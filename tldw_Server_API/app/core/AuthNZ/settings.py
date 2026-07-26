@@ -491,8 +491,11 @@ class Settings(BaseSettings):
         description="Maximum outstanding OpenAI OAuth state records per user/provider",
     )
     OPENAI_OAUTH_REFRESH_LOCK_BACKEND: Literal["memory", "redis", "db"] = Field(
-        default="memory",
-        description="Backend used for OpenAI OAuth refresh locking",
+        default="db",
+        description=(
+            "Cross-worker backend used for whole-row OpenAI credential mutation "
+            "locking; name retained for compatibility"
+        ),
     )
 
     # ===== Enterprise Federation / MCP Broker =====
@@ -1201,10 +1204,10 @@ class Settings(BaseSettings):
             env_val = os.getenv("OPENAI_OAUTH_REFRESH_LOCK_BACKEND")
             if env_val is not None:
                 v = env_val
-        text = str(v or "memory").strip().lower()
+        text = str(v or "db").strip().lower()
         if text in {"memory", "redis", "db"}:
             return text
-        return "memory"
+        return "db"
 
     @field_validator("DATABASE_URL")
     @classmethod

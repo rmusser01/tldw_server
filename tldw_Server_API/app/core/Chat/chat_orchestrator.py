@@ -42,6 +42,9 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     perform_chat_api_call_async,
 )
+from tldw_Server_API.app.core.Chat.orchestrator.error_mapping import (
+    map_stream_error,
+)
 from tldw_Server_API.app.core.Chat.orchestrator.provider_resolution import (
     resolve_provider,
 )
@@ -49,11 +52,12 @@ from tldw_Server_API.app.core.Chat.orchestrator.request_validation import (
     normalize_selected_parts,
     normalize_temperature,
 )
-from tldw_Server_API.app.core.Chat.orchestrator.error_mapping import (
-    map_stream_error,
-)
 from tldw_Server_API.app.core.Chat.orchestrator.stream_execution import (
     execute_stream,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.exceptions import (
@@ -342,6 +346,10 @@ def chat_api_call(
     inference_prefix_cache_intent: Optional[dict[str, Any]] = None,
     # Optional preloaded config to reduce repeated IO in hot paths
     app_config: Optional[dict[str, Any]] = None,
+    # Marks api_key/app_config as one authoritative runtime snapshot.
+    credentials_resolved: bool = False,
+    # Opaque execution capability proving the authoritative snapshot.
+    _provider_call_credentials: ProviderCallCredentials | None = None,
     # Testing hooks
     http_client_factory: Optional[Callable[[int], Any]] = None,
     http_fetcher: Optional[Callable[..., Any]] = None,
@@ -435,6 +443,8 @@ def chat_api_call(
         "extra_body": extra_body,
         "inference_prefix_cache_intent": inference_prefix_cache_intent,
         "app_config": app_config,
+        "credentials_resolved": credentials_resolved,
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: _provider_call_credentials,
         "http_client_factory": http_client_factory,
         "http_fetcher": http_fetcher,
     }

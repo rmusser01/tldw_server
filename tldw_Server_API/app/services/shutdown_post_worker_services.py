@@ -33,6 +33,12 @@ async def run_shutdown_post_worker_non_worker_cleanup(
         logger.bind(error_type=type(exc).__name__).debug(
             "Post-worker optional Workflows DB cleanup skipped after guarded exception"
         )
+    try:
+        await _shutdown_llm_provider_override_recovery()
+    except guard_exceptions as exc:
+        logger.bind(error_type=type(exc).__name__).debug(
+            "Post-worker provider override recovery cleanup skipped after guarded exception"
+        )
     return PostWorkerNonWorkerCleanupHandles()
 
 
@@ -50,3 +56,11 @@ def _close_cached_optional_workflows_db() -> None:
     )
 
     close_cached_workflows_db_for_user()
+
+
+async def _shutdown_llm_provider_override_recovery() -> None:
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        shutdown_llm_provider_override_recovery,
+    )
+
+    await shutdown_llm_provider_override_recovery()

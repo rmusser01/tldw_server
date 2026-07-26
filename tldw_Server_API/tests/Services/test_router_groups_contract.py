@@ -1885,6 +1885,28 @@ def test_iter_content_router_specs_uses_canonical_rag_key_and_single_web_scrapin
     assert web_scraping_specs[0].prefix == "/api/v1"
 
 
+def test_iter_content_router_specs_registers_skills_api() -> None:
+    skills_specs = [
+        spec for spec in iter_content_router_specs() if spec.name == "skills"
+    ]
+
+    assert [
+        (spec.prefix, spec.tags, spec.route_key, spec.default_stable)
+        for spec in skills_specs
+    ] == [("/api/v1/skills", ("skills",), "skills", True)]
+
+
+def test_registered_skills_routes_apply_ingress_rate_limit() -> None:
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
+    from tldw_Server_API.app.api.v1.endpoints import skills
+
+    assert skills.router.routes
+    for route in skills.router.routes:
+        assert check_rate_limit in [
+            dependency.call for dependency in route.dependant.dependencies
+        ]
+
+
 def test_iter_content_router_specs_registers_audio_studio_as_stable_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

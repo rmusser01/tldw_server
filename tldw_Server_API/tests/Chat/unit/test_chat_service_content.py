@@ -7,6 +7,9 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import execute_non_stream_call
+from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
+    StructuredGenerationSchemaError,
+)
 
 
 class _DummyMetrics:
@@ -359,11 +362,20 @@ async def test_execute_non_stream_call_normalizes_gemini_usage_for_logging(monke
 async def test_execute_non_stream_call_rejects_invalid_structured_output_before_persist(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    sentinel = "raw-model-schema-secret-/srv/provider"
+
     async def fake_log_llm_usage(**_kwargs):
         return None
 
     monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
     monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(
+        chat_service,
+        "validate_structured_response",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            StructuredGenerationSchemaError(sentinel)
+        ),
+    )
 
     save_calls: list[dict[str, object]] = []
 
@@ -371,7 +383,7 @@ async def test_execute_non_stream_call_rejects_invalid_structured_output_before_
         return {
             "choices": [
                 {
-                    "message": {"role": "assistant", "content": '{"answer":123}'},
+                    "message": {"role": "assistant", "content": sentinel},
                     "finish_reason": "stop",
                 }
             ]
@@ -437,4 +449,7 @@ async def test_execute_non_stream_call_rejects_invalid_structured_output_before_
         "code": "structured_output_schema_error",
         "message": "Model output did not match the requested JSON schema.",
     }
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert sentinel not in repr(exc_info.value)
     assert save_calls == []

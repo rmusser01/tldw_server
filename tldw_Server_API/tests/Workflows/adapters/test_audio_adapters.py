@@ -14,11 +14,10 @@ This module tests all 9 audio adapters:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1796,6 +1795,76 @@ async def test_template_resolution_in_config(monkeypatch, tmp_path):
 class TestMultiVoiceTTSAdapter:
     """Tests for run_multi_voice_tts_adapter."""
 
+    _SYSTEM_AUDIO = (
+        b"RIFF(\x00\x00\x00WAVEfmt "
+        b"\x10\x00\x00\x00\x01\x00\x01\x00@\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00"
+        b"data\x04\x00\x00\x00\x00\x00\x00\x00"
+    )
+
+    @staticmethod
+    async def _write_system_audio(_text, _fmt, _speed, output_path):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(TestMultiVoiceTTSAdapter._SYSTEM_AUDIO)
+        return output_path.stat().st_size
+
+    @pytest.mark.asyncio
+    async def test_system_tts_wrapper_converts_requested_format(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from tldw_Server_API.app.core.Workflows.adapters.audio import multi_voice_tts
+
+        output_path = tmp_path / "section.mp3"
+        synthesized_path = output_path.with_suffix(".system.wav")
+
+        class _CompletedProcess:
+            returncode = 0
+
+            async def communicate(self):
+                synthesized_path.write_bytes(TestMultiVoiceTTSAdapter._SYSTEM_AUDIO)
+                return b"", b""
+
+        create_process = AsyncMock(return_value=_CompletedProcess())
+
+        async def convert_audio(input_path, requested_output_path, fmt):
+            assert input_path == synthesized_path
+            assert requested_output_path == output_path
+            assert fmt == "mp3"
+            requested_output_path.write_bytes(b"converted-audio")
+            return True
+
+        converter = AsyncMock(side_effect=convert_audio)
+        monkeypatch.setattr(
+            multi_voice_tts.shutil,
+            "which",
+            lambda name: "/usr/bin/espeak-ng" if name == "espeak-ng" else None,
+        )
+        monkeypatch.setattr(
+            multi_voice_tts.asyncio,
+            "create_subprocess_exec",
+            create_process,
+        )
+        monkeypatch.setattr(multi_voice_tts, "_convert_wav_to_format", converter)
+
+        size = await multi_voice_tts._synthesize_section_with_system_tts(
+            "  hello   world  ",
+            "mp3",
+            1.0,
+            output_path,
+        )
+
+        assert size == len(b"converted-audio")
+        command = create_process.await_args.args
+        assert command[:3] == (
+            "/usr/bin/espeak-ng",
+            "-w",
+            str(synthesized_path),
+        )
+        assert command[-1] == "hello world"
+        converter.assert_awaited_once_with(synthesized_path, output_path, "mp3")
+        assert not synthesized_path.exists()
+
     @pytest.fixture
     def sample_sections(self):
         return [
@@ -2129,8 +2198,12 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+        async def provider_unavailable(
+            _text, _model, _voice, _fmt, _speed, _output_path, provider=None
+        ):
             raise RuntimeError("provider unavailable")
+
+        system_tts = AsyncMock(side_effect=self._write_system_audio)
 
         config = {
             "sections": [{"voice": "HOST", "text": "Hello from the real briefing."}],
@@ -2140,9 +2213,15 @@ class TestMultiVoiceTTSAdapter:
             "normalize": False,
         }
 
-        with patch(
-            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
-            side_effect=provider_unavailable,
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=provider_unavailable,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section_with_system_tts",
+                new=system_tts,
+            ),
         ):
             result = await run_multi_voice_tts_adapter(config, base_context)
 
@@ -2153,6 +2232,9 @@ class TestMultiVoiceTTSAdapter:
         audio_path = Path(result["audio_path"])
         assert audio_path.exists()
         assert audio_path.stat().st_size > 44
+        system_tts.assert_awaited_once()
+        assert system_tts.await_args.args[1] == "wav"
+        assert system_tts.await_args.args[3].suffix == ".wav"
 
     def test_multi_voice_tts_config_preserves_system_fallback_flag(self):
         """The adapter contract must not drop the explicit system fallback flag."""
@@ -2181,8 +2263,12 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def provider_initialization_failed(_text, _model, _voice, _fmt, _speed, _output_path):
+        async def provider_initialization_failed(
+            _text, _model, _voice, _fmt, _speed, _output_path, provider=None
+        ):
             raise ProviderInitializationFailed("provider initialization failed")
+
+        system_tts = AsyncMock(side_effect=self._write_system_audio)
 
         config = {
             "sections": [{"voice": "HOST", "text": "Fallback handles provider initialization failure."}],
@@ -2192,15 +2278,22 @@ class TestMultiVoiceTTSAdapter:
             "normalize": False,
         }
 
-        with patch(
-            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
-            side_effect=provider_initialization_failed,
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=provider_initialization_failed,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section_with_system_tts",
+                new=system_tts,
+            ),
         ):
             result = await run_multi_voice_tts_adapter(config, base_context)
 
         assert "error" not in result
         assert result["sections_generated"] == 1
         assert result["system_tts_fallback"] is True
+        system_tts.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_system_fallback_replaces_empty_provider_file(
@@ -2213,10 +2306,18 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def provider_writes_empty_file(_text, _model, _voice, _fmt, _speed, output_path):
+        provider_attempted = False
+
+        async def provider_writes_empty_file(
+            _text, _model, _voice, _fmt, _speed, output_path, provider=None
+        ):
+            nonlocal provider_attempted
+            provider_attempted = True
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"")
             raise RuntimeError("provider produced empty output")
+
+        system_tts = AsyncMock(side_effect=self._write_system_audio)
 
         config = {
             "sections": [{"voice": "HOST", "text": "Fallback replaces empty provider output."}],
@@ -2226,9 +2327,15 @@ class TestMultiVoiceTTSAdapter:
             "normalize": False,
         }
 
-        with patch(
-            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
-            side_effect=provider_writes_empty_file,
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=provider_writes_empty_file,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section_with_system_tts",
+                new=system_tts,
+            ),
         ):
             result = await run_multi_voice_tts_adapter(config, base_context)
 
@@ -2236,6 +2343,8 @@ class TestMultiVoiceTTSAdapter:
         assert result["sections_generated"] == 1
         assert result["system_tts_fallback"] is True
         assert Path(result["audio_path"]).stat().st_size > 44
+        assert provider_attempted is True
+        system_tts.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_final_system_fallback_when_section_fallback_yields_zero(
@@ -2248,7 +2357,9 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+        async def provider_unavailable(
+            _text, _model, _voice, _fmt, _speed, _output_path, provider=None
+        ):
             raise RuntimeError("provider unavailable")
 
         system_attempts = 0
@@ -2297,8 +2408,12 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+        async def provider_unavailable(
+            _text, _model, _voice, _fmt, _speed, _output_path, provider=None
+        ):
             raise RuntimeError("provider unavailable")
+
+        system_tts = AsyncMock(side_effect=self._write_system_audio)
 
         config = {
             "sections": [{"voice": "HOST", "text": "Fallback normalizes malformed format."}],
@@ -2307,9 +2422,15 @@ class TestMultiVoiceTTSAdapter:
             "normalize": False,
         }
 
-        with patch(
-            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
-            side_effect=provider_unavailable,
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=provider_unavailable,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section_with_system_tts",
+                new=system_tts,
+            ),
         ):
             result = await run_multi_voice_tts_adapter(config, base_context)
 
@@ -2317,6 +2438,9 @@ class TestMultiVoiceTTSAdapter:
         assert result["format"] == "mp3"
         assert result["system_tts_fallback"] is True
         assert Path(result["audio_path"]).suffix == ".mp3"
+        system_tts.assert_awaited_once()
+        assert system_tts.await_args.args[1] == "mp3"
+        assert system_tts.await_args.args[3].suffix == ".mp3"
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_system_fallback_recovers_orphaned_system_wav(
@@ -2329,18 +2453,27 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+        async def provider_unavailable(
+            _text, _model, _voice, _fmt, _speed, _output_path, provider=None
+        ):
             raise RuntimeError("provider unavailable")
 
+        orphan_path = None
+
         async def orphaned_system_wav(_text, _fmt, _speed, output_path):
+            nonlocal orphan_path
             orphan_path = output_path.with_name(f"{output_path.stem}.system.")
             orphan_path.parent.mkdir(parents=True, exist_ok=True)
-            orphan_path.write_bytes(
-                b"RIFF$\x00\x00\x00WAVEfmt "
-                b"\x10\x00\x00\x00\x01\x00\x01\x00@\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
-            )
+            orphan_path.write_bytes(self._SYSTEM_AUDIO)
             output_path.write_bytes(b"")
             return 0
+
+        conversion_calls = []
+
+        async def convert_orphan(candidate, output_path, fmt):
+            conversion_calls.append((candidate, output_path, fmt))
+            output_path.write_bytes(candidate.read_bytes())
+            return True
 
         config = {
             "sections": [{"voice": "HOST", "text": "Fallback recovers orphaned system audio."}],
@@ -2358,6 +2491,10 @@ class TestMultiVoiceTTSAdapter:
                 "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section_with_system_tts",
                 side_effect=orphaned_system_wav,
             ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._convert_wav_to_format",
+                side_effect=convert_orphan,
+            ),
         ):
             result = await run_multi_voice_tts_adapter(config, base_context)
 
@@ -2365,6 +2502,12 @@ class TestMultiVoiceTTSAdapter:
         assert result["format"] == "wav"
         assert result["system_tts_fallback"] is True
         assert Path(result["audio_path"]).stat().st_size > 44
+        assert orphan_path is not None
+        assert len(conversion_calls) == 1
+        assert conversion_calls[0][0] == orphan_path
+        assert conversion_calls[0][1].suffix == ".wav"
+        assert conversion_calls[0][2] == "wav"
+        assert not orphan_path.exists()
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_sanitizes_section_warning_logs(self, base_context, tmp_path, monkeypatch):

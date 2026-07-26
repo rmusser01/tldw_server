@@ -295,16 +295,25 @@ describe("fetch-backed WebUI api client", () => {
   })
 
   it("keeps CSRF failures normalized to the existing refresh-page message", async () => {
+    const secret = "csrf-upstream-secret"
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ detail: "CSRF token missing" }, { status: 403 })
+      jsonResponse({ detail: `CSRF token missing: ${secret}` }, { status: 403 })
     )
     vi.stubGlobal("fetch", fetchMock)
 
     const { apiClient } = await loadApiModule()
 
-    await expect(apiClient.post("/notes", { text: "x" })).rejects.toThrow(
-      "CSRF validation failed. Refresh the page and try again."
-    )
+    await expect(apiClient.post("/notes", { text: "x" })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      statusCode: 403,
+      detail: "CSRF validation failed. Refresh the page and try again.",
+      message: "CSRF validation failed. Refresh the page and try again."
+    })
+    expect(storedRequestHistory()[0]?.responseBody).toEqual({
+      detail: "CSRF validation failed. Refresh the page and try again."
+    })
+    expect(JSON.stringify(storedRequestHistory()[0])).not.toContain(secret)
   })
 
   it("extracts JSON error details before applying success response types", async () => {
@@ -323,6 +332,156 @@ describe("fetch-backed WebUI api client", () => {
       detail: "Download denied",
       message: "Download denied"
     })
+  })
+
+  it("maps structured provider errors without object coercion", async () => {
+    const rawBackendDetail = "raw backend detail must not win"
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          detail: {
+            error_code: "credential_store_unavailable",
+            message: rawBackendDetail
+          }
+        },
+        { status: 503, statusText: "Service Unavailable" }
+      )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(apiClient.post("/rag/search", {})).rejects.toMatchObject({
+      name: "ApiError",
+      status: 503,
+      errorCode: "credential_store_unavailable",
+      detail: "Provider credential storage is temporarily unavailable.",
+      message: "Provider credential storage is temporarily unavailable."
+    })
+    expect(storedRequestHistory()[0]?.responseBody).toEqual({
+      detail: {
+        error_code: "credential_store_unavailable",
+        message: "Provider credential storage is temporarily unavailable."
+      }
+    })
+    expect(JSON.stringify(storedRequestHistory()[0])).not.toContain(
+      rawBackendDetail
+    )
+  })
+
+  it("does not expose unknown nested error objects", async () => {
+    const secret = "upstream-secret-provider-body"
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          detail: {
+            error_code: "unknown_provider_failure",
+            message: secret
+          }
+        },
+        { status: 502, statusText: "Bad Gateway" }
+      )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { apiClient } = await loadApiModule()
+
+    let failure: unknown
+    try {
+      await apiClient.post("/rag/search", {})
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toMatchObject({
+      name: "ApiError",
+      status: 502,
+      message: "Bad Gateway"
+    })
+    expect(String(failure)).not.toContain("[object Object]")
+    expect(String(failure)).not.toContain(secret)
+    expect(JSON.stringify(storedRequestHistory()[0])).not.toContain(secret)
+  })
+
+  it("does not expose or persist untyped server-error strings", async () => {
+    const secret = "legacy-upstream-provider-secret"
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { detail: secret },
+        { status: 502, statusText: "Bad Gateway" }
+      )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(apiClient.post("/rag/search", {})).rejects.toMatchObject({
+      name: "ApiError",
+      status: 502,
+      message: "Bad Gateway"
+    })
+    expect(JSON.stringify(storedRequestHistory()[0])).not.toContain(secret)
+  })
+
+  it("keeps app auth when a structured provider error uses status 401", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          detail: {
+            error_code: "provider_authentication_failed",
+            message: "raw upstream authentication detail"
+          }
+        },
+        { status: 401, statusText: "Unauthorized" }
+      )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    localStorage.setItem("access_token", "jwt-token")
+    localStorage.setItem("user", JSON.stringify({ username: "alice" }))
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(apiClient.post("/rag/search", {})).rejects.toMatchObject({
+      name: "ApiError",
+      status: 401,
+      errorCode: "provider_authentication_failed",
+      message: "The selected provider credentials could not be authenticated."
+    })
+    expect(localStorage.getItem("access_token")).toBe("jwt-token")
+    expect(localStorage.getItem("user")).not.toBeNull()
+    expect(window.location.href).toBe("http://localhost:3000/chat")
+  })
+
+  it.each([
+    {
+      label: "status-incompatible provider code",
+      detail: {
+        error_code: "provider_request_invalid",
+        message: "The selected provider or model is invalid."
+      }
+    },
+    {
+      label: "provider-authentication code without its required message",
+      detail: {
+        error_code: "provider_authentication_failed"
+      }
+    }
+  ])("clears app auth for a 401 with $label", async ({ detail }) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ detail }, { status: 401, statusText: "Unauthorized" })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    localStorage.setItem("access_token", "jwt-token")
+    localStorage.setItem("user", JSON.stringify({ username: "alice" }))
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(apiClient.get("/protected")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 401
+    })
+    expect(localStorage.getItem("access_token")).toBeNull()
+    expect(localStorage.getItem("user")).toBeNull()
+    expect(window.location.href).toBe("http://localhost:3000/login")
   })
 
   it("clears auth state and redirects on unauthorized responses with malformed bodies", async () => {

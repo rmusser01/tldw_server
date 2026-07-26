@@ -427,12 +427,13 @@ class TestErrorHandling:
     @patch('tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter.afetch')
     async def test_handle_invalid_voice_error(self, mock_post):
         """Test handling of invalid voice errors."""
+        raw_marker = "RAW_ELEVENLABS_INVALID_VOICE_BODY_SECRET"
         mock_response = MagicMock()
         mock_response.status_code = 400
         mock_response.json.return_value = {
             "detail": {
                 "status": "invalid_voice_id",
-                "message": "Voice not found"
+                "message": raw_marker,
             }
         }
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -446,7 +447,10 @@ class TestErrorHandling:
         with pytest.raises(TTSValidationError) as exc_info:
             await adapter.generate(request)
 
-        assert "Voice not found" in str(exc_info.value)
+        assert "Invalid voice id" in str(exc_info.value)
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
 
 # ========================================================================
 # Usage and Quota Tests

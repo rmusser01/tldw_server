@@ -43,6 +43,24 @@ def test_infer_tts_provider_qwen3_aliases(model_name: str) -> None:
     assert _infer_tts_provider_from_model(model_name) == "qwen3_tts"
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected_provider"),
+    [
+        ("gpt-4o-mini-tts", "openai"),
+        ("pocket-tts-onnx", "pocket_tts"),
+        ("pocket-tts-cpp", "pocket_tts_cpp"),
+        ("vibevoice-realtime-0.5b", "vibevoice_realtime"),
+        ("s2-pro", "fish_s2"),
+        ("lux_tts", "lux_tts"),
+    ],
+)
+def test_infer_tts_provider_uses_authoritative_factory_routes(
+    model_name: str,
+    expected_provider: str,
+) -> None:
+    assert _infer_tts_provider_from_model(model_name) == expected_provider
+
+
 def test_sanitize_speech_request_passes_kitten_provider_hint(monkeypatch) -> None:
     captured: dict[str, str | None] = {}
 

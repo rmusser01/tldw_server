@@ -20,7 +20,101 @@ vi.mock("@/hooks/useStorageMigrations", () => ({
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => ({})
+  useMessageOption: () => ({
+    clearChat: vi.fn(),
+    useOCR: false,
+    chatMode: "normal",
+    setChatMode: vi.fn(),
+    webSearch: false,
+    setWebSearch: vi.fn()
+  })
+}))
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn() })
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string | { defaultValue?: string }): string =>
+      typeof fallback === "string" ? fallback : fallback?.defaultValue || key
+  })
+}))
+
+vi.mock("@/hooks/useMigration", () => ({
+  useMigration: () => ({ isLoading: false })
+}))
+
+vi.mock("@/hooks/useFeatureFlags", () => ({
+  useChatSidebar: () => [false]
+}))
+
+vi.mock("@/hooks/useMediaQuery", () => ({
+  useMobile: () => false
+}))
+
+vi.mock("@/hooks/useSetting", () => ({
+  useSetting: () => [""]
+}))
+
+vi.mock("@/hooks/useServerOnline", () => ({
+  useServerOnline: () => undefined
+}))
+
+vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
+  isMac: false,
+  useChatShortcuts: () => undefined,
+  useSidebarShortcuts: () => undefined,
+  useQuickChatShortcuts: () => undefined,
+  useModeNavigationShortcuts: () => undefined
+}))
+
+vi.mock("@/components/Layouts/Header", () => ({
+  Header: () => <div data-testid="header" />
+}))
+
+vi.mock("@/components/Layouts/QuickIngestButton", () => ({
+  QuickIngestModalHost: () => null
+}))
+
+vi.mock("@/components/Common/QuickChatHelper", () => ({
+  QuickChatHelperButton: () => null
+}))
+
+vi.mock("@/components/Common/NotesDock", () => ({
+  NotesDockHost: () => null
+}))
+
+vi.mock("@/components/Common/EventHosts", () => ({
+  EventOnlyHosts: () => null
+}))
+
+vi.mock("@/components/Timeline", () => ({
+  TimelineModal: () => null
+}))
+
+vi.mock("@/components/Common/PageHelpModal", () => ({
+  PageHelpModal: () => null
+}))
+
+vi.mock("@/components/Common/TutorialRunner", () => ({
+  TutorialRunner: () => null
+}))
+
+vi.mock("@/components/Common/TutorialPrompt", () => ({
+  TutorialPrompt: () => null
+}))
+
+vi.mock("@/components/Common/CommandPaletteHost", () => ({
+  CommandPaletteHost: () => null
+}))
+
+vi.mock("@/components/Option/Prompt/usePromptPaletteCommands", () => ({
+  usePromptPaletteCommands: () => []
+}))
+
+vi.mock("@/components/Common/confirm-danger", () => ({
+  useConfirmDanger: () => vi.fn(async () => false)
 }))
 
 vi.mock("@/utils/human-message", () => ({
@@ -188,4 +282,56 @@ describe("OptionLayout shell overrides", () => {
     expect(originalSetOverrides).toHaveBeenLastCalledWith(null)
     expect(replacementSetOverrides).not.toHaveBeenCalled()
   })
+
+  it.each(["/chat", "/settings"])(
+    "keeps route content mounted while it requests and releases shell hiding on %s",
+    async (pathname) => {
+      const mounted = vi.fn()
+      const unmounted = vi.fn()
+
+      function RouteContent({ hideShell }: { hideShell: boolean }) {
+        useOptionLayoutShellOverrides(
+          hideShell ? { hideHeader: true, hideSidebar: true } : null
+        )
+
+        React.useEffect(() => {
+          mounted()
+          return unmounted
+        }, [])
+
+        return <div data-testid="route-content">Route content</div>
+      }
+
+      const tree = (hideShell: boolean) => (
+        <MemoryRouter initialEntries={[pathname]}>
+          <OptionLayout>
+            <RouteContent hideShell={hideShell} />
+          </OptionLayout>
+        </MemoryRouter>
+      )
+      const view = render(tree(false))
+
+      await waitFor(() => expect(mounted).toHaveBeenCalledTimes(1))
+
+      view.rerender(tree(true))
+
+      await waitFor(() => {
+        expect(
+          view.getByTestId("route-content").parentElement?.className
+        ).toContain("items-center")
+      })
+      expect(mounted).toHaveBeenCalledTimes(1)
+      expect(unmounted).not.toHaveBeenCalled()
+
+      view.rerender(tree(false))
+
+      await waitFor(() => {
+        expect(
+          view.getByTestId("route-content").parentElement?.className
+        ).not.toContain("items-center")
+      })
+      expect(mounted).toHaveBeenCalledTimes(1)
+      expect(unmounted).not.toHaveBeenCalled()
+    }
+  )
 })

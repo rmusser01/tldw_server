@@ -18,9 +18,10 @@ This module tests all 15 content adapters:
 15. run_diagram_generate_adapter - Generate diagram
 """
 
+import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -30,7 +31,7 @@ pytestmark = pytest.mark.unit
 
 # Helper fixtures
 @pytest.fixture
-def base_context() -> Dict[str, Any]:
+def base_context() -> dict[str, Any]:
     """Base context for adapter tests."""
     return {
         "user_id": "1",
@@ -112,7 +113,7 @@ def sample_long_text() -> str:
     """
 
 
-def mock_chat_response(content: str) -> Dict[str, Any]:
+def mock_chat_response(content: str) -> dict[str, Any]:
     """Create a mock OpenAI-style chat response."""
     return {
         "choices": [
@@ -550,8 +551,8 @@ class TestImageGenAdapter:
 
         from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenResult
         from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
-        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
         from tldw_Server_API.app.core.Workflows.adapters.content import image as image_module
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
 
         cfg = ImageGenerationConfig(
             default_backend="stable_diffusion_cpp",
@@ -658,8 +659,8 @@ class TestImageGenAdapter:
         monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
         from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
-        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
         from tldw_Server_API.app.core.Workflows.adapters.content import image as image_module
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
 
         cfg = ImageGenerationConfig(
             default_backend="stable_diffusion_cpp",
@@ -954,6 +955,212 @@ class TestRerankAdapter:
             result = await run_rerank_adapter(config, base_context)
 
             assert result.get("strategy") == strategy
+
+    @pytest.mark.asyncio
+    async def test_rerank_adapter_reports_real_missing_llm_client_degradation(
+        self,
+        monkeypatch,
+        base_context,
+        sample_documents,
+    ):
+        """Expose the real factory's missing-client degradation at the adapter boundary."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_rerank_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.rerank.is_test_mode",
+            return_value=False,
+        ):
+            result = await run_rerank_adapter(
+                {
+                    "query": "What is machine learning?",
+                    "documents": sample_documents,
+                    "strategy": "llm_scoring",
+                },
+                base_context,
+            )
+
+        assert set(result) == {"documents", "count", "strategy", "query", "reranking"}
+        assert result["reranking"] == {
+            "degraded": True,
+            "failure_code": "provider_unavailable",
+            "verification_available": False,
+        }
+        assert [doc["content"] for doc in result["documents"]] == [
+            doc["content"] for doc in sample_documents
+        ]
+        assert [doc["score"] for doc in result["documents"]] == [
+            doc["score"] for doc in sample_documents
+        ]
+
+    @pytest.mark.asyncio
+    async def test_rerank_adapter_allowlists_degraded_metadata(
+        self,
+        monkeypatch,
+        base_context,
+        sample_documents,
+    ):
+        """Do not serialize calibration details or provider diagnostics from rerankers."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.RAG.rag_service.advanced_reranking import ScoredDocument
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_rerank_adapter
+
+        class DegradedReranker:
+            last_metadata = {
+                "degraded": True,
+                "failure_code": "token=provider-secret",
+                "verification_available": True,
+                "endpoint": "https://private-reranker.invalid",
+                "api_key": "provider-secret",
+                "exception": "backend exploded with provider-secret",
+                "sentinel_scores": {"calibrated": 0.9},
+                "calibrated_prob": 0.9,
+                "fused": True,
+                "gated": True,
+            }
+
+            async def rerank(self, _query, documents):
+                return [
+                    ScoredDocument(
+                        document=doc,
+                        original_score=doc.score,
+                        rerank_score=doc.score,
+                        relevance_score=doc.score,
+                    )
+                    for doc in documents
+                ]
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.rerank.is_test_mode",
+            return_value=False,
+        ), patch(
+            "tldw_Server_API.app.core.RAG.rag_service.advanced_reranking.create_reranker",
+            return_value=DegradedReranker(),
+        ):
+            result = await run_rerank_adapter(
+                {
+                    "query": "What is machine learning?",
+                    "documents": sample_documents,
+                    "strategy": "two_tier",
+                },
+                base_context,
+            )
+
+        assert result["reranking"] == {
+            "degraded": True,
+            "failure_code": "provider_unavailable",
+            "verification_available": False,
+        }
+        serialized = json.dumps(result, sort_keys=True)
+        for forbidden in (
+            "provider-secret",
+            "private-reranker",
+            "exception",
+            "sentinel_scores",
+            "calibrated_prob",
+            "fused",
+            "gated",
+        ):
+            assert forbidden not in serialized
+        assert [doc["score"] for doc in result["documents"]] == [
+            doc["score"] for doc in sample_documents
+        ]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_rerank_adapter_metadata_is_request_local(
+        self,
+        monkeypatch,
+        base_context,
+        sample_documents,
+    ):
+        """A degraded call cannot contaminate a concurrent healthy adapter result."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.RAG.rag_service.advanced_reranking import ScoredDocument
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_rerank_adapter
+
+        both_started = asyncio.Event()
+        release = asyncio.Event()
+        started = 0
+
+        class ControlledReranker:
+            def __init__(self, *, degraded: bool) -> None:
+                self.degraded = degraded
+                self.last_metadata: dict[str, Any] = {}
+
+            async def rerank(self, _query, documents):
+                nonlocal started
+                started += 1
+                if started == 2:
+                    both_started.set()
+                await release.wait()
+                self.last_metadata = (
+                    {
+                        "degraded": True,
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                        "endpoint": "https://must-not-escape.invalid",
+                    }
+                    if self.degraded
+                    else {"strategy": "diversity", "gated": False}
+                )
+                return [
+                    ScoredDocument(
+                        document=doc,
+                        original_score=doc.score,
+                        rerank_score=doc.score,
+                        relevance_score=doc.score,
+                    )
+                    for doc in documents
+                ]
+
+        def create_controlled_reranker(strategy, _config):
+            return ControlledReranker(degraded=strategy.value == "llm_scoring")
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.rerank.is_test_mode",
+            return_value=False,
+        ), patch(
+            "tldw_Server_API.app.core.RAG.rag_service.advanced_reranking.create_reranker",
+            side_effect=create_controlled_reranker,
+        ):
+            degraded_task = asyncio.create_task(
+                run_rerank_adapter(
+                    {
+                        "query": "degraded query",
+                        "documents": sample_documents,
+                        "strategy": "llm_scoring",
+                    },
+                    base_context,
+                )
+            )
+            healthy_task = asyncio.create_task(
+                run_rerank_adapter(
+                    {
+                        "query": "healthy query",
+                        "documents": sample_documents,
+                        "strategy": "diversity",
+                    },
+                    base_context,
+                )
+            )
+            await asyncio.wait_for(both_started.wait(), timeout=1.0)
+            release.set()
+            degraded_result, healthy_result = await asyncio.gather(
+                degraded_task,
+                healthy_task,
+            )
+
+        assert degraded_result["reranking"] == {
+            "degraded": True,
+            "failure_code": "provider_unavailable",
+            "verification_available": False,
+        }
+        assert set(healthy_result) == {"documents", "count", "strategy", "query"}
+        assert degraded_result["query"] == "degraded query"
+        assert healthy_result["query"] == "healthy query"
 
 
 # =============================================================================
@@ -2138,21 +2345,33 @@ class TestContentAdaptersErrorHandling:
     async def test_rerank_adapter_sanitizes_backend_errors(self, monkeypatch, base_context, sample_documents):
         """Test rerank adapter hides backend exception details."""
         monkeypatch.delenv("TEST_MODE", raising=False)
+        from tldw_Server_API.app.core.Workflows.adapters.content import rerank as rerank_module
         from tldw_Server_API.app.core.Workflows.adapters.content import run_rerank_adapter
 
-        with patch(
-            "tldw_Server_API.app.core.Workflows.adapters.content.rerank.is_test_mode",
-            return_value=False,
-        ), patch(
-            "tldw_Server_API.app.core.RAG.rag_service.advanced_reranking.create_reranker",
-            side_effect=RuntimeError("rerank backend exploded at /private/content-cache"),
-        ):
-            result = await run_rerank_adapter(
-                {"query": "AI research", "documents": sample_documents},
-                base_context,
-            )
+        records: list[str] = []
+        sink_id = rerank_module.logger.add(
+            lambda message: records.append(str(message)),
+            format="{message}",
+            level="ERROR",
+        )
+        try:
+            with patch(
+                "tldw_Server_API.app.core.Workflows.adapters.content.rerank.is_test_mode",
+                return_value=False,
+            ), patch(
+                "tldw_Server_API.app.core.RAG.rag_service.advanced_reranking.create_reranker",
+                side_effect=RuntimeError("rerank backend leaked provider-secret"),
+            ):
+                result = await run_rerank_adapter(
+                    {"query": "AI research", "documents": sample_documents},
+                    base_context,
+                )
+        finally:
+            rerank_module.logger.remove(sink_id)
 
         assert result == {"error": "rerank_error"}
+        assert "provider-secret" not in "".join(records)
+        assert "error_type=RuntimeError" in "".join(records)
 
     @pytest.mark.asyncio
     async def test_slides_generate_json_parse_error(self, monkeypatch, base_context, sample_long_text):

@@ -209,6 +209,7 @@ Notes:
 - `JOBS_LEASE_RENEW_SECONDS`: Renewal cadence while a worker processes a job (default `30`).
 - `JOBS_LEASE_RENEW_JITTER_SECONDS`: Jitter (seconds) applied to renewals to avoid herd behavior (default `5`).
 - `JOBS_LEASE_MAX_SECONDS`: Cap for acquire/renew lease seconds (default `3600`).
+- `JOBS_EXPIRED_RECOVERY_BATCH_SIZE`: Maximum expired leases transitioned per recovery transaction and terminal-dependent jobs reconciled per maintenance pass (default `100`, clamped `1..1000`). Each acquire processes one batch; `integrity_sweep(fix=true)` drains expired leases across repeated transactions.
 - `TLDW_WORKERS_SIDECAR_MODE`: When true, skip in-process Jobs workers so you can run them as sidecars (`true|false`, default `false`).
 - `EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED`: Enable the in-process Embeddings A/B Jobs worker (`true|false`, default `false`). Alias: `EVALS_ABTEST_JOBS_WORKER_ENABLED`.
 - `EVALUATIONS_JOBS_QUEUE`: Queue name for evaluations jobs (default `default`). Alias: `EVALS_JOBS_QUEUE`.
@@ -382,7 +383,9 @@ The following env vars are retained as **deprecated compatibility knobs** during
 - `PUBLIC_EMAIL_VERIFICATION_PATH`: Public hosted path for email verification completion (default `/auth/verify-email`).
 - `PUBLIC_MAGIC_LINK_PATH`: Public hosted path for magic-link sign-in completion (default `/auth/magic-link`).
 - Hosted SaaS profile: expect `AUTH_MODE=multi_user`, PostgreSQL `DATABASE_URL`, `tldw_production=true`, and `PUBLIC_WEB_BASE_URL=https://<public-app-origin>`.
-- `REDIS_URL`: Optional Redis URL for sessions (`redis://` or `rediss://`).
+- `REDIS_URL`: Optional Redis URL for sessions (`redis://` or `rediss://`) and required when `OPENAI_OAUTH_REFRESH_LOCK_BACKEND=redis`.
+- `OPENAI_OAUTH_REFRESH_LOCK_BACKEND`: Cross-worker backend for all whole-row OpenAI credential mutations; the legacy OAuth-oriented name is retained for compatibility. Values are `db` (default), `redis`, or `memory`; missing and invalid values resolve to `db`. On PostgreSQL, `db` uses a separate zero-idle pool capped at four advisory-lock sessions per application process so credential refresh cannot exhaust the main AuthNZ pool. On SQLite, `db` uses a native process-shared file lock. `redis` is the supported high-scale backend for multi-process or high credential-mutation concurrency and is required with PgBouncer transaction pooling. Direct PostgreSQL connections and PgBouncer session pooling remain correctness-capable with `db` at modest concurrency. Explicit Redis selection without `REDIS_URL` fails closed. `memory` is suitable only for one process.
+- `OPENAI_OAUTH_REFRESH_LOCK_DIR`: Optional local directory for native SQLite OpenAI credential lock files (default `~/.tldw/locks`). The path must be visible to every process that shares that SQLite AuthNZ database.
 - `ENABLE_REGISTRATION`: Enable user registration (`true|false`).
 - `REQUIRE_REGISTRATION_CODE`: Require code to register (`true|false`).
 - `SECURITY_ALERTS_ENABLED`: Enable AuthNZ security alert dispatching (`true|false`, default `false`).
@@ -432,6 +435,16 @@ Config file support (optional):
 - `PERSONA_IOO_BUDGET_AUTO_ADJUST_ENABLED`: Auto-adjust persona exemplar budget after sustained IOO alerts (`true|false`, default `true`).
 - `PERSONA_IOO_BUDGET_AUTO_REDUCTION_FACTOR`: Multiplicative downshift applied when auto-adjust triggers (default `0.75`, clamped to `0.10..0.95`).
 - `PERSONA_IOO_BUDGET_AUTO_MIN_TOKENS`: Lower bound for auto-adjusted persona exemplar budget (default `240`, clamped to `1..20000`).
+
+### Provider call and stream capacity
+
+- `CHAT_SYNC_ADAPTER_MAX_WORKERS`: Process-local cap for credential-bearing synchronous provider adapter calls (default `32`). Saturation fails closed before dispatch.
+- `CHAT_STREAM_DAEMON_MAX_WORKERS`: Process-local cap for synchronous Chat, Audio, Character, and provider stream workers (default `32`).
+- `CHAT_STREAM_CLEANUP_DAEMON_MAX_WORKERS`: Process-local capacity reserved for synchronous cleanup after late or non-cooperative stream work (default `4`). This is not additional request throughput.
+- `CHAT_STREAM_ASYNC_MAX_TASKS`: Process-local cap for asynchronous provider stream tasks (default `256`).
+- `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS`: Process-local capacity reserved for asynchronous cleanup tasks (default `32`). This is not additional request throughput.
+
+All five values must be integers from `1` through `256`; `0` does not disable a cap, and invalid or out-of-range values fall back to the listed default. They are read at process startup, so changes require a restart. The caps apply independently to each application process and replica.
 
 ### Tokenizer (Chat Dictionaries & World Books)
 - `TOKEN_ESTIMATOR_MODE`: `whitespace` (default) or `char_approx`
@@ -719,6 +732,11 @@ Non‑prod defaults
 - `Dockerfiles/docker-compose.dev.yml` exports `STREAMS_UNIFIED=1` for dev/staging overlays.
 - `Dockerfiles/docker-compose.test.yml` also sets `STREAMS_UNIFIED=1` for test environments.
   In production, keep the flag unset or `0` until you explicitly opt into unified streams or are ready to flip them on by default.
+
+### Streaming defaults
+
+| Variable | Default | Notes |
+|----------|---------|-------|
 | `STREAM_HEARTBEAT_INTERVAL_S`   | `10`                | Default heartbeat interval for streams (seconds) |
 | `STREAM_HEARTBEAT_MODE`         | `comment`           | `comment` or `data` heartbeats (prefer `data` behind reverse proxies) |
 | `STREAM_IDLE_TIMEOUT_S`         | (disabled)          | Idle timeout for SSE streams (seconds) |

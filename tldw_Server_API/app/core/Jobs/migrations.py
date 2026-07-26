@@ -8,6 +8,7 @@ database path. This scaffolds the future core JobManager backend.
 from __future__ import annotations
 
 import contextlib
+import os
 import sqlite3
 from pathlib import Path
 
@@ -19,6 +20,41 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
 
 _JOBS_PATH_EXCEPTIONS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
 _JOBS_DB_EXCEPTIONS = (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError)
+
+SQLITE_ARCHIVE_CURSOR_SENTINEL = "0001-01-01 00:00:00"
+_SQLITE_ARCHIVE_ISO_DATE_GLOB = (
+    "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*"
+)
+_SQLITE_ARCHIVE_CREATED_AT_ISO_SQL = (
+    f"trim(created_at) GLOB '{_SQLITE_ARCHIVE_ISO_DATE_GLOB}' "
+    "AND substr(trim(created_at), 1, 4) <> '0000'"
+)
+_SQLITE_ARCHIVE_ARCHIVED_AT_ISO_SQL = (
+    f"trim(archived_at) GLOB '{_SQLITE_ARCHIVE_ISO_DATE_GLOB}' "
+    "AND substr(trim(archived_at), 1, 4) <> '0000'"
+)
+SQLITE_ARCHIVE_CURSOR_TIME_SQL = (
+    "COALESCE("
+    f"CASE WHEN {_SQLITE_ARCHIVE_CREATED_AT_ISO_SQL} "
+    "THEN julianday(trim(created_at)) END, "
+    f"CASE WHEN {_SQLITE_ARCHIVE_ARCHIVED_AT_ISO_SQL} "
+    "THEN julianday(trim(archived_at)) END, "
+    "1721425.5)"
+)
+SQLITE_ARCHIVE_CURSOR_OUTPUT_SQL = (
+    "COALESCE("
+    f"CASE WHEN {_SQLITE_ARCHIVE_CREATED_AT_ISO_SQL} "
+    "THEN strftime('%Y-%m-%d %H:%M:%f', julianday(trim(created_at))) END, "
+    f"CASE WHEN {_SQLITE_ARCHIVE_ARCHIVED_AT_ISO_SQL} "
+    "THEN strftime('%Y-%m-%d %H:%M:%f', julianday(trim(archived_at))) END, "
+    f"'{SQLITE_ARCHIVE_CURSOR_SENTINEL}')"
+)
+SQLITE_ARCHIVE_CURSOR_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_jobs_archive_cursor_v2 "
+    "ON jobs_archive(domain, job_type, "
+    f"{SQLITE_ARCHIVE_CURSOR_TIME_SQL}, "
+    "id, COALESCE(uuid, ''), archive_id)"
+)
 
 JOBS_SQLITE_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -93,6 +129,7 @@ END;
 
 -- Optional archive table (schema-aligned, used when JOBS_ARCHIVE_BEFORE_DELETE=true)
 CREATE TABLE IF NOT EXISTS jobs_archive (
+  archive_id INTEGER PRIMARY KEY AUTOINCREMENT,
   id INTEGER,
   uuid TEXT,
   domain TEXT NOT NULL,
@@ -136,6 +173,15 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   completed_at TEXT,
   archived_at TEXT DEFAULT (DATETIME('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
+  ON jobs_archive(
+    domain,
+    job_type,
+    status,
+    COALESCE(created_at, archived_at, '0001-01-01 00:00:00'),
+    id,
+    COALESCE(uuid, '')
+  );
 
 -- Append-only outbox for job events (CDC/event bus)
 CREATE TABLE IF NOT EXISTS job_events (
@@ -204,12 +250,234 @@ CREATE TABLE IF NOT EXISTS job_sla_policies (
 CREATE TABLE IF NOT EXISTS job_dependencies (
   job_uuid TEXT NOT NULL,
   depends_on_job_uuid TEXT NOT NULL,
+  depends_on_terminal_status TEXT,
+  depends_on_cancellation_reason TEXT,
   created_at TEXT DEFAULT (DATETIME('now')),
   PRIMARY KEY (job_uuid, depends_on_job_uuid)
 );
 CREATE INDEX IF NOT EXISTS idx_job_dependencies_job ON job_dependencies(job_uuid);
 CREATE INDEX IF NOT EXISTS idx_job_dependencies_depends_on ON job_dependencies(depends_on_job_uuid);
 """
+
+
+def _sqlite_archive_locator_schema_ready(conn: sqlite3.Connection) -> bool:
+    """Return whether a SQLite archive has a stable locator allocator."""
+    archive_columns = {
+        str(row[1]): str(row[2] or "")
+        for row in conn.execute("PRAGMA table_info(jobs_archive)").fetchall()
+    }
+    if "archive_id" not in archive_columns:
+        return False
+    if "INT" not in archive_columns["archive_id"].upper():
+        return False
+    if conn.execute(
+        "SELECT 1 FROM jobs_archive WHERE archive_id IS NULL LIMIT 1"
+    ).fetchone() is not None:
+        return False
+
+    archive_index = next(
+        (
+            row
+            for row in conn.execute("PRAGMA index_list(jobs_archive)").fetchall()
+            if str(row[1]) == "idx_jobs_archive_id"
+        ),
+        None,
+    )
+    if not (
+        archive_index is not None
+        and bool(archive_index[2])
+        and len(archive_index) > 4
+        and not bool(archive_index[4])
+    ):
+        return False
+    archive_index_columns = [
+        str(row[2])
+        for row in conn.execute(
+            "PRAGMA index_info(idx_jobs_archive_id)"
+        ).fetchall()
+    ]
+    if archive_index_columns != ["archive_id"]:
+        return False
+
+    trigger_row = conn.execute(
+        "SELECT sql FROM sqlite_master "
+        "WHERE type = 'trigger' AND name = 'trg_jobs_archive_id' "
+        "AND tbl_name = 'jobs_archive'"
+    ).fetchone()
+    trigger_sql = " ".join(
+        str(trigger_row[0] or "").split()
+    ) if trigger_row is not None else ""
+    return all(
+        fragment in trigger_sql
+        for fragment in (
+            "WHEN NEW.archive_id IS NULL",
+            "MAX(archive_id)",
+            "+ 1",
+            "WHERE rowid = NEW.rowid",
+        )
+    )
+
+
+def _sqlite_archive_migration_busy_timeout_ms() -> int:
+    """Return the bounded lock wait used by archive schema migrations."""
+    try:
+        return max(
+            1_000,
+            int(
+                os.getenv(
+                    "JOBS_SQLITE_ARCHIVE_MIGRATION_BUSY_TIMEOUT_MS",
+                    "60000",
+                )
+            ),
+        )
+    except (TypeError, ValueError):
+        return 60_000
+
+
+def _ensure_sqlite_archive_locators(conn: sqlite3.Connection) -> None:
+    """Atomically add and validate stable locators for legacy archives."""
+
+    if _sqlite_archive_locator_schema_ready(conn):
+        return
+    conn.commit()
+    conn.execute(
+        f"PRAGMA busy_timeout = {_sqlite_archive_migration_busy_timeout_ms()}"
+    )
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if _sqlite_archive_locator_schema_ready(conn):
+            conn.commit()
+            return
+        archive_columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(jobs_archive)").fetchall()
+        }
+        if "archive_id" not in archive_columns:
+            conn.execute("ALTER TABLE jobs_archive ADD COLUMN archive_id INTEGER")
+        archive_column = next(
+            row
+            for row in conn.execute("PRAGMA table_info(jobs_archive)").fetchall()
+            if str(row[1]) == "archive_id"
+        )
+        if "INT" not in str(archive_column[2] or "").upper():
+            raise RuntimeError(
+                "jobs_archive.archive_id must have INTEGER affinity"
+            )
+        if conn.execute(
+            "SELECT 1 FROM jobs_archive WHERE archive_id IS NOT NULL "
+            "AND typeof(archive_id) <> 'integer' LIMIT 1"
+        ).fetchone() is not None:
+            raise RuntimeError(
+                "jobs_archive.archive_id contains non-integer values"
+            )
+        for object_type, object_name in (
+            ("index", "idx_jobs_archive_id"),
+            ("trigger", "trg_jobs_archive_id"),
+        ):
+            object_row = conn.execute(
+                "SELECT tbl_name FROM sqlite_master "
+                "WHERE type = ? AND name = ?",
+                (object_type, object_name),
+            ).fetchone()
+            if object_row is not None and str(object_row[0]) != "jobs_archive":
+                raise RuntimeError(
+                    f"{object_name} belongs to another table"
+                )
+
+        conn.execute(
+            "WITH base(max_id) AS MATERIALIZED ("
+            "SELECT COALESCE(MAX(archive_id), 0) FROM jobs_archive), "
+            "missing(target_rowid, locator_offset) AS MATERIALIZED ("
+            "SELECT rowid, ROW_NUMBER() OVER (ORDER BY rowid) "
+            "FROM jobs_archive WHERE archive_id IS NULL) "
+            "UPDATE jobs_archive SET archive_id = ("
+            "SELECT base.max_id + missing.locator_offset "
+            "FROM base, missing WHERE missing.target_rowid = jobs_archive.rowid"
+            ") WHERE archive_id IS NULL"
+        )
+
+        archive_index = next(
+            (
+                row
+                for row in conn.execute(
+                    "PRAGMA index_list(jobs_archive)"
+                ).fetchall()
+                if str(row[1]) == "idx_jobs_archive_id"
+            ),
+            None,
+        )
+        archive_index_columns = (
+            [
+                str(row[2])
+                for row in conn.execute(
+                    "PRAGMA index_info(idx_jobs_archive_id)"
+                ).fetchall()
+            ]
+            if archive_index is not None
+            else []
+        )
+        if not (
+            archive_index is not None
+            and bool(archive_index[2])
+            and len(archive_index) > 4
+            and not bool(archive_index[4])
+            and archive_index_columns == ["archive_id"]
+        ):
+            conn.execute("DROP INDEX IF EXISTS idx_jobs_archive_id")
+            conn.execute(
+                "CREATE UNIQUE INDEX idx_jobs_archive_id "
+                "ON jobs_archive(archive_id)"
+            )
+
+        conn.execute("DROP TRIGGER IF EXISTS trg_jobs_archive_id")
+        conn.execute(
+            "CREATE TRIGGER trg_jobs_archive_id "
+            "AFTER INSERT ON jobs_archive FOR EACH ROW "
+            "WHEN NEW.archive_id IS NULL BEGIN "
+            "UPDATE jobs_archive SET archive_id = "
+            "COALESCE((SELECT MAX(archive_id) FROM jobs_archive), 0) + 1 "
+            "WHERE rowid = NEW.rowid; END"
+        )
+        if not _sqlite_archive_locator_schema_ready(conn):
+            raise RuntimeError("SQLite Jobs archive locator migration failed")
+        conn.commit()
+    except _JOBS_DB_EXCEPTIONS:
+        conn.rollback()
+        raise
+
+
+def _ensure_sqlite_dependency_snapshot_columns(conn: sqlite3.Connection) -> None:
+    """Add and verify dependency snapshots required by acquisition queries."""
+
+    additions = {
+        "depends_on_terminal_status": (
+            "ALTER TABLE job_dependencies "
+            "ADD COLUMN depends_on_terminal_status TEXT"
+        ),
+        "depends_on_cancellation_reason": (
+            "ALTER TABLE job_dependencies "
+            "ADD COLUMN depends_on_cancellation_reason TEXT"
+        ),
+    }
+    try:
+        columns = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info(job_dependencies)"
+            ).fetchall()
+        }
+        for column, statement in additions.items():
+            if column not in columns:
+                conn.execute(statement)
+        conn.execute(
+            "SELECT depends_on_terminal_status, "
+            "depends_on_cancellation_reason FROM job_dependencies LIMIT 0"
+        )
+    except _JOBS_DB_EXCEPTIONS as exc:
+        conn.rollback()
+        raise RuntimeError(
+            "SQLite Jobs dependency snapshot migration failed"
+        ) from exc
 
 
 def ensure_jobs_tables(db_path: Path | None = None) -> Path:
@@ -238,6 +506,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             db_path = Path(db_path)
     with contextlib.suppress(_JOBS_PATH_EXCEPTIONS):
         db_path.parent.mkdir(parents=True, exist_ok=True)
+    archive_locator_verified = False
     try:
         with sqlite3.connect(db_path) as conn:
             # SQLite tuning for better concurrency
@@ -252,12 +521,22 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 )
             except _JOBS_DB_EXCEPTIONS:
                 pass
+            conn.execute(
+                "PRAGMA busy_timeout = "
+                f"{_sqlite_archive_migration_busy_timeout_ms()}"
+            )
             conn.executescript(JOBS_SQLITE_DDL)
             conn.commit()
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
+            _ensure_sqlite_dependency_snapshot_columns(conn)
+            conn.commit()
+            _ensure_sqlite_archive_locators(conn)
+            archive_locator_verified = True
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute(SQLITE_ARCHIVE_CURSOR_INDEX_SQL)
             conn.commit()
         try:
             logger.info(f"Ensured Jobs schema at {Path(db_path).resolve()}")
@@ -265,4 +544,6 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             logger.info(f"Ensured Jobs schema at {db_path}")
     except _JOBS_DB_EXCEPTIONS as e:
         logger.warning("Failed to ensure Jobs schema ({})", type(e).__name__)
+        if not archive_locator_verified:
+            raise
     return db_path

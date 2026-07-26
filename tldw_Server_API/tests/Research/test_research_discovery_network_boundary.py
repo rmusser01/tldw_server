@@ -587,10 +587,48 @@ def _canonical_import_digest(tree: ast.AST) -> str:
     return hashlib.sha256("\n".join(sorted(imports)).encode()).hexdigest()
 
 
+def _stable_ast_dump(value: object) -> str:
+    """Render AST fields with the reviewed schema across supported Python minors."""
+    if isinstance(value, ast.AST):
+        fields = []
+        for name, child in ast.iter_fields(value):
+            if child is None and getattr(type(value), name, ...) is None:
+                continue
+            # Python 3.12 added this empty field to function and class nodes.
+            # Non-empty type parameters remain part of the frozen boundary.
+            if name == "type_params" and child == []:
+                continue
+            fields.append(f"{name}={_stable_ast_dump(child)}")
+        return f"{type(value).__name__}({', '.join(fields)})"
+    if isinstance(value, list):
+        return f"[{', '.join(_stable_ast_dump(item) for item in value)}]"
+    return repr(value)
+
+
 def _semantic_ast_digest(tree: ast.AST) -> str:
     """Hash executable syntax while ignoring formatting, comments, and locations."""
-    canonical = ast.dump(tree, annotate_fields=True, include_attributes=False)
+    canonical = _stable_ast_dump(tree)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def test_semantic_ast_digest_ignores_only_empty_type_parameter_schema() -> None:
+    """Interpreter-added empty fields do not drift hashes; real generics still do."""
+
+    class VersionedNode(ast.AST):
+        _fields = ("name", "type_params")
+
+    legacy = VersionedNode(name="callable")
+    versioned = VersionedNode(name="callable", type_params=[])
+    generic = VersionedNode(
+        name="callable",
+        type_params=[ast.Name(id="T", ctx=ast.Load())],
+    )
+
+    assert _semantic_ast_digest(legacy) == _semantic_ast_digest(versioned)
+    assert _semantic_ast_digest(generic) != _semantic_ast_digest(versioned)
+    assert _semantic_ast_digest(
+        ast.parse("value = ', type_params=[]'")
+    ) != _semantic_ast_digest(ast.parse("value = ''"))
 
 
 def _frozen_digest_violations(

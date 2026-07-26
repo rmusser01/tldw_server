@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useOptionLayoutShellOverrides } from '@/components/Layouts/Layout';
 import OptionLayout from '../../../components/layout/WebLayout';
 
 const testModulePath = import.meta.url.startsWith('file:')
@@ -348,6 +349,10 @@ vi.mock('@/components/Common/TutorialRunner', () => ({
   TutorialRunner: () => <div data-testid="tutorial-runner" />,
 }));
 
+vi.mock('@/components/Common/KeyboardShortcutsModal', () => ({
+  KeyboardShortcutsModal: () => null,
+}));
+
 vi.mock('@/hooks/useConnectionState', () => ({
   useConnectionActions: () => ({ checkOnce: connectionState.value.checkOnce }),
   useConnectionState: () => ({
@@ -648,6 +653,61 @@ describe('WebLayout /chat scroll contract', () => {
 
     expect(await screen.findByTestId('tutorial-runner')).toBeInTheDocument();
   });
+
+  it.each([
+    { pathname: '/chat', hiddenLayoutClass: 'items-stretch' },
+    { pathname: '/settings', hiddenLayoutClass: 'items-center' },
+  ])(
+    'keeps route content mounted while it requests and releases shell hiding on $pathname',
+    async ({ pathname, hiddenLayoutClass }) => {
+      routerState.location.pathname = pathname;
+      const mounted = vi.fn();
+      const unmounted = vi.fn();
+
+      function RouteContent({ hideShell }: { hideShell: boolean }) {
+        useOptionLayoutShellOverrides(
+          hideShell ? { hideHeader: true, hideSidebar: true } : null
+        );
+
+        React.useEffect(() => {
+          mounted();
+          return unmounted;
+        }, []);
+
+        return <div data-testid="route-content">Route content</div>;
+      }
+
+      const tree = (hideShell: boolean) => (
+        <OptionLayout>
+          <RouteContent hideShell={hideShell} />
+        </OptionLayout>
+      );
+      const view = render(tree(false));
+
+      await waitFor(() => expect(mounted).toHaveBeenCalledTimes(1));
+      const routeContent = screen.getByTestId('route-content');
+      const routeContainer = routeContent.parentElement;
+
+      view.rerender(tree(true));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('header')).toBeNull();
+        expect(routeContainer).toHaveClass(hiddenLayoutClass);
+      });
+      expect(screen.getByTestId('route-content')).toBe(routeContent);
+      expect(screen.getByTestId('route-content').parentElement).toBe(routeContainer);
+      expect(mounted).toHaveBeenCalledTimes(1);
+      expect(unmounted).not.toHaveBeenCalled();
+
+      view.rerender(tree(false));
+
+      await waitFor(() => expect(screen.getByTestId('header')).toBeInTheDocument());
+      expect(screen.getByTestId('route-content')).toBe(routeContent);
+      expect(screen.getByTestId('route-content').parentElement).toBe(routeContainer);
+      expect(mounted).toHaveBeenCalledTimes(1);
+      expect(unmounted).not.toHaveBeenCalled();
+    }
+  );
 
   it('preserves non-overridden media query exports in the test mock', async () => {
     const mediaQueryModule = await import('@/hooks/useMediaQuery');

@@ -105,6 +105,285 @@ describe("background proxy fallback safety", () => {
     }
   })
 
+  it.each([
+    {
+      transport: "extension direct detail",
+      source: "background",
+      expectsEvent: true,
+      status: 503,
+      code: "credential_store_unavailable",
+      safeMessage: "Provider credential storage is temporarily unavailable.",
+      responseError: "Failed to fetch RAW_ERROR_SENTINEL",
+      responseData: {
+        detail: {
+          error_code: "credential_store_unavailable",
+          message: "RAW_BODY_SENTINEL",
+          api_key: "RAW_KEY_SENTINEL",
+          debug_path: "/RAW_PATH_SENTINEL/provider.json"
+        },
+        raw_body: "RAW_RESPONSE_SENTINEL"
+      }
+    },
+    {
+      transport: "direct fallback nested detail",
+      source: "direct",
+      expectsEvent: true,
+      status: 502,
+      code: "provider_authentication_failed",
+      safeMessage:
+        "The selected provider credentials could not be authenticated.",
+      responseError: "Failed to fetch RAW_ERROR_SENTINEL",
+      responseData: {
+        details: {
+          detail: {
+            error_code: "provider_authentication_failed",
+            message: "RAW_BODY_SENTINEL",
+            api_key: "RAW_KEY_SENTINEL",
+            debug_path: "/RAW_PATH_SENTINEL/provider.json"
+          }
+        },
+        raw_body: "RAW_RESPONSE_SENTINEL"
+      }
+    },
+    {
+      transport: "extension malformed detail",
+      source: "background",
+      expectsEvent: false,
+      status: 503,
+      code: undefined,
+      safeMessage: "RAG search failed due to a server error.",
+      responseError: "Provider failed RAW_ERROR_SENTINEL",
+      responseData: {
+        detail: {
+          error_code: "RAW_CODE_SENTINEL",
+          message: "RAW_BODY_SENTINEL",
+          api_key: "RAW_KEY_SENTINEL",
+          debug_path: "/RAW_PATH_SENTINEL/provider.json"
+        },
+        raw_body: "RAW_RESPONSE_SENTINEL"
+      }
+    }
+  ])(
+    "sanitizes RAG provider diagnostics at the $transport transport boundary",
+    async ({
+      source,
+      expectsEvent,
+      status,
+      code,
+      safeMessage,
+      responseError,
+      responseData
+    }) => {
+      const warnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined)
+      const eventSpy = vi.fn()
+      const eventName = "tldw:backend-unreachable"
+      window.addEventListener(eventName, eventSpy as EventListener)
+
+      const failedResponse = {
+        ok: false,
+        status,
+        error: responseError,
+        data: responseData
+      }
+      if (source === "background") {
+        mocks.sendMessage.mockResolvedValue(failedResponse)
+      } else {
+        mocks.sendMessage.mockRejectedValue(
+          new Error(
+            "Could not establish connection. Receiving end does not exist."
+          )
+        )
+        mocks.tldwRequest.mockResolvedValue(failedResponse)
+      }
+
+      let finalError: unknown
+      let transportError: unknown
+      let warningDiagnostics = ""
+      try {
+        const [{ bgRequest }, { chatRagMethods }] = await Promise.all([
+          importProxy(),
+          import("@/services/tldw/domains/chat-rag")
+        ])
+        await chatRagMethods.ragSearch.call(
+          {
+            normalizeRagQuery: (query: string) => query,
+            requestWithCurrentConfig: async (
+              init: Parameters<typeof bgRequest>[0]
+            ) => {
+              try {
+                return await bgRequest(init)
+              } catch (error) {
+                transportError = error
+                throw error
+              }
+            }
+          } as any,
+          "test query",
+          { signal: new AbortController().signal }
+        )
+      } catch (error) {
+        finalError = error
+      } finally {
+        warningDiagnostics = JSON.stringify(warnSpy.mock.calls)
+        window.removeEventListener(eventName, eventSpy as EventListener)
+        warnSpy.mockRestore()
+      }
+
+      expect(finalError).toMatchObject({
+        message: safeMessage,
+        status
+      })
+      expect((finalError as { code?: string } | undefined)?.code).toBe(code)
+      expect(transportError).toMatchObject({ status })
+      expect((transportError as { code?: string } | undefined)?.code).toBe(code)
+      expect((transportError as Error).message).toContain(safeMessage)
+      if (code) {
+        expect(
+          (transportError as { details?: unknown }).details
+        ).toEqual({
+          detail: {
+            error_code: code,
+            message: safeMessage
+          }
+        })
+      } else {
+        expect(
+          (transportError as { details?: unknown } | undefined)?.details
+        ).toBeUndefined()
+      }
+      expect(eventSpy).toHaveBeenCalledTimes(expectsEvent ? 1 : 0)
+      if (expectsEvent) {
+        expect(
+          (eventSpy.mock.calls[0]?.[0] as CustomEvent).detail
+        ).toMatchObject({ status, code, message: safeMessage, source })
+      }
+
+      const storageDiagnostics = JSON.stringify(mocks.storageSet.mock.calls)
+      const eventDiagnostics = JSON.stringify(eventSpy.mock.calls)
+      const finalDiagnostics = JSON.stringify({
+        message: (finalError as Error | undefined)?.message,
+        status: (finalError as { status?: number } | undefined)?.status,
+        code: (finalError as { code?: string } | undefined)?.code
+      })
+      const transportDiagnostics = JSON.stringify({
+        message: (transportError as Error | undefined)?.message,
+        status: (transportError as { status?: number } | undefined)?.status,
+        code: (transportError as { code?: string } | undefined)?.code,
+        details: (transportError as { details?: unknown } | undefined)?.details
+      })
+      const allDiagnostics = [
+        warningDiagnostics,
+        storageDiagnostics,
+        eventDiagnostics,
+        transportDiagnostics,
+        finalDiagnostics
+      ].join("\n")
+
+      if (code) {
+        expect(warningDiagnostics).toContain(code)
+      }
+      expect(warningDiagnostics).toContain(String(status))
+      expect(storageDiagnostics).toContain("__tldwRequestErrors")
+      expect(storageDiagnostics).toContain("__tldwLastRequestError")
+      if (code) {
+        expect(storageDiagnostics).toContain(code)
+      }
+      expect(storageDiagnostics).toContain(String(status))
+      expect(allDiagnostics).toContain(safeMessage)
+      expect(allDiagnostics).not.toMatch(
+        /RAW_(?:BODY|CODE|ERROR|KEY|PATH|RESPONSE)_SENTINEL/
+      )
+    }
+  )
+
+  it("keeps concurrent RAG provider failures isolated at the transport boundary", async () => {
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined)
+    const failures = {
+      alpha: {
+        ok: false,
+        status: 401,
+        error: "RAW_ERROR_ALPHA_SENTINEL",
+        data: {
+          detail: {
+            error_code: "missing_provider_credentials",
+            message: "RAW_BODY_ALPHA_SENTINEL",
+            api_key: "RAW_KEY_ALPHA_SENTINEL"
+          }
+        }
+      },
+      beta: {
+        ok: false,
+        status: 503,
+        error: "RAW_ERROR_BETA_SENTINEL",
+        data: {
+          details: {
+            detail: {
+              error_code: "provider_unavailable",
+              message: "RAW_BODY_BETA_SENTINEL",
+              debug_path: "/RAW_PATH_BETA_SENTINEL/provider.json"
+            }
+          }
+        }
+      }
+    } as const
+    mocks.sendMessage.mockImplementation(async (request: any) => {
+      await Promise.resolve()
+      return failures[request.payload.body.query as keyof typeof failures]
+    })
+
+    let warningDiagnostics = ""
+    let errors: Array<Error & { code?: string; status?: number }> = []
+    try {
+      const [{ bgRequest }, { chatRagMethods }] = await Promise.all([
+        importProxy(),
+        import("@/services/tldw/domains/chat-rag")
+      ])
+      const client = {
+        normalizeRagQuery: (query: string) => query,
+        requestWithCurrentConfig: bgRequest
+      } as any
+      errors = await Promise.all(
+        ["alpha", "beta"].map((query) =>
+          chatRagMethods.ragSearch
+            .call(client, query, { signal: new AbortController().signal })
+            .catch((error) => error)
+        )
+      )
+    } finally {
+      warningDiagnostics = JSON.stringify(warnSpy.mock.calls)
+      warnSpy.mockRestore()
+    }
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(errors[0]).toMatchObject({
+      status: 401,
+      code: "missing_provider_credentials",
+      message: "The selected provider credentials are not configured."
+    })
+    expect(errors[1]).toMatchObject({
+      status: 503,
+      code: "provider_unavailable",
+      message: "The selected provider is currently unavailable."
+    })
+
+    const diagnostics = [
+      warningDiagnostics,
+      JSON.stringify(mocks.storageSet.mock.calls),
+      JSON.stringify(
+        errors.map(({ message, code, status }) => ({ message, code, status }))
+      )
+    ].join("\n")
+    expect(diagnostics).toContain("missing_provider_credentials")
+    expect(diagnostics).toContain("provider_unavailable")
+    expect(diagnostics).not.toMatch(
+      /RAW_(?:BODY|ERROR|KEY|PATH)_(?:ALPHA|BETA)_SENTINEL/
+    )
+  })
+
   it("keeps auth enabled for same-origin absolute URLs in background requests", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     mocks.storageGet.mockImplementation(async (key: string) => {
@@ -1042,6 +1321,401 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it("sanitizes opted-in RAG direct-stream non-2xx failures before throwing", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: false })
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") {
+        return {
+          serverUrl: "http://127.0.0.1:8000",
+          authMode: "single-user",
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
+        }
+      }
+      return null
+    })
+    const rawSentinel =
+      "sk-RAW_DIRECT_STREAM_KEY at /RAW_DIRECT_STREAM_PATH/provider.json"
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            detail: {
+              error_code: "credential_store_unavailable",
+              message: rawSentinel,
+              api_key: "RAW_DIRECT_STREAM_KEY",
+              upstream_url: "https://RAW_DIRECT_STREAM_URL.example/v1"
+            },
+            raw_body: "RAW_DIRECT_STREAM_BODY"
+          }),
+          {
+            status: 503,
+            headers: { "content-type": "application/json" }
+          }
+        )
+      )
+    )
+
+    let caught: unknown
+    try {
+      const { chatRagMethods } = await import(
+        "@/services/tldw/domains/chat-rag"
+      )
+      for await (const _chunk of chatRagMethods.ragSearchStream.call(
+        { normalizeRagQuery: (query: string) => query } as any,
+        "direct provider failure"
+      )) {
+        // no-op
+      }
+    } catch (error) {
+      caught = error
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(caught).toMatchObject({
+      status: 503,
+      code: "credential_store_unavailable",
+      message: "Provider credential storage is temporarily unavailable.",
+      details: {
+        detail: {
+          error_code: "credential_store_unavailable",
+          message: "Provider credential storage is temporarily unavailable."
+        }
+      }
+    })
+    expect(JSON.stringify(caught)).not.toMatch(
+      /RAW_DIRECT_STREAM_(?:BODY|KEY|PATH|URL)/
+    )
+    expect((caught as Error).message).not.toContain(rawSentinel)
+  })
+
+  it("sanitizes opted-in RAG extension stream error messages before throwing", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const onMessageListeners = new Set<(msg: any) => void>()
+    const onDisconnectListeners = new Set<() => void>()
+    const port = {
+      onMessage: {
+        addListener: (listener: (msg: any) => void) =>
+          onMessageListeners.add(listener),
+        removeListener: (listener: (msg: any) => void) =>
+          onMessageListeners.delete(listener)
+      },
+      onDisconnect: {
+        addListener: (listener: () => void) =>
+          onDisconnectListeners.add(listener),
+        removeListener: (listener: () => void) =>
+          onDisconnectListeners.delete(listener)
+      },
+      postMessage: vi.fn(() => {
+        onMessageListeners.forEach((listener) =>
+          listener({
+            event: "error",
+            status: 502,
+            message: "RAW_EXTENSION_STREAM_MESSAGE",
+            details: {
+              details: {
+                detail: {
+                  error_code: "provider_authentication_failed",
+                  message: "RAW_EXTENSION_STREAM_BODY",
+                  api_key: "RAW_EXTENSION_STREAM_KEY",
+                  debug_path: "/RAW_EXTENSION_STREAM_PATH/provider.json"
+                }
+              },
+              upstream_url: "https://RAW_EXTENSION_STREAM_URL.example/v1"
+            }
+          })
+        )
+      }),
+      disconnect: vi.fn(() => {
+        onDisconnectListeners.forEach((listener) => listener())
+      })
+    }
+    mocks.connect.mockReturnValue(port as any)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    let caught: unknown
+    try {
+      const { chatRagMethods } = await import(
+        "@/services/tldw/domains/chat-rag"
+      )
+      for await (const _chunk of chatRagMethods.ragSearchStream.call(
+        { normalizeRagQuery: (query: string) => query } as any,
+        "extension provider failure"
+      )) {
+        // no-op
+      }
+    } catch (error) {
+      caught = error
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(caught).toMatchObject({
+      status: 502,
+      code: "provider_authentication_failed",
+      message:
+        "The selected provider credentials could not be authenticated.",
+      details: {
+        detail: {
+          error_code: "provider_authentication_failed",
+          message:
+            "The selected provider credentials could not be authenticated."
+        }
+      }
+    })
+    expect(JSON.stringify(caught)).not.toMatch(
+      /RAW_EXTENSION_STREAM_(?:BODY|KEY|MESSAGE|PATH|URL)/
+    )
+    expect(port.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sanitizeRagProviderStreamError: true })
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("sanitizes opted-in RAG early stream transport errors without replay", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const port = {
+      onMessage: {
+        addListener: vi.fn(),
+        removeListener: vi.fn()
+      },
+      onDisconnect: {
+        addListener: vi.fn(),
+        removeListener: vi.fn()
+      },
+      postMessage: vi.fn(() => {
+        throw new Error(
+          "Failed to fetch https://RAW_EARLY_STREAM_URL.example/v1 with sk-RAW_EARLY_STREAM_KEY"
+        )
+      }),
+      disconnect: vi.fn()
+    }
+    mocks.connect.mockReturnValue(port as any)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    let caught: unknown
+    try {
+      const { chatRagMethods } = await import(
+        "@/services/tldw/domains/chat-rag"
+      )
+      for await (const _chunk of chatRagMethods.ragSearchStream.call(
+        { normalizeRagQuery: (query: string) => query } as any,
+        "early transport failure"
+      )) {
+        // no-op
+      }
+    } catch (error) {
+      caught = error
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(caught).toMatchObject({
+      code: "STREAM_INTERRUPTED",
+      message: "Cannot reach server. Check your connection and try again."
+    })
+    expect((caught as { status?: number }).status).toBeUndefined()
+    expect(JSON.stringify(caught)).not.toMatch(
+      /RAW_EARLY_STREAM_(?:KEY|URL)/
+    )
+    expect(port.postMessage).toHaveBeenCalledTimes(1)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("sanitizes opted-in RAG partial-stream interruption payloads", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const onMessageListeners = new Set<(msg: any) => void>()
+    const onDisconnectListeners = new Set<() => void>()
+    const port = {
+      onMessage: {
+        addListener: (listener: (msg: any) => void) =>
+          onMessageListeners.add(listener),
+        removeListener: (listener: (msg: any) => void) =>
+          onMessageListeners.delete(listener)
+      },
+      onDisconnect: {
+        addListener: (listener: () => void) =>
+          onDisconnectListeners.add(listener),
+        removeListener: (listener: () => void) =>
+          onDisconnectListeners.delete(listener)
+      },
+      postMessage: vi.fn(() => {
+        onMessageListeners.forEach((listener) =>
+          listener({
+            event: "data",
+            data: '{"type":"delta","text":"partial"}'
+          })
+        )
+        onMessageListeners.forEach((listener) =>
+          listener({
+            event: "error",
+            message: "RAW_PARTIAL_STREAM_MESSAGE",
+            details: {
+              detail: {
+                error_code: "provider_unavailable",
+                message: "RAW_PARTIAL_STREAM_BODY",
+                api_key: "RAW_PARTIAL_STREAM_KEY",
+                debug_path: "/RAW_PARTIAL_STREAM_PATH/provider.json"
+              }
+            }
+          })
+        )
+      }),
+      disconnect: vi.fn(() => {
+        onDisconnectListeners.forEach((listener) => listener())
+      })
+    }
+    mocks.connect.mockReturnValue(port as any)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    const chunks: unknown[] = []
+    try {
+      const { chatRagMethods } = await import(
+        "@/services/tldw/domains/chat-rag"
+      )
+      for await (const chunk of chatRagMethods.ragSearchStream.call(
+        { normalizeRagQuery: (query: string) => query } as any,
+        "partial provider failure"
+      )) {
+        chunks.push(chunk)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(chunks[0]).toEqual({ type: "delta", text: "partial" })
+    expect(chunks[1]).toMatchObject({
+      event: "stream_transport_interrupted",
+      detail: "The selected provider is currently unavailable.",
+      code: "provider_unavailable",
+      details: {
+        detail: {
+          error_code: "provider_unavailable",
+          message: "The selected provider is currently unavailable."
+        }
+      },
+      partial_response_saved: true
+    })
+    expect(JSON.stringify(chunks)).not.toMatch(
+      /RAW_PARTIAL_STREAM_(?:BODY|KEY|MESSAGE|PATH)/
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it.each(["direct reader", "extension connect", "extension dispatch"])(
+    "uses a client-owned RAG abort error during the %s race",
+    async (transport) => {
+      const controller = new AbortController()
+      const rawMessage =
+        "Abort raced https://RAW_ABORT_STREAM_URL.example/v1 with sk-RAW_ABORT_STREAM_KEY"
+      mocks.storageGet.mockImplementation(async (key: string) => {
+        if (key === "tldwConfig") {
+          return {
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "single-user",
+            apiKey: "not-a-real-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "device",
+            apiKeyServerOrigin: "http://127.0.0.1:8000"
+          }
+        }
+        return null
+      })
+
+      const fetchSpy = vi.fn()
+      if (transport === "direct reader") {
+        mocks.sendMessage.mockResolvedValue({ ok: false })
+        fetchSpy.mockResolvedValue({
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              read: vi.fn(() => {
+                controller.abort()
+                return Promise.reject(new Error(rawMessage))
+              }),
+              cancel: vi.fn()
+            })
+          }
+        } as unknown as Response)
+      } else {
+        mocks.sendMessage.mockResolvedValue({ ok: true })
+        if (transport === "extension connect") {
+          mocks.connect.mockImplementation(() => {
+            controller.abort()
+            throw new Error(rawMessage)
+          })
+        } else {
+          const onMessageListeners = new Set<(msg: any) => void>()
+          const onDisconnectListeners = new Set<() => void>()
+          mocks.connect.mockReturnValue({
+            onMessage: {
+              addListener: (listener: (msg: any) => void) =>
+                onMessageListeners.add(listener),
+              removeListener: (listener: (msg: any) => void) =>
+                onMessageListeners.delete(listener)
+            },
+            onDisconnect: {
+              addListener: (listener: () => void) =>
+                onDisconnectListeners.add(listener),
+              removeListener: (listener: () => void) =>
+                onDisconnectListeners.delete(listener)
+            },
+            postMessage: vi.fn(() => {
+              onMessageListeners.forEach((listener) =>
+                listener({ event: "error", message: rawMessage })
+              )
+              controller.abort()
+            }),
+            disconnect: vi.fn(() => {
+              onDisconnectListeners.forEach((listener) => listener())
+            })
+          } as any)
+        }
+      }
+      vi.stubGlobal("fetch", fetchSpy)
+
+      let caught: unknown
+      try {
+        const { chatRagMethods } = await import(
+          "@/services/tldw/domains/chat-rag"
+        )
+        for await (const _chunk of chatRagMethods.ragSearchStream.call(
+          { normalizeRagQuery: (query: string) => query } as any,
+          "abort race",
+          { signal: controller.signal }
+        )) {
+          // no-op
+        }
+      } catch (error) {
+        caught = error
+      } finally {
+        vi.unstubAllGlobals()
+      }
+
+      expect(caught).toMatchObject({
+        name: "AbortError",
+        status: 0,
+        code: "REQUEST_ABORTED",
+        message: "RAG stream request was aborted."
+      })
+      expect(JSON.stringify(caught)).not.toMatch(
+        /RAW_ABORT_STREAM_(?:KEY|URL)/
+      )
+      expect((caught as Error).message).not.toContain(rawMessage)
+      expect(fetchSpy).toHaveBeenCalledTimes(
+        transport === "direct reader" ? 1 : 0
+      )
+    }
+  )
+
   it("does not replay a non-idempotent POST when port errors before first data chunk", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true })
     const onMessageListeners = new Set<(msg: any) => void>()
@@ -1184,6 +1858,57 @@ describe("background proxy fallback safety", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(mocks.connect).toHaveBeenCalledTimes(1)
     expect(chunks.some((chunk) => chunk.includes('"event":"run_started"'))).toBe(true)
+  })
+
+  it("does not replay POST streams after an ambiguous postMessage failure", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const onMessageListeners = new Set<(msg: any) => void>()
+    const port = {
+      onMessage: {
+        addListener: (listener: (msg: any) => void) => onMessageListeners.add(listener),
+        removeListener: (listener: (msg: any) => void) => onMessageListeners.delete(listener)
+      },
+      onDisconnect: {
+        addListener: vi.fn(),
+        removeListener: vi.fn()
+      },
+      postMessage: vi.fn(() => {
+        throw new Error("Message port closed during postMessage")
+      }),
+      disconnect: vi.fn()
+    }
+    mocks.connect.mockReturnValue(port as any)
+    mocks.storageGet.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key-not-placeholder"
+    })
+    const fetchSpy = vi.fn(async () =>
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    const { bgStream } = await importProxy()
+    const consume = async () => {
+      for await (const _chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        body: { stream: true, messages: [] }
+      })) {
+        // no-op
+      }
+    }
+
+    try {
+      await expect(consume()).rejects.toThrow("Message port closed")
+      expect(port.postMessage).toHaveBeenCalledTimes(1)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("does not replay a non-idempotent POST after a response-acquisition timeout", async () => {
@@ -1531,7 +2256,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "not-a-real-key"
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null

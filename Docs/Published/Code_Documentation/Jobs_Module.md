@@ -511,6 +511,7 @@ jm.fail_job(job["id"], error="boom", retryable=True, worker_id=worker_id, lease_
 
 - Enable a background worker that posts HMAC-signed webhooks for `job.completed` and `job.failed` using the job events outbox.
 - Flags:
+  - `JOBS_EVENTS_OUTBOX=true` (required on the webhook worker and every API/worker process that can mutate Jobs; webhook startup refuses to run without it)
   - `JOBS_WEBHOOKS_ENABLED=true`
   - `JOBS_WEBHOOKS_URL=https://example.com/jobs/webhook`
   - `JOBS_WEBHOOKS_SECRET_KEYS=primary,oldkey` (rotating; first key used to sign)

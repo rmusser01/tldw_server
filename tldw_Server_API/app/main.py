@@ -1740,16 +1740,16 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.41",
+    version="0.1.42",
     description=APP_DESCRIPTION,
-    terms_of_service="https://github.com/cpacker/tldw_server",
+    terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
         "name": "tldw_server Maintainers",
-        "url": "https://github.com/cpacker/tldw_server/issues",
+        "url": "https://github.com/rmusser01/tldw_server/issues",
     },
     license_info={
-        "name": "GNU GPL v2.0",
-        "url": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html",
+        "name": "Apache License 2.0 (OpenAPI contract only)",
+        "identifier": "Apache-2.0",
     },
     openapi_tags=OPENAPI_TAGS,
     swagger_ui_parameters=_swagger_ui_params,
@@ -1938,10 +1938,12 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
 # layers would otherwise swallow, producing only a bare
 # "Exception in ASGI application" in the uvicorn log.
 # ---------------------------------------------------------------------------
-from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402
+from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402, I001
     client_disconnect_handler as _client_disconnect_handler,
     global_unhandled_exception_handler as _global_handler,
+    tts_public_http_exception_handler as _tts_public_http_handler,
 )
+from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException  # noqa: E402
 
 
 def _run_startup_config_validation() -> None:
@@ -1963,6 +1965,15 @@ async def _global_unhandled_exception_handler(request, exc):
 @app.exception_handler(ClientDisconnect)
 async def _client_disconnect_exception_handler(request: Request, exc: ClientDisconnect):
     response = await _client_disconnect_handler(request, exc)
+    return _apply_runtime_cors_headers(request, response)
+
+
+@app.exception_handler(TTSPublicHTTPException)
+async def _tts_public_http_exception_handler(
+    request: Request,
+    exc: TTSPublicHTTPException,
+):
+    response = await _tts_public_http_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
 
 
@@ -2083,8 +2094,12 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
         tags=OPENAPI_TAGS,
+        terms_of_service=app.terms_of_service,
+        contact=app.contact,
+        license_info=app.license_info,
     )
     _ensure_openapi_operation_tags_declared(openapi_schema)
+    openapi_schema.setdefault("info", {})["x-server-code-license"] = "GPL-3.0-only"
 
     # Servers for common deployments
     openapi_schema["servers"] = [

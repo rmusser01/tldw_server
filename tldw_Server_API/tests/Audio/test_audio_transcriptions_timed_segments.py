@@ -170,7 +170,15 @@ def _setup_stubbed_audio_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
 
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
     import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_ep
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+
+    monkeypatch.setattr(
+        atlib,
+        "convert_to_wav",
+        lambda path, *_args, **_kwargs: path,
+        raising=True,
+    )
 
     async def _fake_get_request_user() -> User:
         return User(id=1, username="single_user")

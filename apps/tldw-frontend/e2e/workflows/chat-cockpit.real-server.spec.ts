@@ -545,6 +545,10 @@ const seedRealServerConfig = async (
       const config = {
         serverUrl: configuredServerUrl,
         authMode: 'single-user',
+        authSource: 'manual',
+        credentialSource: 'manual',
+        apiKeyPersistence: 'device',
+        apiKeyServerOrigin: new URL(configuredServerUrl).origin,
         apiKey: configuredApiKey,
         requestTimeoutMs: 60_000,
         chatRequestTimeoutMs: 120_000,
@@ -1913,9 +1917,11 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     await switchChatLayoutMode(page, 'cockpit');
-    await expect(modeSummary).toHaveText('Cockpit rails hidden. Chat and composer remain active.');
-    await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeVisible();
-    await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeVisible();
+    await expect(modeSummary).toHaveText('Context and runtime rails visible.');
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeHidden();
+    await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeHidden();
     await page.evaluate(() => {
       localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
       localStorage.setItem('playgroundChatContextRailVisible', JSON.stringify(true));
@@ -2263,7 +2269,15 @@ test.describe('/chat cockpit real-server parity', () => {
       'hide mobile context rail'
     );
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
-    await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveCount(0);
+    await expect(
+      mobileRails.getByRole('tab', { name: 'Context', exact: true })
+    ).toHaveCount(0);
+    await expect(
+      mobileRails.getByRole('tab', {
+        name: 'Restore context sidechannel',
+        exact: true,
+      })
+    ).toBeVisible();
     await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toBeVisible();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Runtime panel active. Composer draft remains available below.'
@@ -2388,11 +2402,7 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
 
-    await mobileRails.getByRole('button', { name: 'Return to focus chat' }).click();
-    await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
-      'data-mode',
-      'focus'
-    );
+    await switchChatLayoutMode(page, 'focus');
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
     await assertCoreComposerControls(page, { mobile: true, composerOnly: true });
     await expectMobileDraftReachable();

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import json
 from collections.abc import AsyncIterator, Iterable
 from typing import Any, Callable
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatConfigurationError,
@@ -12,6 +15,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 )
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import load_settings
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _HC_RetryPolicy,
 )
@@ -26,12 +30,8 @@ from tldw_Server_API.app.core.http_client import (
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-    get_http_error_text,
     get_http_status_from_exception,
-    is_http_status_error,
     is_network_error,
-    log_http_400_body,
-    raise_chat_error_from_http,
 )
 from tldw_Server_API.app.core.LLM_Calls.local_cache_diagnostics import build_local_cache_diagnostic
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
@@ -53,6 +53,8 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
+
+from .base import raise_if_in_band_provider_error
 
 from .base import ChatProvider, apply_tool_choice
 
@@ -100,6 +102,142 @@ _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS = (
     ChatConfigurationError,
     ChatProviderError,
 ) + _LOCAL_HTTP_EXCEPTIONS
+
+_LOCAL_PROVIDER_UNAVAILABLE_MESSAGE = (
+    "The local model provider is currently unavailable."
+)
+
+
+def _bounded_local_provider_name(value: Any) -> str:
+    """Return a bounded provider label safe for operational logs and wire types."""
+
+    normalized = "".join(
+        character
+        for character in str(value or "").strip().lower()
+        if character.isalnum() or character in ".-_"
+    )[:64]
+    return normalized or "local-provider"
+
+
+def _log_local_provider_failure(
+    provider_name: Any,
+    exc: BaseException,
+    *,
+    phase: str,
+) -> None:
+    """Log only bounded failure metadata, never upstream text or tracebacks."""
+
+    status = get_http_status_from_exception(exc) if isinstance(exc, Exception) else None
+    logging.error(
+        "{}: Local provider failure phase={} error_type={} upstream_status={}",
+        _bounded_local_provider_name(provider_name),
+        phase,
+        _bounded_local_provider_name(type(exc).__name__),
+        status if isinstance(status, int) else "unknown",
+        exc_info=False,
+    )
+
+
+def _close_local_provider_resource(
+    resource: Any,
+    provider_name: Any,
+    *,
+    phase: str,
+) -> None:
+    """Close a provider resource without allowing cleanup failures to escape."""
+
+    close = getattr(resource, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception as exc:  # noqa: BLE001 - third-party cleanup must stay terminal
+        _log_local_provider_failure(provider_name, exc, phase=phase)
+
+
+def _local_provider_stream_error_frame(provider_name: Any) -> str:
+    """Build the canonical bounded SSE error for local-provider failures."""
+
+    provider = _bounded_local_provider_name(provider_name)
+    return sse_data(
+        {
+            "error": {
+                "code": "provider_unavailable",
+                "message": _LOCAL_PROVIDER_UNAVAILABLE_MESSAGE,
+                "type": f"{provider}_stream_error",
+            }
+        }
+    )
+
+
+def _is_local_provider_stream_error_line(line: str) -> bool:
+    """Detect provider error events without forwarding their untrusted payload."""
+
+    stripped = line.strip()
+    if not stripped.lower().startswith("data:") or is_done_line(stripped):
+        return False
+    try:
+        payload = json.loads(stripped.split(":", 1)[1].strip())
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("error") not in (None, "", {}, []):
+        return True
+    event_type = str(payload.get("type") or "").strip().lower()
+    return (
+        event_type == "error"
+        or event_type.endswith(".error")
+        or event_type.endswith("_error")
+    )
+
+
+def _raise_sanitized_local_provider_error(
+    provider_name: Any,
+    exc: Exception,
+    *,
+    phase: str,
+) -> None:
+    """Map an upstream failure to a detached, bounded public exception."""
+
+    provider = _bounded_local_provider_name(provider_name)
+    status = get_http_status_from_exception(exc)
+    _log_local_provider_failure(provider, exc, phase=phase)
+    if isinstance(exc, ChatConfigurationError):
+        raise_detached_error(
+            ChatConfigurationError(
+                provider=provider,
+                message="The local model provider configuration is invalid.",
+            )
+        )
+    if isinstance(exc, ChatBadRequestError) or (
+        isinstance(status, int) and 400 <= status < 500
+    ):
+        raise_detached_error(
+            ChatBadRequestError(
+                provider=provider,
+                message="The local model provider rejected the request.",
+            )
+        )
+    public_status = 504 if is_network_error(exc) else 502
+    raise_detached_error(
+        ChatProviderError(
+            provider=provider,
+            message=_LOCAL_PROVIDER_UNAVAILABLE_MESSAGE,
+            status_code=public_status,
+        )
+    )
+
+
+def _select_local_app_config(
+    app_config: dict[str, Any] | None,
+    *,
+    credentials_resolved: bool,
+) -> dict[str, Any]:
+    """Honor an authoritative runtime snapshot, including an empty one."""
+    if credentials_resolved:
+        return app_config if isinstance(app_config, dict) else {}
+    return app_config or load_settings()
 
 
 def _extract_text_from_message_content(content: str | list[dict[str, Any]], provider_name: str, msg_index: int) -> str:
@@ -165,7 +303,8 @@ def _chat_with_openai_compatible_local_server(
         app_config: dict[str, Any] | None = None,
         inference_prefix_cache_intent: dict[str, Any] | None = None,
 ):
-    logging.debug(f"{provider_name}: Chat request starting. API Base: {api_base_url}, Model: {model_name}")
+    safe_provider_name = _bounded_local_provider_name(provider_name)
+    logging.debug("{}: Chat request starting", safe_provider_name)
 
     headers = {'Content-Type': 'application/json'}
     if api_key: # Some local servers might use a key
@@ -292,158 +431,139 @@ def _chat_with_openai_compatible_local_server(
     else:
         full_api_url = normalized_base + "/" + chat_completions_path
 
-    logging.debug(f"{provider_name}: Posting to {full_api_url}. Payload keys: {list(payload.keys())}")
+    logging.debug(
+        "{}: Posting local chat request. Payload keys: {}",
+        safe_provider_name,
+        list(payload.keys()),
+    )
     payload_metadata = _sanitize_payload_for_logging(payload)
-    logging.debug(f"{provider_name}: Payload metadata: {payload_metadata}")
+    logging.debug("{}: Payload metadata: {}", safe_provider_name, payload_metadata)
 
 
     # All requests, including tests, use the checked central transport.
     session_factory = http_client_factory or _hc_create_client
-    try:
-        session = session_factory(timeout=timeout)
-    except TypeError:
-        session = session_factory(timeout)
-    try:
-        if streaming:
-            logging.debug(f"{provider_name}: Opening streaming connection to {full_api_url}")
 
-            def stream_generator():
-                done_sent = False
-                response_obj = None
-                try:
-                    try:
-                        stream_impl = http_streamer or _hc_stream_response
-                        with stream_impl(
-                            method="POST",
-                            url=full_api_url,
-                            configured_endpoint=configured_endpoint_scope,
-                            client=session,
-                            headers=headers,
-                            json=payload,
-                            timeout=timeout + 60,
-                        ) as response:
-                            response_obj = response
-                            response.raise_for_status()
-                            logging.debug(f"{provider_name}: Streaming response received.")
-                            try:
-                                iterator = response.iter_lines()
-                                for line in iterator:
-                                    if not line:
-                                        continue
-                                    decoded = line.decode("utf-8", errors="replace") if isinstance(line, (bytes, bytearray)) else str(line)
-                                    if is_done_line(decoded):
-                                        done_sent = True
-                                    normalized = normalize_provider_line(decoded)
-                                    if normalized is None:
-                                        continue
-                                    yield normalized
-                            except _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS as e_stream:
-                                logging.error(f"{provider_name}: Error during stream iteration: {e_stream}", exc_info=True)
-                                yield sse_data({"error": {"message": f"Stream iteration error: {str(e_stream)}", "type": "stream_error", "code": "iteration_error"}})
-                            finally:
-                                for tail in finalize_stream(response, done_already=done_sent):
-                                    yield tail
-                    except _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS as e_stream_outer:
-                        if is_http_status_error(e_stream_outer):
-                            logging.error(
-                                "{}: HTTP Error during stream setup: {} - {}",
-                                provider_name,
-                                get_http_status_from_exception(e_stream_outer) or "N/A",
-                                get_http_error_text(e_stream_outer)[:500],
-                                exc_info=False,
-                            )
-                            raise_chat_error_from_http(
-                                provider_name,
-                                e_stream_outer,
-                                auth_statuses=(),
-                                rate_limit_statuses=(),
-                            )
-                        if is_network_error(e_stream_outer):
-                            logging.error(
-                                f"{provider_name}: Request error during stream setup: {e_stream_outer}",
-                                exc_info=True,
-                            )
-                            yield sse_data(
-                                {
-                                    "error": {
-                                        "message": f"Stream connection error: {str(e_stream_outer)}",
-                                        "type": "stream_error",
-                                        "code": "connection_error",
-                                    }
-                                }
-                            )
-                            for tail in finalize_stream(response_obj, done_already=done_sent):
-                                yield tail
-                            return
-                        logging.error(
-                            f"{provider_name}: Unexpected error during streaming: {e_stream_outer}",
-                            exc_info=True,
-                        )
-                        yield sse_data(
-                            {
-                                "error": {
-                                    "message": f"Unexpected stream error: {str(e_stream_outer)}",
-                                    "type": "stream_error",
-                                    "code": "unexpected_error",
-                                }
-                            }
-                        )
-                        for tail in finalize_stream(response_obj, done_already=done_sent):
-                            yield tail
-                finally:
-                    with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
-                        session.close()
-            return stream_generator()
-        else:
-            attempts = max(1, int(api_retries)) + 1
-            base_ms = max(50, int(api_retry_delay * 1000))
-            policy = _HC_RetryPolicy(attempts=attempts, backoff_base_ms=base_ms)
-            fetch_impl = http_fetcher or _hc_fetch
-            response = fetch_impl(
-                method="POST",
-                url=full_api_url,
-                configured_endpoint=configured_endpoint_scope,
-                client=session,
-                headers=headers,
-                json=payload,
-                timeout=timeout,
-                retry=policy,
-            )
+    def create_session() -> Any:
+        try:
+            return session_factory(timeout=timeout)
+        except TypeError:
+            return session_factory(timeout)
+
+    if streaming:
+
+        def stream_generator():
+            upstream_done = False
+            error_pending = False
+            response_obj = None
+            session = None
             try:
-                response.raise_for_status()
-                data = response.json()
-                logging.debug(f"{provider_name}: Non-streaming request successful.")
-                return attach_cache_diagnostics(data)
+                try:
+                    session = create_session()
+                    logging.debug("{}: Opening streaming connection", safe_provider_name)
+                    stream_impl = http_streamer or _hc_stream_response
+                    with stream_impl(
+                        method="POST",
+                        url=full_api_url,
+                        configured_endpoint=configured_endpoint_scope,
+                        client=session,
+                        headers=headers,
+                        json=payload,
+                        timeout=timeout,
+                    ) as response:
+                        response_obj = response
+                        response.raise_for_status()
+                        logging.debug("{}: Streaming response received", safe_provider_name)
+                        for line in response.iter_lines():
+                            if not line:
+                                continue
+                            decoded = (
+                                line.decode("utf-8", errors="replace")
+                                if isinstance(line, (bytes, bytearray))
+                                else str(line)
+                            )
+                            if is_done_line(decoded):
+                                upstream_done = True
+                                break
+                            if _is_local_provider_stream_error_line(decoded):
+                                error_pending = True
+                                break
+                            normalized = normalize_provider_line(decoded)
+                            if normalized is not None:
+                                yield normalized
+                except EgressPolicyError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - sanitize arbitrary provider failures
+                    if not upstream_done:
+                        _log_local_provider_failure(
+                            safe_provider_name,
+                            exc,
+                            phase="stream_request",
+                        )
+                        error_pending = True
+
+                if error_pending:
+                    yield _local_provider_stream_error_frame(safe_provider_name)
+                # Defer the terminal marker until the response context exits. This
+                # prevents cleanup failures from producing DONE -> error -> DONE.
+                yield from finalize_stream(response_obj, done_already=False)
             finally:
-                with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
-                    response.close()
-    except _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS as e_http:
-        if is_http_status_error(e_http):
-            logging.error(
-                "{}: HTTP Error: {} - {}",
-                provider_name,
-                get_http_status_from_exception(e_http) or "N/A",
-                get_http_error_text(e_http)[:500],
-                exc_info=False,
+                if session is not None:
+                    _close_local_provider_resource(
+                        session,
+                        safe_provider_name,
+                        phase="stream_client_close",
+                    )
+
+        return stream_generator()
+
+    session = None
+    try:
+        session = create_session()
+        attempts = max(1, int(api_retries)) + 1
+        base_ms = max(50, int(api_retry_delay * 1000))
+        policy = _HC_RetryPolicy(attempts=attempts, backoff_base_ms=base_ms)
+        fetch_impl = http_fetcher or _hc_fetch
+        response = fetch_impl(
+            method="POST",
+            url=full_api_url,
+            configured_endpoint=configured_endpoint_scope,
+            client=session,
+            headers=headers,
+            json=payload,
+            timeout=timeout,
+            retry=policy,
+        )
+        try:
+            response.raise_for_status()
+            data = response.json()
+            raise_if_in_band_provider_error(
+                safe_provider_name,
+                data,
+                phase="nonstream_response",
             )
-            raise_chat_error_from_http(
-                provider_name,
-                e_http,
-                auth_statuses=(),
-                rate_limit_statuses=(),
+            logging.debug("{}: Non-streaming request successful", safe_provider_name)
+            return attach_cache_diagnostics(data)
+        finally:
+            _close_local_provider_resource(
+                response,
+                safe_provider_name,
+                phase="nonstream_response_close",
             )
-        if is_network_error(e_http):
-            # Network/connectivity, DNS, timeouts prior to receiving a response
-            logging.error(f"{provider_name}: Request error: {e_http}", exc_info=False)
-            raise ChatProviderError(provider=provider_name, message=str(e_http), status_code=504) from e_http
+    except EgressPolicyError:
         raise
-    except (ValueError, KeyError, TypeError) as e_data:
-        logging.error(f"{provider_name}: Data processing or configuration error: {e_data}", exc_info=True)
-        raise ChatBadRequestError(provider=provider_name, message=f"{provider_name} data or configuration error: {e_data}") from e_data
+    except Exception as exc:  # noqa: BLE001 - sanitize arbitrary provider failures
+        _raise_sanitized_local_provider_error(
+            safe_provider_name,
+            exc,
+            phase="nonstream_request",
+        )
     finally:
-        if not streaming:
-            with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
-                session.close()
+        if session is not None:
+            _close_local_provider_resource(
+                session,
+                safe_provider_name,
+                phase="nonstream_client_close",
+            )
 
 
 def _local_llm_request(
@@ -483,6 +603,9 @@ def _local_llm_request(
         configured_endpoint_scope: ConfiguredEndpointScope | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
+        api_key: str | None = None,
+        credentials_resolved: bool = False,
+        timeout: float | None = None,
 ):
     if temperature is not None:
         if temp is not None and temp != temperature:
@@ -495,12 +618,15 @@ def _local_llm_request(
         streaming = stream
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg_section = 'local_llm' # Generic section for "local-llm" type
     cfg = loaded_config_data.get(cfg_section, {})
 
     api_base_url = configured_endpoint_base_url or cfg.get('api_ip', 'http://127.0.0.1:8080')
-    api_key = cfg.get('api_key') # Local servers might not need a key
+    current_api_key = api_key or cfg.get('api_key') # Local servers might not need a key
 
     current_model = model or cfg.get('model')
     current_temp = temp if temp is not None else float(cfg.get('temperature', 0.7))
@@ -523,7 +649,7 @@ def _local_llm_request(
     current_tool_choice = tool_choice if tool_choice is not None else cfg.get('tool_choice')
 
 
-    timeout = int(cfg.get('api_timeout', 120))
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 120))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -580,7 +706,7 @@ def _local_llm_request(
         api_base_url=api_base_url,
         model_name=current_model,
         input_data=input_data,
-        api_key=api_key,
+        api_key=current_api_key,
         temp=current_temp,
         system_message=system_message,
         streaming=current_streaming,
@@ -601,7 +727,7 @@ def _local_llm_request(
         top_logprobs=current_top_logprobs,
         user_identifier=current_user_identifier,
         provider_name=cfg_section.capitalize(),
-        timeout=timeout,
+        timeout=effective_timeout,
         api_retries=api_retries,
         api_retry_delay=api_retry_delay,
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
@@ -649,6 +775,8 @@ def _llama_request(
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
         inference_prefix_cache_intent: dict[str, Any] | None = None,
+        credentials_resolved: bool = False,
+        timeout: float | None = None,
 ):
     if temperature is not None:
         if temp is not None and temp != temperature:
@@ -661,7 +789,10 @@ def _llama_request(
         streaming = stream
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg = loaded_config_data.get('llama_api', {})
 
     current_api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
@@ -687,7 +818,7 @@ def _llama_request(
     current_n = n if n is not None else cfg.get('n', cfg.get('n_probs'))
 
 
-    timeout = int(cfg.get('api_timeout', 120))
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 120))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -754,7 +885,7 @@ def _llama_request(
         response_format=current_response_format,
         # tools, tool_choice, logprobs, top_logprobs, user_identifier could be added if llama.cpp supports them via OpenAI compat layer
         provider_name="Llama.cpp",
-        timeout=timeout,
+        timeout=effective_timeout,
         api_retries=api_retries,
         api_retry_delay=api_retry_delay,
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
@@ -794,11 +925,16 @@ def _kobold_request(
         configured_endpoint_scope: ConfiguredEndpointScope | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
+        credentials_resolved: bool = False,
+        timeout: float | None = None,
 ):
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
     logging.debug("KoboldAI (Native): Chat request starting...")
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg = loaded_config_data.get('kobold_api', {})
 
     current_api_key = api_key or cfg.get('api_key')
@@ -851,7 +987,7 @@ def _kobold_request(
         logging.warning("Kobold: Failed to coerce seed='%s' to int; sending as-is", current_seed)
 
     max_context_length = int(cfg.get('max_context_length', 2048)) # Kobold uses max_context_length for context window
-    int(cfg.get('api_timeout', 180))
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 180))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -907,7 +1043,8 @@ def _kobold_request(
     # Other kobold params: typical_p, tfs, top_a, etc. could be added from cfg
 
     logging.debug(
-        f"KoboldAI (Native): Posting to {api_url}. prompt_length={len(final_prompt_string)} chars"
+        "KoboldAI (Native): Posting request. prompt_length={} chars",
+        len(final_prompt_string),
     )
     payload_metadata = _sanitize_payload_for_logging(
         payload,
@@ -927,12 +1064,22 @@ def _kobold_request(
             headers=headers,
             json=payload,
             retry=policy,
+            timeout=effective_timeout,
         )
         try:
             response.raise_for_status()
             response_data = response.json()
+            raise_if_in_band_provider_error(
+                "kobold",
+                response_data,
+                phase="nonstream_response",
+            )
         finally:
-            response.close()
+            _close_local_provider_resource(
+                response,
+                "kobold",
+                phase="nonstream_response_close",
+            )
 
         if response_data and 'results' in response_data and len(response_data['results']) > 0:
             # Kobold /generate usually returns a list of results, each with 'text'
@@ -943,33 +1090,17 @@ def _kobold_request(
             # This assumes non-streaming. Streaming would need a generator yielding SSE-like events.
             return {"choices": [{"message": {"role": "assistant", "content": generated_text}, "finish_reason": "stop"}]} # Assuming "stop"
         else:
-            logging.error(
-                "KoboldAI (Native): Unexpected response structure: {}",
-                response_data,
-            )
-            raise ChatProviderError(provider="kobold", message=f"Unexpected response structure from KoboldAI (Native): {str(response_data)[:200]}")
-
-    except _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS as e_http:
-        if is_http_status_error(e_http):
-            log_http_400_body("kobold", e_http)
-            logging.error(
-                "KoboldAI (Native): HTTP Error: {} - {}",
-                get_http_status_from_exception(e_http) or "N/A",
-                get_http_error_text(e_http)[:500],
-                exc_info=False,
-            )
-            raise
-        if is_network_error(e_http):
-            logging.error(f"KoboldAI (Native): Request Exception: {e_http}", exc_info=True)
             raise ChatProviderError(
                 provider="kobold",
-                message=f"Network error calling KoboldAI (Native): {e_http}",
-                status_code=503,
-            ) from e_http
-        raise
-    except (ValueError, KeyError, TypeError) as e_data:
-        logging.error(f"KoboldAI (Native): Data or configuration error: {e_data}", exc_info=True)
-        raise ChatBadRequestError(provider="kobold", message=f"KoboldAI (Native) config/data error: {e_data}") from e_data
+                message="KoboldAI returned an invalid response.",
+            )
+
+    except _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS as e_http:
+        _raise_sanitized_local_provider_error(
+            "kobold",
+            e_http,
+            phase="request",
+        )
 
 
 # https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API
@@ -1005,6 +1136,8 @@ def _ooba_request(
     configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    timeout: float | None = None,
 ):
     if temperature is not None:
         if temp is not None and temp != temperature:
@@ -1017,7 +1150,10 @@ def _ooba_request(
         streaming = stream
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg = loaded_config_data.get('ooba_api', {})
 
     current_api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
@@ -1043,7 +1179,7 @@ def _ooba_request(
     current_presence_penalty = presence_penalty if presence_penalty is not None else cfg.get('presence_penalty')
     current_frequency_penalty = frequency_penalty if frequency_penalty is not None else cfg.get('frequency_penalty')
 
-    timeout = int(cfg.get('api_timeout', 180)) # Ooba can be slow
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 180)) # Ooba can be slow
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -1106,7 +1242,7 @@ def _ooba_request(
         user_identifier=current_user_identifier,
         # tools, tool_choice, logprobs, top_logprobs might be supported by some ooba setups
         provider_name="Oobabooga (OpenAI Extension)",
-        timeout=timeout,
+        timeout=effective_timeout,
         api_retries=api_retries,
         api_retry_delay=api_retry_delay,
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
@@ -1156,6 +1292,8 @@ def _tabbyapi_request(
     configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    timeout: float | None = None,
 ):
     if temperature is not None:
         if temp is not None and temp != temperature:
@@ -1168,7 +1306,10 @@ def _tabbyapi_request(
         streaming = stream
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg = loaded_config_data.get('tabby_api', {})
 
     api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
@@ -1199,7 +1340,7 @@ def _tabbyapi_request(
     current_tools = tools if tools is not None else cfg.get('tools')
     current_tool_choice = tool_choice if tool_choice is not None else cfg.get('tool_choice')
 
-    timeout = int(cfg.get('api_timeout', 120))
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 120))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -1274,7 +1415,7 @@ def _tabbyapi_request(
         tools=current_tools,
         tool_choice=current_tool_choice,
         provider_name="TabbyAPI",
-        timeout=timeout,
+        timeout=effective_timeout,
         api_retries=api_retries,
         api_retry_delay=api_retry_delay,
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
@@ -1327,6 +1468,8 @@ def _vllm_request(
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
     inference_prefix_cache_intent: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    timeout: float | None = None,
                                        # Could be loaded from cfg or passed if chat_api_call handles it
 ):
     if temp is not None:
@@ -1339,7 +1482,10 @@ def _vllm_request(
         streaming = stream
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg = loaded_config_data.get('vllm_api', {})
 
     # vllm_api_url is a specific argument for this function if it's set up in legacy dispatch
@@ -1372,7 +1518,7 @@ def _vllm_request(
     current_user_identifier = user_identifier if user_identifier is not None else cfg.get('user_identifier')
 
 
-    timeout = int(cfg.get('api_timeout', 120))
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 120))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -1449,7 +1595,7 @@ def _vllm_request(
         tool_choice=current_tool_choice,
         user_identifier=current_user_identifier,
         provider_name="vLLM",
-        timeout=timeout,
+        timeout=effective_timeout,
         api_retries=api_retries,
         api_retry_delay=api_retry_delay,
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
@@ -1502,6 +1648,8 @@ def _aphrodite_request(
     configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    timeout: float | None = None,
     # top_logprobs, tools, tool_choice not in Aphrodite's map currently
 ):
     if temp is not None:
@@ -1514,7 +1662,10 @@ def _aphrodite_request(
         streaming = stream
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg = loaded_config_data.get('aphrodite_api', {})
 
     api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
@@ -1548,7 +1699,7 @@ def _aphrodite_request(
     current_logprobs = logprobs if logprobs is not None else cfg.get('logprobs')
     current_user_identifier = user_identifier if user_identifier is not None else cfg.get('user_identifier')
 
-    timeout = int(cfg.get('api_timeout', 120))
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 120))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -1615,7 +1766,7 @@ def _aphrodite_request(
         tool_choice=tool_choice,
         user_identifier=current_user_identifier,
         provider_name="Aphrodite Engine",
-        timeout=timeout,
+        timeout=effective_timeout,
         api_retries=api_retries,
         api_retry_delay=api_retry_delay,
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
@@ -1671,6 +1822,8 @@ def _ollama_request(
     configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    timeout: float | None = None,
     # _chat_with_openai_compatible_local_server supports extra OpenAI fields (logit_bias, n, tools, etc.).
     # Add to this signature if Ollama supports them.
 ):
@@ -1687,7 +1840,10 @@ def _ollama_request(
         system_message = system
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
-    loaded_config_data = app_config or load_settings()
+    loaded_config_data = _select_local_app_config(
+        app_config,
+        credentials_resolved=credentials_resolved,
+    )
     cfg = loaded_config_data.get('ollama_api', {})
 
     current_api_base_url = configured_endpoint_base_url or cfg.get('api_url')
@@ -1745,7 +1901,7 @@ def _ollama_request(
     # Ollama also supports other native parameters like 'num_ctx', 'tfs_z', 'mirostat', etc.
     # Add them to the signature if full coverage is desired; for now, focus on OpenAI-compatible ones.
 
-    timeout = int(cfg.get('api_timeout', 300)) # Ollama can be slow
+    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 300)) # Ollama can be slow
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
 
@@ -1806,7 +1962,7 @@ def _ollama_request(
         tools=current_tools,
         tool_choice=current_tool_choice,
         provider_name="Ollama",
-        timeout=timeout,
+        timeout=effective_timeout,
         api_retries=api_retries,
         api_retry_delay=api_retry_delay,
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
@@ -1827,7 +1983,7 @@ class _LocalAdapterBase(ChatProvider):
     default_timeout_seconds = 120
     max_output_tokens_default: int | None = 4096
     _handler = None
-    http_client_factory: Callable[..., Any] = staticmethod(_hc_create_client)
+    http_client_factory: Callable[..., Any] | None = None
     http_fetcher: Callable[..., Any] = staticmethod(_hc_fetch)
     http_streamer: Callable[..., Any] = staticmethod(_hc_stream_response)
 
@@ -1843,6 +1999,7 @@ class _LocalAdapterBase(ChatProvider):
             "http_client_factory",
             "http_fetcher",
             "http_streamer",
+            PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
         }
     )
 
@@ -1871,35 +2028,55 @@ class _LocalAdapterBase(ChatProvider):
             yield openai_delta_chunk(content)
         yield sse_done()
 
-    def _call_handler(self, request: dict[str, Any], *, streaming: bool | None) -> Any:
-        sanitized = self._sanitize_request(request or {})
+    def _call_handler(
+        self,
+        request: dict[str, Any],
+        *,
+        streaming: bool | None,
+        timeout: float | None = None,
+    ) -> Any:
+        raw_request, credentials = self._bind_request_credentials_with_handle(request)
+        if credentials is not None:
+            endpoint = credentials.trusted_endpoint
+            if endpoint is None or not endpoint.scope.matches(endpoint.base_url):
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message=f"{self.name} endpoint is not configured.",
+                )
+            raw_request["api_key"] = credentials.api_key
+            raw_request["credentials_resolved"] = True
+        else:
+            endpoint = resolve_trusted_provider_endpoint(self.name)
+            if endpoint is None:
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message=f"{self.name} endpoint is not configured.",
+                )
+
+        sanitized = self._sanitize_request(raw_request)
         sanitized = validate_payload(self.name, sanitized)
         args = self._to_handler_args(sanitized, streaming=streaming)
-        endpoint = resolve_trusted_provider_endpoint(self.name)
-        if endpoint is None:
-            raise ChatConfigurationError(
-                provider=self.name,
-                message=f"{self.name} endpoint is not configured.",
-            )
         args.update(
             {
                 "configured_endpoint_base_url": endpoint.base_url,
                 "configured_endpoint_scope": endpoint.scope,
-                "http_client_factory": self.http_client_factory,
+                "http_client_factory": self.http_client_factory or _hc_create_client,
                 "http_fetcher": self.http_fetcher,
                 "http_streamer": self.http_streamer,
             }
         )
+        if timeout is not None:
+            args["timeout"] = timeout
         handler = self._handler
         if handler is None:
             raise RuntimeError(f"{self.name} adapter missing handler")
         return handler(**args)
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
-        return self._call_handler(request, streaming=False)
+        return self._call_handler(request, streaming=False, timeout=timeout)
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
-        result = self._call_handler(request, streaming=True)
+        result = self._call_handler(request, streaming=True, timeout=timeout)
         if not isinstance(result, (dict, str, bytes, bytearray)) and hasattr(result, "__iter__"):
             return result
         return self._wrap_non_streaming(result)
@@ -1923,6 +2100,7 @@ class LocalLLMAdapter(_LocalAdapterBase):
             stream_flag = streaming
         return {
             "input_data": request.get("messages") or [],
+            "api_key": request.get("api_key"),
             "custom_prompt_arg": request.get("custom_prompt_arg"),
             "temp": request.get("temperature"),
             "system_message": request.get("system_message"),
@@ -1945,6 +2123,7 @@ class LocalLLMAdapter(_LocalAdapterBase):
             "tools": request.get("tools"),
             "tool_choice": request.get("tool_choice"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
         }
@@ -1980,6 +2159,7 @@ class LlamaCppAdapter(_LocalAdapterBase):
             "frequency_penalty": request.get("frequency_penalty"),
             "api_url": request.get("api_url"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
             "inference_prefix_cache_intent": request.get("inference_prefix_cache_intent"),
@@ -2011,6 +2191,7 @@ class KoboldAdapter(_LocalAdapterBase):
             "num_responses": request.get("n"),
             "seed": request.get("seed"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
         }
@@ -2047,6 +2228,7 @@ class OobaAdapter(_LocalAdapterBase):
             "frequency_penalty": request.get("frequency_penalty"),
             "api_url": request.get("api_url"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
         }
@@ -2087,6 +2269,7 @@ class TabbyAPIAdapter(_LocalAdapterBase):
             "tool_choice": request.get("tool_choice"),
             "api_url": request.get("api_url"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
         }
@@ -2127,6 +2310,7 @@ class VLLMAdapter(_LocalAdapterBase):
             "tool_choice": request.get("tool_choice"),
             "vllm_api_url": request.get("api_url"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
             "inference_prefix_cache_intent": request.get("inference_prefix_cache_intent"),
@@ -2165,6 +2349,7 @@ class OllamaAdapter(_LocalAdapterBase):
             "tool_choice": request.get("tool_choice"),
             "api_url": request.get("api_url"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
         }
@@ -2205,6 +2390,7 @@ class AphroditeAdapter(_LocalAdapterBase):
             "tool_choice": request.get("tool_choice"),
             "api_url": request.get("api_url"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
         }

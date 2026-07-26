@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 
 
 @dataclass
@@ -62,12 +63,14 @@ class BufferedRealtimeSession(RealtimeTTSSession):
         tts_service: Any,
         config: RealtimeSessionConfig,
         provider_hint: str | None = None,
+        provider_overrides: dict[str, Any] | None = None,
         route: str = "audio.stream.tts.realtime",
         user_id: int | None = None,
     ) -> None:
         self._tts_service = tts_service
         self._config = config
         self._provider_hint = provider_hint
+        self._provider_overrides = provider_overrides
         self._route = route
         self._user_id = user_id
         self._buffer = ""
@@ -96,13 +99,13 @@ class BufferedRealtimeSession(RealtimeTTSSession):
             self._buffer = ""
 
     async def finish(self) -> None:
-        if self._closed:
-            return
-        if self._buffer.strip():
-            await self._text_queue.put(self._buffer)
-            self._buffer = ""
-        await self._text_queue.put(None)
-        self._closed = True
+        if not self._closed:
+            self._closed = True
+            if self._buffer.strip():
+                await self._text_queue.put(self._buffer)
+                self._buffer = ""
+            await self._text_queue.put(None)
+        await await_owned_worker(self._worker_task)
 
     async def audio_stream(self) -> AsyncGenerator[bytes, None]:
         while True:
@@ -130,15 +133,22 @@ class BufferedRealtimeSession(RealtimeTTSSession):
                     lang_code=self._config.lang_code,
                     extra_params=self._config.extra_params,
                 )
-                async for chunk in self._tts_service.generate_speech(
+                speech_stream = self._tts_service.generate_speech(
                     request,
                     provider=self._provider_hint,
-                    fallback=True,
+                    fallback=self._provider_overrides is None,
+                    provider_overrides=self._provider_overrides,
                     voice_to_voice_route=self._route,
                     user_id=self._user_id,
-                ):
-                    if chunk:
-                        await self._audio_queue.put(chunk)
+                )
+                try:
+                    async for chunk in speech_stream:
+                        if chunk:
+                            await self._audio_queue.put(chunk)
+                finally:
+                    close_stream = getattr(speech_stream, "aclose", None)
+                    if callable(close_stream):
+                        await close_stream()
         except Exception as exc:
             self._error = exc
             logger.error(

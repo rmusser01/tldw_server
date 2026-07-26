@@ -355,6 +355,30 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("accepts explicit redaction markers in secret carrier formats", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-redacted-secret-check",
+      preserve: false,
+    })
+
+    try {
+      writeFileSync(
+        artifacts.logs.runner,
+        [
+          "ANTHROPIC_API_KEY=[REDACTED]",
+          "x-api-key: [REDACTED]",
+          '"authorization": "[REDACTED]"',
+        ].join("\n"),
+        "utf8"
+      )
+
+      expect(() => assertNoSecretLeaks(artifacts.root)).not.toThrow()
+    } finally {
+      cleanupRunArtifacts(artifacts)
+    }
+  })
+
   it("detects raw and JSON-shaped secret-like artifact leaks", () => {
     const artifacts = createRunArtifacts({
       frontendRoot,
@@ -562,6 +586,26 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("returns an owned record when its log sink is invalid", async () => {
+    const record = spawnLoggedProcess({
+      name: "invalid-log-child",
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => { console.log('one'); console.log('two') }, 20); setInterval(() => {}, 1000)"],
+      cwd: frontendRoot,
+      env: process.env,
+      logPath: path.join(process.execPath, "skills-certification.log"),
+    })
+    try {
+      expect(record.child.pid).toBeTruthy()
+      await new Promise<void>((resolve) => record.child.stdout?.once("data", () => resolve()))
+      expect(record.loggingErrors.length).toBe(1)
+      await stopProcessTree(record, { timeoutMs: 50 })
+      expect(record.child.exitCode ?? record.child.signalCode).not.toBeNull()
+    } finally {
+      await stopProcessTree(record, { timeoutMs: 50 })
+    }
+  })
+
   it("waits for one-shot child process stdio close before artifact cleanup", () => {
     const runnerSource = readText("scripts/onboarding-uat/run.mjs")
 
@@ -644,6 +688,39 @@ describe("onboarding UAT runner helpers", () => {
 
     expect(child.signals).toEqual(["SIGTERM"])
     expect(child.exitCode).toBe(0)
+  })
+
+  it("uses taskkill tree termination and verifies parent exit on Windows", async () => {
+    class WindowsChild extends EventEmitter {
+      pid = 123458
+      exitCode: number | null = null
+      signalCode: string | null = null
+    }
+    const child = new WindowsChild()
+    await stopProcessTree(child, {
+      platform: "win32",
+      taskkill: async (pid: number, timeoutMs: number) => {
+        expect(pid).toBe(child.pid)
+        expect(timeoutMs).toBe(50)
+        child.exitCode = 0
+        child.emit("exit", 0, null)
+      },
+      timeoutMs: 50,
+    })
+    expect(child.exitCode).toBe(0)
+  })
+
+  it("rejects when injected Windows taskkill fails", async () => {
+    class WindowsChild extends EventEmitter {
+      pid = 123459
+      exitCode: number | null = null
+      signalCode: string | null = null
+    }
+    await expect(stopProcessTree(new WindowsChild(), {
+      platform: "win32",
+      taskkill: async () => { throw new Error("taskkill failed") },
+      timeoutMs: 50,
+    })).rejects.toThrow("taskkill failed")
   })
 })
 

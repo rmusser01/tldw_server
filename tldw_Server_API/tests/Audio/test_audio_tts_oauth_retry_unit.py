@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import asyncio
+from types import MappingProxyType, SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,9 +12,179 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import tldw_Server_API.app.api.v1.endpoints.audio.audio_tts as audio_tts
+from tldw_Server_API.app.api.v1.endpoints.audio import audio as audio_endpoint
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.Audio import tts_service as tts_service_module
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ResolvedByokCredentials,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSAuthenticationError
+
+_STALE_OAUTH_KEY = "tts-oauth-stale-secret-must-not-leak"
+_REFRESHED_OAUTH_KEY = "tts-oauth-refreshed-secret-must-not-leak"
+_SECOND_REFRESH_OAUTH_KEY = "tts-oauth-second-refresh-must-not-occur"
+_STALE_OAUTH_GENERATION = "tts-oauth-generation-stale"
+_REFRESHED_OAUTH_GENERATION = "tts-oauth-generation-refreshed"
+
+
+def _oauth_resolution(
+    *,
+    api_key: str,
+    generation: Any,
+    provider: str = "openai",
+) -> ResolvedByokCredentials:
+    return ResolvedByokCredentials(
+        provider=provider,
+        api_key=api_key,
+        app_config={},
+        credential_fields={},
+        source="user",
+        allowlisted=True,
+        auth_source="oauth",
+        _credential_generation=generation,
+    )
+
+
+class _NoOverrideSnapshot:
+    def enforce(self, _model: str | None) -> None:
+        return None
+
+    def ensure_healthy(self) -> None:
+        return None
+
+    def server_fallback(self, base_fallback=None):
+        return base_fallback
+
+
+class _CoalescingOAuthResolver:
+    """Model the generation-aware coalescing contract at the endpoint seam."""
+
+    def __init__(self) -> None:
+        self.current_key = _STALE_OAUTH_KEY
+        self.current_generation = _STALE_OAUTH_GENERATION
+        self.token_exchange_count = 0
+        self.initial_resolutions: list[ResolvedByokCredentials] = []
+        self.rejected_resolutions: list[ResolvedByokCredentials | None] = []
+        self._lock = asyncio.Lock()
+
+    async def __call__(self, *_args, **kwargs):
+        if not kwargs.get("force_oauth_refresh", False):
+            resolution = _oauth_resolution(
+                api_key=self.current_key,
+                generation=self.current_generation,
+            )
+            self.initial_resolutions.append(resolution)
+            return (1, {"api_key": resolution.api_key}, resolution)
+
+        rejected = kwargs.get("rejected_credentials")
+        self.rejected_resolutions.append(rejected)
+        async with self._lock:
+            rejected_generation = getattr(
+                rejected,
+                "_credential_generation",
+                None,
+            )
+            if (
+                rejected_generation is None
+                or rejected_generation == self.current_generation
+            ):
+                self.token_exchange_count += 1
+                if self.token_exchange_count == 1:
+                    self.current_key = _REFRESHED_OAUTH_KEY
+                    self.current_generation = _REFRESHED_OAUTH_GENERATION
+                else:
+                    self.current_key = _SECOND_REFRESH_OAUTH_KEY
+                    self.current_generation = "tts-oauth-generation-second-refresh"
+            resolution = _oauth_resolution(
+                api_key=self.current_key,
+                generation=self.current_generation,
+            )
+        return (1, {"api_key": resolution.api_key}, resolution)
+
+
+class _ConcurrentAuthRetryTTSService:
+    """Gate both stale requests at their first chunk before returning 401."""
+
+    def __init__(self) -> None:
+        self._stale_arrivals = 0
+        self._both_stale_arrived = asyncio.Event()
+        self.success_keys: list[str] = []
+
+    def generate_speech(self, *args, **kwargs):  # noqa: ARG002
+        overrides = kwargs.get("provider_overrides") or {}
+        api_key = overrides.get("api_key")
+
+        async def _gen():
+            if api_key == _STALE_OAUTH_KEY:
+                self._stale_arrivals += 1
+                if self._stale_arrivals == 2:
+                    self._both_stale_arrived.set()
+                await self._both_stale_arrived.wait()
+                raise TTSAuthenticationError("expired OAuth token")
+            self.success_keys.append(api_key)
+            yield b"recovered audio"
+
+        return _gen()
+
+
+def _assert_concurrent_refresh_coalesced(
+    resolver: _CoalescingOAuthResolver,
+    service: _ConcurrentAuthRetryTTSService,
+) -> None:
+    assert resolver.token_exchange_count == 1
+    assert len(resolver.initial_resolutions) == 2
+    assert len(resolver.rejected_resolutions) == 2
+    assert {id(item) for item in resolver.rejected_resolutions} == {
+        id(item) for item in resolver.initial_resolutions
+    }
+    assert all(
+        item._credential_generation == _STALE_OAUTH_GENERATION
+        for item in resolver.rejected_resolutions
+    )
+    assert service.success_keys == [
+        _REFRESHED_OAUTH_KEY,
+        _REFRESHED_OAUTH_KEY,
+    ]
+
+
+def _assert_oauth_secrets_not_serialized(
+    payload: object,
+    fake_logger: MagicMock,
+) -> None:
+    serialized = repr((payload, fake_logger.method_calls))
+    assert _STALE_OAUTH_KEY not in serialized
+    assert _REFRESHED_OAUTH_KEY not in serialized
+    assert _SECOND_REFRESH_OAUTH_KEY not in serialized
+
+
+def _patch_tts_helper_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tts_service_module,
+        "capture_provider_override_call_snapshot",
+        lambda _provider: _NoOverrideSnapshot(),
+    )
+    monkeypatch.setattr(
+        tts_service_module,
+        "_capture_tts_provider_config",
+        lambda _provider: {},
+    )
+    monkeypatch.setattr(
+        tts_service_module,
+        "load_server_config_snapshot",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        tts_service_module,
+        "resolve_static_server_fallback_from_snapshot",
+        lambda *_args: SimpleNamespace(
+            api_key=None,
+            app_config={},
+            credential_fields={},
+            auth_source=None,
+        ),
+    )
 
 
 class _DummyByokResolution:
@@ -577,6 +749,57 @@ async def test_audio_metadata_openai_oauth_auth_failure_retries_once(monkeypatch
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_audio_metadata_oauth_retry_touches_only_refreshed_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stale = _DummyByokResolution(api_key="oauth-initial-key")
+    refreshed = _DummyByokResolution(api_key="oauth-refreshed-key")
+    force_flags: list[bool] = []
+
+    async def _resolve_tts_byok(*_args, **kwargs):
+        forced = bool(kwargs.get("force_oauth_refresh", False))
+        force_flags.append(forced)
+        resolution = refreshed if forced else stale
+        return (1, {"api_key": resolution.api_key}, resolution)
+
+    class _MetadataAuthRetryTTSService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_speech(self, request_data: OpenAISpeechRequest, **_kwargs: Any):
+            self.calls += 1
+            call_number = self.calls
+
+            async def _generate():
+                if call_number == 1:
+                    raise TTSAuthenticationError("oauth access token invalid")
+                object.__setattr__(
+                    request_data,
+                    "_tts_metadata",
+                    MappingProxyType({"alignment": {"words": []}}),
+                )
+                if False:  # pragma: no cover - make this an async generator
+                    yield b""
+
+            return _generate()
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    response = await audio_tts.create_speech_metadata(
+        _request_data(),
+        _make_request(path="/api/v1/audio/speech/metadata"),
+        tts_service=_MetadataAuthRetryTTSService(),
+        current_user=SimpleNamespace(id=1),
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 200
+    assert force_flags == [False, True]
+    assert stale.touch_calls == 0
+    assert refreshed.touch_calls == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_audio_metadata_openai_oauth_second_auth_failure_propagates_original_auth_error(monkeypatch):
     async def _resolve_tts_byok(*args, **kwargs):
         forced = bool(kwargs.get("force_oauth_refresh", False))
@@ -600,3 +823,238 @@ async def test_audio_metadata_openai_oauth_second_auth_failure_propagates_origin
     assert exc.value.status_code == 502
     detail = exc.value.detail or {}
     assert detail.get("message") == "TTS provider authentication failed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_audio_speech_streaming_concurrent_oauth_401s_coalesce_refresh_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sibling first-chunk 401s adopt one published OAuth generation."""
+    resolver = _CoalescingOAuthResolver()
+    service = _ConcurrentAuthRetryTTSService()
+    fake_logger = MagicMock()
+    _patch_audio_shim(monkeypatch, resolver)
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    async def _request_speech():
+        request_data = _request_data()
+        request_data.stream = True
+        return await audio_tts.create_speech(
+            request_data,
+            _make_request(),
+            tts_service=service,
+            current_user=SimpleNamespace(id=1),
+            media_db=None,
+            usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+        )
+
+    responses = await asyncio.wait_for(
+        asyncio.gather(_request_speech(), _request_speech()),
+        timeout=10,
+    )
+    response_payloads: list[bytes] = []
+    for response in responses:
+        chunks = [chunk async for chunk in response.body_iterator]
+        response_payloads.append(b"".join(chunks))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert response_payloads == [b"recovered audio", b"recovered audio"]
+    _assert_concurrent_refresh_coalesced(resolver, service)
+    _assert_oauth_secrets_not_serialized(
+        [
+            (response.status_code, dict(response.headers), payload)
+            for response, payload in zip(responses, response_payloads)
+        ],
+        fake_logger,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_audio_metadata_concurrent_oauth_401s_coalesce_refresh_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sibling metadata 401s adopt one published OAuth generation."""
+    resolver = _CoalescingOAuthResolver()
+    service = _ConcurrentAuthRetryTTSService()
+    fake_logger = MagicMock()
+    _patch_audio_shim(monkeypatch, resolver)
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    async def _request_metadata():
+        return await audio_tts.create_speech_metadata(
+            _request_data(),
+            _make_request(path="/api/v1/audio/speech/metadata"),
+            tts_service=service,
+            current_user=SimpleNamespace(id=1),
+            usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+        )
+
+    responses = await asyncio.wait_for(
+        asyncio.gather(_request_metadata(), _request_metadata()),
+        timeout=10,
+    )
+
+    assert [response.status_code for response in responses] == [204, 204]
+    _assert_concurrent_refresh_coalesced(resolver, service)
+    _assert_oauth_secrets_not_serialized(
+        [(response.status_code, dict(response.headers)) for response in responses],
+        fake_logger,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("force_oauth_refresh", "expected_rejected_generation"),
+    ((False, None), (True, _STALE_OAUTH_GENERATION)),
+)
+async def test_tts_byok_forwards_rejected_generation_only_for_forced_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    force_oauth_refresh: bool,
+    expected_rejected_generation: str | None,
+) -> None:
+    """Only a forced refresh may forward the rejected credential generation."""
+    _patch_tts_helper_config(monkeypatch)
+    rejected = _oauth_resolution(
+        api_key=_STALE_OAUTH_KEY,
+        generation=_STALE_OAUTH_GENERATION,
+    )
+    resolver_calls: list[dict[str, Any]] = []
+
+    async def _resolve_credentials(
+        provider: str,
+        **kwargs: Any,
+    ) -> ResolvedByokCredentials:
+        assert provider == "openai"
+        resolver_calls.append(kwargs)
+        return _oauth_resolution(
+            api_key=_REFRESHED_OAUTH_KEY,
+            generation=_REFRESHED_OAUTH_GENERATION,
+        )
+
+    await tts_service_module._resolve_tts_byok(
+        provider_hint="openai",
+        model="tts-1",
+        current_user=SimpleNamespace(id=1),
+        request=_make_request(),
+        force_oauth_refresh=force_oauth_refresh,
+        rejected_credentials=rejected,
+        credential_resolver=_resolve_credentials,
+    )
+
+    assert len(resolver_calls) == 1
+    if expected_rejected_generation is None:
+        assert "rejected_credential_generation" not in resolver_calls[0]
+    else:
+        assert resolver_calls[0]["rejected_credential_generation"] == (
+            expected_rejected_generation
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_wrapper_forwards_rejected_credentials_and_injected_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The compatibility wrapper preserves the rejected snapshot and test seam."""
+    rejected = _oauth_resolution(
+        api_key=_STALE_OAUTH_KEY,
+        generation=_STALE_OAUTH_GENERATION,
+    )
+    captured: dict[str, Any] = {}
+
+    async def _injected_resolver(*_args, **_kwargs):
+        raise AssertionError("the core seam should receive, not invoke, this resolver")
+
+    async def _capture_core_resolution(**kwargs):
+        captured.update(kwargs)
+        return (1, {"api_key": _REFRESHED_OAUTH_KEY}, rejected)
+
+    monkeypatch.setattr(
+        audio_endpoint,
+        "resolve_byok_credentials",
+        _injected_resolver,
+    )
+    monkeypatch.setattr(
+        tts_service_module,
+        "_resolve_tts_byok",
+        _capture_core_resolution,
+    )
+
+    await audio_endpoint._resolve_tts_byok(
+        provider_hint="openai",
+        model="tts-1",
+        current_user=SimpleNamespace(id=1),
+        request=_make_request(),
+        force_oauth_refresh=True,
+        rejected_credentials=rejected,
+    )
+
+    assert captured["rejected_credentials"] is rejected
+    assert captured["credential_resolver"] is _injected_resolver
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rejected",
+    (
+        None,
+        SimpleNamespace(
+            provider="openai",
+            _credential_generation=_STALE_OAUTH_GENERATION,
+        ),
+        _oauth_resolution(api_key=_STALE_OAUTH_KEY, generation=None),
+        _oauth_resolution(api_key=_STALE_OAUTH_KEY, generation=" "),
+        _oauth_resolution(api_key=_STALE_OAUTH_KEY, generation=object()),
+        _oauth_resolution(
+            api_key=_STALE_OAUTH_KEY,
+            generation=_STALE_OAUTH_GENERATION,
+            provider="anthropic",
+        ),
+    ),
+    ids=(
+        "missing-snapshot",
+        "wrong-type",
+        "missing-generation",
+        "blank-generation",
+        "generation-wrong-type",
+        "provider-mismatch",
+    ),
+)
+async def test_tts_byok_invalid_rejected_generation_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    rejected: object,
+) -> None:
+    """Invalid rejected metadata never reaches the credential resolver."""
+    _patch_tts_helper_config(monkeypatch)
+    resolver_called = False
+
+    async def _unexpected_resolver(
+        provider: str,
+        **kwargs: Any,
+    ) -> ResolvedByokCredentials:
+        nonlocal resolver_called
+        resolver_called = True
+        return _oauth_resolution(
+            api_key=_REFRESHED_OAUTH_KEY,
+            generation=_REFRESHED_OAUTH_GENERATION,
+        )
+
+    with pytest.raises(ByokResolutionError) as exc_info:
+        await tts_service_module._resolve_tts_byok(
+            provider_hint="openai",
+            model="tts-1",
+            current_user=SimpleNamespace(id=1),
+            request=_make_request(),
+            force_oauth_refresh=True,
+            rejected_credentials=rejected,
+            credential_resolver=_unexpected_resolver,
+        )
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert resolver_called is False

@@ -14,24 +14,53 @@ on:
       - tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py
       - .github/workflows/mcp-unified-rc.yml
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: mcp-unified-rc-${{ github.event.pull_request.number || github.ref }}
+  group: mcp-unified-rc-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: mcp-unified-rc.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   internal-rc:
     name: Build, install, and UAT standalone MCP package
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python

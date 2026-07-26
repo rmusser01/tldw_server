@@ -100,6 +100,7 @@ def _tool_call_stream() -> Any:
             ]
         }
         yield f"data: {json.dumps(tool_delta)}\n\n"
+        yield 'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
         yield "data: [DONE]\n\n"
 
     return _stream()
@@ -136,6 +137,7 @@ def _run_then_notes_stream() -> Any:
             ]
         }
         yield f"data: {json.dumps(tool_delta)}\n\n"
+        yield 'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
         yield "data: [DONE]\n\n"
 
     return _stream()
@@ -488,7 +490,6 @@ async def test_streaming_autoexec_records_run_first_rollout_and_tool_path(
         headers={},
         state=SimpleNamespace(user_id=9, api_key_id=None, team_ids=None, org_ids=None),
     )
-
     response = await execute_streaming_call(
         current_loop=asyncio.get_running_loop(),
         cleaned_args={
@@ -563,6 +564,10 @@ async def test_streaming_provider_fallback_refreshes_run_first_metric_context(
         headers={},
         state=SimpleNamespace(user_id=9, api_key_id=None, team_ids=None, org_ids=None),
     )
+    primary_error = chat_service.ChatAPIError("primary failed")
+    primary_error.upstream_dispatched = False
+    primary_error.output_emitted = False
+    primary_error.allow_non_stream_fallback = True
 
     response = await execute_streaming_call(
         current_loop=asyncio.get_running_loop(),
@@ -595,7 +600,7 @@ async def test_streaming_provider_fallback_refreshes_run_first_metric_context(
         client_id="client-4",
         queue_execution_enabled=False,
         enable_provider_fallback=True,
-        llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+        llm_call_func=lambda: (_ for _ in ()).throw(primary_error),
         refresh_provider_params=lambda fallback_provider: (
             {
                 "api_endpoint": fallback_provider,

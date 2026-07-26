@@ -1,17 +1,30 @@
-import os
-import pytest
 import asyncio
 import inspect
-from pathlib import Path
+import os
 from collections.abc import Iterable
 from typing import Final
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
-from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    set_llm_provider_overrides_cache_for_tests,
+)
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.main import app
+
+
+@pytest.fixture(autouse=True)
+def healthy_provider_override_snapshot():
+    """Keep non-lifespan embedding tests on a deterministic healthy snapshot."""
+    set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        set_llm_provider_overrides_cache_for_tests({})
 
 
 @pytest.fixture

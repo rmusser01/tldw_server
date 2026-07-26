@@ -47,6 +47,7 @@ from tldw_Server_API.app.core.AuthNZ.scheduler import start_authnz_scheduler
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
 from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
+from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
 from tldw_Server_API.app.core.testing import is_test_mode
 
 _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS = (
@@ -201,10 +202,16 @@ def _normalize_env_value(value: Optional[str]) -> Optional[str]:
 def _resolve_env_locations() -> tuple[list[Path], list[Path], Path]:
     project_root = Path(__file__).resolve().parent.parent.parent.parent
     cfg_dir = project_root / "Config_Files"
-    env_candidates = [
-        cfg_dir / ".env",
-        cfg_dir / ".ENV",
-    ]
+    explicit_env = get_tldw_env_file_path()
+    env_candidates = [explicit_env] if explicit_env else []
+    if explicit_env and is_tldw_env_file_exclusive():
+        if not explicit_env.is_file():
+            raise FileNotFoundError(
+                "TLDW_ENV_FILE_EXCLUSIVE requires TLDW_ENV_FILE to reference "
+                f"an existing file: {explicit_env}"
+            )
+    else:
+        env_candidates.extend([cfg_dir / ".env", cfg_dir / ".ENV"])
     template_candidates = [cfg_dir / ".env.example"]
     return env_candidates, template_candidates, cfg_dir
 

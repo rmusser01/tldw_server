@@ -15,12 +15,16 @@ import asyncio
 import tempfile
 import os
 import shutil
+from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from tldw_Server_API.app.core.Chat.document_generator import DocumentGeneratorService, DocumentType
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
 
@@ -161,6 +165,38 @@ class TestDocumentGeneratorService:
 
         assert result is not None
         mock_llm.assert_called_once()
+
+    @pytest.mark.parametrize("captured_key", ["document-key-a", ""], ids=["a-to-b", "absent-to-b"])
+    def test_generate_document_keeps_snapshot_at_chat_boundary(
+        self,
+        service: DocumentGeneratorService,
+        real_db: CharactersRAGDB,
+        captured_key: str,
+    ) -> None:
+        """Document generation must mark its key/config pair authoritative."""
+        config_a = {"openai_api": {"model": "model-a", "api_key": "config-key-a"}}
+        credentials = SimpleNamespace(provider="openai")
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.document_generator.chat_api_call",
+            return_value="Generated content",
+        ) as mock_llm:
+            service.generate_document(
+                conversation_id=real_db.test_conversation_id,
+                document_type=DocumentType.SUMMARY,
+                provider="openai",
+                model="model-a",
+                api_key=captured_key,
+                app_config=config_a,
+                credentials_resolved=True,
+                provider_credentials=credentials,
+            )
+
+        kwargs = mock_llm.call_args.kwargs
+        assert kwargs["api_key"] == captured_key
+        assert kwargs["app_config"] == config_a
+        assert kwargs["credentials_resolved"] is True
+        assert kwargs[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is credentials
 
     def test_generate_study_guide(self, service, real_db):
 

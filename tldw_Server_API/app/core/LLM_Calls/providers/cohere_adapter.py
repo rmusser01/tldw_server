@@ -7,24 +7,21 @@ import time
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from loguru import logger
-
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,
-    ChatProviderError,
-    ChatRateLimitError,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _safe_cast
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-    get_http_error_text,
-    get_http_status_from_exception,
-    is_chunked_encoding_error,
+    build_sanitized_chat_error,
     is_http_status_error,
     is_network_error,
+    log_provider_failure,
+    raise_chat_error_from_http,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     _sanitize_payload_for_logging,
@@ -37,10 +34,13 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_data,
     sse_done,
 )
-from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.LLM_Calls.streaming import (
+    provider_stream_error_frame,
+    wrap_sync_stream,
+)
 from tldw_Server_API.app.core.Utils.Utils import logging
 
-from .base import ChatProvider
+from .base import ChatProvider, raise_if_in_band_provider_error
 
 
 def _summarize_response_for_logging(response: Any) -> dict[str, Any]:
@@ -94,9 +94,13 @@ def _cohere_request(
     extra_body: dict[str, Any] | None = None,
     base_url: str | None = None,
     timeout: float | None = None,
+    credentials_resolved: bool = False,
 ):
     logging.debug(f"Cohere Chat: Request process starting for model '{model}' (Streaming: {streaming})")
-    loaded_config_data = app_config or load_and_log_configs() or {}
+    if credentials_resolved:
+        loaded_config_data = app_config if isinstance(app_config, dict) else {}
+    else:
+        loaded_config_data = app_config or load_and_log_configs() or {}
     if not isinstance(loaded_config_data, dict):
         loaded_config_data = {}
     cohere_config = loaded_config_data.get("cohere_api", loaded_config_data.get("API", {}).get("cohere", {}))
@@ -246,20 +250,20 @@ def _cohere_request(
         text_keys=("message", "preamble"),
     )
     logging.debug(f"Cohere request metadata: {cohere_payload_metadata}")
-    logging.debug(f"Cohere Request URL: {COHERE_CHAT_URL}")
+    logging.debug("Cohere request endpoint resolved")
 
     from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-    session = _chat_calls.create_session_with_retries(
-        total=_safe_cast(cohere_config.get("api_retries"), int, 3),
-        backoff_factor=_safe_cast(cohere_config.get("api_retry_delay"), float, 1.0),
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["POST"],
-    )
+    session = _chat_calls.create_session_with_retries(total=1)
 
     try:
         if streaming:
             response = session.post(COHERE_CHAT_URL, headers=headers, json=payload, stream=True, timeout=timeout_seconds)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    response.close()
+                raise
             logging.debug("Cohere: Streaming response connection established.")
             session_handle = session
             response_handle = response
@@ -278,6 +282,11 @@ def _cohere_request(
                         decoded_line = decoded_line.strip()
                         if not decoded_line:
                             continue
+                        raise_if_in_band_provider_error(
+                            "cohere",
+                            decoded_line,
+                            phase="stream_response",
+                        )
 
                         if decoded_line.startswith("data:"):
                             json_data_str = decoded_line[len("data:") :].strip()
@@ -286,7 +295,10 @@ def _cohere_request(
                             try:
                                 cohere_event = json.loads(json_data_str)
                             except json.JSONDecodeError:
-                                logging.warning(f"Cohere Stream: JSON decode error for data: '{json_data_str}'")
+                                logging.warning(
+                                    "Cohere stream returned malformed JSON chars={}",
+                                    len(json_data_str),
+                                )
                                 continue
 
                             event_type = cohere_event.get("event_type")
@@ -307,16 +319,12 @@ def _cohere_request(
                             yield openai_delta_chunk(decoded_line)
 
                 except Exception as e_stream:
-                    if is_chunked_encoding_error(e_stream):
-                        logging.warning(f"Cohere stream: ChunkedEncodingError: {e_stream}")
-                        yield sse_data(
-                            {"error": {"message": f"Stream connection error: {str(e_stream)}", "type": "cohere_stream_error"}}
-                        )
-                    else:
-                        logging.error(f"Cohere stream: Error during streaming: {e_stream}", exc_info=True)
-                        yield sse_data(
-                            {"error": {"message": f"Stream iteration error: {str(e_stream)}", "type": "cohere_stream_error"}}
-                        )
+                    log_provider_failure(
+                        "cohere",
+                        e_stream,
+                        phase="stream_iteration",
+                    )
+                    yield provider_stream_error_frame("cohere")
                 finally:
                     yield from finalize_stream(response_handle, done_already=stream_properly_closed)
                     with contextlib.suppress(Exception):
@@ -328,6 +336,11 @@ def _cohere_request(
         response = session.post(COHERE_CHAT_URL, headers=headers, json=payload, stream=False, timeout=timeout_seconds)
         response.raise_for_status()
         response_data = response.json()
+        raise_if_in_band_provider_error(
+            "cohere",
+            response_data,
+            phase="chat_response",
+        )
         logging.debug(
             "Cohere non-streaming response metadata: %s",
             _summarize_response_for_logging(response_data),
@@ -363,7 +376,10 @@ def _cohere_request(
                 }
             )
         else:
-            logging.warning(f"Cohere non-streaming response missing 'text' or 'tool_calls': {response_data}")
+            logging.warning(
+                "Cohere non-streaming response missing text/tool calls metadata={}",
+                _summarize_response_for_logging(response_data),
+            )
             choices_payload.append(
                 {"message": {"role": "assistant", "content": ""}, "finish_reason": finish_reason, "index": 0}
             )
@@ -393,40 +409,38 @@ def _cohere_request(
             openai_compatible_response["usage"] = usage_data
         return openai_compatible_response
 
-    except KeyError as e:
-        raise ChatBadRequestError(
-            provider="cohere",
-            message=f"Key error while preparing or parsing Cohere payload/response: {e}",
-        ) from e
+    except KeyError as exc:
+        log_provider_failure(
+            "cohere",
+            exc,
+            phase="payload_or_response_shape",
+        )
+        raise_detached_error(ChatBadRequestError(provider="cohere"))
     except Exception as e:
         if is_http_status_error(e):
-            status_code = get_http_status_from_exception(e) or 500
-            error_text = get_http_error_text(e)
-            logging.error(
-                f"Cohere API call HTTPError to {COHERE_CHAT_URL} status {status_code}. Details: {repr(error_text[:500])}",
-                exc_info=False,
-            )
-            if status_code == 401:
-                raise ChatAuthenticationError(provider="cohere", message=f"Authentication failed. Detail: {error_text[:200]}") from e
-            if status_code == 429:
-                raise ChatRateLimitError(provider="cohere", message=f"Rate limit exceeded. Detail: {error_text[:200]}") from e
-            if 400 <= status_code < 500:
-                raise ChatBadRequestError(provider="cohere", message=f"Bad request (Status {status_code}). Detail: {error_text[:200]}") from e
-            raise ChatProviderError(
-                provider="cohere",
-                message=f"Server error (Status {status_code}). Detail: {error_text[:200]}",
-                status_code=status_code,
-            ) from e
+            raise_chat_error_from_http("cohere", e)
         if is_network_error(e):
-            logging.error(f"Cohere API request failed (network error) for {COHERE_CHAT_URL}: {e}", exc_info=True)
-            raise ChatProviderError(provider="cohere", message=f"Network error after retries: {e}", status_code=504) from e
-        logging.error(f"Cohere API call: Unexpected error: {e}", exc_info=True)
-        if not isinstance(e, ChatAPIError):
-            raise ChatAPIError(provider="cohere", message=f"Unexpected error in Cohere API call: {e}") from e
-        raise
+            log_provider_failure("cohere", e, phase="network_request")
+            raise_detached_error(
+                build_sanitized_chat_error("cohere", status_code=504)
+            )
+        log_provider_failure("cohere", e, phase="request")
+        status_code = (
+            getattr(e, "status_code", None) if isinstance(e, ChatAPIError) else None
+        )
+        raise_detached_error(
+            build_sanitized_chat_error("cohere", status_code=status_code)
+        )
     finally:
         if session:
-            session.close()
+            try:
+                session.close()
+            except Exception as close_error:
+                log_provider_failure(
+                    "cohere",
+                    close_error,
+                    phase="client_close",
+                )
 
 
 class CohereAdapter(ChatProvider):
@@ -470,6 +484,7 @@ class CohereAdapter(ChatProvider):
             "tools": request.get("tools"),
             "custom_prompt_arg": request.get("custom_prompt_arg"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
             "base_url": request.get("base_url"),
@@ -477,10 +492,12 @@ class CohereAdapter(ChatProvider):
         }
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         return _cohere_request(**self._to_handler_args(request, streaming=False, timeout=timeout))
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         return _cohere_request(**self._to_handler_args(request, streaming=True, timeout=timeout))
 

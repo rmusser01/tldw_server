@@ -79,9 +79,9 @@ def test_ensure_jobs_tables_sanitizes_schema_failure_log(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs_migrations.sqlite3, "connect", fail_connect)
     monkeypatch.setattr(jobs_migrations, "logger", fake_logger)
 
-    result = jobs_migrations.ensure_jobs_tables(db_path)
+    with pytest.raises(sqlite3.OperationalError):
+        jobs_migrations.ensure_jobs_tables(db_path)
 
-    assert result == db_path
     fake_logger.warning.assert_called_once()
     warning_args = fake_logger.warning.call_args.args
     rendered = " ".join(str(arg) for arg in warning_args)

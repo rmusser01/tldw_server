@@ -542,6 +542,67 @@ class TestEgressPolicy:
             for fields, _message in captured_logger.debug_logs
         )
 
+    def test_sensitive_dns_failure_redacts_structured_host(
+        self: "TestEgressPolicy",
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Sensitive endpoint DNS failures retain taxonomy without the real host."""
+        captured_logger = _CapturedLogger()
+        private_host = "credential-derived.private.example"
+
+        def _failing_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+            raise OSError("resolver failed")
+
+        monkeypatch.setattr(egress.socket, "getaddrinfo", _failing_getaddrinfo)
+        monkeypatch.setattr(egress, "logger", captured_logger)
+
+        assert egress._getaddrinfo_with_timeout(
+            private_host,
+            timeout_s=0.5,
+            sensitive_observability=True,
+        ) == []
+        assert any(
+            fields.get("event") == "dns_resolver_error"
+            and fields.get("host") == "sensitive_endpoint"
+            and fields.get("exception_type") == "OSError"
+            for fields, _message in captured_logger.debug_logs
+        )
+        assert private_host not in repr(captured_logger.debug_logs)
+
+    def test_sensitive_dns_worker_contains_unexpected_exception(
+        self: "TestEgressPolicy",
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Unexpected resolver failures never reach the process-wide thread hook."""
+        captured_logger = _CapturedLogger()
+        private_host = "credential-derived.private.example"
+        hook_details: list[str] = []
+
+        def _failing_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+            raise RuntimeError(f"resolver exploded for {private_host}")
+
+        def _capture_thread_exception(args: threading.ExceptHookArgs) -> None:
+            hook_details.append(f"{type(args.exc_value).__name__}: {args.exc_value}")
+
+        monkeypatch.setattr(egress.socket, "getaddrinfo", _failing_getaddrinfo)
+        monkeypatch.setattr(egress.threading, "excepthook", _capture_thread_exception)
+        monkeypatch.setattr(egress, "logger", captured_logger)
+
+        assert egress._getaddrinfo_with_timeout(
+            private_host,
+            timeout_s=0.5,
+            sensitive_observability=True,
+        ) == []
+        assert hook_details == []
+        assert private_host not in repr(hook_details)
+        assert private_host not in repr(captured_logger.debug_logs)
+        assert any(
+            fields.get("event") == "dns_resolver_error"
+            and fields.get("host") == "sensitive_endpoint"
+            and fields.get("exception_type") == "RuntimeError"
+            for fields, _message in captured_logger.debug_logs
+        )
+
     def test_dns_slot_wait_rejects_nan_config(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,

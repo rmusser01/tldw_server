@@ -12,10 +12,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import copy
 import inspect
 import json as _json
 import os
 import re
+import threading
 import time
 import uuid as _uuid
 from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
@@ -34,16 +36,35 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ServerFallbackCredentials,
+    resolve_static_server_fallback,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
     sanitize_sender_name,
 )
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    DaemonCapacityError,
+    await_bounded_sync_call,
+    await_owned_worker,
+    start_bounded_stream_daemon,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
+    ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
+    ChatRateLimitError,
+    ProviderCredentialTerminalError,
+    SanitizedProviderStreamError,
 )
 from tldw_Server_API.app.core.Chat.chat_exceptions import get_request_id
 
@@ -52,25 +73,42 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
+from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
-from tldw_Server_API.app.core.Chat.prompt_template_manager import (
-    DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
-    apply_template_to_string,
-    load_template,
-)
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
     evaluate_prompt_cost_guardrails,
     load_prompt_cost_guardrail_config,
 )
+from tldw_Server_API.app.core.Chat.prompt_template_manager import (
+    DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
+    apply_template_to_string,
+    load_template,
+)
 from tldw_Server_API.app.core.Chat.request_queue import (
+    QueueStreamChannel,
+    QueueStreamTerminalError,
     RequestPriority,
     get_request_queue,
 )
+from tldw_Server_API.app.core.Chat.run_first_presentation import (
+    present_chat_tools,
+    tool_names_from_definitions,
+)
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
+    await_stream_operation_bounded,
+    cancel_stream_tasks_bounded,
     create_streaming_response_with_timeout,
+    invoke_stream_close_bounded,
+    is_trusted_local_stream_frame,
+    normalize_provider_stream_error,
+    provider_payload_has_structural_error,
+    provider_result_contains_error,
+    provider_stream_error_allows_replay,
+    provider_stream_error_payload,
+    sanitized_provider_stream_exception,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
@@ -78,35 +116,34 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
-from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
-from tldw_Server_API.app.core.Chat.run_first_presentation import (
-    present_chat_tools,
-    tool_names_from_definitions,
-)
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config import (
-    resolve_chat_run_first_provider_allowlist,
+    load_comprehensive_config,
     resolve_chat_run_first_presentation_variant,
+    resolve_chat_run_first_provider_allowlist,
     resolve_chat_run_first_rollout_mode,
     resolve_run_first_cohort_label,
 )
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_config_option_names,
     custom_openai_provider_name,
+    custom_openai_provider_number,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
-    discover_openrouter_models as _discover_openrouter_models_shared,
-)
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
 )
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    discover_openrouter_models as _discover_openrouter_models_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
+from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -117,7 +154,6 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
-from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
@@ -126,13 +162,15 @@ from tldw_Server_API.app.core.Moderation.review_service import (
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
 )
-from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
 
@@ -152,7 +190,11 @@ _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeDecodeError,
     ValueError,
     _json.JSONDecodeError,
-    asyncio.CancelledError,
+)
+
+_CHAT_PROVIDER_REFRESH_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    ByokResolutionError,
+    *_CHAT_NONCRITICAL_EXCEPTIONS,
 )
 
 _CHAT_RUN_FIRST_METRIC_EXCEPTIONS: tuple[type[Exception], ...] = (
@@ -161,6 +203,329 @@ _CHAT_RUN_FIRST_METRIC_EXCEPTIONS: tuple[type[Exception], ...] = (
     TypeError,
     ValueError,
 )
+
+PROVIDER_STREAM_FACTORY_TIMEOUT_SECONDS = 60.0
+PROVIDER_STREAM_FACTORY_HANDOFF_CLEANUP_SECONDS = 0.1
+
+_LOCAL_CHAT_SIGNAL_PROVENANCE = object()
+_LOCAL_CHAT_SIGNAL_KINDS = frozenset(
+    {
+        "prompt_cost_guardrail",
+        "queue_admission",
+        "structured_error",
+    }
+)
+
+
+def _mark_trusted_local_chat_signal(value: Any, kind: str) -> Any:
+    """Attach private identity provenance to a service-created control signal."""
+
+    if kind not in _LOCAL_CHAT_SIGNAL_KINDS:
+        raise ValueError("Unsupported local chat signal kind")
+    value._chat_local_signal = (_LOCAL_CHAT_SIGNAL_PROVENANCE, kind)
+    return value
+
+
+def trusted_local_chat_signal_kind(value: Any) -> str | None:
+    """Return the allowlisted kind for an exactly service-created control signal."""
+
+    signal = getattr(value, "_chat_local_signal", None)
+    if not isinstance(signal, tuple) or len(signal) != 2:
+        return None
+    provenance, kind = signal
+    if provenance is not _LOCAL_CHAT_SIGNAL_PROVENANCE:
+        return None
+    return kind if kind in _LOCAL_CHAT_SIGNAL_KINDS else None
+
+
+def _close_stream_factory_result_inline(stream: Any) -> None:
+    """Best-effort close a provider stream from an already-isolated daemon."""
+
+    close = getattr(stream, "aclose", None)
+    if not callable(close):
+        close = getattr(stream, "close", None)
+    if not callable(close):
+        return
+    try:
+        result = close()
+        if inspect.isawaitable(result):
+            asyncio.run(result)
+    except BaseException as close_error:
+        if isinstance(close_error, (KeyboardInterrupt, SystemExit)):
+            raise
+        logger.debug(
+            "Late provider stream close failed error_type={}",
+            type(close_error).__name__,
+        )
+
+
+def _close_late_stream_factory_result(stream: Any) -> None:
+    """Best-effort close a late factory result on a bounded daemon thread."""
+
+    try:
+        start_bounded_stream_daemon(
+            lambda: _close_stream_factory_result_inline(stream),
+            name="late-provider-stream-close",
+        )
+    except DaemonCapacityError:
+        logger.warning("Late provider stream close skipped: daemon capacity exhausted")
+
+
+def _observe_factory_cleanup_task(task: asyncio.Task[Any]) -> None:
+    """Consume completion from a detached factory-result cleanup task."""
+
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        task.result()
+
+
+async def _close_accepted_factory_result_after_release(
+    stream: Any,
+    worker_released: threading.Event,
+) -> None:
+    """Close one caller-owned result only after its factory lease is released."""
+
+    cleanup_deadline = time.monotonic() + PROVIDER_STREAM_FACTORY_HANDOFF_CLEANUP_SECONDS
+    while not worker_released.is_set():
+        if time.monotonic() >= cleanup_deadline:
+            logger.warning("Accepted provider stream cleanup missed worker handoff deadline")
+            return
+        await asyncio.sleep(0)
+    close = getattr(stream, "aclose", None)
+    if not callable(close):
+        close = getattr(stream, "close", None)
+    if not callable(close):
+        return
+    try:
+        await invoke_stream_close_bounded(
+            close,
+            max(0.0, cleanup_deadline - time.monotonic()),
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Accepted provider stream cleanup exceeded bounded timeout")
+    except _CHAT_NONCRITICAL_EXCEPTIONS as close_error:
+        logger.debug(
+            "Accepted provider stream cleanup failed error_type={}",
+            type(close_error).__name__,
+        )
+
+
+async def _wait_factory_worker_release_bounded(
+    worker_released: threading.Event,
+    deadline: float,
+) -> bool:
+    """Wait for post-delivery daemon handoff within the request deadline."""
+
+    while not worker_released.is_set():
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0)
+    return True
+
+
+async def _call_stream_factory_bounded(
+    factory: Callable[[], Any],
+    *,
+    timeout: float | None = None,
+) -> Any:
+    """Invoke a sync provider factory with a hard bound and daemon isolation."""
+
+    wait_timeout = (
+        PROVIDER_STREAM_FACTORY_TIMEOUT_SECONDS if timeout is None else float(timeout)
+    )
+    if wait_timeout <= 0:
+        raise asyncio.TimeoutError
+
+    deadline = time.monotonic() + wait_timeout
+    loop = asyncio.get_running_loop()
+    result_future: asyncio.Future[Any] = loop.create_future()
+    decision_lock = threading.Lock()
+    decision_made = threading.Event()
+    decision: str | None = None
+    delivery_observed = threading.Event()
+    worker_released = threading.Event()
+
+    def choose_decision(value: str) -> bool:
+        nonlocal decision
+        with decision_lock:
+            if decision is not None:
+                return decision == value
+            decision = value
+            decision_made.set()
+            return True
+
+    def deliver(value: Any = None, error: BaseException | None = None) -> None:
+        try:
+            if result_future.done():
+                choose_decision("abandoned")
+                return
+            if error is not None:
+                if isinstance(error, asyncio.CancelledError):
+                    error = sanitized_provider_stream_exception(error)
+                result_future.set_exception(error)
+            else:
+                result_future.set_result(value)
+        finally:
+            delivery_observed.set()
+
+    def wait_for_delivery(value: Any = None) -> None:
+        while not delivery_observed.wait(0.05):
+            if loop.is_closed():
+                choose_decision("abandoned")
+                if value is not None:
+                    _close_stream_factory_result_inline(value)
+                return
+        while not decision_made.wait(0.05):
+            if loop.is_closed():
+                choose_decision("abandoned")
+                break
+        if decision == "abandoned" and value is not None:
+            _close_stream_factory_result_inline(value)
+
+    def worker() -> None:
+        try:
+            value = factory()
+        except BaseException as error:
+            if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                raise
+            try:
+                loop.call_soon_threadsafe(deliver, None, error)
+            except RuntimeError:
+                return
+            wait_for_delivery()
+        else:
+            try:
+                loop.call_soon_threadsafe(deliver, value, None)
+            except RuntimeError:
+                _close_stream_factory_result_inline(value)
+                return
+            wait_for_delivery(value)
+
+    start_bounded_stream_daemon(
+        worker,
+        name="provider-stream-factory",
+        released_event=worker_released,
+    )
+    result: Any = None
+    accepted = False
+    try:
+        result = await await_stream_operation_bounded(
+            result_future,
+            wait_timeout,
+        )
+        if time.monotonic() >= deadline:
+            choose_decision("abandoned")
+            raise asyncio.TimeoutError
+        accepted = choose_decision("accepted")
+        if not accepted:
+            raise asyncio.TimeoutError
+        while not worker_released.is_set():
+            if time.monotonic() >= deadline:
+                raise asyncio.TimeoutError
+            await asyncio.sleep(0)
+        return result
+    except asyncio.CancelledError:
+        if not accepted:
+            choose_decision("abandoned")
+        elif result is not None:
+            cleanup_task = asyncio.create_task(
+                _close_accepted_factory_result_after_release(result, worker_released)
+            )
+            cleanup_task.add_done_callback(_observe_factory_cleanup_task)
+        raise
+    except asyncio.TimeoutError:
+        if not accepted:
+            choose_decision("abandoned")
+            if result_future.done():
+                await _wait_factory_worker_release_bounded(worker_released, deadline)
+        elif result is not None:
+            cleanup_task = asyncio.create_task(
+                _close_accepted_factory_result_after_release(result, worker_released)
+            )
+            cleanup_task.add_done_callback(_observe_factory_cleanup_task)
+        raise
+    except BaseException:
+        if not accepted:
+            choose_decision("abandoned")
+            await _wait_factory_worker_release_bounded(worker_released, deadline)
+        raise
+
+
+def _provider_factory_monotonic() -> float:
+    """Return the monotonic clock used by the aggregate provider preflight budget."""
+
+    return time.monotonic()
+
+
+async def _refresh_provider_params_bounded(
+    refresh_provider_params: Callable[[str], Any],
+    provider: str,
+    remaining_timeout: Callable[[], float],
+) -> Any:
+    """Invoke and await provider refresh within the existing preflight deadline."""
+
+    refreshed = await _call_stream_factory_bounded(
+        partial(refresh_provider_params, provider),
+        timeout=remaining_timeout(),
+    )
+    if not inspect.isawaitable(refreshed):
+        return refreshed
+    remaining = remaining_timeout()
+    if remaining <= 0:
+        _close_late_stream_factory_result(refreshed)
+        raise asyncio.TimeoutError
+    return await await_stream_operation_bounded(refreshed, remaining)
+
+
+def _refresh_provider_params_bounded_sync(
+    refresh_provider_params: Callable[[str], Any],
+    provider: str,
+    remaining_timeout: Callable[[], float],
+    request_loop: asyncio.AbstractEventLoop,
+) -> Any:
+    """Run queued refresh awaitables on their owning request event loop."""
+
+    if remaining_timeout() <= 0:
+        raise TimeoutError("Provider parameter refresh timed out")
+    refreshed = refresh_provider_params(provider)
+    if not inspect.isawaitable(refreshed):
+        return refreshed
+    remaining = remaining_timeout()
+    if remaining <= 0:
+        _close_stream_factory_result_inline(refreshed)
+        raise TimeoutError("Provider parameter refresh timed out")
+
+    async def await_on_request_loop() -> Any:
+        return await await_stream_operation_bounded(refreshed, remaining)
+
+    try:
+        refresh_future = asyncio.run_coroutine_threadsafe(
+            await_on_request_loop(),
+            request_loop,
+        )
+    except BaseException:
+        _close_stream_factory_result_inline(refreshed)
+        raise
+    try:
+        return refresh_future.result(timeout=remaining)
+    except TimeoutError:
+        refresh_future.cancel()
+        raise TimeoutError("Provider parameter refresh timed out") from None
+
+
+def _call_stream_factory_from_isolated_worker(
+    factory: Callable[[], Any],
+    remaining_timeout: Callable[[], float],
+) -> Any:
+    """Call a provider factory already owned by RequestQueue's daemon worker."""
+
+    if remaining_timeout() <= 0:
+        raise TimeoutError("Provider stream factory timed out")
+    result = factory()
+    if remaining_timeout() <= 0:
+        _close_stream_factory_result_inline(result)
+        raise TimeoutError("Provider stream factory timed out")
+    return result
+
 
 _config = load_comprehensive_config()
 _chat_config: dict[str, str] = {}
@@ -306,7 +671,7 @@ def _discover_openrouter_models_for_chat(*, force_refresh: bool = False) -> tupl
     if os.getenv("PYTEST_CURRENT_TEST") and not _shared_is_truthy(
         os.getenv("CHAT_ALLOW_OPENROUTER_DISCOVERY_IN_TESTS", "0")
     ):
-        return tuple()
+        return ()
 
     return tuple(
         _discover_openrouter_models_shared(
@@ -557,15 +922,15 @@ def _configured_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     provider_key = (provider or "").strip().lower()
     mapping = _PROVIDER_MODEL_CONFIG_FIELDS.get(provider_key)
     if not mapping:
-        return tuple()
+        return ()
 
     section, field = mapping
     try:
         if not _config or not _config.has_section(section):
-            return tuple()
+            return ()
         raw_value = _config.get(section, field, fallback="")
     except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return tuple()
+        return ()
 
     return tuple(_split_model_list(raw_value))
 
@@ -575,7 +940,7 @@ def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     """Return known model IDs for a provider from catalog + configured values."""
     provider_key = (provider or "").strip().lower()
     if not provider_key:
-        return tuple()
+        return ()
 
     known: set[str] = set()
     try:
@@ -1143,7 +1508,7 @@ def _find_catalog_providers_for_model_cached(model: str) -> tuple[str, ...]:
     """Return providers whose pricing catalog contains the model (exact, case-insensitive)."""
     model_key = (model or "").strip().lower()
     if not model_key:
-        return tuple()
+        return ()
 
     matches: set[str] = set()
     try:
@@ -1162,7 +1527,7 @@ def _find_catalog_providers_for_model_cached(model: str) -> tuple[str, ...]:
                         matches.add(provider_key)
                     break
     except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return tuple()
+        return ()
 
     return tuple(sorted(matches))
 
@@ -1304,8 +1669,12 @@ def _attach_queue_future_logger(future: asyncio.Future[Any], request_id: str) ->
             fut.result()
         except asyncio.CancelledError:
             return
-        except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Queue streaming job {} failed: {}", request_id, exc)
+        except Exception as exc:  # noqa: BLE001 - consume arbitrary queue/provider failures
+            logger.debug(
+                "Queue streaming job {} failed error_type={}",
+                request_id,
+                type(exc).__name__,
+            )
 
     future.add_done_callback(_consume)
 
@@ -1320,8 +1689,12 @@ def _schedule_background_task(
 
     try:
         task = asyncio.create_task(awaitable)
-    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to schedule background task {}: {}", task_name, exc)
+    except Exception as exc:  # noqa: BLE001 - scheduling boundary may reject arbitrary awaitables
+        logger.debug(
+            "Failed to schedule background task {} error_type={}",
+            task_name,
+            type(exc).__name__,
+        )
         return None
 
     if pending_tasks is not None:
@@ -1337,11 +1710,19 @@ def _schedule_background_task(
             exc = completed.exception()
         except asyncio.CancelledError:
             return
-        except _CHAT_NONCRITICAL_EXCEPTIONS as consume_exc:
-            logger.debug("Background task {} observation failed: {}", task_name, consume_exc)
+        except Exception as consume_exc:  # noqa: BLE001 - observe arbitrary task failures
+            logger.debug(
+                "Background task {} observation failed error_type={}",
+                task_name,
+                type(consume_exc).__name__,
+            )
             return
         if exc is not None:
-            logger.debug("Background task {} failed: {}", task_name, exc)
+            logger.debug(
+                "Background task {} failed error_type={}",
+                task_name,
+                type(exc).__name__,
+            )
 
     task.add_done_callback(_consume)
     return task
@@ -1616,6 +1997,7 @@ def resolve_provider_api_key(
     provider: str,
     *,
     prefer_module_keys_in_tests: bool = True,
+    include_override: bool = True,
 ) -> tuple[str | None, dict[str, Any]]:
     """
     Resolve the API key for a provider using env/config first, with optional test overrides.
@@ -1676,13 +2058,16 @@ def resolve_provider_api_key(
         except _CHAT_NONCRITICAL_EXCEPTIONS as _chat_err:
             logger.warning(f"resolve_provider_api_key skipped endpoint module keys: {_chat_err}")
 
-    try:
-        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import get_llm_provider_override
+    module_override_present = use_module_overrides and provider_key in module_keys
+    override_value = None
+    if include_override and not module_override_present:
+        try:
+            from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import get_llm_provider_override
 
-        override = get_llm_provider_override(provider_key)
-        override_value = override.api_key if override else None
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        override_value = None
+            override = get_llm_provider_override(provider_key)
+            override_value = override.api_key if override else None
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            override_value = None
 
     debug_info["override_value_present"] = override_value is not None
 
@@ -1702,7 +2087,7 @@ def resolve_provider_api_key(
         raw_value = override_value
         selected_override = True
         debug_info["selected_source"] = "override"
-    if use_module_overrides and module_keys and provider_key in module_keys:
+    if module_override_present:
         raw_value = module_keys.get(provider_key)
         debug_info["selected_source"] = "module_override"
     elif raw_value is not None and not selected_override:
@@ -1719,6 +2104,54 @@ def resolve_provider_api_key(
     debug_info["raw_value_was_empty"] = isinstance(raw_value, str) and raw_value.strip() == ""
     normalized_value = _normalize(raw_value)
     return normalized_value, debug_info
+
+
+def _resolve_test_module_provider_api_key(provider: str) -> tuple[bool, str | None]:
+    """Return an explicit legacy test-module key without reading server config."""
+    provider_key = (provider or "").strip().lower()
+    try:
+        is_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    except _CHAT_NONCRITICAL_EXCEPTIONS:
+        is_pytest = False
+    if not (is_pytest or _shared_is_test_mode()):
+        return False, None
+
+    module_keys: dict[str, Any] = {}
+    try:
+        from tldw_Server_API.app.api.v1.schemas import chat_request_schemas as _schemas_mod  # type: ignore
+
+        schema_keys = getattr(_schemas_mod, "API_KEYS", None)
+        if isinstance(schema_keys, dict):
+            module_keys.update(schema_keys)
+    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("Static fallback skipped schema module keys: {}", exc)
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import chat as _chat_mod  # type: ignore
+
+        endpoint_keys = getattr(_chat_mod, "API_KEYS", None)
+        if isinstance(endpoint_keys, dict):
+            module_keys.update(endpoint_keys)
+    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("Static fallback skipped endpoint module keys: {}", exc)
+
+    if provider_key not in module_keys:
+        return False, None
+    value = module_keys[provider_key]
+    normalized = value.strip() if isinstance(value, str) and value.strip() else None
+    return True, normalized
+
+
+def resolve_static_provider_fallback(provider: str) -> ServerFallbackCredentials:
+    """Capture one authoritative server fallback, honoring explicit test patches."""
+    module_override_present, module_key = _resolve_test_module_provider_api_key(provider)
+    if module_override_present:
+        return ServerFallbackCredentials(
+            api_key=module_key,
+            credential_fields={},
+            auth_source=None,
+            app_config={},
+        )
+    return resolve_static_server_fallback(provider)
 
 
 def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str | None:
@@ -1819,35 +2252,79 @@ def _reject_local_request_url_overrides(provider: str, chat_args: dict[str, Any]
 def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Translate chat_api_call-style args into an adapter request payload."""
     from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+        bind_provider_call_credentials,
         ensure_app_config,
         normalize_provider,
+        provider_auth_is_resolved,
         resolve_provider_api_key_from_config,
         resolve_provider_model,
+        resolve_provider_section,
     )
+    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 
     provider = normalize_provider(
-        chat_args.get("api_endpoint")
-        or chat_args.get("api_provider")
-        or chat_args.get("provider")
+        chat_args.get("api_endpoint") or chat_args.get("api_provider") or chat_args.get("provider")
     )
     provider = _resolve_chat_provider_name(provider)
     if not provider:
         raise ChatConfigurationError(provider=str(chat_args.get("api_endpoint")), message="LLM provider is required.")
 
+    chat_args, provider_credentials = bind_provider_call_credentials(
+        provider,
+        chat_args,
+        consume=False,
+    )
+
     _reject_local_request_url_overrides(provider, chat_args)
     is_local_provider = _is_local_chat_provider(provider)
 
-    explicit_app_config = chat_args.get("app_config")
-    app_config = explicit_app_config if explicit_app_config is not None else (
-        None if is_local_provider else ensure_app_config(None)
+    credentials_resolved = provider_credentials is not None
+    explicit_app_config = (
+        provider_credentials.app_config
+        if provider_credentials is not None
+        else chat_args.get("app_config")
     )
+    if credentials_resolved:
+        app_config = copy.deepcopy(explicit_app_config or {})
+        provider_section = resolve_provider_section(provider)
+        if provider_section:
+            app_config.setdefault(provider_section, {})
+    else:
+        app_config = (
+            explicit_app_config
+            if explicit_app_config is not None
+            else (None if is_local_provider else ensure_app_config(None))
+        )
     model = chat_args.get("model")
     if model is None and app_config is not None:
-        model = resolve_provider_model(provider, app_config)
+        if credentials_resolved:
+            provider_config = app_config.get(resolve_provider_section(provider)) or {}
+            model = provider_config.get("model") or provider_config.get("model_id")
+            if provider == "mlx":
+                model = model or provider_config.get("model_path") or provider_config.get("mlx_model_path")
+        else:
+            model = resolve_provider_model(provider, app_config)
     if not model and not is_local_provider:
         raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
 
-    api_key = chat_args.get("api_key") or resolve_provider_api_key_from_config(provider, app_config)
+    if credentials_resolved:
+        api_key = (
+            provider_credentials.api_key
+            if provider_credentials is not None
+            else chat_args.get("api_key")
+        )
+        if provider_requires_api_key(provider) and not provider_auth_is_resolved(
+            provider,
+            api_key=api_key,
+            app_config=app_config,
+            credentials_resolved=True,
+        ):
+            raise ChatConfigurationError(
+                provider=provider,
+                message="API key is required for provider.",
+            )
+    else:
+        api_key = chat_args.get("api_key") or resolve_provider_api_key_from_config(provider, app_config)
     messages_payload = chat_args.get("messages_payload") or chat_args.get("messages") or []
 
     request: dict[str, Any] = {
@@ -1857,7 +2334,10 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "api_key": api_key,
         "app_config": app_config,
     }
-
+    if credentials_resolved:
+        request["credentials_resolved"] = True
+    if provider_credentials is not None:
+        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
     base_url_override = _resolve_base_url_override(provider, chat_args)
     if base_url_override:
         request["base_url"] = base_url_override
@@ -1878,6 +2358,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "model",
         "api_key",
         "app_config",
+        "credentials_resolved",
         "base_url",
         "api_base_url",
         "request",
@@ -1891,6 +2372,8 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "http_client_factory",
         "http_fetcher",
         "http_streamer",
+        "timeout",
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
         "_structured_requested_response_format",
         "stream",
         "streaming",
@@ -1905,10 +2388,15 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
             request[key] = value
 
     provenance = chat_args.get("_endpoint_provenance")
-    if provenance in {"server_config", "byok", "request_override"}:
+    if (
+        custom_openai_provider_number(provider) is not None
+        and provenance in {"server_config", "byok", "request_override"}
+    ):
         request["_endpoint_provenance"] = provenance
 
-    return provider, request, {}
+    timeout = chat_args.get("timeout")
+    internal = {"timeout": timeout} if timeout is not None else {}
+    return provider, request, internal
 
 
 def _attach_internal_http_hooks(adapter: Any, request: dict[str, Any], internal: dict[str, Any]) -> None:
@@ -1978,10 +2466,15 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
+    timeout = internal.get("timeout")
+    timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
     try:
         if request.get("stream"):
-            return _map_sync_stream_egress_errors(provider, adapter.stream(request))
-        return adapter.chat(request)
+            return _map_sync_stream_egress_errors(
+                provider,
+                adapter.stream(request, **timeout_kwargs),
+            )
+        return adapter.chat(request, **timeout_kwargs)
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc
 
@@ -1993,27 +2486,46 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
+    timeout = internal.get("timeout")
+    timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
 
     try:
         if request.get("stream"):
             try:
-                stream_iter = adapter.astream(request)
+                stream_iter = adapter.astream(request, **timeout_kwargs)
                 if inspect.isawaitable(stream_iter):
                     stream_iter = await stream_iter
                 return _map_async_stream_egress_errors(provider, stream_iter)
             except NotImplementedError:
-                stream_iter = adapter.stream(request)
+                stream_iter = adapter.stream(request, **timeout_kwargs)
                 return _map_async_stream_egress_errors(
                     provider,
                     wrap_sync_stream(stream_iter),
                 )
 
-        try:
-            return await adapter.achat(request)
-        except NotImplementedError:
-            return await asyncio.to_thread(adapter.chat, request)
+        if getattr(adapter, "async_chat_is_native", None) is True:
+            try:
+                return await adapter.achat(request, **timeout_kwargs)
+            except NotImplementedError:
+                pass
+        return await await_bounded_sync_call(
+            partial(adapter.chat, request, **timeout_kwargs),
+            pool=SYNC_ADAPTER_CALL_POOL,
+            exhaustion_message="Provider adapter capacity is exhausted",
+        )
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc
+    except DaemonCapacityError:
+        raise_detached_error(
+            sanitized_provider_stream_exception("provider_unavailable")
+        )
+    except asyncio.CancelledError as provider_cancel:
+        current_task = asyncio.current_task()
+        if current_task is not None and current_task.cancelling():
+            raise
+        raise_detached_error(
+            sanitized_provider_stream_exception(provider_cancel)
+        )
 
 
 def merge_api_keys_for_provider(
@@ -2090,7 +2602,20 @@ def build_call_params_from_request(
             "grammar_override",
         },
     )
-    if not call_params.get("model") and resolved_model:
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+        _is_server_managed_chat_request_field,
+    )
+
+    declared_fields = getattr(type(request_data), "model_fields", None)
+    call_params = {
+        key: value
+        for key, value in call_params.items()
+        if (
+            not _is_server_managed_chat_request_field(key)
+            and (not isinstance(declared_fields, Mapping) or key in declared_fields)
+        )
+    }
+    if resolved_model:
         call_params["model"] = resolved_model
 
     # Rename keys to match chat_api_call's generic signature
@@ -2137,8 +2662,6 @@ def build_call_params_from_request(
         pinned_tool_name = _tool_choice_name(pinned_tool_choice)
         effective_tool_names = set(run_first_presentation.effective_tool_names)
         if pinned_tool_name and pinned_tool_name not in effective_tool_names:
-            call_params.pop("tool_choice", None)
-        elif not effective_tool_names and pinned_tool_name:
             call_params.pop("tool_choice", None)
     call_params["_chat_effective_tool_names"] = run_first_presentation.effective_tool_names
     call_params["_chat_run_first_eligible"] = run_first_presentation.eligible
@@ -2381,6 +2904,207 @@ def _extract_text_from_content(content: Any) -> str:
         return ""
 
 
+_NONSTREAM_REASONING_FIELDS = (
+    "reasoning_content",
+    "reasoning",
+    "reasoning_details",
+    "thinking",
+    "analysis",
+)
+_NONSTREAM_REASONING_METADATA_FIELDS = frozenset({"type", "id", "index", "signature"})
+_NONSTREAM_REASONING_MAX_NODES = 1024
+_NONSTREAM_REASONING_MAX_DEPTH = 8
+
+
+def _inspect_nonstream_text_output(value: str) -> tuple[bool, bool]:
+    """Return semantic-text and rejected-protocol state for provider text."""
+
+    if provider_result_contains_error(value, legacy_error_prefix=True):
+        return False, True
+    stripped = value.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
+    if not stripped:
+        return False, False
+    if stripped.lower() in {"[done]", "data: [done]"}:
+        return False, True
+    first_line = stripped.splitlines()[0].strip().lower()
+    if first_line.startswith(("data:", "event:", "id:", "retry:", ":")):
+        return False, True
+    return True, False
+
+
+def _inspect_nonstream_reasoning_output(value: Any) -> tuple[bool, bool]:
+    """Return semantic-text and rejected-structure state for reasoning output."""
+
+    stack = [(value, 0, True)]
+    seen: set[int] = set()
+    semantic_text_seen = False
+    visited_nodes = 0
+
+    while stack:
+        item, depth, semantic_allowed = stack.pop()
+        visited_nodes += 1
+        if (
+            visited_nodes > _NONSTREAM_REASONING_MAX_NODES
+            or depth > _NONSTREAM_REASONING_MAX_DEPTH
+        ):
+            return False, True
+        if isinstance(item, str):
+            if semantic_allowed:
+                has_semantic_text, rejected_protocol = (
+                    _inspect_nonstream_text_output(item)
+                )
+                if rejected_protocol:
+                    return False, True
+                semantic_text_seen = semantic_text_seen or has_semantic_text
+            continue
+        if not isinstance(item, (list, dict)):
+            continue
+
+        identity = id(item)
+        if identity in seen:
+            return False, True
+        seen.add(identity)
+
+        if isinstance(item, dict):
+            if normalize_provider_stream_error(item) is not None:
+                return False, True
+            stack.extend(
+                (
+                    nested,
+                    depth + 1,
+                    semantic_allowed
+                    and field not in _NONSTREAM_REASONING_METADATA_FIELDS,
+                )
+                for field, nested in item.items()
+            )
+        else:
+            stack.extend(
+                (nested, depth + 1, semantic_allowed) for nested in item
+            )
+
+    return semantic_text_seen, False
+
+
+def _nonstream_provider_result_is_usable(result: Any) -> bool:
+    """Return whether one non-stream provider result has usable Chat semantics."""
+
+    if isinstance(result, str):
+        has_semantic_text, rejected_protocol = _inspect_nonstream_text_output(result)
+        return has_semantic_text and not rejected_protocol
+    if not isinstance(result, dict):
+        return False
+    if provider_payload_has_structural_error(result):
+        return False
+
+    choices = result.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return False
+
+    for choice in choices:
+        if not isinstance(choice, dict):
+            return False
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            return False
+
+        content = message.get("content")
+        content_is_usable = isinstance(content, str) and bool(content.strip())
+        if isinstance(content, list):
+            content_is_usable = bool(content)
+            for part in content:
+                if not isinstance(part, dict):
+                    content_is_usable = False
+                    break
+                part_type = part.get("type")
+                if part_type in {"text", "output_text"}:
+                    text = part.get("text")
+                    if not isinstance(text, str) or not text.strip():
+                        content_is_usable = False
+                        break
+                elif part_type == "image_url":
+                    image_url = part.get("image_url")
+                    url = image_url.get("url") if isinstance(image_url, dict) else None
+                    if not isinstance(url, str) or not url.strip():
+                        content_is_usable = False
+                        break
+                else:
+                    content_is_usable = False
+                    break
+        elif content is not None and not isinstance(content, str):
+            return False
+
+        tool_calls = message.get("tool_calls")
+        tool_calls_are_usable = False
+        if tool_calls is not None:
+            if not isinstance(tool_calls, list) or not tool_calls:
+                return False
+            tool_calls_are_usable = True
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    return False
+                function = tool_call.get("function")
+                if (
+                    not isinstance(tool_call.get("id"), str)
+                    or not tool_call["id"].strip()
+                    or tool_call.get("type") != "function"
+                    or not isinstance(function, dict)
+                    or not isinstance(function.get("name"), str)
+                    or not function["name"].strip()
+                    or not isinstance(function.get("arguments"), str)
+                    or not function["arguments"].strip()
+                ):
+                    return False
+
+        function_call = message.get("function_call")
+        function_call_is_usable = False
+        if function_call is not None:
+            if (
+                not isinstance(function_call, dict)
+                or not isinstance(function_call.get("name"), str)
+                or not function_call["name"].strip()
+                or not isinstance(function_call.get("arguments"), str)
+                or not function_call["arguments"].strip()
+            ):
+                return False
+            function_call_is_usable = True
+
+        refusal = message.get("refusal")
+        refusal_is_usable = isinstance(refusal, str) and bool(refusal.strip())
+        for field in _NONSTREAM_REASONING_FIELDS:
+            if field not in message:
+                continue
+            _, rejected_structure = (
+                _inspect_nonstream_reasoning_output(message[field])
+            )
+            if rejected_structure:
+                return False
+        content_filter_is_usable = (
+            choice.get("finish_reason") == "content_filter"
+            and (content is None or content == "")
+            and refusal is None
+        )
+
+        if not (
+            content_is_usable
+            or tool_calls_are_usable
+            or function_call_is_usable
+            or refusal_is_usable
+            or content_filter_is_usable
+        ):
+            return False
+
+    return True
+
+
+def _require_usable_nonstream_provider_result(result: Any) -> None:
+    """Raise one bounded, non-replayable error for an invalid provider result."""
+
+    if not _nonstream_provider_result_is_usable(result):
+        raise_detached_error(
+            sanitized_provider_stream_exception("provider_unavailable")
+        )
+
+
 def _apply_redaction_to_content(content: Any, moderation: Any, policy: Any) -> Any:
     """Apply redaction to text parts while preserving non-text content when possible."""
     if content is None:
@@ -2547,10 +3271,63 @@ def _structured_error_detail(exc: StructuredGenerationError) -> dict[str, Any]:
 def build_structured_http_exception(exc: StructuredGenerationError) -> HTTPException:
     """Normalize structured-output failures into a 400 response."""
 
-    return HTTPException(
+    structured_http_error = HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=_structured_error_detail(exc),
     )
+    return _mark_trusted_local_chat_signal(structured_http_error, "structured_error")
+
+
+def _is_trusted_local_chat_http_exception(exc: BaseException) -> bool:
+    """Return whether an HTTP error was created and bounded by this service."""
+
+    return (
+        isinstance(exc, HTTPException)
+        and trusted_local_chat_signal_kind(exc) is not None
+    )
+
+
+def _bound_provider_http_exception(exc: BaseException) -> BaseException:
+    """Replace untrusted provider HTTP errors with a bounded chat exception."""
+
+    if _is_trusted_local_chat_http_exception(exc):
+        return exc
+    if isinstance(exc, (SanitizedProviderStreamError, ProviderCredentialTerminalError)):
+        return exc
+    if isinstance(exc, ByokResolutionError):
+        return ProviderCredentialTerminalError(
+            getattr(exc, "policy_code", exc.code)
+        )
+    return sanitized_provider_stream_exception(exc)
+
+
+def _bound_provider_invocation_exception(exc: BaseException) -> BaseException:
+    """Bound untyped adapter failures while preserving trusted chat signals."""
+
+    if isinstance(exc, (SanitizedProviderStreamError, ProviderCredentialTerminalError)):
+        return exc
+    if _is_trusted_local_chat_http_exception(exc):
+        return exc
+    if isinstance(exc, ChatAuthenticationError):
+        return ChatAuthenticationError(
+            message="The selected provider credentials could not be authenticated.",
+            status_code=403 if getattr(exc, "status_code", None) == 403 else 401,
+        )
+    if isinstance(exc, ChatConfigurationError):
+        return ChatConfigurationError(
+            message="The selected provider configuration is invalid.",
+        )
+    if isinstance(exc, ChatBadRequestError):
+        return ChatBadRequestError(
+            provider=getattr(exc, "provider", None),
+            message="Invalid provider request.",
+        )
+    if isinstance(exc, ChatRateLimitError):
+        return ChatRateLimitError(
+            provider=getattr(exc, "provider", None),
+            message="Rate limit exceeded with the chat provider.",
+        )
+    return sanitized_provider_stream_exception(exc)
 
 
 def _build_assistant_message_payload(
@@ -2604,11 +3381,10 @@ async def write_mandatory_moderation_audit(
         raise
     except Exception as exc:
         logger.error(
-            "Mandatory moderation audit write failed for {} ({}): {}",
+            "Mandatory moderation audit write failed for {} ({}) error_type={}",
             action,
             result,
-            exc,
-            exc_info=True,
+            type(exc).__name__,
         )
         raise MandatoryAuditWriteError("Mandatory audit persistence unavailable") from exc
 
@@ -3596,13 +4372,18 @@ def _evaluate_chat_prompt_cost_guardrails(
         }
         if decision.action == "block":
             logger.warning("Chat prompt cost guardrail blocked request: {}", log_metadata)
-            raise HTTPException(
+            guardrail_error = HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail={
+                    "code": "prompt_cost_guardrail_block",
                     "type": "prompt_cost_guardrail_block",
                     "message": "Prompt cost guardrail blocked request before provider dispatch.",
                     "prompt_guardrails": metadata,
                 },
+            )
+            raise _mark_trusted_local_chat_signal(
+                guardrail_error,
+                "prompt_cost_guardrail",
             )
         logger.warning("Chat prompt cost guardrail warnings: {}", log_metadata)
         return decision
@@ -3673,11 +4454,14 @@ async def execute_streaming_call(
     moderation_getter: Callable[[], Any] | None = None,
     rg_commit_cb: Callable[[int], Any] | None = None,
     rg_refund_cb: Callable[..., Any] | None = None,
-    on_success: Callable[[str], Awaitable[None]] | None = None,
+    on_success: Callable[[str], Awaitable[bool | None]] | None = None,
+    on_provider_output: Callable[[str], Awaitable[bool | None]] | None = None,
     self_monitoring_service: Any | None = None,
     on_stream_full_reply: Callable[[str], Awaitable[None] | None] | None = None,
     assistant_parent_message_id: str | None = None,
     continuation_metadata: dict[str, Any] | None = None,
+    queue_request_id: str | None = None,
+    provider_factory_timeout: float | None = None,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -3688,6 +4472,20 @@ async def execute_streaming_call(
     - usage logging and audit success
     """
     llm_start_time = time.time()
+    factory_budget_seconds = (
+        PROVIDER_STREAM_FACTORY_TIMEOUT_SECONDS
+        if provider_factory_timeout is None
+        else max(0.0, float(provider_factory_timeout))
+    )
+    provider_factory_deadline: float | None = None
+
+    def _remaining_provider_factory_timeout() -> float:
+        nonlocal provider_factory_deadline
+        now = _provider_factory_monotonic()
+        if provider_factory_deadline is None:
+            provider_factory_deadline = now + factory_budget_seconds
+        return max(0.0, provider_factory_deadline - now)
+
     normalized_continuation_metadata = (
         dict(continuation_metadata)
         if isinstance(continuation_metadata, dict) and continuation_metadata
@@ -3706,6 +4504,22 @@ async def execute_streaming_call(
     queue_for_exec = None
     queue_future: asyncio.Future[Any] | None = None
     queue_enabled = False
+
+    def _public_stream_error_payload(value: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = provider_stream_error_payload(value)
+        if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
+            payload["conversation_id"] = final_conversation_id
+            payload["tldw_conversation_id"] = final_conversation_id
+            if system_message_id:
+                payload["tldw_system_message_id"] = system_message_id
+            if normalized_continuation_metadata:
+                payload["tldw_continuation"] = normalized_continuation_metadata
+        return payload
+
+    async def _terminal_stream_error(payload: dict[str, Any]) -> AsyncIterator[str]:
+        yield f"data: {_json.dumps(payload)}\n\n"
+        yield "data: [DONE]\n\n"
+
     try:
         try:
             if structured_request_context is None:
@@ -3731,7 +4545,7 @@ async def execute_streaming_call(
             StructuredGenerationParseError,
             StructuredGenerationSchemaError,
         ) as structured_exc:
-            raise build_structured_http_exception(structured_exc) from structured_exc
+            raise_detached_error(build_structured_http_exception(structured_exc))
         try:
             queue_for_exec = get_request_queue()
         except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -3754,21 +4568,30 @@ async def execute_streaming_call(
                 stream_channel_maxsize = int(str(_maxsz_raw))
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 stream_channel_maxsize = 100
-            stream_channel: asyncio.Queue = asyncio.Queue(maxsize=stream_channel_maxsize)
+            stream_channel: asyncio.Queue = QueueStreamChannel(
+                maxsize=stream_channel_maxsize
+            )
             est_tokens_for_queue = estimate_tokens_from_json(request_json)
 
             def _refresh_params_sync(target_provider: str) -> tuple[dict[str, Any], str | None]:
                 """Resolve provider params inside a sync queue processor."""
-                refreshed = refresh_provider_params(target_provider)
-                if inspect.isawaitable(refreshed):
-                    return asyncio.run(refreshed)  # Safe in executor thread
-                return refreshed  # type: ignore[return-value]
+                return _refresh_provider_params_bounded_sync(
+                    refresh_provider_params,
+                    target_provider,
+                    _remaining_provider_factory_timeout,
+                    current_loop,
+                )
 
             def _queued_processor():
                 nonlocal selected_provider, model, llm_call_func, stream_failure_recorded, structured_request_context
                 local_start = time.time()
                 try:
-                    result = llm_call_func()
+                    result = _call_stream_factory_from_isolated_worker(
+                        llm_call_func,
+                        _remaining_provider_factory_timeout,
+                    )
+                    if not hasattr(result, "__aiter__") and hasattr(result, "__iter__"):
+                        result = wrap_sync_stream(result)
                     if selected_provider != provider:
                         with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
                             metrics.track_provider_fallback_success(
@@ -3778,7 +4601,7 @@ async def execute_streaming_call(
                                 queued=True,
                             )
                     return result
-                except _CHAT_NONCRITICAL_EXCEPTIONS as proc_error:
+                except Exception as proc_error:  # noqa: BLE001 - adapter trust boundary
                     latency = time.time() - local_start
                     metrics.track_llm_call(
                         selected_provider,
@@ -3789,8 +4612,16 @@ async def execute_streaming_call(
                     )
                     stream_failure_recorded = True
                     if provider_manager:
-                        provider_manager.record_failure(selected_provider, proc_error)
-                        if enable_provider_fallback and isinstance(proc_error, (ChatProviderError, ChatAPIError)) and not _is_client_like_error(proc_error):
+                        provider_manager.record_failure(
+                            selected_provider,
+                            sanitized_provider_stream_exception(proc_error),
+                        )
+                        if (
+                            enable_provider_fallback
+                            and isinstance(proc_error, (ChatProviderError, ChatAPIError))
+                            and not _is_client_like_error(proc_error)
+                            and provider_stream_error_allows_replay(proc_error)
+                        ):
                             fallback_provider = provider_manager.get_available_provider(exclude=[selected_provider])
                             if fallback_provider:
                                 logger.warning(
@@ -3819,19 +4650,32 @@ async def execute_streaming_call(
                                         StructuredGenerationParseError,
                                         StructuredGenerationSchemaError,
                                     ) as structured_exc:
-                                        raise build_structured_http_exception(structured_exc) from structured_exc
+                                        raise_detached_error(
+                                            build_structured_http_exception(structured_exc)
+                                        )
                                     apply_structured_response_request(
                                         cleaned_args=refreshed_args,
                                         structured_request_context=structured_request_context,
                                     )
-                                except _CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
-                                    provider_manager.record_failure(fallback_provider, refresh_error)
-                                    raise
+                                except _CHAT_PROVIDER_REFRESH_EXCEPTIONS as refresh_error:
+                                    if not isinstance(refresh_error, ByokResolutionError):
+                                        provider_manager.record_failure(
+                                            fallback_provider,
+                                            sanitized_provider_stream_exception(refresh_error),
+                                        )
+                                    raise_detached_error(
+                                        _bound_provider_http_exception(refresh_error)
+                                    )
                                 model = refreshed_model or model
                                 def llm_call_func_fb():
                                     return perform_chat_api_call(**refreshed_args)
                                 try:
-                                    result = llm_call_func_fb()
+                                    result = _call_stream_factory_from_isolated_worker(
+                                        llm_call_func_fb,
+                                        _remaining_provider_factory_timeout,
+                                    )
+                                    if not hasattr(result, "__aiter__") and hasattr(result, "__iter__"):
+                                        result = wrap_sync_stream(result)
                                     selected_provider = fallback_provider
                                     # Update run-first metric context to reflect fallback provider/model
                                     if run_first_metric_context is not None:
@@ -3847,11 +4691,16 @@ async def execute_streaming_call(
                                         )
                                     return result
                                 except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
-                                    provider_manager.record_failure(fallback_provider, fallback_error)
-                                    raise
-                    raise
+                                    provider_manager.record_failure(
+                                        fallback_provider,
+                                        sanitized_provider_stream_exception(fallback_error),
+                                    )
+                                    raise_detached_error(
+                                        _bound_provider_invocation_exception(fallback_error)
+                                    )
+                    raise_detached_error(_bound_provider_invocation_exception(proc_error))
 
-            queue_request_id = get_request_id() or "unknown"
+            queue_request_id = queue_request_id or get_request_id() or "unknown"
             try:
                 queue_future = await queue_for_exec.enqueue(
                     request_id=queue_request_id,
@@ -3864,6 +4713,7 @@ async def execute_streaming_call(
                     processor_kwargs={},
                     streaming=True,
                     stream_channel=stream_channel,
+                    stream_factory_timeout=factory_budget_seconds,
                 )
                 _attach_queue_future_logger(queue_future, queue_request_id)
             except (ValueError, TimeoutError) as admission_error:
@@ -3876,8 +4726,10 @@ async def execute_streaming_call(
                     else status.HTTP_503_SERVICE_UNAVAILABLE
                 )
                 queue_exc = HTTPException(status_code=status_code, detail=detail)
-                queue_exc._chat_queue_admission = True
-                raise queue_exc from admission_error
+                raise _mark_trusted_local_chat_signal(
+                    queue_exc,
+                    "queue_admission",
+                ) from admission_error
 
             async def _channel_stream():
                 graceful_end = False
@@ -3906,19 +4758,16 @@ async def execute_streaming_call(
                                     stream_channel.get_nowait()
                             except asyncio.QueueEmpty:
                                 pass
-                            try:
-                                error_payload = {
-                                    "error": {
-                                        "message": "Stream channel timed out waiting for queued response.",
-                                        "type": "stream_timeout",
-                                    }
-                                }
-                                yield f"data: {_json.dumps(error_payload)}\n\n"
-                            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                                yield "data: {\"error\":{\"message\":\"Stream channel timed out waiting for queued response.\",\"type\":\"stream_timeout\"}}\n\n"
+                            yield f"data: {_json.dumps(_public_stream_error_payload('provider_unavailable'))}\n\n"
                             break
                         if item is None:
                             graceful_end = True
+                            break
+                        if isinstance(item, QueueStreamTerminalError):
+                            yield (
+                                f"data: {_json.dumps(_public_stream_error_payload(item.code))}\n\n"
+                            )
+                            yield "data: [DONE]\n\n"
                             break
                         yield item
                 except asyncio.CancelledError:
@@ -3945,7 +4794,10 @@ async def execute_streaming_call(
         else:
             # Execute provided LLM call function in a worker to avoid blocking the loop.
             # llm_call_func is a sync callable (partial of perform_chat_api_call or a mock).
-            raw_stream_iter = await current_loop.run_in_executor(None, llm_call_func)
+            raw_stream_iter = await _call_stream_factory_bounded(
+                llm_call_func,
+                timeout=_remaining_provider_factory_timeout(),
+            )
             if selected_provider != provider:
                 with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
                     metrics.track_provider_fallback_success(
@@ -3954,13 +4806,16 @@ async def execute_streaming_call(
                         streaming=True,
                         queued=False,
                     )
+    except asyncio.CancelledError:
+        raise
     except HTTPException as he:
         _emit_chat_run_first_completion_metric(
             metrics,
             context=run_first_metric_context,
             outcome="error",
         )
-        if getattr(he, "_chat_queue_admission", False):
+        local_signal_kind = trusted_local_chat_signal_kind(he)
+        if local_signal_kind == "queue_admission":
             raise
         metrics.track_llm_call(
             selected_provider,
@@ -3969,44 +4824,34 @@ async def execute_streaming_call(
             success=False,
             error_type=type(he).__name__,
         )
-        # For streaming endpoint semantics, emit SSE error + DONE instead of HTTP error
-        # Bind error strings outside the generator to avoid Python 3.11+ exception scoping
-        _err_msg = str(getattr(he, "detail", he))
-        _err_type = type(he).__name__
-
-        async def _err_gen(msg: str = _err_msg, typ: str = _err_type):
-            try:
-                import json as _json
-                payload = {"error": {"message": msg, "type": typ}}
-                if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
-                    payload["conversation_id"] = final_conversation_id
-                    payload["tldw_conversation_id"] = final_conversation_id
-                    if system_message_id:
-                        payload["tldw_system_message_id"] = system_message_id
-                    if normalized_continuation_metadata:
-                        payload["tldw_continuation"] = normalized_continuation_metadata
-                yield f"data: {_json.dumps(payload)}\n\n"
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                # Fallback string serialization
-                pass
-                if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
-                    yield (
-                        f"data: {{\"error\":{{\"message\":\"{msg}\",\"type\":\"{typ}\"}},"
-                        f"\"conversation_id\":\"{final_conversation_id}\","
-                        f"\"tldw_conversation_id\":\"{final_conversation_id}\"}}\n\n"
-                    )
-                else:
-                    yield f"data: {{\"error\":{{\"message\":\"{msg}\",\"type\":\"{typ}\"}}}}\n\n"
-            yield "data: [DONE]\n\n"
+        error_payload = _public_stream_error_payload(he)
+        if (
+            he.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+            and local_signal_kind == "prompt_cost_guardrail"
+            and isinstance(he.detail, dict)
+            and he.detail.get("code") == "prompt_cost_guardrail_block"
+            and he.detail.get("type") == "prompt_cost_guardrail_block"
+        ):
+            error_payload["error"] = {
+                "code": "prompt_cost_guardrail_block",
+                "type": "prompt_cost_guardrail_block",
+                "message": "Prompt cost guardrail blocked request before provider dispatch.",
+            }
         await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
-        return StreamingResponse(
-            _err_gen(),
+        response = StreamingResponse(
+            _terminal_stream_error(error_payload),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
             },
         )
+        if (
+            he.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+            and local_signal_kind == "prompt_cost_guardrail"
+        ):
+            _mark_trusted_local_chat_signal(response, "prompt_cost_guardrail")
+        return response
     except _CHAT_NONCRITICAL_EXCEPTIONS as e:
         metrics.track_llm_call(
             selected_provider,
@@ -4017,18 +4862,26 @@ async def execute_streaming_call(
         )
         _fallback_stream_ok = False
         if provider_manager and not queue_enabled:
-            provider_manager.record_failure(selected_provider, e)
+            provider_manager.record_failure(
+                selected_provider,
+                sanitized_provider_stream_exception(e),
+            )
             # Only fallback on upstream/server errors; skip fallback for client/config errors
-            if enable_provider_fallback and isinstance(e, (ChatProviderError, ChatAPIError)) and not _is_client_like_error(e):
+            if (
+                enable_provider_fallback
+                and isinstance(e, (ChatProviderError, ChatAPIError))
+                and not _is_client_like_error(e)
+                and provider_stream_error_allows_replay(e)
+            ):
                 fallback_provider = provider_manager.get_available_provider(exclude=[selected_provider])
                 if fallback_provider:
                     logger.warning(f"Trying fallback provider {fallback_provider} after {selected_provider} failed")
                     try:
-                        refreshed = refresh_provider_params(fallback_provider)
-                        if hasattr(refreshed, "__await__"):
-                            refreshed_args, refreshed_model = await refreshed  # type: ignore[misc]
-                        else:
-                            refreshed_args, refreshed_model = refreshed
+                        refreshed_args, refreshed_model = await _refresh_provider_params_bounded(
+                            refresh_provider_params,
+                            fallback_provider,
+                            _remaining_provider_factory_timeout,
+                        )
                         # Validate refreshed params have required fields before proceeding
                         if not isinstance(refreshed_args, dict) or "messages_payload" not in refreshed_args:
                             raise ValueError(f"Invalid refreshed params for {fallback_provider}: missing required fields")
@@ -4047,13 +4900,18 @@ async def execute_streaming_call(
                             StructuredGenerationParseError,
                             StructuredGenerationSchemaError,
                         ) as structured_exc:
-                            raise build_structured_http_exception(structured_exc) from structured_exc
+                            raise_detached_error(
+                                build_structured_http_exception(structured_exc)
+                            )
                         apply_structured_response_request(
                             cleaned_args=refreshed_args,
                             structured_request_context=structured_request_context,
                         )
                     except _CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
-                        provider_manager.record_failure(fallback_provider, refresh_error)
+                        provider_manager.record_failure(
+                            fallback_provider,
+                            sanitized_provider_stream_exception(refresh_error),
+                        )
                         raise
                     cleaned_args = refreshed_args
                     model = refreshed_model or model
@@ -4061,7 +4919,10 @@ async def execute_streaming_call(
                     def llm_call_func_fb():
                         return perform_chat_api_call(**cleaned_args)
                     try:
-                        raw_stream_iter = await current_loop.run_in_executor(None, llm_call_func_fb)
+                        raw_stream_iter = await _call_stream_factory_bounded(
+                            llm_call_func_fb,
+                            timeout=_remaining_provider_factory_timeout(),
+                        )
                         fallback_latency = time.time() - fallback_start_time
                         provider_manager.record_success(fallback_provider, fallback_latency)
                         metrics.track_llm_call(fallback_provider, model, fallback_latency, success=True)
@@ -4084,7 +4945,10 @@ async def execute_streaming_call(
                                 queued=False,
                             )
                     except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
-                        provider_manager.record_failure(fallback_provider, fallback_error)
+                        provider_manager.record_failure(
+                            fallback_provider,
+                            sanitized_provider_stream_exception(fallback_error),
+                        )
                         raise
 
         if not _fallback_stream_ok:
@@ -4094,37 +4958,10 @@ async def execute_streaming_call(
                 outcome="error",
             )
 
-            # Safely capture exception details for streaming outside the closure
-            _err_message = str(e)
-            _err_type = type(e).__name__
-
-            # New safe variant that does not reference the except-scope variable directly
-            async def _safe_err_stream():
-                try:
-                    import json as _json
-                    payload = {"error": {"message": _err_message, "type": _err_type}}
-                    if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
-                        payload["conversation_id"] = final_conversation_id
-                        payload["tldw_conversation_id"] = final_conversation_id
-                        if system_message_id:
-                            payload["tldw_system_message_id"] = system_message_id
-                        if normalized_continuation_metadata:
-                            payload["tldw_continuation"] = normalized_continuation_metadata
-                    yield f"data: {_json.dumps(payload)}\n\n"
-                except _CHAT_NONCRITICAL_EXCEPTIONS:
-                    if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
-                        yield (
-                            f"data: {{\"error\":{{\"message\":\"{_err_message}\",\"type\":\"{_err_type}\"}},"
-                            f"\"conversation_id\":\"{final_conversation_id}\","
-                            f"\"tldw_conversation_id\":\"{final_conversation_id}\"}}\n\n"
-                        )
-                    else:
-                        yield f"data: {{\"error\":{{\"message\":\"{_err_message}\",\"type\":\"{_err_type}\"}}}}\n\n"
-                yield "data: [DONE]\n\n"
-
+            error_payload = _public_stream_error_payload(e)
             await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
             return StreamingResponse(
-                _safe_err_stream(),
+                _terminal_stream_error(error_payload),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -4134,8 +4971,6 @@ async def execute_streaming_call(
 
     if not (hasattr(raw_stream_iter, "__aiter__") or hasattr(raw_stream_iter, "__iter__")):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Provider did not return a valid stream.")
-    if hasattr(raw_stream_iter, "__iter__") and not hasattr(raw_stream_iter, "__aiter__"):
-        raw_stream_iter = wrap_sync_stream(raw_stream_iter)
 
     stream_mod_state = {
         "block_logged": False,
@@ -4144,6 +4979,45 @@ async def execute_streaming_call(
         "redact_capture_logged": False,
         "warn_capture_logged": False,
     }
+    provider_output_recorded = False
+    provider_output_lock = asyncio.Lock()
+    clean_success_recorded = False
+    clean_success_lock = asyncio.Lock()
+
+    async def _record_provider_output_once() -> bool:
+        """Record validated provider output once, retaining a clean-end retry."""
+
+        nonlocal provider_output_recorded
+        if not callable(on_provider_output):
+            return False
+        async with provider_output_lock:
+            if provider_output_recorded:
+                return True
+            try:
+                persisted = await on_provider_output(selected_provider)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                return False
+            if persisted is not False:
+                provider_output_recorded = True
+            return provider_output_recorded
+
+    async def _record_clean_success_once() -> bool:
+        """Invoke the clean-completion callback at most once per stream."""
+
+        nonlocal clean_success_recorded
+        if not callable(on_success):
+            return False
+        async with clean_success_lock:
+            if clean_success_recorded:
+                return True
+            try:
+                persisted = await on_success(selected_provider)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                return False
+            if persisted is not False:
+                clean_success_recorded = True
+            return clean_success_recorded
+
     loop_compat_enabled = False
     loop_compat_run_id = str(final_conversation_id or f"run_{_uuid.uuid4().hex[:12]}")
     try:
@@ -4190,7 +5064,10 @@ async def execute_streaming_call(
                 elif sm_result_s.action == "redact" and sm_result_s.redacted_text is not None:
                     full_reply_to_save = sm_result_s.redacted_text
             except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Self-monitoring output check (streaming) skipped: {e}")
+                logger.debug(
+                    "Self-monitoring output check (streaming) skipped error_type={}",
+                    type(e).__name__,
+                )
 
         try:
             _get_mod = moderation_getter or get_moderation_service
@@ -4370,7 +5247,10 @@ async def execute_streaming_call(
                 if hasattr(maybe_result, "__await__"):
                     await maybe_result  # type: ignore[misc]
             except _CHAT_NONCRITICAL_EXCEPTIONS as stream_callback_err:
-                logger.debug("on_stream_full_reply callback skipped due to error: {}", stream_callback_err)
+                logger.debug(
+                    "on_stream_full_reply callback skipped error_type={}",
+                    type(stream_callback_err).__name__,
+                )
 
         if not stream_metrics_recorded:
             try:
@@ -4454,7 +5334,10 @@ async def execute_streaming_call(
                             use_transaction=True,
                         )
             except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
-                logger.warning("Streaming chat tool auto-execution skipped due to error: {}", autoexec_err)
+                logger.warning(
+                    "Streaming chat tool auto-execution skipped error_type={}",
+                    type(autoexec_err).__name__,
+                )
         # Usage logging (estimated) after stream completes
         total_est = 0
         try:
@@ -4520,10 +5403,14 @@ async def execute_streaming_call(
                 )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
-        # BYOK usage tracking (best-effort)
+        # Retry any failed first-output accounting at the last clean boundary,
+        # then notify consumers that the complete stream succeeded.
         try:
-            if callable(on_success):
-                await on_success(selected_provider)
+            await _record_provider_output_once()
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        try:
+            await _record_clean_success_once()
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
         events: list[dict[str, Any]] = list(structured_events)
@@ -4657,10 +5544,9 @@ async def execute_streaming_call(
                 if failures:
                     for failure in failures:
                         logger.error(
-                            "Mandatory moderation audit task failed for {}: {}",
+                            "Mandatory moderation audit task failed for {} error_type={}",
                             final_conversation_id,
-                            failure,
-                            exc_info=True,
+                            type(failure).__name__,
                         )
                     raise StopStreamWithError(
                         message="Mandatory audit persistence unavailable",
@@ -4853,6 +5739,7 @@ async def execute_streaming_call(
                 model_name=model,
                 save_callback=save_callback,
                 finalize_callback=_finalize_stream,
+                on_first_output=_record_provider_output_once,
                 idle_timeout=CHAT_IDLE_TIMEOUT,
                 heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
                 text_transform=_out_transform,
@@ -4902,32 +5789,34 @@ async def execute_streaming_call(
                             await sse_stream.done()
                             done_seen = True
                         break
-                    await sse_stream.send_raw_sse_line(ln)
+                    if is_trusted_local_stream_frame(ln):
+                        # This marker is created only after raw provider frames pass
+                        # through the adapter sanitizer. Preserve its identity across
+                        # the unified queue; ASGI encoding removes it before delivery.
+                        await sse_stream._enqueue(ln)
+                    else:
+                        await sse_stream.send_raw_sse_line(ln)
                 if not done_seen:
                     await sse_stream.done()
+            except asyncio.CancelledError:
+                raise
             except _CHAT_NONCRITICAL_EXCEPTIONS as e:
                 # As a safeguard; tracked_streaming_generator typically yields error frames itself
-                pass
-                await sse_stream.error("internal_error", f"{e}")
+                normalized_error = normalize_provider_stream_error(e)
+                code = normalized_error.code if normalized_error else "provider_unavailable"
+                await sse_stream.error(
+                    code,
+                    provider_stream_error_payload(code)["error"]["message"],
+                    force=True,
+                )
 
         async def _gen():
             prod = asyncio.create_task(_produce())
             try:
                 async for line in sse_stream.iter_sse():
                     yield line
-            except asyncio.CancelledError:
-                # Cancel producer promptly on client disconnect
-                if not prod.done():
-                    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-                        prod.cancel()
-                    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-                        await prod
-                raise
-            else:
-                # Normal shutdown: ensure producer completes cleanly
-                if not prod.done():
-                    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-                        await prod
+            finally:
+                await cancel_stream_tasks_bounded([prod])
 
         return StreamingResponse(
             _gen(),
@@ -4977,7 +5866,7 @@ async def execute_non_stream_call(
     refresh_provider_params: Callable[[str], Any],
     structured_request_context: StructuredResponseRequestContext | None = None,
     moderation_getter: Callable[[], Any] | None = None,
-    on_success: Callable[[str], Awaitable[None]] | None = None,
+    on_success: Callable[[str], Awaitable[bool | None]] | None = None,
     self_monitoring_service: Any | None = None,
     assistant_parent_message_id: str | None = None,
     continuation_metadata: dict[str, Any] | None = None,
@@ -5004,9 +5893,154 @@ async def execute_non_stream_call(
     metrics_recorded = False
     queue_failure_recorded = False
     queue_enabled = False
+    provider_use_recorded = False
+    provider_use_lock = asyncio.Lock()
+    provider_failure_type: str | None = None
     pending_assistant_payload: dict[str, Any] | None = None
     pending_tool_messages: list[dict[str, Any]] = []
     prompt_guardrail_decision: PromptCostGuardrailDecision | None = None
+
+    async def _record_provider_use(provider_name: str) -> bool:
+        """Best-effort, once-only accounting immediately after provider success."""
+
+        nonlocal provider_use_recorded
+        if not callable(on_success):
+            return False
+        async with provider_use_lock:
+            if provider_use_recorded:
+                return True
+            try:
+                persisted = await on_success(provider_name)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                return False
+            if persisted is False:
+                return False
+            provider_use_recorded = True
+            return True
+
+    async def _record_dict_response_usage(
+        *,
+        response: dict[str, Any],
+        messages: list[dict[str, Any]],
+        content: Any,
+        provider_name: str,
+        model_name: str,
+        started_at: float,
+    ) -> None:
+        """Record token and durable usage for one validated dict response."""
+
+        choices = response.get("choices")
+        usage = response.get("usage")
+        if usage:
+            try:
+                normalized_usage = normalize_llm_usage(
+                    provider=provider_name,
+                    usage=usage if isinstance(usage, dict) else None,
+                    choices=choices if isinstance(choices, list) else None,
+                )
+                prompt_tokens = normalized_usage.input_tokens
+                completion_tokens = normalized_usage.output_tokens
+                metrics.track_tokens(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    model=model_name,
+                    provider=provider_name,
+                )
+                user_id = None
+                api_key_id = None
+                try:
+                    if request is not None and hasattr(request, "state"):
+                        user_id = getattr(request.state, "user_id", None)
+                        api_key_id = getattr(request.state, "api_key_id", None)
+                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                    pass
+                await log_llm_usage(
+                    user_id=user_id,
+                    key_id=api_key_id,
+                    request=request,
+                    endpoint=(
+                        f"{request.method}:{request.url.path}"
+                        if request
+                        else "POST:/api/v1/chat/completions"
+                    ),
+                    operation="chat",
+                    provider=provider_name,
+                    model=model_name,
+                    status=200,
+                    latency_ms=int((time.time() - started_at) * 1000),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=normalized_usage.total_tokens,
+                    request_id=(
+                        request.headers.get("X-Request-ID") if request else None
+                    )
+                    or (get_request_id() or None),
+                    conversation_id=(
+                        str(final_conversation_id)
+                        if final_conversation_id is not None
+                        else None
+                    ),
+                    usage_metadata=usage if isinstance(usage, dict) else None,
+                    choice_count=normalized_usage.choice_count,
+                    estimate_source=normalized_usage.estimate_source,
+                )
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                pass
+            return
+
+        try:
+            try:
+                prompt_tokens = _estimate_tokens_from_messages(messages)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                prompt_tokens = 0
+            completion_tokens = max(
+                0,
+                len(_extract_text_from_content(content)) // 4,
+            )
+            metrics.track_tokens(
+                prompt_tokens=int(prompt_tokens),
+                completion_tokens=int(completion_tokens),
+                model=model_name,
+                provider=provider_name,
+            )
+            user_id = None
+            api_key_id = None
+            try:
+                if request is not None and hasattr(request, "state"):
+                    user_id = getattr(request.state, "user_id", None)
+                    api_key_id = getattr(request.state, "api_key_id", None)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                pass
+            await log_llm_usage(
+                user_id=user_id,
+                key_id=api_key_id,
+                request=request,
+                endpoint=(
+                    f"{request.method}:{request.url.path}"
+                    if request
+                    else "POST:/api/v1/chat/completions"
+                ),
+                operation="chat",
+                provider=provider_name,
+                model=model_name,
+                status=200,
+                latency_ms=int((time.time() - started_at) * 1000),
+                prompt_tokens=int(prompt_tokens),
+                completion_tokens=int(completion_tokens),
+                total_tokens=int(prompt_tokens + completion_tokens),
+                request_id=(request.headers.get("X-Request-ID") if request else None)
+                or (get_request_id() or None),
+                conversation_id=(
+                    str(final_conversation_id)
+                    if final_conversation_id is not None
+                    else None
+                ),
+                estimated=True,
+                estimate_source="missing_usage",
+            )
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+
     try:
         try:
             if structured_request_context is None:
@@ -5032,7 +6066,7 @@ async def execute_non_stream_call(
             StructuredGenerationParseError,
             StructuredGenerationSchemaError,
         ) as structured_exc:
-            raise build_structured_http_exception(structured_exc) from structured_exc
+            raise_detached_error(build_structured_http_exception(structured_exc))
         queue_for_exec = None
         try:
             queue_for_exec = get_request_queue()
@@ -5043,6 +6077,13 @@ async def execute_non_stream_call(
             and queue_for_exec is not None
             and queue_is_active(queue_for_exec)
         )
+
+        async def _record_provider_use_after_cancel(result: Any) -> None:
+            """Record only usable late output before cancellation closes its runtime."""
+
+            if _nonstream_provider_result_is_usable(result):
+                await _record_provider_use(selected_provider)
+
         if queue_enabled:
             est_tokens_for_queue = estimate_tokens_from_json(request_json)
             def _queued_processor():
@@ -5050,6 +6091,7 @@ async def execute_non_stream_call(
                 local_start = time.time()
                 try:
                     result = llm_call_func()
+                    _require_usable_nonstream_provider_result(result)
                     latency = time.time() - local_start
                     metrics.track_llm_call(selected_provider, model, latency, success=True)
                     if provider_manager:
@@ -5073,9 +6115,13 @@ async def execute_non_stream_call(
                         error_type=type(proc_error).__name__,
                     )
                     if provider_manager:
-                        provider_manager.record_failure(selected_provider, proc_error)
+                        provider_manager.record_failure(
+                            selected_provider,
+                            sanitized_provider_stream_exception(proc_error),
+                        )
                     queue_failure_recorded = True
-                    raise
+                    bounded_error = _bound_provider_invocation_exception(proc_error)
+                    raise_detached_error(bounded_error)
 
             try:
                 fut = await queue_for_exec.enqueue(
@@ -5100,20 +6146,51 @@ async def execute_non_stream_call(
                     else status.HTTP_503_SERVICE_UNAVAILABLE
                 )
                 queue_exc = HTTPException(status_code=status_code, detail=detail)
-                queue_exc._chat_queue_admission = True
-                raise queue_exc from admission_error
-            llm_response = await fut
+                raise _mark_trusted_local_chat_signal(
+                    queue_exc,
+                    "queue_admission",
+                ) from admission_error
+            try:
+                llm_response = await await_owned_worker(
+                    fut,
+                    on_cancel_result=_record_provider_use_after_cancel,
+                )
+                _require_usable_nonstream_provider_result(llm_response)
+                await await_owned_worker(
+                    _record_provider_use(selected_provider)
+                )
+            except Exception as future_error:  # noqa: BLE001 - queue/provider trust boundary
+                bounded_error = _bound_provider_invocation_exception(future_error)
+                raise_detached_error(bounded_error)
             metrics_recorded = True
         else:
             # Execute provided LLM call function in a worker to avoid blocking the loop.
             # llm_call_func is a sync callable (partial of perform_chat_api_call or a mock).
-            loop = asyncio.get_running_loop()
+            def _invoke_non_stream_provider() -> Any:
+                try:
+                    return llm_call_func()
+                except asyncio.CancelledError as provider_cancel:
+                    raise_detached_error(
+                        sanitized_provider_stream_exception(provider_cancel)
+                    )
+
             try:
-                llm_response = await loop.run_in_executor(None, llm_call_func)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                raise
-            except Exception as exc:  # noqa: BLE001 - normalize unexpected provider exceptions
-                raise ChatAPIError(str(exc)) from exc
+                llm_response = await await_owned_worker(
+                    await_bounded_sync_call(
+                        _invoke_non_stream_provider,
+                        pool=SYNC_ADAPTER_CALL_POOL,
+                        exhaustion_message="Provider adapter capacity is exhausted",
+                    ),
+                    on_cancel_result=_record_provider_use_after_cancel,
+                )
+                _require_usable_nonstream_provider_result(llm_response)
+                await await_owned_worker(
+                    _record_provider_use(selected_provider)
+                )
+            except Exception as provider_error:  # noqa: BLE001 - adapter trust boundary
+                provider_failure_type = type(provider_error).__name__
+                bounded_error = _bound_provider_invocation_exception(provider_error)
+                raise_detached_error(bounded_error)
         llm_latency = time.time() - llm_start_time
         if not metrics_recorded:
             metrics.track_llm_call(selected_provider, model, llm_latency, success=True)
@@ -5133,9 +6210,9 @@ async def execute_non_stream_call(
             context=run_first_metric_context,
             outcome="error",
         )
-        if getattr(he, "_chat_queue_admission", False):
+        if _is_trusted_local_chat_http_exception(he):
             raise
-        raise
+        raise_detached_error(sanitized_provider_stream_exception(he))
     except _CHAT_NONCRITICAL_EXCEPTIONS as e:
         llm_latency = time.time() - llm_start_time
         if not queue_failure_recorded:
@@ -5144,13 +6221,21 @@ async def execute_non_stream_call(
                 model,
                 llm_latency,
                 success=False,
-                error_type=type(e).__name__,
+                error_type=provider_failure_type or type(e).__name__,
             )
             if provider_manager:
-                provider_manager.record_failure(selected_provider, e)
+                provider_manager.record_failure(
+                    selected_provider,
+                    sanitized_provider_stream_exception(e),
+                )
 
         if provider_manager:
-            if enable_provider_fallback and isinstance(e, (ChatProviderError, ChatAPIError)) and not _is_client_like_error(e):
+            if (
+                enable_provider_fallback
+                and isinstance(e, (ChatProviderError, ChatAPIError))
+                and not _is_client_like_error(e)
+                and provider_stream_error_allows_replay(e)
+            ):
                 fallback_provider = provider_manager.get_available_provider(exclude=[selected_provider])
                 if fallback_provider:
                     logger.warning(f"Trying fallback provider {fallback_provider} after {selected_provider} failed")
@@ -5180,24 +6265,43 @@ async def execute_non_stream_call(
                             StructuredGenerationParseError,
                             StructuredGenerationSchemaError,
                         ) as structured_exc:
-                            raise build_structured_http_exception(structured_exc) from structured_exc
+                            raise_detached_error(
+                                build_structured_http_exception(structured_exc)
+                            )
                         apply_structured_response_request(
                             cleaned_args=refreshed_args,
                             structured_request_context=structured_request_context,
                         )
-                    except _CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
-                        provider_manager.record_failure(fallback_provider, refresh_error)
+                    except _CHAT_PROVIDER_REFRESH_EXCEPTIONS as refresh_error:
+                        if not isinstance(refresh_error, ByokResolutionError):
+                            provider_manager.record_failure(
+                                fallback_provider,
+                                sanitized_provider_stream_exception(refresh_error),
+                            )
                         _emit_chat_run_first_completion_metric(
                             metrics,
                             context=run_first_metric_context,
                             outcome="error",
                         )
-                        raise
+                        bounded_error = _bound_provider_http_exception(refresh_error)
+                        raise_detached_error(bounded_error)
                     cleaned_args = refreshed_args
                     model = refreshed_model or model
                     fallback_start_time = time.time()
+
+                    async def _record_fallback_use_after_cancel(result: Any) -> None:
+                        if _nonstream_provider_result_is_usable(result):
+                            await _record_provider_use(fallback_provider)
+
                     try:
-                        llm_response = await perform_chat_api_call_async(**cleaned_args)
+                        llm_response = await await_owned_worker(
+                            perform_chat_api_call_async(**cleaned_args),
+                            on_cancel_result=_record_fallback_use_after_cancel,
+                        )
+                        _require_usable_nonstream_provider_result(llm_response)
+                        await await_owned_worker(
+                            _record_provider_use(fallback_provider)
+                        )
                         fallback_latency = time.time() - fallback_start_time
                         provider_manager.record_success(fallback_provider, fallback_latency)
                         metrics.track_llm_call(fallback_provider, model, fallback_latency, success=True)
@@ -5217,14 +6321,28 @@ async def execute_non_stream_call(
                                 streaming=False,
                                 queued=False,
                             )
-                    except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
-                        provider_manager.record_failure(fallback_provider, fallback_error)
+                    except Exception as fallback_error:  # noqa: BLE001 - adapter trust boundary
+                        fallback_latency = time.time() - fallback_start_time
+                        bounded_error = _bound_provider_invocation_exception(
+                            fallback_error
+                        )
+                        metrics.track_llm_call(
+                            fallback_provider,
+                            model,
+                            fallback_latency,
+                            success=False,
+                            error_type=type(bounded_error).__name__,
+                        )
+                        provider_manager.record_failure(
+                            fallback_provider,
+                            sanitized_provider_stream_exception(bounded_error),
+                        )
                         _emit_chat_run_first_completion_metric(
                             metrics,
                             context=run_first_metric_context,
                             outcome="error",
                         )
-                        raise
+                        raise_detached_error(bounded_error)
                 else:
                     _emit_chat_run_first_completion_metric(
                         metrics,
@@ -5250,7 +6368,7 @@ async def execute_non_stream_call(
     if isinstance(llm_response, str) and should_force_normalize_string_responses():
         llm_response = _wrap_raw_string_response(llm_response, model)
 
-    content_to_save: str | None = None
+    content_to_save: Any | None = None
     tool_calls_to_save: Any | None = None
     function_call_to_save: Any | None = None
     first_turn_tool_calls: Any | None = None
@@ -5265,91 +6383,24 @@ async def execute_non_stream_call(
                 function_call_to_save = message_block.get("function_call")
                 first_turn_tool_calls = tool_calls_to_save
                 first_turn_function_call = function_call_to_save
-        usage = llm_response.get("usage")
-        if usage:
-            try:
-                normalized_usage = normalize_llm_usage(
-                    provider=selected_provider,
-                    usage=usage if isinstance(usage, dict) else None,
-                    choices=choices if isinstance(choices, list) else None,
-                )
-                prompt_tokens = normalized_usage.input_tokens
-                completion_tokens = normalized_usage.output_tokens
-                metrics.track_tokens(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    model=model,
-                    provider=selected_provider,
-                )
-                user_id = None
-                api_key_id = None
-                try:
-                    if request is not None and hasattr(request, "state"):
-                        user_id = getattr(request.state, "user_id", None)
-                        api_key_id = getattr(request.state, "api_key_id", None)
-                except _CHAT_NONCRITICAL_EXCEPTIONS:
-                    pass
-                await log_llm_usage(
-                    user_id=user_id,
-                    key_id=api_key_id,
-                    request=request,
-                    endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
-                    operation="chat",
-                    provider=selected_provider,
-                    model=model,
-                    status=200,
-                    latency_ms=int((time.time() - llm_start_time) * 1000),
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=normalized_usage.total_tokens,
-                    request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
-                    conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
-                    usage_metadata=usage if isinstance(usage, dict) else None,
-                    choice_count=normalized_usage.choice_count,
-                    estimate_source=normalized_usage.estimate_source,
-                )
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pass
-        else:
-            # Estimate usage if not provided
-            try:
-                pt_est = 0
-                try:
-                    pt_est = _estimate_tokens_from_messages(templated_llm_payload)
-                except _CHAT_NONCRITICAL_EXCEPTIONS:
-                    pt_est = 0
-                content_text_for_usage = _extract_text_from_content(content_to_save)
-                ct_est = max(0, len(content_text_for_usage) // 4)
-                user_id = None
-                api_key_id = None
-                try:
-                    if request is not None and hasattr(request, "state"):
-                        user_id = getattr(request.state, "user_id", None)
-                        api_key_id = getattr(request.state, "api_key_id", None)
-                except _CHAT_NONCRITICAL_EXCEPTIONS:
-                    pass
-                await log_llm_usage(
-                    user_id=user_id,
-                    key_id=api_key_id,
-                    request=request,
-                    endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
-                    operation="chat",
-                    provider=selected_provider,
-                    model=model,
-                    status=200,
-                    latency_ms=int((time.time() - llm_start_time) * 1000),
-                    prompt_tokens=int(pt_est),
-                    completion_tokens=int(ct_est),
-                    total_tokens=int(pt_est + ct_est),
-                    request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
-                    conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
-                    estimated=True,
-                    estimate_source="missing_usage",
-                )
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pass
+        await _record_dict_response_usage(
+            response=llm_response,
+            messages=templated_llm_payload,
+            content=content_to_save,
+            provider_name=selected_provider,
+            model_name=model,
+            started_at=llm_start_time,
+        )
     elif isinstance(llm_response, str):
         content_to_save = llm_response
+        await _record_dict_response_usage(
+            response={},
+            messages=templated_llm_payload,
+            content=content_to_save,
+            provider_name=selected_provider,
+            model_name=model,
+            started_at=llm_start_time,
+        )
     elif llm_response is None:
         _emit_chat_run_first_completion_metric(
             metrics,
@@ -5530,23 +6581,20 @@ async def execute_non_stream_call(
                             metrics.track_moderation_output(str(req_user_id or client_id), "redact", streaming=False, category=(out_category2 or "default"))
                     except _CHAT_NONCRITICAL_EXCEPTIONS:
                         pass
-                    try:
-                        if audit_service and audit_context:
-                            await write_mandatory_moderation_audit(
-                                audit_service=audit_service,
-                                audit_context=audit_context,
-                                audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                                action="moderation.output",
-                                result="success",
-                                metadata={
-                                    "phase": "output",
-                                    "streaming": False,
-                                    "action": "redact",
-                                    "pattern": sample,
-                                },
-                            )
-                    except MandatoryAuditWriteError:
-                        raise
+                    if audit_service and audit_context:
+                        await write_mandatory_moderation_audit(
+                            audit_service=audit_service,
+                            audit_context=audit_context,
+                            audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                            action="moderation.output",
+                            result="success",
+                            metadata={
+                                "phase": "output",
+                                "streaming": False,
+                                "action": "redact",
+                                "pattern": sample,
+                            },
+                        )
                     await _capture_moderation_review_item_safely_async(
                         phase="output",
                         action="redact",
@@ -5618,7 +6666,7 @@ async def execute_non_stream_call(
                 context=run_first_metric_context,
                 outcome="error",
             )
-            raise build_structured_http_exception(structured_exc) from structured_exc
+            raise_detached_error(build_structured_http_exception(structured_exc))
 
     should_save_response = (
         should_persist
@@ -5713,11 +6761,52 @@ async def execute_non_stream_call(
                     continuation_args = dict(cleaned_args)
                     continuation_args["messages_payload"] = continuation_messages
                     continuation_args["streaming"] = False
-                    continuation_response = await perform_chat_api_call_async(**continuation_args)
+                    continuation_start_time = time.time()
+                    try:
+                        continuation_response = await await_owned_worker(
+                            perform_chat_api_call_async(**continuation_args),
+                            on_cancel_result=_record_provider_use_after_cancel,
+                        )
+                        _require_usable_nonstream_provider_result(
+                            continuation_response
+                        )
+                    except Exception as continuation_error:  # noqa: BLE001 - adapter trust boundary
+                        continuation_latency = time.time() - continuation_start_time
+                        bounded_error = _bound_provider_invocation_exception(
+                            continuation_error
+                        )
+                        metrics.track_llm_call(
+                            selected_provider,
+                            model,
+                            continuation_latency,
+                            success=False,
+                            error_type=type(bounded_error).__name__,
+                        )
+                        if provider_manager:
+                            provider_manager.record_failure(
+                                selected_provider,
+                                sanitized_provider_stream_exception(bounded_error),
+                            )
+                        raise_detached_error(bounded_error)
+                    await await_owned_worker(
+                        _record_provider_use(selected_provider)
+                    )
+                    continuation_latency = time.time() - continuation_start_time
+                    metrics.track_llm_call(
+                        selected_provider,
+                        model,
+                        continuation_latency,
+                        success=True,
+                    )
+                    if provider_manager:
+                        provider_manager.record_success(
+                            selected_provider,
+                            continuation_latency,
+                        )
                     if isinstance(continuation_response, str) and should_force_normalize_string_responses():
                         continuation_response = _wrap_raw_string_response(continuation_response, model)
 
-                    continuation_content: str | None = None
+                    continuation_content: Any | None = None
                     continuation_tool_calls: Any | None = None
                     continuation_function_call: Any | None = None
                     if continuation_response and isinstance(continuation_response, dict):
@@ -5730,6 +6819,25 @@ async def execute_non_stream_call(
                                 continuation_function_call = continuation_message.get("function_call")
                     elif isinstance(continuation_response, str):
                         continuation_content = continuation_response
+
+                    if isinstance(continuation_response, dict):
+                        await _record_dict_response_usage(
+                            response=continuation_response,
+                            messages=continuation_messages,
+                            content=continuation_content,
+                            provider_name=selected_provider,
+                            model_name=model,
+                            started_at=continuation_start_time,
+                        )
+                    elif isinstance(continuation_response, str):
+                        await _record_dict_response_usage(
+                            response={},
+                            messages=continuation_messages,
+                            content=continuation_content,
+                            provider_name=selected_provider,
+                            model_name=model,
+                            started_at=continuation_start_time,
+                        )
 
                     if continuation_response is not None:
                         try:
@@ -5747,7 +6855,9 @@ async def execute_non_stream_call(
                                 context=run_first_metric_context,
                                 outcome="error",
                             )
-                            raise build_structured_http_exception(structured_exc) from structured_exc
+                            raise_detached_error(
+                                build_structured_http_exception(structured_exc)
+                            )
                         llm_response = continuation_response
                         content_to_save = continuation_content
                         tool_calls_to_save = continuation_tool_calls
@@ -5816,7 +6926,7 @@ async def execute_non_stream_call(
                 context=run_first_metric_context,
                 outcome="error",
             )
-            raise build_structured_http_exception(structured_exc) from structured_exc
+            raise_detached_error(build_structured_http_exception(structured_exc))
 
     if pending_assistant_payload is not None and should_persist and final_conversation_id:
         assistant_message_id = await save_message_fn(
@@ -5917,11 +7027,7 @@ async def execute_non_stream_call(
                 },
             )
 
-    # BYOK usage tracking (best-effort)
-    try:
-        if callable(on_success):
-            await on_success(selected_provider)
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        pass
+    # Retry best-effort accounting if an earlier touch failed transiently.
+    await _record_provider_use(selected_provider)
 
     return encoded_payload

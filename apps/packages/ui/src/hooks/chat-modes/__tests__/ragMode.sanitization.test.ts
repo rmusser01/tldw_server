@@ -191,6 +191,15 @@ describe("ragMode sanitizer", () => {
     expect(sanitized.include_note_ids).toEqual(["101", "note-2"])
   })
 
+  it("drops the unsupported generic filters option", () => {
+    const sanitized = __testing__.sanitizeRagAdvancedOptions({
+      filters: { url: "https://example.com/private" },
+      include_media_ids: [321]
+    })
+
+    expect(sanitized).toEqual({ include_media_ids: [321] })
+  })
+
   it("disables intent routing and reuses retrieval for selected workspace media sources", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [

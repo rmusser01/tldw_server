@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import json
 import re
@@ -12,19 +13,31 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
     normalize_provider,
-    resolve_provider_api_key_from_config,
+    provider_auth_is_resolved,
     resolve_provider_model,
 )
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 
 _DEFAULT_MAX_EXCERPT_CHARS = 12_000
 _DEFAULT_TIMEOUT_SECONDS = 8.0
 _DEFAULT_MAX_TOKENS = 600
+_SYNC_CHAT_CAPACITY_MESSAGE = "Auto Chunking provider adapter capacity is exhausted"
 _MIN_ASSISTANT_MAX_SIZE = 128
 _MAX_ASSISTANT_MAX_SIZE = 4_000
 _ALLOWED_ASSISTANT_METHODS = {
@@ -92,7 +105,7 @@ class AutoChunkBoundaryAssistantResult:
         rationale: str = "",
         provider: str | None = None,
         model: str | None = None,
-    ) -> "AutoChunkBoundaryAssistantResult":
+    ) -> AutoChunkBoundaryAssistantResult:
         return cls(
             used_llm=True,
             chunk_options=dict(chunk_options),
@@ -109,7 +122,7 @@ class AutoChunkBoundaryAssistantResult:
         *,
         reason: str,
         rationale: str,
-    ) -> "AutoChunkBoundaryAssistantResult":
+    ) -> AutoChunkBoundaryAssistantResult:
         return cls(
             used_llm=False,
             chunk_options=None,
@@ -133,6 +146,9 @@ class _Availability:
     model: str | None = None
     api_key: str | None = None
     app_config: dict[str, Any] | None = None
+    credentials_resolved: bool = False
+    credential_runtime: Any | None = None
+    provider_credentials: Any | None = None
     reason: str = ""
 
 
@@ -145,63 +161,91 @@ class ChatAutoChunkBoundaryAssistant:
         chat_call: Callable[..., Any] | None = None,
         config_loader: Callable[[], dict[str, Any] | None] | None = None,
         registry_getter: Callable[[], Any] | None = None,
-        api_key_resolver: Callable[..., str | None] | None = None,
+        credential_runtime_factory: Callable[[dict[str, Any]], Any] | None = None,
         provider_requires_key: Callable[[str], bool] | None = None,
         default_provider: str | None = None,
         max_excerpt_chars: int = _DEFAULT_MAX_EXCERPT_CHARS,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
     ) -> None:
         self._chat_call = chat_call
-        self._config_loader = config_loader or ensure_app_config
+        if config_loader is None:
+            from tldw_Server_API.app.core.LLM_Calls.adapter_utils import ensure_app_config
+
+            config_loader = ensure_app_config
+        self._config_loader = config_loader
         self._registry_getter = registry_getter or get_registry
-        self._api_key_resolver = api_key_resolver or resolve_provider_api_key_from_config
+        self._credential_runtime_factory = (
+            credential_runtime_factory or self._build_server_credential_runtime
+        )
         self._provider_requires_key = provider_requires_key or provider_requires_api_key
         self._default_provider = default_provider
         self._max_excerpt_chars = max(0, int(max_excerpt_chars))
         self._max_tokens = max(1, int(max_tokens))
 
     async def refine(self, request: AutoChunkBoundaryAssistantRequest) -> AutoChunkBoundaryAssistantResult:
+        availability: _Availability | None = None
         try:
-            availability = await asyncio.to_thread(self._check_availability, request)
-        except Exception as exc:
+            availability = await self._check_availability(request)
+        except Exception as exc:  # noqa: BLE001 - optional assistant fails closed
             logger.debug("Auto Chunking boundary assistant availability check failed: {}", type(exc).__name__)
             return AutoChunkBoundaryAssistantResult.fallback(
                 reason="ai_assist_provider_error",
                 rationale=f"{type(exc).__name__}: availability check failed.",
             )
-        if not availability.available:
-            return AutoChunkBoundaryAssistantResult.fallback(
-                reason="ai_assist_unavailable",
-                rationale=availability.reason or "LLM boundary assistant is unavailable.",
-            )
-
         try:
-            raw_response = await asyncio.wait_for(
-                self._call_chat(request, availability),
-                timeout=max(0.001, float(request.timeout_sec or _DEFAULT_TIMEOUT_SECONDS)),
-            )
-        except asyncio.TimeoutError:
-            return AutoChunkBoundaryAssistantResult.fallback(
-                reason="ai_assist_timeout",
-                rationale=f"Timed out after {request.timeout_sec:g} seconds.",
-            )
-        except Exception as exc:
-            logger.debug("Auto Chunking boundary assistant provider call failed: {}", type(exc).__name__)
-            return AutoChunkBoundaryAssistantResult.fallback(
-                reason="ai_assist_provider_error",
-                rationale=f"{type(exc).__name__}: provider call failed.",
-            )
+            if not availability.available:
+                return AutoChunkBoundaryAssistantResult.fallback(
+                    reason="ai_assist_unavailable",
+                    rationale=availability.reason or "LLM boundary assistant is unavailable.",
+                )
 
-        response_text = _extract_llm_response_text(raw_response)
-        return parse_boundary_assistant_response(
-            response_text,
-            request=request,
-            provider=availability.provider,
-            model=availability.model,
-        )
+            try:
+                raw_response = await asyncio.wait_for(
+                    self._call_chat(request, availability),
+                    timeout=max(0.001, float(request.timeout_sec or _DEFAULT_TIMEOUT_SECONDS)),
+                )
+            except asyncio.TimeoutError:
+                return AutoChunkBoundaryAssistantResult.fallback(
+                    reason="ai_assist_timeout",
+                    rationale=f"Timed out after {request.timeout_sec:g} seconds.",
+                )
+            except Exception as exc:  # noqa: BLE001 - adapter boundary fails closed
+                logger.debug("Auto Chunking boundary assistant provider call failed: {}", type(exc).__name__)
+                return AutoChunkBoundaryAssistantResult.fallback(
+                    reason="ai_assist_provider_error",
+                    rationale=f"{type(exc).__name__}: provider call failed.",
+                )
 
-    def _check_availability(self, request: AutoChunkBoundaryAssistantRequest) -> _Availability:
-        app_config = self._load_config()
+            response_text = _extract_llm_response_text(raw_response)
+            result = parse_boundary_assistant_response(
+                response_text,
+                request=request,
+                provider=availability.provider,
+                model=availability.model,
+            )
+            if (
+                result.used_llm
+                and availability.credential_runtime is not None
+                and availability.provider_credentials is not None
+            ):
+                try:
+                    await await_owned_worker(
+                        availability.credential_runtime.mark_used(
+                            availability.provider_credentials
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - usage tracking is best effort
+                    logger.debug("Auto Chunking boundary assistant usage tracking failed")
+            return result
+        finally:
+            if availability.credential_runtime is not None:
+                try:
+                    await await_owned_worker(availability.credential_runtime.close())
+                except Exception:  # noqa: BLE001 - runtime cleanup is best effort
+                    logger.debug("Auto Chunking boundary assistant runtime cleanup failed")
+
+    async def _check_availability(self, request: AutoChunkBoundaryAssistantRequest) -> _Availability:
+        app_config = await asyncio.to_thread(self._load_config)
         provider = normalize_provider(request.provider or self._default_provider or _configured_default_provider(app_config))
         if not provider:
             return _Availability(False, reason="LLM provider is not configured.")
@@ -212,32 +256,85 @@ class ChatAutoChunkBoundaryAssistant:
             return _Availability(False, provider=provider, reason=f"LLM adapter unavailable for provider '{provider}'.")
         provider = _canonical_provider_from_adapter(adapter, fallback=provider)
 
-        model = str(request.model or "").strip() or resolve_provider_model(provider, app_config) or None
-        if not model:
-            return _Availability(False, provider=provider, reason=f"Model is not configured for provider '{provider}'.")
+        requested_model = str(request.model or "").strip() or None
+        credential_runtime = self._credential_runtime_factory(app_config)
+        try:
+            provider_credentials = await credential_runtime.resolve(
+                provider,
+                model=requested_model,
+            )
+        except BaseException:
+            try:
+                await await_owned_worker(credential_runtime.close())
+            except Exception:  # noqa: BLE001 - preserve the original resolution error
+                logger.debug("Auto Chunking boundary assistant runtime cleanup failed")
+            raise
 
-        api_key = self._resolve_api_key(provider, app_config)
-        if self._provider_requires_key(provider) and not api_key:
+        credential_config = provider_credentials.app_config
+        if not isinstance(credential_config, dict):
+            credential_config = {}
+        model = requested_model or resolve_provider_model(provider, credential_config) or None
+        if not model:
+            return _Availability(
+                False,
+                provider=provider,
+                credential_runtime=credential_runtime,
+                provider_credentials=provider_credentials,
+                reason=f"Model is not configured for provider '{provider}'.",
+            )
+
+        api_key = provider_credentials.api_key
+        credentials_resolved = getattr(provider_credentials, "credentials_resolved", False) is True
+        if self._provider_requires_key(provider) and not provider_auth_is_resolved(
+            provider,
+            api_key=api_key,
+            app_config=credential_config,
+            credentials_resolved=credentials_resolved,
+        ):
             return _Availability(
                 False,
                 provider=provider,
                 model=model,
+                credential_runtime=credential_runtime,
+                provider_credentials=provider_credentials,
                 reason=f"API key is not configured for provider '{provider}'.",
             )
 
-        return _Availability(True, provider=provider, model=model, api_key=api_key, app_config=app_config)
+        return _Availability(
+            True,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            app_config=credential_config,
+            credentials_resolved=credentials_resolved,
+            credential_runtime=credential_runtime,
+            provider_credentials=provider_credentials,
+        )
 
     def _load_config(self) -> dict[str, Any]:
         try:
             loaded = self._config_loader()
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed optional config disables the assistant
             loaded = {}
-        return loaded if isinstance(loaded, dict) else {}
+        if not isinstance(loaded, dict):
+            return {}
+        return copy.deepcopy(loaded)
 
-    def _resolve_api_key(self, provider: str, app_config: dict[str, Any]) -> str | None:
-        if _callable_accepts_positional_args(self._api_key_resolver, 2):
-            return self._api_key_resolver(provider, app_config)
-        return self._api_key_resolver(provider)
+    @staticmethod
+    def _build_server_credential_runtime(
+        app_config_snapshot: dict[str, Any],
+    ) -> ProviderCredentialRuntime:
+        """Build a server-only runtime from one immutable config snapshot."""
+
+        frozen_config = copy.deepcopy(app_config_snapshot)
+        return ProviderCredentialRuntime(
+            user_id=None,
+            team_ids=(),
+            org_ids=(),
+            trusted_base_url_override=False,
+            server_config_snapshot=frozen_config,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
 
     async def _call_chat(self, request: AutoChunkBoundaryAssistantRequest, availability: _Availability) -> Any:
         chat_call = self._chat_call
@@ -256,11 +353,57 @@ class ChatAutoChunkBoundaryAssistant:
             "stream": False,
             "response_format": {"type": "json_object"},
             "app_config": availability.app_config,
+            "credentials_resolved": availability.credentials_resolved,
         }
-        result = chat_call(**call_kwargs)
-        if inspect.isawaitable(result):
-            return await result
-        return result
+        if availability.provider_credentials is not None:
+            call_kwargs[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = (
+                availability.provider_credentials
+            )
+        is_native_async = inspect.iscoroutinefunction(chat_call) or inspect.iscoroutinefunction(
+            chat_call.__call__
+        )
+        if is_native_async:
+            result = chat_call(**call_kwargs)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        on_cancel_result = None
+        if (
+            availability.credential_runtime is not None
+            and availability.provider_credentials is not None
+        ):
+            async def _mark_valid_result_after_cancel(raw_response: Any) -> None:
+                parsed = parse_boundary_assistant_response(
+                    _extract_llm_response_text(raw_response),
+                    request=request,
+                    provider=availability.provider,
+                    model=availability.model,
+                )
+                if parsed.used_llm:
+                    await availability.credential_runtime.mark_used(
+                        availability.provider_credentials
+                    )
+
+            on_cancel_result = _mark_valid_result_after_cancel
+
+        def _invoke_sync_chat_call() -> Any:
+            return chat_call(**call_kwargs)
+
+        async def _invoke_sync_chat() -> Any:
+            result = await await_bounded_sync_call(
+                _invoke_sync_chat_call,
+                pool=SYNC_ADAPTER_CALL_POOL,
+                exhaustion_message=_SYNC_CHAT_CAPACITY_MESSAGE,
+            )
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        return await await_owned_worker(
+            _invoke_sync_chat(),
+            on_cancel_result=on_cancel_result,
+        )
 
 
 def extract_bounded_text_excerpt(text: str | None, *, max_chars: int = _DEFAULT_MAX_EXCERPT_CHARS) -> str:
@@ -474,23 +617,6 @@ def _canonical_provider_from_adapter(adapter: Any, *, fallback: str) -> str:
     return fallback
 
 
-def _callable_accepts_positional_args(func: Callable[..., Any], count: int) -> bool:
-    try:
-        signature = inspect.signature(func)
-    except (TypeError, ValueError):
-        return True
-    positional_count = 0
-    for parameter in signature.parameters.values():
-        if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
-            return True
-        if parameter.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        ):
-            positional_count += 1
-    return positional_count >= count
-
-
 def _configured_default_provider(app_config: dict[str, Any]) -> str | None:
     for section_name in ("llm_api_settings", "API", "Chat-API"):
         section = app_config.get(section_name)
@@ -504,7 +630,7 @@ def _configured_default_provider(app_config: dict[str, Any]) -> str | None:
         from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 
         return str(DEFAULT_LLM_PROVIDER or "").strip() or None
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional default-provider import fails closed
         return None
 
 

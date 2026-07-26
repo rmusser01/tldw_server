@@ -180,7 +180,8 @@ class TestOpenAIAdapterInitialization:
         finally:
             openai_mod.logger.remove(sink_id)
 
-        assert exc_info.value.details["error"] == raw_marker
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.details == {"error_type": "RuntimeError"}
         assert any("Initialization failed" in message for message in logged_messages)
         assert all(raw_marker not in message for message in logged_messages)
         assert all("RuntimeError" in message for message in logged_messages)
@@ -317,6 +318,14 @@ class TestOpenAIAdapterInitialization:
 
 class TestRequestValidation:
     """Test request validation in OpenAI adapter."""
+
+    @pytest.mark.unit
+    async def test_production_adapter_accepts_gpt_4o_mini_tts(self):
+        """The endpoint's registered OpenAI model must pass the adapter boundary."""
+        adapter = ProductionOpenAITTSAdapter({"openai_api_key": "test-key"})
+        request = TTSRequest(text="Hello", voice="alloy", model="gpt-4o-mini-tts")
+
+        await adapter.validate_request(request)
 
     @pytest.mark.unit
     async def test_validate_valid_request(self):
@@ -581,7 +590,8 @@ class TestErrorHandling:
         finally:
             openai_mod.logger.remove(sink_id)
 
-        assert raw_marker in str(exc_info.value)
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.details == {"status": 500}
         assert any("OpenAI API error: 500" in message for message in logged_messages)
         assert all(raw_marker not in message for message in logged_messages)
         assert all("HTTPStatusError" in message for message in logged_messages)
@@ -625,7 +635,8 @@ class TestErrorHandling:
         finally:
             openai_mod.logger.remove(sink_id)
 
-        assert exc_info.value.details["error"] == raw_marker
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.details == {"error_type": "RuntimeError"}
         assert any("unexpected error" in message for message in logged_messages)
         assert all(raw_marker not in message for message in logged_messages)
         assert all("RuntimeError" in message for message in logged_messages)

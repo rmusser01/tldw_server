@@ -285,6 +285,32 @@ class BedrockAdapter(ChatProvider):
         override = (request or {}).get("base_url")
         if isinstance(override, str) and override.strip():
             return _normalize_bedrock_base_url(override, runtime_endpoint=False)
+        credentials_resolved = (request or {}).get("credentials_resolved") is True
+        app_config = (request or {}).get("app_config") or {}
+        provider_config = (
+            app_config.get("bedrock_api") or {}
+            if credentials_resolved and isinstance(app_config, dict)
+            else {}
+        )
+        if not isinstance(provider_config, dict):
+            provider_config = {}
+        configured_runtime = provider_config.get("runtime_endpoint")
+        if isinstance(configured_runtime, str) and configured_runtime.strip():
+            return _normalize_bedrock_base_url(configured_runtime, runtime_endpoint=True)
+        configured_base = (
+            provider_config.get("api_base_url")
+            or provider_config.get("base_url")
+            or provider_config.get("api_url")
+            or provider_config.get("endpoint")
+        )
+        if isinstance(configured_base, str) and configured_base.strip():
+            return _normalize_bedrock_base_url(configured_base, runtime_endpoint=False)
+        if credentials_resolved:
+            region = _first_nonempty(provider_config.get("region")) or "us-west-2"
+            return _normalize_bedrock_base_url(
+                f"https://bedrock-runtime.{region}.amazonaws.com",
+                runtime_endpoint=True,
+            )
         runtime = os.getenv("BEDROCK_RUNTIME_ENDPOINT")
         if runtime:
             # Expect a hostname like https://bedrock-runtime.us-west-2.amazonaws.com
@@ -350,6 +376,25 @@ class BedrockAdapter(ChatProvider):
 
     def _resolve_region(self, request: dict[str, Any], base_url: str) -> str:
         host = _url_hostname(base_url)
+        credentials_resolved = request.get("credentials_resolved") is True
+        app_config = request.get("app_config") or {}
+        provider_config = (
+            app_config.get("bedrock_api") or {}
+            if credentials_resolved and isinstance(app_config, dict)
+            else {}
+        )
+        if not isinstance(provider_config, dict):
+            provider_config = {}
+        if credentials_resolved:
+            return (
+                _first_nonempty(
+                    request.get("bedrock_region"),
+                    request.get("region"),
+                    provider_config.get("region"),
+                    _infer_region_from_bedrock_host(host),
+                )
+                or "us-west-2"
+            )
         return (
             _first_nonempty(
                 request.get("bedrock_region"),
@@ -361,10 +406,49 @@ class BedrockAdapter(ChatProvider):
         )
 
     def _build_headers(self, *, request: dict[str, Any], url: str, payload: dict[str, Any]) -> dict[str, str]:
+        from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+
         headers = merge_extra_headers({"Content-Type": "application/json"}, request)
         host = _url_hostname(url)
         is_runtime_host = _is_aws_bedrock_runtime_host(host)
         is_mantle_host = _is_aws_bedrock_mantle_host(host)
+        credentials_resolved = request.get("credentials_resolved") is True
+        if credentials_resolved:
+            api_key = _first_nonempty(request.get("api_key"))
+            if not provider_auth_is_resolved(
+                self.name,
+                api_key=api_key,
+                app_config=request.get("app_config"),
+                credentials_resolved=True,
+            ):
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message="Bedrock runtime authentication was not resolved for this call.",
+                )
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+                return headers
+            if not (is_runtime_host or is_mantle_host):
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message="AWS default-chain authentication requires an AWS Bedrock endpoint.",
+                )
+            credentials = self._resolve_sigv4_credentials(request)
+            if credentials is None:
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message="AWS default-chain credentials are unavailable for Bedrock.",
+                )
+            headers.update(
+                _build_sigv4_headers(
+                    url=url,
+                    payload=payload,
+                    region=self._resolve_region(request, url),
+                    credentials=credentials,
+                )
+            )
+            return headers
+
         key = _first_nonempty(
             request.get("api_key"),
             os.getenv("BEDROCK_API_KEY"),
@@ -502,6 +586,7 @@ class BedrockAdapter(ChatProvider):
         return payload
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         if not self._use_native_http():
             raise RuntimeError("BedrockAdapter native HTTP disabled by configuration")
@@ -515,11 +600,14 @@ class BedrockAdapter(ChatProvider):
             with http_client_factory(timeout=timeout or 90.0) as client:
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                self._raise_if_in_band_provider_error(data, phase="chat_response")
+                return data
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="chat")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         if not self._use_native_http():
             raise RuntimeError("BedrockAdapter native HTTP disabled by configuration")
@@ -542,6 +630,10 @@ class BedrockAdapter(ChatProvider):
                             line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                         except Exception:
                             line = str(raw)
+                        self._raise_if_in_band_provider_error(
+                            line,
+                            phase="stream_response",
+                        )
                         if is_done_line(line):
                             if not seen_done:
                                 seen_done = True
@@ -554,7 +646,7 @@ class BedrockAdapter(ChatProvider):
                     yield from finalize_stream(response=resp, done_already=seen_done)
             return
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="stream")
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.chat, request, timeout=timeout)
@@ -564,44 +656,5 @@ class BedrockAdapter(ChatProvider):
             yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
-        # Reuse Groq/OpenAI-style mapping which inspects httpx/requests error payloads
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            body = None
-            try:
-                body = resp.json()
-            except Exception:
-                body = None
-            log_http_400_body(self.name, exc, body)
-            detail = None
-            if isinstance(body, dict) and isinstance(body.get("error"), dict):
-                eobj = body["error"]
-                msg = (eobj.get("message") or "").strip()
-                typ = (eobj.get("type") or "").strip()
-                detail = (f"{typ} {msg}" if typ else msg) or str(exc)
-            else:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+        """Delegate to the shared bounded error policy."""
         return super().normalize_error(exc)

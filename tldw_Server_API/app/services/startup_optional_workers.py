@@ -152,10 +152,15 @@ def _env_enabled_predicate(
     return _enabled
 
 
-def _jobs_webhooks_worker_enabled(_context: WorkerLifecycleContext) -> bool:
-    return _env_flag_enabled("JOBS_WEBHOOKS_ENABLED") and bool(
-        os.getenv("JOBS_WEBHOOKS_URL")
-    )
+def _jobs_webhooks_worker_enabled(
+    _context: WorkerLifecycleContext | None,
+) -> bool:
+    enabled = _env_flag_enabled("JOBS_WEBHOOKS_ENABLED")
+    has_url = bool(os.getenv("JOBS_WEBHOOKS_URL"))
+    outbox_enabled = _env_flag_enabled("JOBS_EVENTS_OUTBOX")
+    if enabled and has_url and not outbox_enabled:
+        logger.warning("Jobs webhooks require JOBS_EVENTS_OUTBOX=true; refusing to start")
+    return enabled and has_url and outbox_enabled
 
 
 async def start_optional_workers(
@@ -301,13 +306,17 @@ async def _start_jobs_webhooks_worker(
 ) -> tuple[Any | None, Any | None]:
     """Start Jobs webhook delivery when enabled and configured.
 
-    Requires both JOBS_WEBHOOKS_ENABLED and JOBS_WEBHOOKS_URL. With a worker
-    inventory, the worker is registered for background-worker lifecycle
-    shutdown; without one, it uses the legacy stop-event task path.
+    Requires JOBS_WEBHOOKS_ENABLED, JOBS_WEBHOOKS_URL, and the durable Jobs
+    events outbox. With a worker inventory, the worker is registered for
+    background-worker lifecycle shutdown; without one, it uses the legacy
+    stop-event task path.
     """
     try:
-        if not _env_flag_enabled("JOBS_WEBHOOKS_ENABLED") or not os.getenv("JOBS_WEBHOOKS_URL"):
-            logger.info("Jobs webhooks worker disabled by flag or missing URL")
+        if not _jobs_webhooks_worker_enabled(None):
+            if not _env_flag_enabled("JOBS_WEBHOOKS_ENABLED") or not os.getenv(
+                "JOBS_WEBHOOKS_URL"
+            ):
+                logger.info("Jobs webhooks worker disabled by flag or missing URL")
             return None, None
         if worker_inventory is not None:
             from tldw_Server_API.app.services.lifecycle_workers import (

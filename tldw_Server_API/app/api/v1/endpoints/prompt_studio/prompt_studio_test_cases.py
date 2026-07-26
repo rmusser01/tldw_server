@@ -17,10 +17,9 @@ Security
 - Rate limits applied to generation endpoints
 """
 
-import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
 from loguru import logger
@@ -36,11 +35,13 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_write_access,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints.prompt_studio.resource_binding import (
+    authoritative_prompt_project,
+    require_test_cases_in_project,
+)
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
-    ListResponse,
     PageListResponse,
     StandardResponse,
 )
@@ -54,7 +55,28 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_test import (
     TestCaseResponse,
     TestCaseUpdate,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    configured_provider_model_from_snapshot,
+    mark_provider_credential_used,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import ConflictError, DatabaseError, InputError
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    provider_auth_is_resolved,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
+    provider_requires_api_key,
+)
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_generator import TestCaseGenerator
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_io import TestCaseIO
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager import TestCaseManager
@@ -71,6 +93,21 @@ PROMPT_STUDIO_TEST_CASE_EXCEPTIONS = (
     KeyError,
     AttributeError,
 )
+
+
+def _credential_http_exception(exc: ByokResolutionError) -> HTTPException:
+    code = str(getattr(exc, "policy_code", None) or exc.code)
+    return HTTPException(
+        status_code=(
+            status.HTTP_403_FORBIDDEN
+            if code in {"credential_scope_revoked", "model_not_allowed", "provider_disabled"}
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        detail={
+            "error_code": code,
+            "message": "Provider credentials are unavailable.",
+        },
+    )
 
 ########################################################################################################################
 # Router Setup
@@ -861,33 +898,136 @@ async def get_csv_import_template(
 @router.post("/run")
 async def run_test_cases_simple(
     payload: RunTestCasesSimpleRequest,
+    request: Request,
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user)
 ) -> dict[str, Any]:
-    manager = TestCaseManager(db)
     prompt_id = int(payload.prompt_id)
-    test_case_ids = payload.test_case_ids or []
-    model = payload.model or "gpt-3.5-turbo"
-    # Enforce access to the prompt's project before running tests
-    project_id: Optional[int] = None
-    # Prefer explicit project_id from payload for compatibility with older clients/tests
-    if getattr(payload, "project_id", None):
-        try:
-            project_id = int(payload.project_id)  # type: ignore[attr-defined]
-        except (TypeError, ValueError, AttributeError):
-            project_id = None
-    if project_id is None:
-        # Fallback: resolve project via prompt record
-        try:
-            prompt_row = db.get_prompt(prompt_id)
-            project_id = int(prompt_row["project_id"]) if prompt_row and "project_id" in prompt_row else None
-        except (DatabaseError, InputError, KeyError, TypeError, ValueError):
-            project_id = None
-    if project_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Prompt {prompt_id} not found or no project context")
+    _, project_id = authoritative_prompt_project(
+        db,
+        prompt_id,
+        compatibility_project_id=payload.project_id,
+    )
     await require_project_access(project_id, user_context=user_context, db=db)
-    results = await manager.run_batch_tests(prompt_id=prompt_id, test_case_ids=test_case_ids, model=model)
-    return {"results": results}
+    test_case_ids = require_test_cases_in_project(
+        db,
+        payload.test_case_ids or [],
+        project_id,
+    )
+
+    manager = TestCaseManager(db)
+    provider = payload.provider
+    requested_model = payload.model
+
+    try:
+        runtime_user_id, team_ids, org_ids, trusted_base_url_override = (
+            derive_trusted_credential_scope(request, None)
+        )
+    except ByokResolutionError as exc:
+        raise_detached_error(_credential_http_exception(exc))
+    except (RuntimeError, TypeError, ValueError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "credential_store_unavailable",
+                    "message": "Provider credentials are unavailable.",
+                },
+            )
+        )
+    if runtime_user_id is None:
+        try:
+            runtime_user_id = int(user_context.get("user_id"))
+        except (AttributeError, TypeError, ValueError):
+            runtime_user_id = None
+
+    try:
+        credential_runtime = ProviderCredentialRuntime(
+            user_id=runtime_user_id,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            trusted_base_url_override=trusted_base_url_override,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+    except (RuntimeError, ValueError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "credential_store_unavailable",
+                    "message": "Provider credentials are unavailable.",
+                },
+            )
+        )
+
+    try:
+        try:
+            credentials = await credential_runtime.resolve(
+                provider,
+                model=requested_model,
+            )
+        except ByokResolutionError as exc:
+            raise_detached_error(_credential_http_exception(exc))
+        except (RuntimeError, ValueError):
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error_code": "credential_store_unavailable",
+                        "message": "Provider credentials are unavailable.",
+                    },
+                )
+            )
+
+        app_config = credentials.app_config or {}
+        model = requested_model or configured_provider_model_from_snapshot(
+            provider,
+            app_config,
+        )
+        if not model:
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error_code": "provider_configuration_invalid",
+                        "message": "The configured provider model is unavailable.",
+                    },
+                )
+            )
+        if provider_requires_api_key(provider) and not provider_auth_is_resolved(
+            provider,
+            api_key=credentials.api_key,
+            app_config=app_config,
+            credentials_resolved=credentials.credentials_resolved,
+        ):
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error_code": "missing_provider_credentials",
+                        "message": "Provider credentials are unavailable.",
+                    },
+                )
+            )
+
+        async def _mark_provider_success() -> None:
+            await mark_provider_credential_used(credential_runtime, credentials)
+
+        results = await manager.run_batch_tests(
+            prompt_id=prompt_id,
+            test_case_ids=test_case_ids,
+            model=model,
+            provider=provider,
+            api_key_override=credentials.api_key,
+            app_config=app_config,
+            credentials_resolved=True,
+            provider_credentials=credentials,
+            strict_provider_errors=True,
+            on_provider_success=_mark_provider_success,
+        )
+        return {"results": results}
+    finally:
+        await await_owned_worker(credential_runtime.close())
 
 @router.post(
     "/export/{project_id}",

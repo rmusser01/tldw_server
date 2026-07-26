@@ -128,11 +128,19 @@ class FaithfulnessEvaluator:
     Args:
         llm: Any object implementing the ``LLMCallable`` protocol (async generate).
         max_claims: Maximum number of claims to extract and verify.
+        propagate_errors: Re-raise provider failures for callers that need to
+            distinguish unavailable verification from an unsupported claim.
     """
 
-    def __init__(self, llm: LLMCallable, max_claims: int = 25) -> None:
+    def __init__(
+        self,
+        llm: LLMCallable,
+        max_claims: int = 25,
+        propagate_errors: bool = False,
+    ) -> None:
         self.llm = llm
         self.max_claims = max_claims
+        self.propagate_errors = propagate_errors
 
     async def evaluate(
         self,
@@ -187,6 +195,8 @@ class FaithfulnessEvaluator:
         try:
             claims = await self._extract_claims(response)
         except Exception:
+            if self.propagate_errors:
+                raise
             logger.warning("Faithfulness: claim extraction failed")
             return FaithfulnessResult(
                 score=0.0,
@@ -211,6 +221,8 @@ class FaithfulnessEvaluator:
                 verification = await self._verify_claim(claim, context)
                 verifications.append(verification)
             except Exception:
+                if self.propagate_errors:
+                    raise
                 logger.warning(f"Faithfulness: claim verification failed for '{claim[:50]}...'")
                 verifications.append(
                     ClaimVerification(

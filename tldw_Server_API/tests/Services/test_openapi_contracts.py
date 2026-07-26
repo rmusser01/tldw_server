@@ -209,6 +209,19 @@ def openapi_spec(client_user_only) -> dict[str, Any]:
     return response.json()
 
 
+@pytest.mark.integration
+def test_openapi_contract_declares_contract_and_code_licenses(
+    openapi_spec: dict[str, Any],
+) -> None:
+    info = openapi_spec["info"]
+
+    assert info["license"] == {
+        "name": "Apache License 2.0 (OpenAPI contract only)",
+        "identifier": "Apache-2.0",
+    }
+    assert info["x-server-code-license"] == "GPL-3.0-only"
+
+
 def _iter_internal_refs(node: Any, path: tuple[str, ...] = ()) -> Iterator[tuple[str, str]]:
     if isinstance(node, dict):
         ref = node.get("$ref")

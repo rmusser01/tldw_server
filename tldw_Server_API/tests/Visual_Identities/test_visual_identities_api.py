@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import zipfile
 from collections.abc import Generator
 from io import BytesIO
 from pathlib import Path
 from typing import Any
-import zipfile
 
 import pytest
 from fastapi import FastAPI
@@ -16,9 +17,12 @@ from tldw_Server_API.app.api.v1.endpoints import visual_identities
 from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_registry import register_router_specs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
-from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
+from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.Visual_Identities.storage import (
+    resolve_visual_identity_asset_path,
+)
 from tldw_Server_API.app.core.VN_Assets.storage import (
     SOURCE_FEATURE_VN_ASSETS,
     vn_asset_source_ref,
@@ -206,6 +210,31 @@ def _png_bytes(*, color: str = "purple") -> bytes:
     buffer = BytesIO()
     Image.new("RGBA", (8, 8), color).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _assert_stored_draft_asset(
+    repo: VisualIdentityRepository,
+    *,
+    draft_id: int,
+    owner_user_id: int,
+    storage_root: Path,
+    expected_bytes: bytes,
+) -> None:
+    """Validate one recorded asset through the public storage resolver."""
+
+    assets = repo.list_draft_assets(draft_id, owner_user_id=owner_user_id)
+    assert len(assets) == 1
+    asset = assets[0]
+    resolved = resolve_visual_identity_asset_path(
+        owner_user_id=owner_user_id,
+        relpath=asset["storage_relpath"],
+    )
+    assert resolved.is_relative_to((storage_root / str(owner_user_id)).resolve())
+    assert resolved.is_file()
+    stored_bytes = resolved.read_bytes()
+    assert stored_bytes == expected_bytes
+    assert asset["bytes"] == len(stored_bytes)
+    assert asset["sha256"] == hashlib.sha256(stored_bytes).hexdigest()
 
 
 def _zip_bytes_with_png() -> bytes:
@@ -617,7 +646,8 @@ def test_generated_file_asset_import_replays_idempotency(
     pack = repo.create_pack(owner_user_id=1, title="Generated Expressions")
     source_path = outputs_root / "1" / "image_gen" / "neutral.png"
     source_path.parent.mkdir(parents=True)
-    source_path.write_bytes(_png_bytes(color="blue"))
+    source_bytes = _png_bytes(color="blue")
+    source_path.write_bytes(source_bytes)
     files_repo = FakeGeneratedFilesRepo(
         {
             77: {
@@ -662,8 +692,13 @@ def test_generated_file_asset_import_replays_idempotency(
     assert conflict.status_code == 409
     assert file_conflict.status_code == 409
     assert files_repo.accessed_ids == [77]
-    assert len(repo.list_draft_assets(first.json()["draft_id"], owner_user_id=1)) == 1
-    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+    _assert_stored_draft_asset(
+        repo,
+        draft_id=first.json()["draft_id"],
+        owner_user_id=1,
+        storage_root=storage_root,
+        expected_bytes=source_bytes,
+    )
 
 
 def test_generated_file_asset_import_returns_source_context(
@@ -717,7 +752,8 @@ def test_generated_file_asset_import_idempotency_uses_canonical_source_context(
     pack = repo.create_pack(owner_user_id=1, title="Generated Expressions")
     source_path = outputs_root / "1" / "image_gen" / "neutral.png"
     source_path.parent.mkdir(parents=True)
-    source_path.write_bytes(_png_bytes(color="blue"))
+    source_bytes = _png_bytes(color="blue")
+    source_path.write_bytes(source_bytes)
     files_repo = FakeGeneratedFilesRepo(
         {
             77: {
@@ -776,8 +812,13 @@ def test_generated_file_asset_import_idempotency_uses_canonical_source_context(
     assert replay.json() == first.json()
     assert conflict.status_code == 409
     assert files_repo.accessed_ids == [77]
-    assert len(repo.list_draft_assets(first.json()["draft_id"], owner_user_id=1)) == 1
-    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+    _assert_stored_draft_asset(
+        repo,
+        draft_id=first.json()["draft_id"],
+        owner_user_id=1,
+        storage_root=storage_root,
+        expected_bytes=source_bytes,
+    )
 
 
 def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatch(
@@ -917,7 +958,13 @@ def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatc
             owner_user_id=1,
             idempotency_key=idempotency_key,
         ) == 0
-    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+    _assert_stored_draft_asset(
+        repo,
+        draft_id=response.json()["draft_id"],
+        owner_user_id=1,
+        storage_root=storage_root,
+        expected_bytes=source_bytes,
+    )
 
 
 def test_vn_generated_file_import_derives_context_and_replays_without_live_source(
@@ -1006,7 +1053,13 @@ def test_vn_generated_file_import_derives_context_and_replays_without_live_sourc
     assert replay.json() == first.json()
     assert files_repo.accessed_ids == [77]
     assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
-    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+    _assert_stored_draft_asset(
+        repo,
+        draft_id=first.json()["draft_id"],
+        owner_user_id=1,
+        storage_root=storage_root,
+        expected_bytes=source_bytes,
+    )
 
 
 def test_generated_file_asset_import_rejects_invalid_file_without_creating_draft(

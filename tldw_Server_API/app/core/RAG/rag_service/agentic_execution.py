@@ -7,24 +7,42 @@ derived-evidence boundary.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import copy
 import hashlib
 import re
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
 )
+
 from .agentic_tools import make_default_registry
 from .evidence_models import DerivedEvidence, RetrievedEvidence
+from .hyde import (
+    _credential_base_url,
+    _embedding_model_from_config,
+    _embedding_model_spec_from_config,
+    _embedding_provider_from_config,
+    _record_embedding_degraded,
+    _resolve_runtime_embedding_call,
+    _runtime_local_embedding_call_kwargs,
+)
 from .types import Document
 
 # Expose AnswerGenerator at module level for tests/patching parity with the chunker.
@@ -38,6 +56,112 @@ except ImportError:
 
 
 _INTRA_DOC_VEC_CACHE: dict[str, Any] = {}
+_EMBEDDING_SECRET_FIELD_MARKERS = (
+    "api_key",
+    "authorization",
+    "cookie",
+    "credential",
+    "password",
+    "secret",
+    "token",
+)
+
+
+def _bounded_provider_failure_code(exc: BaseException) -> str:
+    """Map a provider failure to a stable, non-sensitive metadata code."""
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    if code in {
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }:
+        return code
+    if getattr(exc, "status_code", None) in {401, 403}:
+        return "invalid_provider_credentials"
+    return "provider_unavailable"
+
+
+def _record_planner_degraded(
+    stage_metadata: dict[str, Any] | None,
+    exc: BaseException,
+) -> None:
+    """Record planner trust independently from embedding-stage metadata."""
+    if stage_metadata is None:
+        return
+    stage_metadata["planner"] = {
+        "failure_code": _bounded_provider_failure_code(exc),
+        "verification_available": False,
+    }
+
+
+def _scrub_embedding_secrets(value: Any) -> Any:
+    """Remove secret-bearing fields from a defensive embedding-config copy."""
+    if isinstance(value, dict):
+        for key in list(value):
+            normalized = str(key).strip().lower().replace("-", "_")
+            if any(marker in normalized for marker in _EMBEDDING_SECRET_FIELD_MARKERS):
+                value.pop(key, None)
+            else:
+                value[key] = _scrub_embedding_secrets(value[key])
+        return value
+    if isinstance(value, list):
+        return [_scrub_embedding_secrets(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_scrub_embedding_secrets(item) for item in value)
+    attributes = getattr(value, "__dict__", None)
+    if isinstance(attributes, dict):
+        for name in list(attributes):
+            normalized = str(name).strip().lower().replace("-", "_")
+            if any(marker in normalized for marker in _EMBEDDING_SECRET_FIELD_MARKERS):
+                with contextlib.suppress(AttributeError, TypeError, ValueError):
+                    delattr(value, name)
+            else:
+                _scrub_embedding_secrets(attributes[name])
+    return value
+
+
+def _embedding_config_snapshot(app_config: dict[str, Any], *, scrub_secrets: bool) -> dict[str, Any]:
+    """Return the single embedding configuration used for resolution and dispatch."""
+    raw = app_config.get("EMBEDDING_CONFIG") or app_config.get("embedding_config") or {}
+    snapshot = copy.deepcopy(raw)
+    if scrub_secrets:
+        snapshot = _scrub_embedding_secrets(snapshot)
+    return {"embedding_config": snapshot}
+
+
+def _effective_embedding_model_id(
+    app_config: dict[str, Any],
+    model_id_override: str | None,
+) -> str:
+    """Return a stable identity for the exact configured embedding model."""
+    raw = app_config.get("embedding_config") or app_config.get("EMBEDDING_CONFIG") or {}
+    selected = str(model_id_override or raw.get("default_model_id") or "").strip()
+    model_spec = _embedding_model_spec_from_config(app_config, model_id_override)
+    model_name = (
+        model_spec.get("model_name_or_path")
+        if isinstance(model_spec, dict)
+        else getattr(model_spec, "model_name_or_path", None)
+    )
+    return str(model_name or selected).strip()
+
+
+def _effective_embedding_endpoint(
+    app_config: dict[str, Any],
+    model_id_override: str | None,
+) -> str:
+    """Return the configured endpoint from the selected embedding snapshot."""
+    model_spec = _embedding_model_spec_from_config(app_config, model_id_override)
+    for field_name in ("api_url", "base_url", "api_base_url", "endpoint"):
+        value = (
+            model_spec.get(field_name)
+            if isinstance(model_spec, dict)
+            else getattr(model_spec, field_name, None)
+        )
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 @dataclass
@@ -122,7 +246,7 @@ def build_agentic_execution_context(
         quote_spans=_payload_bool("agentic_quote_spans", True),
         enable_tools=_payload_bool("agentic_enable_tools", False),
         use_llm_planner=_payload_bool("agentic_use_llm_planner", False),
-        time_budget_sec=effective_payload.get("agentic_time_budget_sec", None),
+        time_budget_sec=effective_payload.get("agentic_time_budget_sec"),
         cache_ttl_sec=max(1, _payload_int("agentic_cache_ttl_sec", 600)),
         debug_trace=_payload_bool("agentic_debug_trace", False)
         or _payload_bool("debug_mode", False),
@@ -133,17 +257,14 @@ def build_agentic_execution_context(
         prefer_structural_anchors=_payload_bool("agentic_prefer_structural_anchors", True),
         enable_table_support=_payload_bool("agentic_enable_table_support", True),
         agentic_enable_vlm_late_chunking=_payload_bool("agentic_enable_vlm_late_chunking", False),
-        agentic_vlm_backend=effective_payload.get("agentic_vlm_backend", None),
+        agentic_vlm_backend=effective_payload.get("agentic_vlm_backend"),
         agentic_vlm_detect_tables_only=_payload_bool("agentic_vlm_detect_tables_only", True),
-        agentic_vlm_max_pages=effective_payload.get("agentic_vlm_max_pages", None),
+        agentic_vlm_max_pages=effective_payload.get("agentic_vlm_max_pages"),
         agentic_vlm_late_chunk_top_k_docs=max(1, _payload_int("agentic_vlm_late_chunk_top_k_docs", 2)),
         agentic_use_provider_embeddings_within=_payload_bool(
             "agentic_use_provider_embeddings_within", False
         ),
-        agentic_provider_embedding_model_id=effective_payload.get(
-            "agentic_provider_embedding_model_id",
-            None,
-        ),
+        agentic_provider_embedding_model_id=effective_payload.get("agentic_provider_embedding_model_id"),
         adaptive_budgets=_payload_bool("agentic_adaptive_budgets", True),
         coverage_target=_payload_float("agentic_coverage_target", 0.8),
         min_corroborating_docs=max(1, _payload_int("agentic_min_corroborating_docs", 2)),
@@ -190,10 +311,11 @@ def _split_headings_and_paragraphs(text: str) -> tuple[list[tuple[str, int, int]
         if re.match(r"^\s*#{1,6}\s+", line):
             section_indices.append(idx)
             section_titles.append(re.sub(r"^\s*#+\s+", "", line).strip())
-        elif idx + 1 < len(lines) and (set(lines[idx + 1].strip()) <= set("=-") and len(lines[idx + 1].strip()) >= min(3, len(line))):
-            section_indices.append(idx)
-            section_titles.append(line.strip())
-        elif len(line) <= 80 and len(line) >= 3 and line.strip().isupper():
+        elif (
+            idx + 1 < len(lines)
+            and set(lines[idx + 1].strip()) <= set("=-")
+            and len(lines[idx + 1].strip()) >= min(3, len(line))
+        ) or (3 <= len(line) <= 80 and line.strip().isupper()):
             section_indices.append(idx)
             section_titles.append(line.strip())
 
@@ -414,12 +536,33 @@ def assemble_ephemeral_chunk(
 class AgenticToolbox:
     """Deterministic tool primitives used by the tool loop."""
 
-    def __init__(self, docs: list[Document], cfg: Any):
+    def __init__(
+        self,
+        docs: list[Document],
+        cfg: Any,
+        *,
+        query: str = "",
+        embedding_app_config: dict[str, Any] | None = None,
+        embedding_provider: str | None = None,
+        embedding_model_id: str = "",
+        embedding_call_kwargs: dict[str, Any] | None = None,
+        provider_embeddings_allowed: bool = True,
+        stage_metadata: dict[str, Any] | None = None,
+    ):
         self.docs = docs
         self.cfg = cfg
+        self.query = query
+        self.embedding_app_config = embedding_app_config or {"embedding_config": {}}
+        self.embedding_provider = str(embedding_provider or "").strip().lower()
+        self.embedding_model_id = str(embedding_model_id or "").strip()
+        self.embedding_call_kwargs = embedding_call_kwargs or {}
+        self.provider_embeddings_allowed = provider_embeddings_allowed
+        self.stage_metadata = stage_metadata
+        self.provider_embedding_used = False
         self._sections: dict[str, list[tuple[str, int, int]]] = {}
         self._paragraphs: dict[str, list[tuple[int, int]]] = {}
         self._para_vecs: dict[str, list[Any]] = {}
+        self._query_vecs: dict[str, Any] = {}
         if getattr(cfg, "enable_section_index", True) or getattr(cfg, "enable_semantic_within", True):
             self._build_indexes()
 
@@ -430,48 +573,83 @@ class AgenticToolbox:
             self._sections[doc.id] = sections
             self._paragraphs[doc.id] = paragraphs
             if getattr(self.cfg, "enable_semantic_within", True):
-                if getattr(self.cfg, "agentic_use_provider_embeddings_within", False):
+                if (
+                    getattr(self.cfg, "agentic_use_provider_embeddings_within", False)
+                    and self.provider_embeddings_allowed
+                ):
                     try:
-                        key = f"{doc.id}|{len(text)}|{hash(text)}|{getattr(self.cfg, 'agentic_provider_embedding_model_id', '') or ''}|prov"
-                        cached = _INTRA_DOC_VEC_CACHE.get(key)
+                        endpoint = str(
+                            _credential_base_url(
+                                self.embedding_call_kwargs.get(
+                                    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+                                )
+                            )
+                            or self.embedding_call_kwargs.get("base_url_override")
+                            or _effective_embedding_endpoint(
+                                self.embedding_app_config,
+                                getattr(self.cfg, "agentic_provider_embedding_model_id", None),
+                            )
+                            or ""
+                        )
+                        endpoint_identity = (
+                            hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
+                            if endpoint
+                            else ""
+                        )
+                        key = (
+                            f"{doc.id}|{len(text)}|{hash(text)}|{hash(self.query)}|"
+                            f"{self.embedding_provider}|{self.embedding_model_id}|"
+                            f"{endpoint_identity}|prov"
+                        )
+                        cache_allowed = (
+                            self.embedding_call_kwargs.get("credentials_resolved") is not True
+                            and PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+                            not in self.embedding_call_kwargs
+                        )
+                        cached = _INTRA_DOC_VEC_CACHE.get(key) if cache_allowed else None
                         if cached is not None:
-                            self._para_vecs[doc.id] = cached
+                            self._query_vecs[doc.id] = cached[0]
+                            self._para_vecs[doc.id] = cached[1:]
                             if getattr(self.cfg, "enable_metrics", False):
                                 with contextlib.suppress(ImportError, AttributeError, RuntimeError, TypeError, ValueError):
                                     from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 
                                     increment_counter("agentic_cache_hits_total", 1, labels={"cache_type": "intra_doc"})
+                            continue
                         else:
-                            from tldw_Server_API.app.core.config import load_comprehensive_config
                             from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
                                 create_embeddings_batch,
                             )
 
-                            app_cfg = load_comprehensive_config() or {}
-                            embedding_settings = app_cfg.get("EMBEDDING_CONFIG", {})
-                            app_config = {"embedding_config": embedding_settings}
-                            texts = [text[start:end] for (start, end) in paragraphs]
+                            texts = [self.query] + [text[start:end] for (start, end) in paragraphs]
                             vecs_list = create_embeddings_batch(
                                 texts,
-                                app_config,
+                                self.embedding_app_config,
                                 getattr(self.cfg, "agentic_provider_embedding_model_id", None),
+                                **self.embedding_call_kwargs,
                             )
                             vecs_np = [np.array(v, dtype=np.float32) for v in vecs_list]
                             for idx, vector in enumerate(vecs_np):
                                 norm = float((vector ** 2).sum()) ** 0.5
                                 if norm > 0:
                                     vecs_np[idx] = vector / norm
-                            self._para_vecs[doc.id] = vecs_np
-                            _INTRA_DOC_VEC_CACHE[key] = vecs_np
+                            self._query_vecs[doc.id] = vecs_np[0]
+                            self._para_vecs[doc.id] = vecs_np[1:]
+                            if cache_allowed:
+                                _INTRA_DOC_VEC_CACHE[key] = vecs_np
+                            self.provider_embedding_used = True
                             continue
-                    except (ImportError, AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
-                        pass
+                    except (ImportError, AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as exc:
+                        _record_embedding_degraded(self.stage_metadata, exc)
+                        self.provider_embeddings_allowed = False
                 self._para_vecs[doc.id] = [_hash_embed(text[start:end], getattr(self.cfg, "semantic_dim", 2048)) for (start, end) in paragraphs]
 
     def search_within(self, doc: Document, query: str, max_hits: int = 8, window: int = 300) -> list[tuple[int, int]]:
         if getattr(self.cfg, "enable_semantic_within", True) and doc.id in self._para_vecs:
             try:
-                qv = _hash_embed(query, getattr(self.cfg, "semantic_dim", 2048))
+                qv = self._query_vecs.get(doc.id)
+                if qv is None:
+                    qv = _hash_embed(query, getattr(self.cfg, "semantic_dim", 2048))
                 vecs = self._para_vecs.get(doc.id) or []
                 if not vecs:
                     return []
@@ -549,12 +727,96 @@ def decompose_query(query: str, cfg: Any) -> list[str]:
     return subgoals or [q]
 
 
-async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    tb = AgenticToolbox(docs, cfg)
+async def tool_loop(
+    docs: list[Document],
+    query: str,
+    cfg: Any,
+    *,
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    deadline = (
+        _now() + float(cfg.time_budget_sec)
+        if getattr(cfg, "time_budget_sec", None) is not None
+        else None
+    )
+    embedding_call_kwargs: dict[str, Any] = {}
+    embedding_app_config: dict[str, Any] = {"embedding_config": {}}
+    embedding_provider: str | None = None
+    embedding_model_id = ""
+    handle = None
+    provider_embeddings_allowed = True
+    if getattr(cfg, "agentic_use_provider_embeddings_within", False):
+        try:
+            from tldw_Server_API.app.core.config import load_comprehensive_config
+
+            loaded_config = load_comprehensive_config() or {}
+            embedding_provider = _embedding_provider_from_config(
+                loaded_config,
+                getattr(cfg, "agentic_provider_embedding_model_id", None),
+            )
+            embedding_model_id = _effective_embedding_model_id(
+                loaded_config,
+                getattr(cfg, "agentic_provider_embedding_model_id", None),
+            )
+            if credential_runtime is not None and embedding_provider in {"local", "local_api"}:
+                embedding_call_kwargs = _runtime_local_embedding_call_kwargs(
+                    loaded_config,
+                    embedding_provider,
+                    getattr(cfg, "agentic_provider_embedding_model_id", None),
+                )
+            embedding_app_config = _embedding_config_snapshot(
+                loaded_config,
+                scrub_secrets=credential_runtime is not None,
+            )
+            # Hugging Face in this synchronous service is an in-process provider.
+            if credential_runtime is not None:
+                if embedding_provider == "openai":
+                    handle, embedding_call_kwargs = await _resolve_runtime_embedding_call(
+                        credential_runtime,
+                        embedding_provider,
+                        _embedding_model_from_config(
+                            loaded_config,
+                            getattr(cfg, "agentic_provider_embedding_model_id", None),
+                        ),
+                    )
+                elif embedding_provider not in {"local", "local_api"}:
+                    embedding_call_kwargs = _runtime_local_embedding_call_kwargs(
+                        embedding_app_config,
+                        embedding_provider,
+                        getattr(cfg, "agentic_provider_embedding_model_id", None),
+                    )
+        except asyncio.CancelledError:
+            raise
+        except (
+            ByokResolutionError,
+            AttributeError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            _record_embedding_degraded(stage_metadata, exc)
+            provider_embeddings_allowed = False
+
+    tb = AgenticToolbox(
+        docs,
+        cfg,
+        query=query,
+        embedding_app_config=embedding_app_config,
+        embedding_provider=embedding_provider,
+        embedding_model_id=embedding_model_id,
+        embedding_call_kwargs=embedding_call_kwargs,
+        provider_embeddings_allowed=provider_embeddings_allowed,
+        stage_metadata=stage_metadata,
+    )
+    if handle is not None and tb.provider_embedding_used:
+        await credential_runtime.mark_used(handle)
     registry = make_default_registry(tb)
     remaining_tokens = int(getattr(cfg, "max_tokens_read", 0) or 0)
     max_steps = min(100, max(1, int(getattr(cfg, "max_tool_calls", 1) or 1)))
-    deadline = (_now() + float(cfg.time_budget_sec)) if getattr(cfg, "time_budget_sec", None) is not None else None
 
     assembled: list[tuple[Document, int, int]] = []
     steps = 0
@@ -565,12 +827,15 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
 
     planned_headings: list[str] = []
     planned_terms: list[str] = []
-    if getattr(cfg, "use_llm_planner", False):
+    if getattr(cfg, "use_llm_planner", False) and time_left():
         try:
             planner_cls = AnswerGenerator
             if planner_cls is None:
                 raise RuntimeError("AnswerGenerator is unavailable")
-            planner = planner_cls(model=None)
+            planner_kwargs: dict[str, Any] = {"model": None}
+            if credential_runtime is not None:
+                planner_kwargs["credential_runtime"] = credential_runtime
+            planner = planner_cls(**planner_kwargs)
             gen = await planner.generate(query=query, context="", prompt_template="default", max_tokens=200)
             text = gen.get("answer", "") if isinstance(gen, dict) else str(gen)
             payload = parse_structured_output(
@@ -590,6 +855,10 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
                     planned_headings = [str(item)[:80] for item in obj["headings"]][:5]
                 if isinstance(obj.get("keywords"), list):
                     planned_terms = [str(item)[:40] for item in obj["keywords"]][:8]
+        except (ByokResolutionError, ChatAPIError) as exc:
+            _record_planner_degraded(stage_metadata, exc)
+            planned_headings = []
+            planned_terms = []
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):
             planned_headings = []
             planned_terms = []
@@ -655,7 +924,10 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
                     t1 = time.time()
                     if getattr(cfg, "enable_metrics", False):
                         with contextlib.suppress(ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                            from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, observe_histogram
+                            from tldw_Server_API.app.core.Metrics.metrics_manager import (
+                                increment_counter,
+                                observe_histogram,
+                            )
 
                             increment_counter("agentic_tool_calls_total", 1, labels={"tool": "open_section"})
                             observe_histogram("agentic_tool_duration_seconds", (t1 - t0), labels={"tool": "open_section"})
@@ -676,7 +948,10 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
                 t1 = time.time()
                 if getattr(cfg, "enable_metrics", False):
                     with contextlib.suppress(ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                        from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, observe_histogram
+                        from tldw_Server_API.app.core.Metrics.metrics_manager import (
+                            increment_counter,
+                            observe_histogram,
+                        )
 
                         increment_counter("agentic_tool_calls_total", 1, labels={"tool": "expand_window"})
                         observe_histogram("agentic_tool_duration_seconds", (t1 - t0), labels={"tool": "expand_window"})
@@ -686,7 +961,10 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
                 remaining_tokens -= _token_estimate(snippet)
                 if getattr(cfg, "enable_metrics", False):
                     with contextlib.suppress(ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                        from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, observe_histogram
+                        from tldw_Server_API.app.core.Metrics.metrics_manager import (
+                            increment_counter,
+                            observe_histogram,
+                        )
 
                         observe_histogram("agentic_span_length_chars", float(len(snippet)), labels={"phase": "tool"})
                         increment_counter("span_bytes_read_total", float(len(snippet.encode("utf-8"))), labels={"tool": "expand_window"})

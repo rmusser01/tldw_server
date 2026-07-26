@@ -1,7 +1,7 @@
 ---
 id: TASK-12973
 title: Prepare and cut the 0.1.41 release from frozen dev
-status: In Progress
+status: Done
 labels:
 - release
 - documentation
@@ -12,6 +12,8 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2744
 - Docs/Development/Release_Process.md
 - Docs/Release_Checklist.md
+- https://github.com/rmusser01/tldw_server/pull/2745
+- https://github.com/rmusser01/tldw_server/pull/2748
 documentation:
 - Docs/superpowers/specs/2026-07-15-release-0.1.41-design.md
 - Docs/superpowers/plans/2026-07-15-release-0.1.41-implementation-plan.md
@@ -31,7 +33,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Prepare release 0.1.41 from frozen origin/dev commit 4c2ad2070ed63992dac8a97a6c4cf3c7d75f6de8 (through PR #2744), excluding all open PRs. Update authoritative version metadata, CHANGELOG.md, README.md, and release-note entry points; replace the inherited MkDocs warning baseline with deterministic canonical-to-Published generation and zero-warning strict validation in both the checked-in tree and CI-equivalent refresh pipeline; verify the expanded release diff and required gates; merge the reviewed release branch into main; tag the final main merge commit as v0.1.41; publish the GitHub Release; verify publication workflows; and sync main back into dev. Preserve the user's dirty primary checkout by working only in the isolated release worktree. Governing plans: Docs/superpowers/plans/2026-07-15-release-0.1.41-implementation-plan.md and Docs/superpowers/plans/2026-07-16-release-0.1.41-zero-warning-docs-implementation-plan.md.
+Prepare release 0.1.41 from frozen origin/dev commit 4c2ad2070ed63992dac8a97a6c4cf3c7d75f6de8 (through PR #2744), excluding all open PRs. Update authoritative version metadata, CHANGELOG.md, README.md, and release-note entry points; replace the inherited MkDocs warning baseline with deterministic canonical-to-Published generation and zero-warning strict validation in both the checked-in tree and CI-equivalent refresh pipeline; verify the expanded release diff and required gates; merge the reviewed release branch into main; and sync main back into dev. Per the requester's 2026-07-16 instruction, do not create an annotated v0.1.41 tag or GitHub Release. Preserve the user's dirty primary checkout by working only in isolated worktrees. Governing plans: Docs/superpowers/plans/2026-07-15-release-0.1.41-implementation-plan.md and Docs/superpowers/plans/2026-07-16-release-0.1.41-zero-warning-docs-implementation-plan.md.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -41,9 +43,9 @@ Prepare release 0.1.41 from frozen origin/dev commit 4c2ad2070ed63992dac8a97a6c4
 - [x] #3 CHANGELOG.md contains a curated 0.1.41 rollup for merged PRs included after 0.1.40 through PR #2744
 - [x] #4 README.md current status and What's New accurately summarize 0.1.41
 - [x] #5 Focused release metadata/docs tests, diff checks, and Bandit policy are satisfied
-- [ ] #6 Release PR into main is merged only after required checks are green
-- [ ] #7 Annotated v0.1.41 tag and GitHub Release point at the final main merge commit
-- [ ] #8 Release artifact workflows are verified and main is synchronized back into dev
+- [x] #6 Release PR into main is merged only after required checks are green
+- [x] #7 No annotated v0.1.41 tag or GitHub Release is created, per the requester's 2026-07-16 instruction
+- [x] #8 Released main history is synchronized back into dev; tag-triggered artifact workflows are intentionally not applicable
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -87,20 +89,30 @@ Worktree clean. The corrected merge ancestry has not yet been pushed at note tim
 - Reproduced CI hash exactly in an isolated /tmp dependency environment. Contract comparison found no path changes. Pydantic unified identical ChatWorkflowTemplateStep input/output components and their draft wrappers; five common schemas only retargeted $ref values.
 - Updated apps/tldw-frontend/lib/api/openapi.fingerprint.json to schema_count=2890 and sha256=22324cf1f3e80b7bdf7eec1807e85de4ff9eab1602173fcc8a92e880ca1d621c.
 - Reproduced CI-version drift check passed. openapi-typescript 7.13.0 generated both old/new views successfully; the ignored generated diff only reflected unified component names/references.
+2026-07-16 release merge and post-merge evidence:
+- Release PR https://github.com/rmusser01/tldw_server/pull/2745 merged normally into main at 7a23be3202e360f2d8e7cfe208e13ba406cf0507. Frozen source 4c2ad2070ed63992dac8a97a6c4cf3c7d75f6de8 is an ancestor of that merge.
+- Human-authored Change summary was inserted verbatim: "0.1.41 Brings in a lot of fixes to issues, including media ingestion and authentication." and "Used a frozen release branch due to the velocity of development and needing to pause without stopping."
+- Exact immutable PR head c88285c532c8e2f4c512bf96cfc8926c7d5c4e56 passed all six release gates: frontend-required 29533600067, e2e-required 29533600100, backend-required 29533600187, security-required 29533600113, container-build-check 29533600035, and coverage-required 29533600083.
+- Mandatory pre-merge repository proof /tmp/tldw-0.1.41-ci-focus-pre-merge.log emitted active_unrelated_runs=[] while preserving release run 29533600213. Account proof /tmp/tldw-0.1.41-ci-focus-account-pre-merge.log emitted active_unrelated_runs=[] for tldw_server, tldw_chatbook, and puzzle-attack. GitHub queued container runs that ignored normal cancellation were force-cancelled only after exact PR/head classification. The user-authorized cancellation policy ended immediately when PR #2745 merged; no post-merge run was cancelled.
+- Clean detached post-merge verification at 7a23be3202 confirmed pyproject, FastAPI AST, README, and MkDocs versions are 0.1.41; release-note extraction length is 2561 with no duplicate bullets; historical 0.1.40 references remain only in prior-release sections; checked-in and refreshed strict MkDocs builds exited zero with no WARNING records; two refreshes were deterministic and left the worktree clean.
+- Requester instruction on 2026-07-16: "Do not create a new tagged release." Tag and GitHub Release publication are therefore intentionally skipped. Confirmed no local v0.1.41 tag, no remote matching tag ref, and no GitHub Release for v0.1.41. Do not create or publish either later under this task.
+- Sync branch codex/sync-main-0.1.41-to-dev was created from released main merge 7a23be3202. TASK-12973 remains In Progress until the sync PR merges and closeout evidence is committed.
+Main-to-dev sync PR opened: https://github.com/rmusser01/tldw_server/pull/2748. Base=dev, head=codex/sync-main-0.1.41-to-dev. Its human-authored Change summary reuses the requester's exact two sentences from release PR #2745. No tag or GitHub Release will be created.
+Closeout (2026-07-16): main-to-dev sync PR https://github.com/rmusser01/tldw_server/pull/2748 merged normally at 7d72382d9c671e3c8d11cc2f4ae1de8d30c78977. After fetching origin/dev and origin/main, git merge-base --is-ancestor origin/main origin/dev exited zero (origin/main=7a23be3202e360f2d8e7cfe208e13ba406cf0507, origin/dev=7d72382d9c671e3c8d11cc2f4ae1de8d30c78977). Tag-triggered publication checks are intentionally not applicable because the requester explicitly prohibited creating a tagged release. No local or remote v0.1.41 tag and no GitHub Release exist.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+0.1.41 was prepared from frozen dev commit 4c2ad2070ed63992dac8a97a6c4cf3c7d75f6de8 through PR #2744, with all relevant version surfaces, CHANGELOG.md, README.md, and release notes updated. The release also replaced the inherited 101-warning documentation baseline with deterministic canonical publication and strict zero-warning MkDocs validation. Release PR #2745 merged into main only after all six exact-head gates passed, and sync PR #2748 carried the released main history back into dev. The frozen release branch was used because development velocity required pausing a stable reviewed snapshot without stopping ongoing development. Per the requester's final instruction, no v0.1.41 tag or GitHub Release was created.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

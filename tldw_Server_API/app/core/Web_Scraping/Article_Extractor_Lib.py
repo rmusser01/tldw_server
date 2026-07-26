@@ -4043,6 +4043,39 @@ class ContentMetadataHandler:
 
     METADATA_START = "[METADATA]"
     METADATA_END = "[/METADATA]"
+    _MAX_METADATA_JSON_NESTING = 64
+
+    @staticmethod
+    def _metadata_json_nesting_is_safe(metadata_text: str) -> bool:
+        """Return whether the leading JSON value stays within the nesting limit."""
+        depth = 0
+        in_string = False
+        escaped = False
+
+        for char in metadata_text:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char in "[{":
+                depth += 1
+                if depth > ContentMetadataHandler._MAX_METADATA_JSON_NESTING:
+                    return False
+            elif char in "]}":
+                depth -= 1
+                if depth == 0:
+                    return True
+                if depth < 0:
+                    return False
+
+        return False
 
     @staticmethod
     def format_content_with_metadata(
@@ -4092,6 +4125,8 @@ class ContentMetadataHandler:
             return None
 
         metadata_text = envelope[len(ContentMetadataHandler.METADATA_START) :].lstrip()
+        if not ContentMetadataHandler._metadata_json_nesting_is_safe(metadata_text):
+            return None
         try:
             metadata, metadata_end = json.JSONDecoder().raw_decode(metadata_text)
         except (json.JSONDecodeError, RecursionError):

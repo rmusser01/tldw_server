@@ -10,6 +10,9 @@ on:
     branches:
       - main
       - dev
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   workflow_dispatch:
   release:
     types: [published]
@@ -22,17 +25,45 @@ env:
 
 concurrency:
   # Ensure newer PR commits cancel older queued runs for the same PR.
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: ci.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   http-client-patch-guard:
     name: HTTP Client Patch Guard
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -42,11 +73,25 @@ jobs:
           python Helper_Scripts/checks/guard_http_client_patching.py
   syntax-check:
     name: Syntax Check (compileall)
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -61,11 +106,25 @@ jobs:
           PY
   shard-coverage:
     name: Shard coverage guard
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -79,11 +138,25 @@ jobs:
         run: python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml
   quickstart-dry-run:
     name: Quickstart Dry-Run Smoke
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -93,17 +166,31 @@ jobs:
           make -n quickstart-install
   lint:
     name: Lint & Type Check
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          cache: pip
+          cache: ${{ github.event_name != 'workflow_run' && 'pip' || '' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -123,6 +210,17 @@ jobs:
 
   frontend-lint:
     name: Frontend Lint (Next.js)
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -130,6 +228,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -151,6 +252,17 @@ jobs:
 
   wizard-tests:
     name: Wizard Tests (Coverage Gate)
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -194,6 +306,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -206,6 +321,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -259,24 +375,59 @@ jobs:
 
   changes:
     name: Detect changed areas
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      backend_changed: ${{ steps.detect.outputs.backend_changed }}
+      backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha }}
+          persist-credentials: false
       - name: Classify changed paths
         id: detect
+        if: github.event_name != 'workflow_run'
         uses: ./.github/actions/detect-required-gate-changes
+      - name: Classify admitted changed paths
+        id: detect_admitted
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.admission.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
+          mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
+          python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
   full-suite-linux-311-smoke:
     name: Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -364,6 +515,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -376,6 +530,7 @@ jobs:
         with:
           python-version: '3.11'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -499,7 +654,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -684,7 +839,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_i*.py
           - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_provider*.py
           - name: admin-incidents
             paths: >-
               tldw_Server_API/tests/Admin/test_incidents_*.py
@@ -821,6 +976,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -854,7 +1010,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
               tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
-              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_propositions*.py
+              tldw_Server_API/tests/Chunking/test_rolling_summarize_fail_closed.py
               tldw_Server_API/tests/Chunking/test_security*.py
               tldw_Server_API/tests/Chunking/test_semantic_*.py
               tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
@@ -906,7 +1063,9 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
           - name: ai-embeddings-policy
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_provider_override_store_boundary.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
           - name: ai-embeddings-v5-core
             paths: >-
@@ -963,6 +1122,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_capabilities_styles.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_provider_override_store_boundary.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_request_contract_parity.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
@@ -995,7 +1156,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_cache_invalidation_core.py
               tldw_Server_API/tests/RAG_NEW/unit/test_chromadb*.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_embedding_cache_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_embedding*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_rewrite_cache.py
               tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache*.py
@@ -1019,6 +1180,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_response_writer.py
               tldw_Server_API/tests/RAG_NEW/unit/test_retrieval*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_reranker*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
           - name: rag-new-unit-unified-pipeline
@@ -1052,7 +1214,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_batch*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_clarification_gate.py
               tldw_Server_API/tests/RAG_NEW/unit/test_corpus_synonyms_expansion.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chain*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_feedback_learning.py
               tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py
               tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py
@@ -1666,6 +1828,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -1678,6 +1843,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -1844,8 +2010,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -1902,8 +2078,22 @@ jobs:
   full-suite-linux-312-summary:
     name: Full Suite (Ubuntu / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-312-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-linux-312-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check Python 3.12 shard result
         shell: bash
@@ -1920,7 +2110,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -2105,7 +2295,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_i*.py
           - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_provider*.py
           - name: admin-incidents
             paths: >-
               tldw_Server_API/tests/Admin/test_incidents_*.py
@@ -2242,6 +2432,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -2275,7 +2466,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
               tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
-              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_propositions*.py
+              tldw_Server_API/tests/Chunking/test_rolling_summarize_fail_closed.py
               tldw_Server_API/tests/Chunking/test_security*.py
               tldw_Server_API/tests/Chunking/test_semantic_*.py
               tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
@@ -2327,7 +2519,9 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
           - name: ai-embeddings-policy
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_provider_override_store_boundary.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
           - name: ai-embeddings-v5-core
             paths: >-
@@ -2384,6 +2578,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_capabilities_styles.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_provider_override_store_boundary.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_request_contract_parity.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
@@ -2416,7 +2612,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_cache_invalidation_core.py
               tldw_Server_API/tests/RAG_NEW/unit/test_chromadb*.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_embedding_cache_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_embedding*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_rewrite_cache.py
               tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache*.py
@@ -2440,6 +2636,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_response_writer.py
               tldw_Server_API/tests/RAG_NEW/unit/test_retrieval*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_reranker*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
           - name: rag-new-unit-unified-pipeline
@@ -2473,7 +2670,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_batch*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_clarification_gate.py
               tldw_Server_API/tests/RAG_NEW/unit/test_corpus_synonyms_expansion.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chain*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_feedback_learning.py
               tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py
               tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py
@@ -3087,6 +3284,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -3099,6 +3299,7 @@ jobs:
         with:
           python-version: '3.13'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -3209,8 +3410,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -3267,8 +3478,22 @@ jobs:
   full-suite-linux-313-summary:
     name: Full Suite (Ubuntu / Python 3.13)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-313-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-linux-313-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check Python 3.13 shard result
         shell: bash
@@ -3286,7 +3511,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -3397,7 +3622,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_i*.py
           - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_provider*.py
           - name: admin-incidents
             paths: >-
               tldw_Server_API/tests/Admin/test_incidents_*.py
@@ -3534,6 +3759,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -3567,7 +3793,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
               tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
-              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_propositions*.py
+              tldw_Server_API/tests/Chunking/test_rolling_summarize_fail_closed.py
               tldw_Server_API/tests/Chunking/test_security*.py
               tldw_Server_API/tests/Chunking/test_semantic_*.py
               tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
@@ -3619,7 +3846,9 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
           - name: ai-embeddings-policy
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_provider_override_store_boundary.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
           - name: ai-embeddings-v5-core
             paths: >-
@@ -3676,6 +3905,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_capabilities_styles.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_provider_override_store_boundary.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_request_contract_parity.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
@@ -3708,7 +3939,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_cache_invalidation_core.py
               tldw_Server_API/tests/RAG_NEW/unit/test_chromadb*.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_embedding_cache_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_embedding*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_rewrite_cache.py
               tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache*.py
@@ -3732,6 +3963,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_response_writer.py
               tldw_Server_API/tests/RAG_NEW/unit/test_retrieval*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_reranker*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
           - name: rag-new-unit-unified-pipeline
@@ -3765,7 +3997,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_batch*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_clarification_gate.py
               tldw_Server_API/tests/RAG_NEW/unit/test_corpus_synonyms_expansion.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chain*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_feedback_learning.py
               tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py
               tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py
@@ -4355,6 +4587,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
@@ -4367,7 +4602,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: ${{ runner.os != 'Windows' }}
-          enable-pip-cache: ${{ runner.os != 'Windows' }}
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' && runner.os != 'Windows' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -4426,8 +4661,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -4484,8 +4729,22 @@ jobs:
   full-suite-macos-312-summary:
     name: Full Suite (macos-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-macos-312-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-macos-312-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check macos-latest Python 3.12 shard result
         shell: bash
@@ -4502,7 +4761,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -4613,7 +4872,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_i*.py
           - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_provider*.py
           - name: admin-incidents
             paths: >-
               tldw_Server_API/tests/Admin/test_incidents_*.py
@@ -4750,6 +5009,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -4783,7 +5043,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
               tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
-              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_propositions*.py
+              tldw_Server_API/tests/Chunking/test_rolling_summarize_fail_closed.py
               tldw_Server_API/tests/Chunking/test_security*.py
               tldw_Server_API/tests/Chunking/test_semantic_*.py
               tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
@@ -4835,7 +5096,9 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
           - name: ai-embeddings-policy
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_provider_override_store_boundary.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
           - name: ai-embeddings-v5-core
             paths: >-
@@ -4892,6 +5155,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_capabilities_styles.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_provider_override_store_boundary.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_request_contract_parity.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
@@ -4924,7 +5189,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_cache_invalidation_core.py
               tldw_Server_API/tests/RAG_NEW/unit/test_chromadb*.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_embedding_cache_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_embedding*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_rewrite_cache.py
               tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache*.py
@@ -4948,6 +5213,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_response_writer.py
               tldw_Server_API/tests/RAG_NEW/unit/test_retrieval*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_reranker*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
           - name: rag-new-unit-unified-pipeline
@@ -4981,7 +5247,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_batch*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_clarification_gate.py
               tldw_Server_API/tests/RAG_NEW/unit/test_corpus_synonyms_expansion.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chain*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_feedback_learning.py
               tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py
               tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py
@@ -5571,6 +5837,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
@@ -5583,7 +5852,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: ${{ runner.os != 'Windows' }}
-          enable-pip-cache: ${{ runner.os != 'Windows' }}
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' && runner.os != 'Windows' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -5642,8 +5911,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -5669,7 +5948,12 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          EXTRA_PYTEST_ARGS=()
+          if [ "$SHARD_NAME" = "research-websearch" ]; then
+            EXTRA_PYTEST_ARGS=(-vv -p pytest_timeout --timeout=120 --timeout-method=thread)
+          fi
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            "${EXTRA_PYTEST_ARGS[@]}" \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -5700,8 +5984,22 @@ jobs:
   full-suite-windows-312-summary:
     name: Full Suite (windows-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-windows-312-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-windows-312-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check windows-latest Python 3.12 shard result
         shell: bash
@@ -5718,7 +6016,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     needs: [lint, syntax-check]
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -5830,7 +6128,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_i*.py
           - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_provider*.py
           - name: admin-incidents
             paths: >-
               tldw_Server_API/tests/Admin/test_incidents_*.py
@@ -5967,6 +6265,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -6000,7 +6299,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
               tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
-              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_propositions*.py
+              tldw_Server_API/tests/Chunking/test_rolling_summarize_fail_closed.py
               tldw_Server_API/tests/Chunking/test_security*.py
               tldw_Server_API/tests/Chunking/test_semantic_*.py
               tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
@@ -6052,7 +6352,9 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
           - name: ai-embeddings-policy
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_provider_override_store_boundary.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
           - name: ai-embeddings-v5-core
             paths: >-
@@ -6109,6 +6411,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_capabilities_styles.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py
+              tldw_Server_API/tests/RAG_NEW/integration/test_rag_provider_override_store_boundary.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_request_contract_parity.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py
               tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
@@ -6141,7 +6445,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_cache_invalidation_core.py
               tldw_Server_API/tests/RAG_NEW/unit/test_chromadb*.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_embedding_cache_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_embedding*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_rewrite_cache.py
               tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache*.py
@@ -6165,6 +6469,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_response_writer.py
               tldw_Server_API/tests/RAG_NEW/unit/test_retrieval*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_reranker*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
           - name: rag-new-unit-unified-pipeline
@@ -6198,7 +6503,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_batch*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_clarification_gate.py
               tldw_Server_API/tests/RAG_NEW/unit/test_corpus_synonyms_expansion.py
-              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chain*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_feedback_learning.py
               tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py
               tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py
@@ -6788,6 +7093,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
@@ -6800,7 +7108,7 @@ jobs:
         with:
           python-version: '3.13'
           use-uv: ${{ runner.os != 'Windows' }}
-          enable-pip-cache: ${{ runner.os != 'Windows' }}
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' && runner.os != 'Windows' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -6859,8 +7167,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -6919,7 +7237,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [full-suite-linux-312-summary, full-suite-linux-313-summary, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
@@ -6928,6 +7246,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -6940,6 +7261,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock

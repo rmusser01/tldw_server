@@ -4,6 +4,7 @@
 import asyncio
 import contextlib
 import threading
+from collections.abc import AsyncGenerator, Iterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
@@ -12,8 +13,8 @@ from cachetools import LRUCache
 from fastapi import Depends, Header, HTTPException, Request, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
@@ -21,13 +22,11 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     get_content_backend_instance,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.testing import is_test_mode
-
-# Local imports
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     DatabaseError,
     PromptStudioDatabase,
 )
+from tldw_Server_API.app.core.testing import is_test_mode
 
 ########################################################################################################################
 # Configuration
@@ -38,6 +37,9 @@ SERVER_CLIENT_ID = settings.get("SERVER_CLIENT_ID", "prompt_studio_server")
 MAX_CACHED_INSTANCES = settings.get("MAX_CACHED_PROMPT_STUDIO_DB_INSTANCES", 20)
 _db_instances_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_INSTANCES)
 _db_lock = threading.Lock()
+_PromptStudioCacheKey = tuple[str, str, str]
+_active_db_leases: dict[_PromptStudioCacheKey, int] = {}
+_pending_db_close: dict[_PromptStudioCacheKey, list[PromptStudioDatabase]] = {}
 
 _PROMPT_STUDIO_DB_EXCEPTIONS = (
     DatabaseError,
@@ -85,17 +87,12 @@ def _get_prompt_studio_db_path_for_user(user_id: str) -> Path:
     """
     return DatabasePaths.get_prompt_studio_db_path(user_id)
 
-def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudioDatabase:
-    """
-    Get or create a PromptStudioDatabase instance for a user.
 
-    Args:
-        user_id: User identifier
-        client_id: Client identifier for sync logging
-
-    Returns:
-        PromptStudioDatabase instance
-    """
+def _resolve_prompt_studio_db_cache_identity(
+    user_id: str,
+    client_id: str,
+) -> tuple[Path, Any, _PromptStudioCacheKey]:
+    """Resolve the backend and client-aware identity for one cached database."""
     db_path = _get_prompt_studio_db_path_for_user(user_id)
     backend = get_content_backend_instance()
 
@@ -116,37 +113,153 @@ def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudi
         else:
             backend_signature = f"{backend.backend_type.value}:{id(backend)}"
 
-    cache_key = (str(db_path), backend_signature)
+    return db_path, backend, (str(db_path), backend_signature, str(client_id))
 
+
+def _close_prompt_studio_db(db_instance: PromptStudioDatabase) -> None:
+    """Close one cached database without leaking backend error details."""
+    close_method = getattr(db_instance, "close_connection", None)
+    if not callable(close_method):
+        close_method = getattr(db_instance, "close", None)
+    if not callable(close_method):
+        return
+    try:
+        close_method()
+    except _PROMPT_STUDIO_DB_EXCEPTIONS as exc:
+        logger.error(
+            "Error closing database instance; error_type={}",
+            type(exc).__name__,
+        )
+
+
+def _evict_prompt_studio_db_for_insert_locked() -> list[PromptStudioDatabase]:
+    """Make room for one cache insert while deferring active DB disposal."""
+    close_now: list[PromptStudioDatabase] = []
+    while len(_db_instances_cache) >= _db_instances_cache.maxsize:
+        evicted_key, evicted_db = _db_instances_cache.popitem()
+        if _active_db_leases.get(evicted_key, 0) > 0:
+            _pending_db_close.setdefault(evicted_key, []).append(evicted_db)
+        else:
+            close_now.append(evicted_db)
+    return close_now
+
+
+def _get_or_create_prompt_studio_db_locked(
+    user_id: str,
+    client_id: str,
+    db_path: Path,
+    backend: Any,
+    cache_key: _PromptStudioCacheKey,
+) -> tuple[PromptStudioDatabase, list[PromptStudioDatabase]]:
+    """Get or create one DB while the caller holds ``_db_lock``."""
+    if cache_key in _db_instances_cache:
+        logger.debug("Using cached PromptStudioDatabase for user {}", user_id)
+        cached_instance = _db_instances_cache[cache_key]
+        cached_instance.user_id = str(user_id)
+        return cached_instance, []
+
+    try:
+        db_instance = create_prompt_studio_database(
+            client_id,
+            db_path=db_path,
+            tenant_user_id=str(user_id),
+            backend=backend,
+        )
+        db_instance.user_id = str(user_id)
+        close_now = _evict_prompt_studio_db_for_insert_locked()
+        _db_instances_cache[cache_key] = db_instance
+        logger.info("Created new PromptStudioDatabase instance for user {}", user_id)
+        return db_instance, close_now
+    except _PROMPT_STUDIO_DB_EXCEPTIONS as e:
+        logger.error(
+            "Failed to create PromptStudioDatabase for user {}; error_type={}",
+            user_id,
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initialize database",
+        ) from e
+
+
+def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudioDatabase:
+    """
+    Get or create an unleased PromptStudioDatabase instance for a user.
+
+    Request and WebSocket callers must use ``managed_prompt_studio_db`` so an
+    instance cannot be closed by capacity eviction while they are using it.
+
+    Args:
+        user_id: User identifier
+        client_id: Client identifier for sync logging
+
+    Returns:
+        PromptStudioDatabase instance
+    """
+    db_path, backend, cache_key = _resolve_prompt_studio_db_cache_identity(
+        user_id,
+        client_id,
+    )
     with _db_lock:
-        # Check cache first
-        if cache_key in _db_instances_cache:
-            logger.debug("Using cached PromptStudioDatabase for user {}", user_id)
-            cached_instance = _db_instances_cache[cache_key]
-            cached_instance.user_id = str(user_id)
-            return cached_instance
+        db_instance, close_now = _get_or_create_prompt_studio_db_locked(
+            user_id,
+            client_id,
+            db_path,
+            backend,
+            cache_key,
+        )
+    for evicted_db in close_now:
+        _close_prompt_studio_db(evicted_db)
+    return db_instance
 
-        # Create new instance
-        try:
-            db_instance = create_prompt_studio_database(
-                client_id,
-                db_path=db_path,
-                backend=backend,
-            )
-            db_instance.user_id = str(user_id)
-            _db_instances_cache[cache_key] = db_instance
-            logger.info("Created new PromptStudioDatabase instance for user {}", user_id)
-            return db_instance
-        except _PROMPT_STUDIO_DB_EXCEPTIONS as e:
-            logger.error(
-                "Failed to create PromptStudioDatabase for user {}; error_type={}",
-                user_id,
-                type(e).__name__,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to initialize database"
-            ) from e
+
+@contextlib.contextmanager
+def managed_prompt_studio_db(
+    user_context: dict[str, Any],
+) -> Iterator[PromptStudioDatabase]:
+    """Lease a client-aware Prompt Studio DB until the caller exits the scope."""
+    user_id = str(user_context["user_id"])
+    client_id = str(user_context["client_id"])
+
+    if (
+        user_id == "anonymous"
+        and not settings.get("ALLOW_ANONYMOUS_PROMPT_STUDIO", False)
+        and not is_test_mode()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required for Prompt Studio",
+        )
+
+    db_path, backend, cache_key = _resolve_prompt_studio_db_cache_identity(
+        user_id,
+        client_id,
+    )
+    with _db_lock:
+        db_instance, close_now = _get_or_create_prompt_studio_db_locked(
+            user_id,
+            client_id,
+            db_path,
+            backend,
+            cache_key,
+        )
+        _active_db_leases[cache_key] = _active_db_leases.get(cache_key, 0) + 1
+
+    try:
+        for evicted_db in close_now:
+            _close_prompt_studio_db(evicted_db)
+        yield db_instance
+    finally:
+        deferred_close: list[PromptStudioDatabase] = []
+        with _db_lock:
+            remaining = _active_db_leases.get(cache_key, 0) - 1
+            if remaining > 0:
+                _active_db_leases[cache_key] = remaining
+            else:
+                _active_db_leases.pop(cache_key, None)
+                deferred_close = _pending_db_close.pop(cache_key, [])
+        for evicted_db in deferred_close:
+            _close_prompt_studio_db(evicted_db)
 
 ########################################################################################################################
 # User Context Dependencies
@@ -378,31 +491,18 @@ async def get_prompt_studio_user(
 
 async def get_prompt_studio_db(
     user_context: dict = Depends(get_prompt_studio_user)
-) -> PromptStudioDatabase:
+) -> AsyncGenerator[PromptStudioDatabase, None]:
     """
-    Get PromptStudioDatabase instance for the current user.
+    Yield a leased PromptStudioDatabase instance for the current user.
 
     Args:
         user_context: User context from authentication
 
-    Returns:
-        PromptStudioDatabase instance
+    Yields:
+        PromptStudioDatabase instance held until dependency teardown
     """
-    user_id = user_context["user_id"]
-    client_id = user_context["client_id"]
-
-    # Allow anonymous only in explicit settings or during tests
-    if (
-        user_id == "anonymous"
-        and not settings.get("ALLOW_ANONYMOUS_PROMPT_STUDIO", False)
-        and not is_test_mode()
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required for Prompt Studio"
-        )
-
-    return _get_or_create_prompt_studio_db(user_id, client_id)
+    with managed_prompt_studio_db(user_context) as db_instance:
+        yield db_instance
 
 ########################################################################################################################
 # Permission Dependencies
@@ -586,21 +686,24 @@ async def check_rate_limit(
 ########################################################################################################################
 # Cleanup
 
-def shutdown_prompt_studio_deps():
+def shutdown_prompt_studio_deps() -> None:
     """
     Cleanup function to close all cached database connections.
     Should be called on application shutdown.
     """
+    close_now: list[PromptStudioDatabase] = []
     with _db_lock:
-        for db_instance in _db_instances_cache.values():
-            try:
-                if hasattr(db_instance, 'close'):
-                    db_instance.close()
-            except _PROMPT_STUDIO_DB_EXCEPTIONS as e:
-                logger.error(
-                    "Error closing database instance; error_type={}",
-                    type(e).__name__,
-                )
-
+        for cache_key, db_instance in list(_db_instances_cache.items()):
+            if _active_db_leases.get(cache_key, 0) > 0:
+                _pending_db_close.setdefault(cache_key, []).append(db_instance)
+            else:
+                close_now.append(db_instance)
         _db_instances_cache.clear()
-        logger.info("Prompt Studio dependencies cleaned up")
+
+        for cache_key in list(_pending_db_close):
+            if _active_db_leases.get(cache_key, 0) <= 0:
+                close_now.extend(_pending_db_close.pop(cache_key))
+
+    for db_instance in close_now:
+        _close_prompt_studio_db(db_instance)
+    logger.info("Prompt Studio dependencies cleaned up")
