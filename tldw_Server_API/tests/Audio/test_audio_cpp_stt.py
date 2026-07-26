@@ -2757,3 +2757,24 @@ async def test_audio_cpp_sync_wrapper_rejects_same_loop_discovery_leader(
         match="^Invalid audio.cpp execution route$",
     ):
         audio_cpp.transcribe_audio_cpp(**request, afetch_fn=fail_afetch)
+
+
+def test_audio_cpp_registry_reset_clears_discovery_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        stt_provider_adapter as spa,
+    )
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        audio_cpp,
+        "reset_audio_cpp_discovery_cache",
+        lambda: calls.append("reset"),
+    )
+    spa._REGISTRY = spa.SttProviderRegistry()
+
+    spa.reset_stt_provider_registry()
+
+    assert calls == ["reset"]
+    assert spa._REGISTRY is None

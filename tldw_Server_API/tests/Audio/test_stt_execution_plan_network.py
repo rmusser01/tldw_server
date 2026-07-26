@@ -947,6 +947,7 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
         plan: spa.SttBatchExecutionPlan,
         actual: spa.SttActualExecution,
         runtime_mismatches: tuple[str, ...] = (),
+        metadata_allowlist: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         assert actual.route_id == "local-2"
         assert actual.backend == "transformers"
@@ -956,6 +957,7 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
             plan=plan,
             actual=actual,
             runtime_mismatches=runtime_mismatches,
+            metadata_allowlist=metadata_allowlist,
         )
 
     monkeypatch.setattr(

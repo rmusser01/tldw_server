@@ -2195,3 +2195,567 @@ def test_qwen3_asr_adapter_uses_config_default(monkeypatch):
     assert provider == "qwen3-asr"
     assert model == "./custom/model/path"
     assert variant is None
+
+
+def _audio_cpp_enabled_settings(
+    *,
+    origin: str = "http://127.0.0.1:18080",
+    default_model: str = "whisper-small",
+    timeout: object = 17.25,
+) -> dict[str, object]:
+    return {
+        "audio_cpp_enabled": "true",
+        "audio_cpp_base_url": origin,
+        "audio_cpp_default_model": default_model,
+        "audio_cpp_timeout_seconds": timeout,
+    }
+
+
+def _clear_audio_cpp_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "STT_AUDIO_CPP_ENABLED",
+        "STT_AUDIO_CPP_BASE_URL",
+        "STT_AUDIO_CPP_DEFAULT_MODEL",
+        "STT_AUDIO_CPP_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _plan_audio_cpp(
+    spa,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model: str | None = "whisper-small",
+    language: str | None = "en",
+    task: str = "transcribe",
+    word_timestamps: bool = False,
+    prompt: str | None = None,
+    hotwords: tuple[str, ...] = (),
+    diarization: bool = False,
+    mode: str = "neutral-v1",
+    settings: dict[str, object] | None = None,
+):
+    _clear_audio_cpp_environment(monkeypatch)
+    monkeypatch.setattr(
+        spa,
+        "get_stt_config",
+        lambda: dict(settings or _audio_cpp_enabled_settings()),
+    )
+    return spa.AudioCppAdapter().plan_batch_execution(
+        model=model,
+        language=language,
+        task=task,
+        word_timestamps=word_timestamps,
+        prompt=prompt,
+        hotwords=hotwords,
+        diarization=diarization,
+        mode=mode,
+    )
+
+
+@pytest.mark.unit
+def test_audio_cpp_provider_registration_aliases_and_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spa = _import_module()
+    _clear_audio_cpp_environment(monkeypatch)
+    monkeypatch.setattr(
+        spa,
+        "get_stt_config",
+        lambda: _audio_cpp_enabled_settings() | {"audio_cpp_enabled": "false"},
+    )
+
+    registry = spa.SttProviderRegistry()
+
+    assert spa.SttProviderName.AUDIO_CPP.value == "audio-cpp"
+    for selector in ("audio-cpp", "audiocpp", "audio_cpp"):
+        adapter = registry.get_adapter_strict(selector)
+        assert isinstance(adapter, spa.AudioCppAdapter)
+        assert adapter.name is spa.SttProviderName.AUDIO_CPP
+    capabilities = registry.get_capabilities("audio-cpp")
+    assert capabilities.supports_batch is True
+    assert capabilities.supports_streaming is False
+    assert capabilities.supports_diarization is False
+    assert any(
+        item["provider"] == "audio-cpp"
+        for item in registry.list_capabilities(include_disabled=True)
+    )
+
+    with pytest.raises(
+        spa.STTExecutionUnsupportedError,
+        match="^audio\\.cpp is disabled$",
+    ):
+        registry.get_adapter_strict("audio-cpp").plan_batch_execution(
+            model="whisper-small",
+            language="en",
+            task="transcribe",
+            word_timestamps=False,
+            prompt=None,
+            hotwords=(),
+            diarization=False,
+            mode="neutral-v1",
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("selector", ("audio-cpp", "audiocpp", "audio_cpp"))
+def test_audio_cpp_selector_resolution_precedes_model_heuristics(
+    monkeypatch: pytest.MonkeyPatch,
+    selector: str,
+) -> None:
+    spa = _import_module()
+    _clear_audio_cpp_environment(monkeypatch)
+    monkeypatch.setattr(
+        spa,
+        "get_stt_config",
+        lambda: _audio_cpp_enabled_settings(default_model="default-asr"),
+    )
+    registry = spa.SttProviderRegistry()
+
+    provider, model, variant = registry.resolve_provider_for_model(
+        f"{selector}:qwen3-asr-1.7b"
+    )
+    assert (provider, model, variant) == (
+        "audio-cpp",
+        "qwen3-asr-1.7b",
+        None,
+    )
+
+    provider, model, variant = registry.resolve_provider_for_model(selector)
+    assert (provider, model, variant) == (
+        "audio-cpp",
+        "default-asr",
+        None,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("selector", "default_model"),
+    (
+        ("audio-cpp:", "default-asr"),
+        ("audiocpp:../unsafe", "default-asr"),
+        ("audio_cpp", ""),
+    ),
+)
+def test_audio_cpp_invalid_selector_never_falls_through_to_model_parser(
+    monkeypatch: pytest.MonkeyPatch,
+    selector: str,
+    default_model: str,
+) -> None:
+    spa = _import_module()
+    _clear_audio_cpp_environment(monkeypatch)
+    monkeypatch.setattr(
+        spa,
+        "get_stt_config",
+        lambda: _audio_cpp_enabled_settings(default_model=default_model),
+    )
+    monkeypatch.setattr(
+        spa,
+        "parse_transcription_model",
+        lambda _model: (_ for _ in ()).throw(
+            AssertionError("invalid audio.cpp selector fell through")
+        ),
+    )
+
+    with pytest.raises(spa.STTExecutionUnsupportedError):
+        spa.SttProviderRegistry().resolve_provider_for_model(selector)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "configured_provider",
+    ("audio-cpp", "audiocpp", "audio_cpp"),
+)
+def test_audio_cpp_configured_default_provider_uses_default_model(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_provider: str,
+) -> None:
+    spa = _import_module()
+    _clear_audio_cpp_environment(monkeypatch)
+    monkeypatch.setattr(
+        spa,
+        "get_stt_config",
+        lambda: _audio_cpp_enabled_settings(default_model="server-default")
+        | {"default_transcriber": configured_provider},
+    )
+
+    assert spa.SttProviderRegistry().resolve_provider_for_model(None) == (
+        "audio-cpp",
+        "server-default",
+        None,
+    )
+
+
+@pytest.mark.unit
+def test_audio_cpp_strict_lookup_never_falls_back() -> None:
+    spa = _import_module()
+    registry = spa.SttProviderRegistry()
+
+    for selector in ("audio-cpp", "audiocpp", "audio_cpp"):
+        assert isinstance(
+            registry.get_adapter_strict(selector),
+            spa.AudioCppAdapter,
+        )
+    with pytest.raises(spa.STTExecutionPlanError):
+        registry.get_adapter_strict("audio-cpp-unknown")
+
+
+@pytest.mark.unit
+def test_audio_cpp_planning_is_network_free_and_freezes_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spa = _import_module()
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_AudioCpp as audio_cpp,
+    )
+
+    def fail_network(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("audio.cpp planning performed network I/O")
+
+    monkeypatch.setattr(audio_cpp, "afetch", fail_network)
+    monkeypatch.setattr(http_client, "afetch", fail_network)
+
+    plan = _plan_audio_cpp(spa, monkeypatch)
+    route = plan.descriptor.primary_route
+    runtime = plan.runtime_values()
+    safe_descriptor = plan.descriptor.as_safe_dict()
+
+    assert runtime == {
+        "audio_cpp_model": "whisper-small",
+        "audio_cpp_origin": "http://127.0.0.1:18080",
+        "audio_cpp_timeout": 17.25,
+        "audio_cpp_transport": route.transport,
+    }
+    assert route.provider == "audio-cpp"
+    assert route.model_label == "whisper-small"
+    assert route.backend == "audio_cpp_http"
+    assert route.source == "audio_cpp_http"
+    assert route.audio_egress is spa.SttAudioEgress.LOOPBACK
+    assert route.endpoint_id == spa._normalize_audio_endpoint(
+        "http://127.0.0.1:18080/v1/audio/transcriptions"
+    )[2]
+    assert route.identity_resolved is False
+    assert route.artifact_id is None
+    assert route.device is None
+    assert route.compute_type is None
+    assert route.dtype is None
+    assert route.decoding_ids == ()
+    assert route.local_model_available is False
+    assert route.would_download is False
+    assert route.transport in {"httpx", "aiohttp"}
+    assert plan.descriptor.source_modules == tuple(
+        sorted(
+            (
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_AudioCpp",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                "tldw_Server_API.app.core.Security.egress",
+                "tldw_Server_API.app.core.http_client",
+                "tldw_Server_API.app.core.stt_observability_context",
+            )
+        )
+    )
+    assert plan.descriptor.dependency_distributions == (route.transport,)
+    assert "127.0.0.1" not in str(safe_descriptor)
+    assert "18080" not in str(safe_descriptor)
+
+
+@pytest.mark.unit
+def test_audio_cpp_planning_classifies_remote_egress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spa = _import_module()
+
+    plan = _plan_audio_cpp(
+        spa,
+        monkeypatch,
+        settings=_audio_cpp_enabled_settings(
+            origin="https://stt.example.com"
+        ),
+    )
+
+    assert (
+        plan.descriptor.primary_route.audio_egress
+        is spa.SttAudioEgress.REMOTE
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    (
+        ({"mode": "production-v1"}, "benchmark mode"),
+        ({"mode": "future-v1"}, "benchmark mode"),
+        ({"task": "translate"}, "semantics"),
+        ({"word_timestamps": True}, "semantics"),
+        ({"prompt": "hint"}, "semantics"),
+        ({"hotwords": ("term",)}, "semantics"),
+        ({"diarization": True}, "semantics"),
+        ({"model": "../unsafe"}, "model"),
+        ({"model": None}, "model"),
+    ),
+)
+def test_audio_cpp_planning_rejects_unsupported_options(
+    monkeypatch: pytest.MonkeyPatch,
+    override: dict[str, object],
+    expected: str,
+) -> None:
+    spa = _import_module()
+
+    with pytest.raises(
+        spa.STTExecutionUnsupportedError,
+        match=expected,
+    ):
+        _plan_audio_cpp(
+            spa,
+            monkeypatch,
+            settings=_audio_cpp_enabled_settings(default_model=""),
+            **override,
+        )
+
+
+@pytest.mark.unit
+def test_audio_cpp_planned_execution_uses_frozen_config_and_exact_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spa = _import_module()
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_AudioCpp as audio_cpp,
+    )
+
+    plan = _plan_audio_cpp(
+        spa,
+        monkeypatch,
+        model="audio-cpp:whisper-small",
+    )
+    route = plan.descriptor.primary_route
+    captured: dict[str, object] = {}
+
+    def fail_config_read(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("planned execution reread audio.cpp config")
+
+    def fake_transcribe(
+        audio_path: str,
+        *,
+        base_dir: Path,
+        route: object,
+        origin: str,
+        model_id: str,
+        timeout_seconds: float,
+        transport: str,
+        language: str | None,
+    ):
+        captured.update(
+            {
+                "audio_path": audio_path,
+                "base_dir": base_dir,
+                "route": route,
+                "origin": origin,
+                "model_id": model_id,
+                "timeout_seconds": timeout_seconds,
+                "transport": transport,
+                "language": language,
+            }
+        )
+        return spa.SttTranscriptionOutcome(
+            artifact={
+                "text": "frozen transcript",
+                "segments": [],
+                "language": language,
+                "metadata": {
+                    "provider": "audio-cpp",
+                    "contract": "audio_cpp_http_v1",
+                    "model_id": model_id,
+                    "model_family": "whisper",
+                    "model_mode": "offline",
+                    "server_backend": "cpu",
+                },
+            },
+            actual_execution=spa.actual_execution_from_route(route, device=None),
+        )
+
+    monkeypatch.setattr(spa, "get_stt_config", fail_config_read)
+    monkeypatch.setattr(audio_cpp, "load_audio_cpp_config", fail_config_read)
+    monkeypatch.setattr(audio_cpp, "transcribe_audio_cpp", fake_transcribe)
+
+    artifact = spa.AudioCppAdapter().transcribe_batch(
+        "not-opened.wav",
+        model="audio-cpp:whisper-small",
+        language="en",
+        base_dir=tmp_path,
+        execution_plan=plan,
+    )
+
+    assert captured == {
+        "audio_path": "not-opened.wav",
+        "base_dir": tmp_path,
+        "route": route,
+        "origin": "http://127.0.0.1:18080",
+        "model_id": "whisper-small",
+        "timeout_seconds": 17.25,
+        "transport": route.transport,
+        "language": "en",
+    }
+    assert artifact["metadata"] == {
+        "provider": "audio-cpp",
+        "contract": "audio_cpp_http_v1",
+        "model_id": "whisper-small",
+        "model_family": "whisper",
+        "model_mode": "offline",
+        "server_backend": "cpu",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("selector", ("audio-cpp", "audiocpp", "audio_cpp"))
+def test_audio_cpp_unplanned_batch_normalizes_ordinary_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    selector: str,
+) -> None:
+    spa = _import_module()
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_AudioCpp as audio_cpp,
+    )
+
+    _clear_audio_cpp_environment(monkeypatch)
+    monkeypatch.setattr(
+        spa,
+        "get_stt_config",
+        lambda: _audio_cpp_enabled_settings(),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_transcribe(
+        _audio_path: str,
+        *,
+        route: object,
+        model_id: str,
+        **_kwargs: object,
+    ):
+        captured["model_id"] = model_id
+        return spa.SttTranscriptionOutcome(
+            artifact={
+                "text": "normalized",
+                "segments": [],
+                "metadata": {
+                    "provider": "audio-cpp",
+                    "contract": "audio_cpp_http_v1",
+                    "model_id": model_id,
+                    "model_family": "whisper",
+                    "model_mode": "offline",
+                    "server_backend": "cpu",
+                },
+            },
+            actual_execution=spa.actual_execution_from_route(route, device=None),
+        )
+
+    monkeypatch.setattr(audio_cpp, "transcribe_audio_cpp", fake_transcribe)
+
+    artifact = spa.AudioCppAdapter().transcribe_batch(
+        "not-opened.wav",
+        model=f"{selector}:whisper-small",
+        language="en",
+        base_dir=tmp_path,
+    )
+
+    assert captured["model_id"] == "whisper-small"
+    assert artifact["actual_execution"]["model_label"] == "whisper-small"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mutate_route",
+    (
+        lambda spa, route: replace(
+            route,
+            endpoint_id=f"sha256:{'f' * 64}",
+        ),
+        lambda spa, route: replace(
+            route,
+            audio_egress=spa.SttAudioEgress.REMOTE,
+        ),
+        lambda spa, route: replace(
+            route,
+            transport=(
+                "aiohttp" if route.transport == "httpx" else "httpx"
+            ),
+        ),
+    ),
+)
+def test_audio_cpp_planned_route_mismatch_fails_before_wav_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutate_route,
+) -> None:
+    spa = _import_module()
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_AudioCpp as audio_cpp,
+    )
+
+    plan = _plan_audio_cpp(spa, monkeypatch)
+    bad_route = mutate_route(spa, plan.descriptor.primary_route)
+    bad_plan = replace(
+        plan,
+        descriptor=replace(plan.descriptor, routes=(bad_route,)),
+    )
+
+    def fail_open(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("WAV opened before frozen route validation")
+
+    async def fail_network(**_kwargs: object) -> None:
+        raise AssertionError("network used before frozen route validation")
+
+    monkeypatch.setattr(audio_cpp, "open_audio_cpp_wav", fail_open)
+    monkeypatch.setattr(audio_cpp, "afetch", fail_network)
+
+    with pytest.raises(
+        spa.STTExecutionPlanError,
+        match="^Invalid audio\\.cpp execution route$",
+    ):
+        spa.AudioCppAdapter().transcribe_batch(
+            "not-opened.wav",
+            model="whisper-small",
+            language="en",
+            base_dir=tmp_path,
+            execution_plan=bad_plan,
+        )
+
+
+@pytest.mark.unit
+def test_audio_cpp_planned_execution_rejects_extra_runtime_settings_before_io(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spa = _import_module()
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_AudioCpp as audio_cpp,
+    )
+
+    plan = _plan_audio_cpp(spa, monkeypatch)
+    bad_plan = replace(
+        plan,
+        runtime_settings=tuple(
+            sorted((*plan.runtime_settings, ("unexpected", "value")))
+        ),
+    )
+
+    def fail_transcribe(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("execution started with a forged runtime snapshot")
+
+    monkeypatch.setattr(audio_cpp, "transcribe_audio_cpp", fail_transcribe)
+
+    with pytest.raises(
+        spa.STTExecutionPlanError,
+        match="^Invalid audio\\.cpp execution route$",
+    ):
+        spa.AudioCppAdapter().transcribe_batch(
+            "not-opened.wav",
+            model="whisper-small",
+            language="en",
+            base_dir=tmp_path,
+            execution_plan=bad_plan,
+        )

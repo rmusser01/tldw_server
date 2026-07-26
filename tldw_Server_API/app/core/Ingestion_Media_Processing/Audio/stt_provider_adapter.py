@@ -197,6 +197,11 @@ _EXTERNAL_RUNTIME_TEMPERATURE = "external_temperature"
 _EXTERNAL_RUNTIME_TIMEOUT = "external_timeout"
 _EXTERNAL_RUNTIME_TRANSPORT = "external_transport"
 _EXTERNAL_RUNTIME_VERIFY_SSL = "external_verify_ssl"
+_AUDIO_CPP_RUNTIME_ORIGIN = "audio_cpp_origin"
+_AUDIO_CPP_RUNTIME_MODEL = "audio_cpp_model"
+_AUDIO_CPP_RUNTIME_TIMEOUT = "audio_cpp_timeout"
+_AUDIO_CPP_RUNTIME_TRANSPORT = "audio_cpp_transport"
+_AUDIO_CPP_SELECTORS = ("audio-cpp", "audiocpp", "audio_cpp")
 
 
 def _segment_text_value(segment: dict[str, Any]) -> str:
@@ -370,6 +375,17 @@ def _resolve_default_model_for_provider(
         return model_id or "microsoft/VibeVoice-ASR", None
     if normalized == SttProviderName.EXTERNAL.value:
         return "external:default", None
+    if normalized == SttProviderName.AUDIO_CPP.value:
+        from . import Audio_Transcription_AudioCpp as audio_cpp
+
+        config = audio_cpp.load_audio_cpp_config(stt_cfg)
+        return (
+            audio_cpp.normalize_audio_cpp_model(
+                None,
+                default_model=config.default_model,
+            ),
+            None,
+        )
     return "", None
 
 
@@ -660,6 +676,7 @@ class SttProviderName(str, Enum):
     QWEN3_ASR = "qwen3-asr"
     VIBEVOICE = "vibevoice"
     EXTERNAL = "external"
+    AUDIO_CPP = "audio-cpp"
 
 
 @dataclass(frozen=True)
@@ -2247,6 +2264,231 @@ class VibeVoiceAdapter(SttProviderAdapter):
         return artifact
 
 
+class AudioCppAdapter(SttProviderAdapter):
+    """Adapter for one user-managed audio.cpp HTTP server."""
+
+    artifact_metadata_allowlist = (
+        "provider",
+        "contract",
+        "model_id",
+        "model_family",
+        "model_mode",
+        "server_backend",
+    )
+
+    def __init__(self) -> None:
+        super().__init__(SttProviderName.AUDIO_CPP)
+
+    def get_capabilities(self) -> SttProviderCapabilities:
+        return SttProviderCapabilities(
+            name=self.name,
+            supports_batch=True,
+            supports_streaming=False,
+            supports_diarization=False,
+        )
+
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode != "neutral-v1":
+            raise STTExecutionUnsupportedError(
+                f"Unsupported audio.cpp benchmark mode: {mode}"
+            )
+        if (
+            task != "transcribe"
+            or word_timestamps
+            or prompt is not None
+            or hotwords
+            or diarization
+        ):
+            raise STTExecutionUnsupportedError(
+                "audio.cpp cannot honor the requested benchmark semantics"
+            )
+
+        from tldw_Server_API.app.core.http_client import (
+            resolve_afetch_transport,
+        )
+
+        from . import Audio_Transcription_AudioCpp as audio_cpp
+
+        config = audio_cpp.load_audio_cpp_config(get_stt_config() or {})
+        if not config.enabled:
+            raise STTExecutionUnsupportedError("audio.cpp is disabled")
+        model_id = audio_cpp.normalize_audio_cpp_model(
+            model,
+            default_model=config.default_model,
+        )
+        try:
+            transport = resolve_afetch_transport()
+        except (RuntimeError, ValueError):
+            raise STTExecutionUnsupportedError(
+                "audio.cpp has no available async HTTP transport"
+            ) from None
+        transcription_url = audio_cpp.audio_cpp_routes(config.origin)[2]
+        _endpoint, egress, endpoint_id = _normalize_audio_endpoint(
+            transcription_url
+        )
+        route = SttExecutionRoute(
+            route_id="audio-cpp-http-1",
+            provider=self.name.value,
+            model_label=model_id,
+            artifact_id=None,
+            identity_resolved=False,
+            backend="audio_cpp_http",
+            source="audio_cpp_http",
+            audio_egress=egress,
+            endpoint_id=endpoint_id,
+            device=None,
+            compute_type=None,
+            dtype=None,
+            decoding_ids=(),
+            local_model_available=False,
+            would_download=False,
+            transport=transport,
+        )
+        descriptor = SttExecutionDescriptor(
+            requested_provider=self.name.value,
+            requested_model_label=model_id,
+            resolved_provider=self.name.value,
+            resolved_model_label=model_id,
+            routes=(route,),
+            honors_task=True,
+            honors_language=True,
+            honors_prompt_absence=True,
+            honors_hotword_absence=True,
+            honors_diarization=True,
+            honors_word_timestamps=True,
+            decoding_settings=(),
+            source_modules=tuple(
+                sorted(
+                    (
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_AudioCpp",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                        "tldw_Server_API.app.core.Security.egress",
+                        "tldw_Server_API.app.core.http_client",
+                        "tldw_Server_API.app.core.stt_observability_context",
+                    )
+                )
+            ),
+            dependency_distributions=(transport,),
+        )
+        runtime: dict[str, SttPlanScalar] = {
+            _AUDIO_CPP_RUNTIME_ORIGIN: config.origin,
+            _AUDIO_CPP_RUNTIME_MODEL: model_id,
+            _AUDIO_CPP_RUNTIME_TIMEOUT: config.timeout_seconds,
+            _AUDIO_CPP_RUNTIME_TRANSPORT: transport,
+        }
+        return SttBatchExecutionPlan(
+            descriptor=descriptor,
+            task=task,
+            language=language,
+            runtime_settings=tuple(sorted(runtime.items())),
+        )
+
+    def _transcribe_planned_batch(
+        self,
+        audio_path: str,
+        *,
+        execution_plan: SttBatchExecutionPlan,
+        base_dir: Path | None,
+        cancel_check: Callable[[], bool] | None,
+    ) -> SttTranscriptionOutcome:
+        from . import Audio_Transcription_AudioCpp as audio_cpp
+
+        runtime = execution_plan.runtime_values()
+        origin = runtime.get(_AUDIO_CPP_RUNTIME_ORIGIN)
+        model_id = runtime.get(_AUDIO_CPP_RUNTIME_MODEL)
+        timeout = runtime.get(_AUDIO_CPP_RUNTIME_TIMEOUT)
+        transport = runtime.get(_AUDIO_CPP_RUNTIME_TRANSPORT)
+        if (
+            set(runtime)
+            != {
+                _AUDIO_CPP_RUNTIME_ORIGIN,
+                _AUDIO_CPP_RUNTIME_MODEL,
+                _AUDIO_CPP_RUNTIME_TIMEOUT,
+                _AUDIO_CPP_RUNTIME_TRANSPORT,
+            }
+            or not isinstance(origin, str)
+            or not isinstance(model_id, str)
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not isinstance(transport, str)
+        ):
+            raise STTExecutionPlanError(
+                "Invalid audio.cpp execution route"
+            )
+        _raise_if_cancelled(cancel_check)
+        return audio_cpp.transcribe_audio_cpp(
+            audio_path,
+            base_dir=(
+                base_dir
+                if base_dir is not None
+                else Path(audio_path).resolve(strict=False).parent
+            ),
+            route=execution_plan.descriptor.primary_route,
+            origin=origin,
+            model_id=model_id,
+            timeout_seconds=float(timeout),
+            transport=transport,
+            language=execution_plan.language,
+        )
+
+    def transcribe_batch(
+        self,
+        audio_path: str,
+        *,
+        model: str | None = None,
+        language: str | None = None,
+        task: str = "transcribe",
+        word_timestamps: bool = False,
+        prompt: str | None = None,
+        hotwords: Sequence[str] | None = None,
+        base_dir: Path | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
+    ) -> dict[str, Any]:
+        from . import Audio_Transcription_AudioCpp as audio_cpp
+
+        if execution_plan is None:
+            execution_plan = self.plan_batch_execution(
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+                diarization=False,
+                mode="neutral-v1",
+            )
+        normalized_model = audio_cpp.normalize_audio_cpp_model(
+            model,
+            default_model=execution_plan.descriptor.resolved_model_label,
+        )
+        return self._run_planned_batch(
+            audio_path,
+            execution_plan=execution_plan,
+            model=normalized_model,
+            language=language,
+            task=task,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            hotwords=hotwords,
+            base_dir=base_dir,
+            cancel_check=cancel_check,
+        )
+
+
 class ExternalAdapter(SttProviderAdapter):
     """Adapter metadata for external/custom STT providers."""
 
@@ -2593,6 +2835,9 @@ _STT_PROVIDER_ALIASES: dict[str, str] = {
     "qwen-3-asr": SttProviderName.QWEN3_ASR.value,
     # External aliases
     "external-provider": SttProviderName.EXTERNAL.value,
+    # audio.cpp aliases
+    "audiocpp": SttProviderName.AUDIO_CPP.value,
+    "audio_cpp": SttProviderName.AUDIO_CPP.value,
 }
 
 
@@ -2612,6 +2857,7 @@ class SttProviderRegistry:
         SttProviderName.QWEN3_ASR.value: Qwen3ASRAdapter,
         SttProviderName.VIBEVOICE.value: VibeVoiceAdapter,
         SttProviderName.EXTERNAL.value: ExternalAdapter,
+        SttProviderName.AUDIO_CPP.value: AudioCppAdapter,
     }
 
     def __init__(self) -> None:
@@ -2748,9 +2994,34 @@ class SttProviderRegistry:
             model, variant = _resolve_default_model_for_provider(provider, stt_cfg)
             return provider, model, variant
 
+        normalized_name = (model_name or "").strip()
+        lowered = normalized_name.lower()
+        for selector in _AUDIO_CPP_SELECTORS:
+            if lowered == selector or lowered.startswith(
+                f"{selector}:"
+            ):
+                from . import Audio_Transcription_AudioCpp as audio_cpp
+
+                try:
+                    stt_cfg = get_stt_config() or {}
+                except _STT_PROVIDER_NONCRITICAL_EXCEPTIONS:
+                    stt_cfg = {}
+                config = audio_cpp.load_audio_cpp_config(stt_cfg)
+                selected_model = (
+                    None
+                    if lowered == selector
+                    else normalized_name[len(selector) + 1 :]
+                )
+                return (
+                    SttProviderName.AUDIO_CPP.value,
+                    audio_cpp.normalize_audio_cpp_model(
+                        selected_model,
+                        default_model=config.default_model,
+                    ),
+                    None,
+                )
+
         try:
-            normalized_name = (model_name or "").strip()
-            lowered = normalized_name.lower()
             # Preserve legacy alias: bare "qwen" maps to Qwen2Audio.
             if lowered == "qwen":
                 provider = SttProviderName.QWEN2AUDIO.value
@@ -2830,5 +3101,10 @@ def reset_stt_provider_registry() -> None:
     """
     Reset the global registry (used by tests).
     """
+    from .Audio_Transcription_AudioCpp import (
+        reset_audio_cpp_discovery_cache,
+    )
+
+    reset_audio_cpp_discovery_cache()
     global _REGISTRY
     _REGISTRY = None
