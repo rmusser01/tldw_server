@@ -12,7 +12,7 @@
 
 ## Scope And Existing Coverage
 
-The branch was initially rebased onto `origin/dev` at `1b9518c68c`, rebased onto `0f3983788c` before final review, and rebased again onto the latest `origin/dev` at `d710e5a5ee` before branch handoff. Stage 2A is test-only.
+The branch was initially rebased onto `origin/dev` at `1b9518c68c`, rebased onto `0f3983788c` before final review, rebased onto `d710e5a5ee` before handoff, and finally rebased at user request onto `76481b2939` for PR #2762. Stage 2A is test-only.
 
 **Files modified during implementation:**
 
@@ -1073,7 +1073,7 @@ git commit -m "chore(backlog): close embeddings workflow stage 2a"
 
 ### Task 8: Refresh The Final Dev Base
 
-**Goal**: Rebase the approved Stage 2A branch onto the latest `origin/dev` immediately before handoff.
+**Goal**: Rebase the approved Stage 2A branch onto the latest `origin/dev` immediately before handoff and refresh it when requested on the open PR.
 
 **Success Criteria**: The rebase is conflict-free, focused post-rebase tests and static checks pass, tracking names the final base, and the branch has no commits behind `origin/dev`.
 
@@ -1081,5 +1081,18 @@ git commit -m "chore(backlog): close embeddings workflow stage 2a"
 
 **Status**: Complete
 
-- [x] Rebase the 12 Stage 2A commits onto `origin/dev` at `d710e5a5ee`.
+- [x] Rebase the 12 Stage 2A commits onto `origin/dev` at `d710e5a5ee`, then rebase the 14-commit PR branch onto `76481b2939` at user request.
 - [x] Run post-rebase verification and refresh closeout metadata.
+
+### Task 9: Verify The PR Rebase
+
+**Goal**: Verify PR #2762 after rebasing it onto `origin/dev` at `76481b2939`.
+
+**Success Criteria**: Focused tests and static checks pass, tracking names the new base, and the force-with-lease update preserves the PR branch.
+
+**Tests**: Touched Embeddings modules, Ruff, Bandit, and diff/scope checks.
+
+**Status**: Complete
+
+- [x] Rebase onto `origin/dev` at `76481b2939` without conflicts.
+- [x] Run post-rebase verification, close tracking, and update PR #2762.
