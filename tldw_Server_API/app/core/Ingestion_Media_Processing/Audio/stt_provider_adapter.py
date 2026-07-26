@@ -689,6 +689,8 @@ class SttProviderAdapter(ABC):
     and capability discovery can be unified and tested.
     """
 
+    artifact_metadata_allowlist: tuple[str, ...] = ()
+
     def __init__(self, name: SttProviderName) -> None:
         self._name = name
 
@@ -811,6 +813,7 @@ class SttProviderAdapter(ABC):
             plan=execution_plan,
             actual=outcome.actual_execution,
             runtime_mismatches=outcome.runtime_mismatches,
+            metadata_allowlist=self.artifact_metadata_allowlist,
         )
 
 

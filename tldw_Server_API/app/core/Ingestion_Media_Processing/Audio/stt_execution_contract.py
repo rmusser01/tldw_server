@@ -44,6 +44,8 @@ _SECRET_SHAPED_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_EXECUTION_MISMATCHES = 8
+_MAX_ARTIFACT_METADATA_KEYS = 8
+_MAX_ARTIFACT_METADATA_STRING_LENGTH = 256
 _EXECUTION_MISMATCH_NAMES = frozenset(
     {
         "diarization",
@@ -826,6 +828,7 @@ def finalize_stt_artifact(
     plan: SttBatchExecutionPlan,
     actual: SttActualExecution,
     runtime_mismatches: tuple[str, ...] = (),
+    metadata_allowlist: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Validate and safely finalize an artifact from a planned STT execution."""
     from tldw_Server_API.app.core.exceptions import (
@@ -841,6 +844,16 @@ def finalize_stt_artifact(
         raise STTExecutionPlanError(
             "Planned STT runtime mismatches are invalid"
         )
+    if (
+        not isinstance(metadata_allowlist, tuple)
+        or len(metadata_allowlist) > _MAX_ARTIFACT_METADATA_KEYS
+        or not all(
+            isinstance(key, str) and _STABLE_ID_RE.fullmatch(key)
+            for key in metadata_allowlist
+        )
+        or len(set(metadata_allowlist)) != len(metadata_allowlist)
+    ):
+        raise STTTranscriptionError("STT artifact metadata allowlist is invalid")
     if not any(_actual_matches_route(actual, route) for route in plan.descriptor.routes):
         raise STTExecutionPlanError("Actual STT execution used an undeclared route")
     if not isinstance(artifact, Mapping):
@@ -856,6 +869,24 @@ def finalize_stt_artifact(
     for key in ("language", "diarization", "usage"):
         if key in artifact:
             finalized[key] = artifact[key]
+    if metadata_allowlist:
+        metadata = artifact.get("metadata")
+        if (
+            not isinstance(metadata, Mapping)
+            or len(metadata) > _MAX_ARTIFACT_METADATA_KEYS
+            or any(key not in metadata_allowlist for key in metadata)
+            or any(
+                not isinstance(value, str)
+                or len(value) > _MAX_ARTIFACT_METADATA_STRING_LENGTH
+                for value in metadata.values()
+            )
+        ):
+            raise STTTranscriptionError("STT provider artifact metadata is invalid")
+        finalized["metadata"] = {
+            key: metadata[key]
+            for key in metadata_allowlist
+            if key in metadata
+        }
     finalized["actual_execution"] = actual.as_safe_dict()
     mismatches = _semantic_mismatches(plan)
     mismatches.extend(

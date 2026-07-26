@@ -203,6 +203,24 @@ def _make_execution_plan(
     )
 
 
+def _make_actual_execution(spa, plan):
+    route = plan.descriptor.primary_route
+    return spa.SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=route.device,
+        compute_type=route.compute_type,
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+    )
+
+
 @pytest.mark.unit
 def test_local_plan_identity_tracks_artifact_content(tmp_path: Path) -> None:
     model_dir = tmp_path / "model"
@@ -956,6 +974,129 @@ def test_finalize_stt_artifact_replaces_hostile_actual_execution_metadata(
     assert set(finalized["actual_execution"]) == {
         field.name for field in fields(spa.SttActualExecution)
     }
+
+
+@pytest.mark.unit
+def test_finalize_stt_artifact_omits_metadata_without_allowlist():
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+
+    finalized = spa.finalize_stt_artifact(
+        {
+            "text": "ok",
+            "segments": [],
+            "metadata": {"provider": "audio-cpp"},
+        },
+        plan=plan,
+        actual=_make_actual_execution(spa, plan),
+    )
+
+    assert "metadata" not in finalized
+
+
+@pytest.mark.unit
+def test_finalize_stt_artifact_preserves_allowed_bounded_string_metadata():
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+
+    finalized = spa.finalize_stt_artifact(
+        {
+            "text": "ok",
+            "segments": [],
+            "metadata": {
+                "provider": "audio-cpp",
+                "contract": "audio_cpp_http_v1",
+            },
+        },
+        plan=plan,
+        actual=_make_actual_execution(spa, plan),
+        metadata_allowlist=("provider", "contract"),
+    )
+
+    assert finalized["metadata"] == {
+        "provider": "audio-cpp",
+        "contract": "audio_cpp_http_v1",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metadata", "metadata_allowlist"),
+    [
+        ({"provider": "audio-cpp"}, ("provider", "provider")),
+        (
+            {"provider": "audio-cpp", "authorization": "Bearer secret"},
+            ("provider",),
+        ),
+        ({"provider": 1}, ("provider",)),
+        (
+            {"key_0": "value"},
+            tuple(f"key_{index}" for index in range(9)),
+        ),
+        ({"provider": "x" * 257}, ("provider",)),
+        ([], ("provider",)),
+    ],
+    ids=[
+        "duplicate-allowlist-name",
+        "unknown-metadata-key",
+        "non-string-value",
+        "excessive-key-count",
+        "overlong-value",
+        "non-mapping-metadata",
+    ],
+)
+def test_finalize_stt_artifact_rejects_invalid_metadata(
+    metadata,
+    metadata_allowlist,
+):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+
+    with pytest.raises(spa.STTTranscriptionError) as exc_info:
+        spa.finalize_stt_artifact(
+            {"text": "ok", "segments": [], "metadata": metadata},
+            plan=plan,
+            actual=_make_actual_execution(spa, plan),
+            metadata_allowlist=metadata_allowlist,
+        )
+
+    assert exc_info.type is spa.STTTranscriptionError
+
+
+@pytest.mark.unit
+def test_finalize_stt_artifact_metadata_allowlist_is_forwarded_by_adapter():
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    actual = _make_actual_execution(spa, plan)
+
+    class MetadataAdapter(spa.FasterWhisperAdapter):
+        artifact_metadata_allowlist = ("provider",)
+
+        def _transcribe_planned_batch(
+            self,
+            audio_path,
+            *,
+            execution_plan,
+            base_dir,
+            cancel_check,
+        ):
+            return spa.SttTranscriptionOutcome(
+                artifact={
+                    "text": "ok",
+                    "segments": [],
+                    "metadata": {"provider": "audio-cpp"},
+                },
+                actual_execution=actual,
+            )
+
+    finalized = MetadataAdapter().transcribe_batch(
+        "not-opened.wav",
+        model="tiny",
+        language="en",
+        execution_plan=plan,
+    )
+
+    assert finalized["metadata"] == {"provider": "audio-cpp"}
 
 
 @pytest.mark.unit
