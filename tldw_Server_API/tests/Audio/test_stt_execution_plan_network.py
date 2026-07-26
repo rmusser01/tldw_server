@@ -1583,6 +1583,22 @@ def _external_config() -> external.ExternalProviderConfig:
     )
 
 
+def _select_planned_async_transport(
+    transport: str | None = None,
+) -> str:
+    """Select the deterministic async transport used by external-plan tests."""
+    if transport not in {None, "aiohttp"}:
+        raise ValueError("unexpected transport")
+    return "aiohttp"
+
+
+def _reject_planned_async_transport(
+    _transport: str | None = None,
+) -> str:
+    """Simulate a planned transport becoming unavailable before execution."""
+    raise RuntimeError("planned transport unavailable")
+
+
 @pytest.mark.unit
 def test_legacy_external_endpoint_keeps_urljoin_behavior() -> None:
     assert external._resolve_transcription_endpoint(
@@ -1598,7 +1614,11 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     audio = tmp_path / "external.wav"
     audio.write_bytes(b"audio")
     config = _external_config()
-    monkeypatch.setattr(http_client, "aiohttp", object())
+    monkeypatch.setattr(
+        http_client,
+        "resolve_afetch_transport",
+        _select_planned_async_transport,
+    )
     monkeypatch.setattr(
         external,
         "load_external_provider_config",
@@ -1935,7 +1955,11 @@ async def test_external_planned_transport_fails_closed_when_unavailable(
     audio = tmp_path / "external.wav"
     audio.write_bytes(b"audio")
     config = _external_config()
-    monkeypatch.setattr(http_client, "aiohttp", object())
+    monkeypatch.setattr(
+        http_client,
+        "resolve_afetch_transport",
+        _select_planned_async_transport,
+    )
     monkeypatch.setattr(
         external,
         "load_external_provider_config",
@@ -1963,13 +1987,10 @@ async def test_external_planned_transport_fails_closed_when_unavailable(
         temperature=float(runtime["external_temperature"]),
         language=str(runtime["external_language"]),
     )
-    monkeypatch.setattr(http_client, "aiohttp", None)
     monkeypatch.setattr(
         external,
-        "afetch",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("unavailable frozen transport was used")
-        ),
+        "resolve_afetch_transport",
+        _reject_planned_async_transport,
     )
 
     with pytest.raises(

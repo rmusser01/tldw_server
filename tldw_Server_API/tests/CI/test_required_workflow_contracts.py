@@ -910,6 +910,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Audio",
             "tldw_Server_API/tests/AudioJobs",
             "tldw_Server_API/tests/Audio_Studio",
+            "tldw_Server_API/tests/Benchmarks",
             "tldw_Server_API/tests/STT",
             "tldw_Server_API/tests/TTS",
             "tldw_Server_API/tests/TTS_NEW",

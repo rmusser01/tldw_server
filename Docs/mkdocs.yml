@@ -111,6 +111,7 @@ nav:
       - Local Models and Audio:
           - Local LLM Setup: User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md
           - STT and TTS Quickstart: User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md
+          - Native Batch STT Benchmark: User_Guides/STT_Benchmark_User_Guide.md
           - TTS Getting Started: User_Guides/WebUI_Extension/TTS_Getting_Started.md
           - TTS Setup Guide: User_Guides/WebUI_Extension/TTS-SETUP-GUIDE.md
           - CPU Audio Setup: Getting_Started/First_Time_Audio_Setup_CPU.md

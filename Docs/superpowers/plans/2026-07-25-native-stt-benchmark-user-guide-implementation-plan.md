@@ -340,6 +340,14 @@ matrix, Ruff, compileall, Bandit, CLI help, link checks, and final diff checks.
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/http_client.py`
+- Modify: `.github/workflows/ci.yml`
+- Modify: `Docs/User_Guides/STT_Benchmark_User_Guide.md`
+- Modify: `Docs/User_Guides/index.md`
+- Create: `Docs/Published/User_Guides/STT_Benchmark_User_Guide.md`
+- Modify: `Docs/Published/User_Guides/index.md`
+- Modify: `Docs/mkdocs.yml`
+- Modify: `tldw_Server_API/tests/Audio/test_stt_execution_plan_network.py`
+- Modify: `tldw_Server_API/tests/CI/test_required_workflow_contracts.py`
 - Modify: `tldw_Server_API/tests/http_client/test_stt_opaque_observability.py`
 - Modify: `tldw_Server_API/tests/Benchmarks/test_stt_bench.py`
 - Create: `tldw_Server_API/tests/Benchmarks/test_stt_bench_integration.py`
