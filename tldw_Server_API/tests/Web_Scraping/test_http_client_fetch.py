@@ -79,8 +79,9 @@ class _CapturedTracingManager:
 @pytest.mark.parametrize("backend", ["httpx", "aiohttp"])
 async def test_afetch_timeout_errors_have_stable_classification(monkeypatch, backend):
     logs = []
+    uses_aiohttp_adapter = backend == "aiohttp"
     monkeypatch.setattr(hc, "_avalidate_egress_or_raise", _allow_async_egress)
-    monkeypatch.setattr(hc, "_is_aiohttp_client", lambda _client: backend == "aiohttp")
+    monkeypatch.setattr(hc, "_is_aiohttp_client", lambda _client: uses_aiohttp_adapter)
 
     async def raise_timeout(**_kwargs):
         if backend == "httpx":
