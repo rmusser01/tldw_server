@@ -150,6 +150,6 @@
 | 2. Scan, redaction, and limits characterization | Complete | Baseline 30/30; expanded and strengthened runs 67/67; Black, Ruff, test-only Bandit, and diff checks clean | Approved after stronger value/identity immutability snapshots |
 | 3. EvaluationLimits and decision evaluator | Complete | RED: absent module collection error; GREEN: strengthened direct 37/37 and combined 104/104; compile, Black, Ruff, production/test Bandit, and diff checks clean | Approved after descriptor, lossless-limit, placeholder, and immutability anchors |
 | 4. Direct evaluator redaction | Complete | RED: 21 missing-method failures / 38 pass; GREEN: strengthened direct 61/61 and combined 128/128; compile, Black, Ruff, production/test Bandit, and diff checks clean | Approved after both-path parity and non-redact no-call coverage |
-| 5. ModerationService delegation | In progress | Pending | Pending |
+| 5. ModerationService delegation | Implemented | RED: 4 delegation/snapshot failures / 70 pass; GREEN: focused 179, Moderation 262, endpoint/Guardian 97, Chat 15, Workflow 10, STT 1; compile, Black, Ruff, production Bandit, and diff checks clean | Pending |
 | 6. Real-service caller regressions | Pending | Pending | Pending |
 | 7. Final verification and scope audit | Pending | Pending | Pending |
