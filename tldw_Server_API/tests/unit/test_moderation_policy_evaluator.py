@@ -726,6 +726,24 @@ def test_evaluate_without_redacted_text_never_invokes_redaction():
     assert result.redacted_text is None
 
 
+@pytest.mark.parametrize("action", ["warn", "block"])
+def test_evaluate_non_redact_decision_never_invokes_redaction(action):
+    class _NoRedactionEvaluator(PolicyEvaluator):
+        def redact_text(self, *_args, **_kwargs):
+            raise AssertionError("redaction must not run")
+
+    result = _NoRedactionEvaluator().evaluate_text(
+        "secret",
+        _policy(_rule("secret", action=action)),
+        "input",
+        LIMITS,
+        include_redacted_text=True,
+    )
+
+    assert result.action == action
+    assert result.redacted_text is None
+
+
 def test_nested_redaction_receives_identical_limits_object():
     seen = []
 
@@ -748,6 +766,7 @@ def test_nested_redaction_receives_identical_limits_object():
 
 
 def test_direct_redaction_is_sequential_and_action_agnostic():
+    evaluator = PolicyEvaluator()
     policy = _policy(
         PatternRule(
             regex=re.compile("secret"),
@@ -762,7 +781,16 @@ def test_direct_redaction_is_sequential_and_action_agnostic():
         enabled=False,
     )
 
-    assert PolicyEvaluator().redact_text_with_count(
+    assert (
+        evaluator.redact_text(
+            "secret",
+            policy,
+            None,
+            LIMITS,
+        )
+        == "[FINAL]"
+    )
+    assert evaluator.redact_text_with_count(
         "secret",
         policy,
         None,
@@ -772,6 +800,7 @@ def test_direct_redaction_is_sequential_and_action_agnostic():
 
 @pytest.mark.timeout(2)
 def test_direct_long_redaction_uses_full_text_finditer():
+    evaluator = PolicyEvaluator()
     limits = EvaluationLimits(
         max_scan_chars=3,
         match_window_chars=0,
@@ -786,7 +815,16 @@ def test_direct_long_redaction_uses_full_text_finditer():
         )
     )
 
-    assert PolicyEvaluator().redact_text_with_count(
+    assert (
+        evaluator.redact_text(
+            "xxABCDEyy",
+            policy,
+            "input",
+            limits,
+        )
+        == "xx[R]yy"
+    )
+    assert evaluator.redact_text_with_count(
         "xxABCDEyy",
         policy,
         "input",
@@ -809,16 +847,27 @@ def test_direct_short_redaction_limit_behavior_is_literal(
     expected_text,
     expected_count,
 ):
+    evaluator = PolicyEvaluator()
     limits = EvaluationLimits(
         max_scan_chars=100,
         match_window_chars=5,
         max_fallback_scan_chars=100,
         max_replacements_per_pattern=limit,
     )
+    policy = _policy(_rule("x", replacement="[R]"))
 
-    assert PolicyEvaluator().redact_text_with_count(
+    assert (
+        evaluator.redact_text(
+            "x x x",
+            policy,
+            None,
+            limits,
+        )
+        == expected_text
+    )
+    assert evaluator.redact_text_with_count(
         "x x x",
-        _policy(_rule("x", replacement="[R]")),
+        policy,
         None,
         limits,
     ) == (expected_text, expected_count)
@@ -838,16 +887,27 @@ def test_direct_long_redaction_supported_limit_behavior_is_literal(
     expected_text,
     expected_count,
 ):
+    evaluator = PolicyEvaluator()
     limits = EvaluationLimits(
         max_scan_chars=3,
         match_window_chars=5,
         max_fallback_scan_chars=100,
         max_replacements_per_pattern=limit,
     )
+    policy = _policy(_rule("x", replacement="[R]"))
 
-    assert PolicyEvaluator().redact_text_with_count(
+    assert (
+        evaluator.redact_text(
+            "x x x",
+            policy,
+            None,
+            limits,
+        )
+        == expected_text
+    )
+    assert evaluator.redact_text_with_count(
         "x x x",
-        _policy(_rule("x", replacement="[R]")),
+        policy,
         None,
         limits,
     ) == (expected_text, expected_count)
@@ -881,19 +941,40 @@ def test_direct_long_redaction_unsupported_limit_errors_are_literal(
 
 
 def test_direct_short_and_long_zero_length_behavior_is_literal():
+    evaluator = PolicyEvaluator()
     policy = _policy(_rule(r"(?=a)", replacement="[R]"))
+    short_limits = EvaluationLimits(10, 5, 100, 10)
+    long_limits = EvaluationLimits(1, 5, 100, 10)
 
-    assert PolicyEvaluator().redact_text_with_count(
+    assert (
+        evaluator.redact_text(
+            "a",
+            policy,
+            None,
+            short_limits,
+        )
+        == "[R]a"
+    )
+    assert evaluator.redact_text_with_count(
         "a",
         policy,
         None,
-        EvaluationLimits(10, 5, 100, 10),
+        short_limits,
     ) == ("[R]a", 1)
-    assert PolicyEvaluator().redact_text_with_count(
+    assert (
+        evaluator.redact_text(
+            "aa",
+            policy,
+            None,
+            long_limits,
+        )
+        == "aa"
+    )
+    assert evaluator.redact_text_with_count(
         "aa",
         policy,
         None,
-        EvaluationLimits(1, 5, 100, 10),
+        long_limits,
     ) == ("aa", 0)
 
 
