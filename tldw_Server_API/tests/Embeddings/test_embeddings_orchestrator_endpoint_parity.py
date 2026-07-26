@@ -990,7 +990,10 @@ def test_flag_true_calls_orchestrator_path(client, monkeypatch):
     assert orchestrator.await_count == 1
 
 
-def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservation(client, monkeypatch):
+def test_orchestrator_path_uses_inline_runner_and_prefers_total_token_actuals(
+    client,
+    monkeypatch,
+):
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
 
     monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
@@ -999,8 +1002,8 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
             vectors=[[0.25, 0.75]],
             provider="huggingface",
             model="sentence-transformers/all-MiniLM-L6-v2",
-            prompt_tokens=3,
-            total_tokens=3,
+            prompt_tokens=2,
+            total_tokens=5,
             cache_hits=0,
             cache_misses=1,
         )
@@ -1067,7 +1070,7 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
     ]
     rg_governor.commit.assert_awaited_once_with(
         "rg-handle",
-        actuals={"tokens": 3},
+        actuals={"tokens": 5},
         op_id="rg-op",
     )
     endpoint_executor.touch_resolved_credentials.assert_awaited_once_with(
@@ -1125,19 +1128,34 @@ def test_orchestrator_path_commits_reserved_units_after_execute_failure(client, 
     assert active_requests.dec_count == 1
 
 
-def test_orchestrator_zero_token_success_commits_reserved_unit(client, monkeypatch):
+@pytest.mark.parametrize(
+    ("prepared_tokens", "prompt_tokens", "reserved_tokens", "expected_actual"),
+    [
+        (2, 4, 2, 4),
+        (0, 0, 1, 1),
+    ],
+    ids=["prompt-token-fallback", "reserved-unit-fallback"],
+)
+def test_orchestrator_zero_total_commits_prompt_then_reserved_units(
+    client,
+    monkeypatch,
+    prepared_tokens,
+    prompt_tokens,
+    reserved_tokens,
+    expected_actual,
+):
     from tldw_Server_API.app.api.v1.endpoints import (
         embeddings_v5_production_enhanced as mod,
     )
 
     monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
     fake_orchestrator = FakeOrchestrator(
-        prepared_total_tokens=0,
+        prepared_total_tokens=prepared_tokens,
         result=EmbeddingExecutionResult(
             vectors=[[0.25, 0.75]],
             provider="huggingface",
             model="sentence-transformers/all-MiniLM-L6-v2",
-            prompt_tokens=0,
+            prompt_tokens=prompt_tokens,
             total_tokens=0,
             cache_hits=0,
             cache_misses=1,
@@ -1160,8 +1178,8 @@ def test_orchestrator_zero_token_success_commits_reserved_unit(client, monkeypat
 
     async def reserve(*, request, current_user, token_total):
         del request, current_user
-        assert token_total == 1
-        return governor, "zero-handle", "zero-op", 1
+        assert token_total == reserved_tokens
+        return governor, "zero-handle", "zero-op", reserved_tokens
 
     monkeypatch.setattr(mod, "_reserve_embedding_rg_tokens", reserve)
 
@@ -1177,7 +1195,7 @@ def test_orchestrator_zero_token_success_commits_reserved_unit(client, monkeypat
     assert response.status_code == status.HTTP_200_OK
     governor.commit.assert_awaited_once_with(
         "zero-handle",
-        actuals={"tokens": 1},
+        actuals={"tokens": expected_actual},
         op_id="zero-op",
     )
     assert active_requests.inc_count == 1
@@ -1291,6 +1309,54 @@ async def test_orchestrator_cancellation_commits_reserved_units_and_decrements_a
     assert len(fake_orchestrator.execute_calls) == 1
     endpoint_executor.touch_resolved_credentials.assert_not_awaited()
     assert success_metric.inc_calls == []
+
+
+def test_orchestrator_path_counts_active_request_during_backpressure_rejection(
+    client,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    active_requests = _RecordingGauge()
+    build_orchestrator = Mock(
+        side_effect=AssertionError("orchestrator should not be built after backpressure rejection")
+    )
+    monkeypatch.setattr(mod, "active_embedding_requests", active_requests)
+    monkeypatch.setattr(
+        mod,
+        "_build_embedding_request_orchestrator",
+        build_orchestrator,
+    )
+
+    async def reject_for_backpressure(*_args, **_kwargs):
+        assert active_requests.inc_count == 1
+        assert active_requests.dec_count == 0
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Backpressure: queue overload",
+        )
+
+    monkeypatch.setattr(
+        mod,
+        "_check_backpressure_and_quotas",
+        reject_for_backpressure,
+    )
+
+    response = client.post(
+        "/api/v1/embeddings",
+        headers={"x-provider": "huggingface"},
+        json={
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "input": "workflow backpressure",
+        },
+    )
+
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert response.json()["detail"] == "Backpressure: queue overload"
+    assert active_requests.inc_count == 1
+    assert active_requests.dec_count == 1
+    build_orchestrator.assert_not_called()
 
 
 def test_orchestrator_path_does_not_execute_or_commit_after_rg_denial(client, monkeypatch):

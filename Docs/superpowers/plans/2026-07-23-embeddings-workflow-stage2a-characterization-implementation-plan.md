@@ -1096,3 +1096,69 @@ git commit -m "chore(backlog): close embeddings workflow stage 2a"
 
 - [x] Rebase onto `origin/dev` at `76481b2939` without conflicts.
 - [x] Run post-rebase verification, close tracking, and update PR #2762.
+
+### Task 10: Remediate Pre-Merge Review Findings
+
+**Goal**: Close the validated pre-merge review gaps without changing production execution behavior.
+
+**Success Criteria**: Tests distinguish total, prompt, and reserved token-accounting precedence; active-request accounting is observed during backpressure rejection; complete-result validation is asserted through observable behavior instead of a private validator call trace; parent tracking reflects the completed design review; and the remediation passes all local required checks before PR CI.
+
+**Files:**
+
+- Modify: `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py`
+- Modify: `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`
+- Modify through Backlog CLI: `backlog/tasks/task-12973 - Extract-concrete-API-workflow-steps-for-Embeddings.md`
+- Modify through Backlog CLI: `backlog/tasks/task-12973.1 - Characterize-Embeddings-workflow-execution-contracts.md`
+
+**Status**: Complete
+
+- [x] **Step 1: Pin resource-governor actual-token precedence**
+
+Change the existing successful endpoint fixture to use distinct values:
+
+```python
+prompt_tokens=2,
+total_tokens=5,
+```
+
+Keep the prepared reservation at three tokens and assert:
+
+```python
+rg_governor.commit.assert_awaited_once_with(
+    "rg-handle",
+    actuals={"tokens": 5},
+    op_id="rg-op",
+)
+```
+
+Temporarily reverse the production `total_tokens`/`prompt_tokens` expression, run this one test, and confirm it fails with committed actuals of two tokens. Restore the production expression immediately and rerun for PASS; no production file may remain modified.
+
+- [x] **Step 2: Characterize active accounting during backpressure rejection**
+
+Add a test whose rejecting backpressure probe observes the live gauge:
+
+```python
+async def reject_for_backpressure(*_args, **_kwargs):
+    assert active_requests.inc_count == 1
+    assert active_requests.dec_count == 0
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Backpressure: queue overload",
+    )
+```
+
+Call `/api/v1/embeddings` with the orchestrator flag enabled, assert status 429, and assert final counts of one increment and one decrement. Verify test sensitivity with a temporary ordering mutation, restore production immediately, and retain no production diff.
+
+- [x] **Step 3: Remove private validator call-trace coupling**
+
+Delete the `validated_embedding_vectors` monkeypatch and `validation_calls` equality assertion from `test_fallback_complete_result_is_validated_before_first_cache_write`. Preserve the exact malformed-response assertions, executor/cache-read evidence, and `cache.set_calls == []` so the test continues to prove complete ordered-result validation occurs before writeback.
+
+- [x] **Step 4: Reconcile parent Stage 2 tracking**
+
+Use Backlog CLI to check parent acceptance criteria 1 and 2 and replace the stale pending-review note with a dated record that the design was approved, the five child tasks exist, and Stage 2A is complete while Stage 2B-2E remain pending.
+
+- [x] **Step 5: Verify and finalize the remediation**
+
+Run the changed tests, all three touched Stage 2A modules, the complete `Embeddings_isolated` suite, Ruff, Bandit with B101 excluded, `git diff --check origin/dev`, and the application-path scope check. Close `TASK-12973.1` with exact evidence and obtain final independent review approval.
+
+**Merge handoff:** Commit and push the scoped remediation, wait for required CI, and merge PR #2762 only after the requester supplies the mandatory human-authored Change summary.

@@ -660,9 +660,7 @@ async def test_fallback_execution_maps_model_and_returns_fallback_headers():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_fallback_complete_result_is_validated_before_first_cache_write(
-    monkeypatch,
-):
+async def test_fallback_complete_result_is_validated_before_first_cache_write():
     primary_error = EmbeddingProviderError(
         "provider_unavailable",
         "primary unavailable",
@@ -680,19 +678,6 @@ async def test_fallback_complete_result_is_validated_before_first_cache_write(
         provider_vectors={
             "huggingface": [[0.3, 0.4, 0.5]],
         },
-    )
-    real_validate = orchestrator_module.validated_embedding_vectors
-    validation_calls: list[tuple[object, int, object]] = []
-
-    def validation_probe(vectors: object, *, expected: int):
-        validated = real_validate(vectors, expected=expected)
-        validation_calls.append((vectors, expected, validated))
-        return validated
-
-    monkeypatch.setattr(
-        orchestrator_module,
-        "validated_embedding_vectors",
-        validation_probe,
     )
     orchestrator = _orchestrator(
         cache=cache,
@@ -740,11 +725,6 @@ async def test_fallback_complete_result_is_validated_before_first_cache_write(
             "two|huggingface|sentence-transformers/all-MiniLM-L6-v2|"
             "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend"
         ),
-    ]
-    assert validation_calls == [
-        ([[0.1, 0.2]], 1, [[0.1, 0.2]]),
-        ([[0.3, 0.4, 0.5]], 1, [[0.3, 0.4, 0.5]]),
-        ([[0.1, 0.2], [0.3, 0.4, 0.5]], 2, None),
     ]
     assert cache.set_calls == []
 

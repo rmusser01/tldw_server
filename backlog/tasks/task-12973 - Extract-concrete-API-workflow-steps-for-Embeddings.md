@@ -4,7 +4,7 @@ title: Extract concrete API workflow steps for Embeddings
 status: In Progress
 assignee: []
 created_date: '2026-07-19 02:31'
-updated_date: '2026-07-26 05:19'
+updated_date: '2026-07-26 19:35'
 labels:
   - embeddings
   - workflow
@@ -13,6 +13,7 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/2733'
+  - 'https://github.com/rmusser01/tldw_server/pull/2762'
 documentation:
   - Docs/superpowers/specs/2026-07-03-embeddings-workflow-architecture-design.md
   - >-
@@ -28,8 +29,8 @@ Stage 2 of the approved Embeddings workflow architecture. Extract preparation, p
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The approved Stage 2 design is documented and reviewed before implementation planning.
-- [ ] #2 Five sequential child tasks cover characterization, pure contracts, provider attempts, fallback coordination, and runner/facade integration.
+- [x] #1 The approved Stage 2 design is documented and reviewed before implementation planning.
+- [x] #2 Five sequential child tasks cover characterization, pure contracts, provider attempts, fallback coordination, and runner/facade integration.
 - [ ] #3 EmbeddingRequestOrchestrator ends Stage 2 as a delegation and compatibility facade with no cache, provider, fallback, or vector-postprocessing decisions.
 - [ ] #4 Workflow-enabled and legacy endpoint behavior remain equivalent across the validated parity matrix.
 - [ ] #5 HTTP header mapping is owned by the endpoint boundary while the compatibility facade preserves the legacy internal result contract.
@@ -45,11 +46,9 @@ Deliver through child tasks 2A-2E in dependency order. Each child must pass focu
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-07-18: Created child tasks TASK-12973.1 through TASK-12973.5 with sequential dependencies after PR #2733 established the Stage 1 workflow boundary.
 
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-2026-07-18: Created isolated branch codex/embeddings-workflow-stage2a-contracts from origin/dev at merge commit 29acaca8c7 (PR #2733). Created child tasks TASK-12973.1 through TASK-12973.5 with sequential dependencies. Baseline verification passed: 93 focused Embeddings orchestration, workflow, runner, and endpoint-parity tests. Written Stage 2 spec completed and self-reviewed; user review is pending before implementation planning.
+2026-07-23 to 2026-07-26: The Stage 2 concrete-steps design completed iterative user review, written-spec review, specification review, and quality review. The user approved the design and Stage 2A implementation plan. TASK-12973.1 characterization is complete in PR #2762; Stage 2B through Stage 2E remain pending and continue in dependency order.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
