@@ -1,3 +1,4 @@
+import asyncio
 import io
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timezone
@@ -12,7 +13,10 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.core.AuthNZ import migrations
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
 
@@ -86,9 +90,15 @@ class _LockingPool:
         self.raise_lock_on_exit = raise_lock_on_exit
         self.enter_calls = 0
         self.exit_calls = 0
+        self.acquire_timeouts: list[float | None] = []
         self.conn = object()
 
-    def transaction(self) -> _LockingTxnCM:
+    def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ) -> _LockingTxnCM:
+        self.acquire_timeouts.append(acquire_timeout_seconds)
         return _LockingTxnCM(self)
 
     def acquire(self) -> object:
@@ -996,7 +1006,12 @@ async def test_get_db_transaction_requires_explicit_test_mode(monkeypatch: pytes
             return False
 
     class _Pool:
-        def transaction(self) -> _TxnCM:
+        def transaction(
+            self,
+            *,
+            acquire_timeout_seconds: float | None = None,
+        ) -> _TxnCM:
+            assert acquire_timeout_seconds == 5.0
             return _TxnCM()
 
         def acquire(self) -> object:
@@ -1048,6 +1063,7 @@ async def test_get_db_transaction_retries_lock_contention_on_entry(
     assert pool.enter_calls == 2
     assert pool.exit_calls == 1
     assert sleep_calls == [0.0]
+    assert pool.acquire_timeouts == [5.0, 5.0]
 
 
 @pytest.mark.asyncio
@@ -1084,6 +1100,7 @@ async def test_get_db_transaction_returns_503_when_lock_retries_exhausted(
     assert pool.enter_calls == 2
     assert pool.exit_calls == 0
     assert sleep_calls == [0.0]
+    assert pool.acquire_timeouts == [5.0, 5.0]
 
 
 @pytest.mark.asyncio
@@ -1113,6 +1130,94 @@ async def test_get_db_transaction_maps_cleanup_lock_error_to_503(
     assert exc_info.value.headers.get("Retry-After") == "3"
     assert pool.enter_calls == 1
     assert pool.exit_calls == 1
+    assert pool.acquire_timeouts == [5.0]
+
+
+@pytest.mark.asyncio
+async def test_get_db_transaction_cancellation_wins_over_cleanup_lock_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    pool = _LockingPool(lock_on_enter_count=0, raise_lock_on_exit=True)
+    cancellation = asyncio.CancelledError()
+
+    async def _fake_get_db_pool() -> _LockingPool:
+        return pool
+
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    agen = auth_deps.get_db_transaction()
+    assert await agen.__anext__() is pool.conn
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await agen.athrow(cancellation)
+
+    assert raised.value is cancellation
+    assert raised.value.__cause__ is None
+    assert pool.enter_calls == 1
+    assert pool.exit_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_get_db_transaction_passes_configured_pool_acquire_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "2.75")
+    pool = _LockingPool()
+
+    async def _fake_get_db_pool() -> _LockingPool:
+        return pool
+
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    agen = auth_deps.get_db_transaction()
+    try:
+        assert await agen.__anext__() is pool.conn
+    finally:
+        await agen.aclose()
+
+    assert pool.acquire_timeouts == [2.75]
+
+
+@pytest.mark.asyncio
+async def test_get_db_transaction_maps_pool_exhaustion_to_exact_busy_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "4")
+
+    class _ExhaustedTxn:
+        async def __aenter__(self) -> object:
+            raise ConnectionPoolExhaustedError()
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    class _ExhaustedPool:
+        def transaction(
+            self,
+            *,
+            acquire_timeout_seconds: float | None = None,
+        ) -> _ExhaustedTxn:
+            assert acquire_timeout_seconds == 5.0
+            return _ExhaustedTxn()
+
+    async def _fake_get_db_pool() -> _ExhaustedPool:
+        return _ExhaustedPool()
+
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    agen = auth_deps.get_db_transaction()
+    with pytest.raises(HTTPException) as exc_info:
+        await agen.__anext__()
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Authentication database is busy. Please retry shortly."
+    assert exc_info.value.headers == {"Retry-After": "4"}
 
 
 @pytest.mark.asyncio

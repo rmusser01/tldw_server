@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import (
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
     DatabaseError,
     DatabaseLockError,
     InvalidTokenError,
@@ -50,6 +51,9 @@ from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter, get_rate_l
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import (
     get_settings,
+)
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     User as User,
@@ -166,34 +170,6 @@ def _read_non_negative_float_env(name: str, default: float) -> float:
         )
         return default
     return max(parsed, 0.0)
-
-
-def _authnz_sqlite_lock_retry_config() -> tuple[int, float, float, int]:
-    """Return retry/backoff config for transient AuthNZ SQLite lock contention."""
-    max_retries = _read_non_negative_int_env(
-        "AUTHNZ_SQLITE_LOCK_MAX_RETRIES",
-        2,
-    )
-    retry_after_seconds = _read_non_negative_int_env(
-        "AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS",
-        1,
-    )
-    base_backoff_seconds = _read_non_negative_float_env(
-        "AUTHNZ_SQLITE_LOCK_RETRY_BASE_SECONDS",
-        0.05,
-    )
-    max_backoff_seconds = _read_non_negative_float_env(
-        "AUTHNZ_SQLITE_LOCK_RETRY_MAX_SECONDS",
-        0.25,
-    )
-    if max_backoff_seconds < base_backoff_seconds:
-        max_backoff_seconds = base_backoff_seconds
-    return (
-        max_retries,
-        base_backoff_seconds,
-        max_backoff_seconds,
-        retry_after_seconds,
-    )
 
 
 def _authnz_busy_http_exception(retry_after_seconds: int) -> HTTPException:
@@ -520,28 +496,37 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
         adapter = _ConnAdapter(conn, is_postgres=is_postgres_backend)
         try:
             yield adapter
-        finally:
+        except BaseException as exc:
+            if not await conn_cm.__aexit__(type(exc), exc, exc.__traceback__):
+                raise
+        else:
             await conn_cm.__aexit__(None, None, None)
     else:
         # Default: yield a request-scoped transaction so writes commit reliably.
         # For SQLite lock contention, retry only transaction-entry failures.
-        max_retries, backoff_base, backoff_max, retry_after = _authnz_sqlite_lock_retry_config()
+        policy = get_authnz_transaction_policy()
+        max_retries = policy.sqlite_lock_max_retries
+        backoff_base = policy.sqlite_lock_retry_base_seconds
+        backoff_max = policy.sqlite_lock_retry_max_seconds
+        retry_after = policy.busy_retry_after_seconds
         entry_attempt = 0
         txn_cm = None
         conn = None
 
         while True:
-            txn_cm = db_pool.transaction()
+            txn_cm = db_pool.transaction(
+                acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
+            )
             try:
                 conn = await txn_cm.__aenter__()
                 break
-            except DatabaseLockError as lock_exc:
+            except DatabaseLockError:
                 if entry_attempt >= max_retries:
                     logger.warning(
                         "AuthNZ DB lock contention exhausted entry retries (attempts={})",
                         entry_attempt + 1,
                     )
-                    raise _authnz_busy_http_exception(retry_after) from lock_exc
+                    raise _authnz_busy_http_exception(retry_after) from None
                 sleep_seconds = min(backoff_base * (2 ** entry_attempt), backoff_max)
                 logger.debug(
                     "AuthNZ DB lock contention on transaction entry; retrying (attempt={} sleep={}s)",
@@ -550,6 +535,8 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
                 )
                 entry_attempt += 1
                 await asyncio.sleep(sleep_seconds)
+            except ConnectionPoolExhaustedError:
+                raise _authnz_busy_http_exception(retry_after) from None
 
         if txn_cm is None:
             raise RuntimeError("AuthNZ transaction context manager was not initialized")
@@ -559,14 +546,16 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
         except BaseException as exc:
             try:
                 await txn_cm.__aexit__(type(exc), exc, exc.__traceback__)
-            except DatabaseLockError as lock_exc:
-                raise _authnz_busy_http_exception(retry_after) from lock_exc
+            except DatabaseLockError:
+                if isinstance(exc, asyncio.CancelledError):
+                    raise exc from None
+                raise _authnz_busy_http_exception(retry_after) from None
             raise
         else:
             try:
                 await txn_cm.__aexit__(None, None, None)
-            except DatabaseLockError as lock_exc:
-                raise _authnz_busy_http_exception(retry_after) from lock_exc
+            except DatabaseLockError:
+                raise _authnz_busy_http_exception(retry_after) from None
 
 
 async def get_password_service_dep() -> PasswordService:

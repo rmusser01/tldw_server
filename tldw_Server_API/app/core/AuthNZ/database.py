@@ -23,17 +23,12 @@ from loguru import logger
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseError,
     DatabaseLockError,
-    DuplicateOrganizationError,
-    DuplicatePermissionError,
-    DuplicateRoleError,
-    DuplicateTeamError,
-    DuplicateUserError,
-    InvalidRegistrationCodeError,
-    RegistrationError,
+    RollbackSignal,
     TransactionError,
-    WeakPasswordError,
+    UserRegistrationException,
 )
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
@@ -57,7 +52,17 @@ _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
     asyncpg.PostgresError,
 )
 
+_AUTHNZ_TRANSACTION_PASSTHROUGH_EXCEPTIONS = (
+    RollbackSignal,
+    UserRegistrationException,
+    HTTPException,
+    MandatoryAuditWriteError,
+)
+
+_AUTHNZ_TRANSACTION_BOUNDARY_EXCEPTIONS = (DatabaseConcurrencyConflict,)
+
 OPENAI_CREDENTIAL_LOCK_POOL_MAX_SIZE = 4
+_POSTGRES_CONCURRENCY_SQLSTATES = frozenset({"40P01", "40001"})
 
 SQLITE_REQUIRED_API_KEYS_COLUMNS = frozenset(
     {
@@ -98,27 +103,149 @@ SQLITE_REQUIRED_API_KEYS_COLUMNS = frozenset(
 )
 
 
-async def _await_connection_release(awaitable: Any) -> Any:
-    """Finish returning a pooled connection before propagating cancellation."""
-    release_task = asyncio.create_task(awaitable)
-    try:
-        return await asyncio.shield(release_task)
-    except asyncio.CancelledError:
-        while not release_task.done():
-            try:
-                await asyncio.shield(release_task)
-            except asyncio.CancelledError:
-                continue
+async def _await_cancellation_safe_cleanup(awaitable: Any) -> Any:
+    """Finish one cleanup task before propagating its first cancellation."""
+    async def _capture_cleanup_outcome() -> tuple[bool, Any]:
         try:
-            release_task.result()
-        except asyncio.CancelledError:
-            logger.error("PostgreSQL pool release task was cancelled")
-        except Exception as exc:  # noqa: BLE001 - preserve cancellation after cleanup
-            logger.error(
-                "PostgreSQL pool release failed during cancellation: {}",
-                type(exc).__name__,
+            return True, await awaitable
+        except BaseException as exc:  # noqa: BLE001 - return failure for safe consumption
+            return False, exc
+
+    cleanup_task = asyncio.create_task(_capture_cleanup_outcome())
+    first_cancellation: asyncio.CancelledError | None = None
+
+    while not cleanup_task.done():
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError as exc:
+            if first_cancellation is None:
+                first_cancellation = exc
+
+    succeeded, result = cleanup_task.result()
+    if not succeeded:
+        cleanup_failure = result
+        result = None
+        if isinstance(cleanup_failure, asyncio.CancelledError):
+            if first_cancellation is None:
+                first_cancellation = cleanup_failure
+        elif first_cancellation is None:
+            raise cleanup_failure
+
+    if first_cancellation is not None:
+        raise first_cancellation from None
+    return result
+
+
+def _has_postgres_concurrency_sqlstate(exc: BaseException) -> bool:
+    """Inspect Python's bounded effective chain for a retryable PostgreSQL state."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and len(seen) < 32:
+        identity = id(current)
+        if identity in seen:
+            break
+        seen.add(identity)
+        try:
+            sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+        except Exception:  # noqa: BLE001 - malformed backend exceptions are untrusted
+            sqlstate = None
+        if sqlstate in _POSTGRES_CONCURRENCY_SQLSTATES:
+            return True
+        try:
+            cause = current.__cause__
+            context = current.__context__
+            suppress_context = current.__suppress_context__
+        except Exception:  # noqa: BLE001 - malformed backend exceptions are untrusted
+            break
+        if isinstance(cause, BaseException):
+            current = cause
+        elif not suppress_context and isinstance(context, BaseException):
+            current = context
+        else:
+            current = None
+    return False
+
+
+def _is_transaction_control_exception(exc: BaseException) -> bool:
+    """Return whether cleanup must preserve the original exception unchanged."""
+    return not isinstance(exc, Exception) or (
+        isinstance(exc, _AUTHNZ_TRANSACTION_PASSTHROUGH_EXCEPTIONS)
+        and not isinstance(exc, _AUTHNZ_TRANSACTION_BOUNDARY_EXCEPTIONS)
+    )
+
+
+def _select_transaction_cleanup_failure(
+    primary: BaseException | None,
+    cleanup: BaseException,
+) -> tuple[BaseException, bool]:
+    """Select the failure to propagate and whether ordinary cleanup should log."""
+    if primary is not None and not isinstance(primary, Exception):
+        return primary, False
+    if not isinstance(cleanup, Exception):
+        return cleanup, False
+    if primary is None:
+        return cleanup, False
+    should_log = not _is_transaction_control_exception(
+        primary
+    ) and not _is_transaction_control_exception(cleanup)
+    return primary, should_log
+
+
+async def _release_postgres_connection(
+    pool: Any,
+    connection: Any,
+    timeout: float | None,
+    primary: BaseException | None,
+) -> BaseException | None:
+    """Finish one pool release and combine it with any active body failure."""
+    try:
+        release = (
+            pool.release(connection)
+            if timeout is None
+            else pool.release(connection, timeout=timeout)
+        )
+        await _await_cancellation_safe_cleanup(release)
+    except BaseException as cleanup_exc:  # noqa: BLE001 - preserve control precedence
+        if primary is None and isinstance(cleanup_exc, Exception):
+            primary = TransactionError("PostgreSQL connection release")
+            should_log = True
+        else:
+            primary, should_log = _select_transaction_cleanup_failure(
+                primary,
+                cleanup_exc,
             )
-        raise
+        if should_log:
+            logger.bind(
+                backend="postgresql",
+                operation="release",
+                error_type=type(cleanup_exc).__name__,
+            ).error("PostgreSQL connection release failed")
+    return primary
+
+
+async def _close_sqlite_connection(
+    connection: Any,
+    primary: BaseException | None,
+) -> BaseException | None:
+    """Finish one SQLite close and combine it with any active body failure."""
+    try:
+        await _await_cancellation_safe_cleanup(connection.close())
+    except BaseException as cleanup_exc:  # noqa: BLE001 - preserve control precedence
+        if primary is None and isinstance(cleanup_exc, Exception):
+            primary = TransactionError("SQLite connection close")
+            should_log = True
+        else:
+            primary, should_log = _select_transaction_cleanup_failure(
+                primary,
+                cleanup_exc,
+            )
+        if should_log:
+            logger.bind(
+                backend="sqlite",
+                operation="close",
+                error_type=type(cleanup_exc).__name__,
+            ).error("SQLite connection close failed")
+    return primary
 
 
 SQLITE_REQUIRED_API_KEY_AUDIT_COLUMNS = frozenset(
@@ -603,85 +730,228 @@ class DatabasePool:
             # Don't raise in permissive contexts - schema might already exist
 
     @asynccontextmanager
-    async def transaction(self):
-        """Database transaction context manager"""
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        """Open the configured backend's transaction context."""
         if not self._initialized:
             await self.initialize()
+        async with self._transaction_context(acquire_timeout_seconds) as conn:
+            yield conn
 
+    @asynccontextmanager
+    async def _transaction_context(self, acquire_timeout_seconds: float | None):
+        """Implement backend-specific transaction lifecycle and translation."""
         postgres_pool = self.pool
         if postgres_pool is not None:
-            # PostgreSQL transaction
-            try:
-                async with postgres_pool.acquire() as conn, conn.transaction():
-                    yield conn
-                logger.debug("PostgreSQL transaction committed successfully")
-            except asyncpg.exceptions.TooManyConnectionsError:
-                raise ConnectionPoolExhaustedError() from None
-            except HTTPException:
-                # Re-raise HTTP exceptions unchanged
-                raise
-            except MandatoryAuditWriteError:
-                raise
-            except (DuplicateUserError, WeakPasswordError, InvalidRegistrationCodeError, RegistrationError, DuplicateOrganizationError, DuplicateTeamError, DuplicateRoleError, DuplicatePermissionError):
-                # Re-raise registration exceptions unchanged
-                raise
-            except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
-                logger.bind(error_type=type(e).__name__).error(
-                    "PostgreSQL transaction failed"
-                )
-                raise TransactionError("PostgreSQL transaction", str(e)) from e
-        else:
-            # SQLite transaction
+            primary_failure: BaseException | None = None
+            failure_operation = "acquire"
+            acquire_context = None
+            transaction_context = None
             conn = None
+            acquired = False
             try:
-                conn = await aiosqlite.connect(self.db_path, uri=self._sqlite_uri)
-                await configure_sqlite_connection_async(conn)
-                conn.row_factory = aiosqlite.Row
-                await conn.execute("BEGIN IMMEDIATE")
+                acquire_context = (
+                    postgres_pool.acquire()
+                    if acquire_timeout_seconds is None
+                    else postgres_pool.acquire(timeout=acquire_timeout_seconds)
+                )
+                conn = await acquire_context.__aenter__()
+                acquired = True
+            except BaseException as exc:  # noqa: BLE001 - classify after ordered cleanup
+                primary_failure = exc
+
+            transaction_entered = False
+            if acquired and primary_failure is None:
+                try:
+                    transaction_context = conn.transaction()
+                    await transaction_context.__aenter__()
+                    transaction_entered = True
+                except BaseException as exc:  # noqa: BLE001 - release must still run
+                    primary_failure = exc
+                    failure_operation = "transaction_enter"
+
+            if transaction_entered:
+                try:
+                    yield conn
+                except BaseException as exc:  # noqa: BLE001 - preserve body control flow
+                    primary_failure = exc
+                    failure_operation = "transaction"
 
                 try:
-                    # Yield a shim that normalizes execute() parameter passing for SQLite
-                    class _SQLiteConnShim:
-                        def __init__(self, _c):
-                            self._c = _c
-                        async def execute(self, query: str, *args):
-                            # Accept both variadic params and single-sequence params
-                            q = _normalize_sqlite_sql(query)
-                            if len(args) == 0:
-                                return await self._c.execute(q)
-                            params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple, dict))) else args
-                            if isinstance(params, dict):
-                                return await self._c.execute(q, params)
-                            return await self._c.execute(q, tuple(params))
-                        def __getattr__(self, name: str):
-                            return getattr(self._c, name)
+                    if primary_failure is None:
+                        await _await_cancellation_safe_cleanup(
+                            transaction_context.__aexit__(None, None, None)
+                        )
+                    else:
+                        await _await_cancellation_safe_cleanup(
+                            transaction_context.__aexit__(
+                                type(primary_failure),
+                                primary_failure,
+                                primary_failure.__traceback__,
+                            )
+                        )
+                except BaseException as cleanup_exc:  # noqa: BLE001 - ordered cleanup selection
+                    cleanup_operation = (
+                        "commit" if primary_failure is None else "rollback"
+                    )
+                    selected_failure, should_log = _select_transaction_cleanup_failure(
+                        primary_failure,
+                        cleanup_exc,
+                    )
+                    if selected_failure is cleanup_exc:
+                        failure_operation = cleanup_operation
+                    primary_failure = selected_failure
+                    if should_log:
+                        logger.bind(
+                            backend="postgresql",
+                            operation=cleanup_operation,
+                            error_type=type(cleanup_exc).__name__,
+                        ).error("PostgreSQL transaction cleanup failed")
 
-                    yield _SQLiteConnShim(conn)
-                    await conn.commit()
-                except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS:
-                    await conn.rollback()
-                    raise
+            if acquired and acquire_context is not None:
+                try:
+                    if primary_failure is None:
+                        await _await_cancellation_safe_cleanup(
+                            acquire_context.__aexit__(None, None, None)
+                        )
+                    else:
+                        await _await_cancellation_safe_cleanup(
+                            acquire_context.__aexit__(
+                                type(primary_failure),
+                                primary_failure,
+                                primary_failure.__traceback__,
+                            )
+                        )
+                except BaseException as cleanup_exc:  # noqa: BLE001 - ordered cleanup selection
+                    selected_failure, should_log = _select_transaction_cleanup_failure(
+                        primary_failure,
+                        cleanup_exc,
+                    )
+                    if selected_failure is cleanup_exc:
+                        failure_operation = "release"
+                    primary_failure = selected_failure
+                    if should_log:
+                        logger.bind(
+                            backend="postgresql",
+                            operation="release",
+                            error_type=type(cleanup_exc).__name__,
+                        ).error("PostgreSQL transaction cleanup failed")
 
-            except aiosqlite.OperationalError as e:
-                if "database is locked" in str(e):
-                    raise DatabaseLockError() from e
-                raise TransactionError("SQLite transaction", str(e)) from e
-            except HTTPException:
-                # Re-raise HTTP exceptions unchanged
-                raise
-            except MandatoryAuditWriteError:
-                raise
-            except (DuplicateUserError, WeakPasswordError, InvalidRegistrationCodeError, RegistrationError, DuplicateOrganizationError, DuplicateTeamError, DuplicateRoleError, DuplicatePermissionError):
-                # Re-raise registration exceptions unchanged
-                raise
-            except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
-                logger.bind(error_type=type(e).__name__).error(
-                    "SQLite transaction failed"
-                )
-                raise TransactionError("SQLite transaction", str(e)) from e
-            finally:
-                if conn:
-                    await conn.close()
+            if primary_failure is None:
+                logger.debug("PostgreSQL transaction committed successfully")
+                return
+            if _is_transaction_control_exception(primary_failure):
+                raise primary_failure from None
+            if not acquired and isinstance(
+                primary_failure,
+                (asyncpg.exceptions.TooManyConnectionsError, TimeoutError),
+            ):
+                raise ConnectionPoolExhaustedError() from None
+            if failure_operation in {"transaction", "commit"} and (
+                _has_postgres_concurrency_sqlstate(primary_failure)
+            ):
+                raise DatabaseConcurrencyConflict() from None
+            if isinstance(primary_failure, Exception):
+                logger.bind(
+                    backend="postgresql",
+                    operation=failure_operation,
+                    error_type=type(primary_failure).__name__,
+                ).error("PostgreSQL transaction failed")
+                raise TransactionError("PostgreSQL transaction") from None
+            raise primary_failure from None
+
+        conn = None
+        failure: BaseException | None = None
+        failure_operation = "transaction"
+        transaction_started = False
+        try:
+            conn = await aiosqlite.connect(self.db_path, uri=self._sqlite_uri)
+            await configure_sqlite_connection_async(conn)
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("BEGIN IMMEDIATE")
+            transaction_started = True
+
+            class _SQLiteConnShim:
+                def __init__(self, connection: Any):
+                    self._c = connection
+
+                async def execute(self, query: str, *args: Any):
+                    q = _normalize_sqlite_sql(query)
+                    if not args:
+                        return await self._c.execute(q)
+                    params = (
+                        args[0]
+                        if len(args) == 1 and isinstance(args[0], (list, tuple, dict))
+                        else args
+                    )
+                    if isinstance(params, dict):
+                        return await self._c.execute(q, params)
+                    return await self._c.execute(q, tuple(params))
+
+                def __getattr__(self, name: str):
+                    return getattr(self._c, name)
+
+            yield _SQLiteConnShim(conn)
+            await conn.commit()
+        except BaseException as exc:  # noqa: BLE001 - cleanup must cover cancellation/control flow
+            failure = exc
+            if conn is not None and transaction_started:
+                try:
+                    await _await_cancellation_safe_cleanup(conn.rollback())
+                except BaseException as cleanup_exc:  # noqa: BLE001 - ordered cleanup selection
+                    selected_failure, should_log = _select_transaction_cleanup_failure(
+                        failure,
+                        cleanup_exc,
+                    )
+                    if selected_failure is cleanup_exc:
+                        failure_operation = "rollback"
+                    failure = selected_failure
+                    if should_log:
+                        logger.bind(
+                            backend="sqlite",
+                            operation="rollback",
+                            error_type=type(cleanup_exc).__name__,
+                        ).error("SQLite transaction cleanup failed")
+        finally:
+            if conn is not None:
+                try:
+                    await _await_cancellation_safe_cleanup(conn.close())
+                except BaseException as cleanup_exc:  # noqa: BLE001 - ordered cleanup selection
+                    selected_failure, should_log = _select_transaction_cleanup_failure(
+                        failure,
+                        cleanup_exc,
+                    )
+                    if selected_failure is cleanup_exc:
+                        failure_operation = "close"
+                    failure = selected_failure
+                    if should_log:
+                        logger.bind(
+                            backend="sqlite",
+                            operation="close",
+                            error_type=type(cleanup_exc).__name__,
+                        ).error("SQLite transaction cleanup failed")
+
+        if failure is None:
+            return
+        if _is_transaction_control_exception(failure):
+            raise failure from None
+        if (
+            failure_operation == "transaction"
+            and isinstance(failure, aiosqlite.OperationalError)
+            and "database is locked" in str(failure).lower()
+        ):
+            raise DatabaseLockError() from None
+        if isinstance(failure, Exception):
+            logger.bind(
+                backend="sqlite",
+                operation=failure_operation,
+                error_type=type(failure).__name__,
+            ).error("SQLite transaction failed")
+            raise TransactionError("SQLite transaction") from None
+        raise failure from None
 
     @asynccontextmanager
     async def acquire(self, *, timeout: float | None = None):
@@ -692,28 +962,39 @@ class DatabasePool:
         postgres_pool = self.pool
         if postgres_pool is not None:
             # PostgreSQL connection
-            conn = None
             try:
                 if timeout is None:
                     conn = await postgres_pool.acquire()
                 else:
                     conn = await postgres_pool.acquire(timeout=timeout)
-                yield conn
             except asyncpg.exceptions.TooManyConnectionsError:
                 raise ConnectionPoolExhaustedError() from None
-            finally:
-                if conn:
-                    release = (
-                        postgres_pool.release(conn)
-                        if timeout is None
-                        else postgres_pool.release(conn, timeout=timeout)
-                    )
-                    await _await_connection_release(release)
+
+            failure: BaseException | None = None
+            try:
+                yield conn
+            except BaseException as exc:  # noqa: BLE001 - release before propagation
+                failure = exc
+
+            had_primary_failure = failure is not None
+            failure = await _release_postgres_connection(
+                postgres_pool,
+                conn,
+                timeout,
+                failure,
+            )
+            if failure is not None:
+                if not had_primary_failure and isinstance(failure, TransactionError):
+                    raise failure from None
+                if isinstance(failure, Exception):
+                    raise failure
+                raise failure from None
         else:
             # SQLite connection
-            conn = None
+            conn = await aiosqlite.connect(self.db_path, uri=self._sqlite_uri)
+
+            failure: BaseException | None = None
             try:
-                conn = await aiosqlite.connect(self.db_path, uri=self._sqlite_uri)
                 await configure_sqlite_connection_async(conn)
                 conn.row_factory = aiosqlite.Row
                 # Yield a shim with normalized execute() signature (see transaction())
@@ -732,9 +1013,17 @@ class DatabasePool:
                         return getattr(self._c, name)
 
                 yield _SQLiteConnShim(conn)
-            finally:
-                if conn:
-                    await conn.close()
+            except BaseException as exc:  # noqa: BLE001 - close before propagation
+                failure = exc
+
+            had_primary_failure = failure is not None
+            failure = await _close_sqlite_connection(conn, failure)
+            if failure is not None:
+                if not had_primary_failure and isinstance(failure, TransactionError):
+                    raise failure from None
+                if isinstance(failure, Exception):
+                    raise failure
+                raise failure from None
 
     async def execute(self, query: str, *args) -> Any:
         """Execute a query without returning results"""
@@ -855,23 +1144,33 @@ class DatabasePool:
         if lock_pool is None:
             raise DatabaseError("OpenAI credential lock pool unavailable")
 
-        conn = None
         try:
             if timeout is None:
                 conn = await lock_pool.acquire()
             else:
                 conn = await lock_pool.acquire(timeout=timeout)
-            yield conn
         except asyncpg.exceptions.TooManyConnectionsError:
             raise ConnectionPoolExhaustedError() from None
-        finally:
-            if conn is not None:
-                release = (
-                    lock_pool.release(conn)
-                    if timeout is None
-                    else lock_pool.release(conn, timeout=timeout)
-                )
-                await _await_connection_release(release)
+
+        failure: BaseException | None = None
+        try:
+            yield conn
+        except BaseException as exc:  # noqa: BLE001 - release before propagation
+            failure = exc
+
+        had_primary_failure = failure is not None
+        failure = await _release_postgres_connection(
+            lock_pool,
+            conn,
+            timeout,
+            failure,
+        )
+        if failure is not None:
+            if not had_primary_failure and isinstance(failure, TransactionError):
+                raise failure from None
+            if isinstance(failure, Exception):
+                raise failure
+            raise failure from None
 
     async def _close_postgres_pools(self) -> bool:
         """Close both PostgreSQL pools and report caller cancellation."""

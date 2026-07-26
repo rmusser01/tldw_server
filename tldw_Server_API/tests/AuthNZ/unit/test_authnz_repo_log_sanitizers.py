@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -428,8 +429,8 @@ async def test_postgres_transaction_execute_failure_log_omits_raw_exception() ->
     finally:
         logger.remove(sink_id)
 
-    assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert str(exc_info.value.__cause__) == _LEAK
+    assert exc_info.value.__cause__ is None
+    assert _LEAK not in "".join(traceback.format_exception(exc_info.value))
     rendered = "\n".join(records)
     assert "PostgreSQL transaction failed" in rendered
     assert "RuntimeError" in rendered
@@ -460,8 +461,8 @@ async def test_sqlite_transaction_execute_failure_log_omits_raw_exception(
     finally:
         logger.remove(sink_id)
 
-    assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert str(exc_info.value.__cause__) == _LEAK
+    assert exc_info.value.__cause__ is None
+    assert _LEAK not in "".join(traceback.format_exception(exc_info.value))
     assert conn.rolled_back is True
     assert conn.closed is True
     rendered = "\n".join(records)
