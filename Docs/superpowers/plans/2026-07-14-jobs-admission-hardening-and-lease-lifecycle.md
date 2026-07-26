@@ -14,7 +14,7 @@
 - Admission implementation task: `TASK-12969.1`.
 - Lease acquisition task: `TASK-12969.2`, dependent on `TASK-12969.1`.
 - Lease renewal/release task: `TASK-12969.3`, dependent on `TASK-12969.2`.
-- Current execution base: `7c7d591c6e3552ca4bdbf30bdd6bf79460221ece` from `origin/dev`.
+- Current execution base: `0f3983788c413e0d17ffe7eabe8cff4a9f6ae723` from `origin/dev`.
 - Findings were reproduced on `132037dd075090c295003d6885ac4276a9640916`; the intervening upstream commits did not change Jobs source or tests, and each task reconfirms its red state before implementation.
 - Preserve every public `JobManager` method signature and return shape.
 - Backend operation modules must not import `JobManager`.
@@ -69,7 +69,7 @@ quota concurrency: 2 created, expected 1
 **Goal:** Define the typed acquisition command and characterize acquisition before moving SQL.
 **Success Criteria:** Facade tests cover contention, expiry, dependencies, quotas, counters, ordering, and post-commit effects on both backends.
 **Tests:** Contract tests, shared acquisition parity scenarios, direct backend operation tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 4: Acquisition Extraction
 **Goal:** Move single-job acquisition SQL into backend modules and leave `JobManager.acquire_next_job` as a thin compatibility facade.
@@ -671,11 +671,11 @@ Open a PR against `dev` containing only `TASK-12969.1` implementation and planni
 - Consumes: merged PR 1 and current `origin/dev`.
 - Produces: a new clean acquisition worktree/branch based on the merge commit.
 
-- [ ] **Step 1: Confirm the admission PR is merged and green**
+- [x] **Step 1: Confirm the admission PR is merged and green**
 
 Record the PR URL, merge commit, focused test results, Bandit result, and requester-owned Change summary in `TASK-12969.1`. Mark it Done only after the merge is visible on `origin/dev`.
 
-- [ ] **Step 2: Create a new acquisition worktree**
+- [x] **Step 2: Create a new acquisition worktree**
 
 ```bash
 git fetch origin dev
@@ -685,9 +685,11 @@ git worktree add .worktrees/jobs-lease-acquisition \
 
 Do not continue acquisition work on the admission branch. Set `TASK-12969.2` to In Progress and record the new worktree/branch.
 
-- [ ] **Step 3: Re-run the merged admission gate**
+- [x] **Step 3: Re-run the merged admission gate**
 
 Run the Task 4 admission gate in the new worktree. Expected: all tests pass with real PostgreSQL execution. Stop and repair regression fallout before any acquisition edits.
+
+Execution evidence on the merged base: 63 tests passed with required real PostgreSQL execution and zero skips. The first sandboxed run could not reach the healthy local PostgreSQL container; the unchanged matrix passed when rerun with local service access.
 
 ## Task 6: Add the Typed Single-Job Acquisition Command
 
@@ -1146,7 +1148,7 @@ python -m compileall -q \
 python -m bandit -r \
   tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/Jobs/operations \
-  -f json -o /tmp/bandit_task_12968_2.json
+  -f json -o /tmp/bandit_task_12969_2.json
 ```
 
 Expected: compile succeeds and Bandit reports no new findings.
@@ -1166,7 +1168,7 @@ Confirm the PR does not contain:
 
 ```bash
 git add Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md \
-  backlog/tasks/task-12968*
+  backlog/tasks/task-12969*
 git commit -m "docs(jobs): record acquisition extraction verification"
 ```
 
