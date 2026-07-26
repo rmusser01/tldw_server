@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
     LifecycleResult,
     NoTransitionReason,
+    ReleaseJobCommand,
+    RenewLeaseCommand,
 )
 
 try:
@@ -51,6 +53,89 @@ _ORDER_CLAUSES = {
     ),
 }
 
+_RENEW_SQL_VARIANTS = {
+    (False, False, False): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval) "
+        "WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+    (False, True, False): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
+        "progress_percent = %s WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+    (False, False, True): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
+        "progress_message = %s WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+    (False, True, True): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
+        "progress_percent = %s, progress_message = %s "
+        "WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+    (True, False, False): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval) "
+        "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+    (True, True, False): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
+        "progress_percent = %s "
+        "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+    (True, False, True): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
+        "progress_message = %s "
+        "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+    (True, True, True): (
+        "UPDATE jobs SET leased_until = "
+        "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
+        "progress_percent = %s, progress_message = %s "
+        "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
+        "RETURNING id, leased_until, progress_percent, progress_message"
+    ),
+}
+
+_RELEASE_SQL = (
+    "UPDATE jobs SET status = 'queued', available_at = NULL, leased_until = NULL, "
+    "worker_id = NULL, lease_id = NULL, acquired_at = NULL, started_at = NULL, "
+    "completion_token = NULL, updated_at = NOW() "
+    "WHERE id = %s AND status = 'processing' "
+    "RETURNING id, domain, queue, job_type, status, available_at, leased_until, "
+    "worker_id, lease_id, acquired_at, started_at, completion_token, updated_at"
+)
+
+_RELEASE_ENFORCED_SQL = (
+    "UPDATE jobs SET status = 'queued', available_at = NULL, leased_until = NULL, "
+    "worker_id = NULL, lease_id = NULL, acquired_at = NULL, started_at = NULL, "
+    "completion_token = NULL, updated_at = NOW() "
+    "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
+    "RETURNING id, domain, queue, job_type, status, available_at, leased_until, "
+    "worker_id, lease_id, acquired_at, started_at, completion_token, updated_at"
+)
+
+_RELEASE_COUNTER_SQL = (
+    "INSERT INTO job_counters(domain, queue, job_type, ready_count, scheduled_count, "
+    "processing_count, quarantined_count) VALUES(%s, %s, %s, 1, 0, 0, 0) "
+    "ON CONFLICT (domain, queue, job_type) DO UPDATE SET "
+    "ready_count = job_counters.ready_count + %s, "
+    "scheduled_count = job_counters.scheduled_count + %s, "
+    "processing_count = GREATEST(job_counters.processing_count - 1, 0), "
+    "updated_at = NOW()"
+)
+
 
 def _pg_advisory_key(*parts: str) -> int:
     """Match the legacy advisory key used by deployed workers."""
@@ -75,6 +160,136 @@ def _count_from_row(row: Any) -> int:
     if isinstance(row, dict):
         return int(row.get("c") or 0)
     return int(row[0] or 0)
+
+
+def _classify_lifecycle_no_transition(
+    cur: Any,
+    *,
+    job_id: int,
+    enforce: bool,
+    worker_id: str | None,
+    lease_id: str | None,
+) -> LifecycleResult:
+    """Classify why a Postgres lifecycle update did not change a row."""
+
+    cur.execute(
+        "SELECT id, status, worker_id, lease_id FROM jobs WHERE id = %s",
+        (job_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return LifecycleResult.no_transition(NoTransitionReason.MISSING)
+    current = dict(row)
+    if current.get("status") != "processing":
+        return LifecycleResult.no_transition(NoTransitionReason.WRONG_STATUS, row=current)
+    if enforce and (
+        current.get("worker_id") != worker_id or current.get("lease_id") != lease_id
+    ):
+        return LifecycleResult.no_transition(NoTransitionReason.STALE_LEASE, row=current)
+    return LifecycleResult.no_transition(NoTransitionReason.WRONG_STATUS, row=current)
+
+
+def renew_lease(
+    conn: Any,
+    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
+    *,
+    command: RenewLeaseCommand,
+    now: datetime,
+) -> LifecycleResult:
+    """Renew one processing Postgres job lease without shortening it."""
+
+    has_percent = command.progress_percent is not None
+    has_message = command.progress_message is not None
+    sql = _RENEW_SQL_VARIANTS[(command.enforce, has_percent, has_message)]
+    params: list[Any] = [now, now, command.seconds]
+    if has_percent:
+        params.append(float(command.progress_percent))
+    if has_message:
+        params.append(str(command.progress_message))
+    params.append(command.job_id)
+    if command.enforce:
+        params.extend((command.worker_id, command.lease_id))
+
+    with conn:
+        with cursor_factory(conn) as cur:
+            cur.execute(sql, tuple(params))
+            row = cur.fetchone()
+            if row is None:
+                return _classify_lifecycle_no_transition(
+                    cur,
+                    job_id=command.job_id,
+                    enforce=command.enforce,
+                    worker_id=command.worker_id,
+                    lease_id=command.lease_id,
+                )
+            return LifecycleResult.applied(row=dict(row))
+
+
+def release_job(
+    conn: Any,
+    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
+    *,
+    command: ReleaseJobCommand,
+    counters_enabled: bool,
+) -> LifecycleResult:
+    """Release one processing Postgres job back to the ready queue."""
+
+    with conn:
+        with cursor_factory(conn) as cur:
+            cur.execute(
+                (
+                    "SELECT id, domain, queue, job_type, status, worker_id, lease_id "
+                    "FROM jobs WHERE id = %s FOR UPDATE"
+                ),
+                (command.job_id,),
+            )
+            selected = cur.fetchone()
+            if selected is None:
+                return LifecycleResult.no_transition(NoTransitionReason.MISSING)
+            current = dict(selected)
+            if current.get("status") != "processing":
+                return LifecycleResult.no_transition(
+                    NoTransitionReason.WRONG_STATUS,
+                    row=current,
+                )
+            if command.enforce and (
+                current.get("worker_id") != command.worker_id
+                or current.get("lease_id") != command.lease_id
+            ):
+                return LifecycleResult.no_transition(
+                    NoTransitionReason.STALE_LEASE,
+                    row=current,
+                )
+
+            if command.enforce:
+                cur.execute(
+                    _RELEASE_ENFORCED_SQL,
+                    (command.job_id, command.worker_id, command.lease_id),
+                )
+            else:
+                cur.execute(_RELEASE_SQL, (command.job_id,))
+            row = cur.fetchone()
+            if row is None:
+                return _classify_lifecycle_no_transition(
+                    cur,
+                    job_id=command.job_id,
+                    enforce=command.enforce,
+                    worker_id=command.worker_id,
+                    lease_id=command.lease_id,
+                )
+            released = dict(row)
+            if counters_enabled:
+                cur.execute(
+                    _RELEASE_COUNTER_SQL,
+                    (
+                        released["domain"],
+                        released["queue"],
+                        released["job_type"],
+                        1,
+                        0,
+                    ),
+                )
+            return LifecycleResult.applied(row=released)
 
 
 def _dependency_condition() -> str:
@@ -232,4 +447,4 @@ def acquire_job(
             return LifecycleResult.applied(row=acquired)
 
 
-__all__ = ["acquire_job"]
+__all__ = ["acquire_job", "release_job", "renew_lease"]

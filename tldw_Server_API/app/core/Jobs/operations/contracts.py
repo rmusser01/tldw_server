@@ -89,6 +89,36 @@ class AcquireJobCommand:
 
 
 @dataclass(frozen=True)
+class RenewLeaseCommand:
+    """Backend-neutral command payload for renewing one job lease."""
+
+    job_id: int
+    seconds: int
+    enforce: bool
+    worker_id: str | None = None
+    lease_id: str | None = None
+    progress_percent: float | None = None
+    progress_message: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject non-positive lease extension durations."""
+
+        if self.seconds < 1:
+            raise ValueError("seconds must be positive")
+
+
+@dataclass(frozen=True)
+class ReleaseJobCommand:
+    """Backend-neutral command payload for releasing one processing job."""
+
+    job_id: int
+    enforce: bool
+    worker_id: str | None = None
+    lease_id: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class AdmissionResult:
     """Result facts produced by a create/admission operation."""
 
@@ -138,7 +168,7 @@ class AdmissionResult:
         return self.was_inserted
 
     @classmethod
-    def applied(cls, *, row: dict[str, Any], durable_events: Sequence[dict[str, Any]] = ()) -> "AdmissionResult":
+    def applied(cls, *, row: dict[str, Any], durable_events: Sequence[dict[str, Any]] = ()) -> AdmissionResult:
         """Build an applied admission result for a newly inserted row."""
 
         return cls(
@@ -154,7 +184,7 @@ class AdmissionResult:
         *,
         row: dict[str, Any],
         durable_events: Sequence[dict[str, Any]] = (),
-    ) -> "AdmissionResult":
+    ) -> AdmissionResult:
         """Build a no-transition result for an idempotent existing row."""
 
         return cls(
@@ -166,7 +196,7 @@ class AdmissionResult:
         )
 
     @classmethod
-    def rejected(cls, reason: AdmissionRejectionReason, *, message: str | None = None) -> "AdmissionResult":
+    def rejected(cls, reason: AdmissionRejectionReason, *, message: str | None = None) -> AdmissionResult:
         """Build an admission-rejected result with an explicit reason."""
 
         return cls(
@@ -211,7 +241,7 @@ class LifecycleResult:
         *,
         row: dict[str, Any],
         durable_events: Sequence[dict[str, Any]] = (),
-    ) -> "LifecycleResult":
+    ) -> LifecycleResult:
         """Build an applied lifecycle result for a successful transition."""
 
         return cls(
@@ -228,7 +258,7 @@ class LifecycleResult:
         *,
         row: dict[str, Any] | None = None,
         message: str | None = None,
-    ) -> "LifecycleResult":
+    ) -> LifecycleResult:
         """Build a no-transition lifecycle result with a reason."""
 
         return cls(
@@ -248,4 +278,6 @@ __all__ = [
     "LifecycleResult",
     "NoTransitionReason",
     "OperationOutcome",
+    "ReleaseJobCommand",
+    "RenewLeaseCommand",
 ]

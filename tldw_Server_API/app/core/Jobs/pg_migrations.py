@@ -756,6 +756,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     """
     try:
         import psycopg  # type: ignore
+        from psycopg import sql as _sql  # type: ignore
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
     import os
@@ -774,18 +775,43 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     schema_name = (schema_row[0] if schema_row else None) or "public"
                     cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
                     if not cur.fetchone():
-                        cur.execute(f"CREATE ROLE {role} NOLOGIN")
+                        cur.execute(
+                            _sql.SQL("CREATE ROLE {} NOLOGIN").format(
+                                _sql.Identifier(role),
+                            )
+                        )
                     try:
                         cur.execute("SELECT current_user")
                         user_row = cur.fetchone()
                         current_user = (user_row[0] if user_row else None) or None
                         if current_user and _re.match(r"^[A-Za-z0-9_]+$", str(current_user)):
-                            cur.execute(f"GRANT {role} TO {current_user}")
+                            cur.execute(
+                                _sql.SQL("GRANT {} TO {}").format(
+                                    _sql.Identifier(role),
+                                    _sql.Identifier(str(current_user)),
+                                )
+                            )
                     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                         pass
-                    cur.execute(f"GRANT USAGE ON SCHEMA {schema_name} TO {role}")
                     cur.execute(
-                        f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema_name} TO {role}"
+                        _sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL(
+                            "GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} TO {}"
+                        ).format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT INSERT ON TABLE {}.job_counters TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
                     )
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
