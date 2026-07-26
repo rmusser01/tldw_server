@@ -14,7 +14,10 @@ import pytest
 
 from tldw_Server_API.app.core.MCP_unified import protocol as protocol_module
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
-from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
+from tldw_Server_API.app.core.MCP_unified.modules.registry import (
+    ModuleStatus,
+    get_module_registry,
+)
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
 from tldw_Server_API.app.core.MCP_unified.protocol_types import (
     AuthenticatedExecutionScope,
@@ -45,6 +48,10 @@ class _IntegrityWriteModule(BaseModule):
         self.breaker_entry_count = 0
         self.execute_count = 0
         self.last_arguments: dict[str, Any] | None = None
+        self.tool_def_calls = 0
+        self.block_tool_def_on_call: int | None = None
+        self.tool_def_entered = asyncio.Event()
+        self.tool_def_release = asyncio.Event()
         self.source_tool_def: dict[str, Any] = {
             "name": self.tool_name,
             "description": "Prepared execution integrity test tool",
@@ -74,6 +81,13 @@ class _IntegrityWriteModule(BaseModule):
 
     async def get_tools(self) -> list[dict[str, Any]]:
         return [self.source_tool_def]
+
+    async def get_tool_def(self, tool_name: str) -> dict[str, Any] | None:
+        self.tool_def_calls += 1
+        if self.tool_def_calls == self.block_tool_def_on_call:
+            self.tool_def_entered.set()
+            await self.tool_def_release.wait()
+        return await super().get_tool_def(tool_name)
 
     def is_write_tool_call(
         self,
@@ -241,6 +255,27 @@ class _BlockingIdempotency(_IdempotencyProbe):
         self.entered.set()
         await self.release.wait()
         return await execute(), False
+
+
+class _BlockingSecondLookupRegistry:
+    def __init__(self, delegate: Any) -> None:
+        self.delegate = delegate
+        self.calls = 0
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def find_module_for_tool(self, tool_name: str) -> BaseModule | None:
+        self.calls += 1
+        if self.calls == 2:
+            self.entered.set()
+            await self.release.wait()
+        return await self.delegate.find_module_for_tool(tool_name)
+
+    async def get_module(self, module_id: str) -> BaseModule | None:
+        return await self.delegate.get_module(module_id)
+
+    def get_module_id_for_tool(self, tool_name: str) -> str | None:
+        return self.delegate.get_module_id_for_tool(tool_name)
 
 
 def _assert_stale_prepared_call(payload: dict[str, Any]) -> None:
@@ -813,6 +848,117 @@ async def test_first_live_check_blocks_stale_registry_bindings_before_admission(
     assert rate_limiter.calls == 0
     assert idempotency.bound_keys == []
     assert idempotency.run_keys == []
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ModuleStatus.PENDING,
+        ModuleStatus.INITIALIZING,
+        ModuleStatus.INACTIVE,
+        ModuleStatus.ERROR,
+    ],
+)
+@pytest.mark.asyncio
+async def test_live_check_requires_actual_registry_registration_to_be_operational(
+    monkeypatch: pytest.MonkeyPatch,
+    status: ModuleStatus,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(monkeypatch)
+    assert prepared.module_id is not None
+    registry = get_module_registry()
+    registry._modules[prepared.module_id].status = status
+
+    # Production fallback currently finds retained instances even when get_module rejects them.
+    assert await registry.find_module_for_tool(prepared.tool_name) is module
+
+    rate_limiter = _RateLimiterProbe()
+    idempotency = _IdempotencyProbe()
+    protocol.rate_limiter = rate_limiter
+    protocol._idempotency = idempotency
+
+    payload = await protocol.execute_prepared_tool_call(prepared)
+
+    _assert_stale_prepared_call(payload)
+    assert rate_limiter.calls == 0
+    assert idempotency.bound_keys == []
+    assert idempotency.run_keys == []
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+
+
+@pytest.mark.parametrize("tamper_target", ["arguments", "context"])
+@pytest.mark.asyncio
+async def test_second_live_check_rechecks_integrity_after_awaited_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    tamper_target: str,
+) -> None:
+    context = RequestContext(
+        request_id=f"second-check-race-{tamper_target}",
+        user_id="user-1",
+        metadata={"workspace": "alpha"},
+    )
+    protocol, module, prepared, _ = await _prepare_call(
+        monkeypatch,
+        context=context,
+        idempotency_key=None,
+    )
+    registry = _BlockingSecondLookupRegistry(get_module_registry())
+    rate_limiter = _RateLimiterProbe()
+    protocol.module_registry = registry
+    protocol.rate_limiter = rate_limiter
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(registry.entered.wait(), timeout=2)
+    if tamper_target == "arguments":
+        prepared.tool_args["value"] = "tampered"
+    else:
+        prepared.context.metadata["workspace"] = "tampered"
+    registry.release.set()
+
+    with pytest.raises(
+        InvalidParamsException,
+        match="Prepared tool call integrity check failed",
+    ):
+        await asyncio.wait_for(execution, timeout=2)
+
+    assert registry.calls == 2
+    assert rate_limiter.calls == 1
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+
+
+@pytest.mark.parametrize("drift", ["status", "mapping", "enabled"])
+@pytest.mark.asyncio
+async def test_second_live_check_rechecks_binding_after_definition_await(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(
+        monkeypatch,
+        idempotency_key=None,
+    )
+    assert prepared.module_id is not None
+    registry = get_module_registry()
+    rate_limiter = _RateLimiterProbe()
+    protocol.rate_limiter = rate_limiter
+    module.block_tool_def_on_call = module.tool_def_calls + 2
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(module.tool_def_entered.wait(), timeout=2)
+    if drift == "status":
+        registry._modules[prepared.module_id].status = ModuleStatus.INACTIVE
+    elif drift == "mapping":
+        registry._tool_registry[prepared.tool_name] = f"remapped-{uuid4().hex}"
+    else:
+        module.config.enabled = False
+    module.tool_def_release.set()
+    payload = await asyncio.wait_for(execution, timeout=2)
+
+    _assert_stale_prepared_call(payload)
+    assert rate_limiter.calls == 1
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
 

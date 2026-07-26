@@ -864,6 +864,47 @@ class ToolExecutionSecurity:
                     ExpectedToolFailureReason.STALE_PREPARED_CALL,
                 )
 
+            current_tool_def = await self.resolve_tool_definition(
+                current_module,
+                prepared.tool_name,
+            )
+            if not isinstance(current_tool_def, dict):
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                )
+            get_module = getattr(module_registry, "get_module", None)
+            if callable(get_module):
+                operational_module = await get_module(prepared.module_id)
+            else:
+                # Compatibility registries must still prove operational membership.
+                get_all_modules = getattr(module_registry, "get_all_modules", None)
+                if not callable(get_all_modules):
+                    raise ExpectedToolFailure(
+                        ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                    )
+                operational_modules = await get_all_modules()
+                operational_module = (
+                    operational_modules.get(prepared.module_id)
+                    if isinstance(operational_modules, dict)
+                    else None
+                )
+
+            try:
+                current_tool_def = self.normalize_tool_definition(current_tool_def)
+            except asyncio.CancelledError:
+                raise
+            except self._noncritical_exceptions:
+                pass
+            current_snapshot = self.build_canonical_snapshot(
+                current_tool_def,
+                max_bytes=TOOL_DEFINITION_MAX_BYTES,
+            )
+
+            if current_module is not prepared.module or operational_module is not prepared.module:
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                )
+
             current_module_id = module_registry.get_module_id_for_tool(prepared.tool_name)
             if current_module_id != prepared.module_id:
                 raise ExpectedToolFailure(
@@ -876,25 +917,6 @@ class ToolExecutionSecurity:
                     ExpectedToolFailureReason.STALE_PREPARED_CALL,
                 )
 
-            current_tool_def = await self.resolve_tool_definition(
-                current_module,
-                prepared.tool_name,
-            )
-            if not isinstance(current_tool_def, dict):
-                raise ExpectedToolFailure(
-                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
-                )
-            try:
-                current_tool_def = self.normalize_tool_definition(current_tool_def)
-            except asyncio.CancelledError:
-                raise
-            except self._noncritical_exceptions:
-                pass
-
-            current_snapshot = self.build_canonical_snapshot(
-                current_tool_def,
-                max_bytes=TOOL_DEFINITION_MAX_BYTES,
-            )
             if not hmac.compare_digest(
                 current_snapshot.sha256,
                 prepared.tool_definition_snapshot.sha256,
@@ -902,7 +924,11 @@ class ToolExecutionSecurity:
                 raise ExpectedToolFailure(
                     ExpectedToolFailureReason.STALE_PREPARED_CALL,
                 )
+
+            self.verify_prepared_tool_call_integrity(prepared)
         except asyncio.CancelledError:
+            raise
+        except InvalidParamsException:
             raise
         except ExpectedToolFailure:
             raise
