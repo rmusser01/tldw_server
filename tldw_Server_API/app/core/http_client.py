@@ -616,9 +616,18 @@ def _get_project_version() -> str:
     return _CACHED_VERSION
 
 
+_BOUNDED_RESPONSE_EXTENSION = "tldw_bounded_response"
+
+
+def _is_bounded_httpx_response(response: httpx.Response) -> bool:
+    request = getattr(response, "request", None)
+    extensions = getattr(request, "extensions", {})
+    return bool(extensions.get(_BOUNDED_RESPONSE_EXTENSION))
+
+
 def _capture_error_body_hook(response: httpx.Response) -> None:
     try:
-        if response.status_code >= 400:
+        if response.status_code >= 400 and not _is_bounded_httpx_response(response):
             response.read()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         pass
@@ -626,7 +635,7 @@ def _capture_error_body_hook(response: httpx.Response) -> None:
 
 async def _capture_error_body_hook_async(response: httpx.Response) -> None:
     try:
-        if response.status_code >= 400:
+        if response.status_code >= 400 and not _is_bounded_httpx_response(response):
             try:
                 await response.aread()
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -851,6 +860,7 @@ class TransportAdapter(Protocol):
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
     ) -> AsyncResponseLike: ...
 
     async def stream_bytes(
@@ -954,6 +964,7 @@ class HttpxAdapter:
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
     ) -> httpx.Response:
         return await _afetch_httpx(
             method=method,
@@ -973,6 +984,7 @@ class HttpxAdapter:
             verify=verify,
             configured_endpoint=configured_endpoint,
             sensitive_observability=sensitive_observability,
+            max_response_bytes=max_response_bytes,
         )
 
     async def stream_bytes(
@@ -1087,6 +1099,7 @@ class AiohttpAdapter:
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
     ) -> AsyncResponseLike:
         return await _afetch_aiohttp(
             method=method,
@@ -1106,6 +1119,7 @@ class AiohttpAdapter:
             verify=verify,
             configured_endpoint=configured_endpoint,
             sensitive_observability=sensitive_observability,
+            max_response_bytes=max_response_bytes,
         )
 
     async def stream_bytes(
@@ -1286,6 +1300,35 @@ def _sanitize_accept_encoding_for_backend(headers: dict[str, str] | None, backen
         # Best-effort: return original headers unchanged
         return dict(headers or {})
     return hdrs
+
+
+def _force_identity_accept_encoding(
+    headers: dict[str, str] | None,
+) -> dict[str, str]:
+    """Return copied headers that request only an identity-encoded response."""
+    identity_headers = dict(headers or {})
+    for key in tuple(identity_headers):
+        if key.lower() == "accept-encoding":
+            identity_headers.pop(key)
+    identity_headers["Accept-Encoding"] = "identity"
+    return identity_headers
+
+
+def _uses_compressed_content_encoding(headers: Any) -> bool:
+    """Return whether headers declare any non-identity content encoding."""
+    try:
+        values = [
+            str(value)
+            for key, value in headers.items()
+            if str(key).lower() == "content-encoding"
+        ]
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        return False
+    return any(
+        token.strip().lower() not in {"", "identity"}
+        for value in values
+        for token in value.split(",")
+    )
 
 
 def _redact_path_for_logging(host: str, path: str) -> str:
@@ -2713,6 +2756,7 @@ async def _httpx_arequest_io(
     follow_redirects: bool = False,
     verify: bool | str | ssl.SSLContext | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
+    max_response_bytes: int | None = None,
 ) -> httpx.Response:
     method_upper = str(method).upper()
     transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
@@ -2720,6 +2764,55 @@ async def _httpx_arequest_io(
         headers,
         accepted_resolved_ips,
     )
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes < 0:
+            raise ValueError("max_response_bytes must be a non-negative integer")
+        headers = _force_identity_accept_encoding(headers)
+        stream_kwargs: dict[str, Any] = {
+            "headers": headers,
+            "cookies": cookies,
+            "params": params,
+            "json": json,
+            "data": data,
+            "files": files,
+            "timeout": timeout,
+            "follow_redirects": follow_redirects,
+        }
+        stream_kwargs["extensions"] = {
+            _BOUNDED_RESPONSE_EXTENSION: True,
+        }
+        if accepted_resolved_ips:
+            stream_kwargs["extensions"]["sni_hostname"] = sni_hostname
+        async with client.stream(
+            method_upper,
+            transport_url,
+            **stream_kwargs,
+        ) as streamed:
+            body = bytearray()
+            if 200 <= int(streamed.status_code) < 300:
+                if _uses_compressed_content_encoding(streamed.headers):
+                    raise NetworkError(
+                        "Compressed responses are not allowed with "
+                        "max_response_bytes"
+                    )
+                async for chunk in streamed.aiter_raw():
+                    if len(body) + len(chunk) > max_response_bytes:
+                        raise NetworkError(
+                            "Response exceeds max_response_bytes limit"
+                        )
+                    body.extend(chunk)
+            copied_headers = httpx.Headers(streamed.headers)
+            response = httpx.Response(
+                status_code=streamed.status_code,
+                content=bytes(body),
+                request=streamed.request,
+                extensions=streamed.extensions,
+                history=streamed.history,
+            )
+            response.headers = copied_headers
+        if accepted_resolved_ips:
+            _restore_httpx_response_url(response, url)
+        return response
     if accepted_resolved_ips:
         response = await client.request(
             method_upper,
@@ -2791,6 +2884,7 @@ async def _aiohttp_request_io(
     proxies: str | dict[str, str] | None = None,
     ssl_override: Any | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
+    max_response_bytes: int | None = None,
 ) -> _AiohttpResponse:
     original_url = url
     url, headers, server_hostname = _prepare_pinned_transport_target(
@@ -2798,6 +2892,10 @@ async def _aiohttp_request_io(
         headers,
         accepted_resolved_ips,
     )
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes < 0:
+            raise ValueError("max_response_bytes must be a non-negative integer")
+        headers = _force_identity_accept_encoding(headers)
     req_timeout = _aiohttp_timeout_from_value(timeout)
     proxy = _resolve_proxy_for_url(url, proxies)
     req_kwargs: dict[str, Any] = {
@@ -2807,6 +2905,8 @@ async def _aiohttp_request_io(
         "timeout": req_timeout,
         "allow_redirects": False,
     }
+    if max_response_bytes is not None:
+        req_kwargs["auto_decompress"] = False
     if proxy:
         req_kwargs["proxy"] = proxy
     if ssl_override is not None:
@@ -2822,7 +2922,27 @@ async def _aiohttp_request_io(
         if data is not None:
             req_kwargs["data"] = data
     async with session.request(str(method).upper(), url, **req_kwargs) as resp:
-        body = await resp.read()
+        if max_response_bytes is None:
+            body = await resp.read()
+        else:
+            bounded_body = bytearray()
+            if 200 <= int(getattr(resp, "status", 0)) < 300:
+                if _uses_compressed_content_encoding(resp.headers):
+                    raise NetworkError(
+                        "Compressed responses are not allowed with "
+                        "max_response_bytes"
+                    )
+                while True:
+                    remaining = max_response_bytes - len(bounded_body)
+                    chunk = await resp.content.read(remaining + 1)
+                    if not chunk:
+                        break
+                    if len(bounded_body) + len(chunk) > max_response_bytes:
+                        raise NetworkError(
+                            "Response exceeds max_response_bytes limit"
+                        )
+                    bounded_body.extend(chunk)
+            body = bytes(bounded_body)
         wrapped = _AiohttpResponse(resp, body)
         if accepted_resolved_ips:
             wrapped.url = original_url
@@ -3079,8 +3199,14 @@ async def _afetch_httpx(
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    max_response_bytes: int | None = None,
 ) -> httpx.Response:
     """Async httpx request with retries and egress enforcement.
+
+    ``max_response_bytes`` requests identity encoding and bounds application
+    response-body accumulation while streaming successful responses. Encoded
+    successful responses are rejected; bounded non-2xx responses are returned
+    with an empty body.
 
     Raises ValueError when retries are enabled and a file-like object in `files`
     is not seekable: "File-like object must be seekable when retries are enabled.
@@ -3170,6 +3296,7 @@ async def _afetch_httpx(
                     dns_pin_cache,
                     target_url,
                 ),
+                max_response_bytes=max_response_bytes,
             )
             return r, "ok", None  # noqa: TRY300
         except EgressPolicyError:
@@ -3295,6 +3422,7 @@ async def _afetch_httpx(
                                             dns_pin_cache,
                                             cur_url,
                                         ),
+                                        max_response_bytes=max_response_bytes,
                                     )
                                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
@@ -3487,8 +3615,14 @@ async def _afetch_aiohttp(
     verify: Any | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    max_response_bytes: int | None = None,
 ) -> _AiohttpResponse:
     """Async aiohttp request with retries and egress enforcement.
+
+    ``max_response_bytes`` requests identity encoding and bounds application
+    response-body accumulation while streaming successful responses. Encoded
+    successful responses are rejected; bounded non-2xx responses are returned
+    with an empty body.
 
     Raises ValueError when retries are enabled and a file-like object in `files`
     is not seekable: "File-like object must be seekable when retries are enabled.
@@ -3580,6 +3714,7 @@ async def _afetch_aiohttp(
                     dns_pin_cache,
                     target_url,
                 ),
+                max_response_bytes=max_response_bytes,
             )
             return resp, "ok", None  # noqa: TRY300
         except EgressPolicyError:
@@ -3660,6 +3795,7 @@ async def _afetch_aiohttp(
                                     dns_pin_cache,
                                     cur_url,
                                 ),
+                                max_response_bytes=max_response_bytes,
                             )
                             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.set_attributes({"http.status_code": int(r2_wrap.status_code)})
@@ -3856,7 +3992,9 @@ async def afetch(
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
     transport: str | None = None,
+    max_response_bytes: int | None = None,
 ) -> Any:
+    """Issue one async request, optionally bounding the decoded success body."""
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
         if (
@@ -3887,6 +4025,7 @@ async def afetch(
         verify=verify,
         configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
+        max_response_bytes=max_response_bytes,
     )
 
 

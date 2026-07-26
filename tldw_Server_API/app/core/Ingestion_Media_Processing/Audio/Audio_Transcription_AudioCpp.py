@@ -2,26 +2,46 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
+import inspect
 import ipaddress
 import json
 import math
 import os
 import re
 import stat
+import threading
 import wave
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, NoReturn, cast
+from typing import Any, BinaryIO, NoReturn, cast
 from urllib.parse import urlparse
 
-from tldw_Server_API.app.core.exceptions import STTExecutionUnsupportedError
+from tldw_Server_API.app.core import http_client as _http_client
+from tldw_Server_API.app.core.exceptions import (
+    STTExecutionPlanError,
+    STTExecutionUnsupportedError,
+    STTTranscriptionError,
+)
+from tldw_Server_API.app.core.http_client import (
+    RetryPolicy,
+    afetch,
+    create_async_client,
+    opaque_stt_http_observability,
+    resolve_afetch_transport,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttExecutionRoute,
+    SttTranscriptionOutcome,
     _normalize_audio_endpoint,
+    actual_execution_from_route,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
 )
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 AUDIO_CPP_ENABLED_ENV = "STT_AUDIO_CPP_ENABLED"
 AUDIO_CPP_BASE_URL_ENV = "STT_AUDIO_CPP_BASE_URL"
@@ -46,6 +66,29 @@ _CONTRACT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 _MAX_MODEL_ID_LENGTH = 256
 _MAX_CONTRACT_ID_LENGTH = 64
 _WAV_READ_CHUNK_BYTES = 64 * 1024
+_AUDIO_CPP_PATHS = (
+    "/health",
+    "/v1/models",
+    "/v1/audio/transcriptions",
+)
+_AUDIO_CPP_BUSY_STATUSES = frozenset({409, 429, 503})
+_AUDIO_CPP_MODEL_UNAVAILABLE_STATUSES = frozenset({404, 422})
+
+_Afetch = Callable[..., Awaitable[Any]]
+_DiscoveryCacheKey = tuple[str, str]
+
+_audio_cpp_discovery_cache: dict[_DiscoveryCacheKey, AudioCppDiscovery] = {}
+_audio_cpp_discovery_inflight: dict[
+    _DiscoveryCacheKey,
+    concurrent.futures.Future[AudioCppDiscovery],
+] = {}
+_audio_cpp_discovery_leader_loops: dict[
+    _DiscoveryCacheKey,
+    asyncio.AbstractEventLoop,
+] = {}
+# ponytail: keep one process lock; shard only after measured contention.
+_audio_cpp_discovery_lock = threading.Lock()
+_audio_cpp_discovery_generation = 0
 
 
 @dataclass(frozen=True)
@@ -448,3 +491,562 @@ def open_audio_cpp_wav(
         if handle is not None:
             handle.close()
         raise STTExecutionUnsupportedError(message) from None
+
+
+class _AudioCppTransportError(RuntimeError):
+    """Internal marker for one failed HTTP exchange."""
+
+
+class _AudioCppStatusError(RuntimeError):
+    """Internal marker for one rejected HTTP status."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__("audio.cpp HTTP status is invalid")
+        self.status_code = status_code
+
+
+def audio_cpp_routes(origin: str) -> tuple[str, str, str]:
+    """Build the three fixed audio.cpp routes from one canonical origin."""
+    try:
+        if _canonical_origin(origin) != origin:
+            raise ValueError
+        routes = tuple(_normalize_audio_endpoint(f"{origin}{path}")[0] for path in _AUDIO_CPP_PATHS)
+        if routes != tuple(f"{origin}{path}" for path in _AUDIO_CPP_PATHS):
+            raise ValueError
+    except (STTExecutionUnsupportedError, TypeError, ValueError):
+        raise STTExecutionUnsupportedError("audio.cpp origin is invalid") from None
+    return cast(tuple[str, str, str], routes)
+
+
+def reset_audio_cpp_discovery_cache() -> None:
+    """Clear process-local audio.cpp discovery state."""
+    global _audio_cpp_discovery_generation
+    with _audio_cpp_discovery_lock:
+        _audio_cpp_discovery_generation += 1
+        _audio_cpp_discovery_cache.clear()
+        _audio_cpp_discovery_inflight.clear()
+        _audio_cpp_discovery_leader_loops.clear()
+
+
+def _invalidate_audio_cpp_discovery(
+    key: _DiscoveryCacheKey,
+    discovery: AudioCppDiscovery,
+) -> None:
+    with _audio_cpp_discovery_lock:
+        if _audio_cpp_discovery_cache.get(key) is discovery:
+            _audio_cpp_discovery_cache.pop(key, None)
+
+
+def _validate_audio_cpp_execution(
+    *,
+    route: SttExecutionRoute,
+    origin: str,
+    model_id: str,
+    timeout_seconds: float,
+    transport: str,
+) -> tuple[tuple[str, str, str], _DiscoveryCacheKey]:
+    message = "Invalid audio.cpp execution route"
+    try:
+        routes = audio_cpp_routes(origin)
+        if _safe_model_id(model_id) != model_id:
+            raise ValueError
+        if type(timeout_seconds) is not float or not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError
+        if (
+            not isinstance(transport, str)
+            or transport != transport.strip().lower()
+            or resolve_afetch_transport(transport) != transport
+        ):
+            raise ValueError
+        _normalized, egress, endpoint_id = _normalize_audio_endpoint(routes[2])
+        if (
+            not isinstance(route, SttExecutionRoute)
+            or route.provider != "audio-cpp"
+            or route.backend != "audio_cpp_http"
+            or route.source != "audio_cpp_http"
+            or route.model_label != model_id
+            or route.audio_egress is not egress
+            or route.endpoint_id != endpoint_id
+            or route.transport != transport
+            or route.identity_resolved
+            or route.artifact_id is not None
+            or route.device is not None
+            or route.compute_type is not None
+            or route.dtype is not None
+            or route.decoding_ids != ()
+            or route.local_model_available
+            or route.would_download
+        ):
+            raise ValueError
+    except (
+        RuntimeError,
+        STTExecutionUnsupportedError,
+        TypeError,
+        ValueError,
+    ):
+        raise STTExecutionPlanError(message) from None
+    return routes, (endpoint_id, model_id)
+
+
+async def _close_audio_cpp_response(response: object) -> None:
+    closer = getattr(response, "aclose", None)
+    if closer is None:
+        closer = getattr(response, "close", None)
+    if not callable(closer):
+        raise TypeError
+    result = closer()
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _close_audio_cpp_response_before_cancellation(
+    response: object,
+) -> None:
+    close_task = asyncio.create_task(_close_audio_cpp_response(response))
+    caller_cancellation: asyncio.CancelledError | None = None
+    while not close_task.done():
+        try:
+            await asyncio.shield(close_task)
+        except asyncio.CancelledError as cancellation:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                caller_cancellation = caller_cancellation or cancellation
+        except Exception:  # noqa: BLE001 - closer exception is inspected below
+            break
+    try:
+        close_task.result()
+    except asyncio.CancelledError:
+        if caller_cancellation is not None:
+            raise caller_cancellation from None
+        raise RuntimeError("audio.cpp cleanup failed") from None
+    except Exception:
+        if caller_cancellation is not None:
+            raise caller_cancellation from None
+        raise
+    if caller_cancellation is not None:
+        raise caller_cancellation
+
+
+def _create_audio_cpp_client(
+    *,
+    transport: str,
+    timeout_seconds: float,
+) -> object:
+    """Create one non-shared async client for a single transcription."""
+    if transport == "httpx":
+        return create_async_client(
+            timeout=timeout_seconds,
+            trust_env=False,
+            verify=True,
+        )
+    if transport == "aiohttp" and _http_client.aiohttp is not None:
+        return _http_client.aiohttp.ClientSession(
+            timeout=_http_client.aiohttp.ClientTimeout(
+                total=timeout_seconds,
+            ),
+            trust_env=False,
+        )
+    raise RuntimeError("audio.cpp transport client is unavailable")
+
+
+async def _close_audio_cpp_client(client: object) -> None:
+    await _close_audio_cpp_response_before_cancellation(client)
+
+
+async def _open_audio_cpp_wav_async(
+    path: str | os.PathLike[str],
+    *,
+    base_dir: str | os.PathLike[str],
+) -> BinaryIO:
+    """Validate off-loop without abandoning a handle on cancellation."""
+    open_task = asyncio.create_task(
+        asyncio.to_thread(
+            open_audio_cpp_wav,
+            path,
+            base_dir=base_dir,
+        )
+    )
+    caller_cancellation: asyncio.CancelledError | None = None
+    while not open_task.done():
+        try:
+            await asyncio.shield(open_task)
+        except asyncio.CancelledError as cancellation:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                caller_cancellation = caller_cancellation or cancellation
+        except Exception:  # noqa: BLE001 - task result is inspected below
+            break
+    try:
+        handle = open_task.result()
+    except BaseException:
+        if caller_cancellation is not None:
+            raise caller_cancellation from None
+        raise
+    if caller_cancellation is not None:
+        try:
+            await _close_audio_cpp_response_before_cancellation(handle)
+        except BaseException:  # noqa: BLE001 - preserve original caller cancellation
+            raise caller_cancellation from None
+        raise caller_cancellation
+    return handle
+
+
+async def _request_audio_cpp(
+    *,
+    method: str,
+    url: str,
+    origin: str,
+    timeout_seconds: float,
+    transport: str,
+    response_name: str,
+    afetch_fn: _Afetch,
+    client: object | None = None,
+    files: dict[str, tuple[str, BinaryIO, str]] | None = None,
+    data: dict[str, str] | None = None,
+) -> bytes:
+    _normalized, _egress, endpoint_id = _normalize_audio_endpoint(url)
+    response: object | None = None
+    request_error: BaseException | None = None
+    request_kwargs: dict[str, Any] = {
+        "method": method,
+        "url": url,
+        "timeout": timeout_seconds,
+        "retry": RetryPolicy(
+            attempts=1,
+            retry_on_status=(),
+            retry_on_methods=(),
+        ),
+        "allow_redirects": False,
+        "verify": True,
+        "transport": transport,
+        "configured_endpoint": ConfiguredEndpointScope.from_url(origin),
+        "max_response_bytes": MAX_AUDIO_CPP_RESPONSE_BYTES,
+    }
+    if client is not None:
+        request_kwargs["client"] = client
+    if files is not None:
+        request_kwargs["files"] = files
+    if data is not None:
+        request_kwargs["data"] = data
+    try:
+        try:
+            with opaque_stt_http_observability(endpoint_id):
+                response = await afetch_fn(**request_kwargs)
+            status_code = int(cast(Any, response).status_code)
+            if status_code != 200:
+                raise _AudioCppStatusError(status_code)
+            content = cast(Any, response).content
+            if type(content) is not bytes or len(content) > MAX_AUDIO_CPP_RESPONSE_BYTES:
+                raise STTExecutionUnsupportedError(f"audio.cpp {response_name} response is invalid")
+            return content
+        except (
+            _AudioCppStatusError,
+            STTExecutionUnsupportedError,
+        ):
+            raise
+        except Exception:  # noqa: BLE001 - transport adapters have no shared exception base
+            raise _AudioCppTransportError from None
+    except BaseException as exc:
+        request_error = exc
+        raise
+    finally:
+        if response is not None:
+            try:
+                await _close_audio_cpp_response_before_cancellation(response)
+            except asyncio.CancelledError:
+                if request_error is None:
+                    raise
+            except Exception:  # noqa: BLE001 - response closers are adapter-defined
+                if request_error is None:
+                    raise _AudioCppTransportError from None
+
+
+def _raise_audio_cpp_runtime_error(
+    error: _AudioCppStatusError | _AudioCppTransportError,
+    *,
+    transcription: bool,
+) -> NoReturn:
+    if (
+        transcription
+        and isinstance(error, _AudioCppStatusError)
+        and error.status_code in _AUDIO_CPP_MODEL_UNAVAILABLE_STATUSES
+    ):
+        raise STTTranscriptionError("audio.cpp requested model is unavailable") from None
+    if isinstance(error, _AudioCppStatusError) and error.status_code in _AUDIO_CPP_BUSY_STATUSES:
+        raise STTTranscriptionError("audio.cpp server is busy") from None
+    raise STTTranscriptionError("audio.cpp request failed") from None
+
+
+async def _fetch_audio_cpp_discovery(
+    *,
+    health_url: str,
+    catalog_url: str,
+    origin: str,
+    model_id: str,
+    timeout_seconds: float,
+    transport: str,
+    afetch_fn: _Afetch,
+    client: object | None,
+) -> AudioCppDiscovery:
+    try:
+        health_body = await _request_audio_cpp(
+            method="GET",
+            url=health_url,
+            origin=origin,
+            timeout_seconds=timeout_seconds,
+            transport=transport,
+            response_name="health",
+            afetch_fn=afetch_fn,
+            client=client,
+        )
+        backend = parse_audio_cpp_health(health_body)
+        catalog_body = await _request_audio_cpp(
+            method="GET",
+            url=catalog_url,
+            origin=origin,
+            timeout_seconds=timeout_seconds,
+            transport=transport,
+            response_name="catalog",
+            afetch_fn=afetch_fn,
+            client=client,
+        )
+        return parse_audio_cpp_catalog(
+            catalog_body,
+            backend=backend,
+            model_id=model_id,
+        )
+    except (_AudioCppStatusError, _AudioCppTransportError) as exc:
+        _raise_audio_cpp_runtime_error(exc, transcription=False)
+
+
+async def _audio_cpp_discovery(
+    *,
+    key: _DiscoveryCacheKey,
+    health_url: str,
+    catalog_url: str,
+    origin: str,
+    model_id: str,
+    timeout_seconds: float,
+    transport: str,
+    afetch_fn: _Afetch,
+    client: object | None,
+) -> AudioCppDiscovery:
+    leader = False
+    loop = asyncio.get_running_loop()
+    with _audio_cpp_discovery_lock:
+        cached = _audio_cpp_discovery_cache.get(key)
+        if cached is not None:
+            return cached
+        future = _audio_cpp_discovery_inflight.get(key)
+        if future is None:
+            future = concurrent.futures.Future()
+            _audio_cpp_discovery_inflight[key] = future
+            _audio_cpp_discovery_leader_loops[key] = loop
+            generation = _audio_cpp_discovery_generation
+            leader = True
+        else:
+            generation = _audio_cpp_discovery_generation
+
+    if not leader:
+        wrapped = asyncio.wrap_future(future)
+
+        def consume_follower_exception(done: asyncio.Future[AudioCppDiscovery]) -> None:
+            if not done.cancelled():
+                done.exception()
+
+        wrapped.add_done_callback(consume_follower_exception)
+        return await asyncio.shield(wrapped)
+
+    try:
+        discovery = await _fetch_audio_cpp_discovery(
+            health_url=health_url,
+            catalog_url=catalog_url,
+            origin=origin,
+            model_id=model_id,
+            timeout_seconds=timeout_seconds,
+            transport=transport,
+            afetch_fn=afetch_fn,
+            client=client,
+        )
+    except BaseException as exc:
+        with _audio_cpp_discovery_lock:
+            if generation == _audio_cpp_discovery_generation:
+                _audio_cpp_discovery_cache.pop(key, None)
+            if _audio_cpp_discovery_inflight.get(key) is future:
+                _audio_cpp_discovery_inflight.pop(key, None)
+                _audio_cpp_discovery_leader_loops.pop(key, None)
+        if not future.done():
+            future.set_exception(exc)
+        raise
+    else:
+        with _audio_cpp_discovery_lock:
+            if generation == _audio_cpp_discovery_generation and _audio_cpp_discovery_inflight.get(key) is future:
+                _audio_cpp_discovery_cache[key] = discovery
+            if _audio_cpp_discovery_inflight.get(key) is future:
+                _audio_cpp_discovery_inflight.pop(key, None)
+                _audio_cpp_discovery_leader_loops.pop(key, None)
+        if not future.done():
+            future.set_result(discovery)
+        return discovery
+
+
+async def transcribe_audio_cpp_async(
+    audio_path: str | os.PathLike[str],
+    *,
+    base_dir: str | os.PathLike[str],
+    route: SttExecutionRoute,
+    origin: str,
+    model_id: str,
+    timeout_seconds: float,
+    transport: str,
+    language: str | None = None,
+    afetch_fn: _Afetch | None = None,
+) -> SttTranscriptionOutcome:
+    """Execute one frozen, planned audio.cpp batch transcription."""
+    routes, key = _validate_audio_cpp_execution(
+        route=route,
+        origin=origin,
+        model_id=model_id,
+        timeout_seconds=timeout_seconds,
+        transport=transport,
+    )
+    if language is not None and not isinstance(language, str):
+        raise STTExecutionPlanError("Invalid audio.cpp execution route")
+    selected_afetch = afetch if afetch_fn is None else afetch_fn
+    client: object | None = None
+    execution_error: BaseException | None = None
+    try:
+        upload = await _open_audio_cpp_wav_async(
+            audio_path,
+            base_dir=base_dir,
+        )
+        with upload:
+            if afetch_fn is None:
+                try:
+                    client = _create_audio_cpp_client(
+                        transport=transport,
+                        timeout_seconds=timeout_seconds,
+                    )
+                except Exception:  # noqa: BLE001 - client implementations vary by transport
+                    raise STTTranscriptionError(
+                        "audio.cpp request failed"
+                    ) from None
+
+            discovery = await _audio_cpp_discovery(
+                key=key,
+                health_url=routes[0],
+                catalog_url=routes[1],
+                origin=origin,
+                model_id=model_id,
+                timeout_seconds=timeout_seconds,
+                transport=transport,
+                afetch_fn=selected_afetch,
+                client=client,
+            )
+            upload.seek(0)
+            data = {"model": model_id}
+            if language is not None:
+                data["language"] = language
+            try:
+                body = await _request_audio_cpp(
+                    method="POST",
+                    url=routes[2],
+                    origin=origin,
+                    timeout_seconds=timeout_seconds,
+                    transport=transport,
+                    response_name="transcription",
+                    afetch_fn=selected_afetch,
+                    client=client,
+                    files={"file": ("audio.wav", upload, "audio/wav")},
+                    data=data,
+                )
+            except (_AudioCppStatusError, _AudioCppTransportError) as exc:
+                if isinstance(exc, _AudioCppTransportError) or exc.status_code in _AUDIO_CPP_MODEL_UNAVAILABLE_STATUSES:
+                    _invalidate_audio_cpp_discovery(key, discovery)
+                _raise_audio_cpp_runtime_error(exc, transcription=True)
+
+        text = parse_audio_cpp_transcription(body)
+        return SttTranscriptionOutcome(
+            artifact={
+                "text": text,
+                "segments": [],
+                "language": language,
+                "diarization": {"enabled": False, "speakers": None},
+                "usage": {"duration_ms": None, "tokens": None},
+                "metadata": {
+                    "provider": "audio-cpp",
+                    "contract": "audio_cpp_http_v1",
+                    "model_id": model_id,
+                    "model_family": discovery.family,
+                    "model_mode": discovery.mode,
+                    "server_backend": discovery.backend,
+                },
+            },
+            actual_execution=actual_execution_from_route(route, device=None),
+        )
+    except BaseException as exc:
+        execution_error = exc
+        raise
+    finally:
+        if client is not None:
+            try:
+                await _close_audio_cpp_client(client)
+            except asyncio.CancelledError:
+                if execution_error is None:
+                    raise
+            except Exception:  # noqa: BLE001 - client closers vary by transport
+                if execution_error is None:
+                    raise STTTranscriptionError(
+                        "audio.cpp request failed"
+                    ) from None
+
+
+def transcribe_audio_cpp(
+    audio_path: str | os.PathLike[str],
+    *,
+    base_dir: str | os.PathLike[str],
+    route: SttExecutionRoute,
+    origin: str,
+    model_id: str,
+    timeout_seconds: float,
+    transport: str,
+    language: str | None = None,
+    afetch_fn: _Afetch | None = None,
+) -> SttTranscriptionOutcome:
+    """Synchronously execute one frozen audio.cpp transcription."""
+
+    async def run() -> SttTranscriptionOutcome:
+        return await transcribe_audio_cpp_async(
+            audio_path,
+            base_dir=base_dir,
+            route=route,
+            origin=origin,
+            model_id=model_id,
+            timeout_seconds=timeout_seconds,
+            transport=transport,
+            language=language,
+            afetch_fn=afetch_fn,
+        )
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    if running_loop is None or not running_loop.is_running():
+        return asyncio.run(run())
+
+    _routes, key = _validate_audio_cpp_execution(
+        route=route,
+        origin=origin,
+        model_id=model_id,
+        timeout_seconds=timeout_seconds,
+        transport=transport,
+    )
+    with _audio_cpp_discovery_lock:
+        if _audio_cpp_discovery_leader_loops.get(key) is running_loop:
+            raise STTExecutionPlanError(
+                "Invalid audio.cpp execution route"
+            )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(run())).result()

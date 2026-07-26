@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -469,6 +468,440 @@ async def test_async_json_max_bytes_guard_uses_actual_body_despite_short_content
             )
     finally:
         await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_httpx_bounded_response_rejects_compressed_success_before_body_iteration() -> None:
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    class ExplodingStream(httpx.AsyncByteStream):
+        iterations = 0
+        payload = b"x"
+
+        async def __aiter__(self):
+            self.iterations += 1
+            raise AssertionError("compressed success body was consumed")
+            yield b""  # pragma: no cover
+
+    stream = ExplodingStream()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            stream=stream,
+            headers={"Content-Encoding": "gzip"},
+        )
+
+    client = hc.create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(
+            hc.NetworkError,
+            match="^Compressed responses are not allowed with max_response_bytes$",
+        ):
+            await hc._httpx_arequest_io(
+                client=client,
+                method="GET",
+                url="http://93.184.216.34/data",
+                max_response_bytes=1024,
+            )
+        assert stream.iterations == 0
+        assert len(stream.payload) < 1024
+    finally:
+        await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_httpx_bounded_response_forces_identity_and_allows_below_limit() -> None:
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    class ByteStream(httpx.AsyncByteStream):
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+            self.bytes_yielded = 0
+
+        async def __aiter__(self):
+            for value in self.payload:
+                self.bytes_yielded += 1
+                yield bytes((value,))
+
+    stream = ByteStream(b"safe")
+    seen_accept_encoding: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_accept_encoding.append(request.headers.get("accept-encoding"))
+        return httpx.Response(200, request=request, stream=stream)
+
+    client = hc.create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        response = await hc._httpx_arequest_io(
+            client=client,
+            method="GET",
+            url="http://93.184.216.34/data",
+            headers={"aCcEpT-EnCoDiNg": "gzip, br"},
+            max_response_bytes=5,
+        )
+        assert response.content == b"safe"
+        assert seen_accept_encoding == ["identity"]
+        assert stream.bytes_yielded == 4
+    finally:
+        await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_httpx_bounded_response_rejects_oversized_raw_chunk_before_copy() -> None:
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    class TwoChunkStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.observed_chunks: list[str] = []
+
+        async def __aiter__(self):
+            self.observed_chunks.append("oversized")
+            yield b"x" * 2048
+            self.observed_chunks.append("sentinel")
+            yield b"must-not-be-consumed"
+
+    class TrackingResponse(httpx.Response):
+        decoded_iteration_started = False
+
+        async def aiter_bytes(self, chunk_size: int | None = None):
+            self.decoded_iteration_started = True
+            async for chunk in super().aiter_bytes(chunk_size):
+                yield chunk
+
+    stream = TwoChunkStream()
+    streamed_response: TrackingResponse | None = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal streamed_response
+        streamed_response = TrackingResponse(200, request=request, stream=stream)
+        return streamed_response
+
+    client = hc.create_async_client(transport=httpx.MockTransport(handler))
+    returned_response: httpx.Response | None = None
+    try:
+        with pytest.raises(
+            hc.NetworkError,
+            match="^Response exceeds max_response_bytes limit$",
+        ):
+            returned_response = await hc._httpx_arequest_io(
+                client=client,
+                method="GET",
+                url="http://93.184.216.34/data",
+                max_response_bytes=1024,
+            )
+        assert returned_response is None
+        assert streamed_response is not None
+        assert streamed_response.decoded_iteration_started is False
+        assert stream.observed_chunks == ["oversized"]
+    finally:
+        await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_httpx_bounded_response_rejects_bytewise_stream_after_limit() -> None:
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    class ByteStream(httpx.AsyncByteStream):
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+            self.bytes_yielded = 0
+
+        async def __aiter__(self):
+            for value in self.payload:
+                self.bytes_yielded += 1
+                yield bytes((value,))
+
+    stream = ByteStream(b"x" * 4096)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request, stream=stream)
+
+    client = hc.create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(
+            hc.NetworkError,
+            match="^Response exceeds max_response_bytes limit$",
+        ):
+            await hc._httpx_arequest_io(
+                client=client,
+                method="GET",
+                url="http://93.184.216.34/data",
+                max_response_bytes=1024,
+            )
+        # This fixture yields one-byte raw chunks; the assertion characterizes
+        # this stream only and is not a universal transport allocation bound.
+        assert stream.bytes_yielded == 1025
+    finally:
+        await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_httpx_bounded_compressed_error_skips_body_and_remains_usable() -> None:
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    class ExplodingStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            raise AssertionError("error response body was consumed")
+            yield b""  # pragma: no cover
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            request=request,
+            stream=ExplodingStream(),
+            headers={
+                "Content-Encoding": "gzip",
+                "X-Error-Code": "invalid-audio",
+            },
+        )
+
+    client = hc.create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        response = await hc._httpx_arequest_io(
+            client=client,
+            method="GET",
+            url="http://93.184.216.34/data",
+            max_response_bytes=1024,
+        )
+        assert response.status_code == 422
+        assert response.content == b""
+        assert response.text == ""
+        assert response.headers["content-encoding"] == "gzip"
+        assert response.headers["x-error-code"] == "invalid-audio"
+        with pytest.raises(httpx.HTTPStatusError):
+            response.raise_for_status()
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_bounded_response_rejects_compressed_success_before_body_read() -> None:
+    from tldw_Server_API.app.core import http_client as hc
+
+    class Content:
+        reads = 0
+        payload = b"x"
+
+        async def read(self, _size: int) -> bytes:
+            self.reads += 1
+            raise AssertionError("compressed success body was consumed")
+
+    content = Content()
+
+    class Response:
+        status = 200
+        headers = {"Content-Encoding": "gzip"}
+        url = "http://93.184.216.34/data"
+        charset = "utf-8"
+
+        def __init__(self) -> None:
+            self.content = content
+
+        def release(self) -> None:
+            return None
+
+    class RequestContext:
+        async def __aenter__(self) -> Response:
+            return Response()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class Session:
+        def request(self, *_args: object, **_kwargs: object) -> RequestContext:
+            return RequestContext()
+
+    with pytest.raises(
+        hc.NetworkError,
+        match="^Compressed responses are not allowed with max_response_bytes$",
+    ):
+        await hc._aiohttp_request_io(
+            session=Session(),
+            method="GET",
+            url="http://93.184.216.34/data",
+            max_response_bytes=1024,
+        )
+
+    assert content.reads == 0
+    assert len(content.payload) < 1024
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_bounded_response_forces_identity_and_disables_decompression() -> None:
+    from tldw_Server_API.app.core import http_client as hc
+
+    class Content:
+        def __init__(self) -> None:
+            self.remaining = b"safe"
+            self.returned_bytes = 0
+
+        async def read(self, size: int) -> bytes:
+            chunk = self.remaining[:size]
+            self.remaining = self.remaining[size:]
+            self.returned_bytes += len(chunk)
+            return chunk
+
+    content = Content()
+
+    class Response:
+        status = 200
+        headers: dict[str, str] = {}
+        url = "http://93.184.216.34/data"
+        charset = "utf-8"
+
+        def __init__(self) -> None:
+            self.content = content
+
+        def release(self) -> None:
+            return None
+
+    class RequestContext:
+        async def __aenter__(self) -> Response:
+            return Response()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    request_kwargs: list[dict[str, object]] = []
+
+    class Session:
+        def request(self, *_args: object, **kwargs: object) -> RequestContext:
+            request_kwargs.append(kwargs)
+            return RequestContext()
+
+    response = await hc._aiohttp_request_io(
+        session=Session(),
+        method="GET",
+        url="http://93.184.216.34/data",
+        headers={"aCcEpT-EnCoDiNg": "gzip, br"},
+        max_response_bytes=5,
+    )
+
+    assert response.content == b"safe"
+    assert content.returned_bytes == 4
+    assert request_kwargs[0]["headers"] == {"Accept-Encoding": "identity"}
+    assert request_kwargs[0]["auto_decompress"] is False
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_bounded_response_aborts_uncompressed_stream_at_limit_plus_one() -> None:
+    from tldw_Server_API.app.core import http_client as hc
+
+    read_sizes: list[int] = []
+    returned_sizes: list[int] = []
+
+    class Content:
+        remaining = b"x" * 4096
+
+        async def read(self, size: int) -> bytes:
+            read_sizes.append(size)
+            chunk = self.remaining[:size]
+            self.remaining = self.remaining[size:]
+            returned_sizes.append(len(chunk))
+            return chunk
+
+    class Response:
+        status = 200
+        headers: dict[str, str] = {}
+        url = "http://93.184.216.34/data"
+        charset = "utf-8"
+        content = Content()
+
+        def release(self) -> None:
+            return None
+
+    class RequestContext:
+        async def __aenter__(self) -> Response:
+            return Response()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class Session:
+        def request(self, *_args: object, **_kwargs: object) -> RequestContext:
+            return RequestContext()
+
+    with pytest.raises(
+        hc.NetworkError,
+        match="^Response exceeds max_response_bytes limit$",
+    ):
+        await hc._aiohttp_request_io(
+            session=Session(),
+            method="GET",
+            url="http://93.184.216.34/data",
+            max_response_bytes=1024,
+        )
+
+    assert read_sizes == [1025]
+    assert returned_sizes == [1025]
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_bounded_compressed_error_skips_body_and_remains_usable() -> None:
+    from tldw_Server_API.app.core import http_client as hc
+
+    class Content:
+        async def read(self, _size: int) -> bytes:
+            raise AssertionError("error response body was consumed")
+
+    class Response:
+        status = 404
+        headers = {
+            "Content-Encoding": "gzip",
+            "X-Error-Code": "not-found",
+        }
+        url = "http://93.184.216.34/data"
+        charset = "utf-8"
+        content = Content()
+
+        def release(self) -> None:
+            return None
+
+    class RequestContext:
+        async def __aenter__(self) -> Response:
+            return Response()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    request_kwargs: list[dict[str, object]] = []
+
+    class Session:
+        def request(self, *_args: object, **kwargs: object) -> RequestContext:
+            request_kwargs.append(kwargs)
+            return RequestContext()
+
+    response = await hc._aiohttp_request_io(
+        session=Session(),
+        method="GET",
+        url="http://93.184.216.34/data",
+        max_response_bytes=1024,
+    )
+
+    assert response.status_code == 404
+    assert response.content == b""
+    assert response.text == ""
+    assert response.headers["Content-Encoding"] == "gzip"
+    assert response.headers["X-Error-Code"] == "not-found"
+    assert request_kwargs[0]["headers"] == {"Accept-Encoding": "identity"}
+    assert request_kwargs[0]["auto_decompress"] is False
 
 
 @requires_httpx
