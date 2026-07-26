@@ -1,10 +1,10 @@
 ---
 id: TASK-12987
 title: Add dedicated audio.cpp batch STT provider
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-26 03:27'
-updated_date: '2026-07-26 14:15'
+updated_date: '2026-07-26 14:43'
 labels:
   - stt
   - benchmark
@@ -26,12 +26,12 @@ Add a first-class external-server-only audio.cpp STT adapter and provider regist
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Registers canonical audio-cpp provider with audiocpp and audio_cpp aliases.
-- [ ] #2 Uses network-free planning followed by consent-gated health/model discovery and WAV multipart transcription.
-- [ ] #3 Records descriptive audio.cpp backend/model metadata while leaving weight identity unresolved and policy gates ineligible.
-- [ ] #4 Supports strict and normalized benchmark scoring with separate cold-first and warm timing.
-- [ ] #5 Normal CI uses fake transports and upstream-shaped fixtures; live audio.cpp coverage is opt-in.
-- [ ] #6 Configuration and user documentation describe setup, limitations, network consent, and true cold-start procedure.
+- [x] #1 Registers canonical audio-cpp provider with audiocpp and audio_cpp aliases.
+- [x] #2 Uses network-free planning followed by consent-gated health/model discovery and WAV multipart transcription.
+- [x] #3 Records descriptive audio.cpp backend/model metadata while leaving weight identity unresolved and policy gates ineligible.
+- [x] #4 Supports strict and normalized benchmark scoring with separate cold-first and warm timing.
+- [x] #5 Normal CI uses fake transports and upstream-shaped fixtures; live audio.cpp coverage is opt-in.
+- [x] #6 Configuration and user documentation describe setup, limitations, network consent, and true cold-start procedure.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -76,14 +76,22 @@ Task 7 documentation pass complete: added the user-managed audio.cpp operator wo
 Task 7 quality-review follow-up started: verified audio-cpp=audio-cpp already fails coordinator preflight, but nested canonical/alias selector-prefixed benchmark models can currently be normalized by AudioCppAdapter.plan_batch_execution and bypass exact requested-model comparison. Scope is direct planner and native preflight regressions, strict exact benchmark model validation while preserving ordinary no-plan selector behavior, corrected result-persistence/privacy documentation, mirrors, and focused/full verification.
 
 Task 7 quality-review follow-up complete: direct audio.cpp planning now requires a safe exact server model ID and rejects canonical/alias selector tokens plus selector-prefixed forms case-insensitively. Ordinary no-plan transcription still accepts canonical/alias prefixed and exact selectors by normalizing them against one validated config snapshot before building the immutable plan. TDD RED: 18/18 expected failures (12 direct planner, 6 native preflight). Focused GREEN: 29/29. Full selector/API/network suite: 539/539 passed. Full benchmark plus integration suite: 406/406 passed. Documentation/mirror suite: 70/70 passed. Documentation now records only requested/resolved model labels, generic audio_cpp_http route/egress, and opaque endpoint as persisted identity; discovered backend/family/mode are request-local and not persisted to benchmark results. The audio.cpp command uses errors-only retention with an explicit privacy warning. Published refresh reran; the changed user guide is byte-identical to its mirror and unchanged CPU/GPU guides remain byte-identical to theirs. Ruff, compileall, and git diff --check passed. Scoped Bandit scanned 3852 LOC across the two touched production files with 0 errors and 0 findings. No live audio.cpp binary/model was required.
+
+Task 8 complete after rebasing cleanly onto current origin/dev. Final feature matrix: 951 passed with 10 warnings. Adjacent changed tests: 240 passed, 1 optional environment skip. Documentation regressions: 46 passed. CLI help succeeded. Changed-file pre-commit hooks and git diff checks passed. Bandit reported zero findings across the full touched production scope; the final event-loop fix scan also reported zero findings across 1,384 LOC. Independent complete-diff review ran 1,023 focused tests and found one P2 event-loop issue. TDD demonstrated the blocking failure, commit 6954f0f107 offloaded audio.cpp endpoint transcription, and focused re-review approved it after 330 tests with compile, diff, and Bandit clean. The final focused test matrix remained 951 passed. A live smoke was intentionally skipped because no operator-managed audio.cpp server, exact model, authorized WAV, and explicit runtime consent were supplied. PR #2759 remains based on dev and requires the requesters own human-written Change summary before merge. Audio.cpp commits after rebase: 20d125679d, 9624acb036, 61e0c4935d, 9f0d99afd4, f301458f90, f3650520e6, c70b0ceb92, af40daddf8, 7d8226bbc7, 76ceb0617c, 7cd2e79906, 6954f0f107.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added a first-class external-server-only audio.cpp batch STT provider for ordinary OpenAI-compatible transcription and the native deterministic benchmark. The implementation provides canonical and alias registration, strict configuration and selectors, immutable network-free planning, explicit benchmark network consent, pinned health/model/transcription contract parsing, secure bounded HTTP execution, strict WAV handling, unresolved weight identity, cold-first and warm timing, deterministic strict and normalized scoring integration, fake-transport coverage, operator documentation, and an event-loop-safe API path. All focused verification and independent review gates passed; live execution remains opt-in and PR merge remains blocked until the requester supplies the required human-authored Change summary.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
