@@ -1698,11 +1698,11 @@ class ToolExecutionSecurity:
             if context.user_id
             else (f"client:{context.client_id}" if context.client_id else "anon")
         )
-        cache_key = f"{owner}|module:{module_name}|tool:{tool_name}|key:{idempotency_key}"
+        cache_key_prefix = f"{owner}|module:{module_name}|tool:{tool_name}"
         scope_fingerprint = self.fingerprint_idempotency_scope(context)
         if scope_fingerprint:
-            cache_key = f"{cache_key}|scope:sha256:{scope_fingerprint}"
-        return cache_key
+            return f"{cache_key_prefix}|scope:sha256:{scope_fingerprint}|key:{idempotency_key}"
+        return f"{cache_key_prefix}|key:{idempotency_key}"
 
     def _make_idempotency_cache_key(
         self,

@@ -539,7 +539,41 @@ async def test_preparation_preserves_patched_protocol_cache_key_facade(
     )
 
 
-def test_explicit_scopes_append_distinct_fixed_format_digests_without_raw_ids() -> None:
+def test_scoped_idempotency_key_cannot_collide_with_crafted_unscoped_raw_key() -> None:
+    protocol = MCPProtocol()
+    scoped_context = RequestContext(
+        request_id="scoped-collision",
+        user_id="user-1",
+        server_auth_scope=AuthenticatedExecutionScope(active_org_id=101_001),
+    )
+    unscoped_context = RequestContext(request_id="unscoped-collision", user_id="user-1")
+    scope_digest = protocol._tool_execution_security.fingerprint_idempotency_scope(
+        scoped_context,
+    )
+    scoped_key = protocol._make_idempotency_cache_key(
+        scoped_context,
+        "module-a",
+        "tool.write",
+        "key-1",
+    )
+    crafted_raw_key = f"key-1|scope:sha256:{scope_digest}"
+    crafted_unscoped_key = protocol._make_idempotency_cache_key(
+        unscoped_context,
+        "module-a",
+        "tool.write",
+        crafted_raw_key,
+    )
+
+    assert scoped_key == (
+        f"user:user-1|module:module-a|tool:tool.write|scope:sha256:{scope_digest}|key:key-1"
+    )
+    assert crafted_unscoped_key == (
+        f"user:user-1|module:module-a|tool:tool.write|key:{crafted_raw_key}"
+    )
+    assert crafted_unscoped_key != scoped_key
+
+
+def test_explicit_scopes_use_distinct_fixed_format_digests_without_raw_ids() -> None:
     protocol = MCPProtocol()
     org_context = RequestContext(
         request_id="scoped",
@@ -554,11 +588,17 @@ def test_explicit_scopes_append_distinct_fixed_format_digests_without_raw_ids() 
 
     org_key = protocol._make_idempotency_cache_key(org_context, "module-a", "tool.write", "key-1")
     team_key = protocol._make_idempotency_cache_key(team_context, "module-a", "tool.write", "key-1")
-    org_digest = org_key.rsplit("|scope:sha256:", 1)[1]
-    team_digest = team_key.rsplit("|scope:sha256:", 1)[1]
+    org_digest = protocol._tool_execution_security.fingerprint_idempotency_scope(org_context)
+    team_digest = protocol._tool_execution_security.fingerprint_idempotency_scope(team_context)
 
     assert org_key != team_key
     assert re.fullmatch(r"[0-9a-f]{64}", org_digest)
     assert re.fullmatch(r"[0-9a-f]{64}", team_digest)
+    assert org_key == (
+        f"user:user-1|module:module-a|tool:tool.write|scope:sha256:{org_digest}|key:key-1"
+    )
+    assert team_key == (
+        f"user:user-1|module:module-a|tool:tool.write|scope:sha256:{team_digest}|key:key-1"
+    )
     assert "101001" not in org_key
     assert "202002" not in team_key
