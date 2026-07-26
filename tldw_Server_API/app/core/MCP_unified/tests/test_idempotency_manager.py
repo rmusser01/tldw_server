@@ -528,7 +528,8 @@ async def test_redis_post_callback_fault_returns_original_and_keeps_local_replay
 
     assert calls == 1
     assert first.payload is original
-    assert first.persistence == "local"
+    expected_persistence = "local" if fault == "result_write_then_raise" else "durable"
+    assert first.persistence == expected_persistence
     assert replay.from_cache is True
     assert replay.payload == original
     assert replay.payload is not original
@@ -539,6 +540,25 @@ async def test_redis_post_callback_fault_returns_original_and_keeps_local_replay
         assert stages == [("redis_release", "RedisError")]
     else:
         assert stages == [("redis_release", "RuntimeError")]
+
+    if fault != "result_write_then_raise":
+        result_key = _result_key("post-success-fault")
+        lock_key = _lock_key("post-success-fault")
+        assert redis.values[result_key] == canonical_json_bytes(
+            original,
+            max_bytes=_policy().max_result_bytes,
+        )
+        lock_sets_before = redis.calls.count(("set", lock_key))
+        fresh_replay = await _remote_manager(redis).execute(
+            "post-success-fault",
+            "args",
+            _execute,
+            policy=_policy(),
+        )
+        assert calls == 1
+        assert fresh_replay.from_cache is True
+        assert fresh_replay.persistence == "durable"
+        assert redis.calls.count(("set", lock_key)) == lock_sets_before
 
 
 @pytest.mark.unit
@@ -1131,6 +1151,149 @@ async def test_redis_factory_disables_response_decoding(monkeypatch: pytest.Monk
     await manager.execute("decode-false", "args", lambda: _async_payload({"ok": True}), policy=_policy())
 
     assert factory_kwargs["decode_responses"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cancelled_redis_factory_attempt_can_retry_without_false_degradation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    idempotency_module = importlib.import_module(
+        "tldw_Server_API.app.core.MCP_unified.tool_execution.idempotency",
+    )
+    redis = _FakeRedis()
+    first_started = asyncio.Event()
+    never_finishes = asyncio.Event()
+    attempts = 0
+
+    class _Config:
+        def get_redis_connection_params(self) -> dict[str, str]:
+            return {"url": "redis://localhost:6379/0"}
+
+    async def _factory(**_kwargs: Any) -> _FakeRedis:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            first_started.set()
+            await never_finishes.wait()
+        return redis
+
+    monkeypatch.setattr(idempotency_module, "get_config", lambda: _Config())
+    manager = IdempotencyManager(redis_client_factory=_factory)
+    first_attempt = asyncio.create_task(manager._ensure_redis())
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+
+    first_attempt.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first_attempt
+
+    assert manager._redis_attempted is False
+    assert manager._redis_ready is False
+    assert manager._redis_client is None
+    assert manager.remote_degraded is False
+    assert await manager._ensure_redis() is True
+    assert attempts == 2
+    assert manager._redis_client is redis
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_mutation_local_cache_failure_rolls_back_before_redispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _local_manager()
+    original_put = manager._put_local_replay_locked
+    fail_once = True
+    calls = 0
+
+    def _put_then_fail(*args: Any, **kwargs: Any) -> None:
+        nonlocal fail_once
+        original_put(*args, **kwargs)
+        if fail_once:
+            fail_once = False
+            raise RuntimeError("post-mutation local cache failure")
+
+    monkeypatch.setattr(manager, "_put_local_replay_locked", _put_then_fail)
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"call": calls}
+
+    first = await manager.execute("local-rollback", "args", _execute, policy=_policy())
+
+    assert first.persistence == "none"
+    assert "local-rollback" not in manager._local_cache
+    assert "local-rollback" in manager._local_bindings
+
+    second = await manager.execute("local-rollback", "args", _execute, policy=_policy())
+    assert calls == 2
+    assert second.from_cache is False
+    assert second.persistence == "local"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_mutation_include_binding_failure_restores_prior_lru_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _local_manager()
+    await manager.execute("prior-a", "args-a", lambda: _async_payload({"a": 1}), policy=_policy())
+    await manager.execute("prior-b", "args-b", lambda: _async_payload({"b": 2}), policy=_policy())
+    cache_before = list(manager._local_cache.items())
+    bindings_before = list(manager._local_bindings.items())
+    original_put = manager._put_local_replay_locked
+
+    def _put_then_fail(*args: Any, **kwargs: Any) -> None:
+        original_put(*args, **kwargs)
+        raise RuntimeError("post-mutation include-binding failure")
+
+    monkeypatch.setattr(manager, "_put_local_replay_locked", _put_then_fail)
+    template = {"new": True}
+    encoded = canonical_json_bytes(template, max_bytes=_policy().max_result_bytes)
+
+    committed = manager._try_commit_local_replay(
+        "new-key",
+        "new-args",
+        template,
+        encoded,
+        policy=_policy(),
+        include_binding=True,
+    )
+
+    assert committed is False
+    assert list(manager._local_cache.items()) == cache_before
+    assert list(manager._local_bindings.items()) == bindings_before
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_hostile_degraded_observer_cannot_replace_outcome_or_leak_name() -> None:
+    hostile_error = type("Observer=TOP_SECRET", (BaseException,), {})
+
+    def _hostile_observer(_stage: str, _error_type: str) -> None:
+        raise hostile_error()
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    original = {"value": object()}
+    try:
+        result = await _local_manager(on_degraded=_hostile_observer).execute(
+            "hostile-observer",
+            "args",
+            lambda: _async_payload(original),
+            policy=_policy(),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert result.payload is original
+    assert result.persistence == "none"
+    assert all("TOP_SECRET" not in message for message in messages)
+    assert any(
+        "degraded observer failed error_type=Exception" in message
+        for message in messages
+    )
 
 
 async def _async_payload(payload: dict[str, Any]) -> dict[str, Any]:

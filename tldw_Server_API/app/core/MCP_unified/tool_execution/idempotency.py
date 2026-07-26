@@ -171,10 +171,10 @@ class IdempotencyManager:
         )
         try:
             self._on_degraded(stage, error_type)
-        except Exception as observer_exc:  # noqa: BLE001 - metrics cannot replace execution outcomes.
+        except BaseException as observer_exc:  # noqa: BLE001 - synchronous metrics cannot replace outcomes.
             logger.debug(
                 "MCP idempotency degraded observer failed error_type={error_type}",
-                error_type=observer_exc.__class__.__name__,
+                error_type=_safe_error_type(observer_exc),
             )
 
     def _mark_remote_failure(self, stage: str, exc: BaseException) -> None:
@@ -191,6 +191,9 @@ class IdempotencyManager:
             try:
                 params = dict(get_config().get_redis_connection_params() or {})
             except asyncio.CancelledError:
+                self._redis_client = None
+                self._redis_ready = False
+                self._redis_attempted = False
                 raise
             except Exception as exc:  # noqa: BLE001 - backend discovery is an explicit fallback phase.
                 self._mark_remote_failure("redis_connect", exc)
@@ -211,6 +214,9 @@ class IdempotencyManager:
                 if client is None:
                     raise RuntimeError("Redis client unavailable")
             except asyncio.CancelledError:
+                self._redis_client = None
+                self._redis_ready = False
+                self._redis_attempted = False
                 raise
             except Exception as exc:  # noqa: BLE001 - no remote ownership was attempted.
                 self._redis_client = None
@@ -402,21 +408,32 @@ class IdempotencyManager:
     ) -> bool:
         try:
             with self._local_guard:
-                if include_binding:
-                    self._put_local_binding_locked(
+                cache_snapshot = self._local_cache.copy()
+                bindings_snapshot = self._local_bindings.copy()
+                locks_snapshot = self._local_locks.copy()
+                lock_users_snapshot = self._local_lock_users.copy()
+                try:
+                    if include_binding:
+                        self._put_local_binding_locked(
+                            cache_key,
+                            arguments_hash,
+                            ttl_seconds=policy.ttl_seconds,
+                            max_entries=policy.max_entries,
+                        )
+                    self._put_local_replay_locked(
                         cache_key,
                         arguments_hash,
+                        template,
+                        canonical_bytes,
                         ttl_seconds=policy.ttl_seconds,
                         max_entries=policy.max_entries,
                     )
-                self._put_local_replay_locked(
-                    cache_key,
-                    arguments_hash,
-                    template,
-                    canonical_bytes,
-                    ttl_seconds=policy.ttl_seconds,
-                    max_entries=policy.max_entries,
-                )
+                except BaseException:
+                    self._local_cache = cache_snapshot
+                    self._local_bindings = bindings_snapshot
+                    self._local_locks = locks_snapshot
+                    self._local_lock_users = lock_users_snapshot
+                    raise
         except Exception as exc:  # noqa: BLE001 - a valid callback result stays authoritative.
             self._record_degraded("local_commit", exc, remote=False)
             return False
@@ -827,17 +844,8 @@ class IdempotencyManager:
             raise
         replay = replay_read.replay
         if replay is not None:
-            released = await self._release_remote_lock(client, lock_key, token)
-            if released:
-                return replay
-            persistence = (
-                "local" if replay_read.local_committed else replay.persistence
-            )
-            return IdempotencyRunResult(
-                payload=replay.payload,
-                from_cache=True,
-                persistence=persistence,
-            )
+            await self._release_remote_lock(client, lock_key, token)
+            return replay
 
         try:
             payload = await execute_fn()
@@ -922,8 +930,6 @@ class IdempotencyManager:
         released = await self._release_remote_lock(client, lock_key, token)
         if not released and canonical is None:
             self._block_remote_key(cache_key, policy=policy)
-        if not released and persistence == "durable":
-            persistence = "local"
         return IdempotencyRunResult(
             payload=cast(dict[str, JsonValue], payload),
             from_cache=False,
