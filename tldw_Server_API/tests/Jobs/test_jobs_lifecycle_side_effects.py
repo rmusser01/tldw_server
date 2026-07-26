@@ -139,3 +139,127 @@ def test_sqlite_acquire_backend_error_runs_no_success_observers(
         )
 
     assert observed == ["operation-returned"]
+
+
+class _FakePostgresConnection:
+    def close(self) -> None:
+        return None
+
+
+def _postgres_manager_without_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    observed: list[str],
+) -> JobManager:
+    manager = _manager_without_preflight(tmp_path, monkeypatch, observed)
+    manager.backend = "postgres"
+    monkeypatch.setattr(manager, "_connect", lambda: _FakePostgresConnection())
+    return manager
+
+
+def test_postgres_acquire_runs_success_observers_after_operation_returns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[str] = []
+    captured: dict[str, Any] = {}
+    manager = _postgres_manager_without_preflight(tmp_path, monkeypatch, observed)
+
+    def acquire_stub(
+        _conn: Any,
+        cursor_factory: Any,
+        *,
+        command: Any,
+        counters_enabled: bool,
+        now: Any,
+    ) -> LifecycleResult:
+        captured.update(
+            command=command,
+            counters_enabled=counters_enabled,
+            cursor_factory=cursor_factory,
+            now=now,
+        )
+        observed.append("operation-returned")
+        return LifecycleResult.applied(
+            row={
+                "id": 1,
+                "uuid": "job-1",
+                "domain": command.domain,
+                "queue": command.queue,
+                "job_type": "work",
+                "owner_user_id": "owner",
+                "status": "processing",
+                "worker_id": command.worker_id,
+                "lease_id": command.lease_id,
+                "leased_until": "2026-01-01 00:00:30",
+                "created_at": "2026-01-01 00:00:00",
+                "acquired_at": "2026-01-01 00:00:00",
+                "retry_count": 0,
+                "payload": '{"value": 1}',
+            }
+        )
+
+    monkeypatch.setattr(manager_module, "_postgres_acquire_job", acquire_stub, raising=False)
+
+    acquired = manager.acquire_next_job(
+        domain="facade",
+        queue="default",
+        job_type="work",
+        lease_seconds=30,
+        worker_id="worker-1",
+        owner_user_id="owner",
+    )
+
+    assert acquired is not None
+    assert acquired["payload"] == {"value": 1}
+    assert acquired["lease_id"] == captured["command"].lease_id
+    assert captured["cursor_factory"] == manager._pg_cursor
+    assert observed == ["operation-returned", "latency", "gauge", "event"]
+
+
+def test_postgres_acquire_no_transition_runs_no_success_observers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[str] = []
+    manager = _postgres_manager_without_preflight(tmp_path, monkeypatch, observed)
+
+    def acquire_stub(*_args: Any, **_kwargs: Any) -> LifecycleResult:
+        observed.append("operation-returned")
+        return LifecycleResult.no_transition(NoTransitionReason.NO_ELIGIBLE_JOB)
+
+    monkeypatch.setattr(manager_module, "_postgres_acquire_job", acquire_stub, raising=False)
+
+    acquired = manager.acquire_next_job(
+        domain="facade",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-1",
+    )
+
+    assert acquired is None
+    assert observed == ["operation-returned"]
+
+
+def test_postgres_acquire_backend_error_runs_no_success_observers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[str] = []
+    manager = _postgres_manager_without_preflight(tmp_path, monkeypatch, observed)
+
+    def acquire_stub(*_args: Any, **_kwargs: Any) -> LifecycleResult:
+        observed.append("operation-returned")
+        raise RuntimeError("forced acquisition failure")
+
+    monkeypatch.setattr(manager_module, "_postgres_acquire_job", acquire_stub, raising=False)
+
+    with pytest.raises(RuntimeError, match="forced acquisition failure"):
+        manager.acquire_next_job(
+            domain="facade",
+            queue="default",
+            lease_seconds=30,
+            worker_id="worker-1",
+        )
+
+    assert observed == ["operation-returned"]

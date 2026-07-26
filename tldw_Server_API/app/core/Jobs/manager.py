@@ -66,6 +66,7 @@ from .operations.contracts import (
     CreateJobCommand,
     OperationOutcome,
 )
+from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
@@ -3615,133 +3616,32 @@ class JobManager:
         self._reconcile_terminal_dependents(**reconciliation_scope)
         conn = self._connect()
         acquired: dict[str, Any] | None = None
-        dep_cond = (
-            " AND (status != 'queued' OR NOT EXISTS ("
-            "SELECT 1 FROM job_dependencies jd "
-            "LEFT JOIN jobs dep ON dep.uuid = jd.depends_on_job_uuid "
-            "WHERE jd.job_uuid = jobs.uuid AND "
-            "COALESCE(dep.status, jd.depends_on_terminal_status, 'missing') <> 'completed'"
-            "))"
-        )
         try:
             if self.backend == "postgres":
-                with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
-                        if max_inflight and owner_user_id:
-                            cur.execute(
-                                "SELECT pg_advisory_xact_lock(%s)",
-                                (self._pg_advisory_key("max-inflight", domain, owner_user_id),),
-                            )
-                            cur.execute(
-                                "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND status='processing' AND leased_until IS NOT NULL AND leased_until > NOW()",
-                                (domain, owner_user_id),
-                            )
-                            inflight_row = cur.fetchone()
-                            if int(inflight_row.get("c") if isinstance(inflight_row, dict) else 0) >= max_inflight:
-                                return None
-                        if JobManager._is_truthy(os.getenv("JOBS_PG_SINGLE_UPDATE_ACQUIRE", "")):
-                            # Build ordering clause with optional env overrides
-                            prio_dir = self._priority_dir_for(domain, backend="pg")
-                            tie = self._tie_break_for(domain, backend="pg")
-                            if tie == "fifo":
-                                _order = f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
-                            elif tie == "lifo":
-                                _order = f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) DESC, id DESC LIMIT 1 FOR UPDATE SKIP LOCKED"
-                            else:
-                                _order = f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
-                            _cond_owner = " AND owner_user_id = %s" if owner_user_id else ""
-                            _cond_job_type = " AND job_type = %s" if job_type else ""
-                            _sql = "".join(
-                                [
-                                    "WITH picked AS (",
-                                    "  SELECT id FROM jobs WHERE domain=%s AND queue=%s ",
-                                    "  AND status='queued' AND (available_at IS NULL OR available_at <= NOW())",
-                                    dep_cond,
-                                    _cond_owner,
-                                    _cond_job_type,
-                                    _order,
-                                    ") ",
-                                    "UPDATE jobs SET status='processing', retry_count = CASE WHEN status='processing' THEN retry_count + 1 ELSE retry_count END, started_at = COALESCE(started_at, NOW()), acquired_at = COALESCE(acquired_at, NOW()), leased_until = NOW() + (%s || ' seconds')::interval, worker_id = %s, lease_id = %s, completion_token = NULL ",
-                                    "WHERE id IN (SELECT id FROM picked) RETURNING *",
-                                ]
-                            )
-                            cur.execute(
-                                _sql,
-                                (
-                                    [domain, queue]
-                                    + ([owner_user_id] if owner_user_id else [])
-                                    + ([job_type] if job_type else [])
-                                    + [int(lease_seconds), worker_id, str(_uuid.uuid4())]
-                                ),
-                            )
-                            row2 = cur.fetchone()
-                            if not row2:
-                                return None
-                            acquired = dict(row2)
-                        else:
-                            # Two-step acquire: select next ID then update+return full row
-                            base = (
-                                "SELECT id FROM jobs WHERE domain = %s AND queue = %s "
-                                "AND status = 'queued' AND (available_at IS NULL OR available_at <= NOW())"
-                            )
-                            base += dep_cond
-                            params: list[Any] = [domain, queue]
-                            if owner_user_id:
-                                base += " AND owner_user_id = %s"
-                                params.append(owner_user_id)
-                            if job_type:
-                                base += " AND job_type = %s"
-                                params.append(job_type)
-                            # Stable ordering: allow env-based override
-                            prio_dir = self._priority_dir_for(domain, backend="pg")
-                            tie = self._tie_break_for(domain, backend="pg")
-                            if tie == "fifo":
-                                base += f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
-                            elif tie == "lifo":
-                                base += f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) DESC, id DESC LIMIT 1 FOR UPDATE SKIP LOCKED"
-                            else:
-                                base += f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
-                            cur.execute(base, params)
-                            row = cur.fetchone()
-                            if not row:
-                                return None
-                            job_id = int(row["id"])  # dict_row
-                            # Acquire and start lease
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status = 'processing', "
-                                    "retry_count = CASE WHEN status = 'processing' THEN retry_count + 1 ELSE retry_count END, "
-                                    "started_at = COALESCE(started_at, NOW()), "
-                                    "acquired_at = COALESCE(acquired_at, NOW()), "
-                                    "leased_until = NOW() + (%s || ' seconds')::interval, "
-                                    "worker_id = %s, lease_id = %s, completion_token = NULL WHERE id = %s"
-                                ),
-                                (int(lease_seconds), worker_id, str(_uuid.uuid4()), job_id),
-                            )
-                            cur.execute("SELECT * FROM jobs WHERE id = %s", (job_id,))
-                            row2 = cur.fetchone()
-                            if not row2:
-                                return None
-                            acquired = dict(row2)
-
-                        if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
-                            is_scheduled = acquired.get("available_at") is not None
-                            cur.execute(
-                                (
-                                    "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) "
-                                    "VALUES(%s,%s,%s,0,0,1,0) ON CONFLICT (domain,queue,job_type) DO UPDATE SET "
-                                    "ready_count = GREATEST(job_counters.ready_count + %s, 0), "
-                                    "scheduled_count = GREATEST(job_counters.scheduled_count + %s, 0), "
-                                    "processing_count = job_counters.processing_count + 1, updated_at = NOW()"
-                                ),
-                                (
-                                    acquired.get("domain"),
-                                    acquired.get("queue"),
-                                    acquired.get("job_type"),
-                                    -1 if not is_scheduled else 0,
-                                    -1 if is_scheduled else 0,
-                                ),
-                            )
+                result = _postgres_acquire_job(
+                    conn,
+                    self._pg_cursor,
+                    command=AcquireJobCommand(
+                        domain=domain,
+                        queue=queue,
+                        lease_seconds=lease_seconds,
+                        worker_id=worker_id,
+                        lease_id=str(_uuid.uuid4()),
+                        owner_user_id=owner_user_id,
+                        job_type=job_type,
+                        max_inflight_quota=max_inflight,
+                        priority_direction=self._priority_dir_for(domain, backend="pg"),
+                        tie_break=self._tie_break_for(domain, backend="pg"),
+                        single_update=JobManager._is_truthy(
+                            os.getenv("JOBS_PG_SINGLE_UPDATE_ACQUIRE", "")
+                        ),
+                    ),
+                    counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
+                    now=self._clock.now_utc(),
+                )
+                if result.outcome is not OperationOutcome.APPLIED or result.row is None:
+                    return None
+                acquired = result.row
             else:
                 result = _sqlite_acquire_job(
                     conn,
