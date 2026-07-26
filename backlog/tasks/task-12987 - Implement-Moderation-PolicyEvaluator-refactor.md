@@ -24,8 +24,10 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
+- tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py
+- tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 05:28
+updated_date: 2026-07-26 05:32
 ---
 
 ## Description
@@ -38,7 +40,7 @@ Execute the approved PolicyEvaluator implementation plan as a strict structural 
 <!-- AC:BEGIN -->
 - [x] #1 Literal pre-extraction characterization tests lock current service behavior and quirks.
 - [x] #2 EvaluationLimits and a stateless PolicyEvaluator own evaluation, scanning, snippets, and redaction logic without service I/O, logging, or mutable runtime state.
-- [ ] #3 ModerationService delegates logic while preserving all public signatures, tuple ordering, public dynamic dispatch, and callable private compatibility methods.
+- [x] #3 ModerationService delegates logic while preserving all public signatures, tuple ordering, public dynamic dispatch, and callable private compatibility methods.
 - [ ] #4 Direct evaluator, delegation-invariant, moderation, Guardian, Chat, Workflow, STT, endpoint, compilation, Bandit, diff, and current-dev mergeability gates pass.
 - [ ] #5 No endpoint/schema changes, behavior hardening, shared-model relocation, or unrelated refactor is included.
 <!-- AC:END -->
@@ -61,6 +63,7 @@ Task 4 review found one Important path-coverage asymmetry and one Minor no-call 
 Fresh Task 4 re-review is APPROVED with no Critical, Important, or Minor findings. The reviewer verified exact text through both separately implemented redaction APIs, count assertions, long/full-text behavior, short/long limits, zero-length handling, warn/block no-call behavior, unchanged production after the test fix, and the identical-limits nested call. Acceptance criterion #2 is complete. Task 5 ModerationService delegation is starting.
 Task 5 implementation commit `8632887612` delegates ModerationService evaluation, snippets, scanning, and redaction while preserving the facade. RED: 4 expected delegation/snapshot failures with all 67 literal characterization cases already passing. GREEN: 74/74 delegation+oracle, 179/179 focused matrix, 262/262 Moderation tests, 97/97 endpoint/Guardian, 15/15 Chat, 10/10 selected Workflow, and 1/1 STT regression passed. Py-compile, Black, Ruff, production Bandit over 3,282 LOC (zero findings/errors), and diff/scope checks passed. The service owns one stateless evaluator, snapshots four raw limits under the RLock, uses separate decision/public-redaction snapshots, retains public dispatch and every private descriptor/signature, and removes duplicate bodies. Independent Task 5 review is pending.
 Task 5 review judged production exact but found two Important mutation-sensitive test gaps. Test-only fix commit `d2fc557ea6` adds a controlled real `ModerationService()` constructor test proving exactly one installed stateless evaluator, plus exact one-call sentinel coverage for every class/static and instance delegate, fresh snapshot counts/identity, generator consumption, decision/public-redaction call order, original decision immutability, and distinct `replace()` result identity. GREEN: 87/87 delegation+characterization and 192/192 focused matrix passed. Black, Ruff, test-only Bandit (zero findings/errors across 551 LOC), and diff/scope checks passed. Production and the characterization oracle are unchanged. Fresh Task 5 re-review is pending.
+Fresh Task 5 re-review is APPROVED with no Critical, Important, or Minor findings. The reviewer independently verified 87 delegation+characterization tests and Ruff, and confirmed real constructor ownership, every class/static and instance delegate, fresh snapshots, generator consumption, decision/public-redaction call order, immutable original decision, distinct replacement result, public dispatch, descriptors/signatures, unchanged production after the test fix, and maintainable mutation-sensitive tests. Acceptance criterion #3 is complete. Task 6 real-service Chat and Workflow regressions are starting.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
