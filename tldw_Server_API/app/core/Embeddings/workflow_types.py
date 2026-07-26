@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.exceptions import EmbeddingWorkflowTraceError
 
 EmbeddingWorkflowPhase = Literal[
     "created",
+    "resolving_intent",
     "normalizing",
     "resolving_policy",
     "planning",
@@ -81,9 +82,7 @@ FORBIDDEN_VALUE_SUBSTRINGS = (
     "secret",
 )
 FORBIDDEN_METADATA_FIELD_FRAGMENTS = FORBIDDEN_METADATA_FIELDS
-SAFE_TOKEN_COUNT_FIELDS = frozenset(
-    {"token_count", "token_counts", "total_tokens", "prompt_tokens"}
-)
+SAFE_TOKEN_COUNT_FIELDS = frozenset({"token_count", "token_counts", "total_tokens", "prompt_tokens"})
 SAFE_METADATA_ENUM_VALUES: Mapping[str, frozenset[str]] = MappingProxyType(
     {
         "endpoint_path": frozenset({"/api/v1/embeddings"}),
@@ -93,6 +92,7 @@ SAFE_METADATA_ENUM_VALUES: Mapping[str, frozenset[str]] = MappingProxyType(
             {
                 "created",
                 "normalizing",
+                "resolving_intent",
                 "resolving_policy",
                 "planning",
                 "serving_cache",
@@ -107,9 +107,11 @@ SAFE_METADATA_ENUM_VALUES: Mapping[str, frozenset[str]] = MappingProxyType(
 )
 SAFE_METADATA_NONNEGATIVE_INTEGER_FIELDS = frozenset(
     {
+        "attempt_count",
         "cache_hits",
         "cache_misses",
         "fallback_chain_length",
+        "fallback_attempt_count",
         "item_count",
         "prompt_tokens",
         "response_header_count",
@@ -119,9 +121,7 @@ SAFE_METADATA_NONNEGATIVE_INTEGER_FIELDS = frozenset(
     }
 )
 SAFE_METADATA_OPTIONAL_NONNEGATIVE_INTEGER_FIELDS = frozenset({"dimensions"})
-SAFE_METADATA_BOOLEAN_FIELDS = frozenset(
-    {"adapter_used", "fallback_allowed", "retryable"}
-)
+SAFE_METADATA_BOOLEAN_FIELDS = frozenset({"adapter_used", "fallback_allowed", "retryable"})
 SAFE_METADATA_INTEGER_SEQUENCE_FIELDS = frozenset({"token_counts"})
 SAFE_METADATA_FIELDS = frozenset(SAFE_METADATA_ENUM_VALUES).union(
     SAFE_METADATA_NONNEGATIVE_INTEGER_FIELDS,
@@ -173,18 +173,14 @@ def _safe_metadata_string(value: str, *, field_name: str) -> str:
     if not value or SAFE_METADATA_STRING_PATTERN.fullmatch(value) is None:
         raise EmbeddingWorkflowTraceError("Workflow metadata string values must be safe identifiers")
     if value not in SAFE_METADATA_ENUM_VALUES[field_name]:
-        raise EmbeddingWorkflowTraceError(
-            f"Unsupported workflow metadata value for field: {field_name}"
-        )
+        raise EmbeddingWorkflowTraceError(f"Unsupported workflow metadata value for field: {field_name}")
     return value
 
 
 def _safe_nonnegative_integer(value: object, *, field_name: str) -> int:
     """Return a strict non-negative integer or reject the trace value."""
     if type(value) is not int or value < 0:
-        raise EmbeddingWorkflowTraceError(
-            f"Workflow metadata field {field_name} must be a non-negative integer"
-        )
+        raise EmbeddingWorkflowTraceError(f"Workflow metadata field {field_name} must be a non-negative integer")
     return value
 
 
@@ -192,15 +188,11 @@ def _safe_metadata_value(field_name: str, value: object) -> SafeWorkflowMetadata
     """Validate and freeze one allowlisted metadata value."""
     if field_name in SAFE_METADATA_ENUM_VALUES:
         if not isinstance(value, str):
-            raise EmbeddingWorkflowTraceError(
-                f"Workflow metadata field {field_name} must be an approved identifier"
-            )
+            raise EmbeddingWorkflowTraceError(f"Workflow metadata field {field_name} must be an approved identifier")
         return _safe_metadata_string(value, field_name=field_name)
     if field_name in SAFE_METADATA_BOOLEAN_FIELDS:
         if type(value) is not bool:
-            raise EmbeddingWorkflowTraceError(
-                f"Workflow metadata field {field_name} must be a boolean"
-            )
+            raise EmbeddingWorkflowTraceError(f"Workflow metadata field {field_name} must be a boolean")
         return value
     if field_name in SAFE_METADATA_NONNEGATIVE_INTEGER_FIELDS:
         return _safe_nonnegative_integer(value, field_name=field_name)
@@ -275,6 +267,8 @@ class EmbeddingWorkflowEvent:
     def __post_init__(self) -> None:
         """Validate identity and freeze metadata before collection."""
         _validate_workflow_id(self.workflow_id)
+        if self.event_type == "workflow_completed" and (self.phase != "finalizing" or self.status != "completed"):
+            raise EmbeddingWorkflowTraceError("workflow_completed events require finalizing phase and completed status")
         object.__setattr__(self, "metadata", safe_workflow_metadata(dict(self.metadata)))
 
 
