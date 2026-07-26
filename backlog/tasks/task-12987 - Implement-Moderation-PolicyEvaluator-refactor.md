@@ -19,9 +19,11 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-07-20-moderation-policy-evaluator-refactor-design.md
 - Docs/superpowers/plans/2026-07-23-moderation-policy-evaluator-refactor-implementation-plan.md
+- tldw_Server_API/app/core/Moderation/policy_evaluator.py
+- tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 04:20
+updated_date: 2026-07-26 04:22
 ---
 
 ## Description
@@ -48,6 +50,7 @@ Task 1 implementation commit `6ed86653fc` added the literal decision/dispatch ch
 Task 1 independent task review is APPROVED with no Critical, Important, or Minor findings. The initial reviewer concern about design/plan entries in `modified_files` was withdrawn after verification that Backlog tracks cumulative full-work-item provenance and those files were added in the preceding TASK-12987 setup commit. A `-W error` diagnostic confirmed the warning noise originates from existing repository/environment configuration and cleanup (`PytestConfigWarning` for the pre-existing `plugins` option, Loguru closed-stream noise, and sqlite ResourceWarning), not the new characterization test.
 Task 2 implementation commit `7c5e78cab5` completed the literal scan/redaction/limit oracle. The approved Task 1 baseline passed 30/30; the first and final expanded runs passed 67/67. The 37 added cases cover sequential redaction/counts, short/long replacement-limit asymmetry, chunk/search bounds, all raw limit fields, bounded full-text redaction, zero-length behavior, malformed raw-rule propagation, exception boundaries, and borrowed policy/rule/category identity. Black, Ruff, test-only Bandit with B101 excluded, and diff checks passed. Existing repository/environment warning noise remains unchanged. Acceptance criterion #1 is complete; independent Task 2 review is pending.
 Task 2 review identified one Important oracle weakness: the original identity-only immutability probe could miss in-place mutations to enabled categories, list contents/order, mutable rule fields, and policy scalars. Review-fix commit `a9af5bb8de` adds copied value snapshots plus collection/rule/category identity checks across two rules. The strengthened suite passed 67/67 before and after Black; Ruff, test-only Bandit, and diff checks passed. Fresh Task 2 re-review is pending.
+Fresh Task 2 re-review of the complete amended range is APPROVED with no Critical, Important, or Minor findings. The reviewer verified copied enabled-category values and identity, strict ordered rule identity, every mutable rule field/category snapshot, policy scalar snapshots, and intact literal scan/redaction/limit coverage. Task 2 is complete; Task 3 direct decision evaluator implementation is starting.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
