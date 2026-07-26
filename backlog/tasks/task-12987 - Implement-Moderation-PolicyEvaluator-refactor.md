@@ -23,7 +23,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 04:39
+updated_date: 2026-07-26 04:41
 ---
 
 ## Description
@@ -53,6 +53,7 @@ Task 2 review identified one Important oracle weakness: the original identity-on
 Fresh Task 2 re-review of the complete amended range is APPROVED with no Critical, Important, or Minor findings. The reviewer verified copied enabled-category values and identity, strict ordered rule identity, every mutable rule field/category snapshot, policy scalar snapshots, and intact literal scan/redaction/limit coverage. Task 2 is complete; Task 3 direct decision evaluator implementation is starting.
 Task 3 implementation commit `ff7346f570` added frozen `EvaluationLimits`, stateless direct decision evaluation, deferred service-type loading, phase/category eligibility, chunk/original-string scanning, action ranking, match selection, snippets, and result construction. RED was a genuine `ModuleNotFoundError` for the absent evaluator module. GREEN: 34/34 direct tests and 101/101 combined direct plus characterization tests passed. Compileall, Black, Ruff, production-scope Bandit (zero findings), and diff checks passed. Redaction remains the planned Task 4 placeholder; ModerationService is unchanged. Independent Task 3 review is pending.
 Task 3 review judged production behavior compliant but found three Important direct-test boundary gaps. Test-only fix commit `ff546f5ad6` now locks the static descriptor/exact deferred type tuple/empty instance state; strengthens two-rule policy, collection, rule-field, category, scalar, and all-limit immutability snapshots; proves constructor-boundary identity preservation for four raw `EvaluationLimits` sentinels; and temporarily anchors the planned missing-redaction boundary until Task 4 supersedes it. Focused direct tests passed 37/37 and combined direct plus characterization tests passed 104/104. Black, Ruff, test-only Bandit, and diff checks passed; the prior production Bandit remains zero findings. Fresh Task 3 re-review is pending.
+Fresh Task 3 re-review is APPROVED with no Critical, Important, or Minor findings. The reviewer verified the static deferred loader contract, exact service type tuple, empty evaluator state, temporary Task 3 missing-redaction boundary, identity-preserving raw limits, strengthened borrowed-input snapshots, unchanged production diff, and intact decision semantics. Task 3 is complete; Task 4 will replace the temporary boundary test with real evaluator redaction and nested-limit coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
