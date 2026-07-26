@@ -966,7 +966,7 @@ git commit -m "test(embeddings): characterize endpoint workflow accounting"
 
 - Modify: `backlog/tasks/task-12973.1 - Characterize-Embeddings-workflow-execution-contracts.md`
 
-- [ ] **Step 1: Run all touched test modules**
+- [x] **Step 1: Run all touched test modules**
 
 ```bash
 source .venv/bin/activate
@@ -979,7 +979,7 @@ python -m pytest \
 
 Expected: all tests pass with no unexpected skips or warnings introduced by Stage 2A.
 
-- [ ] **Step 2: Run the broader isolated Embeddings suite**
+- [x] **Step 2: Run the broader isolated Embeddings suite**
 
 ```bash
 source .venv/bin/activate
@@ -988,7 +988,7 @@ python -m pytest tldw_Server_API/tests/Embeddings_isolated -q
 
 Expected: all isolated Embeddings tests pass.
 
-- [ ] **Step 3: Explicitly rerun the latest-dev credential/cache evidence**
+- [x] **Step 3: Explicitly rerun the latest-dev credential/cache evidence**
 
 ```bash
 source .venv/bin/activate
@@ -1000,7 +1000,7 @@ python -m pytest \
 
 Expected: all selected credential, cache-isolation, malformed-cache, and primary-cardinality cases pass.
 
-- [ ] **Step 4: Run Ruff on touched Python files**
+- [x] **Step 4: Run Ruff on touched Python files**
 
 ```bash
 source .venv/bin/activate
@@ -1012,7 +1012,7 @@ python -m ruff check \
 
 Expected: no lint findings.
 
-- [ ] **Step 5: Run Bandit on the touched test scope**
+- [x] **Step 5: Run Bandit on the touched test scope**
 
 Assertions are the purpose of these test files, so exclude Bandit's test-only `B101` rule:
 
@@ -1029,7 +1029,7 @@ python -m bandit -r \
 
 Expected: zero new security findings.
 
-- [ ] **Step 6: Verify the diff is test/tracking-only**
+- [x] **Step 6: Verify the diff is test/tracking-only**
 
 ```bash
 git diff --check
@@ -1038,7 +1038,7 @@ git diff --name-only origin/dev...HEAD
 
 Expected implementation paths are the three test files plus the approved design, plan, and Backlog task files. No path under `tldw_Server_API/app/` may be changed by Stage 2A.
 
-- [ ] **Step 7: Finalize `TASK-12973.1` through Backlog**
+- [x] **Step 7: Finalize `TASK-12973.1` through Backlog**
 
 Using the Backlog MCP or CLI:
 
@@ -1047,7 +1047,7 @@ Using the Backlog MCP or CLI:
 3. Add the final summary stating that Stage 2A changed tests/tracking only.
 4. Mark `TASK-12973.1` Done.
 
-- [ ] **Step 8: Commit Stage 2A closeout metadata**
+- [x] **Step 8: Commit Stage 2A closeout metadata**
 
 ```bash
 git add \
