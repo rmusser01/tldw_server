@@ -97,6 +97,7 @@ class _FakeRedis:
         self.calls: list[tuple[str, str]] = []
         self.set_expirations: list[tuple[str, int | None]] = []
         self.expirations: list[tuple[str, int]] = []
+        self.replay_refreshes: list[tuple[str, str, bytes, bytes, int]] = []
         self.lock_contended = asyncio.Event()
         self.lock_denials = 0
         self.binding_write_then_raise = False
@@ -111,6 +112,7 @@ class _FakeRedis:
         self.block_cleanup = False
         self.cleanup_entered = asyncio.Event()
         self.cleanup_release = asyncio.Event()
+        self.replace_binding_after_result_read = False
 
     @staticmethod
     def _bytes(value: Any) -> bytes:
@@ -127,7 +129,12 @@ class _FakeRedis:
             await self.poll_read_release.wait()
         if self.fail_poll_read and key.startswith("mcp:idemp:result:") and self.lock_denials:
             raise RedisError("poll credential=TOP_SECRET")
-        return self.values.get(key)
+        value = self.values.get(key)
+        if self.replace_binding_after_result_read and key.startswith("mcp:idemp:result:"):
+            self.replace_binding_after_result_read = False
+            cache_key = key.removeprefix("mcp:idemp:result:")
+            self.values[_binding_key(cache_key)] = b"different-arguments"
+        return value
 
     async def set(
         self,
@@ -166,7 +173,6 @@ class _FakeRedis:
         return key in self.values
 
     async def eval(self, script: str, key_count: int, *values: Any) -> int:
-        del script
         keys = [str(value) for value in values[:key_count]]
         for key in keys:
             self.calls.append(("eval", key))
@@ -187,6 +193,27 @@ class _FakeRedis:
             if self.binding_write_then_raise:
                 raise RedisError("binding credential=TOP_SECRET")
             return 2
+
+        if key_count == 2 and len(values) == 5 and "local result" in script:
+            binding_key, result_key, arguments_hash, encoded, ttl = values
+            encoded_hash = self._bytes(arguments_hash)
+            encoded_result = self._bytes(encoded)
+            if self.values.get(str(binding_key)) != encoded_hash:
+                return 0
+            if self.values.get(str(result_key)) != encoded_result:
+                return -1
+            self.expirations.append((str(binding_key), int(ttl)))
+            self.expirations.append((str(result_key), int(ttl)))
+            self.replay_refreshes.append(
+                (
+                    str(binding_key),
+                    str(result_key),
+                    encoded_hash,
+                    encoded_result,
+                    int(ttl),
+                )
+            )
+            return 1
 
         if key_count == 2 and len(values) == 5:
             binding_key, result_key, arguments_hash, encoded, ttl = values
@@ -1039,6 +1066,78 @@ async def test_verified_remote_replay_survives_local_install_failure(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_remote_replay_atomically_renews_result_and_binding_ttl() -> None:
+    redis = _FakeRedis()
+    key = "remote-replay-ttl"
+    payload = {"content": [{"type": "text", "text": "durable"}]}
+    encoded = canonical_json_bytes(payload, max_bytes=_policy().max_result_bytes)
+    redis.values[_binding_key(key)] = b"args"
+    redis.values[_result_key(key)] = encoded
+    manager = _remote_manager(redis)
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"unexpected": True}
+
+    replay = await manager.execute(key, "args", _execute, policy=_policy())
+
+    assert calls == 0
+    assert replay.payload == payload
+    assert replay.persistence == "durable"
+    assert redis.values[_result_key(key)] == encoded
+    assert redis.replay_refreshes == [
+        (
+            _binding_key(key),
+            _result_key(key),
+            b"args",
+            encoded,
+            _policy().ttl_seconds,
+        )
+    ]
+    assert redis.expirations[-2:] == [
+        (_binding_key(key), _policy().ttl_seconds),
+        (_result_key(key), _policy().ttl_seconds),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_remote_replay_binding_change_during_ttl_renewal_fails_closed() -> None:
+    redis = _FakeRedis()
+    key = "remote-replay-binding-change"
+    payload = {"content": [{"type": "text", "text": "durable"}]}
+    redis.values[_binding_key(key)] = b"args"
+    redis.values[_result_key(key)] = canonical_json_bytes(
+        payload,
+        max_bytes=_policy().max_result_bytes,
+    )
+    redis.replace_binding_after_result_read = True
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"unexpected": True}
+
+    with pytest.raises(ExpectedToolFailure) as caught:
+        await manager.execute(key, "args", _execute, policy=_policy())
+
+    assert caught.value.reason is ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    assert calls == 0
+    assert key not in manager._local_cache
+    assert manager.remote_degraded is True
+    assert stages == [("redis_binding", "RuntimeError")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_scoped_keys_partition_all_manager_state_and_personal_key_is_exact() -> None:
     protocol = MCPProtocol()
     manager = _local_manager()
@@ -1198,6 +1297,59 @@ async def test_cancelled_redis_factory_attempt_can_retry_without_false_degradati
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_concurrent_execute_waits_for_shared_redis_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    idempotency_module = importlib.import_module(
+        "tldw_Server_API.app.core.MCP_unified.tool_execution.idempotency",
+    )
+    redis = _FakeRedis()
+    factory_started = asyncio.Event()
+    release_factory = asyncio.Event()
+    callback_started = asyncio.Event()
+    factory_calls = 0
+    callback_calls = 0
+
+    class _Config:
+        def get_redis_connection_params(self) -> dict[str, str]:
+            return {"url": "redis://localhost:6379/0"}
+
+    async def _factory(**_kwargs: Any) -> _FakeRedis:
+        nonlocal factory_calls
+        factory_calls += 1
+        factory_started.set()
+        await release_factory.wait()
+        return redis
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal callback_calls
+        callback_calls += 1
+        callback_started.set()
+        return {"call": callback_calls}
+
+    monkeypatch.setattr(idempotency_module, "get_config", lambda: _Config())
+    manager = IdempotencyManager(redis_client_factory=_factory)
+    first = asyncio.create_task(manager.execute("shared-init", "args", _execute, policy=_policy()))
+    await asyncio.wait_for(factory_started.wait(), timeout=1)
+    second = asyncio.create_task(manager.execute("shared-init", "args", _execute, policy=_policy()))
+    try:
+        await asyncio.wait_for(callback_started.wait(), timeout=0.1)
+        callback_ran_before_factory = True
+    except TimeoutError:
+        callback_ran_before_factory = False
+
+    release_factory.set()
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert callback_ran_before_factory is False
+    assert factory_calls == 1
+    assert callback_calls == 1
+    assert first_result.payload == second_result.payload == {"call": 1}
+    assert _result_key("shared-init") in redis.values
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_post_mutation_local_cache_failure_rolls_back_before_redispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1329,6 +1481,46 @@ async def test_hostile_exception_attribute_hook_cannot_replace_degraded_outcome(
     assert all("TOP_SECRET" not in message for message in messages)
     assert any(
         "degraded observer failed error_type=_HostileObserverError" in message
+        for message in messages
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_hostile_exception_metaclass_cannot_replace_degraded_outcome() -> None:
+    class _HostileExceptionMeta(type):
+        def __getattribute__(cls, name: str) -> Any:
+            if name == "__name__":
+                raise RuntimeError("metaclass credential=TOP_SECRET")
+            return super().__getattribute__(name)
+
+    class _HostileObserverError(BaseException, metaclass=_HostileExceptionMeta):
+        pass
+
+    def _hostile_observer(_stage: str, _error_type: str) -> None:
+        raise _HostileObserverError()
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    original = {"value": object()}
+    try:
+        try:
+            result = await _local_manager(on_degraded=_hostile_observer).execute(
+                "hostile-observer-metaclass",
+                "args",
+                lambda: _async_payload(original),
+                policy=_policy(),
+            )
+        except RuntimeError:
+            raise AssertionError("hostile metaclass replaced the degraded outcome") from None
+    finally:
+        logger.remove(sink_id)
+
+    assert result.payload is original
+    assert result.persistence == "none"
+    assert all("TOP_SECRET" not in message for message in messages)
+    assert any(
+        "degraded observer failed error_type=Exception" in message
         for message in messages
     )
 

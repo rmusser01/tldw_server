@@ -66,6 +66,14 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('EXPIRE', KEYS[1], ARGV[2])
 return 1
 """
+_REDIS_REFRESH_REPLAY_SCRIPT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+local result = redis.call('GET', KEYS[2])
+if result ~= ARGV[2] then return -1 end
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+redis.call('EXPIRE', KEYS[2], ARGV[3])
+return 1
+"""
 _REDIS_STORE_RESULT_SCRIPT = """
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
@@ -84,14 +92,18 @@ def _noop_degraded(_stage: str, _error_type: str) -> None:
 
 
 def _safe_error_type(exc: BaseException) -> str:
-    name = type(exc).__name__
-    if (
-        1 <= len(name) <= 64
-        and name.isascii()
-        and (name[0].isalpha() or name[0] == "_")
-        and all(character.isalnum() or character == "_" for character in name)
-    ):
-        return name
+    try:
+        name = type(exc).__name__
+        if (
+            type(name) is str
+            and 1 <= len(name) <= 64
+            and name.isascii()
+            and (name[0].isalpha() or name[0] == "_")
+            and all(character.isalnum() or character == "_" for character in name)
+        ):
+            return name
+    except BaseException:  # noqa: BLE001 - hostile exception types cannot replace outcomes.
+        return "Exception"
     return "Exception"
 
 
@@ -187,7 +199,6 @@ class IdempotencyManager:
         async with self._redis_guard:
             if self._redis_attempted:
                 return self._redis_ready
-            self._redis_attempted = True
             try:
                 params = dict(get_config().get_redis_connection_params() or {})
             except asyncio.CancelledError:
@@ -197,9 +208,11 @@ class IdempotencyManager:
                 raise
             except Exception as exc:  # noqa: BLE001 - backend discovery is an explicit fallback phase.
                 self._mark_remote_failure("redis_connect", exc)
+                self._redis_attempted = True
                 return False
             if not params:
                 self._redis_ready = False
+                self._redis_attempted = True
                 return False
 
             url = params.pop("url", None)
@@ -221,10 +234,12 @@ class IdempotencyManager:
             except Exception as exc:  # noqa: BLE001 - no remote ownership was attempted.
                 self._redis_client = None
                 self._mark_remote_failure("redis_connect", exc)
+                self._redis_attempted = True
                 return False
 
             self._redis_client = client
             self._redis_ready = True
+            self._redis_attempted = True
             return True
 
     @staticmethod
@@ -676,6 +691,16 @@ class IdempotencyManager:
             raise ExpectedToolFailure(
                 ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
             ) from exc
+        await self._refresh_remote_replay(
+            client,
+            binding_key,
+            result_key,
+            cache_key,
+            arguments_hash,
+            encoded,
+            policy=policy,
+            deadline=deadline,
+        )
         local_committed = self._try_commit_local_replay(
             cache_key,
             arguments_hash,
@@ -684,22 +709,11 @@ class IdempotencyManager:
             policy=policy,
             include_binding=True,
         )
-        binding_refreshed = await self._refresh_remote_binding(
-            client,
-            binding_key,
-            cache_key,
-            arguments_hash,
-            policy=policy,
-            deadline=deadline,
-        )
-        persistence: Literal["durable", "local", "none"] = "durable"
-        if not binding_refreshed and local_committed:
-            persistence = "local"
         return _RemoteReplayRead(
             replay=IdempotencyRunResult(
                 payload=copy.deepcopy(template),
                 from_cache=True,
-                persistence=persistence,
+                persistence="durable",
             ),
             local_committed=local_committed,
         )
@@ -761,6 +775,60 @@ class IdempotencyManager:
             self._block_remote_key(cache_key, policy=policy)
             return False
         return True
+
+    async def _refresh_remote_replay(
+        self,
+        client: Any,
+        binding_key: str,
+        result_key: str,
+        cache_key: str,
+        arguments_hash: str,
+        encoded: bytes,
+        *,
+        policy: IdempotencyExecutionPolicy,
+        deadline: float | None,
+    ) -> None:
+        try:
+            def operation() -> Awaitable[Any]:
+                return client.eval(
+                    _REDIS_REFRESH_REPLAY_SCRIPT,
+                    2,
+                    binding_key,
+                    result_key,
+                    arguments_hash.encode("utf-8"),
+                    encoded,
+                    policy.ttl_seconds,
+                )
+
+            if deadline is None:
+                refreshed = await operation()
+            else:
+                refreshed = await self._call_before_deadline(
+                    operation,
+                    deadline,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - replay coordination must fail closed.
+            self._mark_remote_failure("redis_result_read", exc)
+            self._block_remote_key(cache_key, policy=policy)
+            raise ExpectedToolFailure(
+                ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+            ) from exc
+
+        if refreshed == 1:
+            return
+        if refreshed == 0:
+            stage = "redis_binding"
+            exc = RuntimeError("Redis argument binding changed before replay refresh")
+        else:
+            stage = "redis_result_read"
+            exc = RuntimeError("Redis result changed before replay refresh")
+        self._mark_remote_failure(stage, exc)
+        self._block_remote_key(cache_key, policy=policy)
+        raise ExpectedToolFailure(
+            ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+        ) from exc
 
     async def _store_remote_result(
         self,
