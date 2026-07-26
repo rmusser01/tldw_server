@@ -22,6 +22,8 @@ from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
     renew_lease,
 )
 
+pytestmark = pytest.mark.integration
+
 NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 RENEW_RESULT_FIELDS = {
     "id",
@@ -257,6 +259,30 @@ def test_sqlite_renew_preserves_longer_current_lease_and_returns_transition_fact
     assert persisted["owner_user_id"] == "owner-1"
 
 
+def test_sqlite_renew_joins_caller_owned_transaction(
+    conn: sqlite3.Connection,
+) -> None:
+    """Leave a caller-owned transaction open after renewing a lease."""
+
+    job_id = _insert_job(conn)
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = renew_lease(
+        conn,
+        command=_renew_command(job_id, progress_message="caller transaction"),
+        now=NOW,
+    )
+
+    assert result.outcome is OperationOutcome.APPLIED
+    assert conn.in_transaction is True
+    conn.rollback()
+    current = conn.execute(
+        "SELECT progress_message FROM jobs WHERE id = ?",
+        (job_id,),
+    ).fetchone()
+    assert current[0] == "old progress"
+
+
 @pytest.mark.parametrize("enforce", [False, True], ids=["unenforced", "enforced"])
 @pytest.mark.parametrize("progress_percent", [None, 55.5], ids=["percent-unchanged", "percent-set"])
 @pytest.mark.parametrize("progress_message", [None, "halfway"], ids=["message-unchanged", "message-set"])
@@ -414,6 +440,30 @@ def test_sqlite_release_counter_failure_rolls_back_transition(
         "lease-1",
         "completion-1",
     )
+
+
+def test_sqlite_release_joins_caller_owned_transaction(
+    conn: sqlite3.Connection,
+) -> None:
+    """Leave a caller-owned transaction open after releasing a job."""
+
+    job_id = _insert_job(conn)
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = release_job(
+        conn,
+        command=_release_command(job_id),
+        counters_enabled=False,
+    )
+
+    assert result.outcome is OperationOutcome.APPLIED
+    assert conn.in_transaction is True
+    conn.rollback()
+    current = conn.execute(
+        "SELECT status, worker_id, lease_id FROM jobs WHERE id = ?",
+        (job_id,),
+    ).fetchone()
+    assert tuple(current) == ("processing", "worker-1", "lease-1")
 
 
 class _PauseAfterValidationConnection:

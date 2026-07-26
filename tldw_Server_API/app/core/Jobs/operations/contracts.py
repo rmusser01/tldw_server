@@ -101,6 +101,8 @@ class RenewLeaseCommand:
     progress_message: str | None = None
 
     def __post_init__(self) -> None:
+        """Reject non-positive lease extension durations."""
+
         if self.seconds < 1:
             raise ValueError("seconds must be positive")
 

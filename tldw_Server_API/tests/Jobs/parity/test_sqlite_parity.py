@@ -24,7 +24,7 @@ from tldw_Server_API.tests.Jobs.parity.scenarios import (
     run_renew_stale_lease_noop_scenario,
 )
 
-pytestmark = pytest.mark.jobs
+pytestmark = [pytest.mark.integration, pytest.mark.jobs]
 
 
 @pytest.fixture()

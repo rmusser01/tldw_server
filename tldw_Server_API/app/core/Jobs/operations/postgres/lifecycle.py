@@ -170,6 +170,8 @@ def _classify_lifecycle_no_transition(
     worker_id: str | None,
     lease_id: str | None,
 ) -> LifecycleResult:
+    """Classify why a Postgres lifecycle update did not change a row."""
+
     cur.execute(
         "SELECT id, status, worker_id, lease_id FROM jobs WHERE id = %s",
         (job_id,),

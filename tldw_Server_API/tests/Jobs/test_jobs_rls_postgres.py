@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_jobs_tables_pg,
 )
 
-pytestmark = pytest.mark.pg_jobs
+pytestmark = [pytest.mark.integration, pytest.mark.pg_jobs]
 RLS_NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
 

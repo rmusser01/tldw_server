@@ -6,6 +6,8 @@ import pytest
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
+pytestmark = pytest.mark.integration
+
 
 def _parse_sqlite_ts(s: str) -> datetime:
     try:

@@ -7,7 +7,7 @@ from collections.abc import Callable
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
-pytestmark = pytest.mark.pg_jobs
+pytestmark = [pytest.mark.integration, pytest.mark.pg_jobs]
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.tests.Jobs.parity.scenarios import (

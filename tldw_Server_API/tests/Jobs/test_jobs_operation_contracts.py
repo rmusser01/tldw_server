@@ -22,6 +22,8 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     RenewLeaseCommand,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_create_job_command_carries_public_job_facts() -> None:
     """Verify create commands carry public job facts without transformation."""

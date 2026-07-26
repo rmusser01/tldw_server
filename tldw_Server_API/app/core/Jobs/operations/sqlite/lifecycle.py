@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
+    begin_immediate_if_needed,
+)
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
     LifecycleResult,
@@ -193,6 +197,8 @@ def _classify_lifecycle_no_transition(
     worker_id: str | None,
     lease_id: str | None,
 ) -> LifecycleResult:
+    """Classify why a SQLite lifecycle update did not change a row."""
+
     row = conn.execute(
         "SELECT id, status, worker_id, lease_id FROM jobs WHERE id = ?",
         (job_id,),
@@ -230,7 +236,8 @@ def renew_lease(
     if command.enforce:
         params.extend((command.worker_id, command.lease_id))
 
-    with conn:
+    transaction = nullcontext(conn) if conn.in_transaction else conn
+    with transaction:
         changed = conn.execute(sql, tuple(params))
         if changed.rowcount != 1:
             return _classify_lifecycle_no_transition(
@@ -260,8 +267,9 @@ def release_job(
 ) -> LifecycleResult:
     """Release one processing SQLite job back to the ready queue."""
 
-    with conn:
-        conn.execute("BEGIN IMMEDIATE")
+    owns_transaction = begin_immediate_if_needed(conn)
+    transaction = conn if owns_transaction else nullcontext(conn)
+    with transaction:
         selected = conn.execute(
             (
                 "SELECT id, domain, queue, job_type, status, worker_id, lease_id "

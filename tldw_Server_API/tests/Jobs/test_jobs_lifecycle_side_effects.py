@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     NoTransitionReason,
 )
 
+pytestmark = pytest.mark.integration
+
 
 def _manager_without_preflight(
     tmp_path: Path,

@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
 )
 
 psycopg = pytest.importorskip("psycopg")
-pytestmark = pytest.mark.pg_jobs
+pytestmark = [pytest.mark.integration, pytest.mark.pg_jobs]
 
 NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 RENEW_RESULT_FIELDS = {
