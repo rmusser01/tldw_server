@@ -341,6 +341,7 @@ matrix, Ruff, compileall, Bandit, CLI help, link checks, and final diff checks.
 **Files:**
 - Modify: `tldw_Server_API/app/core/http_client.py`
 - Modify: `.github/workflows/ci.yml`
+- Modify: `.github/workflows/frontend-e2e-tiers.yml`
 - Modify: `Docs/User_Guides/STT_Benchmark_User_Guide.md`
 - Modify: `Docs/User_Guides/index.md`
 - Create: `Docs/Published/User_Guides/STT_Benchmark_User_Guide.md`
