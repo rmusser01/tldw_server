@@ -83,6 +83,60 @@ class EmbeddingExecutionPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedEmbeddingRequest:
+    normalized_input: NormalizedEmbeddingInput
+    provider_intent: ProviderModelIntent
+    policy_decision: EmbeddingPolicyDecision
+    execution_plan: EmbeddingExecutionPlan
+    effective_dimension_policy: str
+    prompt_tokens: int
+    total_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingExecutionOutcome:
+    vectors: tuple[tuple[float, ...], ...]
+    provider: str
+    model: str
+    prompt_tokens: int
+    total_tokens: int
+    cache_hits: int
+    cache_misses: int
+    requested_dimensions: int | None
+    effective_dimension_policy: str
+    attempt_count: int
+    fallback_attempt_count: int
+    fallback_from: str | None = None
+    embeddings_from_adapter: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "vectors",
+            tuple(tuple(vector) for vector in self.vectors),
+        )
+
+        for field_name, value in (
+            ("prompt_tokens", self.prompt_tokens),
+            ("total_tokens", self.total_tokens),
+            ("cache_hits", self.cache_hits),
+            ("cache_misses", self.cache_misses),
+            ("attempt_count", self.attempt_count),
+            ("fallback_attempt_count", self.fallback_attempt_count),
+        ):
+            if type(value) is not int:
+                raise ValueError(f"{field_name} must be an exact int")
+            if value < 0:
+                raise ValueError(f"{field_name} must be nonnegative")
+        if self.attempt_count < 1:
+            raise ValueError("attempt_count must be at least 1 for a successful outcome")
+        if self.fallback_attempt_count >= self.attempt_count:
+            raise ValueError("fallback_attempt_count must be less than attempt_count")
+        if self.cache_hits + self.cache_misses != len(self.vectors):
+            raise ValueError("cache_hits + cache_misses must equal the number of vectors")
+
+
+@dataclass(frozen=True, slots=True)
 class EmbeddingExecutionResult:
     vectors: list[list[float]]
     provider: str
@@ -100,6 +154,7 @@ __all__ = [
     "EmbeddingDomainError",
     "EmbeddingErrorCode",
     "EmbeddingExecutionError",
+    "EmbeddingExecutionOutcome",
     "EmbeddingExecutionPlan",
     "EmbeddingExecutionResult",
     "EmbeddingInputError",
@@ -111,5 +166,6 @@ __all__ = [
     "SafeDetail",
     "SafeJsonScalar",
     "NormalizedEmbeddingInput",
+    "PreparedEmbeddingRequest",
     "ProviderModelIntent",
 ]

@@ -21,11 +21,9 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingExecutionError,
     EmbeddingExecutionPlan,
     EmbeddingExecutionResult,
-    EmbeddingPolicyDecision,
     EmbeddingProviderError,
     EmbeddingRequestContext,
-    NormalizedEmbeddingInput,
-    ProviderModelIntent,
+    PreparedEmbeddingRequest,
 )
 from tldw_Server_API.app.core.Embeddings.vector_validation import (
     validated_embedding_vectors,
@@ -70,17 +68,6 @@ TokenDecoder = Callable[[list[int] | list[list[int]], str], object]
 BackendIdentityResolver = Callable[[str, str], str | None]
 DimensionAdjustmentRecorder = Callable[[str, str, str], None]
 ProviderPreflight = Callable[[str, str], Awaitable[None]]
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedEmbeddingRequest:
-    normalized_input: NormalizedEmbeddingInput
-    provider_intent: ProviderModelIntent
-    policy_decision: EmbeddingPolicyDecision
-    execution_plan: EmbeddingExecutionPlan
-    effective_dimension_policy: str
-    prompt_tokens: int
-    total_tokens: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,11 +229,7 @@ class EmbeddingRequestOrchestrator:
         for index, text in enumerate(prepared.normalized_input.texts):
             key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, primary_backend_identity)
             cached = await self._cache.get(key)
-            validated_cached = (
-                validated_embedding_vectors([cached], expected=1)
-                if cached is not None
-                else None
-            )
+            validated_cached = validated_embedding_vectors([cached], expected=1) if cached is not None else None
             if validated_cached is not None:
                 results.append(
                     self._postprocess_cached_vector(
@@ -414,11 +397,7 @@ class EmbeddingRequestOrchestrator:
         for index, text in enumerate(prepared.normalized_input.texts):
             key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
             cached = await self._cache.get(key)
-            validated_cached = (
-                validated_embedding_vectors([cached], expected=1)
-                if cached is not None
-                else None
-            )
+            validated_cached = validated_embedding_vectors([cached], expected=1) if cached is not None else None
             if validated_cached is not None:
                 results.append(
                     self._postprocess_cached_vector(
