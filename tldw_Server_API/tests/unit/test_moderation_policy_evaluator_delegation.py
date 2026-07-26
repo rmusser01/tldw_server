@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import re
 import threading
-from unittest.mock import Mock
+from unittest.mock import Mock, call, sentinel
 
 import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service_module
 from tldw_Server_API.app.core.Moderation.moderation_service import (
@@ -42,6 +42,176 @@ def _policy(action="redact"):
                 replacement="[R]",
             )
         ],
+    )
+
+
+def test_constructor_owns_exactly_one_stateless_policy_evaluator(
+    monkeypatch,
+):
+    constructed = []
+
+    class RecordingPolicyEvaluator(PolicyEvaluator):
+        def __init__(self):
+            constructed.append(self)
+
+    evaluator_factory = Mock(side_effect=RecordingPolicyEvaluator)
+    load_configs = Mock(return_value={})
+    load_policy = Mock(return_value=ModerationPolicy())
+    load_runtime_overrides = Mock(return_value=None)
+    load_user_overrides = Mock(return_value={})
+    getenv = Mock(return_value=None)
+    monkeypatch.setattr(
+        moderation_service_module,
+        "PolicyEvaluator",
+        evaluator_factory,
+    )
+    monkeypatch.setattr(
+        moderation_service_module,
+        "load_and_log_configs",
+        load_configs,
+    )
+    monkeypatch.setattr(
+        moderation_service_module.os,
+        "getenv",
+        getenv,
+    )
+    monkeypatch.setattr(
+        ModerationService,
+        "_load_global_policy",
+        load_policy,
+    )
+    monkeypatch.setattr(
+        ModerationService,
+        "_load_runtime_overrides_file",
+        load_runtime_overrides,
+    )
+    monkeypatch.setattr(
+        ModerationService,
+        "_load_user_overrides",
+        load_user_overrides,
+    )
+
+    service = ModerationService()
+
+    evaluator_factory.assert_called_once_with()
+    assert constructed == [service._policy_evaluator]
+    assert service._policy_evaluator is constructed[0]
+    assert isinstance(service._policy_evaluator, PolicyEvaluator)
+    assert vars(service._policy_evaluator) == {}
+    load_configs.assert_called_once_with()
+    assert load_policy.call_args_list == [call(), call()]
+    load_runtime_overrides.assert_called_once_with()
+    load_user_overrides.assert_called_once_with()
+    assert getenv.call_args_list == [
+        call("MODERATION_MAX_SCAN_CHARS"),
+        call("MODERATION_MAX_REPLACEMENTS_PER_PATTERN"),
+        call("MODERATION_MATCH_WINDOW_CHARS"),
+        call("MODERATION_MAX_FALLBACK_SCAN_CHARS"),
+        call("MODERATION_BLOCKLIST_WRITE_DEBOUNCE_MS"),
+    ]
+
+
+def test_effective_rule_categories_delegates_exactly_once(monkeypatch):
+    delegate = Mock(return_value=sentinel.effective_categories)
+    monkeypatch.setattr(
+        PolicyEvaluator,
+        "effective_rule_categories",
+        delegate,
+    )
+
+    result = ModerationService._effective_rule_categories(
+        sentinel.effective_rule,
+    )
+
+    assert result is sentinel.effective_categories
+    delegate.assert_called_once_with(sentinel.effective_rule)
+
+
+def test_rule_applies_to_phase_delegates_exactly_once(monkeypatch):
+    delegate = Mock(return_value=sentinel.phase_applies)
+    monkeypatch.setattr(
+        PolicyEvaluator,
+        "rule_applies_to_phase",
+        delegate,
+    )
+
+    result = ModerationService._rule_applies_to_phase(
+        sentinel.phase_rule,
+        sentinel.phase,
+    )
+
+    assert result is sentinel.phase_applies
+    delegate.assert_called_once_with(
+        sentinel.phase_rule,
+        sentinel.phase,
+    )
+
+
+def test_rule_matches_enabled_categories_delegates_exactly_once(
+    monkeypatch,
+):
+    delegate = Mock(return_value=sentinel.categories_match)
+    monkeypatch.setattr(
+        PolicyEvaluator,
+        "rule_matches_enabled_categories",
+        delegate,
+    )
+
+    result = ModerationService._rule_matches_enabled_categories(
+        sentinel.category_rule,
+        sentinel.enabled_categories,
+    )
+
+    assert result is sentinel.categories_match
+    delegate.assert_called_once_with(
+        sentinel.category_rule,
+        sentinel.enabled_categories,
+    )
+
+
+def test_build_sanitized_snippet_for_replacement_delegates_exactly_once(
+    monkeypatch,
+):
+    delegate = Mock(return_value=sentinel.replacement_snippet)
+    monkeypatch.setattr(
+        PolicyEvaluator,
+        "build_sanitized_snippet_for_replacement",
+        delegate,
+    )
+
+    result = ModerationService._build_sanitized_snippet(
+        sentinel.replacement_text,
+        sentinel.replacement_span,
+        sentinel.replacement,
+    )
+
+    assert result is sentinel.replacement_snippet
+    delegate.assert_called_once_with(
+        sentinel.replacement_text,
+        sentinel.replacement_span,
+        sentinel.replacement,
+    )
+
+
+def test_apply_rule_redactions_delegates_exactly_once(monkeypatch):
+    delegate = Mock(return_value=sentinel.applied_redactions)
+    monkeypatch.setattr(
+        PolicyEvaluator,
+        "apply_rule_redactions",
+        delegate,
+    )
+
+    result = ModerationService._apply_rule_redactions(
+        sentinel.apply_text,
+        sentinel.apply_matches,
+        sentinel.apply_replacement,
+    )
+
+    assert result is sentinel.applied_redactions
+    delegate.assert_called_once_with(
+        sentinel.apply_text,
+        sentinel.apply_matches,
+        sentinel.apply_replacement,
     )
 
 
@@ -133,28 +303,237 @@ def test_evaluation_limits_never_observe_reload_partial_assignments(
     assert observed == [EvaluationLimits(20, 6, 200, 3)]
 
 
+def test_build_sanitized_snippet_delegates_exactly_once():
+    evaluator = Mock()
+    evaluator.build_sanitized_snippet.return_value = sentinel.built_snippet
+    service = _service()
+    service._policy_evaluator = evaluator
+    service._evaluation_limits = Mock(
+        side_effect=AssertionError("snapshot must not run"),
+    )
+
+    result = service.build_sanitized_snippet(
+        sentinel.snippet_text,
+        sentinel.snippet_policy,
+        sentinel.snippet_span,
+        sentinel.snippet_pattern,
+    )
+
+    assert result is sentinel.built_snippet
+    evaluator.build_sanitized_snippet.assert_called_once_with(
+        sentinel.snippet_text,
+        sentinel.snippet_policy,
+        sentinel.snippet_span,
+        sentinel.snippet_pattern,
+    )
+    service._evaluation_limits.assert_not_called()
+
+
+def test_redact_text_delegates_exactly_once_with_one_snapshot():
+    evaluator = Mock()
+    evaluator.redact_text.return_value = sentinel.redacted_text
+    service = _service()
+    service._policy_evaluator = evaluator
+    service._evaluation_limits = Mock(return_value=sentinel.redact_limits)
+
+    result = service.redact_text(
+        sentinel.redact_text_input,
+        sentinel.redact_policy,
+        sentinel.redact_phase,
+    )
+
+    assert result is sentinel.redacted_text
+    service._evaluation_limits.assert_called_once_with()
+    evaluator.redact_text.assert_called_once_with(
+        sentinel.redact_text_input,
+        sentinel.redact_policy,
+        sentinel.redact_phase,
+        sentinel.redact_limits,
+    )
+
+
+def test_redact_text_with_count_delegates_exactly_once_with_one_snapshot():
+    evaluator = Mock()
+    evaluator.redact_text_with_count.return_value = sentinel.redaction_with_count
+    service = _service()
+    service._policy_evaluator = evaluator
+    service._evaluation_limits = Mock(return_value=sentinel.count_limits)
+
+    result = service.redact_text_with_count(
+        sentinel.count_text,
+        sentinel.count_policy,
+        sentinel.count_phase,
+    )
+
+    assert result is sentinel.redaction_with_count
+    service._evaluation_limits.assert_called_once_with()
+    evaluator.redact_text_with_count.assert_called_once_with(
+        sentinel.count_text,
+        sentinel.count_policy,
+        sentinel.count_phase,
+        sentinel.count_limits,
+    )
+
+
+def test_iter_scan_chunks_delegates_exactly_once_with_one_snapshot():
+    evaluator = Mock()
+    evaluator.iter_scan_chunks.return_value = iter(
+        (sentinel.first_chunk, sentinel.second_chunk),
+    )
+    service = _service()
+    service._policy_evaluator = evaluator
+    service._evaluation_limits = Mock(return_value=sentinel.chunk_limits)
+
+    result = list(service._iter_scan_chunks(sentinel.chunk_text))
+
+    assert len(result) == 2
+    assert result[0] is sentinel.first_chunk
+    assert result[1] is sentinel.second_chunk
+    service._evaluation_limits.assert_called_once_with()
+    evaluator.iter_scan_chunks.assert_called_once_with(
+        sentinel.chunk_text,
+        sentinel.chunk_limits,
+    )
+
+
+def test_find_match_span_delegates_exactly_once_with_one_snapshot():
+    evaluator = Mock()
+    evaluator.find_match_span.return_value = sentinel.found_span
+    service = _service()
+    service._policy_evaluator = evaluator
+    service._evaluation_limits = Mock(return_value=sentinel.find_limits)
+
+    result = service._find_match_span(
+        sentinel.find_pattern,
+        sentinel.find_text,
+    )
+
+    assert result is sentinel.found_span
+    service._evaluation_limits.assert_called_once_with()
+    evaluator.find_match_span.assert_called_once_with(
+        sentinel.find_pattern,
+        sentinel.find_text,
+        sentinel.find_limits,
+    )
+
+
+def test_collect_rule_matches_delegates_exactly_once_with_one_snapshot():
+    evaluator = Mock()
+    evaluator.collect_rule_matches.return_value = sentinel.collected_matches
+    service = _service()
+    service._policy_evaluator = evaluator
+    service._evaluation_limits = Mock(return_value=sentinel.collect_limits)
+
+    result = service._collect_rule_matches(
+        sentinel.collect_text,
+        sentinel.collect_pattern,
+    )
+
+    assert result is sentinel.collected_matches
+    service._evaluation_limits.assert_called_once_with()
+    evaluator.collect_rule_matches.assert_called_once_with(
+        sentinel.collect_text,
+        sentinel.collect_pattern,
+        sentinel.collect_limits,
+    )
+
+
+def test_decision_only_evaluation_delegates_exactly_once_with_one_snapshot():
+    evaluator = Mock()
+    evaluator.evaluate_text.return_value = sentinel.decision_only_result
+    service = _service()
+    service._policy_evaluator = evaluator
+    service._evaluation_limits = Mock(return_value=sentinel.decision_limits)
+    service.redact_text = Mock(
+        side_effect=AssertionError("public redaction must not run"),
+    )
+
+    result = service._evaluate_text_core(
+        sentinel.decision_only_text,
+        sentinel.decision_only_policy,
+        sentinel.decision_only_phase,
+        include_redacted_text=False,
+    )
+
+    assert result is sentinel.decision_only_result
+    service._evaluation_limits.assert_called_once_with()
+    evaluator.evaluate_text.assert_called_once_with(
+        sentinel.decision_only_text,
+        sentinel.decision_only_policy,
+        sentinel.decision_only_phase,
+        sentinel.decision_limits,
+        include_redacted_text=False,
+    )
+    service.redact_text.assert_not_called()
+
+
 def test_service_evaluation_and_redaction_use_separate_snapshots():
     first = EvaluationLimits(10, 5, 100, 2)
     second = EvaluationLimits(20, 6, 200, 3)
     evaluator = Mock()
-    evaluator.evaluate_text.return_value = ModerationEvaluationResult(
+    decision = ModerationEvaluationResult(
         action="redact",
-        matched_pattern="secret",
-        match_span=(0, 6),
+        matched_pattern=sentinel.decision_pattern,
+        category=sentinel.decision_category,
+        match_span=sentinel.decision_span,
+        sample=sentinel.decision_sample,
     )
-    evaluator.redact_text.return_value = "[R]"
+    decision_before = vars(decision).copy()
+    evaluator.evaluate_text.return_value = decision
+    evaluator.redact_text.return_value = sentinel.public_redacted_text
     service = _service()
     service._policy_evaluator = evaluator
     service._evaluation_limits = Mock(side_effect=[first, second])
+    service.redact_text = Mock(wraps=service.redact_text)
 
-    result = service.evaluate_text("secret", _policy(), "input")
+    result = service.evaluate_text(
+        sentinel.decision_text,
+        sentinel.decision_policy,
+        sentinel.decision_phase,
+    )
 
-    assert result.redacted_text == "[R]"
-    assert evaluator.evaluate_text.call_args.args[3] is first
-    assert evaluator.evaluate_text.call_args.kwargs == {
-        "include_redacted_text": False,
-    }
-    assert evaluator.redact_text.call_args.args[3] is second
+    assert service._evaluation_limits.call_args_list == [call(), call()]
+    evaluator.evaluate_text.assert_called_once_with(
+        sentinel.decision_text,
+        sentinel.decision_policy,
+        sentinel.decision_phase,
+        first,
+        include_redacted_text=False,
+    )
+    service.redact_text.assert_called_once_with(
+        sentinel.decision_text,
+        sentinel.decision_policy,
+        phase=sentinel.decision_phase,
+    )
+    evaluator.redact_text.assert_called_once_with(
+        sentinel.decision_text,
+        sentinel.decision_policy,
+        sentinel.decision_phase,
+        second,
+    )
+    assert evaluator.mock_calls == [
+        call.evaluate_text(
+            sentinel.decision_text,
+            sentinel.decision_policy,
+            sentinel.decision_phase,
+            first,
+            include_redacted_text=False,
+        ),
+        call.redact_text(
+            sentinel.decision_text,
+            sentinel.decision_policy,
+            sentinel.decision_phase,
+            second,
+        ),
+    ]
+    assert vars(decision) == decision_before
+    assert result is not decision
+    assert result.action is decision.action
+    assert result.redacted_text is sentinel.public_redacted_text
+    assert result.matched_pattern is decision.matched_pattern
+    assert result.category is decision.category
+    assert result.match_span is decision.match_span
+    assert result.sample is decision.sample
 
 
 def test_check_and_decision_only_core_do_not_invoke_public_redaction():
