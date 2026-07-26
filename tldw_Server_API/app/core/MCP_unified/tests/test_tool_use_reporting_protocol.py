@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import re
@@ -1227,6 +1228,23 @@ def test_reporting_classifier_ignores_throwing_expected_failure_descriptor() -> 
         "unavailable",
         "tool_unavailable",
     )
+
+
+def test_reporting_classifier_propagates_descriptor_cancellation() -> None:
+    cancellation = asyncio.CancelledError()
+
+    class _CancellingExpectedFailureShape(LookupError):
+        @property
+        def reason(self) -> object:
+            raise cancellation
+
+        def __str__(self) -> str:
+            raise AssertionError("classifier must not render exception text")
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        classify_tool_use_exception(_CancellingExpectedFailureShape())
+
+    assert caught.value is cancellation
 
 
 def test_reporting_classifier_rejects_spoofed_and_mismatched_expected_shapes() -> None:

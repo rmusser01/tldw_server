@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any
@@ -79,7 +80,9 @@ def _expected_failure_reason_code(exc: BaseException) -> str | None:
             or breaker_action_value != catalog_breaker_action_value
         ):
             return None
-    except BaseException:  # noqa: BLE001 - hostile shape access must not escape.
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - hostile descriptor access degrades safely.
         return None
     return sanitized_reason_code
 
