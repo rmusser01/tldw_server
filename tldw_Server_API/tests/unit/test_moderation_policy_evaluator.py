@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import re
 from dataclasses import FrozenInstanceError
 
@@ -78,6 +79,49 @@ class _LowerUnhashable:
 def test_evaluation_limits_are_frozen():
     with pytest.raises(FrozenInstanceError):
         LIMITS.max_scan_chars = 99
+
+
+def test_evaluation_limits_constructor_preserves_field_identities():
+    max_scan_chars = object()
+    match_window_chars = object()
+    max_fallback_scan_chars = object()
+    max_replacements_per_pattern = object()
+
+    limits = EvaluationLimits(
+        max_scan_chars=max_scan_chars,  # type: ignore[arg-type]
+        match_window_chars=match_window_chars,  # type: ignore[arg-type]
+        max_fallback_scan_chars=max_fallback_scan_chars,  # type: ignore[arg-type]
+        max_replacements_per_pattern=max_replacements_per_pattern,  # type: ignore[arg-type]
+    )
+
+    assert limits.max_scan_chars is max_scan_chars
+    assert limits.match_window_chars is match_window_chars
+    assert limits.max_fallback_scan_chars is max_fallback_scan_chars
+    assert limits.max_replacements_per_pattern is max_replacements_per_pattern
+
+
+def test_direct_policy_type_loader_and_evaluator_shape_are_literal():
+    descriptor = inspect.getattr_static(PolicyEvaluator, "policy_types")
+    evaluator = PolicyEvaluator()
+
+    assert isinstance(descriptor, staticmethod)
+    assert evaluator.policy_types() == (
+        ModerationPolicy,
+        PatternRule,
+        ModerationEvaluationResult,
+    )
+    assert vars(evaluator) == {}
+
+
+def test_direct_redaction_remains_deferred_to_task_4():
+    with pytest.raises(AttributeError, match="redact_text"):
+        PolicyEvaluator().evaluate_text(
+            "secret",
+            _policy(_rule("secret", action="redact")),
+            "input",
+            LIMITS,
+            include_redacted_text=True,
+        )
 
 
 def test_direct_decision_evaluation_has_literal_result():
@@ -572,27 +616,99 @@ def test_direct_empty_text_and_regex_error_behavior_are_literal():
 
 
 def test_direct_evaluator_does_not_mutate_borrowed_inputs():
-    categories = {"confidential"}
-    rule = PatternRule(
-        regex=re.compile("secret"),
+    categories = {"confidential", "pii"}
+    rule = _rule(
+        "secret",
         action="warn",
+        replacement="[SECRET]",
         categories=categories,
+        phase="input",
     )
-    rules = [rule]
-    policy = _policy(*rules, categories_enabled={"confidential"})
+    second_categories = {"secondary"}
+    second_rule = _rule(
+        "token",
+        action="block",
+        replacement="[TOKEN]",
+        categories=second_categories,
+        phase="both",
+    )
+    rules = [rule, second_rule]
+    enabled_categories = {"confidential", "pii", "secondary"}
+    policy = _policy(*rules, categories_enabled=enabled_categories)
     pattern_collection = policy.block_patterns
-    limits_before = EvaluationLimits(**vars(LIMITS))
+    ordered_rules = tuple(pattern_collection)
+    enabled_category_values = enabled_categories.copy()
+    rule_snapshots = tuple(
+        (
+            candidate.regex,
+            candidate.action,
+            candidate.replacement,
+            candidate.phase,
+            candidate.categories,
+            candidate.categories.copy() if candidate.categories is not None else None,
+        )
+        for candidate in rules
+    )
+    policy_scalar_snapshot = (
+        policy.enabled,
+        policy.input_enabled,
+        policy.output_enabled,
+        policy.input_action,
+        policy.output_action,
+        policy.redact_replacement,
+        policy.per_user_overrides,
+    )
+    limit_values = vars(LIMITS).copy()
+    limit_identities = tuple(
+        (field, getattr(LIMITS, field))
+        for field in (
+            "max_scan_chars",
+            "match_window_chars",
+            "max_fallback_scan_chars",
+            "max_replacements_per_pattern",
+        )
+    )
 
     PolicyEvaluator().evaluate_text(
-        "secret",
+        "secret token",
         policy,
         "input",
         LIMITS,
         include_redacted_text=False,
     )
 
+    assert policy.categories_enabled is enabled_categories
+    assert policy.categories_enabled == enabled_category_values
     assert policy.block_patterns is pattern_collection
-    assert policy.block_patterns == rules
-    assert rule.categories is categories
-    assert categories == {"confidential"}
-    assert limits_before == LIMITS
+    assert len(policy.block_patterns) == len(ordered_rules)
+    assert all(
+        current is original
+        for current, original in zip(
+            policy.block_patterns,
+            ordered_rules,
+            strict=True,
+        )
+    )
+    for current, snapshot in zip(
+        policy.block_patterns,
+        rule_snapshots,
+        strict=True,
+    ):
+        regex, action, replacement, phase, category_collection, category_values = snapshot
+        assert current.regex is regex
+        assert current.action == action
+        assert current.replacement == replacement
+        assert current.phase == phase
+        assert current.categories is category_collection
+        assert current.categories == category_values
+    assert (
+        policy.enabled,
+        policy.input_enabled,
+        policy.output_enabled,
+        policy.input_action,
+        policy.output_action,
+        policy.redact_replacement,
+        policy.per_user_overrides,
+    ) == policy_scalar_snapshot
+    assert vars(LIMITS) == limit_values
+    assert all(getattr(LIMITS, field) is original for field, original in limit_identities)
