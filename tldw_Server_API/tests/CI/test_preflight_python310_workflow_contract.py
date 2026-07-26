@@ -8,9 +8,17 @@ def test_ci_runs_governed_preflight_final_gate_on_python310() -> None:
     job = workflow["jobs"]["preflight-python-310"]
     steps = job["steps"]
 
+    portaudio = next(step for step in steps if step.get("name") == "Install PortAudio build dependencies")
+    assert portaudio["uses"] == "./.github/actions/setup-ffmpeg"
+    assert portaudio["with"] == {
+        "install-ffmpeg": "false",
+        "install-portaudio": "true",
+    }
+
     setup = next(step for step in steps if step.get("name") == "Setup Python 3.10 and dependencies")
     assert setup["uses"] == "./.github/actions/setup-python-deps"
     assert setup["with"]["python-version"] == "3.10"
+    assert steps.index(portaudio) < steps.index(setup)
 
     run = next(step for step in steps if step.get("name") == "Run governed preflight final gate")["run"]
     assert "test_phase3_preflight_architecture.py" in run
