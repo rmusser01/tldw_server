@@ -1348,7 +1348,7 @@ Route the SQLite facade only after direct tests pass. The facade maps no-transit
 
 SQLite execution evidence: direct tests first failed at collection because `release_job` was absent, then 25 direct operation tests passed. Facade/observer tests produced eight expected failures before routing and passed 16 tests afterward. Independent verification passed the 93-test SQLite focused matrix plus all five selected SQLite release regression cases. Ruff, compileall, and `git diff --check` pass; Bandit reports zero findings/errors and only the manager's 81 pre-existing skipped suppressions. Specification review's concern that renewal still changes `updated_at` was rejected after confirming the legacy inline update triggered the same table-level timestamp trigger; the plan now states the intended no-new-explicit-assignment contract. Final quality review approved with no actionable findings.
 
-- [ ] **Step 2: Write direct operation tests, then implement PostgreSQL**
+- [x] **Step 2: Write direct operation tests, then implement PostgreSQL**
 
 Use `pytestmark = pytest.mark.pg_jobs` and `jobs_pg_dsn`; a skip is failure. Preserve:
 
@@ -1363,7 +1363,9 @@ Use `pytestmark = pytest.mark.pg_jobs` and `jobs_pg_dsn`; a skip is failure. Pre
 
 Route the PostgreSQL facade only after direct tests pass. Delete only the migrated single-job renewal/release SQL.
 
-- [ ] **Step 3: Prove post-commit side effects**
+PostgreSQL execution evidence: direct tests first failed at collection because `release_job` was absent, then 25 direct operation tests passed against required real PostgreSQL. Facade/observer tests produced eight expected failures before routing and nine PostgreSQL renewal/release cases passed afterward, including a real rollback/no-event commit failure. RLS tests prove visible operations apply and hidden rows return `MISSING` without mutation. A specification review found that the RLS helper had replaced its optional no-DSN skip with an assertion; the previous optional behavior was restored while the shared required fixture still fails unreachable required runs. Independent verification passed 113 required PostgreSQL operation/contract/observer/parity/RLS/acquisition tests plus all five selected PostgreSQL release regressions, with zero skips. Ruff, compileall, and `git diff --check` pass; Bandit reports zero findings/errors and 79 pre-existing manager suppressions. Final quality review approved with no actionable findings.
+
+- [x] **Step 3: Prove post-commit side effects**
 
 Extend `test_jobs_lifecycle_side_effects.py` with applied, no-transition, and raised-error stubs for both backends. Assert:
 

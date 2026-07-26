@@ -70,6 +70,8 @@ from .operations.contracts import (
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
+from .operations.postgres import release_job as _postgres_release_job
+from .operations.postgres import renew_lease as _postgres_renew_lease
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
 from .operations.sqlite import release_job as _sqlite_release_job
@@ -3775,54 +3777,29 @@ class JobManager:
         conn = self._connect()
         try:
             if self.backend == "postgres":
-                with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
-                        now_ts = self._clock.now_utc()
-                        if enforce:
-                            sets = [
-                                "leased_until = GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval)"
-                            ]
-                            params: list[Any] = [now_ts, now_ts, int(seconds)]
-                            if progress_percent is not None:
-                                sets.append("progress_percent = %s")
-                                params.append(float(progress_percent))
-                            if progress_message is not None:
-                                sets.append("progress_message = %s")
-                                params.append(str(progress_message))
-                            params.extend([int(job_id), worker_id, lease_id])
-                            cur.execute(
-                                f"UPDATE jobs SET {', '.join(sets)} WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s",  # nosec B608
-                                tuple(params),
-                            )
-                            ok = cur.rowcount > 0
-                            if ok:
-                                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                    emit_job_event(
-                                        "job.lease_renewed", job={"id": int(job_id)}, attrs={"seconds": int(seconds)}
-                                    )
-                            return ok
-                        else:
-                            sets = [
-                                "leased_until = GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval)"
-                            ]
-                            params2: list[Any] = [now_ts, now_ts, int(seconds)]
-                            if progress_percent is not None:
-                                sets.append("progress_percent = %s")
-                                params2.append(float(progress_percent))
-                            if progress_message is not None:
-                                sets.append("progress_message = %s")
-                                params2.append(str(progress_message))
-                            cur.execute(
-                                f"UPDATE jobs SET {', '.join(sets)} WHERE id = %s AND status = 'processing'",  # nosec B608
-                                tuple(params2 + [int(job_id)]),
-                            )
-                            ok2 = cur.rowcount > 0
-                            if ok2:
-                                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                    emit_job_event(
-                                        "job.lease_renewed", job={"id": int(job_id)}, attrs={"seconds": int(seconds)}
-                                    )
-                            return ok2
+                result = _postgres_renew_lease(
+                    conn,
+                    self._pg_cursor,
+                    command=RenewLeaseCommand(
+                        job_id=int(job_id),
+                        seconds=int(seconds),
+                        enforce=bool(enforce),
+                        worker_id=worker_id,
+                        lease_id=lease_id,
+                        progress_percent=progress_percent,
+                        progress_message=progress_message,
+                    ),
+                    now=self._clock.now_utc(),
+                )
+                if result.outcome is not OperationOutcome.APPLIED:
+                    return False
+                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                    emit_job_event(
+                        "job.lease_renewed",
+                        job={"id": int(job_id)},
+                        attrs={"seconds": int(seconds)},
+                    )
+                return True
             else:
                 result = _sqlite_renew_lease(
                     conn,
@@ -6327,55 +6304,27 @@ class JobManager:
         conn = self._connect()
         try:
             if self.backend == "postgres":
-                with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
-                        cur.execute(
-                            "SELECT domain, queue, job_type, available_at, status, worker_id, lease_id FROM jobs WHERE id = %s",
-                            (int(job_id),),
-                        )
-                        row = cur.fetchone()
-                        if not row or row.get("status") != "processing":
-                            return False
-                        if enforce and (row.get("worker_id") != worker_id or row.get("lease_id") != lease_id):
-                            return False
-                        if enforce:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status = 'queued', available_at = NULL, leased_until = NULL, worker_id = NULL, lease_id = NULL, "
-                                    "acquired_at = NULL, started_at = NULL, completion_token = NULL, updated_at = NOW() "
-                                    "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s"
-                                ),
-                                (int(job_id), worker_id, lease_id),
-                            )
-                        else:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status = 'queued', available_at = NULL, leased_until = NULL, worker_id = NULL, lease_id = NULL, "
-                                    "acquired_at = NULL, started_at = NULL, completion_token = NULL, updated_at = NOW() "
-                                    "WHERE id = %s AND status = 'processing'"
-                                ),
-                                (int(job_id),),
-                            )
-                        ok = cur.rowcount > 0
-                        if ok and JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
-                            cur.execute(
-                                (
-                                    "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) VALUES(%s,%s,%s,1,0,0,0) "
-                                    "ON CONFLICT (domain,queue,job_type) DO UPDATE SET "
-                                    "ready_count = job_counters.ready_count + %s, "
-                                    "scheduled_count = job_counters.scheduled_count + %s, "
-                                    "processing_count = GREATEST(job_counters.processing_count - 1, 0), "
-                                    "updated_at = NOW()"
-                                ),
-                                (row["domain"], row["queue"], row["job_type"], 1, 0),
-                            )
-                        if ok:
-                            released_job = {
-                                "id": int(job_id),
-                                "domain": row["domain"],
-                                "queue": row["queue"],
-                                "job_type": row["job_type"],
-                            }
+                result = _postgres_release_job(
+                    conn,
+                    self._pg_cursor,
+                    command=ReleaseJobCommand(
+                        job_id=int(job_id),
+                        enforce=bool(enforce),
+                        worker_id=worker_id,
+                        lease_id=lease_id,
+                        reason=reason,
+                    ),
+                    counters_enabled=JobManager._is_truthy(
+                        os.getenv("JOBS_COUNTERS_ENABLED", "")
+                    ),
+                )
+                if result.outcome is OperationOutcome.APPLIED and result.row is not None:
+                    released_job = {
+                        "id": int(job_id),
+                        "domain": result.row["domain"],
+                        "queue": result.row["queue"],
+                        "job_type": result.row["job_type"],
+                    }
             else:
                 result = _sqlite_release_job(
                     conn,

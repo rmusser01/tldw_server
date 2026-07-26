@@ -1,14 +1,30 @@
 import os
-import pytest
+from datetime import datetime, timedelta, timezone
+from typing import Any
 from urllib.parse import quote, urlparse, urlunparse
+
+import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg, ensure_jobs_tables_pg
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    NoTransitionReason,
+    OperationOutcome,
+    ReleaseJobCommand,
+    RenewLeaseCommand,
+)
+from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
+    release_job,
+    renew_lease,
+)
+from tldw_Server_API.app.core.Jobs.pg_migrations import (
+    ensure_jobs_rls_policies_pg,
+    ensure_jobs_tables_pg,
+)
 
 pytestmark = pytest.mark.pg_jobs
+RLS_NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def _dsn_or_skip(monkeypatch):
@@ -117,6 +133,45 @@ def _seed(dsn):
             )
 
 
+def _seed_processing_job(dsn: str, *, owner_user_id: str) -> int:
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                (
+                    "INSERT INTO jobs(domain, queue, job_type, owner_user_id, status, priority, "
+                    "leased_until, worker_id, lease_id, acquired_at, started_at, "
+                    "progress_percent, progress_message, created_at) "
+                    "VALUES('chatbooks', 'default', 'export', %s, 'processing', 5, %s, "
+                    "'worker-1', 'lease-1', %s, %s, 10.0, 'old progress', %s) RETURNING id"
+                ),
+                (
+                    owner_user_id,
+                    RLS_NOW - timedelta(minutes=15),
+                    RLS_NOW - timedelta(hours=1),
+                    RLS_NOW - timedelta(hours=1),
+                    RLS_NOW - timedelta(days=1),
+                ),
+            )
+            row = cur.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _read_lifecycle_facts(dsn: str, job_id: int) -> tuple[Any, ...]:
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                (
+                    "SELECT status, leased_until, worker_id, lease_id, acquired_at, started_at, "
+                    "progress_percent, progress_message FROM jobs WHERE id = %s"
+                ),
+                (job_id,),
+            )
+            row = cur.fetchone()
+    assert row is not None
+    return tuple(row)
+
+
 def test_rls_context_filters_results(monkeypatch):
 
 
@@ -152,8 +207,6 @@ def test_rls_applies_to_events_and_controls(monkeypatch):
     ensure_jobs_tables_pg(admin_dsn)
     ensure_jobs_rls_policies_pg(admin_dsn)
     _seed(admin_dsn)
-    import psycopg
-
     jm = JobManager(backend="postgres", db_url=rls_dsn)
 
     # chatbooks:u1 context
@@ -175,3 +228,111 @@ def test_rls_applies_to_events_and_controls(monkeypatch):
             assert sla_count >= 1
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize("operation", ["renew", "release"])
+def test_rls_visible_lifecycle_operation_applies(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    job_id = _seed_processing_job(admin_dsn, owner_user_id="u1")
+    manager = JobManager(backend="postgres", db_url=rls_dsn)
+    JobManager.set_rls_context(
+        is_admin=False,
+        domain_allowlist="chatbooks",
+        owner_user_id="u1",
+    )
+    connection = manager._connect()
+    try:
+        if operation == "renew":
+            result = renew_lease(
+                connection,
+                manager._pg_cursor,
+                command=RenewLeaseCommand(
+                    job_id=job_id,
+                    seconds=30,
+                    enforce=True,
+                    worker_id="worker-1",
+                    lease_id="lease-1",
+                    progress_percent=75.0,
+                    progress_message="visible renewal",
+                ),
+                now=RLS_NOW,
+            )
+        else:
+            result = release_job(
+                connection,
+                manager._pg_cursor,
+                command=ReleaseJobCommand(
+                    job_id=job_id,
+                    enforce=True,
+                    worker_id="worker-1",
+                    lease_id="lease-1",
+                ),
+                counters_enabled=False,
+            )
+    finally:
+        connection.close()
+        JobManager.clear_rls_context()
+
+    assert result.outcome is OperationOutcome.APPLIED
+    assert result.row is not None
+    if operation == "renew":
+        assert result.row["leased_until"] == RLS_NOW + timedelta(seconds=30)
+        assert result.row["progress_percent"] == 75.0
+        assert result.row["progress_message"] == "visible renewal"
+    else:
+        assert result.row["status"] == "queued"
+        assert result.row["worker_id"] is None
+        assert result.row["lease_id"] is None
+
+
+@pytest.mark.parametrize("operation", ["renew", "release"])
+def test_rls_hidden_lifecycle_operation_reports_missing_and_preserves_row(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    job_id = _seed_processing_job(admin_dsn, owner_user_id="u2")
+    before = _read_lifecycle_facts(admin_dsn, job_id)
+    manager = JobManager(backend="postgres", db_url=rls_dsn)
+    JobManager.set_rls_context(
+        is_admin=False,
+        domain_allowlist="chatbooks",
+        owner_user_id="u1",
+    )
+    connection = manager._connect()
+    try:
+        if operation == "renew":
+            result = renew_lease(
+                connection,
+                manager._pg_cursor,
+                command=RenewLeaseCommand(
+                    job_id=job_id,
+                    seconds=30,
+                    enforce=False,
+                    progress_percent=75.0,
+                    progress_message="must remain hidden",
+                ),
+                now=RLS_NOW,
+            )
+        else:
+            result = release_job(
+                connection,
+                manager._pg_cursor,
+                command=ReleaseJobCommand(job_id=job_id, enforce=False),
+                counters_enabled=False,
+            )
+    finally:
+        connection.close()
+        JobManager.clear_rls_context()
+
+    assert result.outcome is OperationOutcome.NO_TRANSITION
+    assert result.no_transition_reason is NoTransitionReason.MISSING
+    assert result.row is None
+    assert _read_lifecycle_facts(admin_dsn, job_id) == before
