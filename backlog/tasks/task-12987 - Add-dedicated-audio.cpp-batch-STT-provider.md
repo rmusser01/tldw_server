@@ -4,7 +4,7 @@ title: Add dedicated audio.cpp batch STT provider
 status: In Progress
 assignee: []
 created_date: '2026-07-26 03:27'
-updated_date: '2026-07-26 03:39'
+updated_date: '2026-07-26 04:05'
 labels:
   - stt
   - benchmark
@@ -12,6 +12,8 @@ labels:
 dependencies: []
 references:
   - Docs/superpowers/specs/2026-07-25-audio-cpp-batch-stt-provider-design.md
+  - >-
+    Docs/superpowers/plans/2026-07-25-audio-cpp-batch-stt-provider-implementation-plan.md
   - 'https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md'
 priority: medium
 ---
@@ -32,6 +34,12 @@ Add a first-class external-server-only audio.cpp STT adapter and provider regist
 - [ ] #6 Configuration and user documentation describe setup, limitations, network consent, and true cold-start procedure.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Follow Docs/superpowers/plans/2026-07-25-audio-cpp-batch-stt-provider-implementation-plan.md task-by-task using TDD, focused commits, independent review, Bandit, and PR gates.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -40,6 +48,12 @@ Add a first-class external-server-only audio.cpp STT adapter and provider regist
 Independent design review found and the spec now addresses four blocking gaps: explicit ordinary API selectors/default-model routing; frozen origin/model/timeout/transport with pre-I/O plan verification; a bounded allowlisted metadata finalizer extension; and real RIFF/WAVE PCM validation with byte-zero upload. It also clarifies empty-output scoring, strict config parsing, and cache lock/reset behavior.
 
 Independent spec re-review approved the revised design with no remaining issues. The final revision additionally makes adapter-side selector normalization mandatory so original REST/Jobs model strings cannot leak upstream, and pins the six retained artifact metadata keys.
+
+Implementation plan drafted with TDD stages for bounded artifact metadata, strict config/selector parsing, upstream contract and WAV validation, secure no-retry HTTP/cache execution, immutable adapter registration, ordinary API and benchmark integration, documentation, and final verification/review/PR gates.
+
+Independent plan review found three blocking issues and the plan was revised: cache discovery now uses concurrent-future single-flight with a short-held threading lock and generation-safe reset; origin validation rejects raw dot/non-root paths and reconstructs a no-trailing-slash canonical origin; WAV validation requires pre/post-open regular-file identity and streams the complete declared PCM payload to detect late truncation.
+
+Independent implementation-plan re-review approved the revised plan with no blocking issues. Its advisory request for an explicit canonical STT config projection test was added to Task 2.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
