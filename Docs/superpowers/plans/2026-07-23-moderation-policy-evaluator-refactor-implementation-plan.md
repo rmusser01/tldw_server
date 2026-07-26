@@ -3473,7 +3473,7 @@ git commit -m "test: cover moderation evaluator caller integration"
 - Consumes: all implementation commits, literal/direct/delegation tests, and real/stubbed caller suites.
 - Produces: compilation, regression, Bandit, scope, independent-review, and current-`dev` mergeability evidence recorded in finalized `TASK-12987`.
 
-- [ ] **Step 1: Compile every touched Python file**
+- [x] **Step 1: Compile every touched Python file**
 
 Run:
 
@@ -3491,7 +3491,7 @@ python -m py_compile \
 
 Expected: exit 0 with no output.
 
-- [ ] **Step 2: Run final formatting and lint gates**
+- [x] **Step 2: Run final formatting and lint gates**
 
 Run Black in check mode for the new files:
 
@@ -3523,7 +3523,7 @@ Expected: Black reports four unchanged files; both Ruff commands report
 `All checks passed!`. The Workflow ignores cover only pre-existing import
 findings; manually confirm the new imports are ordered and used.
 
-- [ ] **Step 3: Run evaluator and all moderation unit suites**
+- [x] **Step 3: Run evaluator and all moderation unit suites**
 
 Run:
 
@@ -3536,7 +3536,7 @@ python -m pytest \
 
 Expected: PASS with zero failures.
 
-- [ ] **Step 4: Run endpoint, Guardian, Chat, Workflow, and STT gates**
+- [x] **Step 4: Run endpoint, Guardian, Chat, Workflow, and STT gates**
 
 Run:
 
@@ -3560,7 +3560,7 @@ python -m pytest \
 
 Expected: every command PASS with zero failures.
 
-- [ ] **Step 5: Run Bandit on the touched production scope**
+- [x] **Step 5: Run Bandit on the touched production scope**
 
 Run:
 
@@ -3574,7 +3574,7 @@ python -m bandit \
 
 Expected: exit 0 and no new findings in touched code. Record the JSON summary in `TASK-12987`.
 
-- [ ] **Step 6: Run diff and scope checks**
+- [x] **Step 6: Run diff and scope checks**
 
 Run:
 
@@ -3601,7 +3601,7 @@ Review the final diff and confirm:
 - evaluation and redaction scan paths remain distinct
 - no logging, diagnostics, normalization, regex hardening, or shared-model move was added
 
-- [ ] **Step 7: Verify current-dev mergeability**
+- [x] **Step 7: Verify current-dev mergeability**
 
 Run:
 
@@ -3612,7 +3612,7 @@ git merge-tree --write-tree HEAD origin/dev
 
 Expected: fetch succeeds; `git merge-tree` exits 0 and prints one tree object ID with no conflicts.
 
-- [ ] **Step 8: Request final code review**
+- [x] **Step 8: Request final code review**
 
 Dispatch an independent code-review subagent with:
 
@@ -3623,7 +3623,7 @@ Dispatch an independent code-review subagent with:
 
 Resolve every actionable finding and rerun the affected verification command.
 
-- [ ] **Step 9: Commit review fixes and rerun final gates**
+- [x] **Step 9: Commit review fixes and rerun final gates**
 
 When review requires implementation or test changes, stage the complete
 touched scope and commit the resolved findings:
@@ -3645,7 +3645,7 @@ If the review is clean, record that result in `TASK-12987` and do not create
 an empty commit. In either case, rerun Steps 1-7 on the final `HEAD`; the final
 diff/scope and mergeability results must therefore include every review fix.
 
-- [ ] **Step 10: Finalize TASK-12987 and commit verification**
+- [x] **Step 10: Finalize TASK-12987 and commit verification**
 
 Update `TASK-12987` with:
 

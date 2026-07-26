@@ -1,7 +1,7 @@
 ---
 id: TASK-12987
 title: Implement Moderation PolicyEvaluator refactor
-status: In Progress
+status: Done
 created_date: 2026-07-26 03:49
 dependencies:
 - TASK-12985
@@ -27,7 +27,7 @@ modified_files:
 - tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py
 - tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 05:53
+updated_date: 2026-07-26 06:07
 ---
 
 ## Description
@@ -41,8 +41,8 @@ Execute the approved PolicyEvaluator implementation plan as a strict structural 
 - [x] #1 Literal pre-extraction characterization tests lock current service behavior and quirks.
 - [x] #2 EvaluationLimits and a stateless PolicyEvaluator own evaluation, scanning, snippets, and redaction logic without service I/O, logging, or mutable runtime state.
 - [x] #3 ModerationService delegates logic while preserving all public signatures, tuple ordering, public dynamic dispatch, and callable private compatibility methods.
-- [ ] #4 Direct evaluator, delegation-invariant, moderation, Guardian, Chat, Workflow, STT, endpoint, compilation, Bandit, diff, and current-dev mergeability gates pass.
-- [ ] #5 No endpoint/schema changes, behavior hardening, shared-model relocation, or unrelated refactor is included.
+- [x] #4 Direct evaluator, delegation-invariant, moderation, Guardian, Chat, Workflow, STT, endpoint, compilation, Bandit, diff, and current-dev mergeability gates pass.
+- [x] #5 No endpoint/schema changes, behavior hardening, shared-model relocation, or unrelated refactor is included.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -68,20 +68,21 @@ Task 6 implementation commit `884fb773ff` added real-service caller regressions 
 Task 6 review found one cleanup defect: artifact deletion could raise before the Chat dependency override was removed. Test-only fix commit `4d1c8e31d1` uses unconditional nested cleanup so the override is always popped without swallowing test-body failures. Focused real-service Chat passed 1/1 and the complete Chat moderation suite passed 16/16; Ruff, test-only Bandit, and diff checks passed. Fresh Task 6 re-review is pending.
 Task 6 second re-review found that cleanup failure could still mask an existing test-body failure. Test-only commit `9d3071a7fd` tracks successful body completion so cleanup errors fail an otherwise successful test but are suppressed when a body failure is already active; dependency override removal remains unconditional. Focused real-service Chat passed 1/1 and full Chat passed 16/16; Ruff, test-only Bandit, and diff checks passed. Final Task 6 re-review is pending.
 Final Task 6 re-review is APPROVED with no findings. The reviewer verified unconditional override removal, cleanup failures surfacing after successful bodies, original body failures remaining primary when cleanup also fails, no swallowed body exceptions, intact real-service Chat/Workflow boundary assertions, and tests/tracking-only scope. Task 6 is complete; Task 7 final verification, scope audit, current-dev mergeability, and whole-branch review are starting.
+Task 7 final verification completed on 2026-07-25. Compilation passed for all seven touched Python files. Black check passed for the four new evaluator/test files. Ruff passed on all touched files, with only the pre-documented existing Workflow-file ignores I001 and F401. Test gates passed: 275/275 Moderation unit tests; 97/97 endpoint and Guardian tests; 16/16 Chat moderation tests; 12/12 selected Workflow moderation tests with 45 deselected; and 1/1 STT redaction regression. Bandit scanned 3,282 production Moderation LOC with zero findings, zero skips, and zero nosec suppressions. git diff --check passed; the worktree was clean; production scope is exactly moderation_service.py plus policy_evaluator.py, with no endpoint or schema changes. Fresh origin/dev remained 0f3983788c413e0d17ffe7eabe8cff4a9f6ae723; git merge-tree --write-tree HEAD origin/dev succeeded with tree 75316096ac5bbeed623b9ffd15d3ee54e8c227e4. The final independent whole-branch review on gpt-5.6-sol xhigh reported no Critical, Important, or Minor findings and judged the branch ready to merge pending process gates. No broad repository-wide suite was run because the approved plan specifies focused structural-refactor gates; residual risks remain the documented existing borrowed-policy concurrent mutation exposure, deferred regex/ReDoS hardening, and selective rather than exhaustive real-caller coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the approved strict structural extraction of Moderation policy evaluation. A stateless explicit-input PolicyEvaluator and frozen lossless EvaluationLimits now own decision, scan, snippet, count, and redaction mechanics, while ModerationService remains the stateful compatibility facade and preserves its public/private signatures, dynamic dispatch, public redaction path, exception boundaries, and existing quirks. Added layered characterization, direct evaluator, mutation-sensitive delegation, and real Chat/Workflow caller coverage. Production changes are limited to the Moderation service and new evaluator; no endpoint, schema, or intentional behavior changes are included. All planned compile, format, lint, focused regression, Bandit, scope, current-dev mergeability, and independent review gates passed. Known behavior hardening remains explicitly deferred to follow-up work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
