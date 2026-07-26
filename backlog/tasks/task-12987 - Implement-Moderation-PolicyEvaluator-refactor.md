@@ -25,7 +25,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 05:00
+updated_date: 2026-07-26 05:13
 ---
 
 ## Description
@@ -59,6 +59,7 @@ Fresh Task 3 re-review is APPROVED with no Critical, Important, or Minor finding
 Task 4 implementation commit `f98963074b` added stateless evaluator redaction, count-returning redaction, full-text long-path match collection, sequential/action-agnostic literal substitution, current replacement-limit asymmetry, and nested reuse of the identical supplied limits object. RED: 21 expected missing-method failures with 38 passing. GREEN: 59/59 direct tests and 126/126 combined direct plus 67-case oracle passed. Compileall, Black, Ruff, production Bandit (zero findings), and diff checks passed. The temporary Task 3 missing-redaction assertion was replaced by real nested-redaction coverage. Independent Task 4 review is pending.
 Task 4 review found one Important path-coverage asymmetry and one Minor no-call gap. Test-only fix commit `b53bfb042b` now independently anchors exact text through both separately implemented redaction APIs for sequential/disabled, full-text long, short/long limit, and zero-length cases; it also proves requested redacted output never invokes redaction for warn/block decisions. Production is unchanged. Focused direct tests passed 61/61 and combined direct plus characterization tests passed 128/128. Black, Ruff, test-only Bandit, and diff checks passed. Fresh Task 4 re-review is pending.
 Fresh Task 4 re-review is APPROVED with no Critical, Important, or Minor findings. The reviewer verified exact text through both separately implemented redaction APIs, count assertions, long/full-text behavior, short/long limits, zero-length handling, warn/block no-call behavior, unchanged production after the test fix, and the identical-limits nested call. Acceptance criterion #2 is complete. Task 5 ModerationService delegation is starting.
+Task 5 implementation commit `8632887612` delegates ModerationService evaluation, snippets, scanning, and redaction while preserving the facade. RED: 4 expected delegation/snapshot failures with all 67 literal characterization cases already passing. GREEN: 74/74 delegation+oracle, 179/179 focused matrix, 262/262 Moderation tests, 97/97 endpoint/Guardian, 15/15 Chat, 10/10 selected Workflow, and 1/1 STT regression passed. Py-compile, Black, Ruff, production Bandit over 3,282 LOC (zero findings/errors), and diff/scope checks passed. The service owns one stateless evaluator, snapshots four raw limits under the RLock, uses separate decision/public-redaction snapshots, retains public dispatch and every private descriptor/signature, and removes duplicate bodies. Independent Task 5 review is pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
