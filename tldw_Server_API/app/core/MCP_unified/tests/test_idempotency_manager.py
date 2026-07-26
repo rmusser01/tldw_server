@@ -1296,6 +1296,43 @@ async def test_hostile_degraded_observer_cannot_replace_outcome_or_leak_name() -
     )
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_hostile_exception_attribute_hook_cannot_replace_degraded_outcome() -> None:
+    class _HostileObserverError(BaseException):
+        def __getattribute__(self, name: str) -> Any:
+            if name == "__class__":
+                raise RuntimeError("observer credential=TOP_SECRET")
+            return super().__getattribute__(name)
+
+    def _hostile_observer(_stage: str, _error_type: str) -> None:
+        raise _HostileObserverError()
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    original = {"value": object()}
+    try:
+        try:
+            result = await _local_manager(on_degraded=_hostile_observer).execute(
+                "hostile-observer-attribute-hook",
+                "args",
+                lambda: _async_payload(original),
+                policy=_policy(),
+            )
+        except RuntimeError:
+            raise AssertionError("hostile observer replaced the degraded outcome") from None
+    finally:
+        logger.remove(sink_id)
+
+    assert result.payload is original
+    assert result.persistence == "none"
+    assert all("TOP_SECRET" not in message for message in messages)
+    assert any(
+        "degraded observer failed error_type=_HostileObserverError" in message
+        for message in messages
+    )
+
+
 async def _async_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 

@@ -84,7 +84,7 @@ def _noop_degraded(_stage: str, _error_type: str) -> None:
 
 
 def _safe_error_type(exc: BaseException) -> str:
-    name = exc.__class__.__name__
+    name = type(exc).__name__
     if (
         1 <= len(name) <= 64
         and name.isascii()
