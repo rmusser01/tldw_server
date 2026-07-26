@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
+import shutil
+# The fixed git invocation below verifies the checked-in manifest without a shell.
+import subprocess  # nosec B404
 from hashlib import sha256
 from pathlib import Path
 
@@ -125,8 +127,11 @@ def test_release_0_1_42_has_completed_source_record() -> None:
         assert path not in entries
         entries[path] = digest
 
-    tracked_output = subprocess.run(
-        ["git", "ls-files", "-s", "-z", "--", *PROTECTED_PACKAGES],
+    git = shutil.which("git")
+    assert git is not None
+    # The executable and path arguments are fixed repository constants.
+    tracked_output = subprocess.run(  # nosec B603
+        [git, "ls-files", "-s", "-z", "--", *PROTECTED_PACKAGES],
         check=True,
         capture_output=True,
     ).stdout
