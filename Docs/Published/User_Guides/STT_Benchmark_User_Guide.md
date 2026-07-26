@@ -73,9 +73,10 @@ Run commands from the repository root.
    test.
 3. Install FFmpeg, including `ffprobe`.
 4. Obtain an authorized corpus and independently verified references.
-5. Preinstall every model artifact. Benchmark preflight rejects missing
-   dependencies, missing local artifacts, and plans that would download
-   weights.
+5. Preinstall every local model artifact. For a network target, provision and
+   verify the separately managed provider before running the benchmark.
+   Preflight rejects missing dependencies, missing local artifacts, and plans
+   that would download weights.
 
 Use the existing setup guides to prepare a local target:
 
@@ -115,6 +116,86 @@ Replace that value if your installed target differs. Add another
 `--target provider=model` only after the first target passes preflight.
 Targets run sequentially in CLI order so they do not compete for model cache
 or compute resources.
+
+## Optional: user-managed audio.cpp server
+
+The dedicated `audio-cpp` provider connects to a separately built, configured,
+and operated `audiocpp_server`. tldw_server does not download, build, start,
+restart, stop, or configure that process or its models. Follow the upstream
+[audio.cpp server README](https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md)
+to build and start the server with the exact ASR model you intend to test; this
+guide does not replace upstream build or server CLI instructions.
+
+Before configuring tldw_server, verify the server manually:
+
+- `GET /health` must succeed;
+- `GET /v1/models` must list the exact intended model ID with `task=asr`.
+
+Configure the provider under `[STT-Settings]` in
+`tldw_Server_API/Config_Files/config.txt`:
+
+```ini
+audio_cpp_enabled = true
+audio_cpp_base_url = http://127.0.0.1:8080
+audio_cpp_default_model = REPLACE_WITH_EXACT_ASR_MODEL_ID
+audio_cpp_timeout_seconds = 600
+```
+
+The corresponding environment overrides are
+`STT_AUDIO_CPP_ENABLED`, `STT_AUDIO_CPP_BASE_URL`,
+`STT_AUDIO_CPP_DEFAULT_MODEL`, and `STT_AUDIO_CPP_TIMEOUT_SECONDS`.
+Environment values take precedence over `config.txt`. The base URL must be an
+HTTP(S) origin; tldw_server derives `GET /health`, `GET /v1/models`, and
+`POST /v1/audio/transcriptions` from it.
+
+Ordinary OpenAI-compatible transcription requests use
+`audio-cpp:<model>`. The aliases `audiocpp:<model>` and
+`audio_cpp:<model>` are accepted. Exact selectors `audio-cpp`, `audiocpp`,
+and `audio_cpp` use the configured default model. That default applies only to
+ordinary requests: benchmark targets must always include the exact model:
+
+```bash
+export STT_AUDIO_CPP_TARGET='audio-cpp=REPLACE_WITH_EXACT_ASR_MODEL_ID'
+```
+
+After setting `STT_MANIFEST` and `STT_DATASET_ROOT` as described in the next
+section, run:
+
+```bash
+python Helper_Scripts/benchmarks/stt_bench.py run \
+  --manifest "$STT_MANIFEST" \
+  --dataset-root "$STT_DATASET_ROOT" \
+  --profile regression \
+  --mode neutral-v1 \
+  --target "$STT_AUDIO_CPP_TARGET" \
+  --allow-network-targets \
+  --run 'audio-cpp-regression-v1'
+```
+
+`audio-cpp=<model>` supports `neutral-v1`; it does not initially support
+`production-v1`. The network-consent flag is required even for a loopback
+server. Supplying it authorizes audio transmission as soon as preflight
+succeeds, so inspect the configured endpoint first.
+
+V1 accepts only a regular `.wav` file that Python can validate as an
+uncompressed PCM RIFF/WAVE container. Validation happens before network I/O.
+The provider does not convert other formats, follow redirects, retry failed
+transcriptions, fall back to another provider, or download models. It has no
+authentication setting or TLS-verification-disable knob; deployments that
+need authentication must use a suitable reverse proxy or the generic external
+provider integration.
+
+The benchmark records the requested model and bounded server metadata, but the
+model/artifact identity remains descriptive and unresolved. Therefore
+audio.cpp results are gate-ineligible and should be treated as descriptive
+measurements.
+
+Cold-first timing includes adapter discovery (`/health` and `/v1/models`), the
+transcription request, and any server-side lazy loading. tldw_server cannot
+reset the independently managed server: for a true server cold-start
+measurement, restart `audiocpp_server` immediately before the run and leave
+its lazy loading enabled. Warm calls reuse tldw_server's discovery cache and
+the server's already-loaded model/session.
 
 ## Prepare the corpus and manifest
 

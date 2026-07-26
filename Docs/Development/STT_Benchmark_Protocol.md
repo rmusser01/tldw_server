@@ -282,6 +282,45 @@ For a controlled network measurement, also set non-secret
 `--network-collection-profile` and `--network-client-location` labels. These
 labels never remove the network-dependent caveat.
 
+### audio.cpp target contract
+
+The dedicated audio.cpp benchmark target is `audio-cpp=<model>`, where
+`<model>` is the exact ASR model ID reported by the operator-managed server's
+`GET /v1/models` response. The matching entry must declare `task=asr`.
+Planning is network-free, but execution always requires
+`--allow-network-targets`, including for a loopback origin. V1 supports
+`neutral-v1`; it does not support `production-v1`.
+
+The operator builds, configures, starts, and, when needed, restarts
+`audiocpp_server` according to the upstream
+[server README](https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md).
+tldw_server does not manage the process or download its models. The operator
+must verify `GET /health` and `GET /v1/models` before a run.
+
+Configuration uses `audio_cpp_enabled`, `audio_cpp_base_url`,
+`audio_cpp_default_model`, and `audio_cpp_timeout_seconds` under
+`[STT-Settings]`. The corresponding environment overrides are
+`STT_AUDIO_CPP_ENABLED`, `STT_AUDIO_CPP_BASE_URL`,
+`STT_AUDIO_CPP_DEFAULT_MODEL`, and `STT_AUDIO_CPP_TIMEOUT_SECONDS`.
+Environment values take precedence. `audio_cpp_default_model` applies to
+ordinary API selection, not benchmark targets. The adapter derives
+`GET /health`, `GET /v1/models`, and `POST /v1/audio/transcriptions` from the
+configured HTTP(S) origin.
+
+Before any network request, the adapter accepts only a regular `.wav` file
+that Python can validate as an uncompressed PCM RIFF/WAVE container. It does
+not convert audio, follow redirects, retry failed transcriptions, fall back to
+another provider, download models, expose an authentication setting, or
+provide a TLS-verification-disable setting.
+
+The execution plan records an opaque endpoint ID and descriptive server/model
+metadata, but model/artifact identity remains unresolved. audio.cpp runs are
+therefore gate-ineligible. Cold-first adapter timing includes initial
+`/health` and `/v1/models` discovery, the transcription request, and any
+server-side lazy loading. A true server cold start requires the operator to
+restart `audiocpp_server` immediately before the run. Warm calls reuse the
+tldw_server discovery cache and the server's loaded model/session.
+
 ## Timing Protocol
 
 All elapsed measurements use `time.perf_counter_ns()`. Targets run sequentially
@@ -419,18 +458,21 @@ Each run is stored under `.benchmarks/stt/<run-id>/`:
 ```text
 .coordinator.lock
 run.json
-inflight.json
 results.jsonl
-summary.json
-summary.md
 ```
 
 `run.json` holds immutable run, environment, target, and execution-contract
-identity. `inflight.json` attributes a crash, timeout, or interrupt to one
-sample without storing transcript text. `results.jsonl` is append-only:
-terminal records are flushed and `fsync`-ed before another sample starts.
-A truncated final line after abrupt termination is reported and ignored during
-report repair; valid prior records are preserved.
+identity. `results.jsonl` is append-only: terminal records are flushed and
+`fsync`-ed before another sample starts. `inflight.json` exists only while a
+call is active or after an interruption requiring recovery; it attributes the
+interrupted sample without storing transcript text and is removed after
+successful persistence. A truncated final line after abrupt termination is
+reported and ignored during report repair; valid prior records are preserved.
+
+`run` does not create `summary.json` or `summary.md`.
+The `report` command creates or refreshes both projections. They are
+disposable views derived from the authoritative `run.json` and
+`results.jsonl`.
 
 Resume requires exact run and execution-contract equality. Changed manifest,
 selection, mode, retention, implementation fingerprint, dependency identity,

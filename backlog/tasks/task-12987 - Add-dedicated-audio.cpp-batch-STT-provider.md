@@ -4,7 +4,7 @@ title: Add dedicated audio.cpp batch STT provider
 status: In Progress
 assignee: []
 created_date: '2026-07-26 03:27'
-updated_date: '2026-07-26 13:38'
+updated_date: '2026-07-26 13:58'
 labels:
   - stt
   - benchmark
@@ -70,6 +70,8 @@ Task 5 independent quality review fix: verified case-insensitive provider routin
 Task 5 test-quality follow-up: made selector normalization cases explicit input/expected pairs. Added mixed-case suffix preservation coverage (AUDIO-CPP:Whisper-Small -> Whisper-Small) through normalize_audio_cpp_model and ordinary/no-plan AudioCppAdapter.transcribe_batch, plus uppercase exact AUDIO-CPP/AUDIOCPP/AUDIO_CPP selectors resolving to configured Default-Model through transcribe_batch. No production changes were needed. Verification: focused selector suite 24/24; exact three-file Task 5 regression 518/518; Ruff and git diff --check clean. Bandit not rerun because this follow-up changes tests and Backlog evidence only.
 
 Task 6 implementation pass: added ordinary POST /api/v1/audio/transcriptions coverage using a generated WAV, audio-cpp:whisper-small, the real SttProviderRegistry/AudioCppAdapter, and only the dedicated audio.cpp transcription boundary faked. The test proves canonical audio-cpp adapter selection, whisper-small normalization, response text preservation, canonical WAV delivery, and no fallback lookup. Added real-adapter benchmark preflight coverage proving missing network consent fails, explicit consent succeeds with unresolved/no-download routing, and persisted execution-contract JSON exposes only the opaque endpoint ID rather than audio_cpp_origin or its URL. Added audio.cpp worker classification/scoring coverage proving whitespace-only text becomes status=empty with an empty hypothesis and 100% deletion score rather than adapter_error. Initial targeted runs passed as characterization (API 1/1; benchmark selection 5/5), so no production dispatcher change was justified. Fresh verification: API audio_cpp 1/1; complete test_stt_bench plus integration 400/400; compileall and git diff --check clean. Ruff passes all non-I001 rules; changed scope has exactly the same 8 pre-existing I001 findings as HEAD and none in new blocks. Bandit skipped because Task 6 changes tests and Backlog evidence only.
+
+Task 7 documentation pass complete: added the user-managed audio.cpp operator workflow, protocol contract, compact benchmark README guidance, and CPU/GPU setup links; refreshed the three published mirrors. Corrected the protocol artifact lifecycle so run.json/results.jsonl are authoritative after run and report creates summary.json/summary.md. Audited the existing guide and retained its supported parakeet target plus the exact external=external:<provider> syntax. Verification: new documentation contract tests 5/5 passed; existing relevant documentation suites 64/64 passed; stt_bench.py run --help succeeded with --allow-network-targets; published mirrors are byte-identical; git diff --check clean. Mirror refresh produced only the three expected published-guide diffs. Bandit skipped because this task changes documentation and documentation tests only.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -33,6 +33,12 @@ Important current-repo realities:
 
 If your only goal is "make sound come out as fast as possible", the current `/setup` bundle path may still be less manual than the exact `supertonic` path in this guide. This guide is the better fit when you want a local-first stack that you understand and can control.
 
+Optional external-server path: if you already operate a separately managed
+audio.cpp `audiocpp_server`, see the
+[audio.cpp benchmark operator workflow](../User_Guides/STT_Benchmark_User_Guide.md#optional-user-managed-audiocpp-server).
+It is not bundled or managed by tldw_server and does not replace the local
+recommendations above.
+
 ## Before You Start
 
 You need:

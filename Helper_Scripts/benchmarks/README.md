@@ -55,6 +55,26 @@ terms before giving that flag, because successful preflight proceeds directly
 to execution. Local run artifacts are written under `.benchmarks/stt/`, ignored
 by Git, and may still contain sensitive transcripts.
 
+### User-managed audio.cpp
+
+The optional `audio-cpp` target connects to a separately managed
+`audiocpp_server`; tldw_server does not build, start, restart, configure, or
+download models for it. Follow the upstream
+[server README](https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md),
+then use the
+[audio.cpp operator workflow](../../Docs/User_Guides/STT_Benchmark_User_Guide.md#optional-user-managed-audiocpp-server)
+to configure the four `audio_cpp_*` settings and verify `/health` plus
+`/v1/models`.
+
+Run an explicit `audio-cpp=<model>` target in `neutral-v1` with
+`--allow-network-targets`, even when the configured server is loopback. Input
+must be a regular `.wav` file containing uncompressed PCM RIFF/WAVE audio.
+There is no conversion, retry, redirect, fallback, or automatic download.
+Model/artifact identity remains unresolved, so results are descriptive and
+gate-ineligible. For a true server cold start, restart `audiocpp_server`
+immediately before the run; warm calls reuse the adapter discovery cache and
+the server's loaded model/session.
+
 ## LLM Gateway
 
 Overview
