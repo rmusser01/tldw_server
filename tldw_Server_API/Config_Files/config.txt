@@ -1177,6 +1177,16 @@ buffered_chunk_duration = 20.0
 buffered_total_buffer = 25.0
 buffered_merge_algo = lcs
 
+# --- audio.cpp external ASR server (disabled by default) ---
+# Environment override: STT_AUDIO_CPP_ENABLED
+audio_cpp_enabled = false
+# Environment override: STT_AUDIO_CPP_BASE_URL
+audio_cpp_base_url = http://127.0.0.1:8080
+# Environment override: STT_AUDIO_CPP_DEFAULT_MODEL
+audio_cpp_default_model =
+# Environment override: STT_AUDIO_CPP_TIMEOUT_SECONDS
+audio_cpp_timeout_seconds = 600
+
 # --- Custom Vocabulary (optional) ---
 # Path to a file with domain terms (one per line) or JSON list.
 # Used to prime Whisper via initial_prompt.

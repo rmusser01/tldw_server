@@ -4402,6 +4402,10 @@ def load_and_log_configs(
         stt_custom_vocab_postprocess_enable = config_parser_object.get('STT-Settings', 'custom_vocab_postprocess_enable', fallback='True')
         stt_custom_vocab_prompt_template = config_parser_object.get('STT-Settings', 'custom_vocab_prompt_template', fallback='')
         stt_custom_vocab_case_sensitive = config_parser_object.get('STT-Settings', 'custom_vocab_case_sensitive', fallback='False')
+        audio_cpp_enabled = config_parser_object.get('STT-Settings', 'audio_cpp_enabled', fallback='false')
+        audio_cpp_base_url = config_parser_object.get('STT-Settings', 'audio_cpp_base_url', fallback='http://127.0.0.1:8080')
+        audio_cpp_default_model = config_parser_object.get('STT-Settings', 'audio_cpp_default_model', fallback='')
+        audio_cpp_timeout_seconds = config_parser_object.get('STT-Settings', 'audio_cpp_timeout_seconds', fallback='600')
 
         # Diarization Settings (optional; overrides DIARIZATION_CONFIG when present)
         def _get_bool(section: str, key: str, default: bool) -> bool:
@@ -5403,6 +5407,10 @@ def load_and_log_configs(
                 'custom_vocab_postprocess_enable': stt_custom_vocab_postprocess_enable,
                 'custom_vocab_prompt_template': stt_custom_vocab_prompt_template,
                 'custom_vocab_case_sensitive': stt_custom_vocab_case_sensitive,
+                'audio_cpp_enabled': audio_cpp_enabled,
+                'audio_cpp_base_url': audio_cpp_base_url,
+                'audio_cpp_default_model': audio_cpp_default_model,
+                'audio_cpp_timeout_seconds': audio_cpp_timeout_seconds,
                 **stt_vnext_items,
             },
             # Also provide with hyphen for backward compatibility
@@ -5458,6 +5466,10 @@ def load_and_log_configs(
                 'custom_vocab_postprocess_enable': stt_custom_vocab_postprocess_enable,
                 'custom_vocab_prompt_template': stt_custom_vocab_prompt_template,
                 'custom_vocab_case_sensitive': stt_custom_vocab_case_sensitive,
+                'audio_cpp_enabled': audio_cpp_enabled,
+                'audio_cpp_base_url': audio_cpp_base_url,
+                'audio_cpp_default_model': audio_cpp_default_model,
+                'audio_cpp_timeout_seconds': audio_cpp_timeout_seconds,
                 **stt_vnext_items,
             },
             'diarization': diarization_config,
