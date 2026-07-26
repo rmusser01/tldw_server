@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import time
 from typing import Any
@@ -11,7 +12,7 @@ from mcp_unified.tool_use_reporting.builders import classify_tool_use_exception
 from mcp_unified.tool_use_reporting.models import ToolUseStatus
 
 from ..auth.rate_limiter import RateLimitExceeded
-from ..execution_outcomes import ExpectedToolFailure
+from ..execution_outcomes import ExpectedToolFailure, ExpectedToolFailureReason
 from ..protocol_types import InvalidParamsException, PreparedToolCall, RequestContext
 from ..tool_observability import (
     attach_execution_eval_metadata,
@@ -101,7 +102,6 @@ class ToolExecutionRuntime:
     async def execute_prepared_tool_call(self, prepared: PreparedToolCall) -> dict[str, Any]:
         """Execute a previously prepared tool invocation."""
 
-        self.security.verify_prepared_tool_call_integrity(prepared)
         tool_name = prepared.tool_name
         tool_args = prepared.tool_args
         module = prepared.module
@@ -171,27 +171,60 @@ class ToolExecutionRuntime:
                     idempotency_replay=idempotency_replay,
                 )
                 await self.reporter.record_event(event)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # noqa: BLE001 - reporting must not affect tool calls.
                 logger.warning(
                     "Failed to build or record prepared tool-use event: {}",
                     exc.__class__.__name__,
                 )
 
-        async def _execute_tool_call() -> dict[str, Any]:
-            # Optional per-tool/category rate limits (ingestion vs read)
+        async def _admit_rate_limit() -> None:
+            category = policy.rate_limit_category
+            key_owner = (
+                f"user:{context.user_id}"
+                if context.user_id
+                else (f"client:{context.client_id}" if context.client_id else "anon")
+            )
+            rate_key = f"{key_owner}:tool:{tool_name}:cat:{category}"
             try:
-                category = policy.rate_limit_category
-                key_owner = f"user:{context.user_id}" if context.user_id else (f"client:{context.client_id}" if context.client_id else "anon")
-                rl_key = f"{key_owner}:tool:{tool_name}:cat:{category}"
-                await self.rate_limiter.check_rate_limit(rl_key, category=category)
+                await self.rate_limiter.check_rate_limit(rate_key, category=category)
             except RateLimitExceeded:
                 raise
+            except asyncio.CancelledError:
+                raise
             except self._noncritical_exceptions as exc:
-                logger.debug(
-                    "MCP tool rate limit check skipped after noncritical failure: {error_type}",
+                logger.warning(
+                    "MCP tool rate admission unavailable: module={module_id} "
+                    "tool={tool_name} error_type={error_type} fail_closed={fail_closed}",
+                    module_id=module_id or "unknown",
+                    tool_name=tool_name,
                     error_type=exc.__class__.__name__,
+                    fail_closed=policy.rate_limit_fail_closed,
                 )
+                if policy.rate_limit_fail_closed is True:
+                    raise ExpectedToolFailure(
+                        ExpectedToolFailureReason.RATE_LIMIT_UNAVAILABLE,
+                    ) from None
 
+        try:
+            await self.security.verify_prepared_tool_call(
+                prepared,
+                require_live_binding=True,
+            )
+            await _admit_rate_limit()
+        except RateLimitExceeded as exc:
+            status, reason_code = classify_tool_use_exception(exc)
+            await _record_prepared_event(
+                status=status,
+                execution_origin=self.reporter.execution_origin_for_failure(status),
+                reason_code=reason_code,
+            )
+            raise
+        except ExpectedToolFailure as failure:
+            return _expected_failure_payload(failure)
+
+        async def _execute_owner() -> dict[str, Any]:
             # Execute tool with circuit breaker (pass context through)
             t0 = time.time()
 
@@ -215,6 +248,10 @@ class ToolExecutionRuntime:
                         ):
                             execution_args = dict(tool_args)
                             execution_args["idempotencyKey"] = normalized_idempotency_key
+                        await self.security.verify_prepared_tool_call(
+                            prepared,
+                            require_live_binding=True,
+                        )
                         result = await module.execute_with_circuit_breaker(
                             module.execute_tool,
                             tool_name,
@@ -222,6 +259,8 @@ class ToolExecutionRuntime:
                             context,
                         )
                         span.set_attribute("mcp.status", "success")
+                    except asyncio.CancelledError:
+                        raise
                     except InvalidParamsException as _tool_e:
                         span.set_attribute("mcp.status", "failure")
                         span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
@@ -331,6 +370,8 @@ class ToolExecutionRuntime:
                 )
                 return response_payload
 
+            except asyncio.CancelledError:
+                raise
             except self._noncritical_exceptions as e:
                 duration_ms = max(0.0, (time.time() - t0) * 1000.0)
                 context.logger.error(  # noqa: TRY400 - structured audit log records sanitized type only.
@@ -385,7 +426,7 @@ class ToolExecutionRuntime:
                     raise InvalidParamsException("Idempotency key was already used with different arguments")
                 payload, from_cache = await self.idempotency.run(
                     idempotency_cache_key,
-                    _execute_tool_call,
+                    _execute_owner,
                     ttl=ttl,
                     max_size=max_size,
                     lock_ttl=policy.idempotency.lock_ttl_seconds,
@@ -402,6 +443,8 @@ class ToolExecutionRuntime:
                     )
             except ExpectedToolFailure as failure:
                 return _expected_failure_payload(failure)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 status, reason_code = classify_tool_use_exception(exc)
                 await _record_prepared_event(
@@ -423,9 +466,11 @@ class ToolExecutionRuntime:
             return payload
 
         try:
-            payload = await _execute_tool_call()
+            payload = await _execute_owner()
         except ExpectedToolFailure as failure:
             return _expected_failure_payload(failure)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             status, reason_code = classify_tool_use_exception(exc)
             await _record_prepared_event(

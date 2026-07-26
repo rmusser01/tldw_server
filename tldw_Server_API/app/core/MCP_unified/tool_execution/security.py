@@ -22,6 +22,7 @@ from mcp_unified.interfaces.path_scope import (
 from pydantic import BaseModel
 
 from ..auth.authnz_rbac import Action, Resource
+from ..execution_outcomes import ExpectedToolFailure, ExpectedToolFailureReason
 from ..modules.base import BaseModule
 from ..protocol_types import (
     ApprovalRequiredError,
@@ -537,9 +538,17 @@ class ToolExecutionSecurity:
             for candidate in tool_defs:
                 if isinstance(candidate, dict) and candidate.get("name") == tool_name:
                     return candidate
+        except asyncio.CancelledError:
+            raise
         except self._noncritical_exceptions:
             return None
         return None
+
+    @staticmethod
+    def normalize_tool_definition(tool_def: dict[str, Any]) -> dict[str, Any]:
+        """Normalize a resolved definition before preparation or live comparison."""
+
+        return ensure_tool_definition_eval_metadata(tool_def)
 
     def classify_write_tool_call(
         self,
@@ -831,6 +840,76 @@ class ToolExecutionSecurity:
         prepared_tag = self._require_fixed_sha256(prepared.integrity_tag, name="signature")
         if not hmac.compare_digest(prepared_tag, expected_tag):
             raise self._integrity_failure("signature mismatch")
+
+    async def verify_prepared_tool_call(
+        self,
+        prepared: PreparedToolCall,
+        *,
+        require_live_binding: bool,
+    ) -> None:
+        """Verify signed state and optionally require its current registry binding."""
+
+        self.verify_prepared_tool_call_integrity(prepared)
+        if not require_live_binding:
+            return
+
+        try:
+            module_registry = self._prepare_callback(
+                "module_registry",
+                lambda: self.module_registry,
+            )()
+            current_module = await module_registry.find_module_for_tool(prepared.tool_name)
+            if current_module is not prepared.module:
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                )
+
+            current_module_id = module_registry.get_module_id_for_tool(prepared.tool_name)
+            if current_module_id != prepared.module_id:
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                )
+
+            current_config = getattr(current_module, "config", None)
+            if getattr(current_config, "enabled", None) is False:
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                )
+
+            current_tool_def = await self.resolve_tool_definition(
+                current_module,
+                prepared.tool_name,
+            )
+            if not isinstance(current_tool_def, dict):
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                )
+            try:
+                current_tool_def = self.normalize_tool_definition(current_tool_def)
+            except asyncio.CancelledError:
+                raise
+            except self._noncritical_exceptions:
+                pass
+
+            current_snapshot = self.build_canonical_snapshot(
+                current_tool_def,
+                max_bytes=TOOL_DEFINITION_MAX_BYTES,
+            )
+            if not hmac.compare_digest(
+                current_snapshot.sha256,
+                prepared.tool_definition_snapshot.sha256,
+            ):
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
+                )
+        except asyncio.CancelledError:
+            raise
+        except ExpectedToolFailure:
+            raise
+        except Exception:  # noqa: BLE001 - live resolution must fail closed.
+            raise ExpectedToolFailure(
+                ExpectedToolFailureReason.STALE_PREPARED_CALL,
+            ) from None
 
     def fingerprint_request_context(self, context: RequestContext) -> str:
         payload = {
@@ -1815,7 +1894,9 @@ class ToolExecutionSecurity:
         tool_def = await self.resolve_tool_definition(module, tool_name)
         if isinstance(tool_def, dict):
             try:
-                tool_def = ensure_tool_definition_eval_metadata(tool_def)
+                tool_def = self.normalize_tool_definition(tool_def)
+            except asyncio.CancelledError:
+                raise
             except self._noncritical_exceptions as exc:
                 context.logger.opt(exception=exc).debug(
                     "Failed to attach eval metadata to resolved tool definition: module_id={module_id} "
@@ -1861,6 +1942,19 @@ class ToolExecutionSecurity:
         # Look up tool definition from module cache where possible
         if tool_def is None:
             tool_def = await self.resolve_tool_definition(module, tool_name)
+            if isinstance(tool_def, dict):
+                try:
+                    tool_def = self.normalize_tool_definition(tool_def)
+                except asyncio.CancelledError:
+                    raise
+                except self._noncritical_exceptions as exc:
+                    context.logger.opt(exception=exc).debug(
+                        "Failed to attach eval metadata to resolved tool definition: "
+                        "module_id={module_id} tool_name={tool_name} error_type={error_type}",
+                        module_id=module_id,
+                        tool_name=tool_name,
+                        error_type=exc.__class__.__name__,
+                    )
 
         idempotency_cache_key = None
         try:

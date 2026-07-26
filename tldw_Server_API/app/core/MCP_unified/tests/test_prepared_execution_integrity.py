@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -40,7 +41,10 @@ class _AllowAllRBAC:
 class _IntegrityWriteModule(BaseModule):
     def __init__(self, config: ModuleConfig) -> None:
         super().__init__(config)
-        self.tool_name = f"{config.name}.write"
+        self.tool_name = str(config.settings.get("tool_name") or f"{config.name}.write")
+        self.breaker_entry_count = 0
+        self.execute_count = 0
+        self.last_arguments: dict[str, Any] | None = None
         self.source_tool_def: dict[str, Any] = {
             "name": self.tool_name,
             "description": "Prepared execution integrity test tool",
@@ -91,7 +95,18 @@ class _IntegrityWriteModule(BaseModule):
         context: RequestContext | None = None,
     ) -> dict[str, Any]:
         del tool_name, context
+        self.execute_count += 1
+        self.last_arguments = dict(arguments)
         return {"value": arguments["value"]}
+
+    async def execute_with_circuit_breaker(
+        self,
+        operation: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.breaker_entry_count += 1
+        return await super().execute_with_circuit_breaker(operation, *args, **kwargs)
 
 
 def _runtime_config(**overrides: Any) -> SimpleNamespace:
@@ -118,7 +133,7 @@ async def _prepare_call(
     module_timeout: Any = 30,
     metadata: dict[str, Any] | None = None,
     scope_payload: dict[str, Any] | None = None,
-    idempotency_key: str = "idem-key",
+    idempotency_key: str | None = "idem-key",
 ) -> tuple[MCPProtocol, _IntegrityWriteModule, Any, dict[str, Any]]:
     module_id = f"prepared_integrity_{uuid4().hex}"
     registry = get_module_registry()
@@ -153,6 +168,99 @@ async def _prepare_call(
         idempotency_key=idempotency_key,
     )
     return protocol, module, prepared, mutable_scope
+
+
+class _RateLimiterProbe:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def check_rate_limit(self, *_args: Any, **_kwargs: Any) -> None:
+        self.calls += 1
+
+
+class _IdempotencyProbe:
+    def __init__(self) -> None:
+        self.bound_keys: list[str] = []
+        self.run_keys: list[str] = []
+
+    async def bind_arguments(
+        self,
+        key: str,
+        arguments_hash: str,
+        *,
+        ttl: int,
+        max_size: int,
+    ) -> bool:
+        del arguments_hash, ttl, max_size
+        self.bound_keys.append(key)
+        return True
+
+    async def run(
+        self,
+        key: str,
+        execute: Any,
+        *,
+        ttl: int,
+        max_size: int,
+        lock_ttl: int,
+    ) -> tuple[Any, bool]:
+        del ttl, max_size, lock_ttl
+        self.run_keys.append(key)
+        return await execute(), False
+
+
+class _BlockingRateLimiter(_RateLimiterProbe):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def check_rate_limit(self, *_args: Any, **_kwargs: Any) -> None:
+        self.calls += 1
+        self.entered.set()
+        await self.release.wait()
+
+
+class _BlockingIdempotency(_IdempotencyProbe):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def run(
+        self,
+        key: str,
+        execute: Any,
+        *,
+        ttl: int,
+        max_size: int,
+        lock_ttl: int,
+    ) -> tuple[Any, bool]:
+        del ttl, max_size, lock_ttl
+        self.run_keys.append(key)
+        self.entered.set()
+        await self.release.wait()
+        return await execute(), False
+
+
+def _assert_stale_prepared_call(payload: dict[str, Any]) -> None:
+    execution_eval = payload["eval"]
+    assert payload == {
+        "content": [
+            {
+                "type": "json",
+                "json": {
+                    "status": "failed",
+                    "reason_code": "stale_prepared_call",
+                    "message": "The prepared tool call is no longer valid.",
+                },
+            }
+        ],
+        "isError": True,
+        "module": payload["module"],
+        "tool": payload["tool"],
+        "eval": execution_eval,
+    }
 
 
 def test_canonical_json_is_sorted_compact_unicode_preserving_and_stable() -> None:
@@ -480,6 +588,23 @@ async def test_prepared_integrity_rejects_authoritative_state_tampering(
         protocol._verify_prepared_tool_call_integrity(candidate)
 
 
+@pytest.mark.asyncio
+async def test_async_prepared_verifier_always_checks_integrity_without_live_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, _, prepared, _ = await _prepare_call(monkeypatch)
+    forged = replace(
+        prepared,
+        policy=replace(prepared.policy, rate_limit_category="read"),
+    )
+
+    with pytest.raises(InvalidParamsException, match="Prepared tool call integrity check failed"):
+        await protocol._tool_execution_security.verify_prepared_tool_call(
+            forged,
+            require_live_binding=False,
+        )
+
+
 def test_metadata_org_and_team_ids_do_not_define_authenticated_scope_domain() -> None:
     protocol = MCPProtocol()
     first = RequestContext(
@@ -602,3 +727,140 @@ def test_explicit_scopes_use_distinct_fixed_format_digests_without_raw_ids() -> 
     )
     assert "101001" not in org_key
     assert "202002" not in team_key
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        "unregistered",
+        "disabled",
+        "replacement_same_id",
+        "remapped",
+        "module_id_drift",
+        "renamed",
+        "definition_changed",
+        "resolution_failure",
+    ],
+)
+@pytest.mark.asyncio
+async def test_first_live_check_blocks_stale_registry_bindings_before_admission(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(monkeypatch)
+    registry = get_module_registry()
+
+    if drift == "unregistered":
+        assert prepared.module_id is not None
+        await registry.unregister_module(prepared.module_id)
+    elif drift == "disabled":
+        module.config.enabled = False
+    elif drift == "replacement_same_id":
+        assert prepared.module_id is not None
+        await registry.unregister_module(prepared.module_id)
+        await registry.register_module(
+            prepared.module_id,
+            _IntegrityWriteModule,
+            ModuleConfig(name=prepared.module_id),
+        )
+    elif drift == "remapped":
+        remapped_id = f"prepared_remap_{uuid4().hex}"
+        await registry.register_module(
+            remapped_id,
+            _IntegrityWriteModule,
+            ModuleConfig(
+                name=remapped_id,
+                settings={"tool_name": prepared.tool_name},
+            ),
+        )
+    elif drift == "module_id_drift":
+        class _ModuleIdDriftRegistry:
+            async def find_module_for_tool(self, tool_name: str) -> BaseModule | None:
+                return module if tool_name == prepared.tool_name else None
+
+            def get_module_id_for_tool(self, tool_name: str) -> str | None:
+                return "different-module-id" if tool_name == prepared.tool_name else None
+
+        protocol.module_registry = _ModuleIdDriftRegistry()
+    elif drift == "renamed":
+        module.source_tool_def["name"] = f"{prepared.tool_name}.renamed"
+        module.invalidate_capability_caches()
+    elif drift == "definition_changed":
+        module.source_tool_def["description"] = "mutated after preparation"
+        module.invalidate_capability_caches()
+    else:
+        class _RegistryResolutionError(Exception):
+            pass
+
+        class _FailingRegistry:
+            async def find_module_for_tool(self, _tool_name: str) -> BaseModule | None:
+                raise _RegistryResolutionError("private registry failure detail")
+
+            def get_module_id_for_tool(self, _tool_name: str) -> str | None:
+                raise AssertionError("module id lookup must not follow failed resolution")
+
+        protocol.module_registry = _FailingRegistry()
+
+    rate_limiter = _RateLimiterProbe()
+    idempotency = _IdempotencyProbe()
+    protocol.rate_limiter = rate_limiter
+    protocol._idempotency = idempotency
+
+    payload = await protocol.execute_prepared_tool_call(prepared)
+
+    _assert_stale_prepared_call(payload)
+    assert "private registry failure detail" not in json.dumps(payload)
+    assert rate_limiter.calls == 0
+    assert idempotency.bound_keys == []
+    assert idempotency.run_keys == []
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+
+
+@pytest.mark.asyncio
+async def test_second_live_check_blocks_definition_mutation_during_rate_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(
+        monkeypatch,
+        idempotency_key=None,
+    )
+    rate_limiter = _BlockingRateLimiter()
+    protocol.rate_limiter = rate_limiter
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(rate_limiter.entered.wait(), timeout=2)
+    module.source_tool_def["description"] = "changed during rate admission"
+    module.invalidate_capability_caches()
+    rate_limiter.release.set()
+    payload = await asyncio.wait_for(execution, timeout=2)
+
+    _assert_stale_prepared_call(payload)
+    assert rate_limiter.calls == 1
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+
+
+@pytest.mark.asyncio
+async def test_second_live_check_blocks_definition_mutation_during_idempotency_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(monkeypatch)
+    rate_limiter = _RateLimiterProbe()
+    idempotency = _BlockingIdempotency()
+    protocol.rate_limiter = rate_limiter
+    protocol._idempotency = idempotency
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(idempotency.entered.wait(), timeout=2)
+    module.source_tool_def["description"] = "changed during idempotency contention"
+    module.invalidate_capability_caches()
+    idempotency.release.set()
+    payload = await asyncio.wait_for(execution, timeout=2)
+
+    _assert_stale_prepared_call(payload)
+    assert rate_limiter.calls == 1
+    assert len(idempotency.bound_keys) == 1
+    assert idempotency.run_keys == idempotency.bound_keys
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
