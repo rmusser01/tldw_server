@@ -1330,7 +1330,7 @@ Verification: the final focused matrix passed 65 tests with required real Postgr
 
 Both applied operations return the post-transition row required by `LifecycleResult`. PostgreSQL must use the facade-provided cursor factory so dict rows, `SET ROLE`, and tenant RLS GUCs remain active.
 
-- [ ] **Step 1: Write direct operation tests, then implement SQLite**
+- [x] **Step 1: Write direct operation tests, then implement SQLite**
 
 In the same task, first run red direct tests for missing job, wrong status, stale enforced worker/lease identity, non-enforced compatibility, no-shorten renewal, progress updates, release field clearing/preservation, returned rows, and counter movement. Then:
 
@@ -1341,10 +1341,12 @@ In the same task, first run red direct tests for missing job, wrong status, stal
 - add a deterministic competing-writer test for that locking boundary;
 - clear `available_at`, `leased_until`, `worker_id`, `lease_id`, `acquired_at`, `started_at`, and `completion_token`, while preserving unrelated job facts;
 - keep counter updates in the durable transaction and preserve rollback of both release and observers when the counter write fails;
-- preserve current timestamp semantics: injected `now` drives renewal expiry, renewal does not add an `updated_at` write, and release keeps SQLite `DATETIME('now')` for `updated_at`;
+- preserve current timestamp semantics: injected `now` drives renewal expiry, renewal SQL does not add an explicit `updated_at` assignment (the existing SQLite table trigger still updates it exactly as before), and release keeps SQLite `DATETIME('now')` for `updated_at`;
 - return `LifecycleResult` without manager callbacks.
 
 Route the SQLite facade only after direct tests pass. The facade maps no-transition to `False` and retains validation, compatibility behavior, and post-commit effects.
+
+SQLite execution evidence: direct tests first failed at collection because `release_job` was absent, then 25 direct operation tests passed. Facade/observer tests produced eight expected failures before routing and passed 16 tests afterward. Independent verification passed the 93-test SQLite focused matrix plus all five selected SQLite release regression cases. Ruff, compileall, and `git diff --check` pass; Bandit reports zero findings/errors and only the manager's 81 pre-existing skipped suppressions. Specification review's concern that renewal still changes `updated_at` was rejected after confirming the legacy inline update triggered the same table-level timestamp trigger; the plan now states the intended no-new-explicit-assignment contract. Final quality review approved with no actionable findings.
 
 - [ ] **Step 2: Write direct operation tests, then implement PostgreSQL**
 
