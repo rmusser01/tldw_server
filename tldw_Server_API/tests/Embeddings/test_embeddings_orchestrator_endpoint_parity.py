@@ -97,10 +97,18 @@ class FakePrepared:
 
 
 class FakeOrchestrator:
-    def __init__(self, *, result=None, prepare_error=None, execute_error=None) -> None:
+    def __init__(
+        self,
+        *,
+        result=None,
+        prepare_error=None,
+        execute_error=None,
+        prepared_total_tokens: int = 3,
+    ) -> None:
         self.result = result
         self.prepare_error = prepare_error
         self.execute_error = execute_error
+        self.prepared_total_tokens = prepared_total_tokens
         self.prepare_calls = []
         self.execute_calls = []
 
@@ -108,7 +116,7 @@ class FakeOrchestrator:
         self.prepare_calls.append((raw_input, context))
         if self.prepare_error is not None:
             raise self.prepare_error
-        return FakePrepared(total_tokens=3)
+        return FakePrepared(total_tokens=self.prepared_total_tokens)
 
     async def execute(self, prepared):
         self.execute_calls.append(prepared)
@@ -184,6 +192,18 @@ class _NoopMetric:
 
     def observe(self, *_args, **_kwargs):
         return None
+
+
+class _RecordingGauge(_NoopMetric):
+    def __init__(self) -> None:
+        self.inc_count = 0
+        self.dec_count = 0
+
+    def inc(self, *_args, **_kwargs):
+        self.inc_count += 1
+
+    def dec(self, *_args, **_kwargs):
+        self.dec_count += 1
 
 
 class _RecordingCounter:
@@ -799,12 +819,19 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
     )
     runner_calls: list[tuple[str, object]] = []
     rg_governor = SimpleNamespace(commit=AsyncMock())
+    active_requests = _RecordingGauge()
+    endpoint_executor = SimpleNamespace(touch_resolved_credentials=AsyncMock())
+    monkeypatch.setattr(mod, "active_embedding_requests", active_requests)
+    monkeypatch.setattr(
+        mod,
+        "_EndpointEmbeddingExecutor",
+        lambda **_kwargs: endpoint_executor,
+    )
 
     monkeypatch.setattr(
         mod,
         "_build_embedding_request_orchestrator",
         lambda *_args, **_kwargs: fake_orchestrator,
-        raising=False,
     )
 
     async def fake_reserve_embedding_rg_tokens(*, request, current_user, token_total):
@@ -816,7 +843,6 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
         mod,
         "_reserve_embedding_rg_tokens",
         fake_reserve_embedding_rg_tokens,
-        raising=False,
     )
 
     class RunnerProbe:
@@ -835,12 +861,12 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
             runner_calls.append(("executed", result.provider))
             return result
 
-    monkeypatch.setattr(mod, "EmbeddingInlineWorkflowRunner", RunnerProbe, raising=False)
+    monkeypatch.setattr(mod, "EmbeddingInlineWorkflowRunner", RunnerProbe)
 
     response = client.post(
         "/api/v1/embeddings",
-        headers={"x-provider": "huggingface"},
-        json={"model": "sentence-transformers/all-MiniLM-L6-v2", "input": "workflow facade"},
+        headers={"x-provider": "openai"},
+        json={"model": "text-embedding-3-small", "input": "workflow facade"},
     )
 
     assert response.status_code == status.HTTP_200_OK
@@ -856,6 +882,12 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
         actuals={"tokens": 3},
         op_id="rg-op",
     )
+    endpoint_executor.touch_resolved_credentials.assert_awaited_once_with(
+        "huggingface",
+        "sentence-transformers/all-MiniLM-L6-v2",
+    )
+    assert active_requests.inc_count == 1
+    assert active_requests.dec_count == 1
 
 
 def test_orchestrator_path_commits_reserved_units_after_execute_failure(client, monkeypatch):
@@ -871,11 +903,12 @@ def test_orchestrator_path_commits_reserved_units_after_execute_failure(client, 
         )
     )
     rg_governor = SimpleNamespace(commit=AsyncMock())
+    active_requests = _RecordingGauge()
+    monkeypatch.setattr(mod, "active_embedding_requests", active_requests)
     monkeypatch.setattr(
         mod,
         "_build_embedding_request_orchestrator",
         lambda *_args, **_kwargs: fake_orchestrator,
-        raising=False,
     )
 
     async def fake_reserve_embedding_rg_tokens(*, request, current_user, token_total):
@@ -886,7 +919,6 @@ def test_orchestrator_path_commits_reserved_units_after_execute_failure(client, 
         mod,
         "_reserve_embedding_rg_tokens",
         fake_reserve_embedding_rg_tokens,
-        raising=False,
     )
 
     response = client.post(
@@ -901,6 +933,176 @@ def test_orchestrator_path_commits_reserved_units_after_execute_failure(client, 
         actuals={"tokens": 3},
         op_id="rg-op",
     )
+    assert active_requests.inc_count == 1
+    assert active_requests.dec_count == 1
+
+
+def test_orchestrator_zero_token_success_commits_reserved_unit(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import (
+        embeddings_v5_production_enhanced as mod,
+    )
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    fake_orchestrator = FakeOrchestrator(
+        prepared_total_tokens=0,
+        result=EmbeddingExecutionResult(
+            vectors=[[0.25, 0.75]],
+            provider="huggingface",
+            model="sentence-transformers/all-MiniLM-L6-v2",
+            prompt_tokens=0,
+            total_tokens=0,
+            cache_hits=0,
+            cache_misses=1,
+        ),
+    )
+    active_requests = _RecordingGauge()
+    endpoint_executor = SimpleNamespace(touch_resolved_credentials=AsyncMock())
+    governor = SimpleNamespace(commit=AsyncMock())
+    monkeypatch.setattr(mod, "active_embedding_requests", active_requests)
+    monkeypatch.setattr(
+        mod,
+        "_EndpointEmbeddingExecutor",
+        lambda **_kwargs: endpoint_executor,
+    )
+    monkeypatch.setattr(
+        mod,
+        "_build_embedding_request_orchestrator",
+        lambda *_args, **_kwargs: fake_orchestrator,
+    )
+
+    async def reserve(*, request, current_user, token_total):
+        del request, current_user
+        assert token_total == 1
+        return governor, "zero-handle", "zero-op", 1
+
+    monkeypatch.setattr(mod, "_reserve_embedding_rg_tokens", reserve)
+
+    response = client.post(
+        "/api/v1/embeddings",
+        headers={"x-provider": "openai"},
+        json={
+            "model": "text-embedding-3-small",
+            "input": "zero accounting",
+        },
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    governor.commit.assert_awaited_once_with(
+        "zero-handle",
+        actuals={"tokens": 1},
+        op_id="zero-op",
+    )
+    assert active_requests.inc_count == 1
+    assert active_requests.dec_count == 1
+    endpoint_executor.touch_resolved_credentials.assert_awaited_once_with(
+        "huggingface",
+        "sentence-transformers/all-MiniLM-L6-v2",
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_cancellation_commits_reserved_units_and_decrements_active(
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints import (
+        embeddings_v5_production_enhanced as mod,
+    )
+
+    active_requests = _RecordingGauge()
+    endpoint_executor = SimpleNamespace(touch_resolved_credentials=AsyncMock())
+    success_metric = _RecordingCounter()
+    governor = SimpleNamespace(commit=AsyncMock())
+    execute_entered = asyncio.Event()
+    execute_release = asyncio.Event()
+    reservation_entered = asyncio.Event()
+
+    class BlockingOrchestrator(FakeOrchestrator):
+        async def execute(self, prepared):
+            self.execute_calls.append(prepared)
+            execute_entered.set()
+            await execute_release.wait()
+            return self.result or EmbeddingExecutionResult(
+                vectors=[[0.25, 0.75]],
+                provider="huggingface",
+                model="sentence-transformers/all-MiniLM-L6-v2",
+                prompt_tokens=3,
+                total_tokens=3,
+                cache_hits=0,
+                cache_misses=1,
+            )
+
+    fake_orchestrator = BlockingOrchestrator(prepared_total_tokens=3)
+
+    async def no_backpressure(*_args, **_kwargs):
+        return None
+
+    async def reserve(*, request, current_user, token_total):
+        del request, current_user
+        assert token_total == 3
+        reservation_entered.set()
+        return governor, "cancel-handle", "cancel-op", token_total
+
+    request = SimpleNamespace(
+        state=SimpleNamespace(),
+        headers={},
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/embeddings"),
+    )
+    monkeypatch.setattr(mod, "EMBEDDINGS_AVAILABLE", True)
+    monkeypatch.setattr(mod, "active_embedding_requests", active_requests)
+    monkeypatch.setattr(mod, "embedding_requests_total", success_metric)
+    monkeypatch.setattr(mod, "embedding_request_duration", _NoopMetric())
+    monkeypatch.setattr(mod, "_check_backpressure_and_quotas", no_backpressure)
+    monkeypatch.setattr(mod, "_reserve_embedding_rg_tokens", reserve)
+    monkeypatch.setattr(
+        mod,
+        "_EndpointEmbeddingExecutor",
+        lambda **_kwargs: endpoint_executor,
+    )
+    monkeypatch.setattr(
+        mod,
+        "_build_embedding_request_orchestrator",
+        lambda *_args, **_kwargs: fake_orchestrator,
+    )
+
+    task = asyncio.create_task(
+        mod._create_embedding_with_orchestrator(
+            request=request,
+            embedding_request=mod.CreateEmbeddingRequest(
+                input="cancel endpoint",
+                model="sentence-transformers/all-MiniLM-L6-v2",
+            ),
+            current_user=_user(),
+            background_tasks=SimpleNamespace(),
+            x_provider="huggingface",
+            response=SimpleNamespace(headers={}),
+        )
+    )
+    try:
+        await asyncio.wait_for(execute_entered.wait(), timeout=1)
+        assert reservation_entered.is_set()
+        task.cancel("endpoint cancellation")
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        execute_release.set()
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    governor.commit.assert_awaited_once_with(
+        "cancel-handle",
+        actuals={"tokens": 3},
+        op_id="cancel-op",
+    )
+    assert active_requests.inc_count == 1
+    assert active_requests.dec_count == 1
+    assert len(fake_orchestrator.execute_calls) == 1
+    endpoint_executor.touch_resolved_credentials.assert_not_awaited()
+    assert success_metric.inc_calls == []
 
 
 def test_orchestrator_path_does_not_execute_or_commit_after_rg_denial(client, monkeypatch):
