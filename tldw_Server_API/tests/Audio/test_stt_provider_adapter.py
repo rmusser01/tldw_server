@@ -2610,7 +2610,17 @@ def test_audio_cpp_planned_execution_uses_frozen_config_and_exact_metadata(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("selector", ("audio-cpp", "audiocpp", "audio_cpp"))
+@pytest.mark.parametrize(
+    "selector",
+    (
+        "audio-cpp",
+        "audiocpp",
+        "audio_cpp",
+        "AUDIO-CPP",
+        "AUDIOCPP",
+        "AUDIO_CPP",
+    ),
+)
 def test_audio_cpp_unplanned_batch_normalizes_ordinary_selector(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

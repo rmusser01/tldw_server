@@ -382,13 +382,14 @@ def normalize_audio_cpp_model(
         selected = model
     else:
         selected = model
-        if selected in _SELECTORS:
+        normalized_selector = selected.lower()
+        if normalized_selector in _SELECTORS:
             selected = default_model
         else:
             for selector in _SELECTORS:
                 prefix = f"{selector}:"
-                if selected.startswith(prefix):
-                    selected = selected.removeprefix(prefix)
+                if normalized_selector.startswith(prefix):
+                    selected = selected[len(prefix) :]
                     break
     if selected is None:
         raise STTExecutionUnsupportedError("audio.cpp model is required")
