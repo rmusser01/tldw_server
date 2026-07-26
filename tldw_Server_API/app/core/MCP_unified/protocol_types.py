@@ -2,15 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
 from .modules.base import BaseModule
-
-if TYPE_CHECKING:
-    from .tool_execution.canonical import JsonValue
-    from .tool_execution.models import CanonicalJsonSnapshot, PreparedExecutionPolicy
 
 
 class InvalidParamsException(Exception):
@@ -231,3 +227,14 @@ class PreparedToolCall:
         """Return the immutable prepared effect for compatibility observers."""
 
         return self.policy.effect == "write"
+
+
+# Resolve public postponed annotations only after the shared protocol types are
+# initialized; tool_execution package setup imports RequestContext back here.
+from .tool_execution.canonical import JsonValue as JsonValue  # noqa: E402
+from .tool_execution.models import (  # noqa: E402
+    CanonicalJsonSnapshot as CanonicalJsonSnapshot,
+)
+from .tool_execution.models import (  # noqa: E402
+    PreparedExecutionPolicy as PreparedExecutionPolicy,
+)

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_args, get_origin, get_type_hints
 from uuid import uuid4
 
 import pytest
@@ -25,7 +25,10 @@ from tldw_Server_API.app.core.MCP_unified.tool_execution.canonical import (
     canonical_json_bytes,
     decode_canonical_json_object,
 )
-from tldw_Server_API.app.core.MCP_unified.tool_execution.models import CanonicalJsonSnapshot
+from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
+    CanonicalJsonSnapshot,
+    PreparedExecutionPolicy,
+)
 
 
 class _AllowAllRBAC:
@@ -253,6 +256,22 @@ def test_authenticated_execution_scope_accepts_positive_non_bool_ids() -> None:
 
     assert scope.active_org_id == 11
     assert scope.active_team_id == 22
+
+
+def test_public_prepared_execution_annotations_resolve_at_runtime() -> None:
+    prepared_hints = get_type_hints(protocol_module.PreparedToolCall)
+    scope_hints = get_type_hints(protocol_module.AuthenticatedExecutionScope)
+    canonical_object_hints = get_type_hints(
+        protocol_module.AuthenticatedExecutionScope.canonical_object,
+    )
+
+    assert prepared_hints["policy"] is PreparedExecutionPolicy
+    assert prepared_hints["tool_definition_snapshot"] is CanonicalJsonSnapshot
+    assert prepared_hints["scope_reporting_snapshot"] is CanonicalJsonSnapshot
+    assert scope_hints == {"active_org_id": int | None, "active_team_id": int | None}
+    canonical_return = canonical_object_hints["return"]
+    assert get_origin(canonical_return) is dict
+    assert get_args(canonical_return)[0] is str
 
 
 def test_fingerprinting_rejects_forged_all_none_authenticated_scope() -> None:
