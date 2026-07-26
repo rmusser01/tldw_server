@@ -25,6 +25,7 @@ from ..auth.authnz_rbac import Action, Resource
 from ..modules.base import BaseModule
 from ..protocol_types import (
     ApprovalRequiredError,
+    AuthenticatedExecutionScope,
     GovernanceDeniedError,
     InvalidParamsException,
     PreparedToolCall,
@@ -32,13 +33,45 @@ from ..protocol_types import (
     _has_trusted_compat_claims,
 )
 from ..tool_observability import ensure_tool_definition_eval_metadata
+from .canonical import (
+    ARGUMENTS_MAX_BYTES,
+    PREPARED_HMAC_PAYLOAD_MAX_BYTES,
+    SCOPE_REPORTING_MAX_BYTES,
+    TOOL_DEFINITION_MAX_BYTES,
+    JsonValue,
+    canonical_json_bytes,
+    decode_canonical_json_object_or_none,
+)
 from .dependencies import ToolExecutionDependencies
+from .models import (
+    CanonicalJsonSnapshot,
+    IdempotencyExecutionPolicy,
+    PreparedExecutionPolicy,
+)
 
 _TOOL_AUTHORIZATION_ALIASES = {
     "bash": "run",
     "shell": "run",
 }
 _TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
+_IDEMPOTENCY_TTL_HARD_MAX_SECONDS = 604_800
+_IDEMPOTENCY_LOCK_HARD_MAX_SECONDS = 604_800
+_IDEMPOTENCY_MAX_ENTRIES_HARD_MAX = 100_000
+_RATE_LIMIT_CATEGORIES = frozenset(
+    {
+        "ingestion",
+        "management",
+        "read",
+        "utility",
+        "browser",
+        "code",
+        "filesystem",
+        "rag_generation",
+        "shell",
+        "search",
+        "tool_discovery",
+    }
+)
 
 _AsyncBoolCallback = Callable[..., bool | Awaitable[bool]]
 _SyncBoolCallback = Callable[..., bool]
@@ -470,7 +503,7 @@ class ToolExecutionSecurity:
             for pattern in allowed_tools
         )
 
-    def hash_arguments(self, arguments: dict[str, Any]) -> str | None:
+    def hash_arguments(self, arguments: Any) -> str | None:
         return self.hash_arguments_with_exceptions(
             arguments,
             noncritical_exceptions=self._noncritical_exceptions,
@@ -478,12 +511,12 @@ class ToolExecutionSecurity:
 
     @staticmethod
     def hash_arguments_with_exceptions(
-        arguments: dict[str, Any],
+        arguments: Any,
         *,
         noncritical_exceptions: tuple[type[BaseException], ...],
     ) -> str | None:
         try:
-            payload = json.dumps(arguments or {}, sort_keys=True, default=str).encode("utf-8")
+            payload = canonical_json_bytes(arguments, max_bytes=ARGUMENTS_MAX_BYTES)
             return hashlib.sha256(payload).hexdigest()
         except noncritical_exceptions:
             return None
@@ -563,80 +596,241 @@ class ToolExecutionSecurity:
             raise InvalidParamsException(f"Invalid arguments: {str(san_err)}") from san_err
 
     @staticmethod
+    def normalized_idempotency_key_digest(normalized_key: str | None) -> str:
+        """Return the full normalized-key digest, or empty for no key."""
+
+        if normalized_key is None:
+            return ""
+        if type(normalized_key) is not str:
+            raise TypeError("normalized idempotency key must be a string or None")
+        return hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def build_canonical_snapshot(
+        value: JsonValue,
+        *,
+        max_bytes: int,
+    ) -> CanonicalJsonSnapshot:
+        """Create immutable canonical snapshot bytes and digest."""
+
+        encoded = canonical_json_bytes(value, max_bytes=max_bytes)
+        return CanonicalJsonSnapshot(
+            encoded=encoded,
+            sha256=hashlib.sha256(encoded).hexdigest(),
+        )
+
+    @staticmethod
     def prepared_tool_call_payload(
         *,
         tool_name: str,
         module_id: str | None,
-        is_write: bool | None,
+        policy: PreparedExecutionPolicy,
         idempotency_cache_key: str | None,
+        normalized_idempotency_key_digest: str,
         arguments_hash: str | None,
         context_fingerprint: str,
+        idempotency_scope_fingerprint: str,
+        tool_definition_sha256: str,
+        scope_reporting_sha256: str,
     ) -> bytes:
         payload = {
-            "tool_name": str(tool_name),
-            "module_id": str(module_id or ""),
-            "is_write": bool(is_write),
-            "idempotency_cache_key": str(idempotency_cache_key or ""),
-            "arguments_hash": str(arguments_hash or ""),
-            "context_fingerprint": str(context_fingerprint or ""),
+            "version": 1,
+            "tool_name": tool_name,
+            "module_id": module_id or "",
+            "policy": asdict(policy),
+            "idempotency_cache_key": idempotency_cache_key or "",
+            "normalized_idempotency_key_digest": normalized_idempotency_key_digest,
+            "arguments_hash": arguments_hash or "",
+            "context_fingerprint": context_fingerprint,
+            "idempotency_scope_fingerprint": idempotency_scope_fingerprint,
+            "tool_definition_sha256": tool_definition_sha256,
+            "scope_reporting_sha256": scope_reporting_sha256,
         }
-        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return canonical_json_bytes(payload, max_bytes=PREPARED_HMAC_PAYLOAD_MAX_BYTES)
 
     def build_prepared_tool_call_integrity_tag(
         self,
         *,
         tool_name: str,
         module_id: str | None,
-        is_write: bool | None,
+        policy: PreparedExecutionPolicy,
         idempotency_cache_key: str | None,
+        normalized_idempotency_key_digest: str,
         arguments_hash: str | None,
         context_fingerprint: str,
+        idempotency_scope_fingerprint: str,
+        tool_definition_sha256: str,
+        scope_reporting_sha256: str,
     ) -> str:
         payload = self.prepared_tool_call_payload(
             tool_name=tool_name,
             module_id=module_id,
-            is_write=is_write,
+            policy=policy,
             idempotency_cache_key=idempotency_cache_key,
+            normalized_idempotency_key_digest=normalized_idempotency_key_digest,
             arguments_hash=arguments_hash,
             context_fingerprint=context_fingerprint,
+            idempotency_scope_fingerprint=idempotency_scope_fingerprint,
+            tool_definition_sha256=tool_definition_sha256,
+            scope_reporting_sha256=scope_reporting_sha256,
         )
         return hmac.new(self._prepared_call_secret, payload, digestmod="sha256").hexdigest()
+
+    @staticmethod
+    def _integrity_failure(reason: str) -> InvalidParamsException:
+        return InvalidParamsException(f"Prepared tool call integrity check failed: {reason}")
+
+    @classmethod
+    def _require_fixed_sha256(cls, value: Any, *, name: str) -> str:
+        if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise cls._integrity_failure(f"invalid {name}")
+        return value
+
+    @classmethod
+    def _verify_snapshot(
+        cls,
+        snapshot: CanonicalJsonSnapshot,
+        *,
+        max_bytes: int,
+        name: str,
+    ) -> None:
+        if type(snapshot) is not CanonicalJsonSnapshot or type(snapshot.encoded) is not bytes:
+            raise cls._integrity_failure(f"invalid {name} snapshot")
+        stored_digest = cls._require_fixed_sha256(snapshot.sha256, name=f"{name} snapshot digest")
+        actual_digest = hashlib.sha256(snapshot.encoded).hexdigest()
+        if not hmac.compare_digest(stored_digest, actual_digest):
+            raise cls._integrity_failure(f"{name} snapshot digest mismatch")
+        try:
+            decoded = decode_canonical_json_object_or_none(
+                snapshot.encoded,
+                max_bytes=max_bytes,
+            )
+            canonical = canonical_json_bytes(decoded, max_bytes=max_bytes)
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise cls._integrity_failure(f"invalid {name} snapshot") from exc
+        if not hmac.compare_digest(snapshot.encoded, canonical):
+            raise cls._integrity_failure(f"non-canonical {name} snapshot")
+
+    @classmethod
+    def _validate_prepared_policy(cls, policy: PreparedExecutionPolicy) -> None:
+        if type(policy) is not PreparedExecutionPolicy:
+            raise cls._integrity_failure("invalid execution policy")
+        if policy.version != 1 or policy.effect not in {"read", "write"}:
+            raise cls._integrity_failure("invalid execution policy")
+        if type(policy.rate_limit_category) is not str or not policy.rate_limit_category:
+            raise cls._integrity_failure("invalid execution policy")
+        if type(policy.rate_limit_fail_closed) is not bool:
+            raise cls._integrity_failure("invalid execution policy")
+        idempotency = policy.idempotency
+        if type(idempotency) is not IdempotencyExecutionPolicy:
+            raise cls._integrity_failure("invalid idempotency policy")
+        if type(idempotency.inject_argument) is not bool:
+            raise cls._integrity_failure("invalid idempotency policy")
+        bounded_values = (
+            (idempotency.ttl_seconds, 1, _IDEMPOTENCY_TTL_HARD_MAX_SECONDS),
+            (idempotency.contention_wait_seconds, 1, 30),
+            (idempotency.finalize_seconds, 1, 15),
+            (idempotency.lock_ttl_seconds, 1, _IDEMPOTENCY_LOCK_HARD_MAX_SECONDS),
+            (idempotency.max_entries, 1, _IDEMPOTENCY_MAX_ENTRIES_HARD_MAX),
+            (idempotency.max_result_bytes, 1, 1_000_000),
+        )
+        if any(type(value) is not int or value < minimum or value > maximum for value, minimum, maximum in bounded_values):
+            raise cls._integrity_failure("invalid idempotency policy")
 
     def verify_prepared_tool_call_integrity(
         self,
         prepared: PreparedToolCall,
     ) -> None:
         if not isinstance(prepared.tool_name, str) or not self._tool_name_re.match(prepared.tool_name):
-            raise InvalidParamsException("Prepared tool call integrity check failed: invalid tool name")
+            raise self._integrity_failure("invalid tool name")
 
-        expected_hash = self.hash_arguments(prepared.tool_args if isinstance(prepared.tool_args, dict) else {})
-        if expected_hash != prepared.arguments_hash:
-            raise InvalidParamsException("Prepared tool call integrity check failed: argument fingerprint mismatch")
-
-        expected_context_fingerprint = self.fingerprint_request_context(prepared.context)
-        if expected_context_fingerprint != prepared.context_fingerprint:
-            raise InvalidParamsException("Prepared tool call integrity check failed: context fingerprint mismatch")
-
-        expected_write = self.resolve_write_classification(
-            prepared.module,
-            prepared.tool_name,
-            prepared.tool_args,
-            prepared.tool_def,
-            fallback_to_name_heuristic=True,
+        self._validate_prepared_policy(prepared.policy)
+        self._verify_snapshot(
+            prepared.tool_definition_snapshot,
+            max_bytes=TOOL_DEFINITION_MAX_BYTES,
+            name="tool definition",
         )
-        if bool(expected_write) != bool(prepared.is_write):
-            raise InvalidParamsException("Prepared tool call integrity check failed: write classification mismatch")
-
-        expected_tag = self.build_prepared_tool_call_integrity_tag(
-            tool_name=prepared.tool_name,
-            module_id=prepared.module_id,
-            is_write=prepared.is_write,
-            idempotency_cache_key=prepared.idempotency_cache_key,
-            arguments_hash=prepared.arguments_hash,
-            context_fingerprint=prepared.context_fingerprint,
+        self._verify_snapshot(
+            prepared.scope_reporting_snapshot,
+            max_bytes=SCOPE_REPORTING_MAX_BYTES,
+            name="scope reporting",
         )
-        if not hmac.compare_digest(prepared.integrity_tag, expected_tag):
-            raise InvalidParamsException("Prepared tool call integrity check failed: signature mismatch")
+
+        expected_hash = self.hash_arguments(prepared.tool_args)
+        if expected_hash is None:
+            raise self._integrity_failure("invalid JSON arguments")
+        prepared_hash = self._require_fixed_sha256(prepared.arguments_hash, name="argument fingerprint")
+        if not hmac.compare_digest(expected_hash, prepared_hash):
+            raise self._integrity_failure("argument fingerprint mismatch")
+
+        try:
+            expected_context_fingerprint = self.fingerprint_request_context(prepared.context)
+            expected_scope_fingerprint = self.fingerprint_idempotency_scope(prepared.context)
+            expected_key_digest = self.normalized_idempotency_key_digest(
+                prepared.normalized_idempotency_key,
+            )
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise self._integrity_failure("invalid bound request state") from exc
+
+        prepared_context_fingerprint = self._require_fixed_sha256(
+            prepared.context_fingerprint,
+            name="context fingerprint",
+        )
+        if not hmac.compare_digest(expected_context_fingerprint, prepared_context_fingerprint):
+            raise self._integrity_failure("context fingerprint mismatch")
+
+        if expected_scope_fingerprint:
+            prepared_scope_fingerprint = self._require_fixed_sha256(
+                prepared.idempotency_scope_fingerprint,
+                name="idempotency scope fingerprint",
+            )
+            if not hmac.compare_digest(expected_scope_fingerprint, prepared_scope_fingerprint):
+                raise self._integrity_failure("idempotency scope fingerprint mismatch")
+        elif prepared.idempotency_scope_fingerprint != "":
+            raise self._integrity_failure("idempotency scope fingerprint mismatch")
+
+        if expected_key_digest:
+            prepared_key_digest = self._require_fixed_sha256(
+                prepared.normalized_idempotency_key_digest,
+                name="normalized idempotency key digest",
+            )
+            if not hmac.compare_digest(expected_key_digest, prepared_key_digest):
+                raise self._integrity_failure("normalized idempotency key digest mismatch")
+        elif prepared.normalized_idempotency_key_digest != "":
+            raise self._integrity_failure("normalized idempotency key digest mismatch")
+
+        expected_cache_key = None
+        if prepared.policy.effect == "write" and prepared.normalized_idempotency_key is not None:
+            expected_cache_key = self.make_idempotency_cache_key(
+                prepared.context,
+                prepared.module_id or getattr(prepared.module, "name", "unknown"),
+                prepared.tool_name,
+                prepared.normalized_idempotency_key,
+            )
+        if not hmac.compare_digest(
+            expected_cache_key or "",
+            prepared.idempotency_cache_key or "",
+        ):
+            raise self._integrity_failure("idempotency cache key mismatch")
+
+        try:
+            expected_tag = self.build_prepared_tool_call_integrity_tag(
+                tool_name=prepared.tool_name,
+                module_id=prepared.module_id,
+                policy=prepared.policy,
+                idempotency_cache_key=prepared.idempotency_cache_key,
+                normalized_idempotency_key_digest=prepared.normalized_idempotency_key_digest,
+                arguments_hash=prepared.arguments_hash,
+                context_fingerprint=prepared.context_fingerprint,
+                idempotency_scope_fingerprint=prepared.idempotency_scope_fingerprint,
+                tool_definition_sha256=prepared.tool_definition_snapshot.sha256,
+                scope_reporting_sha256=prepared.scope_reporting_snapshot.sha256,
+            )
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise self._integrity_failure("invalid signed payload") from exc
+        prepared_tag = self._require_fixed_sha256(prepared.integrity_tag, name="signature")
+        if not hmac.compare_digest(prepared_tag, expected_tag):
+            raise self._integrity_failure("signature mismatch")
 
     def fingerprint_request_context(self, context: RequestContext) -> str:
         payload = {
@@ -646,8 +840,47 @@ class ToolExecutionSecurity:
             "session_id": str(context.session_id or ""),
             "metadata": self.context_json_safe(getattr(context, "metadata", {})),
             "db_paths": self.context_json_safe(getattr(context, "db_paths", {})),
+            "server_auth_scope": self.authenticated_scope_object(
+                getattr(context, "server_auth_scope", None),
+            ),
         }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def authenticated_scope_object(
+        scope: AuthenticatedExecutionScope | None,
+    ) -> dict[str, JsonValue] | None:
+        """Return only the explicit server-authenticated active scope object."""
+
+        if scope is None:
+            return None
+        if type(scope) is not AuthenticatedExecutionScope:
+            raise TypeError("Invalid authenticated execution scope")
+        validated_scope = AuthenticatedExecutionScope(
+            active_org_id=scope.active_org_id,
+            active_team_id=scope.active_team_id,
+        )
+        return validated_scope.canonical_object()
+
+    def fingerprint_idempotency_scope(self, context: RequestContext) -> str:
+        """Return empty for personal scope or a fixed lowercase scope digest."""
+
+        scope_object = self.authenticated_scope_object(
+            getattr(context, "server_auth_scope", None),
+        )
+        if scope_object is None:
+            return ""
+        encoded = canonical_json_bytes(
+            scope_object,
+            max_bytes=PREPARED_HMAC_PAYLOAD_MAX_BYTES,
+        )
         return hashlib.sha256(encoded).hexdigest()
 
     def context_json_safe(self, value: Any) -> Any:
@@ -1331,14 +1564,161 @@ class ToolExecutionSecurity:
             return None
 
     @staticmethod
-    def _make_idempotency_cache_key(
+    def _bounded_positive_int(value: Any, *, name: str, maximum: int) -> int:
+        if type(value) is not int or value < 1 or value > maximum:
+            raise ValueError(f"{name} must be a positive non-boolean integer no greater than {maximum}")
+        return value
+
+    @staticmethod
+    def _resolve_rate_limit_category(
+        tool_name: str,
+        tool_def: dict[str, Any] | None,
+        config: Any,
+    ) -> str:
+        metadata = tool_def.get("metadata") if isinstance(tool_def, dict) else None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        category = str(metadata.get("category") or "").strip().lower().replace("-", "_")
+        if bool(metadata.get("uses_network")) or category in {
+            "web",
+            "network",
+            "external",
+            "external_network",
+        }:
+            return "network"
+        if category in _RATE_LIMIT_CATEGORIES:
+            return category
+
+        category_map = getattr(config, "tool_category_map", {})
+        if isinstance(category_map, dict) and tool_name in category_map:
+            mapped = str(category_map.get(tool_name) or "").strip()
+            if mapped:
+                return mapped
+        if tool_name in {"ingest_media", "update_media", "delete_media"}:
+            return "ingestion"
+        return "read"
+
+    def build_prepared_execution_policy(
+        self,
+        *,
+        module: BaseModule,
+        tool_name: str,
+        tool_args: Any,
+        tool_def: dict[str, Any] | None,
+        is_write: bool,
+        normalized_idempotency_key: str | None,
+        config: Any,
+    ) -> PreparedExecutionPolicy:
+        """Freeze all execution decisions and bounded runtime settings."""
+
+        ttl_seconds = self._bounded_positive_int(
+            getattr(config, "idempotency_ttl_seconds", 300),
+            name="idempotency TTL",
+            maximum=_IDEMPOTENCY_TTL_HARD_MAX_SECONDS,
+        )
+        contention_wait_seconds = self._bounded_positive_int(
+            getattr(config, "idempotency_wait_seconds", 5),
+            name="idempotency contention wait",
+            maximum=30,
+        )
+        finalize_seconds = self._bounded_positive_int(
+            getattr(config, "idempotency_finalize_seconds", 5),
+            name="idempotency finalize timeout",
+            maximum=15,
+        )
+        max_entries = self._bounded_positive_int(
+            getattr(config, "idempotency_cache_size", 512),
+            name="idempotency max entries",
+            maximum=_IDEMPOTENCY_MAX_ENTRIES_HARD_MAX,
+        )
+        max_result_bytes = self._bounded_positive_int(
+            getattr(config, "idempotency_result_max_bytes", 256_000),
+            name="idempotency result byte limit",
+            maximum=1_000_000,
+        )
+        module_config = getattr(module, "config", None)
+        module_timeout_value = getattr(
+            module_config,
+            "timeout_seconds",
+            getattr(config, "module_timeout", 30),
+        )
+        module_timeout_seconds = self._bounded_positive_int(
+            module_timeout_value,
+            name="module timeout",
+            maximum=_IDEMPOTENCY_LOCK_HARD_MAX_SECONDS,
+        )
+        lock_ttl_seconds = max(
+            ttl_seconds,
+            module_timeout_seconds * 2 + finalize_seconds,
+        )
+        lock_ttl_seconds = self._bounded_positive_int(
+            lock_ttl_seconds,
+            name="idempotency lock TTL",
+            maximum=_IDEMPOTENCY_LOCK_HARD_MAX_SECONDS,
+        )
+
+        input_schema = tool_def.get("inputSchema") if isinstance(tool_def, dict) else None
+        properties = input_schema.get("properties") if isinstance(input_schema, dict) else None
+        inject_argument = bool(
+            is_write
+            and normalized_idempotency_key is not None
+            and isinstance(tool_args, dict)
+            and isinstance(properties, dict)
+            and "idempotencyKey" in properties
+            and "idempotencyKey" not in tool_args
+        )
+        metadata = tool_def.get("metadata") if isinstance(tool_def, dict) else None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        return PreparedExecutionPolicy(
+            version=1,
+            effect="write" if is_write else "read",
+            rate_limit_category=self._resolve_rate_limit_category(tool_name, tool_def, config),
+            rate_limit_fail_closed=metadata.get("rate_limit_fail_closed") is True,
+            idempotency=IdempotencyExecutionPolicy(
+                inject_argument=inject_argument,
+                ttl_seconds=ttl_seconds,
+                contention_wait_seconds=contention_wait_seconds,
+                finalize_seconds=finalize_seconds,
+                lock_ttl_seconds=lock_ttl_seconds,
+                max_entries=max_entries,
+                max_result_bytes=max_result_bytes,
+            ),
+        )
+
+    def make_idempotency_cache_key(
+        self,
         context: RequestContext,
         module_name: str,
         tool_name: str,
         idempotency_key: str,
     ) -> str:
-        owner = f"user:{context.user_id}" if context.user_id else (f"client:{context.client_id}" if context.client_id else "anon")
-        return f"{owner}|module:{module_name}|tool:{tool_name}|key:{idempotency_key}"
+        """Build the sole authoritative owner and active-scope replay key."""
+
+        owner = (
+            f"user:{context.user_id}"
+            if context.user_id
+            else (f"client:{context.client_id}" if context.client_id else "anon")
+        )
+        cache_key = f"{owner}|module:{module_name}|tool:{tool_name}|key:{idempotency_key}"
+        scope_fingerprint = self.fingerprint_idempotency_scope(context)
+        if scope_fingerprint:
+            cache_key = f"{cache_key}|scope:sha256:{scope_fingerprint}"
+        return cache_key
+
+    def _make_idempotency_cache_key(
+        self,
+        context: RequestContext,
+        module_name: str,
+        tool_name: str,
+        idempotency_key: str,
+    ) -> str:
+        """Compatibility delegate to the authoritative public key builder."""
+
+        return self.make_idempotency_cache_key(
+            context,
+            module_name,
+            tool_name,
+            idempotency_key,
+        )
 
     @staticmethod
     def _policy_document_path_scope_mode(policy_document: Any) -> str:
@@ -1445,6 +1825,9 @@ class ToolExecutionSecurity:
                     error_type=exc.__class__.__name__,
                 )
         tool_args = self.harden_and_sanitize_tool_arguments(module, tool_args)
+        args_hash = self.hash_arguments(tool_args)
+        if args_hash is None:
+            raise InvalidParamsException("Tool arguments must contain only valid JSON values")
 
         # Determine write-capable status from sanitized arguments.
         is_write = self.resolve_write_classification(
@@ -1512,7 +1895,7 @@ class ToolExecutionSecurity:
                 if normalized_idempotency_key:
                     make_idempotency_cache_key = self._prepare_callback(
                         "make_idempotency_cache_key",
-                        self._make_idempotency_cache_key,
+                        self.make_idempotency_cache_key,
                     )
                     idempotency_cache_key = make_idempotency_cache_key(
                         context,
@@ -1606,7 +1989,6 @@ class ToolExecutionSecurity:
         if approval_status != "allow":
             raise PermissionError(f"Tool '{tool_name}' not allowed by MCP Hub policy")
 
-        args_hash = self.hash_arguments(tool_args if isinstance(tool_args, dict) else {})
         run_governance_preflight = self._prepare_callback(
             "run_governance_preflight",
             self._run_governance_preflight,
@@ -1617,40 +1999,84 @@ class ToolExecutionSecurity:
             tool_def=tool_def if isinstance(tool_def, dict) else None,
             context=context,
         )
+        try:
+            prepared_policy = self.build_prepared_execution_policy(
+                module=module,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                tool_def=tool_def if isinstance(tool_def, dict) else None,
+                is_write=is_write,
+                normalized_idempotency_key=normalized_idempotency_key,
+                config=cfg,
+            )
+        except (TypeError, ValueError) as exc:
+            raise InvalidParamsException("Invalid idempotency execution policy") from exc
+        try:
+            tool_definition_snapshot = self.build_canonical_snapshot(
+                tool_def if isinstance(tool_def, dict) else None,
+                max_bytes=TOOL_DEFINITION_MAX_BYTES,
+            )
+            scope_reporting_snapshot = self.build_canonical_snapshot(
+                scope_payload if isinstance(scope_payload, dict) else None,
+                max_bytes=SCOPE_REPORTING_MAX_BYTES,
+            )
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise InvalidParamsException(
+                "Tool definition and scope reporting payloads must contain only valid bounded JSON values"
+            ) from exc
         if hooks is None:
             raise RuntimeError("ToolExecutionHooks dependency is required")
         await hooks.run_pre_tool_hooks(
             tool_name=tool_name,
             tool_args=tool_args,
             module_id=module_id,
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
+            tool_def=decode_canonical_json_object_or_none(
+                tool_definition_snapshot.encoded,
+                max_bytes=TOOL_DEFINITION_MAX_BYTES,
+            ),
             is_write=is_write,
             arguments_hash=args_hash,
             context=context,
-            scope_payload=scope_payload,
+            scope_payload=decode_canonical_json_object_or_none(
+                scope_reporting_snapshot.encoded,
+                max_bytes=SCOPE_REPORTING_MAX_BYTES,
+            ),
         )
         context_fingerprint = self.fingerprint_request_context(context)
-        integrity_tag = self.build_prepared_tool_call_integrity_tag(
-            tool_name=tool_name,
-            module_id=module_id,
-            is_write=is_write,
-            idempotency_cache_key=idempotency_cache_key,
-            arguments_hash=args_hash,
-            context_fingerprint=context_fingerprint,
+        normalized_idempotency_key_digest = self.normalized_idempotency_key_digest(
+            normalized_idempotency_key,
         )
+        idempotency_scope_fingerprint = self.fingerprint_idempotency_scope(context)
+        try:
+            integrity_tag = self.build_prepared_tool_call_integrity_tag(
+                tool_name=tool_name,
+                module_id=module_id,
+                policy=prepared_policy,
+                idempotency_cache_key=idempotency_cache_key,
+                normalized_idempotency_key_digest=normalized_idempotency_key_digest,
+                arguments_hash=args_hash,
+                context_fingerprint=context_fingerprint,
+                idempotency_scope_fingerprint=idempotency_scope_fingerprint,
+                tool_definition_sha256=tool_definition_snapshot.sha256,
+                scope_reporting_sha256=scope_reporting_snapshot.sha256,
+            )
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise InvalidParamsException("Unable to bind prepared execution policy") from exc
 
         return PreparedToolCall(
             tool_name=tool_name,
             tool_args=tool_args,
             module=module,
             module_id=module_id,
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
-            is_write=is_write,
+            policy=prepared_policy,
+            tool_definition_snapshot=tool_definition_snapshot,
+            scope_reporting_snapshot=scope_reporting_snapshot,
             normalized_idempotency_key=normalized_idempotency_key,
+            normalized_idempotency_key_digest=normalized_idempotency_key_digest,
             idempotency_cache_key=idempotency_cache_key,
             arguments_hash=args_hash,
             context_fingerprint=context_fingerprint,
+            idempotency_scope_fingerprint=idempotency_scope_fingerprint,
             integrity_tag=integrity_tag,
             context=context,
-            scope_payload=scope_payload,
         )

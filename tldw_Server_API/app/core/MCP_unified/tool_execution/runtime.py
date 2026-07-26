@@ -33,7 +33,6 @@ class ToolExecutionRuntime:
         noncritical_exceptions: tuple[type[BaseException], ...],
         tool_execution_error: str,
         generic_exception_like: Any,
-        make_idempotency_cache_key: Any,
         run_post_tool_hooks: Any | None = None,
     ) -> None:
         """Store dependencies and protocol compatibility callbacks for runtime execution."""
@@ -50,7 +49,6 @@ class ToolExecutionRuntime:
         self._noncritical_exceptions = noncritical_exceptions
         self._tool_execution_error = tool_execution_error
         self._generic_exception_like = generic_exception_like
-        self._make_idempotency_cache_key = make_idempotency_cache_key
         self._run_post_tool_hooks = run_post_tool_hooks
 
     def sync_from_dependencies(self) -> None:
@@ -62,18 +60,6 @@ class ToolExecutionRuntime:
         self.idempotency = self.dependencies.idempotency
         self.reporter = self.dependencies.reporter
         self.config_provider = self.dependencies.config_provider
-
-    @staticmethod
-    def make_idempotency_cache_key(
-        context: RequestContext,
-        module_name: str,
-        tool_name: str,
-        idempotency_key: str,
-    ) -> str:
-        """Build the owner-scoped idempotency cache key for a tool call."""
-
-        owner = f"user:{context.user_id}" if context.user_id else (f"client:{context.client_id}" if context.client_id else "anon")
-        return f"{owner}|module:{module_name}|tool:{tool_name}|key:{idempotency_key}"
 
     @staticmethod
     def extract_eval_profile_id(context: RequestContext) -> str | None:
@@ -120,13 +106,19 @@ class ToolExecutionRuntime:
         tool_args = prepared.tool_args
         module = prepared.module
         module_id = prepared.module_id
-        tool_def = prepared.tool_def
-        is_write = prepared.is_write
+        policy = prepared.policy
+        is_write = policy.effect == "write"
         normalized_idempotency_key = prepared.normalized_idempotency_key
         idempotency_cache_key = prepared.idempotency_cache_key
         args_hash = prepared.arguments_hash
         context = prepared.context
         execution_start_ts = time.time()
+
+        def _observer_tool_def() -> dict[str, Any] | None:
+            return prepared.tool_def
+
+        def _observer_scope_payload() -> dict[str, Any] | None:
+            return prepared.scope_payload
 
         def _expected_failure_payload(
             failure: ExpectedToolFailure,
@@ -134,7 +126,7 @@ class ToolExecutionRuntime:
             duration_ms = max(0.0, (time.time() - execution_start_ts) * 1000.0)
             execution_eval = execution_eval_metadata_from_tool_definition(
                 tool_name=tool_name,
-                tool_def=tool_def,
+                tool_def=_observer_tool_def(),
                 profile_id=self.extract_eval_profile_id(context),
                 duration_ms=duration_ms,
             )
@@ -170,10 +162,10 @@ class ToolExecutionRuntime:
                     execution_origin=execution_origin,
                     duration_ms=self.reporter.duration_ms(execution_start_ts),
                     module_id=module_id or getattr(module, "name", None),
-                    tool_def=tool_def if isinstance(tool_def, dict) else None,
+                    tool_def=_observer_tool_def(),
                     payload=payload,
                     tool_args=tool_args,
-                    scope_payload=prepared.scope_payload,
+                    scope_payload=_observer_scope_payload(),
                     is_write=is_write,
                     reason_code=reason_code,
                     idempotency_replay=idempotency_replay,
@@ -188,38 +180,7 @@ class ToolExecutionRuntime:
         async def _execute_tool_call() -> dict[str, Any]:
             # Optional per-tool/category rate limits (ingestion vs read)
             try:
-                cfg = self.config_provider()
-                category = None
-                try:
-                    meta = (tool_def or {}).get("metadata") or {}
-                    cat = str(meta.get("category") or "").lower().replace("-", "_")
-                    if bool(meta.get("uses_network")) or cat in {"web", "network", "external", "external_network"}:
-                        category = "network"
-                    elif cat in {
-                        "ingestion",
-                        "management",
-                        "read",
-                        "utility",
-                        "browser",
-                        "code",
-                        "filesystem",
-                        "rag_generation",
-                        "shell",
-                        "search",
-                        "tool_discovery",
-                    }:
-                        category = cat
-                except self._noncritical_exceptions:
-                    category = None
-                if not category:
-                    try:
-                        if isinstance(cfg.tool_category_map, dict) and tool_name in cfg.tool_category_map:
-                            category = str(cfg.tool_category_map.get(tool_name))
-                    except self._noncritical_exceptions:
-                        category = None
-                if not category:
-                    ingestion_tools = {"ingest_media", "update_media", "delete_media"}
-                    category = "ingestion" if tool_name in ingestion_tools else "read"
+                category = policy.rate_limit_category
                 key_owner = f"user:{context.user_id}" if context.user_id else (f"client:{context.client_id}" if context.client_id else "anon")
                 rl_key = f"{key_owner}:tool:{tool_name}:cat:{category}"
                 await self.rate_limiter.check_rate_limit(rl_key, category=category)
@@ -247,17 +208,10 @@ class ToolExecutionRuntime:
                 ) as span:
                     try:
                         execution_args = tool_args
-                        tool_schema_props = (
-                            (tool_def or {}).get("inputSchema", {}).get("properties", {})
-                            if isinstance(tool_def, dict)
-                            else {}
-                        )
                         if (
-                            normalized_idempotency_key
+                            policy.idempotency.inject_argument
+                            and normalized_idempotency_key
                             and isinstance(tool_args, dict)
-                            and isinstance(tool_schema_props, dict)
-                            and "idempotencyKey" in tool_schema_props
-                            and "idempotencyKey" not in tool_args
                         ):
                             execution_args = dict(tool_args)
                             execution_args["idempotencyKey"] = normalized_idempotency_key
@@ -307,13 +261,13 @@ class ToolExecutionRuntime:
                 result = attach_execution_eval_metadata(
                     result,
                     tool_name=tool_name,
-                    tool_def=tool_def,
+                    tool_def=_observer_tool_def(),
                     profile_id=profile_id,
                     duration_ms=duration_ms,
                 )
                 execution_eval = execution_eval_metadata_from_tool_definition(
                     tool_name=tool_name,
-                    tool_def=tool_def,
+                    tool_def=_observer_tool_def(),
                     profile_id=profile_id,
                     duration_ms=duration_ms,
                 )
@@ -367,11 +321,11 @@ class ToolExecutionRuntime:
                     tool_name=tool_name,
                     tool_args=tool_args,
                     module_id=module_name,
-                    tool_def=tool_def if isinstance(tool_def, dict) else None,
+                    tool_def=_observer_tool_def(),
                     is_write=is_write,
                     arguments_hash=args_hash,
                     context=context,
-                    scope_payload=prepared.scope_payload,
+                    scope_payload=_observer_scope_payload(),
                     status="success",
                     duration_ms=duration_ms,
                 )
@@ -404,11 +358,11 @@ class ToolExecutionRuntime:
                     tool_name=tool_name,
                     tool_args=tool_args,
                     module_id=module_id or getattr(module, "name", None),
-                    tool_def=tool_def if isinstance(tool_def, dict) else None,
+                    tool_def=_observer_tool_def(),
                     is_write=is_write,
                     arguments_hash=args_hash,
                     context=context,
-                    scope_payload=prepared.scope_payload,
+                    scope_payload=_observer_scope_payload(),
                     status="failure",
                     duration_ms=duration_ms,
                     error=e,
@@ -417,9 +371,8 @@ class ToolExecutionRuntime:
 
         if is_write and idempotency_cache_key:
             try:
-                cfg = self.config_provider()
-                ttl = max(1, int(getattr(cfg, "idempotency_ttl_seconds", 300)))
-                max_size = max(1, int(getattr(cfg, "idempotency_cache_size", 512)))
+                ttl = policy.idempotency.ttl_seconds
+                max_size = policy.idempotency.max_entries
                 if args_hash is None:
                     raise InvalidParamsException("Unable to fingerprint tool arguments for idempotency")
                 arguments_bound = await self.idempotency.bind_arguments(
@@ -430,14 +383,12 @@ class ToolExecutionRuntime:
                 )
                 if not arguments_bound:
                     raise InvalidParamsException("Idempotency key was already used with different arguments")
-                module_timeout = int(getattr(getattr(module, "config", None), "timeout_seconds", cfg.module_timeout))
-                lock_ttl = max(ttl, module_timeout * 2)
                 payload, from_cache = await self.idempotency.run(
                     idempotency_cache_key,
                     _execute_tool_call,
                     ttl=ttl,
                     max_size=max_size,
-                    lock_ttl=lock_ttl,
+                    lock_ttl=policy.idempotency.lock_ttl_seconds,
                 )
                 try:
                     if from_cache:

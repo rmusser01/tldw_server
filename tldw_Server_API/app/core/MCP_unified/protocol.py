@@ -73,6 +73,9 @@ from .protocol_types import (
     _has_trusted_compat_claims,
 )
 from .protocol_types import (
+    AuthenticatedExecutionScope as AuthenticatedExecutionScope,
+)
+from .protocol_types import (
     _metadata_claim_values as _metadata_claim_values,
 )
 from .protocol_types import (
@@ -87,6 +90,7 @@ from .protocol_types import (
 from .tool_execution import ToolExecutionCoordinator, ToolExecutionDependencies, ToolExecutionReporter
 from .tool_execution.hooks import ToolExecutionHooks
 from .tool_execution.idempotency import IdempotencyManager, RedisError
+from .tool_execution.models import PreparedExecutionPolicy
 from .tool_execution.runtime import ToolExecutionRuntime
 from .tool_execution.security import ToolExecutionSecurity
 from .tool_observability import ensure_tool_definition_eval_metadata
@@ -434,7 +438,6 @@ class MCPProtocol:
             noncritical_exceptions=_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS,
             tool_execution_error=_MCP_TOOL_EXECUTION_ERROR,
             generic_exception_like=self._generic_exception_like,
-            make_idempotency_cache_key=ToolExecutionRuntime.make_idempotency_cache_key,
             run_post_tool_hooks=lambda **kwargs: self._run_post_tool_hooks(**kwargs),
         )
         self._tool_execution = ToolExecutionCoordinator(
@@ -887,18 +890,26 @@ class MCPProtocol:
         *,
         tool_name: str,
         module_id: str | None,
-        is_write: bool | None,
+        policy: PreparedExecutionPolicy,
         idempotency_cache_key: str | None,
+        normalized_idempotency_key_digest: str,
         arguments_hash: str | None,
         context_fingerprint: str,
+        idempotency_scope_fingerprint: str,
+        tool_definition_sha256: str,
+        scope_reporting_sha256: str,
     ) -> bytes:
         return ToolExecutionSecurity.prepared_tool_call_payload(
             tool_name=tool_name,
             module_id=module_id,
-            is_write=is_write,
+            policy=policy,
             idempotency_cache_key=idempotency_cache_key,
+            normalized_idempotency_key_digest=normalized_idempotency_key_digest,
             arguments_hash=arguments_hash,
             context_fingerprint=context_fingerprint,
+            idempotency_scope_fingerprint=idempotency_scope_fingerprint,
+            tool_definition_sha256=tool_definition_sha256,
+            scope_reporting_sha256=scope_reporting_sha256,
         )
 
     def _build_prepared_tool_call_integrity_tag(
@@ -906,18 +917,26 @@ class MCPProtocol:
         *,
         tool_name: str,
         module_id: str | None,
-        is_write: bool | None,
+        policy: PreparedExecutionPolicy,
         idempotency_cache_key: str | None,
+        normalized_idempotency_key_digest: str,
         arguments_hash: str | None,
         context_fingerprint: str,
+        idempotency_scope_fingerprint: str,
+        tool_definition_sha256: str,
+        scope_reporting_sha256: str,
     ) -> str:
         return self._tool_execution_security.build_prepared_tool_call_integrity_tag(
             tool_name=tool_name,
             module_id=module_id,
-            is_write=is_write,
+            policy=policy,
             idempotency_cache_key=idempotency_cache_key,
+            normalized_idempotency_key_digest=normalized_idempotency_key_digest,
             arguments_hash=arguments_hash,
             context_fingerprint=context_fingerprint,
+            idempotency_scope_fingerprint=idempotency_scope_fingerprint,
+            tool_definition_sha256=tool_definition_sha256,
+            scope_reporting_sha256=scope_reporting_sha256,
         )
 
     def _verify_prepared_tool_call_integrity(
@@ -2188,15 +2207,9 @@ class MCPProtocol:
     # Idempotency cache helpers
     # -------------------------
     def _make_idempotency_cache_key(self, context: RequestContext, module_name: str, tool_name: str, idempotency_key: str) -> str:
-        runtime = getattr(self, "_tool_execution_runtime", None)
-        if runtime is None:
-            return ToolExecutionRuntime.make_idempotency_cache_key(
-                context,
-                module_name,
-                tool_name,
-                idempotency_key,
-            )
-        return runtime.make_idempotency_cache_key(
+        """Compatibility delegate to ToolExecutionSecurity's authoritative builder."""
+
+        return self._tool_execution_security.make_idempotency_cache_key(
             context,
             module_name,
             tool_name,
