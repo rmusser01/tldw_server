@@ -872,21 +872,13 @@ class ToolExecutionSecurity:
                 raise ExpectedToolFailure(
                     ExpectedToolFailureReason.STALE_PREPARED_CALL,
                 )
-            get_module = getattr(module_registry, "get_module", None)
-            if callable(get_module):
-                operational_module = await get_module(prepared.module_id)
-            else:
-                # Compatibility registries must still prove operational membership.
-                get_all_modules = getattr(module_registry, "get_all_modules", None)
-                if not callable(get_all_modules):
-                    raise ExpectedToolFailure(
-                        ExpectedToolFailureReason.STALE_PREPARED_CALL,
-                    )
-                operational_modules = await get_all_modules()
-                operational_module = (
-                    operational_modules.get(prepared.module_id)
-                    if isinstance(operational_modules, dict)
-                    else None
+
+            confirmed_module = await module_registry.find_module_for_tool(
+                prepared.tool_name,
+            )
+            if confirmed_module is not prepared.module:
+                raise ExpectedToolFailure(
+                    ExpectedToolFailureReason.STALE_PREPARED_CALL,
                 )
 
             try:
@@ -900,7 +892,7 @@ class ToolExecutionSecurity:
                 max_bytes=TOOL_DEFINITION_MAX_BYTES,
             )
 
-            if current_module is not prepared.module or operational_module is not prepared.module:
+            if current_module is not prepared.module:
                 raise ExpectedToolFailure(
                     ExpectedToolFailureReason.STALE_PREPARED_CALL,
                 )

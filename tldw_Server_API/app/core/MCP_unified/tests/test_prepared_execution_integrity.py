@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, Callable, get_args, get_origin, get_type_hints
 from uuid import uuid4
 
 import pytest
@@ -52,6 +52,10 @@ class _IntegrityWriteModule(BaseModule):
         self.block_tool_def_on_call: int | None = None
         self.tool_def_entered = asyncio.Event()
         self.tool_def_release = asyncio.Event()
+        self.has_tool_calls = 0
+        self.block_has_tool_on_call: int | None = None
+        self.has_tool_entered = asyncio.Event()
+        self.has_tool_release = asyncio.Event()
         self.source_tool_def: dict[str, Any] = {
             "name": self.tool_name,
             "description": "Prepared execution integrity test tool",
@@ -88,6 +92,13 @@ class _IntegrityWriteModule(BaseModule):
             self.tool_def_entered.set()
             await self.tool_def_release.wait()
         return await super().get_tool_def(tool_name)
+
+    async def has_tool(self, tool_name: str) -> bool:
+        self.has_tool_calls += 1
+        if self.has_tool_calls == self.block_has_tool_on_call:
+            self.has_tool_entered.set()
+            await self.has_tool_release.wait()
+        return await super().has_tool(tool_name)
 
     def is_write_tool_call(
         self,
@@ -261,12 +272,15 @@ class _BlockingSecondLookupRegistry:
     def __init__(self, delegate: Any) -> None:
         self.delegate = delegate
         self.calls = 0
+        self.block_when: Callable[[], bool] = lambda: False
+        self.blocked = False
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
     async def find_module_for_tool(self, tool_name: str) -> BaseModule | None:
         self.calls += 1
-        if self.calls == 2:
+        if not self.blocked and self.block_when():
+            self.blocked = True
             self.entered.set()
             await self.release.wait()
         return await self.delegate.find_module_for_tool(tool_name)
@@ -871,8 +885,7 @@ async def test_live_check_requires_actual_registry_registration_to_be_operationa
     registry = get_module_registry()
     registry._modules[prepared.module_id].status = status
 
-    # Production fallback currently finds retained instances even when get_module rejects them.
-    assert await registry.find_module_for_tool(prepared.tool_name) is module
+    assert await registry.find_module_for_tool(prepared.tool_name) is None
 
     rate_limiter = _RateLimiterProbe()
     idempotency = _IdempotencyProbe()
@@ -887,6 +900,39 @@ async def test_live_check_requires_actual_registry_registration_to_be_operationa
     assert idempotency.run_keys == []
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
+
+
+@pytest.mark.parametrize("lookup_path", ["cached", "fallback"])
+@pytest.mark.parametrize("drift", ["status", "instance"])
+@pytest.mark.asyncio
+async def test_actual_registry_revalidates_operational_binding_after_has_tool(
+    monkeypatch: pytest.MonkeyPatch,
+    lookup_path: str,
+    drift: str,
+) -> None:
+    _, module, prepared, _ = await _prepare_call(monkeypatch)
+    assert prepared.module_id is not None
+    registry = get_module_registry()
+    if lookup_path == "fallback":
+        registry._tool_registry.pop(prepared.tool_name, None)
+    module.block_has_tool_on_call = module.has_tool_calls + 1
+
+    lookup = asyncio.create_task(registry.find_module_for_tool(prepared.tool_name))
+    await asyncio.wait_for(module.has_tool_entered.wait(), timeout=2)
+    registration = registry._modules[prepared.module_id]
+    if drift == "status":
+        registration.status = ModuleStatus.INACTIVE
+    else:
+        registration.module_instance = _IntegrityWriteModule(
+            ModuleConfig(
+                name=prepared.module_id,
+                settings={"tool_name": prepared.tool_name},
+            ),
+        )
+    module.has_tool_release.set()
+
+    assert await asyncio.wait_for(lookup, timeout=2) is None
+    assert registry.get_module_id_for_tool(prepared.tool_name) != prepared.module_id
 
 
 @pytest.mark.parametrize("tamper_target", ["arguments", "context"])
@@ -907,6 +953,7 @@ async def test_second_live_check_rechecks_integrity_after_awaited_lookup(
     )
     registry = _BlockingSecondLookupRegistry(get_module_registry())
     rate_limiter = _RateLimiterProbe()
+    registry.block_when = lambda: rate_limiter.calls == 1
     protocol.module_registry = registry
     protocol.rate_limiter = rate_limiter
 
@@ -924,7 +971,7 @@ async def test_second_live_check_rechecks_integrity_after_awaited_lookup(
     ):
         await asyncio.wait_for(execution, timeout=2)
 
-    assert registry.calls == 2
+    assert registry.calls == 4
     assert rate_limiter.calls == 1
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
@@ -951,7 +998,15 @@ async def test_second_live_check_rechecks_binding_after_definition_await(
     if drift == "status":
         registry._modules[prepared.module_id].status = ModuleStatus.INACTIVE
     elif drift == "mapping":
-        registry._tool_registry[prepared.tool_name] = f"remapped-{uuid4().hex}"
+        remapped_id = f"prepared_race_remap_{uuid4().hex}"
+        await registry.register_module(
+            remapped_id,
+            _IntegrityWriteModule,
+            ModuleConfig(
+                name=remapped_id,
+                settings={"tool_name": prepared.tool_name},
+            ),
+        )
     else:
         module.config.enabled = False
     module.tool_def_release.set()
