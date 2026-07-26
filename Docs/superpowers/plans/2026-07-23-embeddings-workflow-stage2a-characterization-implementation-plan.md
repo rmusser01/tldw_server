@@ -51,7 +51,7 @@ Current `dev` already supplies the following required evidence. Do not duplicate
 
 - Modify: `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`
 
-- [ ] **Step 1: Allow the isolated factory to inject runtime identity and cache-key probes**
+- [x] **Step 1: Allow the isolated factory to inject runtime identity and cache-key probes**
 
 Extend `_orchestrator` with narrow optional overrides while preserving every existing default:
 
@@ -93,7 +93,7 @@ def _orchestrator(
     )
 ```
 
-- [ ] **Step 2: Add a preparation-order characterization test**
+- [x] **Step 2: Add a preparation-order characterization test**
 
 Import the orchestrator module for monkeypatching:
 
@@ -142,7 +142,7 @@ def test_prepare_orders_intent_normalization_policy_and_plan_identity(monkeypatc
     ]
 ```
 
-- [ ] **Step 3: Add a primary-preflight failure test**
+- [x] **Step 3: Add a primary-preflight failure test**
 
 The test must prove readiness runs before cache access and that even a retryable primary readiness failure does not enter fallback:
 
@@ -186,7 +186,7 @@ async def test_primary_preflight_failure_propagates_without_cache_or_fallback():
     assert executor.calls == []
 ```
 
-- [ ] **Step 4: Add retryable fallback-preflight traversal coverage**
+- [x] **Step 4: Add retryable fallback-preflight traversal coverage**
 
 Keep the existing missing-credential skip test. Add a separate retryable readiness case that proves the failed candidate is skipped and the next candidate is attempted:
 
@@ -249,7 +249,7 @@ async def test_retryable_fallback_preflight_failure_continues_to_next_candidate(
     ]
 ```
 
-- [ ] **Step 5: Run the new preparation/readiness tests**
+- [x] **Step 5: Run the new preparation/readiness tests**
 
 Run:
 
@@ -264,7 +264,7 @@ python -m pytest \
 
 Expected: 3 passed. These are characterization tests; a failure means the test assumption must be reconciled with current behavior, not that production code should be changed.
 
-- [ ] **Step 6: Commit the preparation/readiness tests**
+- [x] **Step 6: Commit the preparation/readiness tests**
 
 ```bash
 git add tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
@@ -278,7 +278,7 @@ git commit -m "test(embeddings): characterize preparation and readiness order"
 - Modify: `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`
 - Modify: `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py`
 
-- [ ] **Step 1: Add a primary infrastructure-failure parameterization**
+- [x] **Step 1: Add a primary infrastructure-failure parameterization**
 
 Add a small raising cache inside the test and cover read-time identity, key derivation, and cache access. Each error is a generic infrastructure exception and must propagate unchanged without provider fallback:
 
@@ -335,7 +335,7 @@ async def test_primary_infrastructure_failure_propagates_without_fallback(bounda
     assert cache.set_calls == []
 ```
 
-- [ ] **Step 2: Characterize the current broad fallback-domain catch**
+- [x] **Step 2: Characterize the current broad fallback-domain catch**
 
 This test intentionally records behavior that Stage 2D will correct. A retryable domain-shaped error from fallback identity, key, cache read, or cache write currently advances to the next provider:
 
@@ -420,7 +420,7 @@ async def test_fallback_domain_shaped_infrastructure_failure_currently_advances_
     assert providers.count("openai") == 1
 ```
 
-- [ ] **Step 3: Characterize endpoint cache-adapter exception identity**
+- [x] **Step 3: Characterize endpoint cache-adapter exception identity**
 
 In `test_embeddings_orchestrator_endpoint_parity.py`, add:
 
@@ -468,7 +468,7 @@ async def test_endpoint_cache_adapter_propagates_dependency_error_unchanged(
     dependency.assert_awaited_once()
 ```
 
-- [ ] **Step 4: Run the infrastructure-source tests**
+- [x] **Step 4: Run the infrastructure-source tests**
 
 Run:
 
@@ -483,7 +483,7 @@ python -m pytest \
 
 Expected: 11 passed: 3 primary cases, 4 current fallback cases, and 4 endpoint adapter cases.
 
-- [ ] **Step 5: Commit the failure-source tests**
+- [x] **Step 5: Commit the failure-source tests**
 
 ```bash
 git add \
@@ -498,7 +498,7 @@ git commit -m "test(embeddings): pin orchestration failure sources"
 
 - Modify: `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`
 
-- [ ] **Step 1: Add successful adapter accounting and bypass coverage**
+- [x] **Step 1: Add successful adapter accounting and bypass coverage**
 
 ```python
 @pytest.mark.unit
@@ -540,7 +540,7 @@ async def test_successful_adapter_reports_compatibility_cache_counts_and_bypasse
     assert executor.calls == []
 ```
 
-- [ ] **Step 2: Add isolated malformed/non-finite cache replacement cases**
+- [x] **Step 2: Add isolated malformed/non-finite cache replacement cases**
 
 ```python
 @pytest.mark.unit
@@ -573,7 +573,7 @@ async def test_malformed_cached_vector_becomes_miss_and_is_replaced(cached):
     assert cache.set_calls == [(cache_key, [0.25, 0.75])]
 ```
 
-- [ ] **Step 3: Add fallback complete-result validation before writeback**
+- [x] **Step 3: Add fallback complete-result validation before writeback**
 
 Keep the existing primary mixed-width test unchanged. Add the equivalent full fallback path:
 
@@ -617,7 +617,7 @@ async def test_fallback_complete_result_is_validated_before_first_cache_write():
     assert cache.set_calls == []
 ```
 
-- [ ] **Step 4: Reassert primary execution cardinality**
+- [x] **Step 4: Reassert primary execution cardinality**
 
 In `test_fallback_execution_maps_model_and_returns_fallback_headers`, add:
 
@@ -626,7 +626,7 @@ In `test_fallback_execution_maps_model_and_returns_fallback_headers`, add:
     assert [call["provider"] for call in executor.calls].count("openai") == 1
 ```
 
-- [ ] **Step 5: Run adapter/cache characterization**
+- [x] **Step 5: Run adapter/cache characterization**
 
 Run:
 
@@ -640,7 +640,7 @@ python -m pytest \
 
 Expected: 7 passed.
 
-- [ ] **Step 6: Commit adapter/cache characterization**
+- [x] **Step 6: Commit adapter/cache characterization**
 
 ```bash
 git add tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
@@ -653,7 +653,7 @@ git commit -m "test(embeddings): characterize adapter and cache validation"
 
 - Modify: `tldw_Server_API/tests/Embeddings_isolated/test_workflow_runner.py`
 
-- [ ] **Step 1: Assert the exact current success statuses**
+- [x] **Step 1: Assert the exact current success statuses**
 
 Extend `test_runner_returns_orchestrator_result_and_records_safe_success_events`:
 
@@ -671,7 +671,7 @@ Extend `test_runner_returns_orchestrator_result_and_records_safe_success_events`
 
 This intentionally pins the Stage 1 sequence. Do not add Stage 2 phases in Stage 2A.
 
-- [ ] **Step 2: Add cancellation propagation and trace truncation**
+- [x] **Step 2: Add cancellation propagation and trace truncation**
 
 Import `asyncio`, then add:
 
@@ -703,7 +703,7 @@ async def test_execute_cancellation_propagates_without_terminal_trace_event():
     )
 ```
 
-- [ ] **Step 3: Run the runner characterization tests**
+- [x] **Step 3: Run the runner characterization tests**
 
 Run:
 
@@ -716,7 +716,7 @@ python -m pytest \
 
 Expected: all runner tests pass, including the new cancellation case.
 
-- [ ] **Step 4: Commit runner characterization**
+- [x] **Step 4: Commit runner characterization**
 
 ```bash
 git add tldw_Server_API/tests/Embeddings_isolated/test_workflow_runner.py
@@ -729,7 +729,7 @@ git commit -m "test(embeddings): pin inline runner cancellation"
 
 - Modify: `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py`
 
-- [ ] **Step 1: Add a recording active-request gauge**
+- [x] **Step 1: Add a recording active-request gauge**
 
 Place this beside the existing metric fakes:
 
@@ -746,7 +746,7 @@ class _RecordingGauge(_NoopMetric):
         self.dec_count += 1
 ```
 
-- [ ] **Step 2: Make the endpoint fake support zero-token preparation**
+- [x] **Step 2: Make the endpoint fake support zero-token preparation**
 
 Change only the test fake:
 
@@ -774,7 +774,7 @@ class FakeOrchestrator:
         return FakePrepared(total_tokens=self.prepared_total_tokens)
 ```
 
-- [ ] **Step 3: Strengthen existing success and post-reservation failure tests**
+- [x] **Step 3: Strengthen existing success and post-reservation failure tests**
 
 In both `test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservation` and `test_orchestrator_path_commits_reserved_units_after_execute_failure`, install a fresh `_RecordingGauge`:
 
@@ -810,7 +810,7 @@ After the response:
     )
 ```
 
-- [ ] **Step 4: Add successful zero-token reserved-unit fallback**
+- [x] **Step 4: Add successful zero-token reserved-unit fallback**
 
 ```python
 def test_orchestrator_zero_token_success_commits_reserved_unit(client, monkeypatch):
@@ -862,7 +862,7 @@ def test_orchestrator_zero_token_success_commits_reserved_unit(client, monkeypat
     )
 ```
 
-- [ ] **Step 5: Add direct endpoint cancellation cleanup**
+- [x] **Step 5: Add direct endpoint cancellation cleanup**
 
 Call the endpoint coroutine directly so `CancelledError` is observable rather than translated by `TestClient`:
 
@@ -939,7 +939,7 @@ async def test_orchestrator_cancellation_commits_reserved_units_and_decrements_a
     assert active_requests.dec_count == 1
 ```
 
-- [ ] **Step 6: Run endpoint lifecycle characterization**
+- [x] **Step 6: Run endpoint lifecycle characterization**
 
 Run:
 
@@ -953,7 +953,7 @@ python -m pytest \
 
 Expected: 4 passed.
 
-- [ ] **Step 7: Commit endpoint lifecycle characterization**
+- [x] **Step 7: Commit endpoint lifecycle characterization**
 
 ```bash
 git add tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py
