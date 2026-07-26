@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
+    AcquireJobCommand,
     CreateJobCommand,
     LifecycleResult,
     NoTransitionReason,
@@ -131,6 +133,98 @@ def test_lifecycle_result_names_no_transition_reason() -> None:
     assert result.outcome is OperationOutcome.NO_TRANSITION
     assert result.no_transition_reason is NoTransitionReason.STALE_LEASE
     assert result.transition_applied is False
+
+
+def test_acquire_job_command_preserves_all_public_job_facts() -> None:
+    """Verify acquisition commands preserve every caller-provided field."""
+
+    command = AcquireJobCommand(
+        domain="chatbooks",
+        queue="priority",
+        lease_seconds=45,
+        worker_id="worker-1",
+        lease_id="lease-1",
+        owner_user_id="user-1",
+        job_type="export",
+        max_inflight_quota=3,
+        priority_direction="DESC",
+        tie_break="lifo",
+        single_update=True,
+    )
+
+    assert command.domain == "chatbooks"
+    assert command.queue == "priority"
+    assert command.lease_seconds == 45
+    assert command.worker_id == "worker-1"
+    assert command.lease_id == "lease-1"
+    assert command.owner_user_id == "user-1"
+    assert command.job_type == "export"
+    assert command.max_inflight_quota == 3
+    assert command.priority_direction == "DESC"
+    assert command.tie_break == "lifo"
+    assert command.single_update is True
+
+
+def test_acquire_job_command_is_frozen() -> None:
+    """Verify acquisition command fields cannot be reassigned."""
+
+    command = AcquireJobCommand(
+        domain="chatbooks",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-1",
+        lease_id="lease-1",
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        command.queue = "other"
+
+
+def test_acquire_job_command_rejects_invalid_ordering_values() -> None:
+    """Verify acquisition ordering controls accept only documented values."""
+
+    with pytest.raises(ValueError, match="priority_direction must be ASC or DESC"):
+        AcquireJobCommand(
+            domain="chatbooks",
+            queue="default",
+            lease_seconds=30,
+            worker_id="worker-1",
+            lease_id="lease-1",
+            priority_direction="invalid",
+        )
+
+    with pytest.raises(ValueError, match="tie_break must be fifo, lifo, or None"):
+        AcquireJobCommand(
+            domain="chatbooks",
+            queue="default",
+            lease_seconds=30,
+            worker_id="worker-1",
+            lease_id="lease-1",
+            tie_break="invalid",
+        )
+
+
+def test_acquire_job_command_rejects_non_positive_lease_duration() -> None:
+    """Verify acquisition leases must have a positive duration."""
+
+    for lease_seconds in (0, -1):
+        with pytest.raises(ValueError, match="lease_seconds must be positive"):
+            AcquireJobCommand(
+                domain="chatbooks",
+                queue="default",
+                lease_seconds=lease_seconds,
+                worker_id="worker-1",
+                lease_id="lease-1",
+            )
+
+
+def test_lifecycle_result_supports_no_eligible_job_reason() -> None:
+    """Verify acquisition can report that no eligible job was available."""
+
+    result = LifecycleResult.no_transition(NoTransitionReason.NO_ELIGIBLE_JOB)
+
+    assert result.outcome is OperationOutcome.NO_TRANSITION
+    assert result.no_transition_reason is NoTransitionReason.NO_ELIGIBLE_JOB
 
 
 def test_lifecycle_result_rejects_inconsistent_states() -> None:

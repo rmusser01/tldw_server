@@ -30,6 +30,7 @@ class NoTransitionReason(str, Enum):
     ALREADY_TERMINAL = "already_terminal"
     IDEMPOTENT_EXISTING = "idempotent_existing"
     RLS_FILTERED = "rls_filtered"
+    NO_ELIGIBLE_JOB = "no_eligible_job"
 
 
 class AdmissionRejectionReason(str, Enum):
@@ -60,6 +61,31 @@ class CreateJobCommand:
     batch_group: str | None = None
     request_id: str | None = None
     trace_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AcquireJobCommand:
+    """Backend-neutral command payload for acquiring one eligible Jobs row."""
+
+    domain: str
+    queue: str
+    lease_seconds: int
+    worker_id: str
+    lease_id: str
+    owner_user_id: str | None = None
+    job_type: str | None = None
+    max_inflight_quota: int = 0
+    priority_direction: str = "ASC"
+    tie_break: str | None = None
+    single_update: bool = False
+
+    def __post_init__(self) -> None:
+        if self.priority_direction not in {"ASC", "DESC"}:
+            raise ValueError("priority_direction must be ASC or DESC")
+        if self.tie_break not in {None, "fifo", "lifo"}:
+            raise ValueError("tie_break must be fifo, lifo, or None")
+        if self.lease_seconds < 1:
+            raise ValueError("lease_seconds must be positive")
 
 
 @dataclass(frozen=True)
@@ -217,6 +243,7 @@ class LifecycleResult:
 __all__ = [
     "AdmissionRejectionReason",
     "AdmissionResult",
+    "AcquireJobCommand",
     "CreateJobCommand",
     "LifecycleResult",
     "NoTransitionReason",
