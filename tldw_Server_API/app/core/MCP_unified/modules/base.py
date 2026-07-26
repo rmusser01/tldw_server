@@ -509,6 +509,8 @@ class BaseModule(ABC):
             except Exception as exc:
                 raise _CountedModuleOutcome(exc) from None
 
+        original_to_raise: Exception | None = None
+        original_traceback = None
         try:
             result = await self._circuit_breaker.call_async(_breaker_operation)
             latency_ms = (time.time() - start_time) * 1000
@@ -518,18 +520,18 @@ class BaseModule(ABC):
         except (_IgnoredModuleOutcome, _CountedModuleOutcome) as wrapped:
             latency_ms = max(0.0, (time.time() - start_time) * 1000.0)
             self._metrics.record_request(False, latency_ms)
-            original = wrapped.original
+            original_to_raise = wrapped.original
+            original_traceback = original_to_raise.__traceback__
             reason_code = (
-                original.reason_code
-                if isinstance(original, ExpectedToolFailure)
+                original_to_raise.reason_code
+                if isinstance(original_to_raise, ExpectedToolFailure)
                 else "module_operation_failed"
             )
             logger.bind(
                 module_id=self.name,
                 reason_code=reason_code,
-                error_type=original.__class__.__name__,
+                error_type=original_to_raise.__class__.__name__,
             ).error("MCP module operation failed")
-            raise original.with_traceback(original.__traceback__) from None
         except Exception as e:
             if _is_circuit_breaker_open_error(e):
                 raise
@@ -541,6 +543,9 @@ class BaseModule(ABC):
                 error_type=e.__class__.__name__,
             ).error("MCP module operation failed")
             raise
+
+        if original_to_raise is not None:
+            raise original_to_raise.with_traceback(original_traceback)
 
     async def get_tool_def(self, tool_name: str) -> Optional[dict[str, Any]]:
         """Return a single tool definition, using cached tool list if available."""

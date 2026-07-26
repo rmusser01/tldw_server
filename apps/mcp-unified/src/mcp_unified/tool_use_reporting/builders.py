@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import Enum
 from typing import Any
 
 from mcp_unified.tool_use_reporting.models import ToolUseStatus
@@ -48,19 +49,39 @@ def _safe_exception_family(exc: BaseException) -> str:
 def _expected_failure_reason_code(exc: BaseException) -> str | None:
     """Return a sanitized reason for a host-neutral expected-failure shape."""
 
-    reason = getattr(exc, "reason", None)
-    public_message = getattr(exc, "public_message", None)
-    breaker_action = getattr(exc, "breaker_action", None)
-    breaker_action = getattr(breaker_action, "value", breaker_action)
-    if (
-        reason is None
-        or not isinstance(public_message, str)
-        or not public_message
-        or len(public_message) > 200
-        or breaker_action not in {"ignore", "record_failure"}
-    ):
+    try:
+        reason = exc.reason
+        if not isinstance(reason, Enum):
+            return None
+
+        reason_code = exc.reason_code
+        public_message = exc.public_message
+        breaker_action = exc.breaker_action
+        catalog_reason_code = reason.reason_code
+        catalog_public_message = reason.public_message
+        catalog_breaker_action = reason.breaker_action
+        breaker_action_value = getattr(breaker_action, "value", breaker_action)
+        catalog_breaker_action_value = getattr(
+            catalog_breaker_action,
+            "value",
+            catalog_breaker_action,
+        )
+        sanitized_reason_code = sanitize_reason_code(reason_code)
+        if (
+            not isinstance(reason_code, str)
+            or sanitized_reason_code != reason_code
+            or reason_code != catalog_reason_code
+            or not isinstance(public_message, str)
+            or not public_message.strip()
+            or len(public_message) > 200
+            or public_message != catalog_public_message
+            or breaker_action_value not in {"ignore", "record_failure"}
+            or breaker_action_value != catalog_breaker_action_value
+        ):
+            return None
+    except BaseException:  # noqa: BLE001 - hostile shape access must not escape.
         return None
-    return sanitize_reason_code(getattr(exc, "reason_code", None)) or _ERROR_REASON
+    return sanitized_reason_code
 
 
 def classify_tool_use_exception(exc: BaseException) -> tuple[ToolUseStatus, str]:

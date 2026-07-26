@@ -333,6 +333,62 @@ async def test_counted_expected_failure_reopens_half_open_with_backoff(
     assert _current_recovery_timeout(module) == min(before_timeout * 2.0, 4.0)
 
 
+@pytest.mark.parametrize("breaker_kind", ["fallback", "injected"])
+@pytest.mark.parametrize(
+    "reason_name",
+    ["IDEMPOTENCY_IN_PROGRESS", "DEPENDENCY_UNAVAILABLE"],
+)
+@pytest.mark.asyncio
+async def test_expected_failure_preserves_cause_traceback_and_visible_chain(
+    breaker_kind: str,
+    reason_name: str,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    module = _breaker_module(breaker_kind, threshold=3)
+    cause = LookupError("explicit cause")
+    reason = ExpectedToolFailureReason[reason_name]
+    failure = ExpectedToolFailure(reason)
+    failure.__cause__ = cause
+
+    async def fail_with_explicit_cause() -> None:
+        raise failure
+
+    with pytest.raises(ExpectedToolFailure) as exc_info:
+        await module.execute_with_circuit_breaker(fail_with_explicit_cause)
+
+    caught = exc_info.value
+    assert caught is failure
+    assert type(caught) is ExpectedToolFailure
+    assert caught.__cause__ is cause
+
+    traceback_frames: list[str] = []
+    current_traceback = caught.__traceback__
+    while current_traceback is not None:
+        traceback_frames.append(current_traceback.tb_frame.f_code.co_name)
+        current_traceback = current_traceback.tb_next
+    assert "fail_with_explicit_cause" in traceback_frames
+
+    visible_chain: list[BaseException] = []
+    current: BaseException | None = caught
+    while current is not None:
+        visible_chain.append(current)
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif not current.__suppress_context__:
+            current = current.__context__
+        else:
+            current = None
+    assert visible_chain == [failure, cause]
+    assert not {
+        "_IgnoredModuleOutcome",
+        "_CountedModuleOutcome",
+    }.intersection(item.__class__.__name__ for item in visible_chain)
+
+
 class _UnexpectedModuleFailure(Exception):
     pass
 

@@ -1199,23 +1199,62 @@ async def test_protocol_records_idempotency_replay(monkeypatch: pytest.MonkeyPat
 
 
 def test_reporting_classifier_recognizes_expected_failure_shape_without_message_access() -> None:
-    class _ExpectedFailureShape(Exception):
-        reason = object()
-        reason_code = "idempotency_unavailable"
-        public_message = "SENTINEL_CLASSIFIER_SECRET"
-        breaker_action = "ignore"
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
 
-        def __str__(self) -> str:
-            raise AssertionError("classifier must not render expected failure text")
+    failure = ExpectedToolFailure(
+        ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    )
 
-    class _UnsafeReasonShape(_ExpectedFailureShape):
-        reason_code = "unsafe/reason/SENTINEL_CLASSIFIER_SECRET"
-
-    assert classify_tool_use_exception(_ExpectedFailureShape()) == (
+    assert classify_tool_use_exception(failure) == (
         "error",
         "idempotency_unavailable",
     )
-    assert classify_tool_use_exception(_UnsafeReasonShape()) == ("error", "unknown")
+
+
+def test_reporting_classifier_ignores_throwing_expected_failure_descriptor() -> None:
+    class _ThrowingExpectedFailureShape(LookupError):
+        @property
+        def reason(self) -> object:
+            raise LookupError("SENTINEL_CLASSIFIER_SECRET")
+
+        def __str__(self) -> str:
+            raise AssertionError("classifier must not render exception text")
+
+    assert classify_tool_use_exception(_ThrowingExpectedFailureShape()) == (
+        "unavailable",
+        "tool_unavailable",
+    )
+
+
+def test_reporting_classifier_rejects_spoofed_and_mismatched_expected_shapes() -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailureReason,
+    )
+
+    class _SpoofedExpectedFailureShape(LookupError):
+        reason = object()
+        reason_code = "idempotency_unavailable"
+        public_message = "Idempotent execution is temporarily unavailable."
+        breaker_action = "ignore"
+
+        def __str__(self) -> str:
+            raise AssertionError("classifier must not render exception text")
+
+    class _MismatchedExpectedFailureShape(LookupError):
+        reason = ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+        reason_code = "dependency_unavailable"
+        public_message = reason.public_message
+        breaker_action = reason.breaker_action
+
+        def __str__(self) -> str:
+            raise AssertionError("classifier must not render exception text")
+
+    expected_fallback = ("unavailable", "tool_unavailable")
+    assert classify_tool_use_exception(_SpoofedExpectedFailureShape()) == expected_fallback
+    assert classify_tool_use_exception(_MismatchedExpectedFailureShape()) == expected_fallback
 
 
 @pytest.mark.parametrize("cache_backend", ["local", "redis"])
