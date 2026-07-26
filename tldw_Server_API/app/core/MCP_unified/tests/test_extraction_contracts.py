@@ -1014,6 +1014,25 @@ def test_protocol_reexports_tool_execution_shared_symbols() -> None:
     assert hints["module"] is BaseModule
 
 
+def test_idempotency_manager_is_extracted_with_protocol_compatibility() -> None:
+    from tldw_Server_API.app.core.MCP_unified import protocol
+
+    protocol_tree = ast.parse(
+        (MCP_ROOT / "protocol.py").read_text(encoding="utf-8"),
+        filename=str(MCP_ROOT / "protocol.py"),
+    )
+    protocol_classes = {
+        node.name for node in protocol_tree.body if isinstance(node, ast.ClassDef)
+    }
+
+    assert "IdempotencyManager" not in protocol_classes
+
+    from tldw_Server_API.app.core.MCP_unified.tool_execution import IdempotencyManager, idempotency
+
+    assert protocol.IdempotencyManager is IdempotencyManager
+    assert inspect.getmodule(protocol.IdempotencyManager) is idempotency
+
+
 def test_tool_execution_package_does_not_import_protocol_facade() -> None:
     package_dir = MCP_ROOT / "tool_execution"
     assert package_dir.is_dir()

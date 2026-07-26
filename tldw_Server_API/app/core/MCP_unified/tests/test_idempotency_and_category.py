@@ -465,7 +465,7 @@ async def test_idempotency_local_lock_map_prunes_with_cache_bounds() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
+    from tldw_Server_API.app.core.MCP_unified.tool_execution import idempotency as idempotency_mod
 
     class _Config:
         """Config double that advertises Redis connection settings."""
@@ -484,8 +484,8 @@ async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch: py
         """Record warnings emitted by the protocol logger."""
         warnings.append((message, args, kwargs))
 
-    monkeypatch.setattr(protocol_mod, "get_config", lambda: _Config())
-    monkeypatch.setattr(protocol_mod.logger, "warning", _record_warning)
+    monkeypatch.setattr(idempotency_mod, "get_config", lambda: _Config())
+    monkeypatch.setattr(idempotency_mod.logger, "warning", _record_warning)
 
     manager = IdempotencyManager(redis_client_factory=_none_factory)
 
