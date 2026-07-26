@@ -4,7 +4,7 @@ title: Prepare and cut the 0.1.42 release from current dev
 status: In Progress
 assignee: []
 created_date: '2026-07-26 13:05'
-updated_date: '2026-07-26 13:35'
+updated_date: '2026-07-26 13:37'
 labels:
   - release
   - operations
@@ -14,6 +14,7 @@ references:
   - Docs/Development/Release_Process.md
   - Docs/Release_Checklist.md
   - TASK-12986
+  - 'https://github.com/rmusser01/tldw_server/pull/2761'
 priority: high
 ---
 
@@ -44,6 +45,8 @@ Prepare a normal patch release by integrating current origin/main into current o
 Branch integration completed at merge commit 2e63d09aa0. Frozen inputs were origin/dev=0f3983788c413e0d17ffe7eabe8cff4a9f6ae723 and origin/main=d9c245ac14c40df855d1ab6cd19b3c137b16b47b. The merge preview and real merge produced five conflicts, all in the license bootstrap/actionlint surfaces. Each was resolved to the newer origin/dev version because dev contains the completed live rollout plus subsequent TASK-12986 hardening; the resolved files are byte-for-byte identical to origin/dev. The merge commit therefore changes ancestry only and retains all current dev content.
 
 Focused local release verification on merge head 2e63d09aa0 passed: 211 pytest tests across the release helper, required workflow contracts, license-first workflow/admission contracts, trusted frontend license workflow/classifier, and release workflow contracts (2 pre-existing warnings). Pinned Actionlint 1.7.12 reported no findings across all workflows. Bandit scanned 363 LOC in Helper_Scripts/ci/check_frontend_license_gate.py and Helper_Scripts/ci/license_first_admission.py with errors=[] and results=[]. Both origin/dev and origin/main are ancestors of the merge head; git diff --check is clean. No production runtime file was changed by conflict resolution, so broader release security coverage is delegated to the security-required PR gate.
+
+Release PR #2761 opened as a draft against main from exact head a9818a21f8b5bb100d4899e60b86728ca48e5590. Its Change summary section intentionally contains only a requester placeholder; the repository policy requires Robert to replace it in his own words before the PR can be marked ready or merged.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
