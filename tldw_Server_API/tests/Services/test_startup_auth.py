@@ -227,6 +227,45 @@ async def test_pg_ensure_false_emits_high_signal_warning(
 
 
 @pytest.mark.asyncio
+async def test_pg_authnz_core_readiness_failure_blocks_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _successful_ensure(_pool: object) -> bool:
+        return True
+
+    async def _profile_version_not_ready(_pool: object) -> bool:
+        raise RuntimeError("AuthNZ profile_version readiness validation failed")
+
+    pg_ensures = {
+        "ensure_user_timestamp_timezones_pg": _successful_ensure,
+        "ensure_authnz_core_tables_pg": _profile_version_not_ready,
+        "ensure_notification_permissions_pg": _successful_ensure,
+        "ensure_generated_files_table_pg": _successful_ensure,
+        "ensure_tool_catalogs_tables_pg": _successful_ensure,
+        "ensure_privilege_snapshots_table_pg": _successful_ensure,
+        "ensure_api_keys_tables_pg": _successful_ensure,
+        "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_virtual_key_counters_pg": _successful_ensure,
+        "ensure_llm_provider_overrides_pg": _successful_ensure,
+    }
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
+        **pg_ensures,
+    )
+    startup_auth = _import_startup_auth()
+
+    with pytest.raises(
+        startup_auth.AuthStartupError,
+        match="AUTHNZ_CORE_SCHEMA_NOT_READY",
+    ) as exc_info:
+        await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "profile_version" in str(exc_info.value.__cause__)
+
+
+@pytest.mark.asyncio
 async def test_init_auth_services_raises_auth_startup_error_when_db_pool_init_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -274,38 +313,23 @@ async def test_init_auth_services_raises_auth_startup_error_when_db_pool_is_miss
 
 
 @pytest.mark.asyncio
-async def test_init_auth_services_warns_when_schema_ensure_is_skipped(
+async def test_init_auth_services_aborts_when_schema_readiness_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_pool = SimpleNamespace()
+    calls: list[str] = []
+    readiness_failure = RuntimeError("profile_version readiness failed")
 
     async def _fake_get_db_pool():
+        calls.append("get_db_pool")
         return db_pool
 
     async def _failing_ensure_schema():
-        raise RuntimeError("migration unavailable")
+        calls.append("ensure_schema")
+        raise readiness_failure
 
-    async def _fake_noop():
-        return None
-
-    async def _fake_refresh(_pool):
-        return None
-
-    class _FakeLogger:
-        def __init__(self) -> None:
-            self.warnings: list[str] = []
-
-        def info(self, _message: str) -> None:
-            pass
-
-        def error(self, _message: str) -> None:
-            pass
-
-        def debug(self, _message: str) -> None:
-            pass
-
-        def warning(self, message: str) -> None:
-            self.warnings.append(message)
+    async def _unexpected_pg_extras(_pool: object) -> None:
+        calls.append("pg_extras")
 
     _install_module(
         monkeypatch,
@@ -316,28 +340,19 @@ async def test_init_auth_services_warns_when_schema_ensure_is_skipped(
         monkeypatch,
         "tldw_Server_API.app.core.AuthNZ.initialize",
         ensure_authnz_schema_ready_once=_failing_ensure_schema,
-        ensure_single_user_rbac_seed_if_needed=_fake_noop,
-    )
-    _install_module(
-        monkeypatch,
-        "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
-        refresh_llm_provider_overrides=_fake_refresh,
-        start_llm_provider_override_refresh_service=(
-            _noop_start_llm_provider_override_refresh_service
-        ),
-        set_llm_provider_overrides_cache_for_tests=_noop_reset_llm_provider_overrides_cache,
     )
 
     startup_auth = _import_startup_auth()
-    fake_logger = _FakeLogger()
-    monkeypatch.setattr(startup_auth, "logger", fake_logger)
+    monkeypatch.setattr(startup_auth, "_ensure_pg_extras", _unexpected_pg_extras)
 
-    result = await startup_auth.init_auth_services()
+    with pytest.raises(
+        startup_auth.AuthStartupError,
+        match="AUTHNZ_SCHEMA_NOT_READY",
+    ) as exc_info:
+        await startup_auth.init_auth_services()
 
-    assert result is db_pool
-    assert fake_logger.warnings == [
-        "App Startup: Skipped AuthNZ SQLite migration ensure: migration unavailable"
-    ]
+    assert exc_info.value.__cause__ is readiness_failure
+    assert calls == ["get_db_pool", "ensure_schema"]
 
 
 @pytest.mark.asyncio

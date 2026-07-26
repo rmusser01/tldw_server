@@ -2763,6 +2763,149 @@ async def ensure_user_timestamp_timezones_pg(pool: DatabasePool | None = None) -
         return False
 
 
+_USER_PROFILE_VERSION_MIGRATION_LOCK_KEY = 0x544C44575F505631
+
+
+async def ensure_user_profile_version_pg(pool: DatabasePool | None = None) -> bool:
+    """Transactionally add, backfill, and verify users.profile_version."""
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
+        return False
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.fetchval(
+                "SELECT pg_advisory_xact_lock($1)",
+                _USER_PROFILE_VERSION_MIGRATION_LOCK_KEY,
+            )
+            users_exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'users'
+                )
+                """
+            )
+            if not users_exists:
+                raise RuntimeError(
+                    "AuthNZ profile_version migration requires the users table"
+                )
+
+            profile_metadata = await conn.fetchrow(
+                """
+                SELECT data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'users'
+                  AND column_name = 'profile_version'
+                """
+            )
+            profile_column_existed = profile_metadata is not None
+            if not profile_column_existed:
+                await conn.execute(
+                    "ALTER TABLE users ADD COLUMN profile_version TIMESTAMPTZ"
+                )
+
+            updated_at_type = await conn.fetchval(
+                """
+                SELECT data_type
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'users'
+                  AND column_name = 'updated_at'
+                """
+            )
+            if updated_at_type == "timestamp without time zone":
+                await conn.execute(
+                    """
+                    ALTER TABLE users
+                    ALTER COLUMN updated_at TYPE TIMESTAMPTZ
+                    USING updated_at AT TIME ZONE 'UTC'
+                    """
+                )
+            elif updated_at_type != "timestamp with time zone":
+                raise RuntimeError(
+                    "AuthNZ profile_version migration found an invalid updated_at type"
+                )
+
+            if profile_column_existed:
+                profile_type = str(profile_metadata["data_type"])
+                if profile_type == "timestamp without time zone":
+                    await conn.execute(
+                        """
+                        ALTER TABLE users
+                        ALTER COLUMN profile_version TYPE TIMESTAMPTZ
+                        USING profile_version AT TIME ZONE 'UTC'
+                        """
+                    )
+                elif profile_type != "timestamp with time zone":
+                    raise RuntimeError(
+                        "AuthNZ profile_version migration found an invalid column type"
+                    )
+                invalid_count = int(
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM users WHERE profile_version IS NULL"
+                    )
+                )
+                if invalid_count:
+                    raise RuntimeError(
+                        "AuthNZ profile_version readiness validation failed"
+                    )
+            else:
+                invalid_source_count = int(
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM users WHERE updated_at IS NULL"
+                    )
+                )
+                if invalid_source_count:
+                    raise RuntimeError(
+                        "AuthNZ profile_version migration found null updated_at values"
+                    )
+                await conn.execute(
+                    "UPDATE users SET profile_version = updated_at"
+                )
+
+            invalid_count = int(
+                await conn.fetchval(
+                    "SELECT COUNT(*) FROM users WHERE profile_version IS NULL"
+                )
+            )
+            if invalid_count:
+                raise RuntimeError(
+                    "AuthNZ profile_version readiness validation failed"
+                )
+
+            await conn.execute(
+                """
+                ALTER TABLE users
+                ALTER COLUMN profile_version SET DEFAULT CURRENT_TIMESTAMP,
+                ALTER COLUMN profile_version SET NOT NULL
+                """
+            )
+            ready = await conn.fetchrow(
+                """
+                SELECT data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'users'
+                  AND column_name = 'profile_version'
+                """
+            )
+            if (
+                ready is None
+                or ready["data_type"] != "timestamp with time zone"
+                or ready["is_nullable"] != "NO"
+            ):
+                raise RuntimeError(
+                    "AuthNZ profile_version readiness validation failed"
+                )
+
+    logger.info("Ensured PostgreSQL users.profile_version anchor")
+    return True
+
+
 async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure core AuthNZ tables exist for PostgreSQL backends.
 
@@ -2771,24 +2914,28 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
     intended as a bootstrap guardrail for Postgres deployments that have
     not yet run dedicated migrations for these tables.
     """
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
+        return False
     try:
-        db_pool = pool or await get_db_pool()
-        if getattr(db_pool, "pool", None) is None:
-            return False
         for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
             try:
                 await db_pool.execute(sql, *params)
             except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"PG ensure authnz core tables DDL failed: {exc}")
         await ensure_mcp_prompt_read_permission_pg(db_pool)
-        logger.info(
-            "Ensured PostgreSQL AuthNZ core tables "
-            "(audit_logs, sessions, registration_codes, RBAC, orgs/teams)"
-        )
-        return True
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL AuthNZ core tables: {exc}")
         return False
+
+    if not await ensure_user_profile_version_pg(db_pool):
+        return False
+
+    logger.info(
+        "Ensured PostgreSQL AuthNZ core tables "
+        "(audit_logs, sessions, registration_codes, RBAC, orgs/teams)"
+    )
+    return True
 
 
 def _parse_json_payload_pg(raw: Any) -> dict[str, Any]:

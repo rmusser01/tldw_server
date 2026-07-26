@@ -7,7 +7,6 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.AuthNZ.migrations import get_authnz_migrations
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -73,7 +72,10 @@ def _seed_current_sqlite_db_with_legacy_scope_default(db_path) -> None:  # noqa:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                profile_version TEXT NOT NULL DEFAULT (
+                    STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now')
+                )
             )
             """
         )

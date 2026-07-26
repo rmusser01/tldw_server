@@ -660,20 +660,17 @@ async def ensure_authnz_schema_ready_once() -> None:
 
             db_fs_path = getattr(pool, '_sqlite_fs_path', None) or getattr(pool, 'db_path', None)
             key = str(db_fs_path or '')
-            if key in _SCHEMA_ENSURED_KEYS:
-                return
-            if db_fs_path and str(db_fs_path) != ':memory:':
-                try:
-                    await asyncio.to_thread(ensure_authnz_tables, Path(str(db_fs_path)))
-                    logger.info(f"AuthNZ Startup: ensured SQLite schema at {db_fs_path}")
-                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as mig_err:
-                    logger.debug(f"AuthNZ Startup: ensure_authnz_tables skipped/failed: {mig_err}")
-            _SCHEMA_ENSURED_KEYS.add(key)
         except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
-            # Do not raise during startup; log for diagnostics
-            logger.debug(f"AuthNZ Startup: schema ensure encountered error: {e}")
+            logger.debug(f"AuthNZ Startup: schema target inspection failed/skipped: {e}")
+            return
+
+        if key in _SCHEMA_ENSURED_KEYS:
+            return
+        if db_fs_path and str(db_fs_path) != ':memory:':
+            await asyncio.to_thread(ensure_authnz_tables, Path(str(db_fs_path)))
             with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
-                _SCHEMA_ENSURED_KEYS.add(str(getattr(pool, '_sqlite_fs_path', '') or getattr(pool, 'db_path', '') or ''))
+                logger.info(f"AuthNZ Startup: ensured SQLite schema at {db_fs_path}")
+        _SCHEMA_ENSURED_KEYS.add(key)
 
 
 async def ensure_single_user_rbac_seed_if_needed() -> None:
