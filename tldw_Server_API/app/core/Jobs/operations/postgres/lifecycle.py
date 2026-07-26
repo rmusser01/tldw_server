@@ -32,6 +32,25 @@ _COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
     *_PG_ERRORS,
 )
 
+_ORDER_CLAUSES = {
+    ("ASC", "ASC"): (
+        " ORDER BY priority ASC, COALESCE(available_at, created_at) ASC, "
+        "id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
+    ),
+    ("ASC", "DESC"): (
+        " ORDER BY priority ASC, COALESCE(available_at, created_at) DESC, "
+        "id DESC LIMIT 1 FOR UPDATE SKIP LOCKED"
+    ),
+    ("DESC", "ASC"): (
+        " ORDER BY priority DESC, COALESCE(available_at, created_at) ASC, "
+        "id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
+    ),
+    ("DESC", "DESC"): (
+        " ORDER BY priority DESC, COALESCE(available_at, created_at) DESC, "
+        "id DESC LIMIT 1 FOR UPDATE SKIP LOCKED"
+    ),
+}
+
 
 def _pg_advisory_key(*parts: str) -> int:
     """Match the legacy advisory key used by deployed workers."""
@@ -71,11 +90,7 @@ def _dependency_condition() -> str:
 
 def _order_clause(command: AcquireJobCommand) -> str:
     tie_direction = "DESC" if command.tie_break == "lifo" else "ASC"
-    return (
-        f" ORDER BY priority {command.priority_direction}, "
-        f"COALESCE(available_at, created_at) {tie_direction}, "
-        f"id {tie_direction} LIMIT 1 FOR UPDATE SKIP LOCKED"
-    )
+    return _ORDER_CLAUSES[(command.priority_direction, tie_direction)]
 
 
 def _candidate_sql(command: AcquireJobCommand) -> tuple[str, list[Any]]:
@@ -100,7 +115,8 @@ def _single_update_acquire(cur: Any, *, command: AcquireJobCommand) -> dict[str,
     sql = "".join(
         [
             "WITH picked AS (",
-            f"  {candidate_sql}",
+            "  ",
+            candidate_sql,
             ") ",
             "UPDATE jobs SET status='processing', "
             "retry_count = CASE WHEN status='processing' THEN retry_count + 1 ELSE retry_count END, "

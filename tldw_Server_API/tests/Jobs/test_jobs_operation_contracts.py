@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import io
+import tokenize
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -285,6 +287,64 @@ def test_lifecycle_result_copies_mutable_facts() -> None:
 
     assert result.row == {"id": 1, "status": "processing", "result": {"ok": True}}
     assert result.durable_events == ({"event_type": "job.completed", "attrs": {"attempt": 1}},)
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_acquire_sql_does_not_interpolate_query_fragments(backend: str) -> None:
+    """Verify acquisition SQL uses fixed fragments for ordering and candidate queries."""
+
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "tldw_Server_API/app/core/Jobs/operations"
+        / backend
+        / "lifecycle.py"
+    )
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    formatted: list[tuple[int, str]] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            expressions = [value.value for value in node.values if isinstance(value, ast.FormattedValue)]
+            lease_parameter_only = expressions and all(
+                isinstance(expression, ast.Attribute)
+                and isinstance(expression.value, ast.Name)
+                and expression.value.id == "command"
+                and expression.attr == "lease_seconds"
+                for expression in expressions
+            )
+            if not lease_parameter_only:
+                formatted.append((node.lineno, "f-string"))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"format", "format_map"}
+        ):
+            formatted.append((node.lineno, node.func.attr))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+            formatted.append((node.lineno, "percent-format"))
+
+    assert formatted == []
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_acquire_sql_has_no_bandit_query_suppressions(backend: str) -> None:
+    """Verify acquisition SQL does not rely on Bandit query suppressions."""
+
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "tldw_Server_API/app/core/Jobs/operations"
+        / backend
+        / "lifecycle.py"
+    )
+
+    source = path.read_text(encoding="utf-8")
+    comments = [
+        token.string
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT and "nosec" in token.string.casefold()
+    ]
+
+    assert comments == []
 
 
 def test_operation_contracts_do_not_import_job_manager() -> None:

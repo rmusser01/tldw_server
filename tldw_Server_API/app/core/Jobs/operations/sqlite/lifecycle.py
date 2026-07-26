@@ -12,6 +12,21 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     NoTransitionReason,
 )
 
+_ORDER_CLAUSES = {
+    ("ASC", "ASC"): (
+        " ORDER BY priority ASC, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1"
+    ),
+    ("ASC", "DESC"): (
+        " ORDER BY priority ASC, COALESCE(available_at, created_at) DESC, id DESC LIMIT 1"
+    ),
+    ("DESC", "ASC"): (
+        " ORDER BY priority DESC, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1"
+    ),
+    ("DESC", "DESC"): (
+        " ORDER BY priority DESC, COALESCE(available_at, created_at) DESC, id DESC LIMIT 1"
+    ),
+}
+
 
 def _sqlite_timestamp(value: datetime) -> str:
     """Return the UTC timestamp representation used by the Jobs table."""
@@ -70,10 +85,7 @@ def _candidate_sql(
         scheduled_sql += " LIMIT 1"
         tie_direction = "ASC" if conn.execute(scheduled_sql, scheduled_params).fetchone() else "DESC"
 
-    sql += (
-        f" ORDER BY priority {command.priority_direction}, "  # nosec B608
-        f"COALESCE(available_at, created_at) {tie_direction}, id {tie_direction} LIMIT 1"
-    )
+    sql += _ORDER_CLAUSES[(command.priority_direction, tie_direction)]
     return sql, params
 
 
@@ -128,13 +140,17 @@ def acquire_job(
         candidate_sql, candidate_params = _candidate_sql(conn, command=command, now_sql=now_sql)
         job_id: int | None = None
         if command.single_update:
-            update_sql = (
-                "UPDATE jobs SET status='processing', "  # nosec B608
-                "retry_count = CASE WHEN status='processing' THEN retry_count + 1 ELSE retry_count END, "
-                "started_at = COALESCE(started_at, DATETIME(?)), "
-                "acquired_at = COALESCE(acquired_at, DATETIME(?)), "
-                "leased_until = DATETIME(?, ?), worker_id = ?, lease_id = ?, completion_token = NULL "
-                f"WHERE id IN ({candidate_sql})"
+            update_sql = "".join(
+                [
+                    "UPDATE jobs SET status='processing', ",
+                    "retry_count = CASE WHEN status='processing' THEN retry_count + 1 ELSE retry_count END, ",
+                    "started_at = COALESCE(started_at, DATETIME(?)), ",
+                    "acquired_at = COALESCE(acquired_at, DATETIME(?)), ",
+                    "leased_until = DATETIME(?, ?), worker_id = ?, lease_id = ?, completion_token = NULL ",
+                    "WHERE id IN (",
+                    candidate_sql,
+                    ")",
+                ]
             )
             changed = conn.execute(
                 update_sql,
