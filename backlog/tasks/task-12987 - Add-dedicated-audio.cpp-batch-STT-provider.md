@@ -4,7 +4,7 @@ title: Add dedicated audio.cpp batch STT provider
 status: In Progress
 assignee: []
 created_date: '2026-07-26 03:27'
-updated_date: '2026-07-26 08:53'
+updated_date: '2026-07-26 13:11'
 labels:
   - stt
   - benchmark
@@ -66,6 +66,8 @@ Task 5 started at clean HEAD 15e1be89f5. Scope: register AudioCppAdapter and enf
 Task 5 implementation pass ready for independent spec/quality review. Corrected initial RED: 290 selected tests produced 26 expected failures and 264 characterization passes from missing enum/adapter/registration/selector/reset behavior. Additional self-review RED/GREEN: exact runtime snapshot enforcement failed 1 of 2 then passed 2/2; invalid prefixed selectors demonstrated 3/3 fallback failures then passed 3/3 after moving audio.cpp resolution outside the legacy Whisper fallback boundary. Final GREEN: 504/504 across test_audio_cpp_stt.py, test_stt_provider_adapter.py, and test_stt_execution_plan_network.py. Implementation registers canonical audio-cpp plus audiocpp/audio_cpp aliases, network-free neutral-v1 planning, exact six-key metadata opt-in, frozen origin/model/timeout/transport, unresolved no-download routes, config-free planned execution, ordinary selector normalization, strict fail-closed resolution, and registry cache reset. The required network regression exposed one pre-existing VibeVoice test helper that had not accepted Task 1's metadata_allowlist keyword; the minimal two-line test-only compatibility update is included in test_stt_execution_plan_network.py. Verification: Ruff check clean on all touched Python files; compileall and git diff --check clean; scoped Bandit JSON reports 0 errors and 0 findings. Whole-file Ruff format check remains a pre-existing baseline on the same files (confirmed against HEAD), so no unrelated mechanical rewrite was performed. Self-review found no raw origin serialization, secret fields, network I/O during planning, config reread during planned execution, fallback/retry/download path, or selector collision remaining.
 
 Task 5 independent quality review fix: verified case-insensitive provider routing exposed a case-sensitive normalize_audio_cpp_model boundary in no-plan execution. TDD RED: focused selector/no-plan suite had 9 expected uppercase canonical/alias failures and 10 lowercase/control passes. Minimal fix lowercases only the selector comparison while preserving the exact server model suffix. GREEN: focused 19/19; exact Task 5 three-file regression 513/513. Quality gates: Ruff clean, compileall clean, git diff --check clean, scoped Bandit 0 errors/0 findings. Separate follow-up commit pending.
+
+Task 5 test-quality follow-up: made selector normalization cases explicit input/expected pairs. Added mixed-case suffix preservation coverage (AUDIO-CPP:Whisper-Small -> Whisper-Small) through normalize_audio_cpp_model and ordinary/no-plan AudioCppAdapter.transcribe_batch, plus uppercase exact AUDIO-CPP/AUDIOCPP/AUDIO_CPP selectors resolving to configured Default-Model through transcribe_batch. No production changes were needed. Verification: focused selector suite 24/24; exact three-file Task 5 regression 518/518; Ruff and git diff --check clean. Bandit not rerun because this follow-up changes tests and Backlog evidence only.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

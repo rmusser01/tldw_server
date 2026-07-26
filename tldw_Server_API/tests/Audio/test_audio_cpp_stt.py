@@ -574,25 +574,27 @@ def test_audio_cpp_config_allows_empty_default_model_until_requested(
 
 
 @pytest.mark.parametrize(
-    "selector",
+    ("selector", "expected_model"),
     [
-        "audio-cpp:whisper-small",
-        "audiocpp:whisper-small",
-        "audio_cpp:whisper-small",
-        "AUDIO-CPP:whisper-small",
-        "AUDIOCPP:whisper-small",
-        "AUDIO_CPP:whisper-small",
+        ("audio-cpp:whisper-small", "whisper-small"),
+        ("audiocpp:whisper-small", "whisper-small"),
+        ("audio_cpp:whisper-small", "whisper-small"),
+        ("AUDIO-CPP:whisper-small", "whisper-small"),
+        ("AUDIOCPP:whisper-small", "whisper-small"),
+        ("AUDIO_CPP:whisper-small", "whisper-small"),
+        ("AUDIO-CPP:Whisper-Small", "Whisper-Small"),
     ],
 )
 def test_audio_cpp_selector_prefixes_strip_to_exact_server_model(
     selector: str,
+    expected_model: str,
 ) -> None:
     assert (
         audio_cpp.normalize_audio_cpp_model(
             selector,
             default_model="configured-model",
         )
-        == "whisper-small"
+        == expected_model
     )
 
 

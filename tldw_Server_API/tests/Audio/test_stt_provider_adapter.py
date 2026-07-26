@@ -2611,20 +2611,26 @@ def test_audio_cpp_planned_execution_uses_frozen_config_and_exact_metadata(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "selector",
+    ("model", "default_model", "expected_model"),
     (
-        "audio-cpp",
-        "audiocpp",
-        "audio_cpp",
-        "AUDIO-CPP",
-        "AUDIOCPP",
-        "AUDIO_CPP",
+        ("audio-cpp:whisper-small", "unused-default", "whisper-small"),
+        ("audiocpp:whisper-small", "unused-default", "whisper-small"),
+        ("audio_cpp:whisper-small", "unused-default", "whisper-small"),
+        ("AUDIO-CPP:whisper-small", "unused-default", "whisper-small"),
+        ("AUDIOCPP:whisper-small", "unused-default", "whisper-small"),
+        ("AUDIO_CPP:whisper-small", "unused-default", "whisper-small"),
+        ("AUDIO-CPP:Whisper-Small", "unused-default", "Whisper-Small"),
+        ("AUDIO-CPP", "Default-Model", "Default-Model"),
+        ("AUDIOCPP", "Default-Model", "Default-Model"),
+        ("AUDIO_CPP", "Default-Model", "Default-Model"),
     ),
 )
 def test_audio_cpp_unplanned_batch_normalizes_ordinary_selector(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    selector: str,
+    model: str,
+    default_model: str,
+    expected_model: str,
 ) -> None:
     spa = _import_module()
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
@@ -2635,7 +2641,7 @@ def test_audio_cpp_unplanned_batch_normalizes_ordinary_selector(
     monkeypatch.setattr(
         spa,
         "get_stt_config",
-        lambda: _audio_cpp_enabled_settings(),
+        lambda: _audio_cpp_enabled_settings(default_model=default_model),
     )
     captured: dict[str, object] = {}
 
@@ -2667,13 +2673,13 @@ def test_audio_cpp_unplanned_batch_normalizes_ordinary_selector(
 
     artifact = spa.AudioCppAdapter().transcribe_batch(
         "not-opened.wav",
-        model=f"{selector}:whisper-small",
+        model=model,
         language="en",
         base_dir=tmp_path,
     )
 
-    assert captured["model_id"] == "whisper-small"
-    assert artifact["actual_execution"]["model_label"] == "whisper-small"
+    assert captured["model_id"] == expected_model
+    assert artifact["actual_execution"]["model_label"] == expected_model
 
 
 @pytest.mark.unit
