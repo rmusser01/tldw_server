@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import ast
+import io
+import tokenize
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
     CreateJobCommand,
@@ -133,6 +137,112 @@ def test_lifecycle_result_names_no_transition_reason() -> None:
     assert result.transition_applied is False
 
 
+def test_acquire_job_command_preserves_all_public_job_facts() -> None:
+    """Verify acquisition commands preserve every caller-provided field."""
+
+    command = AcquireJobCommand(
+        domain="chatbooks",
+        queue="priority",
+        lease_seconds=45,
+        worker_id="worker-1",
+        lease_id="lease-1",
+        owner_user_id="user-1",
+        job_type="export",
+        max_inflight_quota=3,
+        priority_direction="DESC",
+        tie_break="lifo",
+        single_update=True,
+    )
+
+    assert command.domain == "chatbooks"
+    assert command.queue == "priority"
+    assert command.lease_seconds == 45
+    assert command.worker_id == "worker-1"
+    assert command.lease_id == "lease-1"
+    assert command.owner_user_id == "user-1"
+    assert command.job_type == "export"
+    assert command.max_inflight_quota == 3
+    assert command.priority_direction == "DESC"
+    assert command.tie_break == "lifo"
+    assert command.single_update is True
+
+
+def test_acquire_job_command_is_frozen() -> None:
+    """Verify acquisition command fields cannot be reassigned."""
+
+    command = AcquireJobCommand(
+        domain="chatbooks",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-1",
+        lease_id="lease-1",
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        command.queue = "other"
+
+
+def test_acquire_job_command_defaults_to_backend_ordering() -> None:
+    """Verify omitted tie-breaking delegates ordering to the backend default."""
+
+    command = AcquireJobCommand(
+        domain="chatbooks",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-1",
+        lease_id="lease-1",
+    )
+
+    assert command.tie_break is None
+
+
+def test_acquire_job_command_rejects_invalid_ordering_values() -> None:
+    """Verify acquisition ordering controls accept only documented values."""
+
+    with pytest.raises(ValueError, match="priority_direction must be ASC or DESC"):
+        AcquireJobCommand(
+            domain="chatbooks",
+            queue="default",
+            lease_seconds=30,
+            worker_id="worker-1",
+            lease_id="lease-1",
+            priority_direction="invalid",
+        )
+
+    with pytest.raises(ValueError, match="tie_break must be fifo, lifo, or None"):
+        AcquireJobCommand(
+            domain="chatbooks",
+            queue="default",
+            lease_seconds=30,
+            worker_id="worker-1",
+            lease_id="lease-1",
+            tie_break="invalid",
+        )
+
+
+def test_acquire_job_command_rejects_non_positive_lease_duration() -> None:
+    """Verify acquisition leases must have a positive duration."""
+
+    for lease_seconds in (0, -1):
+        with pytest.raises(ValueError, match="lease_seconds must be positive"):
+            AcquireJobCommand(
+                domain="chatbooks",
+                queue="default",
+                lease_seconds=lease_seconds,
+                worker_id="worker-1",
+                lease_id="lease-1",
+            )
+
+
+def test_lifecycle_result_supports_no_eligible_job_reason() -> None:
+    """Verify acquisition can report that no eligible job was available."""
+
+    result = LifecycleResult.no_transition(NoTransitionReason.NO_ELIGIBLE_JOB)
+
+    assert result.outcome is OperationOutcome.NO_TRANSITION
+    assert result.no_transition_reason is NoTransitionReason.NO_ELIGIBLE_JOB
+
+
 def test_lifecycle_result_rejects_inconsistent_states() -> None:
     """Verify invalid lifecycle result state combinations are rejected."""
 
@@ -177,6 +287,64 @@ def test_lifecycle_result_copies_mutable_facts() -> None:
 
     assert result.row == {"id": 1, "status": "processing", "result": {"ok": True}}
     assert result.durable_events == ({"event_type": "job.completed", "attrs": {"attempt": 1}},)
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_acquire_sql_does_not_interpolate_query_fragments(backend: str) -> None:
+    """Verify acquisition SQL uses fixed fragments for ordering and candidate queries."""
+
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "tldw_Server_API/app/core/Jobs/operations"
+        / backend
+        / "lifecycle.py"
+    )
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    formatted: list[tuple[int, str]] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            expressions = [value.value for value in node.values if isinstance(value, ast.FormattedValue)]
+            lease_parameter_only = expressions and all(
+                isinstance(expression, ast.Attribute)
+                and isinstance(expression.value, ast.Name)
+                and expression.value.id == "command"
+                and expression.attr == "lease_seconds"
+                for expression in expressions
+            )
+            if not lease_parameter_only:
+                formatted.append((node.lineno, "f-string"))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"format", "format_map"}
+        ):
+            formatted.append((node.lineno, node.func.attr))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+            formatted.append((node.lineno, "percent-format"))
+
+    assert formatted == []
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_acquire_sql_has_no_bandit_query_suppressions(backend: str) -> None:
+    """Verify acquisition SQL does not rely on Bandit query suppressions."""
+
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "tldw_Server_API/app/core/Jobs/operations"
+        / backend
+        / "lifecycle.py"
+    )
+
+    source = path.read_text(encoding="utf-8")
+    comments = [
+        token.string
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT and "nosec" in token.string.casefold()
+    ]
+
+    assert comments == []
 
 
 def test_operation_contracts_do_not_import_job_manager() -> None:
