@@ -1073,16 +1073,26 @@ async def create_transcription(
                                 },
                             ),
                         )
-                    artifact = adapter.transcribe_batch(
-                        canonical_path,
-                        model=model_for_provider,
-                        language=language_for_provider,
-                        task=task_normalized,
-                        word_timestamps=("word" in granularity_tokens),
-                        prompt=prompt,
-                        hotwords=hotwords_norm,
-                        base_dir=base_dir,
-                    )
+                    transcribe_kwargs = {
+                        "model": model_for_provider,
+                        "language": language_for_provider,
+                        "task": task_normalized,
+                        "word_timestamps": ("word" in granularity_tokens),
+                        "prompt": prompt,
+                        "hotwords": hotwords_norm,
+                        "base_dir": base_dir,
+                    }
+                    if provider == "audio-cpp":
+                        artifact = await asyncio.to_thread(
+                            adapter.transcribe_batch,
+                            canonical_path,
+                            **transcribe_kwargs,
+                        )
+                    else:
+                        artifact = adapter.transcribe_batch(
+                            canonical_path,
+                            **transcribe_kwargs,
+                        )
                     detected_language = artifact.get("language")
                     segments_for_timing = artifact.get("segments") or []
                     transcribed_text = artifact.get("text", "")

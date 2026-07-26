@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "repository": "https://github.com/0xShug0/audio.cpp",
+    "commit": "10287cb60e71c12177b6bbbc70726950a9c7e29a",
+    "contract": "audio_cpp_http_v1"
+  },
+  "health": {"status": "ok", "backend": "cpu", "models": 1},
+  "models": {"object": "list", "data": [{"id": "whisper-small", "family": "whisper", "task": "asr", "mode": "offline"}]},
+  "transcription": {"text": "fixture transcript", "timing": {"total_ms": 10}}
+}

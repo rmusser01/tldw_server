@@ -18,6 +18,7 @@
 import importlib.util
 import inspect
 import os
+
 # Used for a fixed, shell-free optional package installer.
 import subprocess  # nosec B404
 import sys
@@ -28,6 +29,12 @@ from typing import Any, Callable, Optional, Union
 
 import numpy as np
 from loguru import logger
+
+from tldw_Server_API.app.core.exceptions import STTExecutionUnsupportedError
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttBatchExecutionPlan,
+    SttExecutionRoute,
+)
 
 # Check if we're on macOS
 IS_MACOS = sys.platform == 'darwin'
@@ -304,7 +311,9 @@ def load_parakeet_mlx_model(
     force_reload: bool = False,
     model_path: Optional[str] = None,
     cache_dir: Optional[str] = None,
-):
+    allow_download: bool = True,
+    execution_route: SttExecutionRoute | None = None,
+) -> Any | None:
     """
     Load the Parakeet MLX model.
 
@@ -315,6 +324,17 @@ def load_parakeet_mlx_model(
         Loaded model instance or None if loading fails
     """
     global _mlx_model_cache
+
+    if execution_route is not None:
+        raise STTExecutionUnsupportedError(
+            "Planned Parakeet MLX execution cannot prove local device and dtype"
+        )
+    if not allow_download:
+        if model_path is None or not Path(model_path).is_dir():
+            raise STTExecutionUnsupportedError(
+                "No-download Parakeet MLX execution requires an existing explicit local artifact"
+            )
+        model_path = str(Path(model_path).resolve())
 
     if not IS_MACOS:
         logger.error("Parakeet MLX is only supported on macOS with Apple Silicon")
@@ -338,11 +358,10 @@ def load_parakeet_mlx_model(
 
     try:
         import parakeet_mlx
-        stt_cfg: dict[str, Any] = {}
         try:
             from tldw_Server_API.app.core.config import get_stt_config
 
-            stt_cfg = get_stt_config() or {}
+            stt_cfg: dict[str, Any] = get_stt_config() or {}
         except Exception:
             stt_cfg = {}
 
@@ -376,6 +395,10 @@ def load_parakeet_mlx_model(
             logger.info(f"Loading model from: {model_id}")
             model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
         except FileNotFoundError:
+            if not allow_download:
+                raise STTExecutionUnsupportedError(
+                    "Planned Parakeet MLX artifact was not available locally"
+                ) from None
             # Model might need to be downloaded first
             logger.info("Model not found locally, downloading from Hugging Face...")
             try:
@@ -393,6 +416,8 @@ def load_parakeet_mlx_model(
 
         return model
 
+    except STTExecutionUnsupportedError:
+        raise
     except ImportError as e:
         logger.exception(f"Failed to import parakeet: {e}")
         logger.info("Try installing manually: pip install git+https://github.com/senstella/parakeet-mlx.git")
@@ -427,6 +452,8 @@ def transcribe_with_parakeet_mlx(
     sentence_max_words: Optional[int] = None,
     sentence_silence_gap: Optional[float] = None,
     sentence_max_duration: Optional[float] = None,
+    execution_plan: SttBatchExecutionPlan | None = None,
+    execution_route: SttExecutionRoute | None = None,
 ) -> Union[str, dict[str, Any]]:
     """
     Transcribe audio using Parakeet MLX model.
@@ -444,9 +471,18 @@ def transcribe_with_parakeet_mlx(
     Returns:
         Transcribed text string
     """
+    if execution_plan is not None or execution_route is not None:
+        raise STTExecutionUnsupportedError(
+            "Planned Parakeet MLX execution cannot prove local device and dtype"
+        )
+
     _ = (language, batch_size)
+
     # Attempt to load the model first (tests may monkeypatch loader)
-    model = load_parakeet_mlx_model(model_path=model_path, cache_dir=cache_dir)
+    model = load_parakeet_mlx_model(
+        model_path=model_path,
+        cache_dir=cache_dir,
+    )
     if model is None:
         # Preserve the original platform check semantics only when loading fails
         if not IS_MACOS:
@@ -502,7 +538,7 @@ def transcribe_with_parakeet_mlx(
         try:
             from tldw_Server_API.app.core.config import get_stt_config
 
-            stt_cfg = get_stt_config() or {}
+            stt_cfg: dict[str, Any] = get_stt_config() or {}
         except Exception:
             stt_cfg = {}
 

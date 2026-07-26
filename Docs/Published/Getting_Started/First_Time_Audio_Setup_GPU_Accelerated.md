@@ -31,6 +31,12 @@ Important current-repo realities:
 - The `/setup` bundle docs may recommend a different first-run STT path for some hardware classes.
 - Stock Docker CPU/default audio works with bundled dependencies, but the stock Docker profile is not a ready-made GPU-accelerated audio path. Host-side config or model edits require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 
+Optional external-server path: if you already operate a separately managed
+audio.cpp `audiocpp_server`, see the
+[audio.cpp benchmark operator workflow](../User_Guides/STT_Benchmark_User_Guide.md#optional-user-managed-audiocpp-server).
+It is not bundled or managed by tldw_server and does not replace the local
+recommendations above.
+
 ## Choose Your Hardware Lane First
 
 ### NVIDIA lane

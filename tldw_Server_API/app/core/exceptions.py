@@ -909,6 +909,14 @@ class STTTranscriptionError(RuntimeError):
     """Raised when an STT backend fails to produce a valid transcription."""
 
 
+class STTExecutionPlanError(BadRequestError):
+    """Raised when a planned STT execution cannot be honored."""
+
+
+class STTExecutionUnsupportedError(STTExecutionPlanError):
+    """Raised when an adapter cannot safely expose the benchmark contract."""
+
+
 class SecurityAlertWebhookError(Exception):
     """Raised when delivery of a security alert to a webhook fails.
 
