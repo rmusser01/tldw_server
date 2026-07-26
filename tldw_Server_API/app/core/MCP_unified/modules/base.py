@@ -17,6 +17,7 @@ from typing import Any, Optional, TypeVar
 from loguru import logger
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 
+from ..execution_outcomes import BreakerAction, ExpectedToolFailure
 from ..tool_observability import ensure_tool_definition_eval_metadata
 
 T = TypeVar("T")
@@ -111,6 +112,27 @@ class ModuleCircuitBreakerConfig:
     success_threshold: int = 1
     category: str = "mcp"
     service: str = ""
+    expected_exception: type | tuple[type[BaseException], ...] = Exception
+
+
+class _IgnoredModuleOutcome(Exception):
+    """Private breaker-neutral wrapper that never renders its original error."""
+
+    __slots__ = ("original",)
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__("ignored_module_outcome")
+
+
+class _CountedModuleOutcome(Exception):
+    """Private breaker-counted wrapper that never renders its original error."""
+
+    __slots__ = ("original",)
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__("counted_module_outcome")
 
 
 def _build_module_circuit_breaker_config(config: ModuleConfig) -> ModuleCircuitBreakerConfig:
@@ -123,6 +145,7 @@ def _build_module_circuit_breaker_config(config: ModuleConfig) -> ModuleCircuitB
         success_threshold=1,
         category="mcp",
         service=config.name,
+        expected_exception=_CountedModuleOutcome,
     )
 
 
@@ -208,8 +231,9 @@ class _DefaultModuleCircuitBreaker:
             self._half_open_in_flight += 1
         try:
             result = await operation()
-        except Exception:
-            self.record_failure()
+        except BaseException as exc:
+            if isinstance(exc, self.config.expected_exception):
+                self.record_failure()
             raise
         finally:
             if half_open_probe:
@@ -329,7 +353,11 @@ class BaseModule(ABC):
                 logger.info(f"Module initialized successfully: {self.name}")
 
             except Exception as e:
-                logger.error(f"Module initialization failed: {self.name} - {str(e)}")
+                logger.bind(
+                    module_id=self.name,
+                    reason_code="module_initialization_failed",
+                    error_type=e.__class__.__name__,
+                ).error("MCP module initialization failed")
                 self._health = ModuleHealth(
                     status=HealthStatus.UNHEALTHY,
                     message="Initialization failed"
@@ -367,7 +395,11 @@ class BaseModule(ABC):
                 logger.info(f"Module shut down successfully: {self.name}")
 
             except Exception as e:
-                logger.error(f"Module shutdown failed: {self.name} - {str(e)}")
+                logger.bind(
+                    module_id=self.name,
+                    reason_code="module_shutdown_failed",
+                    error_type=e.__class__.__name__,
+                ).error("MCP module shutdown failed")
                 # Continue shutdown even if there's an error
 
     def invalidate_capability_caches(self) -> None:
@@ -414,7 +446,11 @@ class BaseModule(ABC):
             )
 
         except Exception as e:
-            logger.error(f"Health check failed for {self.name}: {str(e)}")
+            logger.bind(
+                module_id=self.name,
+                reason_code="module_health_check_failed",
+                error_type=e.__class__.__name__,
+            ).error("MCP module health check failed")
             self._health = ModuleHealth(
                 status=HealthStatus.UNHEALTHY,
                 message="Health check error",
@@ -463,18 +499,47 @@ class BaseModule(ABC):
                     with contextlib.suppress(Exception):
                         self._semaphore.release()
 
+        async def _breaker_operation():
+            try:
+                return await _guarded_operation()
+            except ExpectedToolFailure as exc:
+                if exc.breaker_action is BreakerAction.IGNORE:
+                    raise _IgnoredModuleOutcome(exc) from None
+                raise _CountedModuleOutcome(exc) from None
+            except Exception as exc:
+                raise _CountedModuleOutcome(exc) from None
+
         try:
-            result = await self._circuit_breaker.call_async(_guarded_operation)
+            result = await self._circuit_breaker.call_async(_breaker_operation)
             latency_ms = (time.time() - start_time) * 1000
             self._metrics.record_request(True, latency_ms)
             return result
 
+        except (_IgnoredModuleOutcome, _CountedModuleOutcome) as wrapped:
+            latency_ms = max(0.0, (time.time() - start_time) * 1000.0)
+            self._metrics.record_request(False, latency_ms)
+            original = wrapped.original
+            reason_code = (
+                original.reason_code
+                if isinstance(original, ExpectedToolFailure)
+                else "module_operation_failed"
+            )
+            logger.bind(
+                module_id=self.name,
+                reason_code=reason_code,
+                error_type=original.__class__.__name__,
+            ).error("MCP module operation failed")
+            raise original.with_traceback(original.__traceback__) from None
         except Exception as e:
             if _is_circuit_breaker_open_error(e):
                 raise
-            latency_ms = (time.time() - start_time) * 1000
+            latency_ms = max(0.0, (time.time() - start_time) * 1000.0)
             self._metrics.record_request(False, latency_ms)
-            logger.error(f"Operation failed in module {self.name}: {str(e)}")
+            logger.bind(
+                module_id=self.name,
+                reason_code="module_operation_failed",
+                error_type=e.__class__.__name__,
+            ).error("MCP module operation failed")
             raise
 
     async def get_tool_def(self, tool_name: str) -> Optional[dict[str, Any]]:
@@ -490,7 +555,12 @@ class BaseModule(ABC):
                 if isinstance(tool, dict) and tool.get("name") == tool_name:
                     return tool
         except Exception as tool_lookup_error:
-            logger.debug("MCP module tool cache lookup failed", exc_info=tool_lookup_error)
+            logger.bind(
+                module_id=self.name,
+                tool_id=tool_name,
+                reason_code="module_tool_cache_lookup_failed",
+                error_type=tool_lookup_error.__class__.__name__,
+            ).debug("MCP module tool cache lookup failed")
         return None
 
     def get_metrics(self) -> ModuleMetrics:

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from mcp_unified.interfaces.runtime import ToolHookCallContext, ToolHookDecision
 from mcp_unified.tool_hooks import ConfiguredToolCallHookManager, ToolHookRegistration
+from mcp_unified.tool_use_reporting.builders import classify_tool_use_exception
 from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
 
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
@@ -260,6 +261,57 @@ class _ToolModule:
 
     async def execute_with_circuit_breaker(self, func, *args: Any, **kwargs: Any) -> Any:
         return await func(*args, **kwargs)
+
+
+class _ExpectedFailureWriteModule(_ToolModule):
+    def __init__(self) -> None:
+        super().__init__(write=True)
+
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> dict[str, Any]:
+        del tool_name, arguments, context
+        from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+            ExpectedToolFailure,
+            ExpectedToolFailureReason,
+        )
+
+        self.calls += 1
+        raise ExpectedToolFailure(ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE)
+
+
+class _MemoryRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, Any] = {}
+
+    async def get(self, key: str) -> Any:
+        return self.values.get(key)
+
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        nx: bool = False,
+        ex: int | None = None,
+    ) -> bool:
+        del ex
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    async def eval(self, _script: str, _numkeys: int, key: str, token: str) -> int:
+        if self.values.get(key) != token:
+            return 0
+        del self.values[key]
+        return 1
+
+    async def expire(self, _key: str, _ttl: int) -> bool:
+        return True
 
 
 class _FilesystemPayloadModule(_ToolModule):
@@ -1144,6 +1196,88 @@ async def test_protocol_records_idempotency_replay(monkeypatch: pytest.MonkeyPat
     assert module.calls == 1
     assert recorder.events[-1].execution_origin == "cached"
     assert recorder.events[-1].idempotency_replay is True
+
+
+def test_reporting_classifier_recognizes_expected_failure_shape_without_message_access() -> None:
+    class _ExpectedFailureShape(Exception):
+        reason = object()
+        reason_code = "idempotency_unavailable"
+        public_message = "SENTINEL_CLASSIFIER_SECRET"
+        breaker_action = "ignore"
+
+        def __str__(self) -> str:
+            raise AssertionError("classifier must not render expected failure text")
+
+    class _UnsafeReasonShape(_ExpectedFailureShape):
+        reason_code = "unsafe/reason/SENTINEL_CLASSIFIER_SECRET"
+
+    assert classify_tool_use_exception(_ExpectedFailureShape()) == (
+        "error",
+        "idempotency_unavailable",
+    )
+    assert classify_tool_use_exception(_UnsafeReasonShape()) == ("error", "unknown")
+
+
+@pytest.mark.parametrize("cache_backend", ["local", "redis"])
+@pytest.mark.asyncio
+async def test_expected_write_failure_returns_exact_tool_error_without_result_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    cache_backend: str,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    module = _ExpectedFailureWriteModule()
+    protocol, _ = _protocol(module=module)
+    redis = _MemoryRedis()
+    protocol._idempotency._redis_attempted = True
+    protocol._idempotency._redis_ready = cache_backend == "redis"
+    protocol._idempotency._redis_client = redis if cache_backend == "redis" else None
+    request = {
+        "jsonrpc": "2.0",
+        "id": f"expected-failure-{cache_backend}",
+        "method": "tools/call",
+        "params": {
+            "name": "test.write",
+            "arguments": {"value": "A"},
+            "idempotencyKey": "expected-failure-key",
+        },
+    }
+
+    try:
+        first = await protocol.process_request(request, _request_context())
+        second = await protocol.process_request(request, _request_context())
+    finally:
+        get_config.cache_clear()  # type: ignore[attr-defined]
+
+    assert first is not None
+    assert second is not None
+    assert first.error is None
+    assert second.error is None
+    assert module.calls == 2
+    assert protocol._idempotency._local_cache == {}
+    assert not any(key.startswith("mcp:idemp:result:") for key in redis.values)
+
+    for response in (first, second):
+        payload = response.result
+        execution_eval = payload["eval"]
+        assert payload == {
+            "content": [
+                {
+                    "type": "json",
+                    "json": {
+                        "status": "failed",
+                        "reason_code": "idempotency_unavailable",
+                        "message": "Idempotent execution is temporarily unavailable.",
+                    },
+                }
+            ],
+            "isError": True,
+            "module": "test_module",
+            "tool": "test.write",
+            "eval": execution_eval,
+        }
 
 
 @pytest.mark.asyncio

@@ -444,6 +444,7 @@ def _to_tldw_circuit_breaker_config(config: Any) -> CircuitBreakerConfig:
         success_threshold=config.success_threshold,
         category=config.category,
         service=config.service,
+        expected_exception=config.expected_exception,
     )
 
 

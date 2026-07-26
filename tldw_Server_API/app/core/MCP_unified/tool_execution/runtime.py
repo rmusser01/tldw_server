@@ -11,6 +11,7 @@ from mcp_unified.tool_use_reporting.builders import classify_tool_use_exception
 from mcp_unified.tool_use_reporting.models import ToolUseStatus
 
 from ..auth.rate_limiter import RateLimitExceeded
+from ..execution_outcomes import ExpectedToolFailure
 from ..protocol_types import InvalidParamsException, PreparedToolCall, RequestContext
 from ..tool_observability import (
     attach_execution_eval_metadata,
@@ -126,6 +127,29 @@ class ToolExecutionRuntime:
         args_hash = prepared.arguments_hash
         context = prepared.context
         execution_start_ts = time.time()
+
+        def _expected_failure_payload(
+            failure: ExpectedToolFailure,
+        ) -> dict[str, Any]:
+            duration_ms = max(0.0, (time.time() - execution_start_ts) * 1000.0)
+            execution_eval = execution_eval_metadata_from_tool_definition(
+                tool_name=tool_name,
+                tool_def=tool_def,
+                profile_id=self.extract_eval_profile_id(context),
+                duration_ms=duration_ms,
+            )
+            failure_content = {
+                "status": "failed",
+                "reason_code": failure.reason_code,
+                "message": failure.public_message,
+            }
+            return {
+                "content": [{"type": "json", "json": failure_content}],
+                "isError": True,
+                "module": module_id or getattr(module, "name", None),
+                "tool": tool_name,
+                "eval": execution_eval,
+            }
 
         async def _record_prepared_event(
             *,
@@ -425,6 +449,8 @@ class ToolExecutionRuntime:
                         "MCP idempotency metrics skipped after noncritical failure: {error_type}",
                         error_type=metrics_exc.__class__.__name__,
                     )
+            except ExpectedToolFailure as failure:
+                return _expected_failure_payload(failure)
             except Exception as exc:
                 status, reason_code = classify_tool_use_exception(exc)
                 await _record_prepared_event(
@@ -447,6 +473,8 @@ class ToolExecutionRuntime:
 
         try:
             payload = await _execute_tool_call()
+        except ExpectedToolFailure as failure:
+            return _expected_failure_payload(failure)
         except Exception as exc:
             status, reason_code = classify_tool_use_exception(exc)
             await _record_prepared_event(

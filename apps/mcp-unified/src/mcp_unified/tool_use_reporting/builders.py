@@ -45,6 +45,24 @@ def _safe_exception_family(exc: BaseException) -> str:
     return reason_code or _ERROR_REASON
 
 
+def _expected_failure_reason_code(exc: BaseException) -> str | None:
+    """Return a sanitized reason for a host-neutral expected-failure shape."""
+
+    reason = getattr(exc, "reason", None)
+    public_message = getattr(exc, "public_message", None)
+    breaker_action = getattr(exc, "breaker_action", None)
+    breaker_action = getattr(breaker_action, "value", breaker_action)
+    if (
+        reason is None
+        or not isinstance(public_message, str)
+        or not public_message
+        or len(public_message) > 200
+        or breaker_action not in {"ignore", "record_failure"}
+    ):
+        return None
+    return sanitize_reason_code(getattr(exc, "reason_code", None)) or _ERROR_REASON
+
+
 def classify_tool_use_exception(exc: BaseException) -> tuple[ToolUseStatus, str]:
     """Classify a tool-call exception into reporting status and safe reason code.
 
@@ -53,6 +71,10 @@ def classify_tool_use_exception(exc: BaseException) -> tuple[ToolUseStatus, str]
     """
 
     class_name = exc.__class__.__name__
+
+    expected_failure_reason = _expected_failure_reason_code(exc)
+    if expected_failure_reason is not None:
+        return "error", expected_failure_reason
 
     governance = getattr(exc, "governance", None)
     if governance is not None or class_name == "GovernanceDeniedError":
