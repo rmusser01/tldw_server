@@ -347,6 +347,24 @@ class IdempotencyManager:
                 max_entries=policy.max_entries,
             )
 
+    def _try_refresh_local_binding(
+        self,
+        cache_key: str,
+        arguments_hash: str,
+        *,
+        policy: IdempotencyExecutionPolicy,
+    ) -> bool:
+        try:
+            self._refresh_local_binding(
+                cache_key,
+                arguments_hash,
+                policy=policy,
+            )
+        except Exception as exc:  # noqa: BLE001 - established callback outcomes stay authoritative.
+            self._record_degraded("local_commit", exc, remote=False)
+            return False
+        return True
+
     def _put_local_replay_locked(
         self,
         cache_key: str,
@@ -512,14 +530,14 @@ class IdempotencyManager:
             try:
                 payload = await execute_fn()
             except asyncio.CancelledError:
-                self._refresh_local_binding(
+                self._try_refresh_local_binding(
                     cache_key,
                     arguments_hash,
                     policy=policy,
                 )
                 raise
             except Exception:
-                self._refresh_local_binding(
+                self._try_refresh_local_binding(
                     cache_key,
                     arguments_hash,
                     policy=policy,
@@ -695,7 +713,7 @@ class IdempotencyManager:
         policy: IdempotencyExecutionPolicy,
         deadline: float | None = None,
     ) -> bool:
-        self._refresh_local_binding(
+        self._try_refresh_local_binding(
             cache_key,
             arguments_hash,
             policy=policy,
@@ -933,7 +951,7 @@ class IdempotencyManager:
                 binding_key,
                 result_key,
                 arguments_hash,
-                binding_ttl_seconds=policy.lock_ttl_seconds,
+                binding_ttl_seconds=policy.ttl_seconds,
                 deadline=deadline,
             )
         except asyncio.CancelledError:

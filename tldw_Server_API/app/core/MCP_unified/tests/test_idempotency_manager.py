@@ -43,7 +43,7 @@ def _policy(*, max_result_bytes: int = 4_096) -> IdempotencyExecutionPolicy:
         ttl_seconds=30,
         contention_wait_seconds=1,
         finalize_seconds=1,
-        lock_ttl_seconds=30,
+        lock_ttl_seconds=7,
         max_entries=16,
         max_result_bytes=max_result_bytes,
     )
@@ -684,6 +684,45 @@ async def test_uncacheable_success_is_returned_unchanged_without_persistence(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_remote_uncacheable_success_survives_local_binding_refresh_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = _FakeRedis()
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    original_put = manager._put_local_binding_locked
+    fail_refresh = False
+    original = {"value": object()}
+
+    def _put_binding(*args: Any, **kwargs: Any) -> None:
+        if fail_refresh:
+            raise RuntimeError("private local binding detail")
+        original_put(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_put_local_binding_locked", _put_binding)
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal fail_refresh
+        fail_refresh = True
+        return original
+
+    result = await manager.execute("uncacheable-refresh", "args", _execute, policy=_policy())
+
+    assert result.payload is original
+    assert result.persistence == "none"
+    assert stages == [
+        ("serialization", "TypeError"),
+        ("local_commit", "RuntimeError"),
+    ]
+    assert (_binding_key("uncacheable-refresh"), _policy().ttl_seconds) in redis.expirations
+    assert _lock_key("uncacheable-refresh") not in redis.values
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["local", "redis"])
 @pytest.mark.parametrize("expected", [True, False], ids=["expected-failure", "unexpected-failure"])
 async def test_callback_failures_cache_no_result_and_retain_argument_binding(
@@ -722,8 +761,83 @@ async def test_callback_failures_cache_no_result_and_retain_argument_binding(
         assert manager._local_bindings[key][1] == "args-a"
     else:
         assert redis.values[_binding_key(key)] == b"args-a"
-        assert (_binding_key(key), _policy().lock_ttl_seconds) in redis.set_expirations
+        assert (_binding_key(key), _policy().ttl_seconds) in redis.set_expirations
+        assert (_lock_key(key), _policy().lock_ttl_seconds) in redis.set_expirations
         assert (_binding_key(key), _policy().ttl_seconds) in redis.expirations
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "callback_exception",
+    [ValueError("callback failure"), asyncio.CancelledError("callback cancellation")],
+    ids=["failure", "cancellation"],
+)
+async def test_local_callback_outcome_survives_binding_refresh_failure(
+    callback_exception: BaseException,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stages: list[tuple[str, str]] = []
+    manager = _local_manager(
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    original_put = manager._put_local_binding_locked
+    fail_refresh = False
+
+    def _put_binding(*args: Any, **kwargs: Any) -> None:
+        if fail_refresh:
+            raise RuntimeError("private local binding detail")
+        original_put(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_put_local_binding_locked", _put_binding)
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal fail_refresh
+        fail_refresh = True
+        raise callback_exception
+
+    with pytest.raises(type(callback_exception)) as caught:
+        await manager.execute("local-refresh-outcome", "args", _execute, policy=_policy())
+
+    assert caught.value is callback_exception
+    assert stages == [("local_commit", "RuntimeError")]
+    assert "local-refresh-outcome" not in manager._local_cache
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_remote_callback_failure_survives_local_binding_refresh_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = _FakeRedis()
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    original_put = manager._put_local_binding_locked
+    fail_refresh = False
+    callback_exception = ValueError("callback failure")
+
+    def _put_binding(*args: Any, **kwargs: Any) -> None:
+        if fail_refresh:
+            raise RuntimeError("private local binding detail")
+        original_put(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_put_local_binding_locked", _put_binding)
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal fail_refresh
+        fail_refresh = True
+        raise callback_exception
+
+    with pytest.raises(ValueError) as caught:
+        await manager.execute("remote-refresh-outcome", "args", _execute, policy=_policy())
+
+    assert caught.value is callback_exception
+    assert stages == [("local_commit", "RuntimeError")]
+    assert (_binding_key("remote-refresh-outcome"), _policy().ttl_seconds) in redis.expirations
+    assert _lock_key("remote-refresh-outcome") not in redis.values
 
 
 @pytest.mark.unit
@@ -778,6 +892,9 @@ async def test_cancellation_before_success_propagates_without_cache_or_fallback(
     assert calls == 1
     assert key not in manager._local_cache
     assert _result_key(key) not in redis.values
+    if backend == "redis":
+        assert (_binding_key(key), _policy().ttl_seconds) in redis.set_expirations
+        assert (_lock_key(key), _policy().lock_ttl_seconds) in redis.set_expirations
 
 
 @pytest.mark.unit
