@@ -27,7 +27,7 @@ modified_files:
 - tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py
 - tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 05:46
+updated_date: 2026-07-26 05:50
 ---
 
 ## Description
@@ -66,6 +66,7 @@ Task 5 review judged production exact but found two Important mutation-sensitive
 Fresh Task 5 re-review is APPROVED with no Critical, Important, or Minor findings. The reviewer independently verified 87 delegation+characterization tests and Ruff, and confirmed real constructor ownership, every class/static and instance delegate, fresh snapshots, generator consumption, decision/public-redaction call order, immutable original decision, distinct replacement result, public dispatch, descriptors/signatures, unchanged production after the test fix, and maintainable mutation-sensitive tests. Acceptance criterion #3 is complete. Task 6 real-service Chat and Workflow regressions are starting.
 Task 6 implementation commit `884fb773ff` added real-service caller regressions without production changes. Baselines were Chat 15/15 and selected Workflow 10/10. First new regression run passed 3/3; focused Chat+Workflow+STT+endpoint passed 5/5; complete Chat passed 16/16 and selected Workflow passed 12/12. Py-compile, Ruff (with only documented existing Workflow ignores), test-only Bandit (zero findings/errors), and diff checks passed. Chat removes both test-mode toggles and uses the endpoint dependency seam with a real service/evaluator; Workflow asserts real check metadata, per-rule replacement, and exact replacement count. Independent Task 6 review is pending.
 Task 6 review found one cleanup defect: artifact deletion could raise before the Chat dependency override was removed. Test-only fix commit `4d1c8e31d1` uses unconditional nested cleanup so the override is always popped without swallowing test-body failures. Focused real-service Chat passed 1/1 and the complete Chat moderation suite passed 16/16; Ruff, test-only Bandit, and diff checks passed. Fresh Task 6 re-review is pending.
+Task 6 second re-review found that cleanup failure could still mask an existing test-body failure. Test-only commit `9d3071a7fd` tracks successful body completion so cleanup errors fail an otherwise successful test but are suppressed when a body failure is already active; dependency override removal remains unconditional. Focused real-service Chat passed 1/1 and full Chat passed 16/16; Ruff, test-only Bandit, and diff checks passed. Final Task 6 re-review is pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
