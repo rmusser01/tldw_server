@@ -1379,7 +1379,7 @@ Extend `test_jobs_lifecycle_side_effects.py` with applied, no-transition, and ra
 
 Renewal events currently run before commit on both backends. Moving them after the backend operation returns is an intentional correctness fix, not behavior-preserving relocation. Add a real commit-failure test proving lease/progress rollback and no renewal success event.
 
-- [ ] **Step 4: Run the focused renewal/release matrix**
+- [x] **Step 4: Run the focused renewal/release matrix**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -1403,9 +1403,13 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all tests pass and PostgreSQL does not skip.
 
-- [ ] **Step 5: Commit backend work in reviewable units**
+Execution evidence: 130 focused renewal/release tests passed against SQLite and required real PostgreSQL with zero skips.
+
+- [x] **Step 5: Commit backend work in reviewable units**
 
 Commit SQLite routing after its direct/facade matrix passes, then PostgreSQL routing after its real-database matrix passes. Do not commit red tests. Keep both commits in the same PR 3 branch so the final parity review sees one coherent transition family.
+
+Execution evidence: SQLite routing was committed as `f50b36e707`; PostgreSQL routing was committed as `2aa8b67e78`, after their backend-specific required matrices passed.
 
 ## Task 13: Final Renewal/Release Verification and PR 3
 
@@ -1417,7 +1421,7 @@ Commit SQLite routing after its direct/facade matrix passes, then PostgreSQL rou
 - Consumes: completed Tasks 11-12.
 - Produces: a review-ready PR against `dev` containing only single-job renewal/release extraction.
 
-- [ ] **Step 1: Run the two-backend regression matrix**
+- [x] **Step 1: Run the two-backend regression matrix**
 
 Run the Task 10 acquisition matrix plus the Task 12 renewal/release matrix, then run these unchanged neighboring paths explicitly:
 
@@ -1439,7 +1443,9 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: batch and terminal behavior remains green on both backends and PostgreSQL does not skip.
 
-- [ ] **Step 2: Verify boundaries mechanically**
+Execution evidence: the acquisition regression matrix passed 109 tests and the focused renewal/release matrix passed 130 tests, both with required real PostgreSQL and zero skips. The neighboring matrix passed 101 selected tests with two PostgreSQL admission counter rollback parameterizations excluded after both failures reproduced unchanged on a clean detached `origin/dev` worktree at `76481b2939`. Those stale tests expect admission counter failures to abort job creation, while merged admission behavior intentionally treats counter maintenance as best effort under a savepoint. They are a confirmed dev-baseline defect outside this renewal/release extraction.
+
+- [x] **Step 2: Verify boundaries mechanically**
 
 ```bash
 rg -n "JobManager" tldw_Server_API/app/core/Jobs/operations
@@ -1450,7 +1456,9 @@ git diff --function-context origin/dev -- tldw_Server_API/app/core/Jobs/manager.
 
 Expected: operation modules do not reference `JobManager`; public methods remain; only single-job renew/release SQL moved; lifecycle SQL uses fixed parameterized variants without query suppressions; acquisition behavior is unchanged from merged PR 2; batch and terminal methods have no behavioral changes.
 
-- [ ] **Step 3: Run syntax and security validation**
+Execution evidence: the branch remains three commits ahead of its original dev base and changes only the expected 18 plan/tracking, lifecycle, facade, and test files. Operation modules contain no `JobManager` references, public acquisition/renewal/release/batch methods remain, and the manager diff replaces only single-job renewal/release inline SQL plus the required imports.
+
+- [x] **Step 3: Run syntax and security validation**
 
 ```bash
 python -m compileall -q \
@@ -1464,6 +1472,8 @@ python -m bandit -r \
 ```
 
 Expected: compile succeeds and Bandit reports no new findings.
+
+Execution evidence: final `compileall` succeeds. Bandit output at `/tmp/bandit_task_12969_3.json` contains zero findings and zero errors; its 79 skipped checks are pre-existing manager suppressions, while extracted lifecycle modules contain no suppressions. Ruff passes across every changed Python file after cleaning eight existing mechanical findings in touched files, and the directly affected 36-test contract/fault-injection check passes.
 
 - [ ] **Step 4: Open PR 3 and finalize tracking after merge**
 

@@ -166,7 +166,7 @@ class AdmissionResult:
         return self.was_inserted
 
     @classmethod
-    def applied(cls, *, row: dict[str, Any], durable_events: Sequence[dict[str, Any]] = ()) -> "AdmissionResult":
+    def applied(cls, *, row: dict[str, Any], durable_events: Sequence[dict[str, Any]] = ()) -> AdmissionResult:
         """Build an applied admission result for a newly inserted row."""
 
         return cls(
@@ -182,7 +182,7 @@ class AdmissionResult:
         *,
         row: dict[str, Any],
         durable_events: Sequence[dict[str, Any]] = (),
-    ) -> "AdmissionResult":
+    ) -> AdmissionResult:
         """Build a no-transition result for an idempotent existing row."""
 
         return cls(
@@ -194,7 +194,7 @@ class AdmissionResult:
         )
 
     @classmethod
-    def rejected(cls, reason: AdmissionRejectionReason, *, message: str | None = None) -> "AdmissionResult":
+    def rejected(cls, reason: AdmissionRejectionReason, *, message: str | None = None) -> AdmissionResult:
         """Build an admission-rejected result with an explicit reason."""
 
         return cls(
@@ -239,7 +239,7 @@ class LifecycleResult:
         *,
         row: dict[str, Any],
         durable_events: Sequence[dict[str, Any]] = (),
-    ) -> "LifecycleResult":
+    ) -> LifecycleResult:
         """Build an applied lifecycle result for a successful transition."""
 
         return cls(
@@ -256,7 +256,7 @@ class LifecycleResult:
         *,
         row: dict[str, Any] | None = None,
         message: str | None = None,
-    ) -> "LifecycleResult":
+    ) -> LifecycleResult:
         """Build a no-transition lifecycle result with a reason."""
 
         return cls(

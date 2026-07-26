@@ -1,11 +1,10 @@
-import os
 import sqlite3
 from datetime import datetime
 
 import pytest
 
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 
 def _parse_sqlite_ts(s: str) -> datetime:
@@ -92,7 +91,7 @@ def test_complete_transient_error_then_idempotent_finalize_sqlite(monkeypatch, t
     db_path = tmp_path / "jobs2.db"
     ensure_jobs_tables(db_path)
     jm = JobManager(db_path)
-    j = jm.create_job(domain="ps", queue="default", job_type="t", payload={}, owner_user_id="u")
+    jm.create_job(domain="ps", queue="default", job_type="t", payload={}, owner_user_id="u")
     acq = jm.acquire_next_job(domain="ps", queue="default", lease_seconds=5, worker_id="w1")
     lease_id = str(acq.get("lease_id"))
 
