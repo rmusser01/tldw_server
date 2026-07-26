@@ -234,6 +234,14 @@ class _IdempotencyProbe:
         return await execute(), False
 
 
+class _RecordingToolUseRecorder:
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    async def record_tool_use(self, event: Any) -> None:
+        self.events.append(event)
+
+
 class _BlockingRateLimiter(_RateLimiterProbe):
     def __init__(self) -> None:
         super().__init__()
@@ -266,6 +274,29 @@ class _BlockingIdempotency(_IdempotencyProbe):
         self.entered.set()
         await self.release.wait()
         return await execute(), False
+
+
+class _BlockingCacheHitIdempotency(_IdempotencyProbe):
+    def __init__(self, cached_payload: dict[str, Any]) -> None:
+        super().__init__()
+        self.cached_payload = cached_payload
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def run(
+        self,
+        key: str,
+        execute: Any,
+        *,
+        ttl: int,
+        max_size: int,
+        lock_ttl: int,
+    ) -> tuple[Any, bool]:
+        del execute, ttl, max_size, lock_ttl
+        self.run_keys.append(key)
+        self.entered.set()
+        await self.release.wait()
+        return self.cached_payload, True
 
 
 class _BlockingSecondLookupRegistry:
@@ -1065,3 +1096,125 @@ async def test_second_live_check_blocks_definition_mutation_during_idempotency_w
     assert idempotency.run_keys == idempotency.bound_keys
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
+
+
+@pytest.mark.parametrize("drift", ["unregistered", "disabled", "definition_changed"])
+@pytest.mark.asyncio
+async def test_cache_hit_rechecks_live_binding_after_idempotency_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(monkeypatch)
+    cached_payload = {
+        "content": [{"type": "json", "json": {"cached": True}}],
+        "module": prepared.module_id,
+        "tool": prepared.tool_name,
+    }
+    rate_limiter = _RateLimiterProbe()
+    idempotency = _BlockingCacheHitIdempotency(cached_payload)
+    recorder = _RecordingToolUseRecorder()
+    protocol.rate_limiter = rate_limiter
+    protocol._idempotency = idempotency
+    protocol._tool_use_recorder = recorder
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(idempotency.entered.wait(), timeout=2)
+    assert rate_limiter.calls == 1
+    assert len(idempotency.bound_keys) == 1
+    assert idempotency.run_keys == idempotency.bound_keys
+
+    if drift == "unregistered":
+        assert prepared.module_id is not None
+        await get_module_registry().unregister_module(prepared.module_id)
+    elif drift == "disabled":
+        module.config.enabled = False
+    else:
+        module.source_tool_def["description"] = "changed during cached lookup"
+        module.invalidate_capability_caches()
+    idempotency.release.set()
+    payload = await asyncio.wait_for(execution, timeout=2)
+
+    _assert_stale_prepared_call(payload)
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+    assert not any(
+        event.status == "success"
+        and event.execution_origin == "cached"
+        and event.idempotency_replay is True
+        for event in recorder.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_allows_definition_change_before_current_preparation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, module, _, _ = await _prepare_call(monkeypatch)
+    module.source_tool_def["description"] = "changed before current preparation"
+    module.invalidate_capability_caches()
+    prepared = await protocol.prepare_tool_call(
+        params={
+            "name": module.tool_name,
+            "arguments": {"value": "alpha"},
+        },
+        context=RequestContext(
+            request_id=f"current-preparation-{module.name}",
+            user_id="user-1",
+        ),
+        idempotency_key="idem-key",
+    )
+    cached_payload = {
+        "content": [{"type": "json", "json": {"cached": "older-payload"}}],
+        "module": prepared.module_id,
+        "tool": prepared.tool_name,
+    }
+    idempotency = _BlockingCacheHitIdempotency(cached_payload)
+    recorder = _RecordingToolUseRecorder()
+    protocol.rate_limiter = _RateLimiterProbe()
+    protocol._idempotency = idempotency
+    protocol._tool_use_recorder = recorder
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(idempotency.entered.wait(), timeout=2)
+    idempotency.release.set()
+    payload = await asyncio.wait_for(execution, timeout=2)
+
+    assert payload == cached_payload
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+    assert recorder.events[-1].status == "success"
+    assert recorder.events[-1].execution_origin == "cached"
+    assert recorder.events[-1].idempotency_replay is True
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_live_binding_cancellation_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(monkeypatch)
+    cached_payload = {
+        "content": [{"type": "json", "json": {"cached": True}}],
+        "module": prepared.module_id,
+        "tool": prepared.tool_name,
+    }
+    idempotency = _BlockingCacheHitIdempotency(cached_payload)
+    registry = _BlockingSecondLookupRegistry(get_module_registry())
+    recorder = _RecordingToolUseRecorder()
+    registry.block_when = idempotency.release.is_set
+    protocol.module_registry = registry
+    protocol.rate_limiter = _RateLimiterProbe()
+    protocol._idempotency = idempotency
+    protocol._tool_use_recorder = recorder
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(idempotency.entered.wait(), timeout=2)
+    idempotency.release.set()
+    await asyncio.wait_for(registry.entered.wait(), timeout=2)
+    execution.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+
+    assert module.breaker_entry_count == 0
+    assert module.execute_count == 0
+    assert not any(event.status == "success" for event in recorder.events)

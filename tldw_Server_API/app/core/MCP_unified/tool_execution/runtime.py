@@ -431,6 +431,11 @@ class ToolExecutionRuntime:
                     max_size=max_size,
                     lock_ttl=policy.idempotency.lock_ttl_seconds,
                 )
+                if from_cache:
+                    await self.security.verify_prepared_tool_call(
+                        prepared,
+                        require_live_binding=True,
+                    )
                 try:
                     if from_cache:
                         self.metrics.record_idempotency_hit(module_id or getattr(module, "name", "unknown"), str(tool_name))
