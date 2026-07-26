@@ -429,7 +429,7 @@ The raw normalized key remains only because a prepared write may inject it into 
 
 For incremental compatibility, expose read-only `tool_def`, `scope_payload`, and `is_write` properties on `PreparedToolCall` that decode a new detached copy or derive from `policy`. Mark them observer/compatibility-only in the docstring. This keeps Task 3 green while Task 4 removes every runtime security decision from those properties.
 
-Add explicit `RequestContext.server_auth_scope: AuthenticatedExecutionScope | None`, where the frozen scope permits only positive non-boolean integer `active_org_id` and `active_team_id`. Do not derive it from `context.metadata`. Its canonical digest is empty for no active scope and `sha256(canonical_json(scope))` otherwise. The no-scope cache-key shape must remain byte-for-byte unchanged; scoped keys append `|scope:sha256:<64 lowercase hex>`.
+Add explicit `RequestContext.server_auth_scope: AuthenticatedExecutionScope | None`, where the frozen scope permits only positive non-boolean integer `active_org_id` and `active_team_id`. Do not derive it from `context.metadata`. Its canonical digest is empty for no active scope and `sha256(canonical_json(scope))` otherwise. The no-scope cache-key shape must remain byte-for-byte unchanged; scoped keys insert `|scope:sha256:<64 lowercase hex>` before the unrestricted `|key:` segment so a crafted personal key cannot collide with a scoped replay domain.
 
 Add the canonical server-auth scope object to `fingerprint_request_context` in addition to the separately signed idempotency-scope fingerprint. Generic metadata remains covered by the existing complete context fingerprint, but only `server_auth_scope` can affect the replay-domain suffix.
 
@@ -492,16 +492,16 @@ Make `ToolExecutionSecurity.make_idempotency_cache_key` the sole authoritative k
 
 ### Required Tests
 
-- [ ] Canonical output is UTF-8, sorted, compact, Unicode-preserving, and stable.
-- [ ] Non-string keys, tuples, sets, bytes, paths, custom objects, NaN, and infinities are rejected.
-- [ ] Exact-limit payloads pass and over-limit payloads fail.
-- [ ] A manually signed but non-canonical snapshot encoding is rejected even when its stored SHA-256 matches its bytes.
-- [ ] Mutating source `tool_def` or `scope_payload` after preparation does not alter observer snapshots or policy.
-- [ ] Mutating policy, snapshots, raw normalized key, cache key, arguments, context, or explicit server-auth scope is detected before admission.
-- [ ] `metadata["org_id"]` and `metadata["team_id"]` do not change the active-scope fingerprint or cache key.
-- [ ] Personal/no-scope key shape matches the existing literal string.
-- [ ] Same user/key/arguments under two explicit active scopes yields different fixed-format digests and no raw IDs.
-- [ ] Policy rate category and idempotency-injection fields are fixed at preparation even if shared source dictionaries or config objects mutate; Task 4 proves runtime consumption.
+- [x] Canonical output is UTF-8, sorted, compact, Unicode-preserving, and stable.
+- [x] Non-string keys, tuples, sets, bytes, paths, custom objects, NaN, and infinities are rejected.
+- [x] Exact-limit payloads pass and over-limit payloads fail.
+- [x] A manually signed but non-canonical snapshot encoding is rejected even when its stored SHA-256 matches its bytes.
+- [x] Mutating source `tool_def` or `scope_payload` after preparation does not alter observer snapshots or policy.
+- [x] Mutating policy, snapshots, raw normalized key, cache key, arguments, context, or explicit server-auth scope is detected before admission.
+- [x] `metadata["org_id"]` and `metadata["team_id"]` do not change the active-scope fingerprint or cache key.
+- [x] Personal/no-scope key shape matches the existing literal string.
+- [x] Same user/key/arguments under two explicit active scopes yields different fixed-format digests and no raw IDs.
+- [x] Policy rate category and idempotency-injection fields are fixed at preparation even if shared source dictionaries or config objects mutate; Task 4 proves runtime consumption.
 
 Run:
 
