@@ -120,7 +120,7 @@ Re-resolving identity before writeback is the approved Stage 2C correctness corr
 
 The attempt does not promise transactional cache writes. If a later write fails, earlier writes may already exist, matching current behavior. Read-time or write-time backend-identity resolution, cache-key derivation, cache access, validation, postprocessing, and writeback failures are not provider-call failures and must never trigger fallback.
 
-Stage 2A must characterize the exception types passed through by the production endpoint identity resolver, cache-key function, and cache adapter. Generic infrastructure failures already propagate without fallback. Stage 2D explicitly corrects the current fallback-wide `EmbeddingDomainError` catch so a domain-shaped error originating from identity resolution, key derivation, cache access, validation, postprocessing, or writeback also propagates instead of being misclassified as a provider failure.
+Stage 2A must characterize the exception types passed through by the production endpoint identity resolver, cache-key function, and cache adapter. The endpoint compatibility helper `_orchestrator_backend_identity` collapses allowlisted noncritical identity-construction failures to `None`. That narrow compatibility behavior is not a general exception-swallowing policy: exceptions that escape identity resolution, cache-key derivation, or cache access propagate and do not trigger fallback. Generic infrastructure failures already satisfy this rule. Stage 2D explicitly corrects the current fallback-wide `EmbeddingDomainError` catch so a domain-shaped error originating from identity resolution, key derivation, cache access, validation, postprocessing, or writeback also propagates instead of being misclassified as a provider failure.
 
 Provider-call failures are represented by a private frozen `ProviderCallFailure` DTO containing the exact original `EmbeddingDomainError`. `EmbeddingProviderAttempt` returns `ProviderAttemptSuccess | ProviderCallFailure` and catches domain errors only around the executor call. Readiness, backend-identity resolution, cache-key derivation, cache access, validation, postprocessing, writeback, tracing, and resource-governor errors are never converted to this result. If the coordinator ultimately raises the failure, it raises the contained error object unchanged.
 
@@ -240,6 +240,13 @@ Stage 2 preserves current task-cancellation behavior. `asyncio.CancelledError` p
 
 ## Error Routing Matrix
 
+The endpoint compatibility helper `_orchestrator_backend_identity` collapses an
+allowlisted noncritical construction failure to `None`; that behavior is local
+to the helper and does not make identity, cache-key, or cache access broadly
+exception-swallowing. Exceptions that escape those boundaries, including
+infrastructure and domain errors, fail the request without activating
+fallback.
+
 | Operation | Result |
 | --- | --- |
 | Intent resolution, normalization, or policy failure | Fail request; no execution or fallback |
@@ -247,7 +254,8 @@ Stage 2 preserves current task-cancellation behavior. `asyncio.CancelledError` p
 | Preferred adapter exception | Fail request unchanged; no provider fallback |
 | Preferred adapter returns no result | Continue to primary readiness |
 | Primary readiness failure | Fail request unchanged; no fallback |
-| Primary backend-identity or cache-key derivation failure | Fail request; no fallback |
+| Allowlisted noncritical endpoint backend-identity construction failure | `_orchestrator_backend_identity` returns `None` for compatibility; no exception escapes that helper |
+| Escaping primary backend-identity or cache-key infrastructure/domain failure | Fail request unchanged; no fallback |
 | Malformed or non-finite primary cached vector | Treat as a miss and replace through provider execution |
 | Primary cache read, postprocessing, or cache write failure | Fail request; no fallback |
 | Eligible primary provider-call failure with fallback allowed | Start fallback with the complete input |
@@ -256,7 +264,7 @@ Stage 2 preserves current task-cancellation behavior. `asyncio.CancelledError` p
 | Fallback provider call reports missing credentials | Skip candidate, preserving current candidate behavior |
 | Other eligible fallback readiness or `ProviderCallFailure` | Continue to the next candidate |
 | Ineligible fallback failure | Raise immediately |
-| Fallback backend-identity or cache-key derivation failure | Fail request; do not try another provider |
+| Escaping fallback backend-identity or cache-key infrastructure/domain failure | Fail request unchanged; do not try another provider |
 | Malformed or non-finite fallback cached vector | Treat as a miss and replace through that fallback candidate |
 | Fallback cache read, postprocessing, or cache write failure | Fail request; do not try another provider |
 | Fallback exhaustion | Apply existing exhausted-error selection, preserving rate-limit retry metadata |

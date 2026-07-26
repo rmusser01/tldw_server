@@ -683,24 +683,11 @@ async def test_fallback_complete_result_is_validated_before_first_cache_write(
     )
     real_validate = orchestrator_module.validated_embedding_vectors
     validation_calls: list[tuple[object, int, object]] = []
-    cache_key_calls: list[tuple[str, str, str, int | None, str | None]] = []
 
     def validation_probe(vectors: object, *, expected: int):
         validated = real_validate(vectors, expected=expected)
         validation_calls.append((vectors, expected, validated))
         return validated
-
-    def cache_key_probe(
-        text: str,
-        provider: str,
-        model: str,
-        dimensions: int | None,
-        backend_identity: str | None,
-    ) -> str:
-        cache_key_calls.append(
-            (text, provider, model, dimensions, backend_identity)
-        )
-        return _cache_key(text, provider, model, dimensions, backend_identity)
 
     monkeypatch.setattr(
         orchestrator_module,
@@ -710,7 +697,6 @@ async def test_fallback_complete_result_is_validated_before_first_cache_write(
     orchestrator = _orchestrator(
         cache=cache,
         executor=executor,
-        cache_key_fn=cache_key_probe,
         settings_fallback_chain={"openai": ["huggingface"]},
         settings_fallback_model_map={
             "openai:text-embedding-3-small": {
@@ -759,43 +745,6 @@ async def test_fallback_complete_result_is_validated_before_first_cache_write(
         ([[0.1, 0.2]], 1, [[0.1, 0.2]]),
         ([[0.3, 0.4, 0.5]], 1, [[0.3, 0.4, 0.5]]),
         ([[0.1, 0.2], [0.3, 0.4, 0.5]], 2, None),
-    ]
-    assert cache_key_calls == [
-        (
-            "one",
-            "openai",
-            "text-embedding-3-small",
-            None,
-            "openai:text-embedding-3-small:backend",
-        ),
-        (
-            "two",
-            "openai",
-            "text-embedding-3-small",
-            None,
-            "openai:text-embedding-3-small:backend",
-        ),
-        (
-            "one",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-            None,
-            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend",
-        ),
-        (
-            "two",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-            None,
-            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend",
-        ),
-        (
-            "two",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-            None,
-            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend",
-        ),
     ]
     assert cache.set_calls == []
 
@@ -1226,54 +1175,52 @@ async def test_retryable_fallback_preflight_failure_continues_to_next_candidate(
         ("cohere", "embed-english-v3.0"),
         ("huggingface", "sentence-transformers/all-MiniLM-L6-v2"),
     ]
-    assert events == [
-        ("preflight", "openai", "text-embedding-3-small"),
-        ("identity", "openai", "text-embedding-3-small"),
-        ("cache_key", "openai", "text-embedding-3-small"),
-        ("cache_get", "openai", "text-embedding-3-small"),
-        ("executor", "openai", "text-embedding-3-small"),
-        ("executor_error", "openai", "text-embedding-3-small"),
-        ("preflight", "cohere", "embed-english-v3.0"),
-        ("preflight_error", "cohere", "embed-english-v3.0"),
-        (
-            "preflight",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ),
-        (
-            "identity",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ),
-        (
-            "cache_key",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ),
-        (
-            "cache_get",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ),
-        (
-            "executor",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ),
-        (
-            "cache_key",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ),
-        (
-            "cache_set",
-            "huggingface",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ),
-    ]
+    primary = ("openai", "text-embedding-3-small")
+    cohere = ("cohere", "embed-english-v3.0")
+    fallback = ("huggingface", "sentence-transformers/all-MiniLM-L6-v2")
+
+    def event_index(action: str, provider_model: tuple[str, str]) -> int:
+        provider, model = provider_model
+        return events.index((action, provider, model))
+
+    primary_preflight = event_index("preflight", primary)
+    primary_identity = event_index("identity", primary)
+    primary_cache_key = event_index("cache_key", primary)
+    primary_cache_get = event_index("cache_get", primary)
+    primary_executor = event_index("executor", primary)
+    primary_executor_error = event_index("executor_error", primary)
+    assert (
+        primary_preflight
+        < primary_identity
+        < primary_cache_key
+        < primary_cache_get
+        < primary_executor
+        < primary_executor_error
+    )
+
+    cohere_preflight = event_index("preflight", cohere)
+    cohere_preflight_error = event_index("preflight_error", cohere)
+    assert primary_executor_error < cohere_preflight < cohere_preflight_error
     assert not any(
-        action in {"cache_get", "cache_set"} and provider == "cohere"
+        action in {"identity", "cache_key", "cache_get", "cache_set", "executor"}
+        and provider == cohere[0]
         for action, provider, _ in events
+    )
+
+    fallback_preflight = event_index("preflight", fallback)
+    fallback_identity = event_index("identity", fallback)
+    fallback_cache_key = event_index("cache_key", fallback)
+    fallback_cache_get = event_index("cache_get", fallback)
+    fallback_executor = event_index("executor", fallback)
+    fallback_cache_set = event_index("cache_set", fallback)
+    assert (
+        cohere_preflight_error
+        < fallback_preflight
+        < fallback_identity
+        < fallback_cache_key
+        < fallback_cache_get
+        < fallback_executor
+        < fallback_cache_set
     )
     assert [call["provider"] for call in executor.calls] == [
         "openai",

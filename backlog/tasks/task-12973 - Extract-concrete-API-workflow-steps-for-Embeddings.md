@@ -4,7 +4,7 @@ title: Extract concrete API workflow steps for Embeddings
 status: In Progress
 assignee: []
 created_date: '2026-07-19 02:31'
-updated_date: '2026-07-19 02:43'
+updated_date: '2026-07-26 05:19'
 labels:
   - embeddings
   - workflow
@@ -55,11 +55,7 @@ Deliver through child tasks 2A-2E in dependency order. Each child must pass focu
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Stage 2 is in progress; child-task summaries remain authoritative until the parent is complete.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -12,7 +12,7 @@
 
 ## Scope And Existing Coverage
 
-The branch was rebased onto `origin/dev` at `1b9518c68c` before this plan was written. Stage 2A is test-only.
+The branch was initially rebased onto `origin/dev` at `1b9518c68c` before this plan was written and was rebased again onto `origin/dev` at `0f3983788c` before final review. Stage 2A is test-only.
 
 **Files modified during implementation:**
 
@@ -1054,3 +1054,19 @@ git add \
   "backlog/tasks/task-12973.1 - Characterize-Embeddings-workflow-execution-contracts.md"
 git commit -m "chore(backlog): close embeddings workflow stage 2a"
 ```
+
+### Task 7: Remediate Final Whole-Branch Review
+
+**Goal**: Remove brittle implementation-detail assertions, complete endpoint boundary and resource-accounting characterization, and correct closeout metadata.
+
+**Success Criteria**: Tests preserve the approved Stage 2C ordering correction, production endpoint identity/key behavior and cleanup paths are characterized accurately, the design distinguishes collapsed identity construction failures from escaping failures, and tracking reflects the final rebase.
+
+**Tests**: Focused isolated-orchestrator and endpoint-parity tests, then the complete Task 6 verification matrix.
+
+**Status**: Complete
+
+- [x] Replace exact fallback event-list equality with semantic order and no-Cohere-work assertions.
+- [x] Remove the extra writeback cache-key derivation requirement from complete-result validation coverage.
+- [x] Add direct production endpoint identity and cache-key failure characterization and reconcile the error-routing text.
+- [x] Cover active-request cleanup on reservation denial and noncritical resource-governor commit failure.
+- [x] Normalize Backlog metadata, rerun all verification gates, and obtain final specification and quality approval.
