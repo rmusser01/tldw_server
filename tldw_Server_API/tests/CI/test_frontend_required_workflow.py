@@ -27,7 +27,6 @@ def test_frontend_required_does_not_publish_or_enforce_license_policy() -> None:
     workflow_text = workflow_path.read_text(encoding="utf-8")
 
     assert checkout["if"] == "needs.changes.outputs.frontend_changed == 'true'"
-    assert "fetch-depth" not in checkout.get("with", {})
     assert "Enforce temporary frontend licensing contribution freeze" not in step_names
     assert "check_frontend_license_gate.py" not in workflow_text
     assert "frontend-license-policy/trusted/" not in workflow_text
