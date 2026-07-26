@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import io
 import tokenize
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 
 import pytest
@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     LifecycleResult,
     NoTransitionReason,
     OperationOutcome,
+    ReleaseJobCommand,
+    RenewLeaseCommand,
 )
 
 
@@ -232,6 +234,102 @@ def test_acquire_job_command_rejects_non_positive_lease_duration() -> None:
                 worker_id="worker-1",
                 lease_id="lease-1",
             )
+
+
+def test_renew_lease_command_preserves_exact_public_facts() -> None:
+    """Verify renewal commands retain every normalized facade input."""
+
+    command = RenewLeaseCommand(
+        job_id=42,
+        seconds=30,
+        enforce=True,
+        worker_id="worker-1",
+        lease_id="lease-1",
+        progress_percent=62.5,
+        progress_message="indexing",
+    )
+
+    assert [item.name for item in fields(command)] == [
+        "job_id",
+        "seconds",
+        "enforce",
+        "worker_id",
+        "lease_id",
+        "progress_percent",
+        "progress_message",
+    ]
+    assert command.job_id == 42
+    assert command.seconds == 30
+    assert command.enforce is True
+    assert command.worker_id == "worker-1"
+    assert command.lease_id == "lease-1"
+    assert command.progress_percent == 62.5
+    assert command.progress_message == "indexing"
+
+
+def test_renew_lease_command_requires_explicit_enforcement_policy() -> None:
+    """Verify renewal callers cannot omit the resolved enforcement policy."""
+
+    with pytest.raises(TypeError, match="enforce"):
+        RenewLeaseCommand(job_id=42, seconds=30)  # type: ignore[call-arg]
+
+
+def test_renew_lease_command_rejects_non_positive_duration() -> None:
+    """Verify backend renewal commands always carry a positive duration."""
+
+    for seconds in (0, -1):
+        with pytest.raises(ValueError, match="seconds must be positive"):
+            RenewLeaseCommand(job_id=42, seconds=seconds, enforce=False)
+
+
+def test_renew_lease_command_is_frozen() -> None:
+    """Verify renewal command fields cannot be reassigned."""
+
+    command = RenewLeaseCommand(job_id=42, seconds=30, enforce=False)
+
+    with pytest.raises(FrozenInstanceError):
+        command.seconds = 60
+
+
+def test_release_job_command_preserves_exact_public_facts() -> None:
+    """Verify release commands retain every normalized facade input."""
+
+    command = ReleaseJobCommand(
+        job_id=42,
+        enforce=True,
+        worker_id="worker-1",
+        lease_id="lease-1",
+        reason="yield",
+    )
+
+    assert [item.name for item in fields(command)] == [
+        "job_id",
+        "enforce",
+        "worker_id",
+        "lease_id",
+        "reason",
+    ]
+    assert command.job_id == 42
+    assert command.enforce is True
+    assert command.worker_id == "worker-1"
+    assert command.lease_id == "lease-1"
+    assert command.reason == "yield"
+
+
+def test_release_job_command_requires_explicit_enforcement_policy() -> None:
+    """Verify release callers cannot omit the resolved enforcement policy."""
+
+    with pytest.raises(TypeError, match="enforce"):
+        ReleaseJobCommand(job_id=42)  # type: ignore[call-arg]
+
+
+def test_release_job_command_is_frozen() -> None:
+    """Verify release command fields cannot be reassigned."""
+
+    command = ReleaseJobCommand(job_id=42, enforce=False)
+
+    with pytest.raises(FrozenInstanceError):
+        command.reason = "other"
 
 
 def test_lifecycle_result_supports_no_eligible_job_reason() -> None:

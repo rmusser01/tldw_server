@@ -124,22 +124,21 @@ def test_renew_with_clock_skew_does_not_shrink_lease_sqlite(monkeypatch, tmp_pat
 
     db_path = tmp_path / "jobs3.db"
     ensure_jobs_tables(db_path)
+    initial_epoch = int(datetime.now().timestamp()) + 31_536_000
+    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", str(initial_epoch))
     jm = JobManager(db_path)
     jm.create_job(domain="ps", queue="default", job_type="t", payload={}, owner_user_id="u")
     acq = jm.acquire_next_job(domain="ps", queue="default", lease_seconds=20, worker_id="w")
     row = jm.get_job(int(acq["id"]))
     before = _parse_sqlite_ts(row["leased_until"]) if isinstance(row["leased_until"], str) else row["leased_until"]
 
-    # Move clock backwards and renew; leased_until should not move back
-    # Capture current epoch from manager clock and subtract skew
-    from time import time as _now
-    skewed = int(_now()) - 3600
-    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", str(skewed))
-    ok = jm.renew_job_lease(int(acq["id"]), seconds=5)
+    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", str(initial_epoch - 3600))
+    skewed_jm = JobManager(db_path)
+    ok = skewed_jm.renew_job_lease(int(acq["id"]), seconds=5, enforce=False)
     assert ok is True
-    row2 = jm.get_job(int(acq["id"]))
+    row2 = skewed_jm.get_job(int(acq["id"]))
     after = _parse_sqlite_ts(row2["leased_until"]) if isinstance(row2["leased_until"], str) else row2["leased_until"]
-    assert after >= before
+    assert after == before
 
 
 @pytest.mark.parametrize("idempotency_key", [None, "idem-k"])

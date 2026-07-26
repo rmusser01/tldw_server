@@ -89,6 +89,34 @@ class AcquireJobCommand:
 
 
 @dataclass(frozen=True)
+class RenewLeaseCommand:
+    """Backend-neutral command payload for renewing one job lease."""
+
+    job_id: int
+    seconds: int
+    enforce: bool
+    worker_id: str | None = None
+    lease_id: str | None = None
+    progress_percent: float | None = None
+    progress_message: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.seconds < 1:
+            raise ValueError("seconds must be positive")
+
+
+@dataclass(frozen=True)
+class ReleaseJobCommand:
+    """Backend-neutral command payload for releasing one processing job."""
+
+    job_id: int
+    enforce: bool
+    worker_id: str | None = None
+    lease_id: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class AdmissionResult:
     """Result facts produced by a create/admission operation."""
 
@@ -248,4 +276,6 @@ __all__ = [
     "LifecycleResult",
     "NoTransitionReason",
     "OperationOutcome",
+    "ReleaseJobCommand",
+    "RenewLeaseCommand",
 ]

@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.tests.Jobs.parity.scenarios import (
+    FUTURE_NOW_EPOCH,
     run_acquire_complete_lifecycle_scenario,
     run_acquire_contention_scenario,
     run_cancel_terminal_noop_scenario,
@@ -18,6 +19,8 @@ from tldw_Server_API.tests.Jobs.parity.scenarios import (
     run_idempotent_create_preserves_original_request_ids_scenario,
     run_idempotent_create_replay_event_uses_current_request_ids_scenario,
     run_idempotent_create_scope_scenario,
+    run_release_lease_ownership_scenario,
+    run_renew_lease_characterization_scenario,
     run_renew_stale_lease_noop_scenario,
 )
 
@@ -90,6 +93,26 @@ def test_sqlite_renew_stale_lease_noop(sqlite_manager_factory: Callable[[], JobM
     """Run the stale lease renewal scenario against SQLite."""
 
     run_renew_stale_lease_noop_scenario(sqlite_manager_factory)
+
+
+def test_sqlite_renew_lease_characterization(
+    sqlite_manager_factory: Callable[[], JobManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run future-clock renewal characterization against SQLite."""
+
+    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", FUTURE_NOW_EPOCH)
+    run_renew_lease_characterization_scenario(sqlite_manager_factory)
+
+
+def test_sqlite_release_lease_ownership(
+    sqlite_manager_factory: Callable[[], JobManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run release ownership and compatibility characterization against SQLite."""
+
+    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", FUTURE_NOW_EPOCH)
+    run_release_lease_ownership_scenario(sqlite_manager_factory)
 
 
 def test_sqlite_cancel_terminal_noop(sqlite_manager_factory: Callable[[], JobManager]) -> None:
