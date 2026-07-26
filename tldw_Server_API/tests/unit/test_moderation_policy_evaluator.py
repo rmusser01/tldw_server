@@ -113,17 +113,6 @@ def test_direct_policy_type_loader_and_evaluator_shape_are_literal():
     assert vars(evaluator) == {}
 
 
-def test_direct_redaction_remains_deferred_to_task_4():
-    with pytest.raises(AttributeError, match="redact_text"):
-        PolicyEvaluator().evaluate_text(
-            "secret",
-            _policy(_rule("secret", action="redact")),
-            "input",
-            LIMITS,
-            include_redacted_text=True,
-        )
-
-
 def test_direct_decision_evaluation_has_literal_result():
     policy = _policy(
         PatternRule(
@@ -712,3 +701,332 @@ def test_direct_evaluator_does_not_mutate_borrowed_inputs():
     ) == policy_scalar_snapshot
     assert vars(LIMITS) == limit_values
     assert all(getattr(LIMITS, field) is original for field, original in limit_identities)
+
+
+def test_evaluate_without_redacted_text_never_invokes_redaction():
+    class _NoRedactionEvaluator(PolicyEvaluator):
+        def redact_text(self, *_args, **_kwargs):
+            raise AssertionError("redaction must not run")
+
+    result = _NoRedactionEvaluator().evaluate_text(
+        "secret",
+        _policy(
+            PatternRule(
+                regex=re.compile("secret"),
+                action="redact",
+                replacement="[R]",
+            )
+        ),
+        "input",
+        LIMITS,
+        include_redacted_text=False,
+    )
+
+    assert result.action == "redact"
+    assert result.redacted_text is None
+
+
+def test_nested_redaction_receives_identical_limits_object():
+    seen = []
+
+    class _RecordingEvaluator(PolicyEvaluator):
+        def redact_text(self, text, policy, phase, limits):
+            seen.append(limits)
+            return "[R]"
+
+    result = _RecordingEvaluator().evaluate_text(
+        "secret",
+        _policy(PatternRule(regex=re.compile("secret"), action="redact")),
+        "input",
+        LIMITS,
+        include_redacted_text=True,
+    )
+
+    assert result.redacted_text == "[R]"
+    assert seen == [LIMITS]
+    assert seen[0] is LIMITS
+
+
+def test_direct_redaction_is_sequential_and_action_agnostic():
+    policy = _policy(
+        PatternRule(
+            regex=re.compile("secret"),
+            action="warn",
+            replacement="token",
+        ),
+        PatternRule(
+            regex=re.compile("token"),
+            action="block",
+            replacement="[FINAL]",
+        ),
+        enabled=False,
+    )
+
+    assert PolicyEvaluator().redact_text_with_count(
+        "secret",
+        policy,
+        None,
+        LIMITS,
+    ) == ("[FINAL]", 2)
+
+
+@pytest.mark.timeout(2)
+def test_direct_long_redaction_uses_full_text_finditer():
+    limits = EvaluationLimits(
+        max_scan_chars=3,
+        match_window_chars=0,
+        max_fallback_scan_chars=3,
+        max_replacements_per_pattern=10,
+    )
+    policy = _policy(
+        PatternRule(
+            regex=re.compile("ABCDE"),
+            action="warn",
+            replacement="[R]",
+        )
+    )
+
+    assert PolicyEvaluator().redact_text_with_count(
+        "xxABCDEyy",
+        policy,
+        "input",
+        limits,
+    ) == ("xx[R]yy", 1)
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected_text", "expected_count"),
+    [
+        (None, "[R] [R] [R]", 3),
+        (0, "[R] [R] [R]", 3),
+        (-1, "[R] [R] [R]", 3),
+        ("2", "[R] [R] x", 2),
+        ("bad", "[R] [R] [R]", 3),
+    ],
+)
+def test_direct_short_redaction_limit_behavior_is_literal(
+    limit,
+    expected_text,
+    expected_count,
+):
+    limits = EvaluationLimits(
+        max_scan_chars=100,
+        match_window_chars=5,
+        max_fallback_scan_chars=100,
+        max_replacements_per_pattern=limit,
+    )
+
+    assert PolicyEvaluator().redact_text_with_count(
+        "x x x",
+        _policy(_rule("x", replacement="[R]")),
+        None,
+        limits,
+    ) == (expected_text, expected_count)
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected_text", "expected_count"),
+    [
+        (None, "[R] [R] [R]", 3),
+        (0, "[R] [R] [R]", 3),
+        (-1, "[R] [R] [R]", 3),
+        (2, "[R] [R] x", 2),
+    ],
+)
+def test_direct_long_redaction_supported_limit_behavior_is_literal(
+    limit,
+    expected_text,
+    expected_count,
+):
+    limits = EvaluationLimits(
+        max_scan_chars=3,
+        match_window_chars=5,
+        max_fallback_scan_chars=100,
+        max_replacements_per_pattern=limit,
+    )
+
+    assert PolicyEvaluator().redact_text_with_count(
+        "x x x",
+        _policy(_rule("x", replacement="[R]")),
+        None,
+        limits,
+    ) == (expected_text, expected_count)
+
+
+@pytest.mark.parametrize(
+    ("limit", "error_type"),
+    [
+        ("2", TypeError),
+        ("bad", ValueError),
+    ],
+)
+def test_direct_long_redaction_unsupported_limit_errors_are_literal(
+    limit,
+    error_type,
+):
+    limits = EvaluationLimits(
+        max_scan_chars=3,
+        match_window_chars=5,
+        max_fallback_scan_chars=100,
+        max_replacements_per_pattern=limit,
+    )
+
+    with pytest.raises(error_type):
+        PolicyEvaluator().redact_text_with_count(
+            "x x x",
+            _policy(_rule("x", replacement="[R]")),
+            None,
+            limits,
+        )
+
+
+def test_direct_short_and_long_zero_length_behavior_is_literal():
+    policy = _policy(_rule(r"(?=a)", replacement="[R]"))
+
+    assert PolicyEvaluator().redact_text_with_count(
+        "a",
+        policy,
+        None,
+        EvaluationLimits(10, 5, 100, 10),
+    ) == ("[R]a", 1)
+    assert PolicyEvaluator().redact_text_with_count(
+        "aa",
+        policy,
+        None,
+        EvaluationLimits(1, 5, 100, 10),
+    ) == ("aa", 0)
+
+
+@pytest.mark.parametrize("raw", [None, "2", "bad"])
+def test_direct_redaction_path_does_not_coerce_max_scan(raw):
+    limits = EvaluationLimits(
+        max_scan_chars=raw,  # type: ignore[arg-type]
+        match_window_chars=5,
+        max_fallback_scan_chars=100,
+        max_replacements_per_pattern=10,
+    )
+
+    with pytest.raises(TypeError):
+        PolicyEvaluator().redact_text(
+            "x",
+            _policy(_rule("x")),
+            None,
+            limits,
+        )
+
+
+def test_direct_redaction_phase_gate_and_malformed_rule_are_literal():
+    evaluator = PolicyEvaluator()
+    policy = _policy(
+        _rule("secret", replacement="[R]"),
+        input_enabled=False,
+    )
+
+    assert evaluator.redact_text("secret", policy, "input", LIMITS) == "secret"
+
+    malformed = _policy(None)
+    with pytest.raises(AttributeError):
+        evaluator.redact_text("secret", malformed, None, LIMITS)
+
+
+def test_direct_redaction_empty_literal_replacement_and_regex_errors():
+    evaluator = PolicyEvaluator()
+    literal_policy = _policy(
+        _rule(r"(secret)", replacement=r"\1-literal"),
+    )
+    regex_error_policy = _policy(_RegexErrorPattern())
+
+    assert evaluator.redact_text("", literal_policy, None, LIMITS) == ""
+    assert (
+        evaluator.redact_text(
+            "secret",
+            _policy(),
+            None,
+            LIMITS,
+        )
+        == "secret"
+    )
+    assert (
+        evaluator.redact_text(
+            "secret",
+            literal_policy,
+            None,
+            LIMITS,
+        )
+        == r"\1-literal"
+    )
+    assert (
+        evaluator.redact_text(
+            "secret",
+            regex_error_policy,
+            None,
+            LIMITS,
+        )
+        == "secret"
+    )
+    assert evaluator.redact_text_with_count(
+        "secret",
+        regex_error_policy,
+        None,
+        LIMITS,
+    ) == ("secret", 0)
+
+
+def test_direct_replacement_lookup_regex_error_is_skipped():
+    class _ReplacementErrorPolicy:
+        block_patterns = [re.compile("secret")]
+        input_enabled = True
+        output_enabled = True
+        categories_enabled = None
+
+        @property
+        def redact_replacement(self):
+            raise re.error("replacement lookup failed")
+
+    evaluator = PolicyEvaluator()
+    policy = _ReplacementErrorPolicy()
+
+    assert (
+        evaluator.redact_text(
+            "secret",
+            policy,  # type: ignore[arg-type]
+            None,
+            LIMITS,
+        )
+        == "secret"
+    )
+    assert evaluator.redact_text_with_count(
+        "secret",
+        policy,  # type: ignore[arg-type]
+        None,
+        LIMITS,
+    ) == ("secret", 0)
+
+
+def test_direct_redaction_does_not_mutate_inputs_or_limits():
+    categories = {"confidential"}
+    rule = _rule(
+        "secret",
+        action="warn",
+        replacement="[R]",
+        categories=categories,
+    )
+    policy = _policy(rule, categories_enabled={"confidential"})
+    pattern_collection = policy.block_patterns
+    limits_before = EvaluationLimits(**vars(LIMITS))
+
+    assert (
+        PolicyEvaluator().redact_text(
+            "secret",
+            policy,
+            "input",
+            LIMITS,
+        )
+        == "[R]"
+    )
+
+    assert policy.block_patterns is pattern_collection
+    assert policy.block_patterns[0] is rule
+    assert rule.categories is categories
+    assert categories == {"confidential"}
+    assert limits_before == LIMITS

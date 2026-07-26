@@ -188,6 +188,178 @@ class PolicyEvaluator:
         except re.error:
             return None
 
+    @staticmethod
+    def collect_rule_matches(
+        text: str,
+        pattern: re.Pattern[str],
+        limits: EvaluationLimits,
+    ) -> list[re.Match[str]]:
+        if not text:
+            return []
+        limit = limits.max_replacements_per_pattern
+        if limit is not None and int(limit) <= 0:
+            limit = None
+        matches = []
+        try:
+            for match in pattern.finditer(text):
+                start, end = match.span()
+                if start == end:
+                    continue
+                matches.append(match)
+                if limit is not None and len(matches) >= limit:
+                    break
+        except re.error:
+            return []
+        return matches
+
+    @staticmethod
+    def apply_rule_redactions(
+        text: str,
+        matches: list[re.Match[str]],
+        replacement: str,
+    ) -> str:
+        if not matches:
+            return text
+        parts = []
+        last = 0
+        for match in matches:
+            start, end = match.span()
+            if start < last:
+                continue
+            parts.append(text[last:start])
+            parts.append(replacement)
+            last = end
+        parts.append(text[last:])
+        return "".join(parts)
+
+    def redact_text(
+        self,
+        text: str,
+        policy: ModerationPolicy,
+        phase: str | None,
+        limits: EvaluationLimits,
+    ) -> str:
+        _, PatternRule, _ = self.policy_types()
+        if not text or not policy.block_patterns:
+            return text
+        if phase == "input" and not policy.input_enabled:
+            return text
+        if phase == "output" and not policy.output_enabled:
+            return text
+        redacted = text
+        for rule in policy.block_patterns:
+            if isinstance(
+                rule,
+                PatternRule,
+            ) and not self.rule_applies_to_phase(rule, phase):
+                continue
+            if isinstance(
+                rule,
+                PatternRule,
+            ) and not self.rule_matches_enabled_categories(
+                rule,
+                policy.categories_enabled,
+            ):
+                continue
+            pattern = rule.regex if isinstance(rule, PatternRule) else rule
+            replacement_override = None
+            if isinstance(rule, PatternRule) and rule.replacement:
+                replacement_override = rule.replacement
+            try:
+                replacement = replacement_override or policy.redact_replacement
+                limit_raw = limits.max_replacements_per_pattern
+                try:
+                    limit = int(limit_raw) if limit_raw is not None else 0
+                except _EVALUATION_NONCRITICAL_EXCEPTIONS:
+                    limit = 0
+                if limit <= 0:
+                    limit = 0
+                if len(redacted) <= limits.max_scan_chars:
+                    redacted = pattern.sub(
+                        lambda _match, value=replacement: value,
+                        redacted,
+                        count=limit,
+                    )
+                else:
+                    matches = self.collect_rule_matches(
+                        redacted,
+                        pattern,
+                        limits,
+                    )
+                    if matches:
+                        redacted = self.apply_rule_redactions(
+                            redacted,
+                            matches,
+                            replacement,
+                        )
+            except re.error:
+                continue
+        return redacted
+
+    def redact_text_with_count(
+        self,
+        text: str,
+        policy: ModerationPolicy,
+        phase: str | None,
+        limits: EvaluationLimits,
+    ) -> tuple[str, int]:
+        _, PatternRule, _ = self.policy_types()
+        if not text or not policy.block_patterns:
+            return text, 0
+        if phase == "input" and not policy.input_enabled:
+            return text, 0
+        if phase == "output" and not policy.output_enabled:
+            return text, 0
+        redacted = text
+        total_count = 0
+        for rule in policy.block_patterns:
+            if isinstance(rule, PatternRule) and not self.rule_applies_to_phase(
+                rule,
+                phase,
+            ):
+                continue
+            if isinstance(rule, PatternRule) and not self.rule_matches_enabled_categories(
+                rule,
+                policy.categories_enabled,
+            ):
+                continue
+            pattern = rule.regex if isinstance(rule, PatternRule) else rule
+            replacement_override = None
+            if isinstance(rule, PatternRule) and rule.replacement:
+                replacement_override = rule.replacement
+            try:
+                replacement = replacement_override or policy.redact_replacement
+                limit_raw = limits.max_replacements_per_pattern
+                try:
+                    limit = int(limit_raw) if limit_raw is not None else 0
+                except _EVALUATION_NONCRITICAL_EXCEPTIONS:
+                    limit = 0
+                if limit <= 0:
+                    limit = 0
+                if len(redacted) <= limits.max_scan_chars:
+                    redacted, count = pattern.subn(
+                        lambda _match, value=replacement: value,
+                        redacted,
+                        count=limit,
+                    )
+                else:
+                    matches = self.collect_rule_matches(
+                        redacted,
+                        pattern,
+                        limits,
+                    )
+                    count = len(matches)
+                    if matches:
+                        redacted = self.apply_rule_redactions(
+                            redacted,
+                            matches,
+                            replacement,
+                        )
+                total_count += count
+            except re.error:
+                continue
+        return redacted, total_count
+
     def evaluate_text(
         self,
         text: str,
