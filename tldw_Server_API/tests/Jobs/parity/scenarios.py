@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 ManagerFactory = Callable[[], JobManager]
+LeaseExpiry = Callable[[JobManager, int], None]
 
 
 def run_idempotent_create_scope_scenario(make_manager: ManagerFactory) -> None:
@@ -194,6 +197,73 @@ def run_acquire_complete_lifecycle_scenario(make_manager: ManagerFactory) -> Non
     assert stored is not None
     assert stored["status"] == "completed"
     assert stored.get("leased_until") is None
+
+
+def run_acquire_contention_scenario(make_manager: ManagerFactory) -> None:
+    """Verify concurrent workers acquire a pending job at most once."""
+
+    seed = make_manager()
+    job = seed.create_job(
+        domain="parity-contention",
+        queue="default",
+        job_type="single",
+        payload={},
+        owner_user_id="owner-1",
+    )
+    managers = [make_manager(), make_manager()]
+    barrier = Barrier(2)
+
+    def acquire(item: tuple[JobManager, str]) -> dict[str, object] | None:
+        manager, worker_id = item
+        barrier.wait(timeout=10)
+        return manager.acquire_next_job(
+            domain="parity-contention",
+            queue="default",
+            lease_seconds=30,
+            worker_id=worker_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(acquire, zip(managers, ("worker-1", "worker-2"), strict=True)))
+
+    acquired = [result for result in results if result is not None]
+    assert len(acquired) == 1
+    assert int(acquired[0]["id"]) == int(job["id"])
+
+
+def run_expired_lease_reclaim_scenario(
+    make_manager: ManagerFactory,
+    expire_lease: LeaseExpiry,
+) -> None:
+    """Verify a different worker can reclaim an expired lease."""
+
+    manager = make_manager()
+    job = manager.create_job(
+        domain="parity-expiry",
+        queue="default",
+        job_type="reclaim",
+        payload={},
+        owner_user_id="owner-1",
+    )
+    first = manager.acquire_next_job(
+        domain="parity-expiry",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-1",
+    )
+    assert first is not None
+    expire_lease(manager, int(job["id"]))
+
+    second = manager.acquire_next_job(
+        domain="parity-expiry",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-2",
+    )
+    assert second is not None
+    assert int(second["id"]) == int(job["id"])
+    assert second["worker_id"] == "worker-2"
+    assert second["lease_id"] != first["lease_id"]
 
 
 def run_complete_idempotency_scenario(make_manager: ManagerFactory) -> None:

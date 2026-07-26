@@ -10,9 +10,11 @@ import pytest
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.tests.Jobs.parity.scenarios import (
+    run_acquire_contention_scenario,
     run_acquire_complete_lifecycle_scenario,
     run_cancel_terminal_noop_scenario,
     run_events_outbox_create_complete_scenario,
+    run_expired_lease_reclaim_scenario,
     run_idempotent_create_replay_event_uses_current_request_ids_scenario,
     run_idempotent_create_preserves_original_request_ids_scenario,
     run_idempotent_create_scope_scenario,
@@ -33,6 +35,18 @@ def sqlite_manager_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> C
     monkeypatch.setenv("JOBS_DISABLE_LEASE_ENFORCEMENT", "true")
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     return lambda: JobManager(db_path)
+
+
+def _expire_sqlite_lease(manager: JobManager, job_id: int) -> None:
+    conn = manager._connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET leased_until = DATETIME('now', '-10 seconds') WHERE id = ?",
+                (job_id,),
+            )
+    finally:
+        conn.close()
 
 
 def test_sqlite_idempotent_create_scope(sqlite_manager_factory: Callable[[], JobManager]) -> None:
@@ -59,6 +73,18 @@ def test_sqlite_acquire_complete_lifecycle(sqlite_manager_factory: Callable[[], 
     """Run the acquire-complete lifecycle scenario against SQLite."""
 
     run_acquire_complete_lifecycle_scenario(sqlite_manager_factory)
+
+
+def test_sqlite_acquire_contention(sqlite_manager_factory: Callable[[], JobManager]) -> None:
+    """Run the concurrent acquisition scenario against SQLite."""
+
+    run_acquire_contention_scenario(sqlite_manager_factory)
+
+
+def test_sqlite_expired_lease_reclaim(sqlite_manager_factory: Callable[[], JobManager]) -> None:
+    """Run the expired lease reclaim scenario against SQLite."""
+
+    run_expired_lease_reclaim_scenario(sqlite_manager_factory, _expire_sqlite_lease)
 
 
 def test_sqlite_renew_stale_lease_noop(sqlite_manager_factory: Callable[[], JobManager]) -> None:
