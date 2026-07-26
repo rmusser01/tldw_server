@@ -137,3 +137,19 @@
 - The production API image built successfully as `sha256:1e44c831aef0790cf7b6a392df1991efaac27be7c1abba24fc011221b9a2b1ed`; runtime assertions proved all four protected roots absent and the required legal files present.
 - Full-branch review caught an overbroad nested-notice phrase and stale PR #2727 evidence. The strengthened tests failed 2/2 before correction; all four notices now mirror the root categories and preserve Markdown as GPL, the evidence records current head `e8bcc4c8b705df50a5f7e6299335ba8001ff4811`, 10/10 policy tests pass, and final re-review is CLEAN.
 - TASK-12976 is technically complete and PR #2755 remains the draft cutoff PR into `dev`; PR #2727 remains open, draft, and blocked behind it. The required human-authored PR #2755 Change summary is still empty, so the PR is not merge-ready. Counsel terms, custom grants, frontend CLA, completed Countdown grants, and protected artifact publishing remain deferred.
+
+## 2026-07-25 — TASK-12987 Moderation PolicyEvaluator structural extraction
+
+- Execution worktree: `.worktrees/moderation-policy-evaluator-design` on `codex/moderation-policy-evaluator-refactor`.
+- Fresh branch is based on current `origin/dev`; the stale implementation branch is preserved separately.
+- The former local `TASK-12986` execution ID collided with an unrelated canonical task merged into `dev`, so implementation is tracked under `TASK-12987`.
+
+| Task | Status | TDD evidence | Review |
+| --- | --- | --- | --- |
+| 1. Decision and dispatch characterization | In progress | Pending | Pending |
+| 2. Scan, redaction, and limits characterization | Pending | Pending | Pending |
+| 3. EvaluationLimits and decision evaluator | Pending | Pending | Pending |
+| 4. Direct evaluator redaction | Pending | Pending | Pending |
+| 5. ModerationService delegation | Pending | Pending | Pending |
+| 6. Real-service caller regressions | Pending | Pending | Pending |
+| 7. Final verification and scope audit | Pending | Pending | Pending |
