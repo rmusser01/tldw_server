@@ -4,7 +4,7 @@ title: Prepare and cut the 0.1.42 release from current dev
 status: In Progress
 assignee: []
 created_date: '2026-07-26 13:05'
-updated_date: '2026-07-26 13:37'
+updated_date: '2026-07-26 14:48'
 labels:
   - release
   - operations
@@ -15,13 +15,15 @@ references:
   - Docs/Release_Checklist.md
   - TASK-12986
   - 'https://github.com/rmusser01/tldw_server/pull/2761'
+documentation:
+  - Docs/superpowers/specs/2026-07-26-release-0.1.42-reviewed-metadata-design.md
 priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Prepare a normal patch release by integrating current origin/main into current origin/dev in an isolated worktree, validating the combined release candidate, merging it to main only after the repository merge gates are satisfied, cutting v0.1.42 with the authoritative release helper, syncing main back to dev, and then unblocking TASK-12986 license-first CI activation.
+Prepare a normal patch release by integrating current origin/main into current origin/dev in an isolated worktree, adding the complete 0.1.42 changelog, public release notes, and visible version metadata to the reviewed release PR, merging it to main only after repository merge gates are satisfied, tagging the reviewed main merge commit as v0.1.42, publishing the GitHub Release, syncing main back to dev, and then unblocking TASK-12986 license-first CI activation.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -29,14 +31,14 @@ Prepare a normal patch release by integrating current origin/main into current o
 - [x] #1 The release branch contains current origin/dev and current origin/main with conflicts resolved without dropping reviewed changes.
 - [x] #2 Focused release, CI workflow, license gate, security, and diff verification pass or exact blockers are recorded.
 - [ ] #3 The release PR targets main and includes the required requester-authored Change summary before merge.
-- [ ] #4 v0.1.42 is cut from synchronized main using the authoritative release helper and publication is verified.
-- [ ] #5 main is synchronized back into dev before TASK-12986 license-first activation continues.
+- [ ] #4 main is synchronized back into dev before TASK-12986 license-first activation continues.
+- [ ] #5 The reviewed main merge commit is tagged v0.1.42, the GitHub Release is published from the curated changelog entry, and publication is verified.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Freeze current refs and integrate main into the dev-derived release branch. 2. Resolve conflicts and verify the combined release candidate. 3. Push and open the main release PR; wait for the human Change summary and required gates. 4. Merge, cut v0.1.42, verify publication, and sync main to dev. 5. Resume TASK-12986 cutover.
+1. Freeze current refs and integrate main into the dev-derived release branch. 2. Add and verify the complete 0.1.42 changelog, release notes, and version surfaces. 3. Push the updated main release PR; wait for the human Change summary and required trusted gate. 4. Merge, tag the reviewed main commit as v0.1.42, publish the GitHub Release, and sync main to dev. 5. Resume TASK-12986 cutover.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -47,6 +49,8 @@ Branch integration completed at merge commit 2e63d09aa0. Frozen inputs were orig
 Focused local release verification on merge head 2e63d09aa0 passed: 211 pytest tests across the release helper, required workflow contracts, license-first workflow/admission contracts, trusted frontend license workflow/classifier, and release workflow contracts (2 pre-existing warnings). Pinned Actionlint 1.7.12 reported no findings across all workflows. Bandit scanned 363 LOC in Helper_Scripts/ci/check_frontend_license_gate.py and Helper_Scripts/ci/license_first_admission.py with errors=[] and results=[]. Both origin/dev and origin/main are ancestors of the merge head; git diff --check is clean. No production runtime file was changed by conflict resolution, so broader release security coverage is delegated to the security-required PR gate.
 
 Release PR #2761 opened as a draft against main from exact head a9818a21f8b5bb100d4899e60b86728ca48e5590. Its Change summary section intentionally contains only a requester placeholder; the repository policy requires Robert to replace it in his own words before the PR can be marked ready or merged.
+
+Requester selected the reviewed-metadata release approach: PR #2761 will carry the complete 0.1.42 changelog, release notes, and visible version surfaces. Because the existing patch helper would calculate 0.1.43 after that pre-bump, publication will tag the reviewed main merge commit as v0.1.42 and create the GitHub Release from the curated changelog entry.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
