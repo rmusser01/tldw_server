@@ -305,7 +305,35 @@ class _MemoryRedis:
         self.values[key] = value
         return True
 
-    async def eval(self, _script: str, _numkeys: int, key: str, token: str) -> int:
+    @staticmethod
+    def _bytes(value: Any) -> bytes:
+        return value if isinstance(value, bytes) else str(value).encode("utf-8")
+
+    async def eval(self, _script: str, numkeys: int, *values: Any) -> int:
+        if numkeys == 2 and len(values) == 4:
+            binding_key, result_key, arguments_hash, _ttl = values
+            existing = self.values.get(binding_key)
+            if existing is not None:
+                return 1 if existing == self._bytes(arguments_hash) else -1
+            if result_key in self.values:
+                return -2
+            self.values[binding_key] = self._bytes(arguments_hash)
+            return 2
+
+        if numkeys == 2 and len(values) == 5:
+            binding_key, result_key, arguments_hash, encoded, _ttl = values
+            if self.values.get(binding_key) != self._bytes(arguments_hash):
+                return 0
+            self.values[result_key] = encoded
+            return 1
+
+        if numkeys == 1 and len(values) == 3:
+            binding_key, arguments_hash, _ttl = values
+            return int(self.values.get(binding_key) == self._bytes(arguments_hash))
+
+        if numkeys != 1 or len(values) != 2:
+            raise AssertionError("Unexpected Redis Lua operation")
+        key, token = values
         if self.values.get(key) != token:
             return 0
         del self.values[key]

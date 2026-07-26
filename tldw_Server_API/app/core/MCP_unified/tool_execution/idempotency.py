@@ -38,6 +38,7 @@ _DEGRADED_STAGES = frozenset(
     {
         "serialization",
         "result_size",
+        "local_commit",
         "redis_connect",
         "redis_binding",
         "redis_result_read",
@@ -49,6 +50,28 @@ _DEGRADED_STAGES = frozenset(
     }
 )
 _REDIS_POLL_INTERVAL_SECONDS = 0.05
+_REDIS_BIND_ARGUMENTS_SCRIPT = """
+local binding = redis.call('GET', KEYS[1])
+if binding then
+    if binding ~= ARGV[1] then return -1 end
+    redis.call('EXPIRE', KEYS[1], ARGV[2])
+    return 1
+end
+if redis.call('EXISTS', KEYS[2]) == 1 then return -2 end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return 2
+"""
+_REDIS_REFRESH_BINDING_SCRIPT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return 1
+"""
+_REDIS_STORE_RESULT_SCRIPT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return 1
+"""
 
 
 async def _no_redis_client_factory(**_kwargs: Any) -> None:
@@ -86,7 +109,23 @@ class _RemoteUncertainEntry:
 
 
 class _PreOwnerRedisFailure(Exception):
-    """Redis failed before this request attempted remote lock ownership."""
+    """Legacy private sentinel retained only to prove it cannot select fallback."""
+
+
+@dataclass(frozen=True, slots=True)
+class _RemoteReplayRead:
+    replay: IdempotencyRunResult | None
+    remote_available: bool = True
+    local_committed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _RemotePreOwnerState:
+    client: Any
+    result_key: str
+    binding_key: str
+    lock_key: str
+    replay: IdempotencyRunResult | None
 
 
 class IdempotencyManager:
@@ -333,6 +372,38 @@ class IdempotencyManager:
             self._local_cache.popitem(last=False)
         self._prune_local_locks_locked()
 
+    def _try_commit_local_replay(
+        self,
+        cache_key: str,
+        arguments_hash: str,
+        template: dict[str, JsonValue],
+        canonical_bytes: bytes,
+        *,
+        policy: IdempotencyExecutionPolicy,
+        include_binding: bool = False,
+    ) -> bool:
+        try:
+            with self._local_guard:
+                if include_binding:
+                    self._put_local_binding_locked(
+                        cache_key,
+                        arguments_hash,
+                        ttl_seconds=policy.ttl_seconds,
+                        max_entries=policy.max_entries,
+                    )
+                self._put_local_replay_locked(
+                    cache_key,
+                    arguments_hash,
+                    template,
+                    canonical_bytes,
+                    ttl_seconds=policy.ttl_seconds,
+                    max_entries=policy.max_entries,
+                )
+        except Exception as exc:  # noqa: BLE001 - a valid callback result stays authoritative.
+            self._record_degraded("local_commit", exc, remote=False)
+            return False
+        return True
+
     def _get_local_lock(self, cache_key: str) -> asyncio.Lock:
         with self._local_guard:
             lock = self._local_locks.get(cache_key)
@@ -462,14 +533,17 @@ class IdempotencyManager:
                     persistence="none",
                 )
             encoded, template = canonical
-            with self._local_guard:
-                self._put_local_replay_locked(
-                    cache_key,
-                    arguments_hash,
-                    template,
-                    encoded,
-                    ttl_seconds=policy.ttl_seconds,
-                    max_entries=policy.max_entries,
+            if not self._try_commit_local_replay(
+                cache_key,
+                arguments_hash,
+                template,
+                encoded,
+                policy=policy,
+            ):
+                return IdempotencyRunResult(
+                    payload=cast(dict[str, JsonValue], payload),
+                    from_cache=False,
+                    persistence="none",
                 )
             return IdempotencyRunResult(
                 payload=cast(dict[str, JsonValue], payload),
@@ -485,54 +559,32 @@ class IdempotencyManager:
         self,
         client: Any,
         binding_key: str,
+        result_key: str,
         arguments_hash: str,
         *,
         binding_ttl_seconds: int,
         deadline: float,
-    ) -> bool:
-        encoded_hash = arguments_hash.encode("utf-8")
-        created = await self._call_before_deadline(
-            lambda: client.set(
+    ) -> Literal["bound", "created", "mismatch", "orphan"]:
+        status = await self._call_before_deadline(
+            lambda: client.eval(
+                _REDIS_BIND_ARGUMENTS_SCRIPT,
+                2,
                 binding_key,
-                encoded_hash,
-                nx=True,
-                ex=binding_ttl_seconds,
+                result_key,
+                arguments_hash.encode("utf-8"),
+                binding_ttl_seconds,
             ),
             deadline,
         )
-        if created:
-            return True
-        existing = await self._call_before_deadline(
-            lambda: client.get(binding_key),
-            deadline,
-        )
-        if existing is None:
-            created = await self._call_before_deadline(
-                lambda: client.set(
-                    binding_key,
-                    encoded_hash,
-                    nx=True,
-                    ex=binding_ttl_seconds,
-                ),
-                deadline,
-            )
-            if created:
-                return True
-            existing = await self._call_before_deadline(
-                lambda: client.get(binding_key),
-                deadline,
-            )
-        if type(existing) is not bytes:
-            raise TypeError("Redis argument binding must be bytes")
-        if not secrets.compare_digest(existing, encoded_hash):
-            return False
-        refreshed = await self._call_before_deadline(
-            lambda: client.expire(binding_key, binding_ttl_seconds),
-            deadline,
-        )
-        if not refreshed:
-            raise RuntimeError("Redis argument binding expired")
-        return True
+        if status == 1:
+            return "bound"
+        if status == 2:
+            return "created"
+        if status == -1:
+            return "mismatch"
+        if status == -2:
+            return "orphan"
+        raise RuntimeError("Redis argument binding returned an invalid state")
 
     def _decode_remote_replay(
         self,
@@ -549,36 +601,6 @@ class IdempotencyManager:
             raise ValueError("Redis idempotency result is not canonical")
         return raw, template
 
-    def _install_remote_replay(
-        self,
-        cache_key: str,
-        arguments_hash: str,
-        encoded: bytes,
-        template: dict[str, JsonValue],
-        *,
-        policy: IdempotencyExecutionPolicy,
-    ) -> IdempotencyRunResult:
-        with self._local_guard:
-            self._put_local_binding_locked(
-                cache_key,
-                arguments_hash,
-                ttl_seconds=policy.ttl_seconds,
-                max_entries=policy.max_entries,
-            )
-            self._put_local_replay_locked(
-                cache_key,
-                arguments_hash,
-                template,
-                encoded,
-                ttl_seconds=policy.ttl_seconds,
-                max_entries=policy.max_entries,
-            )
-        return IdempotencyRunResult(
-            payload=copy.deepcopy(template),
-            from_cache=True,
-            persistence="durable",
-        )
-
     async def _read_remote_replay(
         self,
         client: Any,
@@ -590,7 +612,7 @@ class IdempotencyManager:
         policy: IdempotencyExecutionPolicy,
         pre_owner: bool,
         deadline: float | None,
-    ) -> IdempotencyRunResult | None:
+    ) -> _RemoteReplayRead:
         try:
             if deadline is None:
                 raw = await client.get(result_key)
@@ -604,13 +626,13 @@ class IdempotencyManager:
         except Exception as exc:  # noqa: BLE001 - Redis clients expose multiple error families.
             self._mark_remote_failure("redis_result_read", exc)
             if pre_owner:
-                raise _PreOwnerRedisFailure from exc
+                return _RemoteReplayRead(replay=None, remote_available=False)
             self._block_remote_key(cache_key, policy=policy)
             raise ExpectedToolFailure(
                 ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
             ) from exc
         if raw is None:
-            return None
+            return _RemoteReplayRead(replay=None)
         try:
             encoded, template = self._decode_remote_replay(raw, policy=policy)
         except Exception as exc:  # noqa: BLE001 - corrupt remote bytes must fail closed.
@@ -619,26 +641,32 @@ class IdempotencyManager:
             raise ExpectedToolFailure(
                 ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
             ) from exc
-        replay = self._install_remote_replay(
+        local_committed = self._try_commit_local_replay(
             cache_key,
             arguments_hash,
-            encoded,
             template,
+            encoded,
             policy=policy,
+            include_binding=True,
         )
-        if await self._refresh_remote_binding(
+        binding_refreshed = await self._refresh_remote_binding(
             client,
             binding_key,
             cache_key,
             arguments_hash,
             policy=policy,
             deadline=deadline,
-        ):
-            return replay
-        return IdempotencyRunResult(
-            payload=replay.payload,
-            from_cache=True,
-            persistence="local",
+        )
+        persistence: Literal["durable", "local", "none"] = "durable"
+        if not binding_refreshed and local_committed:
+            persistence = "local"
+        return _RemoteReplayRead(
+            replay=IdempotencyRunResult(
+                payload=copy.deepcopy(template),
+                from_cache=True,
+                persistence=persistence,
+            ),
+            local_committed=local_committed,
         )
 
     async def _release_remote_lock(self, client: Any, lock_key: str, token: bytes) -> bool:
@@ -673,15 +701,24 @@ class IdempotencyManager:
             policy=policy,
         )
         try:
+            def operation() -> Awaitable[Any]:
+                return client.eval(
+                    _REDIS_REFRESH_BINDING_SCRIPT,
+                    1,
+                    binding_key,
+                    arguments_hash.encode("utf-8"),
+                    policy.ttl_seconds,
+                )
+
             if deadline is None:
-                refreshed = await client.expire(binding_key, policy.ttl_seconds)
+                refreshed = await operation()
             else:
                 refreshed = await self._call_before_deadline(
-                    lambda: client.expire(binding_key, policy.ttl_seconds),
+                    operation,
                     deadline,
                 )
-            if not refreshed:
-                raise RuntimeError("Redis argument binding expired")
+            if refreshed != 1:
+                raise RuntimeError("Redis argument binding ownership was lost")
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - binding health cannot replace callback outcomes.
@@ -689,6 +726,39 @@ class IdempotencyManager:
             self._block_remote_key(cache_key, policy=policy)
             return False
         return True
+
+    async def _store_remote_result(
+        self,
+        client: Any,
+        binding_key: str,
+        result_key: str,
+        cache_key: str,
+        arguments_hash: str,
+        encoded: bytes,
+        *,
+        policy: IdempotencyExecutionPolicy,
+    ) -> Literal["durable", "uncertain", "binding_lost"]:
+        try:
+            stored = await client.eval(
+                _REDIS_STORE_RESULT_SCRIPT,
+                2,
+                binding_key,
+                result_key,
+                arguments_hash.encode("utf-8"),
+                encoded,
+                policy.ttl_seconds,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - local commit prevents redispatch.
+            self._mark_remote_failure("redis_result_write", exc)
+            return "uncertain"
+        if stored != 1:
+            exc = RuntimeError("Redis argument binding changed before result commit")
+            self._mark_remote_failure("redis_result_write", exc)
+            self._block_remote_key(cache_key, policy=policy)
+            return "binding_lost"
+        return "durable"
 
     async def _release_remote_without_replay(
         self,
@@ -716,7 +786,7 @@ class IdempotencyManager:
         policy: IdempotencyExecutionPolicy,
     ) -> IdempotencyRunResult:
         try:
-            replay = await self._read_remote_replay(
+            replay_read = await self._read_remote_replay(
                 client,
                 result_key,
                 binding_key,
@@ -727,13 +797,6 @@ class IdempotencyManager:
                 deadline=None,
             )
         except asyncio.CancelledError:
-            await self._release_remote_without_replay(
-                client,
-                lock_key,
-                token,
-                cache_key,
-                policy=policy,
-            )
             raise
         except Exception:
             await self._release_remote_without_replay(
@@ -744,33 +807,23 @@ class IdempotencyManager:
                 policy=policy,
             )
             raise
+        replay = replay_read.replay
         if replay is not None:
             released = await self._release_remote_lock(client, lock_key, token)
             if released:
                 return replay
+            persistence = (
+                "local" if replay_read.local_committed else replay.persistence
+            )
             return IdempotencyRunResult(
                 payload=replay.payload,
                 from_cache=True,
-                persistence="local",
+                persistence=persistence,
             )
 
         try:
             payload = await execute_fn()
         except asyncio.CancelledError:
-            await self._refresh_remote_binding(
-                client,
-                binding_key,
-                cache_key,
-                arguments_hash,
-                policy=policy,
-            )
-            await self._release_remote_without_replay(
-                client,
-                lock_key,
-                token,
-                cache_key,
-                policy=policy,
-            )
             raise
         except Exception:
             await self._refresh_remote_binding(
@@ -793,36 +846,60 @@ class IdempotencyManager:
         persistence: Literal["durable", "local", "none"] = "none"
         if canonical is not None:
             encoded, template = canonical
-            with self._local_guard:
-                self._put_local_replay_locked(
+            if not self._try_commit_local_replay(
+                cache_key,
+                arguments_hash,
+                template,
+                encoded,
+                policy=policy,
+            ):
+                await self._refresh_remote_binding(
+                    client,
+                    binding_key,
                     cache_key,
                     arguments_hash,
-                    template,
-                    encoded,
-                    ttl_seconds=policy.ttl_seconds,
-                    max_entries=policy.max_entries,
+                    policy=policy,
+                )
+                await self._release_remote_without_replay(
+                    client,
+                    lock_key,
+                    token,
+                    cache_key,
+                    policy=policy,
+                )
+                return IdempotencyRunResult(
+                    payload=cast(dict[str, JsonValue], payload),
+                    from_cache=False,
+                    persistence="none",
                 )
             persistence = "local"
-            try:
-                stored = await client.set(result_key, encoded, ex=policy.ttl_seconds)
-                if not stored:
-                    raise RuntimeError("Redis result write rejected")
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - local commit prevents redispatch.
-                self._mark_remote_failure("redis_result_write", exc)
-            else:
+            result_state = await self._store_remote_result(
+                client,
+                binding_key,
+                result_key,
+                cache_key,
+                arguments_hash,
+                encoded,
+                policy=policy,
+            )
+            if result_state == "durable":
                 persistence = "durable"
-
-        binding_refreshed = await self._refresh_remote_binding(
-            client,
-            binding_key,
-            cache_key,
-            arguments_hash,
-            policy=policy,
-        )
-        if not binding_refreshed and persistence == "durable":
-            persistence = "local"
+            elif result_state == "uncertain":
+                await self._refresh_remote_binding(
+                    client,
+                    binding_key,
+                    cache_key,
+                    arguments_hash,
+                    policy=policy,
+                )
+        else:
+            await self._refresh_remote_binding(
+                client,
+                binding_key,
+                cache_key,
+                arguments_hash,
+                policy=policy,
+            )
 
         released = await self._release_remote_lock(client, lock_key, token)
         if not released and canonical is None:
@@ -835,26 +912,26 @@ class IdempotencyManager:
             persistence=persistence,
         )
 
-    async def _execute_redis(
+    async def _prepare_redis(
         self,
         cache_key: str,
         arguments_hash: str,
-        execute_fn: Callable[[], Awaitable[dict[str, Any]]],
         *,
         policy: IdempotencyExecutionPolicy,
         deadline: float,
-    ) -> IdempotencyRunResult:
+    ) -> _RemotePreOwnerState | None:
         client = self._redis_client
         if client is None:
-            raise _PreOwnerRedisFailure
+            return None
 
         binding_key = f"mcp:idemp:args:{cache_key}"
         result_key = f"mcp:idemp:result:{cache_key}"
         lock_key = f"mcp:idemp:lock:{cache_key}"
         try:
-            bound = await self._redis_bind_arguments(
+            binding_state = await self._redis_bind_arguments(
                 client,
                 binding_key,
+                result_key,
                 arguments_hash,
                 binding_ttl_seconds=policy.lock_ttl_seconds,
                 deadline=deadline,
@@ -867,10 +944,17 @@ class IdempotencyManager:
             raise ExpectedToolFailure(
                 ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
             ) from exc
-        if not bound:
+        if binding_state == "mismatch":
             raise InvalidParamsException(
                 "Idempotency key was already used with different arguments"
             )
+        if binding_state == "orphan":
+            exc = RuntimeError("Redis result exists without an argument binding")
+            self._mark_remote_failure("redis_binding", exc)
+            self._block_remote_key(cache_key, policy=policy)
+            raise ExpectedToolFailure(
+                ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+            ) from exc
         with self._local_guard:
             self._put_local_binding_locked(
                 cache_key,
@@ -879,7 +963,7 @@ class IdempotencyManager:
                 max_entries=policy.max_entries,
             )
 
-        replay = await self._read_remote_replay(
+        replay_read = await self._read_remote_replay(
             client,
             result_key,
             binding_key,
@@ -889,8 +973,29 @@ class IdempotencyManager:
             pre_owner=True,
             deadline=deadline,
         )
-        if replay is not None:
-            return replay
+        if not replay_read.remote_available:
+            return None
+        return _RemotePreOwnerState(
+            client=client,
+            result_key=result_key,
+            binding_key=binding_key,
+            lock_key=lock_key,
+            replay=replay_read.replay,
+        )
+
+    async def _execute_redis(
+        self,
+        state: _RemotePreOwnerState,
+        cache_key: str,
+        arguments_hash: str,
+        execute_fn: Callable[[], Awaitable[dict[str, Any]]],
+        *,
+        policy: IdempotencyExecutionPolicy,
+        deadline: float,
+    ) -> IdempotencyRunResult:
+        client = state.client
+        if state.replay is not None:
+            return state.replay
 
         while True:
             remaining = self._remaining(deadline)
@@ -902,7 +1007,7 @@ class IdempotencyManager:
             try:
                 acquired = await self._call_before_deadline(
                     lambda token=token: client.set(
-                        lock_key,
+                        state.lock_key,
                         token,
                         nx=True,
                         ex=policy.lock_ttl_seconds,
@@ -920,9 +1025,9 @@ class IdempotencyManager:
             if acquired:
                 return await self._execute_remote_owner(
                     client,
-                    result_key,
-                    binding_key,
-                    lock_key,
+                    state.result_key,
+                    state.binding_key,
+                    state.lock_key,
                     token,
                     cache_key,
                     arguments_hash,
@@ -930,18 +1035,18 @@ class IdempotencyManager:
                     policy=policy,
                 )
 
-            replay = await self._read_remote_replay(
+            replay_read = await self._read_remote_replay(
                 client,
-                result_key,
-                binding_key,
+                state.result_key,
+                state.binding_key,
                 cache_key,
                 arguments_hash,
                 policy=policy,
                 pre_owner=False,
                 deadline=deadline,
             )
-            if replay is not None:
-                return replay
+            if replay_read.replay is not None:
+                return replay_read.replay
             remaining = self._remaining(deadline)
             if remaining <= 0:
                 raise ExpectedToolFailure(
@@ -975,16 +1080,21 @@ class IdempotencyManager:
 
         deadline = asyncio.get_running_loop().time() + policy.contention_wait_seconds
         if await self._ensure_redis():
-            try:
+            remote_state = await self._prepare_redis(
+                cache_key,
+                arguments_hash,
+                policy=policy,
+                deadline=deadline,
+            )
+            if remote_state is not None:
                 return await self._execute_redis(
+                    remote_state,
                     cache_key,
                     arguments_hash,
                     execute_fn,
                     policy=policy,
                     deadline=deadline,
                 )
-            except _PreOwnerRedisFailure:
-                pass
         return await self._execute_local(
             cache_key,
             arguments_hash,

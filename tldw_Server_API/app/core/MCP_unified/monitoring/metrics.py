@@ -70,6 +70,7 @@ class MetricsCollector:
         {
             "serialization",
             "result_size",
+            "local_commit",
             "redis_connect",
             "redis_binding",
             "redis_result_read",

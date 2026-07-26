@@ -136,6 +136,7 @@ async def test_prometheus_exports_idempotency_counters(client):
             max_result_bytes=4_096,
         ),
     )
+    protocol.metrics.record_idempotency_degraded("local_commit")
 
     # Scrape Prometheus metrics with auth
     r3 = client.get(
@@ -154,3 +155,4 @@ async def test_prometheus_exports_idempotency_counters(client):
     assert 'tool="idemp_write"' in text  # nosec B101
     assert "mcp_idempotency_degraded_total" in text  # nosec B101
     assert 'stage="serialization"' in text  # nosec B101
+    assert 'stage="local_commit"' in text  # nosec B101
