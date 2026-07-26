@@ -21,7 +21,7 @@ modified_files:
 - Docs/superpowers/plans/2026-07-23-moderation-policy-evaluator-refactor-implementation-plan.md
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 04:04
+updated_date: 2026-07-26 04:11
 ---
 
 ## Description
@@ -32,7 +32,7 @@ Execute the approved PolicyEvaluator implementation plan as a strict structural 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Literal pre-extraction characterization tests lock current service behavior and quirks.
+- [x] #1 Literal pre-extraction characterization tests lock current service behavior and quirks.
 - [ ] #2 EvaluationLimits and a stateless PolicyEvaluator own evaluation, scanning, snippets, and redaction logic without service I/O, logging, or mutable runtime state.
 - [ ] #3 ModerationService delegates logic while preserving all public signatures, tuple ordering, public dynamic dispatch, and callable private compatibility methods.
 - [ ] #4 Direct evaluator, delegation-invariant, moderation, Guardian, Chat, Workflow, STT, endpoint, compilation, Bandit, diff, and current-dev mergeability gates pass.
@@ -46,6 +46,7 @@ Implementation begins from a fresh branch based on current origin/dev because th
 Execution resumed on 2026-07-25 in `.worktrees/moderation-policy-evaluator-design` on fresh branch `codex/moderation-policy-evaluator-refactor`, based on current `origin/dev`. The stale branch is preserved separately. TASK-12987 replaces the collided local TASK-12986 ID, which current dev uses for unrelated trusted-license CI work. Pre-Task-1 baseline: 44/44 focused existing moderation tests passed. Task 1 decision/dispatch characterization is in progress under the subagent-driven workflow.
 Task 1 implementation commit `6ed86653fc` added the literal decision/dispatch characterization oracle without production changes. The first and final focused runs both passed 30/30; the pre-task baseline remained 44/44. Black, Ruff, and diff checks passed. Default Bandit reported only expected low-severity B101 findings on pytest assertions; the test-only scan excluding B101 exited 0 with no findings. Task-scoped independent review is pending.
 Task 1 independent task review is APPROVED with no Critical, Important, or Minor findings. The initial reviewer concern about design/plan entries in `modified_files` was withdrawn after verification that Backlog tracks cumulative full-work-item provenance and those files were added in the preceding TASK-12987 setup commit. A `-W error` diagnostic confirmed the warning noise originates from existing repository/environment configuration and cleanup (`PytestConfigWarning` for the pre-existing `plugins` option, Loguru closed-stream noise, and sqlite ResourceWarning), not the new characterization test.
+Task 2 implementation commit `7c5e78cab5` completed the literal scan/redaction/limit oracle. The approved Task 1 baseline passed 30/30; the first and final expanded runs passed 67/67. The 37 added cases cover sequential redaction/counts, short/long replacement-limit asymmetry, chunk/search bounds, all raw limit fields, bounded full-text redaction, zero-length behavior, malformed raw-rule propagation, exception boundaries, and borrowed policy/rule/category identity. Black, Ruff, test-only Bandit with B101 excluded, and diff checks passed. Existing repository/environment warning noise remains unchanged. Acceptance criterion #1 is complete; independent Task 2 review is pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

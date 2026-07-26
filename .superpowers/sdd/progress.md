@@ -147,7 +147,7 @@
 | Task | Status | TDD evidence | Review |
 | --- | --- | --- | --- |
 | 1. Decision and dispatch characterization | Complete | Characterization baseline 44/44; new oracle first/final runs 30/30; Black, Ruff, and diff checks clean; test-only Bandit clean with B101 excluded | Approved; no findings after cumulative-provenance clarification |
-| 2. Scan, redaction, and limits characterization | In progress | Pending | Pending |
+| 2. Scan, redaction, and limits characterization | Implemented | Baseline 30/30; expanded first/final runs 67/67; Black, Ruff, test-only Bandit, and diff checks clean | Pending |
 | 3. EvaluationLimits and decision evaluator | Pending | Pending | Pending |
 | 4. Direct evaluator redaction | Pending | Pending | Pending |
 | 5. ModerationService delegation | Pending | Pending | Pending |
