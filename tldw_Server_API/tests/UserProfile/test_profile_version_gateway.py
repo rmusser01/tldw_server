@@ -116,6 +116,31 @@ class _Pool:
         yield self.conn
 
 
+class _SyncResult:
+    def __init__(self, rows: list[Any], *, rowcount: Any = 1) -> None:
+        self.rows = rows
+        self.rowcount = rowcount
+
+
+class _SyncExecutor:
+    def __init__(self, rows: list[Any]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, tuple[Any, ...], Any]] = []
+        self.update_rowcount: Any = 1
+
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...],
+        *,
+        connection: Any,
+    ) -> _SyncResult:
+        self.calls.append((sql, params, connection))
+        if sql.lstrip().upper().startswith("UPDATE"):
+            return _SyncResult([], rowcount=self.update_rowcount)
+        return _SyncResult(self.rows)
+
+
 def _candidate_rows(*values: tuple[str, int | None, Any]) -> list[dict[str, Any]]:
     return [
         {"source_tag": source, "source_id": source_id, "candidate_value": value}
@@ -338,6 +363,79 @@ async def test_transaction_read_uses_only_supplied_connection() -> None:
     assert pool.acquire_calls == 0
     assert len(supplied_conn.calls) == 1
     assert pooled_conn.calls == []
+
+
+@pytest.mark.parametrize(
+    ("backend", "placeholder", "lock_clause"),
+    [
+        ("sqlite", "?", ""),
+        ("postgres", "%s", "FOR UPDATE"),
+    ],
+)
+def test_sync_transaction_read_uses_supplied_executor_and_backend_sql(
+    backend: str,
+    placeholder: str,
+    lock_clause: str,
+) -> None:
+    conn = object()
+    executor = _SyncExecutor(
+        _candidate_rows(("user", 21, "2026-02-03T04:05:06.123456Z"))
+    )
+    gateway = ProfileVersionGateway(_Pool(None, backend_type=backend))
+
+    version = gateway.read_in_transaction_sync(
+        executor,
+        conn,
+        21,
+        lock_user=True,
+    )
+
+    assert version == utc("2026-02-03T04:05:06.123456Z")
+    assert len(executor.calls) == 1
+    sql, params, used_connection = executor.calls[0]
+    assert used_connection is conn
+    assert params == (21,)
+    assert placeholder in sql
+    if lock_clause:
+        assert lock_clause in sql
+    else:
+        assert "FOR UPDATE" not in sql
+
+
+@pytest.mark.parametrize(
+    ("backend", "expected_sql", "expected_value"),
+    [
+        (
+            "sqlite",
+            "UPDATE main.users SET profile_version = ? WHERE id = ?",
+            "2026-02-03T04:05:06.123456Z",
+        ),
+        (
+            "postgres",
+            "UPDATE public.users SET profile_version = %s WHERE id = %s",
+            utc("2026-02-03T04:05:06.123456Z"),
+        ),
+    ],
+)
+def test_sync_touch_uses_backend_parameter_style_and_exact_row_metadata(
+    backend: str,
+    expected_sql: str,
+    expected_value: Any,
+) -> None:
+    conn = object()
+    executor = _SyncExecutor([])
+    gateway = ProfileVersionGateway(_Pool(None, backend_type=backend))
+
+    gateway.touch_sync(
+        executor,
+        conn,
+        22,
+        utc("2026-02-03T04:05:06.123456Z"),
+    )
+
+    assert executor.calls == [
+        (expected_sql, (expected_value, 22), conn)
+    ]
 
 
 @pytest.mark.asyncio
@@ -786,12 +884,12 @@ async def test_touch_writes_exact_backend_value_and_requires_one_user_row() -> N
 
     assert sqlite_conn.calls == [
         (
-            "UPDATE users SET profile_version = ? WHERE id = ?",
+            "UPDATE main.users SET profile_version = ? WHERE id = ?",
             ("2026-01-01T00:00:00.123456Z", 3),
         )
     ]
     assert postgres_conn.execute_calls == [
-        ("UPDATE users SET profile_version = $1 WHERE id = $2", (value, 3))
+        ("UPDATE public.users SET profile_version = $1 WHERE id = $2", (value, 3))
     ]
 
     sqlite_conn.update_rowcount = 0

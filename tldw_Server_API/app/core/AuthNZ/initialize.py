@@ -11,6 +11,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import os
 import secrets
 import sys
@@ -34,8 +35,6 @@ SINGLE_USER_API_KEY_PLACEHOLDERS = {
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
-import contextlib
-
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
@@ -46,8 +45,8 @@ from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.scheduler import start_authnz_scheduler
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
-from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
 from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
+from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
 from tldw_Server_API.app.core.testing import is_test_mode
 
 _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS = (
@@ -554,7 +553,8 @@ async def setup_database():
             pool = await get_db_pool()
 
             # Ensure core AuthNZ tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
-            await ensure_authnz_core_tables_pg(pool)
+            if not await ensure_authnz_core_tables_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres AuthNZ core tables")
 
             # Ensure billing tables used by webhook/invoice/audit paths.
             ok_billing_tables = await ensure_billing_tables_pg(pool)
@@ -646,30 +646,26 @@ async def ensure_authnz_schema_ready_once() -> None:
     """
     global _SCHEMA_ENSURED_KEYS
     async with _SCHEMA_ENSURE_LOCK:
-        try:
-            pool = await get_db_pool()
-        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
-            with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
-                logger.debug(f"AuthNZ schema ensure: failed to acquire DB pool; skipping: {e}")
+        pool = await get_db_pool()
+        # If asyncpg pool exists, we're on Postgres; no SQLite migration ensure needed.
+        if getattr(pool, 'pool', None):
             return
 
-        try:
-            # If asyncpg pool exists, we're on Postgres; no SQLite migration ensure needed.
-            if getattr(pool, 'pool', None):
-                return
-
-            db_fs_path = getattr(pool, '_sqlite_fs_path', None) or getattr(pool, 'db_path', None)
-            key = str(db_fs_path or '')
-        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"AuthNZ Startup: schema target inspection failed/skipped: {e}")
-            return
+        db_fs_path = getattr(pool, '_sqlite_fs_path', None) or getattr(pool, 'db_path', None)
+        if db_fs_path is None or not str(db_fs_path).strip():
+            raise RuntimeError("SQLite AuthNZ database target is unavailable")
+        key = str(db_fs_path)
 
         if key in _SCHEMA_ENSURED_KEYS:
             return
-        if db_fs_path and str(db_fs_path) != ':memory:':
+        if str(db_fs_path) != ':memory:':
             await asyncio.to_thread(ensure_authnz_tables, Path(str(db_fs_path)))
             with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
                 logger.info(f"AuthNZ Startup: ensured SQLite schema at {db_fs_path}")
+        else:
+            raise RuntimeError(
+                "SQLite in-memory AuthNZ database target cannot be validated by path"
+            )
         _SCHEMA_ENSURED_KEYS.add(key)
 
 

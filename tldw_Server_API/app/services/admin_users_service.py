@@ -17,6 +17,10 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     UserUpdateRequest,
     unwrap_optional_secret,
 )
+from tldw_Server_API.app.core.Audit.unified_audit_service import (
+    AuditEventCategory,
+    AuditEventType,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateUserError,
     RegistrationDisabledError,
@@ -24,25 +28,26 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     UserNotFoundError,
     WeakPasswordError,
 )
+from tldw_Server_API.app.core.AuthNZ.password_service import hash_password
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    ProfileVersionNotFound,
+    UserVersionOwnership,
+    VersionedUserWriteGateway,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_profile
-from tldw_Server_API.app.core.AuthNZ.password_service import hash_password
 from tldw_Server_API.app.services import admin_scope_service
 from tldw_Server_API.app.services.admin_audit_service import (
     emit_admin_account_audit_event as _emit_admin_account_audit_event,
 )
-from tldw_Server_API.app.services.admin_guardrails_service import verify_privileged_action
 from tldw_Server_API.app.services.admin_data_ops_service import (
     build_users_csv as svc_build_users_csv,
 )
 from tldw_Server_API.app.services.admin_data_ops_service import (
     build_users_json as svc_build_users_json,
 )
-from tldw_Server_API.app.core.Audit.unified_audit_service import (
-    AuditEventCategory,
-    AuditEventType,
-)
+from tldw_Server_API.app.services.admin_guardrails_service import verify_privileged_action
 
 
 def _generate_temporary_password(length: int = 20) -> str:
@@ -358,31 +363,38 @@ async def update_user(
             )
 
         is_pg = await is_pg_fn()
+        gateway = VersionedUserWriteGateway("postgres" if is_pg else "sqlite")
         updates = []
         params = []
         param_count = 0
+        profile_visible_fields: list[str] = []
 
         if request.email is not None:
             param_count += 1
             updates.append(f"email = ${param_count}" if is_pg else "email = ?")
             params.append(request.email)
+            profile_visible_fields.append("email")
 
         if request.role is not None:
             param_count += 1
             updates.append(f"role = ${param_count}" if is_pg else "role = ?")
             params.append(request.role)
+            profile_visible_fields.append("role")
             if request.role != "admin":
                 updates.append("is_superuser = FALSE" if is_pg else "is_superuser = 0")
+                profile_visible_fields.append("is_superuser")
 
         if request.is_active is not None:
             param_count += 1
             updates.append(f"is_active = ${param_count}" if is_pg else "is_active = ?")
             params.append(request.is_active)
+            profile_visible_fields.append("is_active")
 
         if request.is_verified is not None:
             param_count += 1
             updates.append(f"is_verified = ${param_count}" if is_pg else "is_verified = ?")
             params.append(request.is_verified)
+            profile_visible_fields.append("is_verified")
 
         if request.is_locked is not None:
             param_count += 1
@@ -399,6 +411,7 @@ async def update_user(
             param_count += 1
             updates.append(f"storage_quota_mb = ${param_count}" if is_pg else "storage_quota_mb = ?")
             params.append(request.storage_quota_mb)
+            profile_visible_fields.append("storage_quota_mb")
 
         if not updates:
             raise HTTPException(
@@ -406,11 +419,11 @@ async def update_user(
                 detail="No fields to update",
             )
 
+        compound_floor = None
         if request.role is not None:
-            await _lock_user_for_role_change(
+            compound_floor = await gateway.capture_floor(
                 db,
                 user_id=user_id,
-                is_pg=is_pg,
             )
             await _sync_system_role_membership(
                 db,
@@ -433,19 +446,25 @@ async def update_user(
             update_user_sql_template = "UPDATE users SET {set_clause} WHERE id = ?"
             query = update_user_sql_template.format_map(locals())  # nosec B608
 
-        if is_pg:
-            row = await db.fetchrow(query + " RETURNING id", *params)
-            if not row:
-                raise UserNotFoundError(f"User {user_id}")
-        else:
-            cursor = await db.execute(query, params)
-            affected = int(getattr(cursor, "rowcount", 0) or 0)
-            if affected == 0:
-                cursor = await db.execute("SELECT 1 FROM users WHERE id = ?", (user_id,))
-                if not await cursor.fetchone():
-                    raise UserNotFoundError(f"User {user_id}")
-            await db.commit()
-
+        ownership = (
+            UserVersionOwnership.CALLER_OWNS_ANCHOR
+            if compound_floor is not None
+            else UserVersionOwnership.GATEWAY_OWNS_ANCHOR
+        )
+        write_result = await gateway.execute_update(
+            db,
+            user_id=user_id,
+            profile_visible_fields=tuple(profile_visible_fields),
+            statement=query,
+            parameters=tuple(params),
+            ownership=ownership,
+        )
+        if compound_floor is not None:
+            await gateway.final_touch(
+                db,
+                user_id=user_id,
+                version_floor=max(compound_floor, write_result.version_floor),
+            )
         if reason is not None:
             metadata: dict[str, Any] = {"reason": reason}
             if request.role is not None:
@@ -467,7 +486,7 @@ async def update_user(
 
         return {"message": f"User {user_id} updated successfully"}
 
-    except UserNotFoundError as err:
+    except (ProfileVersionNotFound, UserNotFoundError) as err:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found",
@@ -512,7 +531,10 @@ async def reset_user_password(
 
         is_pg = await is_pg_fn()
         if is_pg:
-            row = await db.fetchrow("SELECT metadata FROM users WHERE id = $1", user_id)
+            row = await db.fetchrow(
+                "SELECT metadata FROM public.users WHERE id = $1 FOR UPDATE",
+                user_id,
+            )
             if not row:
                 raise UserNotFoundError(f"User {user_id}")
             existing_metadata = _parse_user_metadata(row.get("metadata"))
@@ -534,9 +556,9 @@ async def reset_user_password(
         metadata_json = json.dumps(existing_metadata)
 
         if is_pg:
-            await db.execute(
+            update_result = await db.execute(
                 """
-                UPDATE users
+                UPDATE public.users
                 SET password_hash = $1,
                     metadata = $2::jsonb,
                     updated_at = CURRENT_TIMESTAMP
@@ -546,6 +568,8 @@ async def reset_user_password(
                 metadata_json,
                 user_id,
             )
+            if type(update_result) is not str or update_result != "UPDATE 1":
+                raise UserNotFoundError(f"User {user_id}")
         else:
             await db.execute(
                 """
@@ -557,7 +581,6 @@ async def reset_user_password(
                 """,
                 (password_hash, metadata_json, user_id),
             )
-            await db.commit()
 
         await _emit_admin_account_audit_event(
             actor_id=principal.user_id,
@@ -630,7 +653,10 @@ async def set_user_mfa_requirement(
         require_mfa = bool(request.require_mfa)
         is_pg = await is_pg_fn()
         if is_pg:
-            row = await db.fetchrow("SELECT metadata FROM users WHERE id = $1", user_id)
+            row = await db.fetchrow(
+                "SELECT metadata FROM public.users WHERE id = $1 FOR UPDATE",
+                user_id,
+            )
             if not row:
                 raise UserNotFoundError(f"User {user_id}")
             existing_metadata = _parse_user_metadata(row.get("metadata"))
@@ -652,9 +678,9 @@ async def set_user_mfa_requirement(
         metadata_json = json.dumps(existing_metadata)
 
         if is_pg:
-            await db.execute(
+            update_result = await db.execute(
                 """
-                UPDATE users
+                UPDATE public.users
                 SET metadata = $1::jsonb,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $2
@@ -662,6 +688,8 @@ async def set_user_mfa_requirement(
                 metadata_json,
                 user_id,
             )
+            if type(update_result) is not str or update_result != "UPDATE 1":
+                raise UserNotFoundError(f"User {user_id}")
         else:
             await db.execute(
                 """
@@ -672,7 +700,6 @@ async def set_user_mfa_requirement(
                 """,
                 (metadata_json, user_id),
             )
-            await db.commit()
 
         await _emit_admin_account_audit_event(
             actor_id=principal.user_id,
@@ -741,17 +768,29 @@ async def delete_user(
         )
 
         is_pg = await is_pg_fn()
+        gateway = VersionedUserWriteGateway("postgres" if is_pg else "sqlite")
         if is_pg:
-            await db.execute(
-                "UPDATE users SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-                user_id,
+            await gateway.execute_update(
+                db,
+                user_id=user_id,
+                profile_visible_fields=("is_active",),
+                statement=(
+                    "UPDATE users SET is_active = FALSE, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = $1"
+                ),
+                parameters=(user_id,),
             )
         else:
-            await db.execute(
-                "UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?",
-                (user_id,),
+            await gateway.execute_update(
+                db,
+                user_id=user_id,
+                profile_visible_fields=("is_active",),
+                statement=(
+                    "UPDATE users SET is_active = 0, "
+                    "updated_at = datetime('now') WHERE id = ?"
+                ),
+                parameters=(user_id,),
             )
-            await db.commit()
 
         await _emit_admin_account_audit_event(
             actor_id=principal.user_id,

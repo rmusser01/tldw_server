@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _mint_profile_user_sql,
+    _profile_user_backend,
+    _profile_user_connection_identity,
+    _revoke_profile_user_sql,
+)
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
     ProfileVersionInvalid,
     ProfileVersionNotFound,
@@ -20,18 +26,18 @@ from tldw_Server_API.app.core.UserProfiles.backend import (
 _SQLITE_CANDIDATES_SQL = """
 WITH target_user AS (
     SELECT users.id, users.profile_version
-    FROM users
+    FROM main.users
     WHERE users.id = ?
 ),
 org_memberships AS (
     SELECT om.org_id
-    FROM org_members AS om
+    FROM main.org_members AS om
     JOIN target_user AS u ON u.id = om.user_id
     WHERE COALESCE(om.status, 'active') = 'active'
 ),
 team_memberships AS (
     SELECT tm.team_id
-    FROM team_members AS tm
+    FROM main.team_members AS tm
     JOIN target_user AS u ON u.id = tm.user_id
     WHERE COALESCE(tm.status, 'active') = 'active'
 )
@@ -45,37 +51,37 @@ SELECT 'team_membership', team_id, NULL
 FROM team_memberships
 UNION ALL
 SELECT 'user_override', NULL, uco.updated_at
-FROM user_config_overrides AS uco
+    FROM main.user_config_overrides AS uco
 JOIN target_user AS u ON u.id = uco.user_id
 UNION ALL
 SELECT 'org_override', oco.org_id, oco.updated_at
-FROM org_config_overrides AS oco
+    FROM main.org_config_overrides AS oco
 JOIN org_memberships AS om ON om.org_id = oco.org_id
 UNION ALL
 SELECT 'team_override', tco.team_id, tco.updated_at
-FROM team_config_overrides AS tco
+    FROM main.team_config_overrides AS tco
 JOIN team_memberships AS tm ON tm.team_id = tco.team_id
 """.strip()
 
 
-def _postgres_candidates_sql(*, lock_user: bool) -> str:
+def _postgres_candidates_sql(*, lock_user: bool, placeholder: str = "$1") -> str:
     # This closed boolean choice cannot introduce user-controlled SQL.
     lock_clause = " FOR UPDATE" if lock_user else ""
     query = f"""
 WITH locked_user AS (
     SELECT users.id, users.profile_version
-    FROM users
-    WHERE users.id = $1{lock_clause}
+    FROM public.users
+    WHERE users.id = {placeholder}{lock_clause}
 ),
 org_memberships AS (
     SELECT om.org_id
-    FROM org_members AS om
+    FROM public.org_members AS om
     JOIN locked_user AS u ON u.id = om.user_id
     WHERE COALESCE(om.status, 'active') = 'active'
 ),
 team_memberships AS (
     SELECT tm.team_id
-    FROM team_members AS tm
+    FROM public.team_members AS tm
     JOIN locked_user AS u ON u.id = tm.user_id
     WHERE COALESCE(tm.status, 'active') = 'active'
 )
@@ -89,15 +95,15 @@ SELECT 'team_membership', team_id, NULL::TIMESTAMPTZ
 FROM team_memberships
 UNION ALL
 SELECT 'user_override', NULL::INTEGER, uco.updated_at
-FROM user_config_overrides AS uco
+    FROM public.user_config_overrides AS uco
 JOIN locked_user AS u ON u.id = uco.user_id
 UNION ALL
 SELECT 'org_override', oco.org_id, oco.updated_at
-FROM org_config_overrides AS oco
+    FROM public.org_config_overrides AS oco
 JOIN org_memberships AS om ON om.org_id = oco.org_id
 UNION ALL
 SELECT 'team_override', tco.team_id, tco.updated_at
-FROM team_config_overrides AS tco
+    FROM public.team_config_overrides AS tco
 JOIN team_memberships AS tm ON tm.team_id = tco.team_id
 """.strip()  # nosec B608
     return query
@@ -129,6 +135,23 @@ class ProfileVersionGatewayProtocol(Protocol):
     ) -> datetime: ...
 
     async def touch(self, conn: Any, user_id: int, value: datetime) -> None: ...
+
+    def read_in_transaction_sync(
+        self,
+        executor: Any,
+        conn: Any,
+        user_id: int,
+        *,
+        lock_user: bool,
+    ) -> datetime: ...
+
+    def touch_sync(
+        self,
+        executor: Any,
+        conn: Any,
+        user_id: int,
+        value: datetime,
+    ) -> None: ...
 
 
 class ProfileVersionGateway:
@@ -180,21 +203,101 @@ class ProfileVersionGateway:
         try:
             is_postgres = self._is_postgres_backend()
             if is_postgres:
-                result = await conn.execute(
-                    "UPDATE users SET profile_version = $1 WHERE id = $2",
-                    normalized,
-                    user_id,
+                sql = (
+                    "UPDATE public.users SET profile_version = $1 WHERE id = $2"
                 )
+                guarded_sql = _profile_touch_sql(conn, sql, backend="postgres")
+                try:
+                    result = await conn.execute(guarded_sql, normalized, user_id)
+                finally:
+                    _revoke_profile_user_sql(guarded_sql)
                 changed = _postgres_changed_rows(result)
             else:
                 serialized = normalized.astimezone(timezone.utc).strftime(
                     "%Y-%m-%dT%H:%M:%S.%fZ"
                 )
-                cursor = await conn.execute(
-                    "UPDATE users SET profile_version = ? WHERE id = ?",
-                    (serialized, user_id),
-                )
+                sql = "UPDATE main.users SET profile_version = ? WHERE id = ?"
+                guarded_sql = _profile_touch_sql(conn, sql, backend="sqlite")
+                try:
+                    cursor = await conn.execute(
+                        guarded_sql,
+                        (serialized, user_id),
+                    )
+                finally:
+                    _revoke_profile_user_sql(guarded_sql)
                 changed = _sqlite_changed_rows(cursor)
+        except (ProfileVersionNotFound, ProfileVersionInvalid):
+            raise
+        except Exception as exc:  # noqa: BLE001 - sanitize storage failures
+            raise self._storage_failure(exc) from None
+
+        if changed != 1:
+            raise ProfileVersionNotFound()
+
+    def read_in_transaction_sync(
+        self,
+        executor: Any,
+        conn: Any,
+        user_id: int,
+        *,
+        lock_user: bool,
+    ) -> datetime:
+        """Synchronously read through only the supplied transaction connection."""
+        try:
+            is_postgres = self._is_postgres_backend()
+            if is_postgres:
+                sql = _postgres_candidates_sql(
+                    lock_user=lock_user,
+                    placeholder="%s",
+                )
+            else:
+                sql = _SQLITE_CANDIDATES_SQL
+            result = executor.execute(sql, (user_id,), connection=conn)
+            return _parse_candidates(
+                result.rows,
+                allow_naive=not is_postgres,
+            ).maximum
+        except (ProfileVersionNotFound, ProfileVersionInvalid):
+            raise
+        except Exception as exc:  # noqa: BLE001 - sanitize storage failures
+            raise self._storage_failure(exc) from None
+
+    def touch_sync(
+        self,
+        executor: Any,
+        conn: Any,
+        user_id: int,
+        value: datetime,
+    ) -> None:
+        """Synchronously advance the anchor on the supplied connection."""
+        normalized = normalize_profile_version(value)
+        try:
+            is_postgres = self._is_postgres_backend()
+            if is_postgres:
+                sql = (
+                    "UPDATE public.users SET profile_version = %s WHERE id = %s"
+                )
+                stored_value: Any = normalized
+            else:
+                sql = "UPDATE main.users SET profile_version = ? WHERE id = ?"
+                stored_value = normalized.astimezone(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%S.%fZ"
+                )
+            guarded_sql = _profile_touch_sql(
+                conn,
+                sql,
+                backend="postgres" if is_postgres else "sqlite",
+                boundary=executor,
+            )
+            try:
+                result = executor.execute(
+                    guarded_sql,
+                    (stored_value, user_id),
+                    connection=conn,
+                )
+            finally:
+                _revoke_profile_user_sql(guarded_sql)
+            changed = _sqlite_changed_rows(result)
         except (ProfileVersionNotFound, ProfileVersionInvalid):
             raise
         except Exception as exc:  # noqa: BLE001 - sanitize storage failures
@@ -235,6 +338,30 @@ class ProfileVersionGateway:
             return resolve_profile_backend(self._db_pool) == "postgres"
         except ProfileBackendUnavailable:
             raise ProfileVersionReadFailed() from None
+
+
+def _profile_touch_sql(
+    conn: Any,
+    sql: str,
+    *,
+    backend: str,
+    boundary: Any | None = None,
+) -> Any:
+    """Authorize an anchor touch only when crossing a managed DB boundary."""
+    managed_backend = _profile_user_backend(conn)
+    if managed_backend is None and boundary is not None:
+        managed_backend = _profile_user_backend(boundary)
+    if managed_backend is None:
+        return sql
+    if managed_backend != backend:
+        raise ProfileVersionReadFailed()
+    return _mint_profile_user_sql(
+        sql,
+        backend=backend,
+        connection_identity=_profile_user_connection_identity(conn),
+        operation="update",
+        columns=("profile_version",),
+    )
 
 
 def _parse_candidates(

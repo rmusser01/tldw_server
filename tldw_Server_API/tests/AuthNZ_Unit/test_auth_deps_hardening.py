@@ -7,17 +7,23 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.testclient import TestClient
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.core.Audit.unified_audit_service import (
+    AuditEventCategory,
+    AuditEventType,
+)
 from tldw_Server_API.app.core.AuthNZ import migrations
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseLockError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.services import admin_audit_service
 
 
 class _FailingCommitConn:
@@ -39,6 +45,45 @@ class _AcquireCM:
 class _FakeDBPool:
     def acquire(self) -> _AcquireCM:
         return _AcquireCM()
+
+
+class _BlockingCleanupConn:
+    def __init__(self) -> None:
+        self.rollback_started = asyncio.Event()
+        self.allow_rollback = asyncio.Event()
+        self.rollback_finished = asyncio.Event()
+
+    async def rollback(self) -> None:
+        self.rollback_started.set()
+        await self.allow_rollback.wait()
+        self.rollback_finished.set()
+
+
+class _BlockingCleanupAcquire:
+    def __init__(self, conn: _BlockingCleanupConn) -> None:
+        self.conn = conn
+        self.release_started = asyncio.Event()
+        self.allow_release = asyncio.Event()
+        self.release_finished = asyncio.Event()
+
+    async def __aenter__(self) -> _BlockingCleanupConn:
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        del exc_type, exc, tb
+        self.release_started.set()
+        await self.allow_release.wait()
+        self.release_finished.set()
+        return False
+
+
+class _BlockingCleanupPool:
+    def __init__(self) -> None:
+        self.conn = _BlockingCleanupConn()
+        self.acquire_context = _BlockingCleanupAcquire(self.conn)
+
+    def acquire(self) -> _BlockingCleanupAcquire:
+        return self.acquire_context
 
 
 class _ExplodingPoolProperty:
@@ -142,11 +187,9 @@ async def test_test_db_adapter_execute_propagates_sqlite_commit_errors(monkeypat
 
     agen = auth_deps.get_db_transaction()
     adapter = await agen.__anext__()
-    try:
-        with pytest.raises(RuntimeError, match="sqlite commit failed"):
-            await adapter.execute("SELECT 1")
-    finally:
-        await agen.aclose()
+    await adapter.execute("SELECT 1")
+    with pytest.raises(RuntimeError, match="sqlite commit failed"):
+        await agen.__anext__()
 
 
 @pytest.mark.asyncio
@@ -159,11 +202,48 @@ async def test_test_db_adapter_commit_propagates_sqlite_commit_errors(monkeypatc
 
     agen = auth_deps.get_db_transaction()
     adapter = await agen.__anext__()
-    try:
-        with pytest.raises(RuntimeError, match="sqlite commit failed"):
-            await adapter.commit()
-    finally:
-        await agen.aclose()
+    await adapter.commit()
+    with pytest.raises(RuntimeError, match="sqlite commit failed"):
+        await agen.__anext__()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_at", ["rollback", "release"])
+async def test_test_db_adapter_drains_cleanup_before_propagating_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_at: str,
+) -> None:
+    pool = _BlockingCleanupPool()
+
+    async def _fake_get_db_pool() -> _BlockingCleanupPool:
+        return pool
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
+
+    async def _exercise_dependency() -> None:
+        generator = auth_deps.get_db_transaction()
+        await generator.__anext__()
+        await generator.athrow(RuntimeError("body failed"))
+
+    cleanup_task = asyncio.create_task(_exercise_dependency())
+
+    await pool.conn.rollback_started.wait()
+    if cancel_at == "rollback":
+        cleanup_task.cancel()
+        pool.conn.allow_rollback.set()
+        await pool.acquire_context.release_started.wait()
+    else:
+        pool.conn.allow_rollback.set()
+        await pool.acquire_context.release_started.wait()
+        cleanup_task.cancel()
+
+    pool.acquire_context.allow_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await cleanup_task
+
+    assert pool.conn.rollback_finished.is_set()
+    assert pool.acquire_context.release_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -185,6 +265,42 @@ async def test_stub_session_manager_uses_timezone_aware_timestamps(monkeypatch: 
 
     refreshed = await sm.refresh_session("unused-positional", session_id=1, user_id=1)
     assert str(refreshed["expires_at"]).endswith("+00:00")
+
+
+def test_stub_session_manager_supports_admin_endpoint_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
+    app = FastAPI()
+
+    @app.post("/admin-session-contract")
+    async def exercise_admin_session_contract(
+        session_manager=Depends(auth_deps.get_session_manager_dep),
+    ) -> dict[str, int]:
+        user_id = 987_654
+        await session_manager.create_session(
+            user_id=user_id,
+            access_token="access",
+            refresh_token="refresh",
+        )
+        sessions = await session_manager.get_user_sessions(user_id, strict=True)
+        revoked = await session_manager.revoke_all_user_sessions(
+            user_id=user_id,
+            reason="Support case 123",
+            revoked_by=7,
+        )
+        remaining = await session_manager.get_user_sessions(user_id, strict=True)
+        return {
+            "listed": len(sessions),
+            "revoked": revoked,
+            "remaining": len(remaining),
+        }
+
+    response = TestClient(app).post("/admin-session-contract")
+
+    assert response.status_code == 200
+    assert response.json() == {"listed": 1, "revoked": 1, "remaining": 0}
 
 @pytest.mark.asyncio
 async def test_get_current_user_fast_path_sanitizes_cached_user(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1157,6 +1273,76 @@ async def test_get_db_transaction_cancellation_wins_over_cleanup_lock_error(
     assert raised.value.__cause__ is None
     assert pool.enter_calls == 1
     assert pool.exit_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("commit_fails", [False, True])
+async def test_admin_audit_is_flushed_only_after_authnz_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    commit_fails: bool,
+) -> None:
+    events: list[dict[str, Any]] = []
+
+    class _AuditService:
+        async def log_event(self, **kwargs: Any) -> None:
+            events.append(kwargs)
+
+        async def flush(self, *, raise_on_failure: bool) -> None:
+            assert raise_on_failure is False
+
+    async def _get_audit_service(_actor_id: int | None) -> _AuditService:
+        return _AuditService()
+
+    class _Transaction:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, exc_type, exc, traceback) -> bool:
+            del exc_type, exc, traceback
+            if commit_fails:
+                raise RuntimeError("commit failed")
+            return False
+
+    class _Pool:
+        def transaction(self, *, acquire_timeout_seconds: float | None = None):
+            assert acquire_timeout_seconds == 5.0
+            return _Transaction()
+
+    async def _get_pool() -> _Pool:
+        return _Pool()
+
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    monkeypatch.setattr(auth_deps, "get_db_pool", _get_pool)
+    monkeypatch.setattr(
+        admin_audit_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _get_audit_service,
+    )
+    generator = auth_deps.get_db_transaction()
+    await generator.__anext__()
+    await admin_audit_service.emit_admin_account_audit_event(
+        actor_id=7,
+        target_user_id=42,
+        event_type=AuditEventType.USER_UPDATED,
+        category=AuditEventCategory.AUTHORIZATION,
+        resource_type="user_account",
+        resource_id="42",
+        action="admin.user.update",
+    )
+
+    was_deferred = events == []
+    if commit_fails:
+        with pytest.raises(RuntimeError, match="commit failed"):
+            await generator.__anext__()
+        commit_outcome_is_correct = events == []
+    else:
+        with pytest.raises(StopAsyncIteration):
+            await generator.__anext__()
+        commit_outcome_is_correct = len(events) == 1
+
+    assert was_deferred
+    assert commit_outcome_is_correct
 
 
 @pytest.mark.asyncio

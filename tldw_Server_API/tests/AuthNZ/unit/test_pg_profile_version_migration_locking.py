@@ -126,6 +126,7 @@ class _Connection:
         return {
             "data_type": "timestamp with time zone",
             "is_nullable": "NO",
+            "column_default": "CURRENT_TIMESTAMP",
         }
 
     async def execute(self, query: str, *args: object) -> None:

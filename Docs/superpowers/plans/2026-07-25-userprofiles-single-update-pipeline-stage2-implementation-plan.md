@@ -80,7 +80,7 @@
 - Modify: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py`
 - Modify: `tldw_Server_API/tests/UserProfile/test_user_profile_legacy_me_update.py`
 
-- [ ] **Step 1: Add parameterized caller characterization before changing internals**
+- [x] **Step 1: Add parameterized caller characterization before changing internals**
 
 Create a table whose rows contain `caller`, `dry_run`, `updates`, expected status, exact detail shape, applied-key order, headers, and audit count. Include duplicate keys, mixed accepted/rejected input, stale version, runtime rollback, empty updates, and the complete deprecated-email matrix.
 
@@ -94,7 +94,7 @@ async def test_stage2_caller_contract_is_characterized(case, caller_harness):
     assert observed.audit_count == case.audit_count
 ```
 
-- [ ] **Step 2: Add AST inventories for profile-visible users writes and membership DML**
+- [x] **Step 2: Add AST inventories for profile-visible users writes and membership DML**
 
 Parse Python string constants and call sites rather than grepping source text. Classify AuthNZ `users` INSERT/UPDATE statements separately from content-database tables. Make the expected file/operation inventory explicit so a new writer fails the test with its path and line.
 
@@ -107,7 +107,7 @@ PROFILE_VISIBLE_COLUMNS = frozenset({
 MEMBERSHIP_TABLES = frozenset({"org_members", "team_members"})
 ```
 
-- [ ] **Step 3: Run the characterization and inventory tests**
+- [x] **Step 3: Run the characterization and inventory tests**
 
 Run:
 ```bash
@@ -116,11 +116,11 @@ python -m pytest tldw_Server_API/tests/UserProfile/test_stage2_caller_characteri
 ```
 Expected: characterization passes against current behavior; boundary tests fail with the complete current direct-writer inventory printed for migration.
 
-- [ ] **Step 4: Record the inventory in the Work Package 1 Backlog task**
+- [x] **Step 4: Record the inventory in the Work Package 1 Backlog task**
 
 Record exact production files, writer functions, and parent-delete paths. Do not add exemptions for runtime writers; only offline migrations and unrelated content databases may be classified as exclusions.
 
-- [ ] **Step 5: Commit the characterization checkpoint**
+- [x] **Step 5: Commit the characterization checkpoint**
 
 ```bash
 git add tldw_Server_API/tests/UserProfile tldw_Server_API/tests/Chatbooks backlog/tasks
@@ -139,7 +139,7 @@ git commit -m "test: characterize UserProfiles stage 2 boundaries"
 - Create: `tldw_Server_API/tests/AuthNZ/unit/test_database_transaction_acquire_timeout.py`
 - Modify: `tldw_Server_API/tests/AuthNZ/unit/test_sqlite_transaction_modes.py`
 
-- [ ] **Step 1: Write failing transaction-boundary tests**
+- [x] **Step 1: Write failing transaction-boundary tests**
 
 Cover unchanged `RollbackSignal` identity, no log emission for that signal, SQLSTATE `40P01` and `40001` from statements and commit, pool acquisition timeout, explicit exhaustion, cancellation, SQLite rollback, and absence of raw exception text/path in logs and translated exceptions.
 
@@ -155,7 +155,7 @@ async def test_transaction_rethrows_rollback_signal_unchanged(pool):
     assert raised.value is signal
 ```
 
-- [ ] **Step 2: Run tests and confirm the missing contracts fail**
+- [x] **Step 2: Run tests and confirm the missing contracts fail**
 
 Run:
 ```bash
@@ -164,7 +164,7 @@ python -m pytest tldw_Server_API/tests/AuthNZ/unit/test_database_transaction_sig
 ```
 Expected: FAIL because the signal types and bounded transaction argument do not exist.
 
-- [ ] **Step 3: Implement the generic exception and transaction contracts**
+- [x] **Step 3: Implement the generic exception and transaction contracts**
 
 Use this public shape; neither exception stores raw backend text. The policy parser is the only place that reads SQLite retry/backoff, busy retry metadata, and PostgreSQL acquisition timeout settings.
 
@@ -187,12 +187,12 @@ async def transaction(self, *, acquire_timeout_seconds: float | None = None):
 
 Implement `_transaction_context()` as the existing backend-specific body, not as a second public transaction API. Pass the timeout to asyncpg acquisition, catch `RollbackSignal` and `DatabaseConcurrencyConflict` before broad translation, classify SQLSTATE from statement and commit failures, re-raise cancellation, sanitize ordinary translation with `from None`, and preserve SQLite `BEGIN IMMEDIATE` plus rollback. Resolve `AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS=5` in `AuthnzTransactionPolicy`; do not import FastAPI. Make `get_db_transaction()` consume the same policy while preserving its exact HTTP mapping at the dependency boundary.
 
-- [ ] **Step 4: Run the transaction tests**
+- [x] **Step 4: Run the transaction tests**
 
 Run the command from Step 2.
 Expected: PASS; captured logs contain exception class and stable backend code only.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/AuthNZ/exceptions.py tldw_Server_API/app/core/AuthNZ/database.py tldw_Server_API/app/core/AuthNZ/settings.py tldw_Server_API/app/core/AuthNZ/transaction_policy.py tldw_Server_API/app/api/v1/API_Deps/auth_deps.py tldw_Server_API/tests/AuthNZ/unit
@@ -205,12 +205,18 @@ git commit -m "refactor(authnz): add safe transaction rollback contracts"
 - Modify: `tldw_Server_API/Databases/SQLite/Schema/sqlite_users.sql:1`
 - Modify: `tldw_Server_API/Databases/Postgres/Schema/postgresql_users.sql:1`
 - Modify: `tldw_Server_API/app/core/AuthNZ/migrations.py`
+- Create: `tldw_Server_API/app/core/AuthNZ/sqlite_profile_version_schema.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/database.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/Users_DB.py`
 - Modify: `tldw_Server_API/tests/AuthNZ/conftest.py`
 - Create: `tldw_Server_API/tests/AuthNZ/unit/test_profile_version_migration.py`
+- Create: `tldw_Server_API/tests/AuthNZ/unit/test_sqlite_profile_version_schema.py`
 - Create: `tldw_Server_API/tests/AuthNZ_Postgres/test_profile_version_migration_pg.py`
+- Create: `tldw_Server_API/tests/DB_Management/test_userdatabase_v2_profile_version_schema.py`
 
-- [ ] **Step 1: Write migration tests first**
+- [x] **Step 1: Write migration tests first**
 
 Test fresh schema type/default, upgrade backfill from naive/aware `updated_at`, canonical SQLite `YYYY-MM-DDTHH:MM:SS.ffffffZ`, PostgreSQL `TIMESTAMPTZ`, idempotence, null/unparsable rejection, startup failure, and unchanged external version at the migration boundary.
 
@@ -222,7 +228,7 @@ def test_sqlite_profile_version_backfill_is_canonical(tmp_path):
     assert value == "2026-01-02T03:04:05.123456Z"
 ```
 
-- [ ] **Step 2: Run migration tests and verify red**
+- [x] **Step 2: Run migration tests and verify red**
 
 Run:
 ```bash
@@ -232,11 +238,29 @@ python -m pytest tldw_Server_API/tests/AuthNZ_Postgres/test_profile_version_migr
 ```
 Expected: SQLite FAIL because the column is absent; PostgreSQL FAIL or explicit local skip, with CI required to pass.
 
-- [ ] **Step 3: Implement schema and upgrade migration**
+- [x] **Step 3: Implement schema and upgrade migration**
 
 Fresh SQLite uses `profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))` so the staged migration remains deployable before every creator is converted; converted creators still supply an explicit canonical value. PostgreSQL uses `profile_version TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`. The upgrade adds nullable, backfills after strict normalization, verifies every row, then enforces readiness. Keep `update_users_timestamp` limited to `updated_at`; it must not write `profile_version`.
 
-- [ ] **Step 4: Run both migration suites and existing schema fail-fast tests**
+Review amendment: extract the SQLite column definition, normalization,
+rebuild, and strict readiness validation into one leaf module shared by
+migration 091 and embedded bootstrap. File-backed `DatabasePool` owns migration
+and post-migration validation before serving; `UsersDB` fails closed if that
+boundary leaves the column missing. `UserDatabase_v2` runs the owning helper on
+its pooled raw SQLite connection before installing its managed serving guard.
+The owning helper uses `BEGIN IMMEDIATE`, disables and restores the original
+foreign-key mode outside the transaction, rolls back on `BaseException`, and
+refuses a caller-owned transaction. Valid canonical schemas use a validate-only
+fast path. Rebuild tests preserve custom columns/order, constraints, indexes,
+triggers, foreign keys, and `sqlite_sequence`, preserve canonical values,
+normalize nulls from valid `updated_at`, prove idempotence and omitted six-digit
+defaults, and fail without partial mutation for malformed data or an incomplete
+schema. Readiness validates only the canonical anchor once present; legacy
+`updated_at` is required and normalized only when deriving a missing/null
+anchor. Cleanup-failure tests preserve the primary exception, mark the
+connection invalid, and prove the owning pool retires it before reuse.
+
+- [x] **Step 4: Run both migration suites and existing schema fail-fast tests**
 
 Run:
 ```bash
@@ -246,7 +270,7 @@ python -m pytest tldw_Server_API/tests/AuthNZ_Postgres/test_profile_version_migr
 ```
 Expected: all available tests PASS; PostgreSQL CI remains a required check when local Docker is unavailable.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/Databases tldw_Server_API/app/core/AuthNZ/migrations.py tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py tldw_Server_API/tests/AuthNZ tldw_Server_API/tests/AuthNZ_Postgres
@@ -265,7 +289,7 @@ git commit -m "feat(authnz): add durable user profile version anchor"
 - Create: `tldw_Server_API/tests/UserProfile/test_profile_transaction_gateway.py`
 - Modify: `tldw_Server_API/tests/AuthNZ_Postgres/test_user_profile_version_locking_pg.py`
 
-- [ ] **Step 1: Write failing version and transaction gateway tests**
+- [x] **Step 1: Write failing version and transaction gateway tests**
 
 Assert one backend-specific statement returns the complete candidate set, all transaction reads use the supplied connection, missing users and component failures fail closed, normalization rejects invalid timestamps, old/new snapshots never hybridize, lock reads include the user row, and `touch_value` is exactly `max(clock_now_utc, version_floor + timedelta(microseconds=1))`.
 
@@ -278,7 +302,7 @@ def test_compute_touch_value_exceeds_future_floor():
 
 Also assert SQLite retry count/backoff, exact `database_busy` retry metadata, PostgreSQL deadline, conflict mapping, cancellation, and no automatic conflict retry.
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run:
 ```bash
@@ -287,7 +311,7 @@ python -m pytest tldw_Server_API/tests/UserProfile/test_profile_version_gateway.
 ```
 Expected: FAIL because the gateway modules do not exist.
 
-- [ ] **Step 3: Implement the narrow contracts**
+- [x] **Step 3: Implement the narrow contracts**
 
 Use these interfaces and return immutable candidates rather than a permissive timestamp fallback.
 
@@ -319,7 +343,7 @@ class ProfileVersionGatewayProtocol(Protocol):
 
 The SQL statement must include `users.profile_version`, personal override timestamps, current membership IDs, and inherited org/team override timestamps. The PostgreSQL locked-user CTE performs `SELECT ... FOR UPDATE` before candidate aggregation. Define sanitized `ProfileVersionNotFound`, `ProfileVersionInvalid`, and `ProfileVersionReadFailed` types in `AuthNZ/profile_version.py`. `UserProfileService.get_profile_version()` delegates to the gateway; `build_profile()` no longer catches component failure or returns `datetime.now()` for the version.
 
-- [ ] **Step 4: Run focused and existing profile read/version tests**
+- [x] **Step 4: Run focused and existing profile read/version tests**
 
 Run:
 ```bash
@@ -328,7 +352,7 @@ python -m pytest tldw_Server_API/tests/UserProfile/test_profile_version_gateway.
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/AuthNZ/profile_version.py tldw_Server_API/app/core/UserProfiles tldw_Server_API/tests/UserProfile tldw_Server_API/tests/AuthNZ_Postgres/test_user_profile_version_locking_pg.py
@@ -339,6 +363,14 @@ git commit -m "feat(userprofiles): add fail-closed version transaction gateways"
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/AuthNZ/profile_version.py`
+- Create: `tldw_Server_API/app/core/AuthNZ/profile_user_fields.py`
+- Create: `tldw_Server_API/app/core/AuthNZ/profile_user_write_guard.py`
+- Create: `tldw_Server_API/app/core/AuthNZ/profile_user_sync_boundary.py`
+- Create: `tldw_Server_API/app/core/AuthNZ/postgres_profile_version_schema.py`
+- Modify: `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/database.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/Users_DB.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/users_repo.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py`
 - Modify: `tldw_Server_API/app/services/auth_service.py`
@@ -353,7 +385,7 @@ git commit -m "feat(userprofiles): add fail-closed version transaction gateways"
 - Create: `tldw_Server_API/tests/AuthNZ/unit/test_versioned_user_write_gateway.py`
 - Modify: `tldw_Server_API/tests/UserProfile/test_profile_write_boundaries.py`
 
-- [ ] **Step 1: Add gateway behavior tests**
+- [x] **Step 1: Add gateway behavior tests**
 
 Test user-row lock, pre/post candidate capture, explicit one-touch write, insert initialization, caller-owned mode, strict advance under a same-clock update, future inherited override floor, secret-only exclusion, and rollback on failure.
 
@@ -369,7 +401,7 @@ class UserWriteResult:
     version_floor: datetime
 ```
 
-- [ ] **Step 2: Run behavior and boundary tests to identify remaining direct writes**
+- [x] **Step 2: Run behavior and boundary tests to identify remaining direct writes**
 
 Run:
 ```bash
@@ -378,11 +410,75 @@ python -m pytest tldw_Server_API/tests/AuthNZ/unit/test_versioned_user_write_gat
 ```
 Expected: gateway tests FAIL initially; the boundary test reports every unmigrated creator/writer.
 
-- [ ] **Step 3: Implement and migrate the complete inventory**
+- [x] **Step 3: Implement and migrate the complete inventory**
 
 `VersionedUserWriteGateway` accepts a supplied connection, a closed whitelist of columns, operation time, and ownership mode. It initializes `profile_version` on every user insert. For each inventoried update it locks, captures pre/post candidates, performs the write, and touches once unless the caller owns the anchor. Secret-only password/TOTP/backup-code changes do not touch unless the same statement changes an inventoried field. During this foundation package, route the still-transitional `UserProfileUpdateService`, deprecated email endpoint, and admin bulk path through the gateway without changing their public contracts; Work Package 4 later replaces those adapters with the command service. The boundary test permits no direct SQL exception for them.
 
-- [ ] **Step 4: Run affected AuthNZ and structural suites**
+Review amendment: enforce the migrated ownership contract at every managed
+serving AuthNZ write boundary with a bounded runtime SQL classifier. The global
+marker prototype is rejected because it required whole-program inference or
+annotations at 1,256 unrelated dynamic SQL sinks. Managed asyncpg, aiosqlite,
+FastAPI adapter, `UsersDB`, and `UserDatabase_v2` surfaces reject raw protected
+`users` writes before I/O. The gateway alone mints a private, one-shot
+connection-bound capability for its exact validated `INSERT` or `UPDATE`.
+Keep bootstrap and offline migrations as narrow non-serving maintenance phases;
+do not add a process-wide bypass. Freeze SQLite's existing
+`update_users_timestamp` trigger as an `updated_at`-only raw-safe exception and
+freeze that PostgreSQL bootstrap has no users-writing stored routine or trigger.
+Managed serving connections reject function, procedure, trigger, and rule
+creation. Every raw users-table creation is rejected. Only the exact canonical
+`CREATE TABLE IF NOT EXISTS main.users`/`public.users` shape, including required
+anchor columns, can execute through a private one-shot bootstrap capability;
+CTAS, incomplete schemas, shadow relations, and rename-to-`users` operations
+are rejected. SQLite readiness rejects temporary serving/rebuild shadows and
+audits main and temporary triggers. All
+managed `DROP` and `TRUNCATE` statements are rejected. Additive non-anchor or
+constraint-strengthening `ALTER TABLE users` actions remain available, while
+`profile_version` alterations require a private capability and destructive or
+shape-changing alterations fail closed. Raw `profile_version` updates are
+also protected; the profile-version gateway mints and revokes the exact
+connection-bound touch capability. Hostile same-process
+reflection or monkeypatching and database principals that bypass the managed
+AuthNZ openers are explicitly outside the firewall threat model.
+The static scanner retains its committed local-resolution inventory behavior;
+plain unresolved query parameters delegate to runtime enforcement.
+
+Review amendment: centralize PostgreSQL readiness in one caller-transaction
+async/sync helper. It addresses `public.users` explicitly, audits triggers,
+non-extension routines/rules, dynamic SQL, event triggers, and
+DML/COPY/TRUNCATE indirect users writes before and after repair. It normalizes
+naive timestamps as UTC, backfills only a missing anchor from
+`updated_at`, rejects existing null anchors, and enforces the canonical
+`TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP` metadata. Direct pool
+bootstrap, `UsersDB`, `UserDatabase_v2`, and the advisory-lock migration all
+delegate to it; fresh bootstrap and readiness validation are atomic before pool
+availability.
+
+Review amendment: make synchronous managed wrappers generation-bound leases.
+Pool return or context exit invalidates every derived wrapper/cursor before raw
+release, and duplicate return fails before pool I/O. The explicit FastAPI test
+adapter owns one request connection and transaction for SQLite and PostgreSQL,
+commits once at successful dependency exit, or rolls back on exceptional exit;
+compatibility `commit()` calls do not finalize the request transaction.
+`UsersDB.update_user`
+uses one acquisition with no inner commit or nested post-read acquisition.
+Candidate tables use explicit `main`/`public` schemas. Bootstrap and storage
+errors are sanitized to stable domain messages.
+
+Closing review amendment: the PostgreSQL helper owns its transaction-scoped
+advisory lock so every direct caller is serialized, and its pre/post audit also
+rejects updatable views that depend on `public.users`. Required core bootstrap
+DDL uses guard-compatible ordinary statements and fails fast on the first
+error; startup cannot report readiness after a suppressed migration failure.
+Candidate organizations, teams, memberships, and override tables use their full
+canonical constraints instead of reduced stand-ins. The private users-bootstrap
+capability validates the complete required identity/auth/version shape,
+including keys, uniqueness, nullability, and defaults. SQL parser and tokenizer
+failures are translated to the same sanitized rejection. Pool-owned repository,
+user, quota, and auth transactions never commit from inside the operation, and
+changed synchronous backends expose only stable database-error messages.
+
+- [x] **Step 4: Run affected AuthNZ and structural suites**
 
 Run:
 ```bash
@@ -391,7 +487,7 @@ python -m pytest tldw_Server_API/tests/AuthNZ/unit/test_versioned_user_write_gat
 ```
 Expected: PASS and no runtime profile-visible users writer outside approved gateway/caller-owned paths.
 
-- [ ] **Step 5: Run Work Package 1 security and review gates**
+- [x] **Step 5: Run Work Package 1 security and review gates**
 
 Run:
 ```bash
@@ -401,6 +497,19 @@ python -m bandit -r tldw_Server_API/app/core/AuthNZ tldw_Server_API/app/core/Use
 git diff --check
 ```
 Expected: zero compile failures, no new Bandit findings, clean diff check. Request code review, resolve valid findings, complete the Work Package 1 Backlog child, then commit any review fixes.
+
+Final controller evidence (2026-08-08): the complete UserProfiles suite passed
+301 tests; the final touched non-PostgreSQL matrix passed 557 tests; and the
+dedicated SessionManager matrix passed 19 tests. The standard PostgreSQL gate
+reported 1 schema-only pass and 11 database-backed skips because PostgreSQL was
+unavailable locally; those checks remain CI-required. Full app compileall,
+Ruff on every touched Python file, and `git diff --check` passed. Bandit scanned
+36 touched production files (32,661 LOC) with the established B105/B106
+false-positive baseline and reported zero findings and zero errors at
+`/tmp/bandit_task13001_1_final.json`. Final specification-compliance and
+code-quality/security reviews both approved with no open P0-P3 findings. No
+Work Package 2 membership protocol or later typed-pipeline/adapter scope was
+introduced.
 
 ## Work Package 2: Membership Writer Protocol
 

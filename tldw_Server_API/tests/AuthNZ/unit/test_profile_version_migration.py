@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+from tldw_Server_API.app.core.AuthNZ.migrations import (
+    apply_authnz_migrations,
+    ensure_authnz_tables,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -470,6 +473,58 @@ def test_sqlite_profile_version_migration_is_idempotent(tmp_path: Path) -> None:
     assert count == 1
 
 
+def test_candidate_timestamp_migration_preserves_rows_and_indexes(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "candidate-timestamps.db"
+    apply_authnz_migrations(db_path, target_version=91)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
+            ("candidate-user", "candidate@example.com", "hash"),
+        )
+        user_id = int(conn.execute("SELECT id FROM users").fetchone()[0])
+        conn.execute(
+            "INSERT INTO organizations (name, updated_at) VALUES (?, NULL)",
+            ("Candidate Org",),
+        )
+        org_id = int(conn.execute("SELECT id FROM organizations").fetchone()[0])
+        conn.execute(
+            "INSERT INTO org_members (org_id, user_id, added_at) "
+            "VALUES (?, ?, NULL)",
+            (org_id, user_id),
+        )
+        conn.execute(
+            "CREATE INDEX candidate_org_slug_idx ON organizations(slug)"
+        )
+        conn.commit()
+
+    apply_authnz_migrations(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        org_row = conn.execute(
+            "SELECT name, updated_at FROM organizations WHERE id = ?",
+            (org_id,),
+        ).fetchone()
+        member_added_at = conn.execute(
+            "SELECT added_at FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()[0]
+        index_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
+            ("candidate_org_slug_idx",),
+        ).fetchone()
+        updated_at_metadata = {
+            row[1]: row for row in conn.execute("PRAGMA table_info(organizations)")
+        }["updated_at"]
+
+    assert org_row[0] == "Candidate Org"
+    assert org_row[1] is not None
+    assert member_added_at is not None
+    assert index_exists is not None
+    assert updated_at_metadata[3] == 1
+
+
 @pytest.mark.parametrize("legacy_value", [None, "not-a-timestamp"])
 def test_sqlite_upgrade_rejects_invalid_updated_at_and_rolls_back(
     tmp_path: Path,
@@ -540,6 +595,34 @@ def test_current_sqlite_schema_fails_startup_when_profile_version_is_corrupt(
         conn.execute("UPDATE users SET profile_version = ?", (corrupt_value,))
 
     with pytest.raises(RuntimeError, match="profile_version"):
+        ensure_authnz_tables(db_path)
+
+
+def test_current_sqlite_schema_fails_startup_when_candidate_schema_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "corrupt-candidates.db"
+    ensure_authnz_tables(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.executescript(
+            """
+            ALTER TABLE org_members RENAME TO legacy_org_members;
+            CREATE TABLE org_members (
+                org_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT DEFAULT 'member',
+                status TEXT DEFAULT 'active',
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (org_id, user_id),
+                FOREIGN KEY (org_id) REFERENCES teams(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            DROP TABLE legacy_org_members;
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="candidate schema"):
         ensure_authnz_tables(db_path)
 
 

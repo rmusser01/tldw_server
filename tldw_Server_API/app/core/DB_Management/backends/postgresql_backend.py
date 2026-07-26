@@ -773,37 +773,59 @@ class PostgreSQLBackend(DatabaseBackend):
             conn = self.get_pool().get_connection()
             owns_connection = True
 
+        primary_failure: BaseException | None = None
+
+        def _rollback() -> None:
+            try:
+                conn.rollback()
+            except BaseException as rollback_exc:  # noqa: BLE001
+                logger.bind(exception_type=type(rollback_exc).__name__).warning(
+                    "PostgreSQL transaction rollback failed"
+                )
+
+        self._tx_depth_inc(conn)
+        is_outermost = self._tx_depth(conn) == 1
         try:
-            # Track managed transaction depth per-connection so we can
-            # reliably commit/rollback only at the outermost boundary,
-            # regardless of whether we own the connection or it was
-            # supplied by the caller.
-            self._tx_depth_inc(conn)
-            is_outermost = self._tx_depth(conn) == 1
-            # PostgreSQL uses implicit transactions
-            yield conn
-            # Commit only when we're at the outermost depth for this connection.
+            try:
+                yield conn
+            except BaseException as exc:  # noqa: BLE001
+                primary_failure = exc
+                if is_outermost:
+                    _rollback()
+                raise
             if is_outermost:
                 try:
                     conn.commit()
-                except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
-                    # Surface commit failures consistently
-                    logger.error(f"Transaction commit failed: {e}")
-                    raise
-        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
-            # Roll back only when we're at the outermost depth for this connection.
-            try:
-                if self._tx_depth(conn) == 1:
-                    conn.rollback()
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                # Swallow rollback errors to avoid masking the original
-                pass
-            logger.error(f"Transaction failed: {e}")
-            raise
+                except BaseException as exc:  # noqa: BLE001
+                    primary_failure = exc
+                    _rollback()
+                    if not isinstance(exc, Exception):
+                        raise
+                    logger.bind(exception_type=type(exc).__name__).error(
+                        "PostgreSQL transaction commit failed"
+                    )
+                    raise DatabaseError(
+                        "PostgreSQL transaction commit failed"
+                    ) from None
         finally:
             self._tx_depth_dec(conn)
             if owns_connection:
-                self.get_pool().return_connection(conn)
+                try:
+                    self.get_pool().return_connection(conn)
+                except BaseException as cleanup_exc:  # noqa: BLE001
+                    if primary_failure is not None:
+                        logger.bind(
+                            exception_type=type(cleanup_exc).__name__
+                        ).warning("PostgreSQL transaction connection return failed")
+                    elif not isinstance(cleanup_exc, Exception):
+                        raise
+                    else:
+                        logger.bind(
+                            exception_type=type(cleanup_exc).__name__
+                        ).error("PostgreSQL transaction connection return failed")
+                        raise DatabaseError(
+                            "PostgreSQL transaction connection return failed"
+                        ) from None
 
     def get_pool(self) -> ConnectionPool:
         """Get or create the connection pool."""
@@ -891,7 +913,9 @@ class PostgreSQLBackend(DatabaseBackend):
                     try:
                         conn.rollback()
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                        logger.debug(f"Rollback after read-only execute() failed: {rollback_exc}")
+                        logger.bind(
+                            exception_type=type(rollback_exc).__name__,
+                        ).debug("Rollback after read-only execute() failed")
 
             execution_time = time.time() - start_time
 
@@ -913,9 +937,13 @@ class PostgreSQLBackend(DatabaseBackend):
                 try:
                     conn.rollback()
                 except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                    logger.debug(f"Rollback after failed execute() also failed: {rollback_exc}")
-            logger.error(f"Query execution failed: {e}")
-            raise DatabaseError(f"PostgreSQL error: {e}") from e
+                    logger.bind(
+                        exception_type=type(rollback_exc).__name__,
+                    ).debug("Rollback after failed execute() also failed")
+            logger.bind(exception_type=type(e).__name__).error(
+                "PostgreSQL query execution failed"
+            )
+            raise DatabaseError("PostgreSQL query execution failed") from None
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
@@ -962,7 +990,9 @@ class PostgreSQLBackend(DatabaseBackend):
                     try:
                         conn.rollback()
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                        logger.debug(f"Rollback after read-only execute_many() failed: {rollback_exc}")
+                        logger.bind(
+                            exception_type=type(rollback_exc).__name__,
+                        ).debug("Rollback after read-only execute_many() failed")
 
             execution_time = time.time() - start_time
 
@@ -979,9 +1009,13 @@ class PostgreSQLBackend(DatabaseBackend):
                 try:
                     conn.rollback()
                 except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                    logger.debug(f"Rollback after failed execute_many() also failed: {rollback_exc}")
-            logger.error(f"Batch execution failed: {e}")
-            raise DatabaseError(f"PostgreSQL error: {e}") from e
+                    logger.bind(
+                        exception_type=type(rollback_exc).__name__,
+                    ).debug("Rollback after failed execute_many() also failed")
+            logger.bind(exception_type=type(e).__name__).error(
+                "PostgreSQL batch execution failed"
+            )
+            raise DatabaseError("PostgreSQL batch execution failed") from None
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)

@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 
 
 @dataclass
@@ -148,6 +149,7 @@ class AuthnzSessionsRepo:
         self,
         *,
         session_id: int,
+        expected_user_id: int | None = None,
         revoked_by: int | None,
         reason: str | None,
     ) -> dict[str, Any] | None:
@@ -159,40 +161,78 @@ class AuthnzSessionsRepo:
                 session_details: dict[str, Any] | None = None
 
                 if self._is_postgres_backend():
-                    session_row = await conn.fetchrow(
-                        """
-                        SELECT id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
-                        FROM sessions
-                        WHERE id = $1
-                        """,
-                        session_id,
-                    )
+                    if expected_user_id is None:
+                        session_row = await conn.fetchrow(
+                            """
+                            SELECT id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                            FROM sessions
+                            WHERE id = $1
+                            """,
+                            session_id,
+                        )
+                    else:
+                        session_row = await conn.fetchrow(
+                            """
+                            SELECT id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                            FROM sessions
+                            WHERE id = $1 AND user_id = $2
+                            """,
+                            session_id,
+                            expected_user_id,
+                        )
                     if session_row:
                         session_details = self._normalize_session_details(dict(session_row))
 
-                    await conn.execute(
-                        """
-                        UPDATE sessions
-                        SET is_active = FALSE,
-                            is_revoked = TRUE,
-                            revoked_at = CURRENT_TIMESTAMP,
-                            revoked_by = $2,
-                            revoke_reason = $3
-                        WHERE id = $1
-                        """,
-                        session_id,
-                        revoked_by,
-                        reason,
-                    )
+                    if expected_user_id is None:
+                        await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_active = FALSE,
+                                is_revoked = TRUE,
+                                revoked_at = CURRENT_TIMESTAMP,
+                                revoked_by = $2,
+                                revoke_reason = $3
+                            WHERE id = $1
+                            """,
+                            session_id,
+                            revoked_by,
+                            reason,
+                        )
+                    else:
+                        await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_active = FALSE,
+                                is_revoked = TRUE,
+                                revoked_at = CURRENT_TIMESTAMP,
+                                revoked_by = $3,
+                                revoke_reason = $4
+                            WHERE id = $1 AND user_id = $2
+                            """,
+                            session_id,
+                            expected_user_id,
+                            revoked_by,
+                            reason,
+                        )
                 else:
-                    cursor = await conn.execute(
-                        """
-                        SELECT id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
-                        FROM sessions
-                        WHERE id = ?
-                        """,
-                        (session_id,),
-                    )
+                    if expected_user_id is None:
+                        cursor = await conn.execute(
+                            """
+                            SELECT id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                            FROM sessions
+                            WHERE id = ?
+                            """,
+                            (session_id,),
+                        )
+                    else:
+                        cursor = await conn.execute(
+                            """
+                            SELECT id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                            FROM sessions
+                            WHERE id = ? AND user_id = ?
+                            """,
+                            (session_id, expected_user_id),
+                        )
                     row = await cursor.fetchone()
                     if row:
                         session_details = self._normalize_session_details(
@@ -205,29 +245,48 @@ class AuthnzSessionsRepo:
                                 "refresh_expires_at": row[5],
                             }
                         )
-                    await conn.execute(
-                        """
-                        UPDATE sessions
-                        SET is_active = 0,
-                            is_revoked = 1,
-                            revoked_at = datetime('now'),
-                            revoked_by = ?,
-                            revoke_reason = ?
-                        WHERE id = ?
-                        """,
-                        (revoked_by, reason, session_id),
-                    )
+                    if expected_user_id is None:
+                        await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_active = 0,
+                                is_revoked = 1,
+                                revoked_at = datetime('now'),
+                                revoked_by = ?,
+                                revoke_reason = ?
+                            WHERE id = ?
+                            """,
+                            (revoked_by, reason, session_id),
+                        )
+                    else:
+                        await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_active = 0,
+                                is_revoked = 1,
+                                revoked_at = datetime('now'),
+                                revoked_by = ?,
+                                revoke_reason = ?
+                            WHERE id = ? AND user_id = ?
+                            """,
+                            (revoked_by, reason, session_id, expected_user_id),
+                        )
 
                 return session_details
         except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(f"AuthnzSessionsRepo.revoke_session_record failed: {exc}")
-            raise
+            logger.bind(
+                operation="revoke_session_record",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ session persistence failed")
+            raise DatabaseError("Session persistence operation failed") from None
 
     async def revoke_all_sessions_for_user(
         self,
         *,
         user_id: int,
         except_session_id: int | None = None,
+        revoked_by: int | None = None,
+        reason: str | None = None,
     ) -> int:
         """
         Mark all sessions for a user as revoked (optionally excluding one).
@@ -246,11 +305,15 @@ class AuthnzSessionsRepo:
                             UPDATE sessions
                             SET is_active = FALSE,
                                 is_revoked = TRUE,
-                                revoked_at = CURRENT_TIMESTAMP
+                                revoked_at = CURRENT_TIMESTAMP,
+                                revoked_by = $3,
+                                revoke_reason = $4
                             WHERE user_id = $1 AND id != $2
                             """,
                             user_id,
                             except_session_id,
+                            revoked_by,
+                            reason,
                         )
                     else:
                         result = await conn.execute(
@@ -258,10 +321,14 @@ class AuthnzSessionsRepo:
                             UPDATE sessions
                             SET is_active = FALSE,
                                 is_revoked = TRUE,
-                                revoked_at = CURRENT_TIMESTAMP
+                                revoked_at = CURRENT_TIMESTAMP,
+                                revoked_by = $2,
+                                revoke_reason = $3
                             WHERE user_id = $1
                             """,
                             user_id,
+                            revoked_by,
+                            reason,
                         )
                     try:
                         affected = int(result.split()[-1]) if isinstance(result, str) else 0
@@ -274,10 +341,12 @@ class AuthnzSessionsRepo:
                             UPDATE sessions
                             SET is_active = 0,
                                 is_revoked = 1,
-                                revoked_at = datetime('now')
+                                revoked_at = datetime('now'),
+                                revoked_by = ?,
+                                revoke_reason = ?
                             WHERE user_id = ? AND id != ?
                             """,
-                            (user_id, except_session_id),
+                            (revoked_by, reason, user_id, except_session_id),
                         )
                     else:
                         cursor = await conn.execute(
@@ -285,21 +354,28 @@ class AuthnzSessionsRepo:
                             UPDATE sessions
                             SET is_active = 0,
                                 is_revoked = 1,
-                                revoked_at = datetime('now')
+                                revoked_at = datetime('now'),
+                                revoked_by = ?,
+                                revoke_reason = ?
                             WHERE user_id = ?
                             """,
-                            (user_id,),
+                            (revoked_by, reason, user_id),
                         )
                     affected = getattr(cursor, "rowcount", 0) or 0
 
                 return int(affected)
         except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(f"AuthnzSessionsRepo.revoke_all_sessions_for_user failed: {exc}")
-            raise
+            logger.bind(
+                operation="revoke_all_sessions_for_user",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ session persistence failed")
+            raise DatabaseError("Session persistence operation failed") from None
 
     async def fetch_session_token_metadata_for_user(
         self,
         user_id: int,
+        *,
+        except_session_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         Fetch session token metadata for a user.
@@ -311,27 +387,48 @@ class AuthnzSessionsRepo:
         try:
             async with self.db_pool.acquire() as conn:
                 if self._is_postgres_backend():
-                    rows = await conn.fetch(
-                        """
-                        SELECT id, access_jti, refresh_jti, expires_at, refresh_expires_at
-                        FROM sessions
-                        WHERE user_id = $1
-                        """,
-                        user_id,
-                    )
+                    if except_session_id is None:
+                        rows = await conn.fetch(
+                            """
+                            SELECT id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                            FROM sessions
+                            WHERE user_id = $1
+                            """,
+                            user_id,
+                        )
+                    else:
+                        rows = await conn.fetch(
+                            """
+                            SELECT id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                            FROM sessions
+                            WHERE user_id = $1 AND id != $2
+                            """,
+                            user_id,
+                            except_session_id,
+                        )
                     return [
                         self._normalize_session_details(dict(row))
                         for row in rows
                     ]
 
-                cursor = await conn.execute(
-                    """
-                    SELECT id, access_jti, refresh_jti, expires_at, refresh_expires_at
-                    FROM sessions
-                    WHERE user_id = ?
-                    """,
-                    (user_id,),
-                )
+                if except_session_id is None:
+                    cursor = await conn.execute(
+                        """
+                        SELECT id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                        FROM sessions
+                        WHERE user_id = ?
+                        """,
+                        (user_id,),
+                    )
+                else:
+                    cursor = await conn.execute(
+                        """
+                        SELECT id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                        FROM sessions
+                        WHERE user_id = ? AND id != ?
+                        """,
+                        (user_id, except_session_id),
+                    )
                 sqlite_rows = await cursor.fetchall()
                 sessions: list[dict[str, Any]] = []
                 for row in sqlite_rows:
@@ -445,6 +542,7 @@ class AuthnzSessionsRepo:
         user_id: int,
         revoked_by: int | None,
         reason: str | None,
+        except_session_id: int | None = None,
     ) -> int:
         """
         Mark all sessions for a user as revoked with audit metadata.
@@ -457,37 +555,68 @@ class AuthnzSessionsRepo:
             async with self.db_pool.transaction() as conn:
                 affected = 0
                 if self._is_postgres_backend():
-                    result = await conn.execute(
-                        """
-                        UPDATE sessions
-                        SET is_revoked = TRUE,
-                            is_active = FALSE,
-                            revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
-                            revoked_by = COALESCE($2, revoked_by),
-                            revoke_reason = COALESCE($3, revoke_reason)
-                        WHERE user_id = $1
-                        """,
-                        user_id,
-                        revoked_by,
-                        reason,
-                    )
+                    if except_session_id is None:
+                        result = await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_revoked = TRUE,
+                                is_active = FALSE,
+                                revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
+                                revoked_by = COALESCE($2, revoked_by),
+                                revoke_reason = COALESCE($3, revoke_reason)
+                            WHERE user_id = $1
+                            """,
+                            user_id,
+                            revoked_by,
+                            reason,
+                        )
+                    else:
+                        result = await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_revoked = TRUE,
+                                is_active = FALSE,
+                                revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
+                                revoked_by = COALESCE($3, revoked_by),
+                                revoke_reason = COALESCE($4, revoke_reason)
+                            WHERE user_id = $1 AND id != $2
+                            """,
+                            user_id,
+                            except_session_id,
+                            revoked_by,
+                            reason,
+                        )
                     try:
                         affected = int(result.split()[-1]) if isinstance(result, str) else 0
                     except Exception:
                         affected = 0
                 else:
-                    cursor = await conn.execute(
-                        """
-                        UPDATE sessions
-                        SET is_revoked = 1,
-                            is_active = 0,
-                            revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
-                            revoked_by = COALESCE(?, revoked_by),
-                            revoke_reason = COALESCE(?, revoke_reason)
-                        WHERE user_id = ?
-                        """,
-                        (revoked_by, reason, user_id),
-                    )
+                    if except_session_id is None:
+                        cursor = await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_revoked = 1,
+                                is_active = 0,
+                                revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
+                                revoked_by = COALESCE(?, revoked_by),
+                                revoke_reason = COALESCE(?, revoke_reason)
+                            WHERE user_id = ?
+                            """,
+                            (revoked_by, reason, user_id),
+                        )
+                    else:
+                        cursor = await conn.execute(
+                            """
+                            UPDATE sessions
+                            SET is_revoked = 1,
+                                is_active = 0,
+                                revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
+                                revoked_by = COALESCE(?, revoked_by),
+                                revoke_reason = COALESCE(?, revoke_reason)
+                            WHERE user_id = ? AND id != ?
+                            """,
+                            (revoked_by, reason, user_id, except_session_id),
+                        )
                     affected = getattr(cursor, "rowcount", 0) or 0
 
                 return int(affected)
@@ -560,11 +689,14 @@ class AuthnzSessionsRepo:
                         }
                     )
                 return sessions
-        except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(
-                f"AuthnzSessionsRepo.get_active_sessions_for_user failed: {exc}"
-            )
+        except DatabaseError:
             raise
+        except Exception as exc:  # pragma: no cover - surfaced via callers
+            logger.bind(
+                operation="get_active_sessions_for_user",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ session read failed")
+            raise DatabaseError("Session read operation failed") from None
 
     async def cleanup_expired_sessions(self) -> int:
         """

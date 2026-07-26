@@ -318,22 +318,46 @@ class SQLiteBackend(DatabaseBackend):
         conn = connection or self.get_pool().get_connection()
 
         started = False
+
+        def _rollback() -> None:
+            if not started or not getattr(conn, "in_transaction", False):
+                return
+            try:
+                conn.execute("ROLLBACK")
+            except BaseException as rollback_exc:  # noqa: BLE001
+                logger.bind(exception_type=type(rollback_exc).__name__).warning(
+                    "SQLite transaction rollback failed"
+                )
+
         try:
             if not getattr(conn, "in_transaction", False):
                 conn.execute("BEGIN IMMEDIATE")
                 started = True
+        except BaseException as exc:  # noqa: BLE001
+            if not isinstance(exc, Exception):
+                raise
+            logger.bind(exception_type=type(exc).__name__).error(
+                "SQLite transaction begin failed"
+            )
+            raise DatabaseError("SQLite transaction begin failed") from None
+        try:
             yield conn
-            if started and getattr(conn, "in_transaction", False):
-                conn.execute("COMMIT")
-        except Exception as e:
-            if started and getattr(conn, "in_transaction", False):
-                try:
-                    conn.execute("ROLLBACK")
-                except sqlite3.OperationalError:
-                    # Best effort; ignore if no active transaction
-                    pass
-            logger.exception(f"Transaction failed: {e}")
+        except BaseException:  # noqa: BLE001
+            _rollback()
             raise
+        if started and getattr(conn, "in_transaction", False):
+            try:
+                conn.execute("COMMIT")
+            except BaseException as exc:  # noqa: BLE001
+                _rollback()
+                if not isinstance(exc, Exception):
+                    raise
+                logger.bind(exception_type=type(exc).__name__).error(
+                    "SQLite transaction commit failed"
+                )
+                raise DatabaseError(
+                    "SQLite transaction commit failed"
+                ) from None
 
     def get_pool(self) -> ConnectionPool:
         """Get or create the connection pool."""
@@ -386,8 +410,10 @@ class SQLiteBackend(DatabaseBackend):
             )
 
         except sqlite3.Error as e:
-            logger.exception(f"Query execution failed: {e}")
-            raise DatabaseError(f"SQLite error: {e}") from e
+            logger.bind(exception_type=type(e).__name__).error(
+                "SQLite query execution failed"
+            )
+            raise DatabaseError("SQLite query execution failed") from None
 
     def execute_many(
         self,
@@ -415,8 +441,10 @@ class SQLiteBackend(DatabaseBackend):
             )
 
         except sqlite3.Error as e:
-            logger.exception(f"Batch execution failed: {e}")
-            raise DatabaseError(f"SQLite error: {e}") from e
+            logger.bind(exception_type=type(e).__name__).error(
+                "SQLite batch execution failed"
+            )
+            raise DatabaseError("SQLite batch execution failed") from None
 
     def create_tables(self, schema: str, connection: Optional[sqlite3.Connection] = None) -> None:
         """Create tables from a schema definition."""

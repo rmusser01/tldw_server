@@ -26,10 +26,11 @@ def test_ready_endpoint_returns_503_when_draining() -> None:
 
 @pytest.mark.integration
 def test_ready_endpoint_returns_non_success_when_dependency_raises(monkeypatch) -> None:
+    from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
     from tldw_Server_API.app.main import app
 
-    def _fake_get_db_pool() -> object:
-        raise RuntimeError("boom")
+    async def _fake_get_db_pool() -> object:
+        raise DatabaseError("private database failure")
 
     with TestClient(app) as client:
         monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
@@ -44,6 +45,41 @@ def test_ready_endpoint_returns_non_success_when_dependency_raises(monkeypatch) 
         raise AssertionError(f"unexpected reason: {payload['reason']!r}")
     if "error" in payload:
         raise AssertionError(f"readiness probe should not echo raw errors: {payload!r}")
+
+
+@pytest.mark.integration
+def test_ready_endpoint_sanitizes_unhealthy_database_payload(monkeypatch) -> None:
+    from tldw_Server_API.app.main import app
+
+    marker = "postgresql://admin:secret@private-host/authnz"
+
+    class _Pool:
+        async def health_check(self) -> dict[str, str]:
+            return {
+                "status": "unhealthy",
+                "type": "postgresql",
+                "error": marker,
+            }
+
+    async def _fake_get_db_pool() -> _Pool:
+        return _Pool()
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+            _fake_get_db_pool,
+        )
+        response = client.get("/ready")
+
+    payload = response.json()
+    assert response.status_code == 503
+    assert payload["database"] == {
+        "status": "unhealthy",
+        "type": "postgresql",
+        "error": "database_unavailable",
+    }
+    assert marker not in response.text
+    assert "secret" not in response.text
 
 
 @pytest.mark.integration

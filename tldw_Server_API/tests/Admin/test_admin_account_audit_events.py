@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
-    AdminPrivilegedActionRequest,
     AdminMfaRequirementRequest,
     AdminPasswordResetRequest,
+    AdminPrivilegedActionRequest,
     UserUpdateRequest,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
@@ -15,6 +17,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
 from tldw_Server_API.app.services import (
     admin_audit_service,
     admin_sessions_mfa_service,
@@ -23,27 +26,50 @@ from tldw_Server_API.app.services import (
 
 
 class _FakeCursor:
-    def __init__(self, row=None, *, rowcount: int = 1) -> None:
+    def __init__(self, row=None, *, rows=None, rowcount: int = 1) -> None:
         self._row = row
+        self._rows = rows if rows is not None else ([] if row is None else [row])
         self.rowcount = rowcount
 
     async def fetchone(self):
         return self._row
 
+    async def fetchall(self):
+        return self._rows
+
 
 class _FakeUserDb:
+    _authnz_profile_user_backend = "sqlite"
+
     def __init__(self, metadata: str = "{}") -> None:
+        self._authnz_profile_user_guard_identity = self
         self.metadata = metadata
         self.committed = False
         self.queries: list[tuple[str, object]] = []
 
-    async def execute(self, query: str, params=None):
-        self.queries.append((query, params))
-        if "SELECT id, is_system FROM roles" in query:
+    async def execute(self, query: object, params=None):
+        concrete = _guard_sql(
+            query,
+            backend="sqlite",
+            connection_identity=self,
+            operation="execute",
+        )
+        self.queries.append((concrete, params))
+        if concrete.lstrip().lower().startswith("with target_user as"):
+            return _FakeCursor(
+                rows=[
+                    (
+                        "user",
+                        42,
+                        "2026-08-01T12:00:00.000000Z",
+                    )
+                ]
+            )
+        if "SELECT id, is_system FROM roles" in concrete:
             return _FakeCursor((2, 1))
-        if "SELECT id FROM users WHERE id" in query:
+        if "SELECT id FROM users WHERE id" in concrete:
             return _FakeCursor((42,))
-        if "SELECT metadata FROM users" in query:
+        if "SELECT metadata FROM users" in concrete:
             return _FakeCursor((self.metadata,))
         return _FakeCursor()
 
@@ -55,14 +81,37 @@ class _FakeSessionManager:
     def __init__(self) -> None:
         self.revoked_session_id: int | None = None
         self.revoked_by: int | None = None
+        self.revoke_reason: str | None = None
+        self.expected_user_id: int | None = None
         self.revoked_all_user_id: int | None = None
+        self.revoked_all_by: int | None = None
+        self.revoke_all_reason: str | None = None
 
-    async def revoke_session(self, *, session_id: int, revoked_by: int | None) -> None:
+    async def revoke_session(
+        self,
+        *,
+        session_id: int,
+        expected_user_id: int,
+        revoked_by: int | None,
+        reason: str | None,
+    ) -> bool:
         self.revoked_session_id = session_id
+        self.expected_user_id = expected_user_id
         self.revoked_by = revoked_by
+        self.revoke_reason = reason
+        return True
 
-    async def revoke_all_user_sessions(self, *, user_id: int) -> None:
+    async def revoke_all_user_sessions(
+        self,
+        *,
+        user_id: int,
+        reason: str,
+        revoked_by: int | None,
+    ) -> int:
         self.revoked_all_user_id = user_id
+        self.revoke_all_reason = reason
+        self.revoked_all_by = revoked_by
+        return 1
 
 
 class _FakeMfaService:
@@ -73,6 +122,19 @@ class _FakeMfaService:
     async def disable_mfa(self, user_id: int) -> bool:
         self.disabled_user_id = user_id
         return self.disable_result
+
+
+class _PostgresMetadataDb:
+    def __init__(self, *, update_result: str) -> None:
+        self.update_result = update_result
+        self.fetchrow_queries: list[str] = []
+
+    async def fetchrow(self, query: str, *_args):
+        self.fetchrow_queries.append(query)
+        return {"metadata": {"preserved": True}}
+
+    async def execute(self, *_args):
+        return self.update_result
 
 
 def _admin_principal() -> AuthPrincipal:
@@ -110,6 +172,7 @@ async def test_reset_user_password_emits_durable_audit_event(monkeypatch) -> Non
     monkeypatch.setattr(admin_users_service, "_emit_admin_account_audit_event", _fake_emit, raising=False)
     monkeypatch.setattr(admin_users_service, "hash_password", lambda value: hashed_passwords.append(value) or f"hashed::{value}")
 
+    db = _FakeUserDb()
     result = await admin_users_service.reset_user_password(
         _admin_principal(),
         42,
@@ -119,12 +182,13 @@ async def test_reset_user_password_emits_durable_audit_event(monkeypatch) -> Non
             temporary_password="TempPass123!",
             force_password_change=True,
         ),
-        _FakeUserDb(),
+        db,
         password_service=object(),
         is_pg_fn=lambda: _false_async(),
     )
 
     assert result["message"] == "Password reset successfully"
+    assert not db.committed
     assert hashed_passwords == ["TempPass123!"]
     assert len(emitted) == 1
     assert emitted[0]["actor_id"] == 7
@@ -136,6 +200,69 @@ async def test_reset_user_password_emits_durable_audit_event(monkeypatch) -> Non
     assert emitted[0]["action"] == "admin.user.password_reset"
     assert emitted[0]["metadata"]["reason"] == "Support case 123"
     assert emitted[0]["metadata"]["credential_provided_by_admin"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["password", "mfa"])
+async def test_postgres_admin_metadata_updates_lock_and_reject_concurrent_delete(
+    monkeypatch,
+    operation: str,
+) -> None:
+    emitted: list[dict[str, object]] = []
+
+    async def _fake_emit(**kwargs) -> None:
+        emitted.append(kwargs)
+
+    async def _is_pg() -> bool:
+        return True
+
+    monkeypatch.setattr(
+        admin_users_service.admin_scope_service,
+        "enforce_admin_user_scope",
+        _allow_scope,
+    )
+    monkeypatch.setattr(admin_users_service, "verify_privileged_action", _allow_reauth)
+    monkeypatch.setattr(
+        admin_users_service,
+        "_emit_admin_account_audit_event",
+        _fake_emit,
+    )
+    monkeypatch.setattr(admin_users_service, "hash_password", lambda _value: "hash")
+    db = _PostgresMetadataDb(update_result="UPDATE 0")
+
+    with pytest.raises(HTTPException) as raised:
+        if operation == "password":
+            await admin_users_service.reset_user_password(
+                _admin_principal(),
+                42,
+                AdminPasswordResetRequest(
+                    reason="Support case 123",
+                    admin_password="AdminPass123!",
+                    temporary_password="TempPass123!",
+                    force_password_change=True,
+                ),
+                db,
+                password_service=object(),
+                is_pg_fn=_is_pg,
+            )
+        else:
+            await admin_users_service.set_user_mfa_requirement(
+                _admin_principal(),
+                42,
+                AdminMfaRequirementRequest(
+                    require_mfa=True,
+                    reason="Support case 123",
+                    admin_password="AdminPass123!",
+                ),
+                db,
+                password_service=object(),
+                is_pg_fn=_is_pg,
+            )
+
+    assert raised.value.status_code == 404
+    assert db.fetchrow_queries
+    assert "FOR UPDATE" in db.fetchrow_queries[0].upper()
+    assert emitted == []
 
 
 @pytest.mark.asyncio
@@ -521,6 +648,7 @@ async def test_set_user_mfa_requirement_emits_durable_audit_event(monkeypatch) -
     monkeypatch.setattr(admin_users_service, "verify_privileged_action", _allow_reauth)
     monkeypatch.setattr(admin_users_service, "_emit_admin_account_audit_event", _fake_emit, raising=False)
 
+    db = _FakeUserDb()
     result = await admin_users_service.set_user_mfa_requirement(
         _admin_principal(),
         42,
@@ -529,12 +657,13 @@ async def test_set_user_mfa_requirement_emits_durable_audit_event(monkeypatch) -
             reason="Support case 123",
             admin_password="AdminPass123!",
         ),
-        _FakeUserDb(),
+        db,
         password_service=object(),
         is_pg_fn=lambda: _false_async(),
     )
 
     assert result["message"] == "MFA requirement updated successfully"
+    assert not db.committed
     assert len(emitted) == 1
     assert emitted[0]["actor_id"] == 7
     assert emitted[0]["target_user_id"] == 42
@@ -565,16 +694,23 @@ async def test_emit_admin_account_audit_event_does_not_raise_when_flush_fails(mo
         _fake_get_service,
     )
 
-    await admin_audit_service.emit_admin_account_audit_event(
-        actor_id=7,
-        target_user_id=42,
-        event_type=AuditEventType.USER_DEACTIVATED,
-        category=AuditEventCategory.AUTHORIZATION,
-        resource_type="user_account",
-        resource_id="42",
-        action="admin.user.deactivate",
-        metadata={"reason": "Support case 123"},
-    )
+    output = io.StringIO()
+    sink = admin_audit_service.logger.add(output, format="{message} {extra}")
+    try:
+        await admin_audit_service.emit_admin_account_audit_event(
+            actor_id=7,
+            target_user_id=42,
+            event_type=AuditEventType.USER_DEACTIVATED,
+            category=AuditEventCategory.AUTHORIZATION,
+            resource_type="user_account",
+            resource_id="42",
+            action="admin.user.deactivate",
+            metadata={"reason": "Support case 123"},
+        )
+    finally:
+        admin_audit_service.logger.remove(sink)
+
+    assert "audit unavailable" not in output.getvalue()
 
 
 async def _false_async() -> bool:

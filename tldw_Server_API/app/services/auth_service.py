@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
+
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _profile_user_backend,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    ProfileVersionNotFound,
+    VersionedUserWriteGateway,
+)
 from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
 
 _USER_ROW_FALLBACK_COLUMNS = (
@@ -36,7 +44,7 @@ def _normalize_user_row(row: Any) -> dict[str, Any] | None:
     with contextlib.suppress(Exception):
         return dict(row)
     with contextlib.suppress(Exception):
-        return {key: row[key] for key in row.keys()}
+        return {key: row[key] for key in row}
     return {
         _USER_ROW_FALLBACK_COLUMNS[i]: row[i]
         for i in range(min(len(_USER_ROW_FALLBACK_COLUMNS), len(row)))
@@ -48,7 +56,7 @@ def _normalize_sqlite_placeholders(query: str) -> str:
 
 
 async def _execute_compat(db: Any, query: str, *params: Any) -> Any:
-    execute = getattr(db, "execute")
+    execute = db.execute
     try:
         return await execute(query, *params)
     except TypeError:
@@ -76,6 +84,8 @@ async def _fetchrow_compat(db: Any, query: str, *params: Any) -> Any:
 
 
 async def _maybe_commit(db: Any) -> None:
+    if _profile_user_backend(db) is not None:
+        return
     commit = getattr(db, "commit", None)
     if callable(commit):
         with contextlib.suppress(Exception):
@@ -105,6 +115,23 @@ def _extract_row_value(row: Any, key: str, index: int) -> Any:
     with contextlib.suppress(Exception):
         return row[index]
     return None
+
+
+def _versioned_user_gateway(db: Any) -> VersionedUserWriteGateway:
+    """Resolve the connection's established async PostgreSQL/SQLite contract."""
+    backend = _profile_user_backend(db)
+    if backend is None:
+        fetch = getattr(db, "fetch", None)
+        backend = "postgres" if callable(fetch) else "sqlite"
+    return VersionedUserWriteGateway(backend)
+
+
+def _normalize_datetime_for_backend(value: datetime, *, backend: str) -> datetime:
+    if backend != "postgres":
+        return value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 async def fetch_user_by_login_identifier(db, identifier: str) -> dict[str, Any] | None:
@@ -140,13 +167,21 @@ async def update_user_password_hash(db, user_id: int, new_hash: str) -> None:
 
 async def update_user_last_login(db, user_id: int, now: datetime | None = None) -> None:
     """Update last_login timestamp for the user."""
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc)
     try:
-        await _execute_compat(
+        gateway = _versioned_user_gateway(db)
+        now = _normalize_datetime_for_backend(now, backend=gateway.backend)
+        statement = (
+            "UPDATE users SET last_login = $1 WHERE id = $2"
+            if gateway.backend == "postgres"
+            else "UPDATE users SET last_login = ? WHERE id = ?"
+        )
+        await gateway.execute_update(
             db,
-            "UPDATE users SET last_login = $1 WHERE id = $2",
-            now,
-            user_id,
+            user_id=user_id,
+            profile_visible_fields=("last_login",),
+            statement=statement,
+            parameters=(now, user_id),
         )
         await _maybe_commit(db)
     except Exception as e:
@@ -258,6 +293,8 @@ async def apply_password_reset(
 ) -> None:
     """Apply password reset and mark reset token as used."""
     try:
+        backend = _versioned_user_gateway(db).backend
+        now_utc = _normalize_datetime_for_backend(now_utc, backend=backend)
         await _execute_compat(
             db,
             "UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3",
@@ -286,30 +323,36 @@ async def verify_user_email_once(
 ) -> int:
     """Mark user email as verified once; return number of updated rows."""
     try:
-        result = await _execute_compat(
+        gateway = _versioned_user_gateway(db)
+        now_utc = _normalize_datetime_for_backend(now_utc, backend=gateway.backend)
+        if gateway.backend == "postgres":
+            statement = """
+                UPDATE users
+                   SET is_verified = $1, updated_at = $2
+                 WHERE id = $3
+                   AND lower(email) = lower($4)
+                   AND COALESCE(is_verified, $5) != $6
+                """
+        else:
+            statement = """
+                UPDATE users
+                   SET is_verified = ?, updated_at = ?
+                 WHERE id = ?
+                   AND lower(email) = lower(?)
+                   AND COALESCE(is_verified, ?) != ?
+                """
+        write_result = await gateway.execute_update(
             db,
-            """
-            UPDATE users
-               SET is_verified = $1, updated_at = $2
-             WHERE id = $3
-               AND lower(email) = lower($4)
-               AND COALESCE(is_verified, $5) != $6
-            """,
-            True,
-            now_utc,
-            user_id,
-            email,
-            False,
-            True,
+            user_id=user_id,
+            profile_visible_fields=("is_verified",),
+            statement=statement,
+            parameters=(True, now_utc, user_id, email, False, True),
         )
-        updated_rows = _extract_update_count(result)
-        if updated_rows <= 0 and not isinstance(result, str):
-            row = await _fetchrow_compat(db, "SELECT changes() AS changed")
-            changed = _extract_row_value(row, "changed", 0)
-            with contextlib.suppress(TypeError, ValueError):
-                updated_rows = int(changed)
         await _maybe_commit(db)
-        return max(updated_rows, 0)
+        return len(write_result.affected_user_ids)
+    except ProfileVersionNotFound:
+        await _maybe_commit(db)
+        return 0
     except Exception as exc:
         logger.error(f"auth_service.verify_user_email_once failed for user {user_id}: {exc}")
         raise
@@ -336,12 +379,19 @@ async def fetch_user_by_email_for_verification(db: Any, email: str) -> dict[str,
 async def mark_user_verified(db: Any, user_id: int, now_utc: datetime) -> None:
     """Mark user email as verified."""
     try:
-        await _execute_compat(
+        gateway = _versioned_user_gateway(db)
+        now_utc = _normalize_datetime_for_backend(now_utc, backend=gateway.backend)
+        statement = (
+            "UPDATE users SET is_verified = $1, updated_at = $2 WHERE id = $3"
+            if gateway.backend == "postgres"
+            else "UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?"
+        )
+        await gateway.execute_update(
             db,
-            "UPDATE users SET is_verified = $1, updated_at = $2 WHERE id = $3",
-            True,
-            now_utc,
-            user_id,
+            user_id=user_id,
+            profile_visible_fields=("is_verified",),
+            statement=statement,
+            parameters=(True, now_utc, user_id),
         )
         await _maybe_commit(db)
     except Exception as exc:

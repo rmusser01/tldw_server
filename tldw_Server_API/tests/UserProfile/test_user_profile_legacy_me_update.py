@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_db_transaction
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
 from tldw_Server_API.app.main import app
 
 _MISSING_OVERRIDE = object()
@@ -57,8 +58,22 @@ def test_users_me_update_returns_404_when_update_affects_no_rows(auth_headers, m
     class _FakeCursor:
         rowcount = 0
 
+        async def fetchall(self):
+            return []
+
     class _FakeDB:
-        async def execute(self, *_args, **_kwargs):
+        async def fetch(self, *_args, **_kwargs):
+            return []
+
+        async def execute(self, query, *_args, **_kwargs):
+            concrete = _guard_sql(
+                query,
+                backend="postgres",
+                connection_identity=self,
+                operation="execute",
+            )
+            if "UPDATE public.users SET email" in concrete:
+                return "UPDATE 0"
             return _FakeCursor()
 
     async def _fake_get_db_transaction():
@@ -68,7 +83,11 @@ def test_users_me_update_returns_404_when_update_affects_no_rows(auth_headers, m
         del allow_missing
         return _active_user_context()
 
+    async def _is_postgres_backend() -> bool:
+        return True
+
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
+    monkeypatch.setattr(users_endpoints, "is_postgres_backend", _is_postgres_backend)
     with _dependency_override_scope(
         {get_db_transaction: _fake_get_db_transaction}
     ):
@@ -89,12 +108,42 @@ def test_users_me_update_succeeds_when_row_is_updated(auth_headers, monkeypatch)
     class _FakeCursor:
         rowcount = 1
 
+        def __init__(self, rows=None):
+            self._rows = rows or []
+
+        async def fetchall(self):
+            return self._rows
+
     class _FakeDB:
+        _authnz_profile_user_backend = "postgres"
         calls: list[tuple[object, ...]] = []
 
-        async def execute(self, *args, **_kwargs):
-            self.calls.append(args)
-            return _FakeCursor()
+        async def fetch(self, query, user_id):
+            assert "locked_user" in str(query).lower()
+            return [
+                {
+                    "source_tag": "user",
+                    "source_id": int(user_id),
+                    "candidate_value": datetime(
+                        2026,
+                        7,
+                        26,
+                        12,
+                        tzinfo=timezone.utc,
+                    ),
+                }
+            ]
+
+        async def execute(self, query, *args, **_kwargs):
+            concrete = _guard_sql(
+                query,
+                backend="postgres",
+                connection_identity=self,
+                operation="execute",
+            )
+            if "UPDATE public.users SET email" in concrete:
+                self.calls.append((concrete, *args))
+            return "UPDATE 1"
 
     fake_db = _FakeDB()
 
@@ -105,7 +154,11 @@ def test_users_me_update_succeeds_when_row_is_updated(auth_headers, monkeypatch)
         del allow_missing
         return _active_user_context()
 
+    async def _is_postgres_backend() -> bool:
+        return True
+
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
+    monkeypatch.setattr(users_endpoints, "is_postgres_backend", _is_postgres_backend)
     with _dependency_override_scope(
         {get_db_transaction: _fake_get_db_transaction}
     ):
@@ -123,7 +176,7 @@ def test_users_me_update_succeeds_when_row_is_updated(auth_headers, monkeypatch)
     assert payload.get("email") == "updated@example.com"
     assert fake_db.calls == [
         (
-            "UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+            "UPDATE public.users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
             "updated@example.com",
             1,
         )

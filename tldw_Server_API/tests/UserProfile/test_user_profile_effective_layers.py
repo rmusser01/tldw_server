@@ -13,6 +13,11 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     create_organization,
     create_team,
 )
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _mint_profile_user_sql,
+    _profile_user_connection_identity,
+    _revoke_profile_user_sql,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import (
     OrgProfileOverridesRepo,
@@ -305,10 +310,20 @@ def test_inactive_memberships_do_not_contribute_inherited_overrides(
                         "(SELECT id FROM teams WHERE org_id = ?)",
                         (user_id, inactive_org_id),
                     )
-                    await conn.execute(
-                        "UPDATE users SET profile_version = ? WHERE id = ?",
-                        ("2026-01-01T00:00:00.000000Z", user_id),
+                    profile_anchor_update = _mint_profile_user_sql(
+                        "UPDATE main.users SET profile_version = ? WHERE id = ?",
+                        backend="sqlite",
+                        connection_identity=_profile_user_connection_identity(conn),
+                        operation="update",
+                        columns=("profile_version",),
                     )
+                    try:
+                        await conn.execute(
+                            profile_anchor_update,
+                            ("2026-01-01T00:00:00.000000Z", user_id),
+                        )
+                    finally:
+                        _revoke_profile_user_sql(profile_anchor_update)
                     await conn.execute(
                         "UPDATE org_config_overrides SET updated_at = ? "
                         "WHERE org_id = ?",

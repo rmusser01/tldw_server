@@ -888,17 +888,64 @@ class CallerHarness:
         class _Cursor:
             rowcount = case.email_rowcount
 
+            def __init__(self, rows=None) -> None:
+                self._rows = rows or []
+
+            async def fetchall(self):
+                return self._rows
+
+        def _candidate_rows() -> list[dict[str, Any]]:
+            if case.email_rowcount == 0:
+                return []
+            return [
+                {
+                    "source_tag": "user",
+                    "source_id": 7,
+                    "candidate_value": PROFILE_VERSION,
+                }
+            ]
+
         class _Db:
-            async def execute(self, *_args, **_kwargs):
-                return _Cursor()
+            async def fetch(self, *_args, **_kwargs):
+                return _candidate_rows()
+
+            async def execute(self, query, *_args, **_kwargs):
+                query_text = str(query)
+                if query_text.lstrip().lower().startswith("with target_user as"):
+                    return _Cursor(_candidate_rows())
+                if any(
+                    f"UPDATE {table} SET email" in query_text
+                    for table in ("main.users", "public.users")
+                ):
+                    return (
+                        f"UPDATE {case.email_rowcount}"
+                        if "$1" in query_text
+                        else _Cursor()
+                    )
+                return "UPDATE 1" if "$1" in query_text else _Cursor()
 
         class _TransactionalConnection:
-            async def execute(self, *_args, **_kwargs):
+            async def fetch(self, *_args, **_kwargs):
+                return _candidate_rows()
+
+            async def execute(self, query, *_args, **_kwargs):
                 nonlocal email_execute_count
-                email_execute_count += 1
-                if case.email_failure == "duplicate":
-                    raise users_endpoints.DatabaseError("duplicate email")
-                return _Cursor()
+                query_text = str(query)
+                if query_text.lstrip().lower().startswith("with target_user as"):
+                    return _Cursor(_candidate_rows())
+                if any(
+                    f"UPDATE {table} SET email" in query_text
+                    for table in ("main.users", "public.users")
+                ):
+                    email_execute_count += 1
+                    if case.email_failure == "duplicate":
+                        raise users_endpoints.DatabaseError("duplicate email")
+                    return (
+                        f"UPDATE {case.email_rowcount}"
+                        if "$1" in query_text
+                        else _Cursor()
+                    )
+                return "UPDATE 1" if "$1" in query_text else _Cursor()
 
         transaction_connection = _TransactionalConnection()
 

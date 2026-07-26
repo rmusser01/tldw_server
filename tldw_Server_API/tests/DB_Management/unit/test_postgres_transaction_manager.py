@@ -1,11 +1,14 @@
-import pytest
+import io
 
+import pytest
+from loguru import logger
+
+import tldw_Server_API.app.core.DB_Management.backends.postgresql_backend as postgresql_backend
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseConfig,
     DatabaseError,
 )
-import tldw_Server_API.app.core.DB_Management.backends.postgresql_backend as postgresql_backend
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
     PostgreSQLBackend,
 )
@@ -48,6 +51,11 @@ class _CursorRaises:
         self._exc = exc
 
     def execute(self, _query, _params=None):
+        raise self._exc
+
+
+class _CursorManyRaises(_CursorRaises):
+    def executemany(self, _query, _params):
         raise self._exc
 
 
@@ -121,6 +129,69 @@ def test_transaction_nested_rollback_only_once_on_exception_with_external_connec
     assert conn.rollbacks == 1
 
 
+def test_transaction_rolls_back_unclassified_body_exception():
+    class UnclassifiedFailure(Exception):
+        pass
+
+    backend = _pg_backend()
+    conn = DummyConn()
+
+    with pytest.raises(UnclassifiedFailure):
+        with backend.transaction(connection=conn):
+            raise UnclassifiedFailure("private transaction detail")
+
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
+
+
+def test_transaction_preserves_base_exception_and_rolls_back():
+    class ControlSignal(BaseException):
+        pass
+
+    backend = _pg_backend()
+    conn = DummyConn()
+    signal = ControlSignal()
+
+    with pytest.raises(ControlSignal) as raised:
+        with backend.transaction(connection=conn):
+            raise signal
+
+    assert raised.value is signal
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
+
+
+def test_transaction_sanitizes_commit_failure_and_rolls_back(monkeypatch):
+    class DriverBoom(Exception):
+        pass
+
+    class CommitFailingConn(DummyConn):
+        def commit(self):
+            raise DriverBoom("private transaction detail")
+
+    monkeypatch.setattr(
+        postgresql_backend,
+        "_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS",
+        tuple(postgresql_backend._POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS) + (DriverBoom,),
+        raising=True,
+    )
+    backend = _pg_backend()
+    conn = CommitFailingConn()
+    output = io.StringIO()
+    sink = logger.add(output, format="{message} {extra}")
+    try:
+        with pytest.raises(DatabaseError) as raised:
+            with backend.transaction(connection=conn):
+                pass
+    finally:
+        logger.remove(sink)
+
+    assert str(raised.value) == "PostgreSQL transaction commit failed"
+    assert raised.value.__cause__ is None
+    assert conn.rollbacks == 1
+    assert "private transaction detail" not in output.getvalue()
+
+
 def test_execute_many_handles_cursor_without_statusmessage():
 
     backend = _pg_backend()
@@ -135,13 +206,14 @@ def test_execute_many_handles_cursor_without_statusmessage():
     assert result.rowcount == 2
 
 
-def test_execute_wraps_classified_driver_exceptions(monkeypatch):
+def test_execute_sanitizes_classified_driver_exceptions(monkeypatch):
 
     class DriverBoom(Exception):
         pass
 
     backend = _pg_backend()
-    conn = _ConnWithCursor(_CursorRaises(DriverBoom("driver failed")))
+    sentinel = "private@example.com constraint=users_email_key"
+    conn = _ConnWithCursor(_CursorRaises(DriverBoom(sentinel)))
 
     monkeypatch.setattr(
         postgresql_backend,
@@ -150,8 +222,48 @@ def test_execute_wraps_classified_driver_exceptions(monkeypatch):
         raising=True,
     )
 
-    with pytest.raises(DatabaseError, match="PostgreSQL error: driver failed"):
-        backend.execute("SELECT 1", connection=conn)
+    output = io.StringIO()
+    sink = logger.add(output, format="{message} {extra}")
+    try:
+        with pytest.raises(DatabaseError) as raised:
+            backend.execute("SELECT 1", connection=conn)
+    finally:
+        logger.remove(sink)
+
+    assert str(raised.value) == "PostgreSQL query execution failed"
+    assert raised.value.__cause__ is None
+    assert sentinel not in output.getvalue()
+
+
+def test_execute_many_sanitizes_classified_driver_exceptions(monkeypatch):
+    class DriverBoom(Exception):
+        pass
+
+    backend = _pg_backend()
+    sentinel = "private@example.com constraint=users_email_key"
+    conn = _ConnWithCursor(_CursorManyRaises(DriverBoom(sentinel)))
+    monkeypatch.setattr(
+        postgresql_backend,
+        "_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS",
+        tuple(postgresql_backend._POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS) + (DriverBoom,),
+        raising=True,
+    )
+
+    output = io.StringIO()
+    sink = logger.add(output, format="{message} {extra}")
+    try:
+        with pytest.raises(DatabaseError) as raised:
+            backend.execute_many(
+                "INSERT INTO demo(value) VALUES (?)",
+                [(1,)],
+                connection=conn,
+            )
+    finally:
+        logger.remove(sink)
+
+    assert str(raised.value) == "PostgreSQL batch execution failed"
+    assert raised.value.__cause__ is None
+    assert sentinel not in output.getvalue()
 
 
 def test_psycopg_error_classified_when_driver_available():

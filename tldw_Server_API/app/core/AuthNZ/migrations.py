@@ -6,7 +6,6 @@ import contextlib
 import json
 import re
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,6 +16,16 @@ from loguru import logger
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import encrypt_admin_webhook_secret
+from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
+    SQLITE_PROFILE_CANDIDATE_TABLE_STATEMENTS,
+    validate_sqlite_profile_candidate_schema,
+)
+from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
+    _leading_schema_identifier,
+    _table_definition_spans,
+    rebuild_sqlite_users_with_profile_version,
+    validate_sqlite_profile_version_readiness,
+)
 from tldw_Server_API.app.core.DB_Management.migrations import Migration, MigrationManager
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import acquire_migration_lock
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
@@ -1096,396 +1105,142 @@ def migration_090_seed_notification_permissions(conn: sqlite3.Connection) -> Non
     logger.info("Migration 090: Seeded notification permissions and role memberships")
 
 
-_SQLITE_LEGACY_TIMESTAMP_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}"
-    r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?$"
-)
-_SQLITE_PROFILE_VERSION_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$"
-)
-_SQLITE_PROFILE_VERSION_DEFAULT_PATTERN = re.compile(
-    r"^\s*\(?\s*STRFTIME\s*\(\s*'%Y-%m-%dT%H:%M:%f000Z'\s*,\s*'now'\s*\)"
-    r"\s*\)?\s*$",
-    re.IGNORECASE,
-)
-_SQLITE_PROFILE_VERSION_COLUMN_SQL = (
-    "profile_version TEXT NOT NULL DEFAULT "
-    "(STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))"
-)
-_SQLITE_PROFILE_VERSION_REBUILD_TABLE = "__authnz_users_profile_version_v91"
-
-
-def _normalize_sqlite_profile_version(value: Any) -> str:
-    """Normalize one legacy SQLite timestamp as canonical UTC RFC3339."""
-    if not isinstance(value, str):
-        raise RuntimeError("AuthNZ profile_version migration found a null timestamp")
-    candidate = value.strip()
-    if not _SQLITE_LEGACY_TIMESTAMP_PATTERN.fullmatch(candidate):
-        raise RuntimeError("AuthNZ profile_version migration found an invalid timestamp")
-    try:
-        parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-    except ValueError:
-        raise RuntimeError(
-            "AuthNZ profile_version migration found an invalid timestamp"
-        ) from None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    else:
-        parsed = parsed.astimezone(timezone.utc)
-    return parsed.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
-def _is_canonical_sqlite_profile_version(value: Any) -> bool:
-    if not isinstance(value, str) or not _SQLITE_PROFILE_VERSION_PATTERN.fullmatch(
-        value
-    ):
-        return False
-    try:
-        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
-    except ValueError:
-        return False
-    return True
-
-
-def _sqlite_table_definition_spans(
-    create_sql: str,
-) -> tuple[int, int, list[tuple[int, int]]]:
-    """Locate one CREATE TABLE body and its top-level comma-delimited elements."""
-    quote: str | None = None
-    in_brackets = False
-    in_line_comment = False
-    in_block_comment = False
-    body_open: int | None = None
-    element_start: int | None = None
-    depth = 0
-    spans: list[tuple[int, int]] = []
-    index = 0
-
-    while index < len(create_sql):
-        char = create_sql[index]
-        next_char = create_sql[index + 1] if index + 1 < len(create_sql) else ""
-
-        if in_line_comment:
-            if char in "\r\n":
-                in_line_comment = False
-            index += 1
-            continue
-        if in_block_comment:
-            if char == "*" and next_char == "/":
-                in_block_comment = False
-                index += 2
-            else:
-                index += 1
-            continue
-        if quote is not None:
-            if char == quote:
-                if next_char == quote:
-                    index += 2
-                    continue
-                quote = None
-            index += 1
-            continue
-        if in_brackets:
-            if char == "]":
-                in_brackets = False
-            index += 1
-            continue
-
-        if char == "-" and next_char == "-":
-            in_line_comment = True
-            index += 2
-            continue
-        if char == "/" and next_char == "*":
-            in_block_comment = True
-            index += 2
-            continue
-        if char in {"'", '"', "`"}:
-            quote = char
-            index += 1
-            continue
-        if char == "[":
-            in_brackets = True
-            index += 1
-            continue
-        if char == "(":
-            if body_open is None:
-                body_open = index
-                element_start = index + 1
-                depth = 1
-            else:
-                depth += 1
-            index += 1
-            continue
-        if char == ")" and body_open is not None:
-            depth -= 1
-            if depth == 0:
-                if element_start is None:
-                    raise RuntimeError(
-                        "AuthNZ profile_version migration found invalid users schema"
-                    )
-                spans.append((element_start, index))
-                return body_open, index, spans
-            index += 1
-            continue
-        if char == "," and body_open is not None and depth == 1:
-            if element_start is None:
-                raise RuntimeError(
-                    "AuthNZ profile_version migration found invalid users schema"
-                )
-            spans.append((element_start, index))
-            element_start = index + 1
-        index += 1
-
-    raise RuntimeError("AuthNZ profile_version migration found invalid users schema")
-
-
-def _sqlite_leading_schema_identifier(definition: str) -> str | None:
-    candidate = definition.lstrip()
-    if not candidate:
-        return None
-    if candidate[0] in {'"', "`"}:
-        quote = candidate[0]
-        index = 1
-        value: list[str] = []
-        while index < len(candidate):
-            if candidate[index] == quote:
-                if index + 1 < len(candidate) and candidate[index + 1] == quote:
-                    value.append(quote)
-                    index += 2
-                    continue
-                return "".join(value)
-            value.append(candidate[index])
-            index += 1
-        return None
-    if candidate[0] == "[":
-        end = candidate.find("]", 1)
-        return candidate[1:end] if end >= 0 else None
-    match = re.match(r"[A-Za-z_][A-Za-z0-9_$]*", candidate)
-    return match.group(0) if match else None
-
-
-def _sqlite_starts_with_table_constraint(definition: str) -> bool:
-    candidate = definition
-    while True:
-        candidate = candidate.lstrip()
-        if candidate.startswith("--"):
-            newline = re.search(r"[\r\n]", candidate[2:])
-            if newline is None:
-                return False
-            candidate = candidate[newline.end() + 1 :]
-            continue
-        if candidate.startswith("/*"):
-            comment_end = candidate.find("*/", 2)
-            if comment_end < 0:
-                return False
-            candidate = candidate[comment_end + 2 :]
-            continue
-        break
-    if not candidate or candidate[0] in {'"', "`", "["}:
-        return False
-    match = re.match(r"[A-Za-z_][A-Za-z0-9_$]*", candidate)
-    return bool(
-        match
-        and match.group(0).upper()
-        in {"CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN"}
-    )
-
-
-def _sqlite_users_rebuild_sql(create_sql: str, *, profile_exists: bool) -> str:
-    body_open, body_close, spans = _sqlite_table_definition_spans(create_sql)
-    body = create_sql[body_open + 1 : body_close]
-
-    if profile_exists:
-        matching_spans = [
-            (start, end)
-            for start, end in spans
-            if (
-                _sqlite_leading_schema_identifier(create_sql[start:end]) or ""
-            ).casefold()
-            == "profile_version"
-        ]
-        if len(matching_spans) != 1:
-            raise RuntimeError(
-                "AuthNZ profile_version migration found invalid users schema metadata"
-            )
-        start, end = matching_spans[0]
-        definition = create_sql[start:end]
-        leading_whitespace = definition[: len(definition) - len(definition.lstrip())]
-        relative_start = start - body_open - 1
-        relative_end = end - body_open - 1
-        body = (
-            body[:relative_start]
-            + leading_whitespace
-            + _SQLITE_PROFILE_VERSION_COLUMN_SQL
-            + body[relative_end:]
-        )
-    else:
-        constraint_starts = [
-            start
-            for start, end in spans
-            if _sqlite_starts_with_table_constraint(create_sql[start:end])
-        ]
-        if constraint_starts:
-            relative_start = constraint_starts[0] - body_open - 1
-            body = (
-                body[:relative_start]
-                + "\n    "
-                + _SQLITE_PROFILE_VERSION_COLUMN_SQL
-                + ","
-                + body[relative_start:]
-            )
-        else:
-            body = body + ",\n    " + _SQLITE_PROFILE_VERSION_COLUMN_SQL
-
-    return (
-        f'CREATE TABLE "{_SQLITE_PROFILE_VERSION_REBUILD_TABLE}" ('
-        + body
-        + ")"
-        + create_sql[body_close + 1 :]
-    )
-
-
-def _quote_sqlite_schema_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
-
-
-def _rebuild_sqlite_users_with_profile_version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA foreign_keys").fetchone()[0]:
-        raise RuntimeError(
-            "AuthNZ profile_version migration requires foreign keys disabled "
-            "for its atomic users-table rebuild"
-        )
-    if _sqlite_table_exists(conn, _SQLITE_PROFILE_VERSION_REBUILD_TABLE):
-        raise RuntimeError(
-            "AuthNZ profile_version migration found an unexpected rebuild table"
-        )
-
-    schema_row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
-    ).fetchone()
-    if schema_row is None or not isinstance(schema_row[0], str):
-        raise RuntimeError("AuthNZ profile_version migration found invalid users schema")
-    create_sql = schema_row[0]
-
-    table_xinfo = conn.execute("PRAGMA table_xinfo(users)").fetchall()
-    ordinary_columns = [row[1] for row in table_xinfo if len(row) < 7 or row[6] == 0]
-    if "updated_at" not in ordinary_columns:
-        raise RuntimeError(
-            "AuthNZ users table is missing required columns: updated_at, profile_version"
-        )
-    profile_exists = "profile_version" in ordinary_columns
-    target_columns = ordinary_columns if profile_exists else [*ordinary_columns, "profile_version"]
-    updated_at_index = ordinary_columns.index("updated_at")
-    profile_index = ordinary_columns.index("profile_version") if profile_exists else None
-
-    schema_objects = conn.execute(
-        """
-        SELECT type, name, sql
-        FROM sqlite_master
-        WHERE tbl_name = 'users'
-          AND type IN ('index', 'trigger')
-          AND sql IS NOT NULL
-        ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
-        """
-    ).fetchall()
-    sequence_value: int | None = None
-    if _sqlite_table_exists(conn, "sqlite_sequence"):
-        sequence_row = conn.execute(
-            "SELECT seq FROM sqlite_sequence WHERE name = 'users'"
-        ).fetchone()
-        if sequence_row is not None:
-            sequence_value = int(sequence_row[0])
-
-    conn.execute(_sqlite_users_rebuild_sql(create_sql, profile_exists=profile_exists))
-
-    quoted_source_columns = ", ".join(
-        _quote_sqlite_schema_identifier(column) for column in ordinary_columns
-    )
-    quoted_target_columns = ", ".join(
-        _quote_sqlite_schema_identifier(column) for column in target_columns
-    )
-    placeholders = ", ".join("?" for _ in target_columns)
-    select_sql = f"SELECT {quoted_source_columns} FROM users"  # nosec B608
-    insert_sql = (
-        f'INSERT INTO "{_SQLITE_PROFILE_VERSION_REBUILD_TABLE}" '  # nosec B608
-        f"({quoted_target_columns}) VALUES ({placeholders})"  # nosec B608
-    )
-
-    source_cursor = conn.execute(select_sql)
-    while batch := source_cursor.fetchmany(500):
-        transformed: list[tuple[Any, ...]] = []
-        for row in batch:
-            values = list(row)
-            if profile_index is None:
-                values.append(_normalize_sqlite_profile_version(row[updated_at_index]))
-            elif values[profile_index] is None:
-                values[profile_index] = _normalize_sqlite_profile_version(
-                    row[updated_at_index]
-                )
-            elif not _is_canonical_sqlite_profile_version(values[profile_index]):
-                raise RuntimeError(
-                    "AuthNZ profile_version migration found an invalid existing value"
-                )
-            transformed.append(tuple(values))
-        conn.executemany(insert_sql, transformed)
-
-    conn.execute("DROP TABLE users")
-    conn.execute(
-        f'ALTER TABLE "{_SQLITE_PROFILE_VERSION_REBUILD_TABLE}" RENAME TO users'
-    )
-    if sequence_value is not None:
-        conn.execute(
-            "DELETE FROM sqlite_sequence WHERE name IN (?, ?)",
-            ("users", _SQLITE_PROFILE_VERSION_REBUILD_TABLE),
-        )
-        conn.execute(
-            "INSERT INTO sqlite_sequence(name, seq) VALUES ('users', ?)",
-            (sequence_value,),
-        )
-    for _object_type, _name, object_sql in schema_objects:
-        conn.execute(object_sql)
-
-
-def _validate_sqlite_profile_version_readiness(conn: sqlite3.Connection) -> None:
-    """Fail closed unless profile-version schema and values are canonical."""
-    if not _sqlite_table_exists(conn, "users"):
-        raise RuntimeError("AuthNZ users table is missing required columns: profile_version")
-    columns = {
-        row[1]: row for row in conn.execute("PRAGMA table_info(users)").fetchall()
-    }
-    profile_column = columns.get("profile_version")
-    if profile_column is None:
-        raise RuntimeError("AuthNZ users table is missing required columns: profile_version")
-    column_type = str(profile_column[2] or "").strip().upper()
-    not_null = bool(profile_column[3])
-    default = profile_column[4]
-    if (
-        column_type != "TEXT"
-        or not not_null
-        or not isinstance(default, str)
-        or not _SQLITE_PROFILE_VERSION_DEFAULT_PATTERN.fullmatch(default)
-    ):
-        raise RuntimeError(
-            "AuthNZ profile_version readiness validation failed for schema metadata"
-        )
-    invalid_count = 0
-    for (value,) in conn.execute("SELECT profile_version FROM users"):
-        if not _is_canonical_sqlite_profile_version(value):
-            invalid_count += 1
-    if invalid_count:
-        raise RuntimeError(
-            "AuthNZ profile_version readiness validation failed for "
-            f"{invalid_count} user row(s)"
-        )
-
-
 def migration_091_add_user_profile_version(conn: sqlite3.Connection) -> None:
     """Add and strictly backfill the durable user profile-version anchor."""
     if not _sqlite_table_exists(conn, "users"):
         raise RuntimeError("AuthNZ users table is missing required columns: profile_version")
-    _rebuild_sqlite_users_with_profile_version(conn)
-    _validate_sqlite_profile_version_readiness(conn)
+    rebuild_sqlite_users_with_profile_version(conn)
+    validate_sqlite_profile_version_readiness(conn)
     logger.info("Migration 091: Added and validated users.profile_version")
+
+
+_CANDIDATE_TIMESTAMP_COLUMNS = {
+    "organizations": ("updated_at", "created_at"),
+    "teams": ("updated_at", "created_at"),
+    "org_members": ("added_at", None),
+    "team_members": ("added_at", None),
+    "user_config_overrides": ("updated_at", "created_at"),
+    "org_config_overrides": ("updated_at", "created_at"),
+    "team_config_overrides": ("updated_at", "created_at"),
+}
+
+
+def _add_not_null_to_sqlite_column(
+    create_sql: str,
+    column_name: str,
+) -> str:
+    _body_open, _body_close, spans = _table_definition_spans(create_sql)
+    for start, end in spans:
+        definition = create_sql[start:end]
+        if _leading_schema_identifier(definition) != column_name:
+            continue
+        if re.search(r"\bNOT\s+NULL\b", definition, re.IGNORECASE):
+            return create_sql
+        default_match = re.search(r"\bDEFAULT\b", definition, re.IGNORECASE)
+        insertion = default_match.start() if default_match else len(definition)
+        hardened = (
+            definition[:insertion].rstrip()
+            + " NOT NULL "
+            + definition[insertion:].lstrip()
+        ).rstrip()
+        return create_sql[:start] + hardened + create_sql[end:]
+    raise RuntimeError(
+        f"AuthNZ candidate timestamp migration is missing {column_name}"
+    )
+
+
+def _rebuild_sqlite_candidate_timestamp(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    fallback_column: str | None,
+) -> None:
+    table_row = conn.execute(
+        "SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    if table_row is None or not table_row[0]:
+        raise RuntimeError(
+            f"AuthNZ candidate timestamp migration is missing {table_name}"
+        )
+    table_info = conn.execute(
+        f'PRAGMA main.table_info("{table_name}")'  # nosec B608
+    ).fetchall()
+    column_metadata = {str(row[1]): row for row in table_info}
+    if column_name not in column_metadata:
+        raise RuntimeError(
+            f"AuthNZ candidate timestamp migration is missing {table_name}.{column_name}"
+        )
+
+    quoted_table = table_name.replace('"', '""')
+    quoted_column = column_name.replace('"', '""')
+    fallback = (
+        f'"{fallback_column.replace(chr(34), chr(34) * 2)}", CURRENT_TIMESTAMP'
+        if fallback_column
+        else "CURRENT_TIMESTAMP"
+    )
+    conn.execute(
+        f'UPDATE "{quoted_table}" SET "{quoted_column}" = '  # nosec B608
+        f'COALESCE("{quoted_column}", {fallback}) '
+        f'WHERE "{quoted_column}" IS NULL'
+    )
+    if bool(column_metadata[column_name][3]):
+        return
+
+    schema_objects = conn.execute(
+        "SELECT type, name, sql FROM main.sqlite_master "
+        "WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+        (table_name,),
+    ).fetchall()
+    create_sql = _add_not_null_to_sqlite_column(str(table_row[0]), column_name)
+    body_open, _body_close, _spans = _table_definition_spans(create_sql)
+    rebuild_name = f"__authnz_{table_name}_candidate_v92"
+    if _sqlite_table_exists(conn, rebuild_name):
+        raise RuntimeError(
+            "AuthNZ candidate timestamp migration found an unsafe rebuild table"
+        )
+    quoted_rebuild = rebuild_name.replace('"', '""')
+    conn.execute(f'CREATE TABLE "{quoted_rebuild}" ' + create_sql[body_open:])  # nosec B608
+
+    columns = [str(row[1]) for row in table_info]
+    column_list = ", ".join(
+        f'"{column.replace(chr(34), chr(34) * 2)}"' for column in columns
+    )
+    conn.execute(
+        f'INSERT INTO "{quoted_rebuild}" ({column_list}) '  # nosec B608
+        f'SELECT {column_list} FROM "{quoted_table}"'
+    )
+    conn.execute(f'DROP TABLE "{quoted_table}"')  # nosec B608
+    conn.execute(
+        f'ALTER TABLE "{quoted_rebuild}" RENAME TO "{quoted_table}"'  # nosec B608
+    )
+    for _object_type, _object_name, object_sql in schema_objects:
+        conn.execute(str(object_sql))
+
+
+def migration_092_harden_profile_candidate_timestamps(
+    conn: sqlite3.Connection,
+) -> None:
+    """Backfill and require every profile candidate version-source timestamp."""
+    for statement in SQLITE_PROFILE_CANDIDATE_TABLE_STATEMENTS:
+        conn.execute(statement)
+    for table_name, (column_name, fallback_column) in (
+        _CANDIDATE_TIMESTAMP_COLUMNS.items()
+    ):
+        _rebuild_sqlite_candidate_timestamp(
+            conn,
+            table_name=table_name,
+            column_name=column_name,
+            fallback_column=fallback_column,
+        )
+    foreign_key_errors = conn.execute("PRAGMA main.foreign_key_check").fetchall()
+    if foreign_key_errors:
+        raise RuntimeError(
+            "AuthNZ candidate timestamp migration found invalid foreign keys"
+        )
+    validate_sqlite_profile_candidate_schema(conn)
+    logger.info("Migration 092: Hardened profile candidate timestamps")
 
 
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
@@ -5249,10 +5004,11 @@ def migration_082_harden_admin_webhooks_and_create_admin_settings(conn: sqlite3.
 
     migrated_rows: list[tuple[Any, ...]] = []
     for row in rows:
-        secret_encrypted = row["secret_encrypted"] if "secret_encrypted" in row.keys() else None
-        secret_key_id = row["secret_key_id"] if "secret_key_id" in row.keys() else None
+        row_values = dict(row)
+        secret_encrypted = row_values.get("secret_encrypted")
+        secret_key_id = row_values.get("secret_key_id")
         if not secret_encrypted:
-            plaintext_secret = row["secret"] if "secret" in row.keys() else None
+            plaintext_secret = row_values.get("secret")
             if not plaintext_secret:
                 raise ValueError(f"Admin webhook {row['id']} is missing a secret for migration")
             encrypted = encrypt_admin_webhook_secret(str(plaintext_secret))
@@ -5764,6 +5520,11 @@ def get_authnz_migrations() -> list[Migration]:
             "Add durable user profile version anchor",
             migration_091_add_user_profile_version,
         ),
+        Migration(
+            92,
+            "Harden profile candidate version timestamps",
+            migration_092_harden_profile_candidate_timestamps,
+        ),
     ]
 
 
@@ -5885,7 +5646,8 @@ def ensure_authnz_tables(db_path: Path) -> None:
         logger.debug("AuthNZ tables are up to date")
 
     with sqlite3.connect(db_path) as conn:
-        _validate_sqlite_profile_version_readiness(conn)
+        validate_sqlite_profile_version_readiness(conn)
+        validate_sqlite_profile_candidate_schema(conn)
 
 
 #

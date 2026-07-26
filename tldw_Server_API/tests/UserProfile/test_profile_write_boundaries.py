@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import ast
+import io
 import re
+import sqlite3
 import textwrap
+import tokenize
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -44,6 +47,18 @@ SQL_CALL_NAMES = frozenset(
         "_execute_compat",
     }
 )
+_SQL_CALL_IDENTIFIER_RE = re.compile(
+    rf"\b(?:{'|'.join(sorted(map(re.escape, SQL_CALL_NAMES)))})\b"
+)
+_IGNORED_CALL_TOKENS = frozenset(
+    {
+        tokenize.NL,
+        tokenize.NEWLINE,
+        tokenize.INDENT,
+        tokenize.DEDENT,
+        tokenize.COMMENT,
+    }
+)
 OFFLINE_MIGRATION_PATHS = frozenset(
     {
         "tldw_Server_API/app/core/AuthNZ/migrations.py",
@@ -71,6 +86,14 @@ _INSERT_COLUMNS_RE = re.compile(
     r"^[^(]*\((?P<columns>.*?)\)\s*VALUES\b",
     re.IGNORECASE | re.DOTALL,
 )
+_POSTGRES_ROUTINE_DECLARATION_RE = re.compile(
+    r"\bCREATE\s+(?:OR\s+REPLACE\s+)?"
+    r"(?P<kind>FUNCTION|PROCEDURE|TRIGGER)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"(?P<name>(?:[A-Za-z_]\w*|\"[^\"]+\")"
+    r"(?:\s*\.\s*(?:[A-Za-z_]\w*|\"[^\"]+\"))*)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -95,232 +118,17 @@ class ObservedWrite:
         return f"{self.path}:{self.line} {self.function} -> {self.operation}"
 
 
-# Duplicate entries represent distinct backend-specific call sites in the same
-# writer function. Diagnostics add the current source line for any drift.
-EXPECTED_PROFILE_VISIBLE_USER_WRITES = (
+EXPECTED_MEMBERSHIP_WRITES = (
     ExpectedWrite(
-        "tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py",
-        "upsert_user_override",
-        "INSERT users (id, username, email, password_hash, is_active, is_verified, role)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py",
-        "upsert_user_override",
-        "INSERT users (id, username, email, password_hash, is_active, is_verified, role)",
+        "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py",
+        "provision_tenant",
+        "INSERT org_members",
     ),
     ExpectedWrite(
         "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py",
         "provision_tenant",
-        "INSERT users (username, email, password_hash, is_active)",
+        "INSERT org_members",
     ),
-    ExpectedWrite(
-        "tldw_Server_API/app/api/v1/endpoints/users.py",
-        "update_user_profile",
-        "UPDATE users (email, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py",
-        "AuthnzMfaRepo.clear_mfa_config",
-        "UPDATE users (totp_secret, two_factor_enabled, backup_codes, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py",
-        "AuthnzMfaRepo.clear_mfa_config",
-        "UPDATE users (totp_secret, two_factor_enabled, backup_codes, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py",
-        "AuthnzMfaRepo.set_mfa_config",
-        "UPDATE users (totp_secret, two_factor_enabled, backup_codes, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py",
-        "AuthnzMfaRepo.set_mfa_config",
-        "UPDATE users (totp_secret, two_factor_enabled, backup_codes, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/users_repo.py",
-        "AuthnzUsersRepo.ensure_single_user_admin_user",
-        "INSERT users (id, username, email, password_hash, is_active, is_verified, role)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/users_repo.py",
-        "AuthnzUsersRepo.ensure_single_user_admin_user",
-        "INSERT users (id, username, email, password_hash, is_active, is_verified, role)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/users_repo.py",
-        "AuthnzUsersRepo.ensure_single_user_admin_user",
-        "UPDATE users (role, is_active, is_verified)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/users_repo.py",
-        "AuthnzUsersRepo.ensure_single_user_admin_user",
-        "UPDATE users (role, is_active, is_verified)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py",
-        "UserDatabase._ensure_core_columns",
-        "UPDATE users (uuid)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py",
-        "UserDatabase._ensure_core_columns",
-        "UPDATE users (uuid)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py",
-        "UserDatabase._ensure_core_columns",
-        "UPDATE users (uuid)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py",
-        "UserDatabase.create_user",
-        "INSERT users (uuid, username, email, password_hash, metadata)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py",
-        "UserDatabase.record_login",
-        "UPDATE users (last_login, failed_login_attempts, locked_until)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/UserDatabase_v2.py",
-        "UserDatabase.update_user",
-        "UPDATE users (<dynamic>, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB._create_tables",
-        "UPDATE users (uuid)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB._create_tables",
-        "UPDATE users (uuid)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB._create_tables",
-        "UPDATE users (uuid)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB.create_user",
-        "INSERT users (uuid, username, email, password_hash, role, is_active, is_verified, is_superuser, storage_quota_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB.create_user",
-        "INSERT users (uuid, username, email, password_hash, role, is_active, is_verified, is_superuser, storage_quota_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB.create_user",
-        "UPDATE users (uuid)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB.update_user",
-        "UPDATE users (<dynamic>, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/DB_Management/Users_DB.py",
-        "UsersDB.update_user",
-        "UPDATE users (<dynamic>, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/UserProfiles/update_service.py",
-        "_update_user_field",
-        "UPDATE users (<dynamic>, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/admin_users_service.py",
-        "delete_user",
-        "UPDATE users (is_active, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/admin_users_service.py",
-        "delete_user",
-        "UPDATE users (is_active, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/admin_users_service.py",
-        "update_user",
-        "UPDATE users (<dynamic>)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/admin_users_service.py",
-        "update_user",
-        "UPDATE users (<dynamic>)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/auth_service.py",
-        "mark_user_verified",
-        "UPDATE users (is_verified, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/auth_service.py",
-        "update_user_last_login",
-        "UPDATE users (last_login)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/auth_service.py",
-        "verify_user_email_once",
-        "UPDATE users (is_verified, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService.register_user",
-        "INSERT users (uuid, username, email, password_hash, role, is_active, is_verified, created_by, storage_quota_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService.register_user",
-        "INSERT users (uuid, username, email, password_hash, role, is_active, is_verified, created_by, storage_quota_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService.rollback_user_registration",
-        "UPDATE users (username, email, is_active, is_verified, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService.rollback_user_registration",
-        "UPDATE users (username, email, is_active, is_verified, updated_at)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/storage_quota_service.py",
-        "StorageQuotaService.calculate_user_storage",
-        "UPDATE users (storage_used_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/storage_quota_service.py",
-        "StorageQuotaService.calculate_user_storage",
-        "UPDATE users (storage_used_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/storage_quota_service.py",
-        "StorageQuotaService.set_user_quota",
-        "UPDATE users (storage_quota_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/storage_quota_service.py",
-        "StorageQuotaService.set_user_quota",
-        "UPDATE users (storage_quota_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/storage_quota_service.py",
-        "StorageQuotaService.update_usage",
-        "UPDATE users (storage_used_mb)",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/storage_quota_service.py",
-        "StorageQuotaService.update_usage",
-        "UPDATE users (storage_used_mb)",
-    ),
-)
-
-EXPECTED_MEMBERSHIP_WRITES = (
     ExpectedWrite(
         "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
         "AuthnzOrgsTeamsRepo._ensure_user_in_default_team",
@@ -479,18 +287,44 @@ def _relative_path(path: Path, repo_root: Path = REPO_ROOT) -> str:
     return path.relative_to(repo_root).as_posix()
 
 
-def _nearest_scope(
-    node: ast.AST,
-    parents: dict[ast.AST, ast.AST],
-) -> ast.AST:
-    current = node
-    while current in parents:
-        current = parents[current]
-        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return current
-    while current in parents:
-        current = parents[current]
-    return current
+def _normalized_schema_sql(sql: str) -> str:
+    return " ".join(sql.split())
+
+
+def _sqlite_users_routine_inventory(
+    schema_sql: str,
+) -> tuple[tuple[str, str, str], ...]:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.executescript(schema_sql)
+        rows = connection.execute(
+            """
+            SELECT name, tbl_name, sql
+              FROM sqlite_master
+             WHERE type = 'trigger'
+               AND instr(lower(sql), 'users') > 0
+             ORDER BY name
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+    return tuple(
+        (str(name), str(table), _normalized_schema_sql(str(sql)))
+        for name, table, sql in rows
+    )
+
+
+def _postgres_stored_routine_declarations(
+    schema_sql: str,
+) -> tuple[tuple[str, str], ...]:
+    declarations: list[tuple[str, str]] = []
+    for match in _POSTGRES_ROUTINE_DECLARATION_RE.finditer(schema_sql):
+        name = ".".join(
+            part.strip().strip('"').lower()
+            for part in match.group("name").split(".")
+        )
+        declarations.append((match.group("kind").lower(), name))
+    return tuple(sorted(declarations))
 
 
 def _qualified_scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str:
@@ -503,16 +337,28 @@ def _qualified_scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str:
     return ".".join(reversed(names)) or "<module>"
 
 
-def _nodes_in_scope(
+def _nodes_in_scope_and_parents(
     tree: ast.AST,
-    parents: dict[ast.AST, ast.AST],
-) -> dict[ast.AST, list[ast.AST]]:
+) -> tuple[dict[ast.AST, list[ast.AST]], dict[ast.AST, ast.AST]]:
     grouped: dict[ast.AST, list[ast.AST]] = defaultdict(list)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        grouped[_nearest_scope(node, parents)].append(node)
-    return grouped
+    parents: dict[ast.AST, ast.AST] = {}
+    enclosing_scope: dict[ast.AST, ast.AST] = {tree: tree}
+    for parent in ast.walk(tree):
+        scope = enclosing_scope[parent]
+        if not isinstance(
+            parent,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            grouped[scope].append(parent)
+        child_scope = (
+            parent
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+            else scope
+        )
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+            enclosing_scope[child] = child_scope
+    return grouped, parents
 
 
 def _assignment_targets(node: ast.AST) -> Iterable[tuple[str, ast.AST]]:
@@ -744,6 +590,24 @@ def _call_name(node: ast.Call) -> str:
     if isinstance(node.func, ast.Name):
         return node.func.id
     return ""
+
+
+def _contains_sql_call_candidate(source: str) -> bool:
+    if _SQL_CALL_IDENTIFIER_RE.search(source) is None:
+        return False
+    pending_call_name = False
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if pending_call_name:
+            if token.type in _IGNORED_CALL_TOKENS or (
+                token.type == tokenize.OP and token.string == ")"
+            ):
+                continue
+            if token.type == tokenize.OP and token.string == "(":
+                return True
+            pending_call_name = False
+        if token.type == tokenize.NAME and token.string in SQL_CALL_NAMES:
+            pending_call_name = True
+    return False
 
 
 def _query_arguments(node: ast.Call) -> tuple[ast.AST, ...]:
@@ -1026,11 +890,7 @@ def _scan_python_tree(
 ) -> tuple[ObservedWrite, ...]:
     observed: list[ObservedWrite] = []
     relative_path = _relative_path(path, repo_root)
-    parents: dict[ast.AST, ast.AST] = {}
-    for parent in ast.walk(tree):
-        for child in ast.iter_child_nodes(parent):
-            parents[child] = parent
-    grouped = _nodes_in_scope(tree, parents)
+    grouped, parents = _nodes_in_scope_and_parents(tree)
     module_assignments: dict[str, list[ast.AST]] = defaultdict(list)
     for node in grouped.get(tree, []):
         for name, value in _assignment_targets(node):
@@ -1114,10 +974,13 @@ def _scan_python_source(
 def _scan_sql_calls() -> tuple[ObservedWrite, ...]:
     observed: list[ObservedWrite] = []
     for path in sorted(APP_ROOT.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if not _contains_sql_call_candidate(source):
+            continue
         observed.extend(
             _scan_python_source(
                 path=path,
-                source=path.read_text(encoding="utf-8"),
+                source=source,
                 repo_root=REPO_ROOT,
             )
         )
@@ -1184,10 +1047,17 @@ def _assert_inventory(
 
 def test_profile_visible_authnz_users_writer_inventory_is_frozen() -> None:
     inventory = _partition_inventory()
-    _assert_inventory(
-        label="Profile-visible AuthNZ users writer",
-        observed=inventory.get("profile", ()),
-        expected=EXPECTED_PROFILE_VISIBLE_USER_WRITES,
+    forbidden = tuple(
+        write
+        for write in inventory.get("profile", ())
+        if not (
+            write.path
+            == "tldw_Server_API/app/core/AuthNZ/profile_version.py"
+            and write.function.startswith("VersionedUserWriteGateway.")
+        )
+    )
+    assert not forbidden, "Forbidden profile-visible users writes:\n" + "\n".join(
+        f"  {write.diagnostic()}" for write in forbidden
     )
 
 
@@ -1221,6 +1091,54 @@ def test_only_offline_migrations_or_content_databases_are_excluded() -> None:
         label="Excluded offline/content-database write",
         observed=excluded,
         expected=EXPECTED_EXCLUDED_WRITES,
+    )
+
+
+def test_authnz_bootstrap_users_stored_routine_inventory_is_frozen() -> None:
+    sqlite_schema = (
+        REPO_ROOT
+        / "tldw_Server_API/Databases/SQLite/Schema/sqlite_users.sql"
+    ).read_text(encoding="utf-8")
+    postgres_schema = (
+        REPO_ROOT
+        / "tldw_Server_API/Databases/Postgres/Schema/postgresql_users.sql"
+    ).read_text(encoding="utf-8")
+
+    assert _sqlite_users_routine_inventory(sqlite_schema) == (
+        (
+            "update_users_timestamp",
+            "users",
+            "CREATE TRIGGER update_users_timestamp AFTER UPDATE ON users "
+            "FOR EACH ROW BEGIN UPDATE users SET updated_at = CURRENT_TIMESTAMP "
+            "WHERE id = NEW.id; END",
+        ),
+    )
+    assert _postgres_stored_routine_declarations(postgres_schema) == ()
+
+
+def test_stored_routine_inventory_surfaces_future_users_writers() -> None:
+    sqlite_schema = """
+        CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);
+        CREATE TABLE source_rows (id INTEGER PRIMARY KEY);
+        CREATE TRIGGER future_profile_write
+        AFTER UPDATE ON source_rows
+        BEGIN
+            UPDATE users SET email = 'changed' WHERE id = NEW.id;
+        END;
+    """
+    postgres_schema = """
+        CREATE OR REPLACE FUNCTION future_profile_write() RETURNS trigger AS $$
+        BEGIN
+            UPDATE users SET email = 'changed' WHERE id = NEW.id;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """
+
+    sqlite_inventory = _sqlite_users_routine_inventory(sqlite_schema)
+    assert sqlite_inventory[0][:2] == ("future_profile_write", "source_rows")
+    assert _postgres_stored_routine_declarations(postgres_schema) == (
+        ("function", "future_profile_write"),
     )
 
 
@@ -1354,6 +1272,32 @@ def test_scanner_fails_closed_for_unresolved_static_query_expression(
     assert "fixture_app/scanner_case.py:6" in diagnostic
     assert "writes" in diagnostic
     assert "execute" in diagnostic
+
+
+def test_plain_unresolved_query_parameter_is_delegated_to_runtime_guard(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        ProfileUserWriteRejected,
+        _guard_sql,
+    )
+
+    observed = _scan_fixture_source(
+        tmp_path,
+        """
+        async def writes(db, statement):
+            await db.execute(statement)
+        """,
+    )
+    assert observed == ()
+
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            "UPDATE users SET email = ? WHERE id = ?",
+            backend="sqlite",
+            connection_identity=object(),
+            operation="execute",
+        )
 
 
 def test_scanner_fails_closed_through_container_alias_and_cycle(

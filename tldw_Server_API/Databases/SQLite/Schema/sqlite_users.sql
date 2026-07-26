@@ -4,20 +4,31 @@
 -- Users table for authentication
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    uuid TEXT UNIQUE,
+    uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    metadata TEXT DEFAULT '{}',
+    role TEXT NOT NULL DEFAULT 'user',
     is_active BOOLEAN NOT NULL DEFAULT 1,
     is_verified BOOLEAN NOT NULL DEFAULT 0,
+    is_superuser BOOLEAN NOT NULL DEFAULT 0,
+    email_verified BOOLEAN NOT NULL DEFAULT 0,
+    two_factor_enabled BOOLEAN NOT NULL DEFAULT 0,
+    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until DATETIME,
+    storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+    storage_used_mb REAL NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now')),
     last_login DATETIME,
-    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
-    locked_until DATETIME,
-    role TEXT NOT NULL DEFAULT 'user',
-    metadata TEXT -- JSON field for additional user metadata
+    email_verified_at DATETIME,
+    two_factor_secret TEXT,
+    totp_secret TEXT,
+    backup_codes TEXT,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    password_changed_at DATETIME
 );
 
 -- Sessions table for session management
@@ -71,7 +82,7 @@ CREATE TABLE IF NOT EXISTS user_provider_secrets (
     revoked_by INTEGER,
     revoked_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_used_at DATETIME,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE (user_id, provider)
@@ -106,7 +117,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     is_active INTEGER DEFAULT 1,
     metadata TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -116,7 +127,7 @@ CREATE TABLE IF NOT EXISTS org_members (
     user_id INTEGER NOT NULL,
     role TEXT DEFAULT 'member',
     status TEXT DEFAULT 'active',
-    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (org_id, user_id),
     FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -132,7 +143,7 @@ CREATE TABLE IF NOT EXISTS teams (
     is_active INTEGER DEFAULT 1,
     metadata TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (org_id, name),
     FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 );
@@ -143,10 +154,46 @@ CREATE TABLE IF NOT EXISTS team_members (
     user_id INTEGER NOT NULL,
     role TEXT DEFAULT 'member',
     status TEXT DEFAULT 'active',
-    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (team_id, user_id),
     FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_config_overrides (
+    user_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER,
+    updated_by INTEGER,
+    PRIMARY KEY (user_id, key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS org_config_overrides (
+    org_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER,
+    updated_by INTEGER,
+    PRIMARY KEY (org_id, key),
+    FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS team_config_overrides (
+    team_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER,
+    updated_by INTEGER,
+    PRIMARY KEY (team_id, key),
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
 
 -- Team invites table

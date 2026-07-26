@@ -74,7 +74,7 @@ async def test_sqlite_schema_readiness_retries_then_caches_only_success(
 
 
 @pytest.mark.asyncio
-async def test_schema_pool_acquisition_failure_remains_noncritical(
+async def test_schema_pool_acquisition_failure_propagates_without_caching(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _reset_schema_ensure_state(monkeypatch)
@@ -84,13 +84,14 @@ async def test_schema_pool_acquisition_failure_remains_noncritical(
 
     monkeypatch.setattr(initialize, "get_db_pool", _fail_pool_acquisition)
 
-    await initialize.ensure_authnz_schema_ready_once()
+    with pytest.raises(RuntimeError, match="pool is not configured yet"):
+        await initialize.ensure_authnz_schema_ready_once()
 
     assert set() == initialize._SCHEMA_ENSURED_KEYS
 
 
 @pytest.mark.asyncio
-async def test_schema_target_inspection_failure_remains_noncritical_without_caching(
+async def test_schema_target_inspection_failure_propagates_without_caching(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -109,6 +110,24 @@ async def test_schema_target_inspection_failure_remains_noncritical_without_cach
 
     monkeypatch.setattr(initialize, "get_db_pool", _get_db_pool)
 
-    await initialize.ensure_authnz_schema_ready_once()
+    with pytest.raises(RuntimeError, match="backend inspection unavailable"):
+        await initialize.ensure_authnz_schema_ready_once()
 
     assert str(db_path) not in initialize._SCHEMA_ENSURED_KEYS
+
+
+@pytest.mark.asyncio
+async def test_sqlite_schema_readiness_rejects_missing_database_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_schema_ensure_state(monkeypatch)
+
+    async def _get_db_pool() -> object:
+        return SimpleNamespace(pool=None)
+
+    monkeypatch.setattr(initialize, "get_db_pool", _get_db_pool)
+
+    with pytest.raises(RuntimeError, match="database target"):
+        await initialize.ensure_authnz_schema_ready_once()
+
+    assert set() == initialize._SCHEMA_ENSURED_KEYS

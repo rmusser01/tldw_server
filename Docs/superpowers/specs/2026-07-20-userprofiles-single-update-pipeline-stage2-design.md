@@ -1,9 +1,9 @@
 # UserProfiles Stage 2 Single-Update Pipeline Design
 
-**Status:** Revised after design review and awaiting requester approval
+**Status:** Approved; Work Package 1 complete, Work Package 2 next
 **Task:** TASK-13000
 **Related work:** PR #2529; historical UserProfiles contract-refactor tasks TASK-12016.1 through TASK-12016.11
-**Date:** 2026-07-20; revised 2026-07-23
+**Date:** 2026-07-20; revised 2026-08-08
 
 ## Problem
 
@@ -299,6 +299,26 @@ version gateway reads `profile_version`, not `updated_at`. Existing databases
 see no initial version jump because the migration preserves the normalized old
 value.
 
+All SQLite AuthNZ owners use the same cycle-free schema helper for this anchor.
+Migration 091 performs the rebuild inside its migration transaction;
+`UserDatabase_v2` runs the owning remediation against its pooled raw connection
+before installing the serving write guard; and file-backed `DatabasePool`
+startup validates the migrated result before yielding a serving connection.
+The canonical default is
+`STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now')`. A valid canonical table takes a
+validate-only fast path. A legacy nullable or defaultless column is rebuilt
+atomically, preserving column order, custom constraints, indexes, triggers,
+foreign keys, and `sqlite_sequence`; null values are derived from valid
+`updated_at` values while existing canonical anchors are unchanged. Missing or
+invalid `updated_at` fails closed only when it is required to derive a missing
+or null anchor; canonical anchors have no continuing dependency on that legacy
+metadata. Malformed/noncanonical anchors, an unexpected rebuild table, or an
+incomplete schema also fails closed. The owning remediation requires no caller
+transaction, restores the connection's original foreign-key mode, and rolls
+back all schema/data changes on ordinary failures and control-flow base
+exceptions. Cleanup failures preserve the primary exception, mark the pooled
+connection invalid, and force the owner to retire it before reuse.
+
 A connection-aware `VersionedUserWriteGateway` owns direct writes to AuthNZ
 `users` columns exposed by profile identity/quota state. The initial inventory
 includes UUID, username, email, role/superuser state, active/verified state,
@@ -317,6 +337,109 @@ performs one final touch. A structural SQL/AST test rejects inventoried AuthNZ
 `users` INSERT/UPDATE statements outside approved gateways and creator paths.
 It distinguishes unrelated per-user content databases named `users` and allows
 offline migrations only while the application is not serving traffic.
+
+Task 5 also enforces this ownership at managed AuthNZ database boundaries.
+Whole-program SQL inference was rejected after the review prototype found
+1,256 unresolved dynamic SQL sinks across unrelated domains; annotating those
+sinks would have widened Task 5 and made a static marker an authorization
+mechanism. Instead, caller-side async and sync AuthNZ connection guards classify
+the actual concrete SQL with a bounded parser cache before database I/O. Raw
+profile-visible or unknown-column `users` writes fail closed. Only the
+`VersionedUserWriteGateway` can mint a private, exact-type, one-shot capability
+bound to the SQL, backend, operation, columns, and managed connection identity.
+The capability survives the existing adapters and is consumed at the final
+guard. The structural scanner remains a bounded inventory for statically
+resolvable writes; unresolved query parameters are covered by runtime guard
+tests rather than whole-program analysis.
+
+This runtime guarantee is intentionally scoped to serving AuthNZ connections
+opened by `DatabasePool`, its FastAPI adapter, `UsersDB`, or `UserDatabase_v2`.
+Offline migrations use their existing narrow maintenance phase; unrelated
+content databases and independently opened same-process connections are not in
+scope. Code that can introspect or monkeypatch private runtime objects, and
+external database principals that connect without the managed AuthNZ openers,
+are also outside this firewall's threat model; deployments must restrict direct
+database credentials and stored-object DDL accordingly. Managed serving
+connections reject creation or replacement of functions, procedures, triggers,
+and rules because their executable bodies can conceal protected writes. Table
+and index creation remains available, but every `users` creation is protected.
+The exact `CREATE TABLE IF NOT EXISTS main.users` or `public.users` bootstrap
+shape, including the required anchor columns, executes only with a private
+one-shot connection capability; raw canonical DDL, CTAS, incomplete schemas,
+temporary relations, unqualified relations, alternate-schema relations, and
+rename-to-`users` operations fail closed. SQLite readiness also rejects
+temporary `users` or rebuild relations and audits triggers in both the serving
+and temporary catalogs before any remediation. All managed
+`DROP` and `TRUNCATE` statements fail closed, regardless of target, because
+destructive DDL has no serving-path use. `ALTER TABLE users` is limited to
+adding non-anchor columns or strengthening non-anchor constraints, column
+defaults, or nullability;
+`profile_version` alterations require the same private connection-bound
+capability as anchor DML. Other destructive or shape-changing alterations fail
+closed. The SQLite bootstrap has one
+frozen stored-write exception:
+`update_users_timestamp` performs only `UPDATE users SET updated_at = ...`, and
+`updated_at` is explicitly raw-safe and excluded from profile-version
+semantics. The structural boundary test freezes that exact trigger definition
+and fails on additional users-writing triggers. It also freezes that the
+PostgreSQL AuthNZ bootstrap defines no function, procedure, or trigger that
+writes `users`, because such server-side writes would bypass caller-side
+interception.
+
+PostgreSQL updatable views that depend on `public.users` are also rejected:
+otherwise an alias could bypass target-name classification while still writing
+the protected relation. SQL parsing and tokenization failures always become a
+stable fail-closed rejection without returning parser input or driver text.
+
+`profile_version` itself is protected. Direct anchor updates fail closed; the
+profile-version gateway mints a private one-shot capability for the exact touch
+statement on the managed connection, using the same consume-and-revoke path as
+other protected writes.
+
+PostgreSQL anchor ownership is centralized in one async/sync leaf helper over a
+caller-owned transaction connection. It addresses only `public.users`, audits
+direct triggers plus non-extension routines and rules for indirect users
+writes, rejects dynamic-SQL routines and active non-extension event triggers,
+and detects insert, update, delete, merge, truncate, and copy paths regardless
+of token order. It normalizes legacy naive
+`updated_at`/`profile_version` timestamps as UTC,
+backfills a missing anchor from normalized `updated_at`, and then enforces a
+`TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP` contract. Existing null anchors
+are corruption and fail closed instead of being silently repaired. Direct pool
+bootstrap, `UsersDB`, `UserDatabase_v2`, and the advisory-lock migration delegate
+to this helper; no call site implements its own anchor semantics. Fresh schema
+creation and readiness validation run in one owner transaction before the pool
+is marked available. Stored-object audits run before and after remediation.
+The helper itself acquires the transaction-scoped advisory lock, so direct and
+migration callers cannot accidentally omit serialization. Required core DDL is
+expressed as guard-compatible ordinary statements and aborts readiness on its
+first error; migration failures are never downgraded to a successful startup.
+
+Managed synchronous wrappers are leases, not durable connection handles. Every
+checkout has a unique generation; returning or context-exiting the lease
+invalidates all wrappers and cursors derived from it before the raw connection
+is returned, and a duplicate return fails closed before pool I/O. The explicit
+FastAPI test adapter uses one request-scoped connection and transaction for
+both SQLite and PostgreSQL, commits once only after successful dependency
+completion, and rolls back on any exceptional exit. Its `commit()`
+compatibility method never finalizes the request
+transaction. `UsersDB.update_user()` likewise performs its write, post-read,
+and final commit on one acquired connection with no nested acquisition or inner
+commit. Bootstrap and storage failures expose stable domain messages and do not
+include raw database values, paths, or driver details.
+
+Candidate membership and configuration tables are created explicitly in
+`main` or `public`, so a nonstandard PostgreSQL search path cannot split
+bootstrap writes from the relations used by readiness and version candidates.
+Their bootstrap definitions are the complete canonical organization, team,
+membership, and override schemas, including primary/foreign keys, roles,
+statuses, actors, values, and timestamps. The private `users` bootstrap
+capability likewise requires the full identity/auth/version contract, including
+primary key, unique and not-null fields, and canonical defaults; a partial table
+cannot consume the capability. Pool-owned user, repository, quota, and auth
+operations leave commit/rollback to the surrounding transaction owner. Changed
+synchronous backend failures log only stable exception metadata and raise
+stable domain messages.
 
 Effective `identity.is_locked` is derived from time-sensitive
 `failed_attempts`/`account_lockouts`, not the legacy `users.is_locked` column.

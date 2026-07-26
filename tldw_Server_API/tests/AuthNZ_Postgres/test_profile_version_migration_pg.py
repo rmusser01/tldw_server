@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -183,3 +184,76 @@ async def test_postgres_current_schema_corruption_fails_closed_at_startup(
         user_id,
     )
     assert await ensure_user_profile_version_pg(test_db_pool) is True
+
+
+@pytest.mark.asyncio
+async def test_postgres_readiness_rejects_updatable_view_alias_to_users(
+    test_db_pool,
+) -> None:  # noqa: ANN001
+    from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+        ensure_user_profile_version_pg,
+    )
+
+    view_name = f"user_alias_{uuid.uuid4().hex[:8]}"
+    nested_view_name = f"nested_user_alias_{uuid.uuid4().hex[:8]}"
+    async with test_db_pool.pool.acquire() as raw_conn:
+        await raw_conn.execute(
+            f"CREATE VIEW public.{view_name} AS "
+            "SELECT id, email FROM public.users"
+        )
+        await raw_conn.execute(
+            f"CREATE VIEW public.{nested_view_name} AS "
+            f"SELECT id, email FROM public.{view_name}"
+        )
+    try:
+        with pytest.raises(RuntimeError, match="indirect.*users write"):
+            await ensure_user_profile_version_pg(test_db_pool)
+    finally:
+        async with test_db_pool.pool.acquire() as raw_conn:
+            await raw_conn.execute(f"DROP VIEW IF EXISTS public.{nested_view_name}")
+            await raw_conn.execute(f"DROP VIEW IF EXISTS public.{view_name}")
+
+
+@pytest.mark.asyncio
+async def test_postgres_readiness_rejects_inherited_users_descendant(
+    test_db_pool,
+) -> None:  # noqa: ANN001
+    from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+        ensure_user_profile_version_pg,
+    )
+
+    table_name = f"user_child_{uuid.uuid4().hex[:8]}"
+    async with test_db_pool.pool.acquire() as raw_conn:
+        await raw_conn.execute(
+            f"CREATE TABLE public.{table_name} () INHERITS (public.users)"
+        )
+    try:
+        with pytest.raises(RuntimeError, match="indirect.*users write"):
+            await ensure_user_profile_version_pg(test_db_pool)
+    finally:
+        async with test_db_pool.pool.acquire() as raw_conn:
+            await raw_conn.execute(f"DROP TABLE IF EXISTS public.{table_name}")
+
+
+@pytest.mark.asyncio
+async def test_postgres_readiness_serializes_concurrent_legacy_upgrades(
+    test_db_pool,
+) -> None:  # noqa: ANN001
+    from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
+        ensure_postgres_profile_version_on_connection,
+    )
+
+    await _reset_to_legacy_users_schema(test_db_pool)
+
+    async def _upgrade() -> None:
+        async with test_db_pool.pool.acquire() as raw_conn:
+            async with raw_conn.transaction():
+                await ensure_postgres_profile_version_on_connection(raw_conn)
+
+    await asyncio.gather(_upgrade(), _upgrade())
+
+    assert await test_db_pool.fetchval(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'users' "
+        "AND column_name = 'profile_version'"
+    ) == 1

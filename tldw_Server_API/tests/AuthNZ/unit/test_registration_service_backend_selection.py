@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
 
@@ -30,9 +31,16 @@ class _PoolStub:
 
 
 class _CursorStub:
-    def __init__(self, *, row: Any = None, lastrowid: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        row: Any = None,
+        lastrowid: int | None = None,
+        rowcount: int = 1,
+    ) -> None:
         self._row = row
         self.lastrowid = lastrowid
+        self.rowcount = rowcount
 
     async def fetchone(self) -> Any:
         return self._row
@@ -65,12 +73,18 @@ class _SQLiteRegisterConn:
         self.committed = False
         self.membership_inserted = False
 
-    async def execute(self, query: str, params: Any) -> _CursorStub:
-        lowered = str(query).lower()
+    async def execute(self, query: object, params: Any) -> _CursorStub:
+        concrete = _guard_sql(
+            query,
+            backend="sqlite",
+            connection_identity=self,
+            operation="execute",
+        )
+        lowered = concrete.lower()
         self.execute_calls.append((lowered, params))
         if "select username, email" in lowered:
             return _CursorStub(row=None)
-        if "insert into users" in lowered:
+        if "insert into main.users" in lowered:
             return _CursorStub(lastrowid=29)
         if "select id from roles where name" in lowered:
             return _CursorStub(row=(11,))
@@ -132,10 +146,16 @@ class _PostgresRegisterConn:
         assert "select username, email" in query.lower()
         return None
 
-    async def fetchval(self, query: str, *params: Any) -> int | None:
-        lowered = query.lower()
+    async def fetchval(self, query: object, *params: Any) -> int | None:
+        concrete = _guard_sql(
+            query,
+            backend="postgres",
+            connection_identity=self,
+            operation="fetchval",
+        )
+        lowered = concrete.lower()
         self.fetchval_calls.append((lowered, tuple(params)))
-        if "insert into users" in lowered:
+        if "insert into public.users" in lowered:
             return 31
         if "select id from roles where name" in lowered:
             return 13

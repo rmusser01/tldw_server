@@ -64,6 +64,10 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
 )
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    ProfileVersionNotFound,
+    VersionedUserWriteGateway,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.testing import is_truthy
@@ -582,20 +586,27 @@ async def update_user_profile(
         updates_made = False
 
         if request.email and request.email != user_context.get("email"):
-            # Update email
-            # Use Postgres-style placeholders; test adapters and SQLite shims
-            # normalize `$N` to `?` automatically.
-            execute_result = await db.execute(
-                "UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
-                request.email.lower(),
-                user_id,
+            is_pg = await is_postgres_backend()
+            statement = (
+                "UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2"
+                if is_pg
+                else "UPDATE users SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             )
-            affected_rows = _extract_affected_rows(execute_result)
-            if affected_rows == 0:
+            try:
+                await VersionedUserWriteGateway(
+                    "postgres" if is_pg else "sqlite"
+                ).execute_update(
+                    db,
+                    user_id=user_id,
+                    profile_visible_fields=("email",),
+                    statement=statement,
+                    parameters=(request.email.lower(), user_id),
+                )
+            except ProfileVersionNotFound:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User not found",
-                )
+                ) from None
 
             updates_made = True
             user_context["email"] = request.email.lower()

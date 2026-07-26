@@ -11,6 +11,7 @@ import pytest
 from loguru import logger
 
 import tldw_Server_API.app.core.AuthNZ.exceptions as authnz_exceptions
+from tldw_Server_API.app.core.AuthNZ import database as database_module
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     AuthnzMonitoringError,
@@ -72,6 +73,14 @@ class _SqlstateError(RuntimeError):
     def __init__(self, sqlstate: str) -> None:
         super().__init__(_RAW_BACKEND_TEXT)
         self.sqlstate = sqlstate
+
+
+class _HostileSqlstateError(RuntimeError):
+    sqlstate: object = []
+
+    def __init__(self, *, pgcode: object) -> None:
+        super().__init__(_RAW_BACKEND_TEXT)
+        self.pgcode = pgcode
 
 
 class _AcquireContext:
@@ -206,6 +215,15 @@ def _nested_sqlstate_error(sqlstate: str) -> RuntimeError:
             raise RuntimeError(_RAW_BACKEND_TEXT) from conflict
         except RuntimeError as wrapper:
             return wrapper
+
+
+def test_postgres_sqlstate_ignores_unhashable_attributes_and_checks_pgcode() -> None:
+    assert database_module._has_postgres_concurrency_sqlstate(  # noqa: SLF001
+        _HostileSqlstateError(pgcode="40P01")
+    )
+    assert not database_module._has_postgres_concurrency_sqlstate(  # noqa: SLF001
+        _HostileSqlstateError(pgcode={"state": "40001"})
+    )
 
 
 def _natural_sqlstate_error(sqlstate: str) -> RuntimeError:

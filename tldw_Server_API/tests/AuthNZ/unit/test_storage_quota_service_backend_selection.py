@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 
@@ -43,10 +44,12 @@ class _CursorStub:
         row: Any = None,
         rows: list[Any] | None = None,
         description: list[tuple[Any, ...]] | None = None,
+        rowcount: int = 1,
     ) -> None:
         self._row = row
         self._rows = rows if rows is not None else ([] if row is None else [row])
         self.description = description
+        self.rowcount = rowcount
 
     async def fetchone(self) -> Any:
         return self._row
@@ -56,7 +59,10 @@ class _CursorStub:
 
 
 class _SQLiteUpdateConnWithFetchrowTrap:
+    _authnz_profile_user_backend = "sqlite"
+
     def __init__(self) -> None:
+        self._authnz_profile_user_guard_identity = self
         self.update_calls = 0
         self.select_calls = 0
         self.committed = False
@@ -64,15 +70,27 @@ class _SQLiteUpdateConnWithFetchrowTrap:
     async def fetchrow(self, *args, **kwargs):  # noqa: ANN001, ANN002, ARG002
         raise AssertionError("SQLite backend path should not call conn.fetchrow")
 
-    async def execute(self, query: str, params: Any) -> _CursorStub:
-        q = str(query).lower()
-        if "update users" in q and "set storage_used_mb" in q:
+    async def execute(self, query: object, params: Any) -> _CursorStub:
+        concrete = _guard_sql(
+            query,
+            backend="sqlite",
+            connection_identity=self,
+            operation="execute",
+        )
+        q = concrete.lower()
+        if "source_tag" in q:
+            return _CursorStub(
+                rows=[("user", 1, "2026-07-26T12:00:00.000000Z")]
+            )
+        if "update main.users" in q and "set storage_used_mb" in q:
             self.update_calls += 1
             return _CursorStub()
         if "select storage_used_mb, storage_quota_mb from users" in q:
             self.select_calls += 1
             return _CursorStub(row=(5.5, 100))
-        raise AssertionError(f"Unexpected SQLite query: {query!r}")
+        if "set profile_version" in q:
+            return _CursorStub()
+        raise AssertionError(f"Unexpected SQLite query: {concrete!r}")
 
     async def commit(self) -> None:
         self.committed = True
@@ -183,7 +201,7 @@ async def test_update_usage_sqlite_backend_selection_ignores_conn_fetchrow(tmp_p
     assert result["storage_used_mb"] == 5.5
     assert conn.update_calls == 1
     assert conn.select_calls == 1
-    assert conn.committed is True
+    assert conn.committed is False
 
 
 @pytest.mark.asyncio
