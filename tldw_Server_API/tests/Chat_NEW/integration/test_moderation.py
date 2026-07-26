@@ -422,8 +422,10 @@ def test_output_redaction_non_streaming_with_real_moderation_service(
             == "this has [RULE] token"
         )
     finally:
-        _cleanup_db_artifacts(db_path)
-        app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        try:
+            _cleanup_db_artifacts(db_path)
+        finally:
+            app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
 @pytest.mark.unit
