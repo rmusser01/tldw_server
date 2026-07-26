@@ -455,3 +455,372 @@ def test_effective_policy_identity_and_rule_aliasing_are_unchanged():
     assert overlaid is not policy
     assert overlaid.block_patterns is not policy.block_patterns
     assert overlaid.block_patterns[0] is base_rule
+
+
+@pytest.mark.parametrize("action", ["warn", "block", "redact"])
+def test_direct_redaction_ignores_policy_enabled_and_rule_action(action):
+    policy = _policy(
+        _rule("secret", action=action, replacement="[RULE]"),
+        enabled=False,
+    )
+
+    redacted, count = _service().redact_text_with_count(
+        "secret and secret",
+        policy,
+        "input",
+    )
+
+    assert redacted == "[RULE] and [RULE]"
+    assert count == 2
+
+
+def test_sequential_redaction_applies_later_rules_to_changed_text():
+    policy = _policy(
+        _rule("secret", action="warn", replacement="token"),
+        _rule("token", action="block", replacement="[FINAL]"),
+    )
+
+    redacted, count = _service().redact_text_with_count("secret", policy)
+
+    assert redacted == "[FINAL]"
+    assert count == 2
+
+
+def test_replacement_text_is_literal_not_a_backreference():
+    policy = _policy(
+        _rule(r"(secret)", action="redact", replacement=r"\1-literal"),
+    )
+
+    assert _service().redact_text("secret", policy) == r"\1-literal"
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected_text", "expected_count"),
+    [
+        (None, "[R] [R] [R]", 3),
+        (0, "[R] [R] [R]", 3),
+        (-1, "[R] [R] [R]", 3),
+        ("2", "[R] [R] x", 2),
+        ("bad", "[R] [R] [R]", 3),
+    ],
+)
+def test_short_redaction_replacement_limit_characterization(
+    limit,
+    expected_text,
+    expected_count,
+):
+    service = _service(
+        max_scan_chars=100,
+        max_replacements_per_pattern=limit,
+    )
+    policy = _policy(_rule("x", replacement="[R]"))
+
+    assert service.redact_text_with_count("x x x", policy) == (
+        expected_text,
+        expected_count,
+    )
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected_text", "expected_count"),
+    [
+        (None, "[R] [R] [R]", 3),
+        (0, "[R] [R] [R]", 3),
+        (-1, "[R] [R] [R]", 3),
+        (2, "[R] [R] x", 2),
+    ],
+)
+def test_long_redaction_supported_limit_characterization(
+    limit,
+    expected_text,
+    expected_count,
+):
+    service = _service(
+        max_scan_chars=3,
+        max_replacements_per_pattern=limit,
+    )
+    policy = _policy(_rule("x", replacement="[R]"))
+
+    assert service.redact_text_with_count("x x x", policy) == (
+        expected_text,
+        expected_count,
+    )
+
+
+@pytest.mark.parametrize(
+    ("limit", "error_type"),
+    [
+        ("2", TypeError),
+        ("bad", ValueError),
+    ],
+)
+def test_long_redaction_unsupported_limit_exception_characterization(
+    limit,
+    error_type,
+):
+    service = _service(
+        max_scan_chars=3,
+        max_replacements_per_pattern=limit,
+    )
+
+    with pytest.raises(error_type):
+        service.redact_text_with_count(
+            "x x x",
+            _policy(_rule("x", replacement="[R]")),
+        )
+
+
+class _RecordingPattern:
+    pattern = "never"
+
+    def __init__(self):
+        self.bounds = []
+
+    def search(self, _text, *bounds):
+        self.bounds.append(bounds)
+        return None
+
+
+def test_chunk_geometry_and_search_bounds_are_literal():
+    service = _service(
+        max_scan_chars=10,
+        match_window_chars=5,
+        max_fallback_scan_chars=100,
+    )
+    chunks = list(service._iter_scan_chunks("x" * 25))
+    pattern = _RecordingPattern()
+
+    assert chunks[:3] == [(0, 10), (1, 11), (2, 12)]
+    assert chunks[-1] == (15, 25)
+    assert len(chunks) == 16
+
+    assert service._find_match_span(pattern, "x" * 20) is None
+    assert pattern.bounds == [
+        (0, 15),
+        (1, 16),
+        (2, 17),
+        (3, 18),
+        (4, 19),
+        (5, 20),
+        (6, 20),
+        (7, 20),
+        (8, 20),
+        (9, 20),
+        (10, 20),
+        (),
+    ]
+
+
+def test_original_string_search_preserves_lookbehind_before_pos():
+    service = _service(
+        max_scan_chars=1,
+        match_window_chars=5,
+        max_fallback_scan_chars=1,
+    )
+
+    assert service._find_match_span(
+        re.compile(r"(?<=A)needle"),
+        ("x" * 9) + "Aneedle",
+    ) == (10, 16)
+
+
+def test_chunk_search_does_not_turn_mid_text_anchor_into_start_anchor():
+    service = _service(
+        max_scan_chars=2,
+        match_window_chars=10,
+        max_fallback_scan_chars=100,
+    )
+
+    assert service._find_match_span(re.compile(r"^needle"), "xxneedle") is None
+
+
+def test_full_text_fallback_limit_is_inclusive_and_guarded():
+    pattern = re.compile(r"^needle$")
+
+    assert _service(
+        max_scan_chars=3,
+        match_window_chars=0,
+        max_fallback_scan_chars=6,
+    )._find_match_span(
+        pattern, "needle"
+    ) == (0, 6)
+    assert (
+        _service(
+            max_scan_chars=3,
+            match_window_chars=0,
+            max_fallback_scan_chars=5,
+        )._find_match_span(pattern, "needle")
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "error_type"),
+    [
+        (None, TypeError),
+        ("bad", ValueError),
+    ],
+)
+def test_evaluation_max_scan_coercion_errors_are_literal(raw, error_type):
+    service = _service(max_scan_chars=raw)
+    with pytest.raises(error_type):
+        service._find_match_span(re.compile("x"), "x")
+    with pytest.raises(error_type):
+        list(service._iter_scan_chunks("x"))
+
+
+def test_numeric_string_max_scan_is_coerced_for_evaluation():
+    service = _service(max_scan_chars="2")
+    assert service._find_match_span(re.compile("x"), "xx") == (0, 1)
+    assert list(service._iter_scan_chunks("xx")) == [(0, 2)]
+
+
+@pytest.mark.parametrize("raw", [None, "2", "bad"])
+def test_redaction_path_comparison_does_not_coerce_max_scan(raw):
+    service = _service(max_scan_chars=raw)
+    with pytest.raises(TypeError):
+        service.redact_text("x", _policy(_rule("x")))
+
+
+@pytest.mark.parametrize(
+    ("field", "raw", "error_type"),
+    [
+        ("_match_window_chars", None, TypeError),
+        ("_match_window_chars", "bad", ValueError),
+        ("_max_fallback_scan_chars", None, TypeError),
+        ("_max_fallback_scan_chars", "bad", ValueError),
+    ],
+)
+def test_long_evaluation_limit_coercion_errors_are_literal(
+    field,
+    raw,
+    error_type,
+):
+    service = _service(max_scan_chars=1)
+    setattr(service, field, raw)
+    with pytest.raises(error_type):
+        service._find_match_span(re.compile("never"), "long text")
+
+
+def test_numeric_string_window_and_fallback_limits_are_coerced():
+    service = _service(
+        max_scan_chars=1,
+        match_window_chars="2",
+        max_fallback_scan_chars="20",
+    )
+    assert service._find_match_span(re.compile("never"), "long text") is None
+
+
+@pytest.mark.timeout(2)
+def test_long_redaction_uses_bounded_full_text_finditer():
+    service = _service(
+        max_scan_chars=3,
+        match_window_chars=0,
+        max_replacements_per_pattern=10,
+    )
+    policy = _policy(_rule("ABCDE", replacement="[R]"))
+
+    assert service.redact_text_with_count("xxABCDEyy", policy) == (
+        "xx[R]yy",
+        1,
+    )
+
+
+def test_zero_length_matches_differ_between_short_and_long_redaction():
+    policy = _policy(_rule(r"(?=a)", replacement="[R]"))
+
+    short = _service(max_scan_chars=10).redact_text_with_count("a", policy)
+    long = _service(max_scan_chars=1).redact_text_with_count("aa", policy)
+
+    assert short == ("[R]a", 1)
+    assert long == ("aa", 0)
+
+
+def test_malformed_raw_rule_exceptions_propagate():
+    policy = _policy()
+    policy.block_patterns = [None]  # type: ignore[list-item]
+    service = _service()
+
+    with pytest.raises(AttributeError):
+        service.evaluate_text("secret", policy, "input")
+    with pytest.raises(AttributeError):
+        service.redact_text("secret", policy, "input")
+
+
+class _RegexErrorPattern:
+    pattern = "broken"
+
+    def search(self, *_args, **_kwargs):
+        raise re.error("broken")
+
+    def finditer(self, *_args, **_kwargs):
+        raise re.error("broken")
+
+    def sub(self, *_args, **_kwargs):
+        raise re.error("broken")
+
+    def subn(self, *_args, **_kwargs):
+        raise re.error("broken")
+
+
+def test_regex_errors_keep_current_no_match_and_skip_behavior():
+    policy = _policy()
+    policy.block_patterns = [_RegexErrorPattern()]  # type: ignore[list-item]
+    service = _service()
+
+    assert service.evaluate_text("secret", policy, "input") == (ModerationEvaluationResult())
+    assert service.redact_text("secret", policy, "input") == "secret"
+    assert service.redact_text_with_count(
+        "secret",
+        policy,
+        "input",
+    ) == ("secret", 0)
+
+
+def test_replacement_lookup_regex_error_remains_inside_rule_boundary():
+    class _ReplacementErrorPolicy:
+        block_patterns = [re.compile("secret")]
+        input_enabled = True
+        output_enabled = True
+        categories_enabled = None
+
+        @property
+        def redact_replacement(self):
+            raise re.error("replacement lookup failed")
+
+    service = _service()
+    policy = _ReplacementErrorPolicy()
+
+    assert (
+        service.redact_text(
+            "secret",
+            policy,  # type: ignore[arg-type]
+        )
+        == "secret"
+    )
+    assert service.redact_text_with_count(
+        "secret",
+        policy,  # type: ignore[arg-type]
+    ) == ("secret", 0)
+
+
+def test_service_evaluation_and_redaction_do_not_mutate_inputs():
+    categories = {"confidential"}
+    rule = _rule(
+        "secret",
+        action="redact",
+        replacement="[R]",
+        categories=categories,
+    )
+    rules = [rule]
+    policy = _policy(*rules, categories_enabled={"confidential"})
+    pattern_collection = policy.block_patterns
+    service = _service()
+
+    service.evaluate_text("secret", policy, "input")
+    service.redact_text("secret", policy, "input")
+
+    assert policy.block_patterns is pattern_collection
+    assert policy.block_patterns[0] is rule
+    assert rule.categories is categories
+    assert categories == {"confidential"}
