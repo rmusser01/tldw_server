@@ -1,7 +1,10 @@
+import asyncio
 import io
+import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 import pytest
 import soundfile as sf
@@ -125,7 +128,8 @@ def test_audio_transcriptions_uses_adapter_base_dir(
         assert captured_conversion["overwrite"] is True
 
 
-def test_audio_cpp_transcription_uses_real_registry_without_fallback(
+@pytest.mark.asyncio
+async def test_audio_cpp_transcription_uses_real_registry_without_fallback(
     monkeypatch: pytest.MonkeyPatch,
     bypass_api_limits: Any,
 ) -> None:
@@ -165,6 +169,7 @@ def test_audio_cpp_transcription_uses_real_registry_without_fallback(
         return get_adapter(provider)
 
     captured: dict[str, object] = {}
+    blocking_interval: dict[str, float] = {}
 
     def _fake_transcribe_audio_cpp(
         audio_path: str,
@@ -173,6 +178,9 @@ def test_audio_cpp_transcription_uses_real_registry_without_fallback(
         model_id: str,
         **_kwargs: object,
     ) -> Any:
+        blocking_interval["start"] = time.perf_counter()
+        time.sleep(0.1)
+        blocking_interval["end"] = time.perf_counter()
         captured["audio_path"] = audio_path
         captured["provider"] = route.provider
         captured["model_id"] = model_id
@@ -216,25 +224,44 @@ def test_audio_cpp_transcription_uses_real_registry_without_fallback(
     app.dependency_overrides[get_request_user] = _fake_get_request_user
     app.include_router(audio_router, prefix="/api/v1/audio")
 
-    with bypass_api_limits(app), TestClient(app) as client:
-        response = client.post(
-            "/api/v1/audio/transcriptions",
-            headers={"X-API-KEY": TEST_API_KEY},
-            files={
-                "file": (
-                    "sample.wav",
-                    io.BytesIO(_make_wav_bytes()),
-                    "audio/wav",
-                )
-            },
-            data={
-                "model": "audio-cpp:whisper-small",
-                "response_format": "json",
-            },
-        )
+    ticker_times: list[float] = []
+    stop_ticker = asyncio.Event()
+
+    async def _ticker() -> None:
+        while not stop_ticker.is_set():
+            ticker_times.append(time.perf_counter())
+            await asyncio.sleep(0.005)
+
+    with bypass_api_limits(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            ticker_task = asyncio.create_task(_ticker())
+            response = await client.post(
+                "/api/v1/audio/transcriptions",
+                headers={"X-API-KEY": TEST_API_KEY},
+                files={
+                    "file": (
+                        "sample.wav",
+                        io.BytesIO(_make_wav_bytes()),
+                        "audio/wav",
+                    )
+                },
+                data={
+                    "model": "audio-cpp:whisper-small",
+                    "response_format": "json",
+                },
+            )
+            stop_ticker.set()
+            await ticker_task
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert response.json()["text"] == "audio.cpp endpoint transcript"
+    assert any(
+        blocking_interval["start"] < tick < blocking_interval["end"]
+        for tick in ticker_times
+    )
     assert adapter_lookups == ["audio-cpp"]
     assert captured["provider"] == "audio-cpp"
     assert captured["model_id"] == "whisper-small"
