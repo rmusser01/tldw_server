@@ -148,7 +148,7 @@
 | --- | --- | --- | --- |
 | 1. Decision and dispatch characterization | Complete | Characterization baseline 44/44; new oracle first/final runs 30/30; Black, Ruff, and diff checks clean; test-only Bandit clean with B101 excluded | Approved; no findings after cumulative-provenance clarification |
 | 2. Scan, redaction, and limits characterization | Complete | Baseline 30/30; expanded and strengthened runs 67/67; Black, Ruff, test-only Bandit, and diff checks clean | Approved after stronger value/identity immutability snapshots |
-| 3. EvaluationLimits and decision evaluator | Implemented | RED: absent module collection error; GREEN: direct 34/34 and combined 101/101; compile, Black, Ruff, production Bandit, and diff checks clean | Pending |
+| 3. EvaluationLimits and decision evaluator | Review fix implemented | RED: absent module collection error; GREEN: strengthened direct 37/37 and combined 104/104; compile, Black, Ruff, production/test Bandit, and diff checks clean | Re-review pending after descriptor, lossless-limit, placeholder, and immutability anchors |
 | 4. Direct evaluator redaction | Pending | Pending | Pending |
 | 5. ModerationService delegation | Pending | Pending | Pending |
 | 6. Real-service caller regressions | Pending | Pending | Pending |
