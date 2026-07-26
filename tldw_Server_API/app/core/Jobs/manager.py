@@ -1723,8 +1723,12 @@ class JobManager:
             )
         else:
             if found and JobManager._is_truthy(os.getenv("JOBS_SECRET_REJECT", "")):
-                raise ValueError(f"Payload appears to contain secrets at: {where[:3]}{'...' if len(where) > 3 else ''}")  # noqa: TRY003
-            payload = cleaned if found else payload
+                suffix = "..." if len(where) > 3 else ""
+                raise ValueError(
+                    f"Payload appears to contain secrets at: {where[:3]}{suffix}"
+                )  # noqa: TRY003 - public rejection text is an API compatibility contract.
+            if found:
+                payload = cleaned
 
         # JSON payload size cap
         max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")

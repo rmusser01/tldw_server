@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,13 +19,51 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
+_PSYCOPG_REQUIRED_MESSAGE = "psycopg is required for PostgreSQL quota admission"
+_IDEMPOTENT_CONFLICT_ATTEMPTS = 3
+_IDEMPOTENT_CONFLICT_LOST_MESSAGE = "Idempotent job conflict repeatedly disappeared during admission"
 
 try:
-    import psycopg  # type: ignore
-
-    _PG_ERRORS: tuple[type[BaseException], ...] = (psycopg.Error,)
+    import psycopg as _psycopg  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency path
+    _psycopg = None
     _PG_ERRORS = ()
+else:
+    _PG_ERRORS: tuple[type[BaseException], ...] = (_psycopg.Error,)
+
+
+_COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    *_PG_ERRORS,
+)
+
+
+@contextmanager
+def _read_committed_quota_transaction(conn: Any, *, enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    if _psycopg is None:
+        raise RuntimeError(_PSYCOPG_REQUIRED_MESSAGE)
+
+    previous_isolation = conn.isolation_level
+    conn.isolation_level = _psycopg.IsolationLevel.READ_COMMITTED
+    try:
+        yield
+    finally:
+        if not getattr(conn, "closed", False):
+            conn.isolation_level = previous_isolation
+
+
+def _quota_lock_key(command: CreateJobCommand) -> int:
+    material = f"jobs:admission-quota\x00{command.domain}\x00{command.owner_user_id}".encode()
+    digest = hashlib.blake2b(material, digest_size=8).digest()
+    return int.from_bytes(digest, byteorder="big", signed=True)
+
 
 def _count_from_row(row: Any) -> int:
     if row is None:
@@ -125,6 +164,29 @@ def _bump_counters(
     )
 
 
+def _bump_counters_best_effort(
+    cur: Any,
+    *,
+    command: CreateJobCommand,
+    available_at: datetime | None,
+) -> None:
+    cur.execute("SAVEPOINT jobs_admission_counter_update")
+    try:
+        _bump_counters(cur, command=command, available_at=available_at)
+    except _COUNTER_NONCRITICAL_ERRORS as exc:
+        cur.execute("ROLLBACK TO SAVEPOINT jobs_admission_counter_update")
+        cur.execute("RELEASE SAVEPOINT jobs_admission_counter_update")
+        logger.warning(
+            "Non-critical Postgres jobs counter update failed for {}:{}:{}: {}",
+            command.domain,
+            command.queue,
+            command.job_type,
+            exc,
+        )
+    else:
+        cur.execute("RELEASE SAVEPOINT jobs_admission_counter_update")
+
+
 def _quota_rejection(
     cur: Any,
     *,
@@ -136,37 +198,27 @@ def _quota_rejection(
     if not command.owner_user_id:
         return None
 
-    try:
-        if max_queued_quota:
-            cur.execute(
-                "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND status='queued'",
-                (command.domain, command.owner_user_id),
-            )
-            if _count_from_row(cur.fetchone()) >= max_queued_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_MAX_QUEUED_MESSAGE,
-                )
-
-        if submits_per_minute_quota:
-            cur.execute(
-                "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND created_at >= (%s - interval '60 seconds')",
-                (command.domain, command.owner_user_id, now),
-            )
-            if _count_from_row(cur.fetchone()) >= submits_per_minute_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_SUBMITS_PER_MINUTE_MESSAGE,
-                )
-    except _PG_ERRORS as exc:
-        logger.warning(
-            "Postgres jobs quota check failed for {}:{}:{}; continuing without quota rejection: {}",
-            command.domain,
-            command.queue,
-            command.job_type,
-            exc,
+    if max_queued_quota:
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND status='queued'",
+            (command.domain, command.owner_user_id),
         )
-        return None
+        if _count_from_row(cur.fetchone()) >= max_queued_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_MAX_QUEUED_MESSAGE,
+            )
+
+    if submits_per_minute_quota:
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND created_at >= (%s - interval '60 seconds')",
+            (command.domain, command.owner_user_id, now),
+        )
+        if _count_from_row(cur.fetchone()) >= submits_per_minute_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_SUBMITS_PER_MINUTE_MESSAGE,
+            )
 
     return None
 
@@ -214,6 +266,38 @@ def _insert_job(
     return _row_to_dict(row) if row else None
 
 
+def _insert_or_lock_idempotent_job(
+    cur: Any,
+    *,
+    command: CreateJobCommand,
+    uuid_value: str,
+    payload_json: str,
+    available_at: datetime | None,
+) -> tuple[dict[str, Any], bool]:
+    for _ in range(_IDEMPOTENT_CONFLICT_ATTEMPTS):
+        row = _insert_job(
+            cur,
+            command=command,
+            uuid_value=uuid_value,
+            payload_json=payload_json,
+            available_at=available_at,
+            idempotent_insert=True,
+        )
+        if row is not None:
+            return row, True
+
+        cur.execute(
+            "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s "
+            "AND idempotency_key = %s FOR KEY SHARE",
+            (command.domain, command.queue, command.job_type, command.idempotency_key),
+        )
+        row = _row_to_dict(cur.fetchone())
+        if row:
+            return row, False
+
+    raise RuntimeError(_IDEMPOTENT_CONFLICT_LOST_MESSAGE)
+
+
 def create_job_admission(
     conn: Any,
     cursor_factory: Callable[[Any], AbstractContextManager[Any]],
@@ -229,45 +313,42 @@ def create_job_admission(
 
     payload_json = json.dumps(command.payload)
     available_at = _future_available_at(command.available_at, now=now)
+    quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
 
-    with conn:
+    with _read_committed_quota_transaction(conn, enabled=quota_enabled), conn:
         with cursor_factory(conn) as cur:
-            quota_result = _quota_rejection(
-                cur,
-                command=command,
-                now=now,
-                max_queued_quota=max_queued_quota,
-                submits_per_minute_quota=submits_per_minute_quota,
-            )
-            if quota_result is not None:
-                return quota_result
+            if quota_enabled:
+                cur.execute("SELECT pg_advisory_xact_lock(%s)", (_quota_lock_key(command),))
+
+            idempotent_replay = False
+            if quota_enabled and command.idempotency_key:
+                cur.execute(
+                    "SELECT 1 FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s FOR KEY SHARE",
+                    (command.domain, command.queue, command.job_type, command.idempotency_key),
+                )
+                idempotent_replay = cur.fetchone() is not None
+
+            if not idempotent_replay:
+                quota_result = _quota_rejection(
+                    cur,
+                    command=command,
+                    now=now,
+                    max_queued_quota=max_queued_quota,
+                    submits_per_minute_quota=submits_per_minute_quota,
+                )
+                if quota_result is not None:
+                    return quota_result
 
             if command.idempotency_key:
-                row = _insert_job(
+                row, inserted = _insert_or_lock_idempotent_job(
                     cur,
                     command=command,
                     uuid_value=uuid_value,
                     payload_json=payload_json,
                     available_at=available_at,
-                    idempotent_insert=True,
                 )
-                inserted = row is not None
-                if row is None:
-                    cur.execute(
-                        "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s",
-                        (command.domain, command.queue, command.job_type, command.idempotency_key),
-                    )
-                    row = _row_to_dict(cur.fetchone())
-                if not row:
-                    row = {
-                        "uuid": uuid_value,
-                        "status": "queued",
-                        "domain": command.domain,
-                        "queue": command.queue,
-                        "job_type": command.job_type,
-                    }
                 if inserted and counters_enabled:
-                    _bump_counters(cur, command=command, available_at=available_at)
+                    _bump_counters_best_effort(cur, command=command, available_at=available_at)
                 event = _insert_created_event(
                     cur,
                     row=row,
@@ -296,7 +377,7 @@ def create_job_admission(
                     "job_type": command.job_type,
                 }
             if counters_enabled:
-                _bump_counters(cur, command=command, available_at=available_at)
+                _bump_counters_best_effort(cur, command=command, available_at=available_at)
             event = _insert_created_event(
                 cur,
                 row=row,

@@ -7,8 +7,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from loguru import logger
-
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
@@ -142,37 +140,27 @@ def _quota_rejection(
     if not command.owner_user_id:
         return None
 
-    try:
-        if max_queued_quota:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='queued'",
-                (command.domain, command.owner_user_id),
-            ).fetchone()
-            if int(row[0] if row else 0) >= max_queued_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_MAX_QUEUED_MESSAGE,
-                )
+    if max_queued_quota:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='queued'",
+            (command.domain, command.owner_user_id),
+        ).fetchone()
+        if int(row[0] if row else 0) >= max_queued_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_MAX_QUEUED_MESSAGE,
+            )
 
-        if submits_per_minute_quota:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND created_at >= DATETIME(?, '-60 seconds')",
-                (command.domain, command.owner_user_id, now_sql),
-            ).fetchone()
-            if int(row[0] if row else 0) >= submits_per_minute_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_SUBMITS_PER_MINUTE_MESSAGE,
-                )
-    except sqlite3.Error as exc:
-        logger.warning(
-            "SQLite jobs quota check failed for {}:{}:{}; continuing without quota rejection: {}",
-            command.domain,
-            command.queue,
-            command.job_type,
-            exc,
-        )
-        return None
+    if submits_per_minute_quota:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND created_at >= DATETIME(?, '-60 seconds')",
+            (command.domain, command.owner_user_id, now_sql),
+        ).fetchone()
+        if int(row[0] if row else 0) >= submits_per_minute_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_SUBMITS_PER_MINUTE_MESSAGE,
+            )
 
     return None
 
@@ -250,16 +238,29 @@ def create_job_admission(
     available_at = _future_available_at(command.available_at, now=now)
     available_at_sql = _sqlite_timestamp(available_at) if available_at else None
 
+    quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
+    if quota_enabled:
+        conn.execute("BEGIN IMMEDIATE")
+
     with conn:
-        quota_result = _quota_rejection(
-            conn,
-            command=command,
-            now_sql=now_sql,
-            max_queued_quota=max_queued_quota,
-            submits_per_minute_quota=submits_per_minute_quota,
-        )
-        if quota_result is not None:
-            return quota_result
+        idempotent_replay = False
+        if quota_enabled and command.idempotency_key:
+            row = conn.execute(
+                "SELECT 1 FROM jobs WHERE domain = ? AND queue = ? AND job_type = ? AND idempotency_key = ?",
+                (command.domain, command.queue, command.job_type, command.idempotency_key),
+            ).fetchone()
+            idempotent_replay = row is not None
+
+        if not idempotent_replay:
+            quota_result = _quota_rejection(
+                conn,
+                command=command,
+                now_sql=now_sql,
+                max_queued_quota=max_queued_quota,
+                submits_per_minute_quota=submits_per_minute_quota,
+            )
+            if quota_result is not None:
+                return quota_result
 
         if command.idempotency_key:
             row_id = _insert_job(
