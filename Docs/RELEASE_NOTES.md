@@ -6,6 +6,34 @@ This page is the release notes index placeholder for published versions.
 
 No published changes yet.
 
+## 0.1.42 - 2026-07-26
+
+### Provider credentials and embeddings
+
+- Consolidated server-side provider credential resolution across Chat, RAG,
+  embeddings, and audio, with fail-closed BYOK handling and safer streaming.
+- Added the inline embeddings workflow facade and hardened its runtime and CI
+  contracts.
+
+### Operations and CI
+
+- Hardened Jobs admission transactions, quotas, idempotency, and concurrent
+  capacity enforcement.
+- Added strict live-integration certification for Skills.
+- Established the protected frontend source-available boundary, trusted license
+  gate, protected-branch prerequisites, and license-first PR sequencing.
+
+### Licensing
+
+- The tagged source release includes protected frontend source under PolyForm
+  Perimeter 1.0.1. The release-specific Countdown grant adds
+  `AGPL-3.0-only` as an additional option on July 26, 2028 at 12:00 UTC.
+- The immutable record, completed grant, exact source revision, and file
+  manifest are in `LICENSES/releases/0.1.42/`.
+- This release publishes no protected frontend binaries. The Python package and
+  `app`, `worker`, and `audio-worker` images remain server-only under
+  GPL-3.0-only.
+
 ## 0.1.41 - 2026-07-16
 
 ### Research and source-grounded learning

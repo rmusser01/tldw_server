@@ -17,6 +17,50 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.42] - 2026-07-26
+
+> Rollup coverage: this entry covers the frozen `dev` release train after
+> `0.1.41` through PR #2750, plus the trusted license-gate bootstrap on
+> `main`. It includes PRs #2746, #2748, #2749, #2733, #2755, #2756, #2727,
+> #2757, #2758, #2750, and #2753.
+
+### Added
+
+- **Embeddings Workflow Architecture** — Added the inline embeddings workflow
+  facade and hardened its runtime and CI contracts.
+- **Skills Live Certification** — Added strict live-integration certification
+  for Skills discovery and execution.
+
+### Changed
+
+- **Provider Credentials** — Consolidated server-side provider credential
+  resolution across Chat, RAG, embeddings, and audio, with fail-closed BYOK
+  handling and safer streaming behavior.
+- **Frontend Licensing And CI Admission** — Applied the protected frontend
+  source-available boundary, bootstrapped the trusted license gate, repaired
+  protected-branch prerequisites, and prepared license-first PR sequencing.
+- **Jobs Admission** — Hardened admission transactions, quotas, idempotency,
+  and concurrent capacity enforcement.
+- **Release Metadata** — Bumped package, FastAPI, README, release-note, and
+  MkDocs metadata to `0.1.42`.
+
+### Fixed
+
+- **Release And Workflow Reliability** — Closed the `0.1.41` release records,
+  synchronized released `main` back to `dev`, and corrected workflow
+  prerequisites required for the protected release train.
+
+### Licensing
+
+- The tagged source release contains protected frontend source under PolyForm
+  Perimeter 1.0.1. Its release-specific Countdown grant adds
+  `AGPL-3.0-only` as an additional option beginning
+  `2028-07-26T12:00:00Z`; see `LICENSES/releases/0.1.42/`.
+- No WebUI, Admin UI, shared UI, or extension binary is published in this
+  release. PyPI and the `app`, `worker`, and `audio-worker` images remain
+  server-only and GPL-3.0-only.
+
+
 ## [0.1.41] - 2026-07-16
 
 > Rollup coverage: this entry covers the frozen `dev` release train after

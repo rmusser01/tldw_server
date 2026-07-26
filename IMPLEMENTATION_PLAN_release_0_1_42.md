@@ -34,7 +34,7 @@ Record the unchanged protected frontend snapshot at exact commit
   `2028-07-26` plus the verbatim AGPL text, and generate SHA-256 entries for all
   tracked protected files at the frozen source revision.
 - [x] Run the focused test and exact protected-tree comparison; expect success.
-- [ ] Commit the record and test with `TASK-12988` in the message.
+- [x] Commit the record and test with `TASK-12988` in the message.
 
 ### Task 2: Add reviewed release metadata
 
@@ -48,14 +48,14 @@ Record the unchanged protected frontend snapshot at exact commit
 - Modify: `Docs/mkdocs.yml`
 - Regenerate: `Docs/Published/**`
 
-- [ ] Add concise `0.1.42` notes covering provider credentials, embeddings
+- [x] Add concise `0.1.42` notes covering provider credentials, embeddings
   workflows, frontend licensing/license-first CI, Jobs hardening, and Skills
   certification.
-- [ ] Change all visible release surfaces from `0.1.41` to `0.1.42` without
+- [x] Change all visible release surfaces from `0.1.41` to `0.1.42` without
   running the patch helper, which would calculate `0.1.43`.
-- [ ] Refresh `Docs/Published` twice, require an empty second diff, and run the
+- [x] Refresh `Docs/Published` twice, require an empty second diff, and run the
   strict documentation build.
-- [ ] Commit the metadata and generated documentation with `TASK-12988`.
+- [x] Commit the metadata and generated documentation with `TASK-12988`.
 
 ### Task 3: Verify and refresh PR #2761
 

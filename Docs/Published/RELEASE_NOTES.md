@@ -2,6 +2,18 @@
 
 Published release notes entry point.
 
+## 0.1.42 - 2026-07-26
+
+- See the repository `CHANGELOG.md` for the full `0.1.42` rollup through
+  PR #2750 plus the trusted license-gate bootstrap on `main`.
+- This patch highlights shared provider credentials, inline embeddings
+  workflows, Jobs admission hardening, strict Skills certification, and
+  license-first CI preparation.
+- The source release's protected frontend material remains source-available
+  under PolyForm Perimeter 1.0.1. Its release-specific Countdown grant adds
+  `AGPL-3.0-only` on July 26, 2028 at 12:00 UTC; see
+  `LICENSES/releases/0.1.42/`. No protected frontend binary is published.
+
 ## 0.1.41 - 2026-07-16
 
 - See the repository `CHANGELOG.md` for the full `0.1.41` rollup from the
