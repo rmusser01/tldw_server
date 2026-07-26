@@ -5,6 +5,7 @@ import asyncio
 import inspect
 import json
 import textwrap
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -21,6 +22,10 @@ from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_reg
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest
 from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
 from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
+    IdempotencyExecutionPolicy,
+    IdempotencyRunResult,
+)
 from tldw_Server_API.app.core.MCP_unified.tool_execution.runtime import ToolExecutionRuntime
 
 
@@ -130,33 +135,28 @@ class _AdmissionModule(BaseModule):
 
 class _IdempotencyProbe:
     def __init__(self) -> None:
-        self.bound_keys: list[str] = []
-        self.run_keys: list[str] = []
+        self.execute_keys: list[str] = []
+        self.policies: list[IdempotencyExecutionPolicy] = []
 
-    async def bind_arguments(
+    async def execute(
         self,
         key: str,
         arguments_hash: str,
+        execute: Callable[[], Awaitable[dict[str, Any]]],
         *,
-        ttl: int,
-        max_size: int,
-    ) -> bool:
-        del arguments_hash, ttl, max_size
-        self.bound_keys.append(key)
-        return True
+        policy: IdempotencyExecutionPolicy,
+    ) -> IdempotencyRunResult:
+        del arguments_hash
+        self.execute_keys.append(key)
+        self.policies.append(policy)
+        return IdempotencyRunResult(
+            payload=await execute(),
+            from_cache=False,
+            persistence="none",
+        )
 
-    async def run(
-        self,
-        key: str,
-        execute: Any,
-        *,
-        ttl: int,
-        max_size: int,
-        lock_ttl: int,
-    ) -> tuple[Any, bool]:
-        del ttl, max_size, lock_ttl
-        self.run_keys.append(key)
-        return await execute(), False
+    async def shutdown(self) -> None:
+        return None
 
 
 class _AdmissionLimiter:
@@ -324,8 +324,7 @@ async def test_observer_snapshot_mutation_cannot_change_runtime_admission_or_wri
 
     assert payload.get("isError") is not True
     assert limiter.categories == ["management"]
-    assert len(idempotency.bound_keys) == 1
-    assert idempotency.run_keys == idempotency.bound_keys
+    assert len(idempotency.execute_keys) == 1
     assert module.breaker_entry_count == 1
     assert module.execute_count == 1
     assert module.last_arguments == {
@@ -364,8 +363,7 @@ async def test_fail_closed_admission_backend_error_returns_exact_failure_before_
         message="Rate-limit admission is temporarily unavailable.",
     )
     assert limiter.categories == ["management"]
-    assert idempotency.bound_keys == []
-    assert idempotency.run_keys == []
+    assert idempotency.execute_keys == []
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
     assert secret not in json.dumps(payload)
@@ -418,8 +416,7 @@ async def test_rate_admission_cancellation_propagates_without_execution_state(
         logger.remove(sink_id)
 
     assert limiter.categories == ["management"]
-    assert idempotency.bound_keys == []
-    assert idempotency.run_keys == []
+    assert idempotency.execute_keys == []
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
     assert getattr(idempotency, "_local_cache", {}) == {}

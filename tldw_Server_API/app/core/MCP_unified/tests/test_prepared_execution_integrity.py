@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import re
+from collections.abc import Awaitable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +32,8 @@ from tldw_Server_API.app.core.MCP_unified.tool_execution.canonical import (
 )
 from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
     CanonicalJsonSnapshot,
+    IdempotencyExecutionPolicy,
+    IdempotencyRunResult,
     PreparedExecutionPolicy,
 )
 
@@ -205,33 +208,28 @@ class _RateLimiterProbe:
 
 class _IdempotencyProbe:
     def __init__(self) -> None:
-        self.bound_keys: list[str] = []
-        self.run_keys: list[str] = []
+        self.execute_keys: list[str] = []
+        self.policies: list[IdempotencyExecutionPolicy] = []
 
-    async def bind_arguments(
+    async def execute(
         self,
         key: str,
         arguments_hash: str,
+        execute: Callable[[], Awaitable[dict[str, Any]]],
         *,
-        ttl: int,
-        max_size: int,
-    ) -> bool:
-        del arguments_hash, ttl, max_size
-        self.bound_keys.append(key)
-        return True
+        policy: IdempotencyExecutionPolicy,
+    ) -> IdempotencyRunResult:
+        del arguments_hash
+        self.execute_keys.append(key)
+        self.policies.append(policy)
+        return IdempotencyRunResult(
+            payload=await execute(),
+            from_cache=False,
+            persistence="none",
+        )
 
-    async def run(
-        self,
-        key: str,
-        execute: Any,
-        *,
-        ttl: int,
-        max_size: int,
-        lock_ttl: int,
-    ) -> tuple[Any, bool]:
-        del ttl, max_size, lock_ttl
-        self.run_keys.append(key)
-        return await execute(), False
+    async def shutdown(self) -> None:
+        return None
 
 
 class _RecordingToolUseRecorder:
@@ -260,20 +258,24 @@ class _BlockingIdempotency(_IdempotencyProbe):
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def run(
+    async def execute(
         self,
         key: str,
-        execute: Any,
+        arguments_hash: str,
+        execute: Callable[[], Awaitable[dict[str, Any]]],
         *,
-        ttl: int,
-        max_size: int,
-        lock_ttl: int,
-    ) -> tuple[Any, bool]:
-        del ttl, max_size, lock_ttl
-        self.run_keys.append(key)
+        policy: IdempotencyExecutionPolicy,
+    ) -> IdempotencyRunResult:
+        del arguments_hash
+        self.execute_keys.append(key)
+        self.policies.append(policy)
         self.entered.set()
         await self.release.wait()
-        return await execute(), False
+        return IdempotencyRunResult(
+            payload=await execute(),
+            from_cache=False,
+            persistence="none",
+        )
 
 
 class _BlockingCacheHitIdempotency(_IdempotencyProbe):
@@ -283,20 +285,24 @@ class _BlockingCacheHitIdempotency(_IdempotencyProbe):
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def run(
+    async def execute(
         self,
         key: str,
-        execute: Any,
+        arguments_hash: str,
+        execute: Callable[[], Awaitable[dict[str, Any]]],
         *,
-        ttl: int,
-        max_size: int,
-        lock_ttl: int,
-    ) -> tuple[Any, bool]:
-        del execute, ttl, max_size, lock_ttl
-        self.run_keys.append(key)
+        policy: IdempotencyExecutionPolicy,
+    ) -> IdempotencyRunResult:
+        del arguments_hash, execute
+        self.execute_keys.append(key)
+        self.policies.append(policy)
         self.entered.set()
         await self.release.wait()
-        return self.cached_payload, True
+        return IdempotencyRunResult(
+            payload=self.cached_payload,
+            from_cache=True,
+            persistence="local",
+        )
 
 
 class _BlockingSecondLookupRegistry:
@@ -891,8 +897,7 @@ async def test_first_live_check_blocks_stale_registry_bindings_before_admission(
     _assert_stale_prepared_call(payload)
     assert "private registry failure detail" not in json.dumps(payload)
     assert rate_limiter.calls == 0
-    assert idempotency.bound_keys == []
-    assert idempotency.run_keys == []
+    assert idempotency.execute_keys == []
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
 
@@ -927,8 +932,7 @@ async def test_live_check_requires_actual_registry_registration_to_be_operationa
 
     _assert_stale_prepared_call(payload)
     assert rate_limiter.calls == 0
-    assert idempotency.bound_keys == []
-    assert idempotency.run_keys == []
+    assert idempotency.execute_keys == []
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
 
@@ -1092,8 +1096,7 @@ async def test_second_live_check_blocks_definition_mutation_during_idempotency_w
 
     _assert_stale_prepared_call(payload)
     assert rate_limiter.calls == 1
-    assert len(idempotency.bound_keys) == 1
-    assert idempotency.run_keys == idempotency.bound_keys
+    assert len(idempotency.execute_keys) == 1
     assert module.breaker_entry_count == 0
     assert module.execute_count == 0
 
@@ -1120,8 +1123,7 @@ async def test_cache_hit_rechecks_live_binding_after_idempotency_wait(
     execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
     await asyncio.wait_for(idempotency.entered.wait(), timeout=2)
     assert rate_limiter.calls == 1
-    assert len(idempotency.bound_keys) == 1
-    assert idempotency.run_keys == idempotency.bound_keys
+    assert len(idempotency.execute_keys) == 1
 
     if drift == "unregistered":
         assert prepared.module_id is not None

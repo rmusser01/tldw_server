@@ -350,6 +350,9 @@ class MCPProtocol:
         # Idempotency manager for write-capable tools
         self._idempotency = IdempotencyManager(
             redis_client_factory=self.dependencies.redis_client_factory,
+            on_degraded=lambda stage, _error_type: self.metrics.record_idempotency_degraded(
+                stage
+            ),
         )
         # Integrity secret for prepared tool call execution
         self._prepared_call_secret = secrets.token_bytes(32)

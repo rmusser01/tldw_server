@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from .canonical import JsonValue
+
 
 @dataclass(frozen=True, slots=True)
 class CanonicalJsonSnapshot:
@@ -25,6 +27,15 @@ class IdempotencyExecutionPolicy:
     lock_ttl_seconds: int
     max_entries: int
     max_result_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class IdempotencyRunResult:
+    """Outcome of one bound idempotency ownership attempt."""
+
+    payload: dict[str, JsonValue]
+    from_cache: bool
+    persistence: Literal["durable", "local", "none"]
 
 
 @dataclass(frozen=True, slots=True)

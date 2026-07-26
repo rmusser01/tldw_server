@@ -1,12 +1,15 @@
 import pytest
 
+from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig, create_tool_definition
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.tests.support import (
     build_mcp_admin_auth_override,
     build_mcp_test_client,
     reset_mcp_test_state,
+)
+from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
+    IdempotencyExecutionPolicy,
 )
 
 
@@ -114,6 +117,26 @@ async def test_prometheus_exports_idempotency_counters(client):
     )
     assert r2.status_code == 200  # nosec B101
 
+    protocol = get_mcp_server().protocol
+
+    async def _uncacheable_success():
+        return {"value": object()}
+
+    await protocol._idempotency.execute(
+        "prometheus-degraded",
+        "args",
+        _uncacheable_success,
+        policy=IdempotencyExecutionPolicy(
+            inject_argument=False,
+            ttl_seconds=30,
+            contention_wait_seconds=1,
+            finalize_seconds=1,
+            lock_ttl_seconds=30,
+            max_entries=16,
+            max_result_bytes=4_096,
+        ),
+    )
+
     # Scrape Prometheus metrics with auth
     r3 = client.get(
         "/api/v1/mcp/metrics/prometheus",
@@ -129,3 +152,5 @@ async def test_prometheus_exports_idempotency_counters(client):
     assert 'tool="idemp_write"' in text  # nosec B101
     assert "mcp_idempotency_hits_total" in text  # nosec B101
     assert 'tool="idemp_write"' in text  # nosec B101
+    assert "mcp_idempotency_degraded_total" in text  # nosec B101
+    assert 'stage="serialization"' in text  # nosec B101

@@ -412,25 +412,16 @@ class ToolExecutionRuntime:
 
         if is_write and idempotency_cache_key:
             try:
-                ttl = policy.idempotency.ttl_seconds
-                max_size = policy.idempotency.max_entries
                 if args_hash is None:
                     raise InvalidParamsException("Unable to fingerprint tool arguments for idempotency")
-                arguments_bound = await self.idempotency.bind_arguments(
+                idempotency_result = await self.idempotency.execute(
                     idempotency_cache_key,
                     args_hash,
-                    ttl=ttl,
-                    max_size=max_size,
-                )
-                if not arguments_bound:
-                    raise InvalidParamsException("Idempotency key was already used with different arguments")
-                payload, from_cache = await self.idempotency.run(
-                    idempotency_cache_key,
                     _execute_owner,
-                    ttl=ttl,
-                    max_size=max_size,
-                    lock_ttl=policy.idempotency.lock_ttl_seconds,
+                    policy=policy.idempotency,
                 )
+                payload = idempotency_result.payload
+                from_cache = idempotency_result.from_cache
                 if from_cache:
                     await self.security.verify_prepared_tool_call(
                         prepared,
