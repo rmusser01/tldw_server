@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
-    AcquireJobCommand,
     CreateJobCommand,
     LifecycleResult,
     NoTransitionReason,
@@ -178,6 +178,20 @@ def test_acquire_job_command_is_frozen() -> None:
 
     with pytest.raises(FrozenInstanceError):
         command.queue = "other"
+
+
+def test_acquire_job_command_defaults_to_backend_ordering() -> None:
+    """Verify omitted tie-breaking delegates ordering to the backend default."""
+
+    command = AcquireJobCommand(
+        domain="chatbooks",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-1",
+        lease_id="lease-1",
+    )
+
+    assert command.tie_break is None
 
 
 def test_acquire_job_command_rejects_invalid_ordering_values() -> None:

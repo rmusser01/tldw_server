@@ -34,7 +34,7 @@ _COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
 
 
 def _pg_advisory_key(*parts: str) -> int:
-    """Match the legacy JobManager advisory key used by deployed workers."""
+    """Match the legacy advisory key used by deployed workers."""
 
     material = (":".join(["jobs"] + [part or "" for part in parts])).encode(
         "utf-8",

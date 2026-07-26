@@ -157,13 +157,18 @@ def _postgres_manager_without_preflight(
     return manager
 
 
+@pytest.mark.parametrize("single_update", [False, True])
 def test_postgres_acquire_runs_success_observers_after_operation_returns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    single_update: bool,
 ) -> None:
     observed: list[str] = []
     captured: dict[str, Any] = {}
     manager = _postgres_manager_without_preflight(tmp_path, monkeypatch, observed)
+    monkeypatch.setenv("JOBS_PG_ACQUIRE_PRIORITY_DESC_DOMAINS", "facade")
+    monkeypatch.setenv("JOBS_PG_ACQUIRE_TIE_BREAK_FACADE", "lifo")
+    monkeypatch.setenv("JOBS_PG_SINGLE_UPDATE_ACQUIRE", str(single_update))
 
     def acquire_stub(
         _conn: Any,
@@ -214,6 +219,9 @@ def test_postgres_acquire_runs_success_observers_after_operation_returns(
     assert acquired["payload"] == {"value": 1}
     assert acquired["lease_id"] == captured["command"].lease_id
     assert captured["cursor_factory"] == manager._pg_cursor
+    assert captured["command"].priority_direction == "DESC"
+    assert captured["command"].tie_break == "lifo"
+    assert captured["command"].single_update is single_update
     assert observed == ["operation-returned", "latency", "gauge", "event"]
 
 
