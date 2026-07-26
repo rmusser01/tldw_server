@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 
@@ -65,7 +67,81 @@ def test_countdown_template_is_not_misrepresented_as_an_active_grant() -> None:
     readme = _read("LICENSES/releases/README.md")
     assert "No protected frontend release may be published" in readme
     assert "completed release-specific Countdown grant" in readme
-    assert not any(child.is_dir() for child in Path("LICENSES/releases").iterdir())
+    template = _read("LICENSES/PolyForm-Countdown-1.0.0-template.txt")
+    assert "{start date}" in template
+    assert "{Copy the scheduled license terms here.}" in template
+
+
+def test_release_0_1_42_has_completed_source_record() -> None:
+    release_dir = Path("LICENSES/releases/0.1.42")
+    record = json.loads((release_dir / "release.json").read_text(encoding="utf-8"))
+
+    assert record["schema_version"] == 1
+    assert record["release_id"] == "0.1.42"
+    assert record["product_version"] == "0.1.42"
+    assert record["repository"] == "https://github.com/rmusser01/tldw_server"
+    assert record["protected_source_revision"] == "0f3983788c413e0d17ffe7eabe8cff4a9f6ae723"
+    assert record["release_date"] == "2026-07-26"
+    assert record["countdown_start"] == "2028-07-26T12:00:00Z"
+    assert record["protected_paths"] == PROTECTED_PATHS
+    assert record["initial_license"] == {
+        "name": "PolyForm Perimeter License 1.0.1",
+        "path": "LICENSES/PolyForm-Perimeter-1.0.1.txt",
+    }
+    assert record["countdown_grant"] == {
+        "additional_license": "AGPL-3.0-only",
+        "path": "LICENSES/releases/0.1.42/PolyForm-Countdown-1.0.0.txt",
+    }
+    assert record["artifact_verification"]["protected_source_snapshot"] == {
+        "manifest": "LICENSES/releases/0.1.42/protected-files.sha256",
+        "result": "verified",
+        "source_revision": "0f3983788c413e0d17ffe7eabe8cff4a9f6ae723",
+    }
+    assert record["artifact_verification"]["protected_binaries"] == {
+        "published": False,
+        "artifacts": [],
+    }
+    assert record["human_review_required"] is True
+
+    grant = (release_dir / "PolyForm-Countdown-1.0.0.txt").read_text(encoding="utf-8")
+    expected_grant = _read("LICENSES/PolyForm-Countdown-1.0.0-template.txt").replace(
+        "{start date}",
+        "2028-07-26",
+    ).replace(
+        "{Copy the scheduled license terms here.}",
+        _read("LICENSES/AGPL-3.0-only.txt").rstrip(),
+    )
+    assert grant == expected_grant
+
+    manifest_path = release_dir / "protected-files.sha256"
+    manifest_bytes = manifest_path.read_bytes()
+    assert sha256(manifest_bytes).hexdigest() == record["protected_file_manifest"]["sha256"]
+    assert record["protected_file_manifest"]["path"] == str(manifest_path)
+
+    entries = {}
+    for line in manifest_bytes.decode("utf-8").splitlines():
+        digest, path = line.split("  ", 1)
+        assert len(digest) == 64
+        assert path not in entries
+        entries[path] = digest
+
+    tracked_output = subprocess.run(
+        ["git", "ls-files", "-s", "-z", "--", *PROTECTED_PACKAGES],
+        check=True,
+        capture_output=True,
+    ).stdout
+    tracked = {}
+    for entry in tracked_output.split(b"\0"):
+        if not entry:
+            continue
+        metadata, raw_path = entry.split(b"\t", 1)
+        mode = metadata.split(b" ", 1)[0].decode("ascii")
+        tracked[os.fsdecode(raw_path)] = mode
+
+    assert set(entries) == set(tracked)
+    for path, mode in tracked.items():
+        data = os.fsencode(os.readlink(path)) if mode == "120000" else Path(path).read_bytes()
+        assert sha256(data).hexdigest() == entries[path], path
 
 
 def test_protected_packages_use_local_license_notices() -> None:
