@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -15,7 +16,6 @@ from tldw_Server_API.app.core.Embeddings.workflow_types import (
     EmbeddingInMemoryWorkflowTraceCollector,
     EmbeddingNoopWorkflowTraceCollector,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -141,6 +141,15 @@ async def test_runner_returns_orchestrator_result_and_records_safe_success_event
         "executing",
         "executing",
         "finalizing",
+    ]
+    assert [event.status for event in collector.events] == [
+        "running",
+        "running",
+        "running",
+        "running",
+        "running",
+        "running",
+        "completed",
     ]
     workflow_ids = {event.workflow_id for event in collector.events}
     assert len(workflow_ids) == 1
@@ -300,6 +309,37 @@ async def test_unexpected_exceptions_trace_failure_kind_and_phase_only_then_rera
     }
     assert "sk-secret" not in repr(collector.events)
     assert "raw provider body" not in repr(collector.events)
+
+
+@pytest.mark.asyncio
+async def test_execute_cancellation_propagates_without_terminal_trace_event():
+    cancellation = asyncio.CancelledError("cancelled")
+    orchestrator = FakeOrchestrator(execute_error=cancellation)
+    collector = EmbeddingInMemoryWorkflowTraceCollector()
+    runner = EmbeddingInlineWorkflowRunner(orchestrator, trace_collector=collector)
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await runner.run(["one", "two"], _request_context())
+
+    assert exc_info.value is cancellation
+    assert len(orchestrator.prepare_calls) == 1
+    assert len(orchestrator.execute_calls) == 1
+    assert [event.event_type for event in collector.events] == [
+        "workflow_started",
+        "phase_changed",
+        "phase_changed",
+        "prepare_completed",
+        "phase_changed",
+    ]
+    assert [event.phase for event in collector.events] == [
+        "created",
+        "normalizing",
+        "planning",
+        "planning",
+        "executing",
+    ]
+    assert collector.events[-1].phase == "executing"
+    assert all(event.event_type not in {"workflow_failed", "workflow_completed"} for event in collector.events)
 
 
 @pytest.mark.asyncio
