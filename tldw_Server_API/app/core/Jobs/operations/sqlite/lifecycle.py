@@ -193,7 +193,10 @@ def _classify_lifecycle_no_transition(
     worker_id: str | None,
     lease_id: str | None,
 ) -> LifecycleResult:
-    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    row = conn.execute(
+        "SELECT id, status, worker_id, lease_id FROM jobs WHERE id = ?",
+        (job_id,),
+    ).fetchone()
     if row is None:
         return LifecycleResult.no_transition(NoTransitionReason.MISSING)
     current = dict(row)
@@ -237,7 +240,13 @@ def renew_lease(
                 worker_id=command.worker_id,
                 lease_id=command.lease_id,
             )
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (command.job_id,)).fetchone()
+        row = conn.execute(
+            (
+                "SELECT id, leased_until, progress_percent, progress_message "
+                "FROM jobs WHERE id = ?"
+            ),
+            (command.job_id,),
+        ).fetchone()
         if row is None:
             return LifecycleResult.no_transition(NoTransitionReason.MISSING)
         return LifecycleResult.applied(row=dict(row))
@@ -254,7 +263,10 @@ def release_job(
     with conn:
         conn.execute("BEGIN IMMEDIATE")
         selected = conn.execute(
-            "SELECT * FROM jobs WHERE id = ?",
+            (
+                "SELECT id, domain, queue, job_type, status, worker_id, lease_id "
+                "FROM jobs WHERE id = ?"
+            ),
             (command.job_id,),
         ).fetchone()
         if selected is None:
@@ -288,7 +300,14 @@ def release_job(
                 _RELEASE_COUNTER_SQL,
                 (current["domain"], current["queue"], current["job_type"]),
             )
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (command.job_id,)).fetchone()
+        row = conn.execute(
+            (
+                "SELECT id, domain, queue, job_type, status, available_at, leased_until, "
+                "worker_id, lease_id, acquired_at, started_at, completion_token, updated_at "
+                "FROM jobs WHERE id = ?"
+            ),
+            (command.job_id,),
+        ).fetchone()
         if row is None:
             return LifecycleResult.no_transition(NoTransitionReason.MISSING)
         return LifecycleResult.applied(row=dict(row))

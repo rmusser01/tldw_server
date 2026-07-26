@@ -756,6 +756,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     """
     try:
         import psycopg  # type: ignore
+        from psycopg import sql as _sql  # type: ignore
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
     import os
@@ -786,6 +787,12 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     cur.execute(f"GRANT USAGE ON SCHEMA {schema_name} TO {role}")
                     cur.execute(
                         f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema_name} TO {role}"
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT INSERT ON TABLE {}.job_counters TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
                     )
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass

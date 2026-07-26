@@ -23,6 +23,27 @@ from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
 )
 
 NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+RENEW_RESULT_FIELDS = {
+    "id",
+    "leased_until",
+    "progress_percent",
+    "progress_message",
+}
+RELEASE_RESULT_FIELDS = {
+    "id",
+    "domain",
+    "queue",
+    "job_type",
+    "status",
+    "available_at",
+    "leased_until",
+    "worker_id",
+    "lease_id",
+    "acquired_at",
+    "started_at",
+    "completion_token",
+    "updated_at",
+}
 
 
 @pytest.fixture()
@@ -217,7 +238,7 @@ def test_sqlite_lifecycle_ignores_supplied_identity_without_enforcement(
     assert result.outcome is OperationOutcome.APPLIED
 
 
-def test_sqlite_renew_preserves_longer_current_lease_and_returns_full_row(
+def test_sqlite_renew_preserves_longer_current_lease_and_returns_transition_facts(
     conn: sqlite3.Connection,
 ) -> None:
     job_id = _insert_job(conn, leased_until="2026-01-02 13:00:00")
@@ -226,10 +247,14 @@ def test_sqlite_renew_preserves_longer_current_lease_and_returns_full_row(
 
     assert result.outcome is OperationOutcome.APPLIED
     assert result.row is not None
+    assert set(result.row) == RENEW_RESULT_FIELDS
     assert result.row["leased_until"] == "2026-01-02 13:00:00"
-    assert result.row["uuid"] == "job-1"
-    assert result.row["payload"] == '{"input": 1}'
-    assert result.row["owner_user_id"] == "owner-1"
+    persisted = dict(
+        conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    )
+    assert persisted["uuid"] == "job-1"
+    assert persisted["payload"] == '{"input": 1}'
+    assert persisted["owner_user_id"] == "owner-1"
 
 
 @pytest.mark.parametrize("enforce", [False, True], ids=["unenforced", "enforced"])
@@ -255,6 +280,7 @@ def test_sqlite_renew_supports_every_progress_and_enforcement_variant(
     )
 
     assert result.row is not None
+    assert set(result.row) == RENEW_RESULT_FIELDS
     assert result.row["leased_until"] == "2026-01-02 12:00:30"
     assert result.row["progress_percent"] == (10.0 if progress_percent is None else 55.5)
     assert result.row["progress_message"] == (
@@ -275,6 +301,7 @@ def test_sqlite_release_clears_lease_fields_and_preserves_unrelated_facts(
 
     assert result.outcome is OperationOutcome.APPLIED
     assert result.row is not None
+    assert set(result.row) == RELEASE_RESULT_FIELDS
     assert result.row["status"] == "queued"
     for field in (
         "available_at",
@@ -286,20 +313,23 @@ def test_sqlite_release_clears_lease_fields_and_preserves_unrelated_facts(
         "completion_token",
     ):
         assert result.row[field] is None
-    assert result.row["uuid"] == "job-1"
-    assert result.row["payload"] == '{"input": 1}'
-    assert result.row["result"] == '{"partial": true}'
-    assert result.row["owner_user_id"] == "owner-1"
-    assert result.row["project_id"] == 17
-    assert result.row["batch_group"] == "batch-1"
-    assert result.row["retry_count"] == 2
-    assert result.row["progress_percent"] == 10.0
-    assert result.row["progress_message"] == "old progress"
-    assert result.row["request_id"] == "request-1"
-    assert result.row["trace_id"] == "trace-1"
-    assert result.row["error_message"] == "old error"
-    assert result.row["error_code"] == "old-code"
-    assert result.row["last_error"] == "old failure"
+    persisted = dict(
+        conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    )
+    assert persisted["uuid"] == "job-1"
+    assert persisted["payload"] == '{"input": 1}'
+    assert persisted["result"] == '{"partial": true}'
+    assert persisted["owner_user_id"] == "owner-1"
+    assert persisted["project_id"] == 17
+    assert persisted["batch_group"] == "batch-1"
+    assert persisted["retry_count"] == 2
+    assert persisted["progress_percent"] == 10.0
+    assert persisted["progress_message"] == "old progress"
+    assert persisted["request_id"] == "request-1"
+    assert persisted["trace_id"] == "trace-1"
+    assert persisted["error_message"] == "old error"
+    assert persisted["error_code"] == "old-code"
+    assert persisted["last_error"] == "old failure"
     assert result.row["updated_at"] != "2001-01-01 00:00:00"
 
 
@@ -408,7 +438,7 @@ class _PauseAfterValidationConnection:
 
     def execute(self, sql: str, parameters: Any = ()) -> sqlite3.Cursor:
         cursor = self._connection.execute(sql, parameters)
-        if not self._paused and sql.startswith("SELECT * FROM jobs WHERE id = ?"):
+        if not self._paused and "FROM jobs WHERE id = ?" in sql:
             self._paused = True
             self.validation_was_locked = self._connection.in_transaction
             self._selected.set()

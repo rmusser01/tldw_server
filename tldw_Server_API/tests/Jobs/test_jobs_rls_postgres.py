@@ -290,6 +290,47 @@ def test_rls_visible_lifecycle_operation_applies(
         assert result.row["lease_id"] is None
 
 
+def test_rls_visible_release_can_insert_missing_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    job_id = _seed_processing_job(admin_dsn, owner_user_id="u1")
+    manager = JobManager(backend="postgres", db_url=rls_dsn)
+    JobManager.set_rls_context(
+        is_admin=False,
+        domain_allowlist="chatbooks",
+        owner_user_id="u1",
+    )
+    connection = manager._connect()
+    try:
+        result = release_job(
+            connection,
+            manager._pg_cursor,
+            command=ReleaseJobCommand(
+                job_id=job_id,
+                enforce=True,
+                worker_id="worker-1",
+                lease_id="lease-1",
+            ),
+            counters_enabled=True,
+        )
+    finally:
+        connection.close()
+        JobManager.clear_rls_context()
+
+    assert result.outcome is OperationOutcome.APPLIED
+    with psycopg.connect(admin_dsn, autocommit=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT ready_count, processing_count FROM job_counters "
+                "WHERE domain = 'chatbooks' AND queue = 'default' AND job_type = 'export'"
+            )
+            counter = cursor.fetchone()
+    assert counter == (1, 0)
+
+
 @pytest.mark.parametrize("operation", ["renew", "release"])
 def test_rls_hidden_lifecycle_operation_reports_missing_and_preserves_row(
     monkeypatch: pytest.MonkeyPatch,

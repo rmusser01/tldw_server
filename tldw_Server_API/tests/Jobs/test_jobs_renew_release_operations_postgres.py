@@ -26,6 +26,27 @@ psycopg = pytest.importorskip("psycopg")
 pytestmark = pytest.mark.pg_jobs
 
 NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+RENEW_RESULT_FIELDS = {
+    "id",
+    "leased_until",
+    "progress_percent",
+    "progress_message",
+}
+RELEASE_RESULT_FIELDS = {
+    "id",
+    "domain",
+    "queue",
+    "job_type",
+    "status",
+    "available_at",
+    "leased_until",
+    "worker_id",
+    "lease_id",
+    "acquired_at",
+    "started_at",
+    "completion_token",
+    "updated_at",
+}
 
 
 @pytest.fixture()
@@ -285,7 +306,7 @@ def test_postgres_lifecycle_ignores_identity_without_enforcement(
     assert result.outcome is OperationOutcome.APPLIED
 
 
-def test_postgres_renew_preserves_longer_current_lease_and_returns_full_row(
+def test_postgres_renew_preserves_longer_current_lease_and_returns_transition_facts(
     manager: JobManager,
     conn: Any,
 ) -> None:
@@ -301,10 +322,12 @@ def test_postgres_renew_preserves_longer_current_lease_and_returns_full_row(
 
     assert result.outcome is OperationOutcome.APPLIED
     assert result.row is not None
+    assert set(result.row) == RENEW_RESULT_FIELDS
     assert result.row["leased_until"] == current_expiry
-    assert result.row["payload"] == {"input": 1}
-    assert result.row["owner_user_id"] == "owner-1"
-    assert result.row["project_id"] == 17
+    persisted = _fetch_job(manager, job_id)
+    assert persisted["payload"] == {"input": 1}
+    assert persisted["owner_user_id"] == "owner-1"
+    assert persisted["project_id"] == 17
 
 
 @pytest.mark.parametrize("enforce", [False, True], ids=["unenforced", "enforced"])
@@ -354,6 +377,7 @@ def test_postgres_release_clears_lease_fields_and_preserves_unrelated_facts(
 
     assert result.outcome is OperationOutcome.APPLIED
     assert result.row is not None
+    assert set(result.row) == RELEASE_RESULT_FIELDS
     assert result.row["status"] == "queued"
     for field in (
         "available_at",
@@ -365,19 +389,20 @@ def test_postgres_release_clears_lease_fields_and_preserves_unrelated_facts(
         "completion_token",
     ):
         assert result.row[field] is None
-    assert result.row["payload"] == {"input": 1}
-    assert result.row["result"] == {"partial": True}
-    assert result.row["owner_user_id"] == "owner-1"
-    assert result.row["project_id"] == 17
-    assert result.row["batch_group"] == "batch-1"
-    assert result.row["retry_count"] == 2
-    assert result.row["progress_percent"] == 10.0
-    assert result.row["progress_message"] == "old progress"
-    assert result.row["request_id"] == "request-1"
-    assert result.row["trace_id"] == "trace-1"
-    assert result.row["error_message"] == "old error"
-    assert result.row["error_code"] == "old-code"
-    assert result.row["last_error"] == "old failure"
+    persisted = _fetch_job(manager, job_id)
+    assert persisted["payload"] == {"input": 1}
+    assert persisted["result"] == {"partial": True}
+    assert persisted["owner_user_id"] == "owner-1"
+    assert persisted["project_id"] == 17
+    assert persisted["batch_group"] == "batch-1"
+    assert persisted["retry_count"] == 2
+    assert persisted["progress_percent"] == 10.0
+    assert persisted["progress_message"] == "old progress"
+    assert persisted["request_id"] == "request-1"
+    assert persisted["trace_id"] == "trace-1"
+    assert persisted["error_message"] == "old error"
+    assert persisted["error_code"] == "old-code"
+    assert persisted["last_error"] == "old failure"
     assert result.row["updated_at"] != datetime(2001, 1, 1, tzinfo=timezone.utc)
 
 
@@ -502,7 +527,7 @@ class _PauseAfterValidationCursor:
     def execute(self, sql: Any, params: Any = ()) -> Any:
         result = self._inner.execute(sql, params)
         normalized = " ".join(str(sql).lower().split())
-        if normalized.startswith("select * from jobs where id = %s"):
+        if "from jobs where id = %s for update" in normalized:
             self._selected.set()
             if not self._writer_attempt_finished.wait(timeout=5):
                 raise TimeoutError("competing writer did not finish its first attempt")

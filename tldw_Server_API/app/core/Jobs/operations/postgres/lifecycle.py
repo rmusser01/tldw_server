@@ -57,50 +57,54 @@ _RENEW_SQL_VARIANTS = {
     (False, False, False): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval) "
-        "WHERE id = %s AND status = 'processing' RETURNING *"
+        "WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
     (False, True, False): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
-        "progress_percent = %s WHERE id = %s AND status = 'processing' RETURNING *"
+        "progress_percent = %s WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
     (False, False, True): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
-        "progress_message = %s WHERE id = %s AND status = 'processing' RETURNING *"
+        "progress_message = %s WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
     (False, True, True): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
         "progress_percent = %s, progress_message = %s "
-        "WHERE id = %s AND status = 'processing' RETURNING *"
+        "WHERE id = %s AND status = 'processing' "
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
     (True, False, False): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval) "
         "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
-        "RETURNING *"
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
     (True, True, False): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
         "progress_percent = %s "
         "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
-        "RETURNING *"
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
     (True, False, True): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
         "progress_message = %s "
         "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
-        "RETURNING *"
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
     (True, True, True): (
         "UPDATE jobs SET leased_until = "
         "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval), "
         "progress_percent = %s, progress_message = %s "
         "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
-        "RETURNING *"
+        "RETURNING id, leased_until, progress_percent, progress_message"
     ),
 }
 
@@ -108,7 +112,9 @@ _RELEASE_SQL = (
     "UPDATE jobs SET status = 'queued', available_at = NULL, leased_until = NULL, "
     "worker_id = NULL, lease_id = NULL, acquired_at = NULL, started_at = NULL, "
     "completion_token = NULL, updated_at = NOW() "
-    "WHERE id = %s AND status = 'processing' RETURNING *"
+    "WHERE id = %s AND status = 'processing' "
+    "RETURNING id, domain, queue, job_type, status, available_at, leased_until, "
+    "worker_id, lease_id, acquired_at, started_at, completion_token, updated_at"
 )
 
 _RELEASE_ENFORCED_SQL = (
@@ -116,7 +122,8 @@ _RELEASE_ENFORCED_SQL = (
     "worker_id = NULL, lease_id = NULL, acquired_at = NULL, started_at = NULL, "
     "completion_token = NULL, updated_at = NOW() "
     "WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s "
-    "RETURNING *"
+    "RETURNING id, domain, queue, job_type, status, available_at, leased_until, "
+    "worker_id, lease_id, acquired_at, started_at, completion_token, updated_at"
 )
 
 _RELEASE_COUNTER_SQL = (
@@ -163,7 +170,10 @@ def _classify_lifecycle_no_transition(
     worker_id: str | None,
     lease_id: str | None,
 ) -> LifecycleResult:
-    cur.execute("SELECT * FROM jobs WHERE id = %s", (job_id,))
+    cur.execute(
+        "SELECT id, status, worker_id, lease_id FROM jobs WHERE id = %s",
+        (job_id,),
+    )
     row = cur.fetchone()
     if row is None:
         return LifecycleResult.no_transition(NoTransitionReason.MISSING)
@@ -224,7 +234,13 @@ def release_job(
 
     with conn:
         with cursor_factory(conn) as cur:
-            cur.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (command.job_id,))
+            cur.execute(
+                (
+                    "SELECT id, domain, queue, job_type, status, worker_id, lease_id "
+                    "FROM jobs WHERE id = %s FOR UPDATE"
+                ),
+                (command.job_id,),
+            )
             selected = cur.fetchone()
             if selected is None:
                 return LifecycleResult.no_transition(NoTransitionReason.MISSING)
