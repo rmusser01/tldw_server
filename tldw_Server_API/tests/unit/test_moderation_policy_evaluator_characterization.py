@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Moderation.moderation_service import (
     PatternRule,
 )
 from tldw_Server_API.app.core.Moderation.policy_compiler import PolicyCompiler
+from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
 
 
 def _service(
@@ -29,6 +30,7 @@ def _service(
     service._match_window_chars = match_window_chars
     service._max_fallback_scan_chars = max_fallback_scan_chars
     service._max_replacements_per_pattern = max_replacements_per_pattern
+    service._policy_evaluator = PolicyEvaluator()
     return service
 
 
