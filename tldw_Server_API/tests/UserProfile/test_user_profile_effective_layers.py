@@ -5,7 +5,6 @@ import uuid
 
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
@@ -14,12 +13,14 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     create_organization,
     create_team,
 )
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import (
     OrgProfileOverridesRepo,
     TeamProfileOverridesRepo,
 )
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
-from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.UserProfiles.version_gateway import ProfileVersionGateway
+from tldw_Server_API.app.main import app
 
 
 def _run_async(coro):
@@ -46,6 +47,30 @@ def test_select_lowest_id_overrides() -> None:
     assert selected["preferences.ui.theme"]["id"] == 1
     assert selected["preferences.ui.density"]["value"] == "org-one-density"
     assert selected["preferences.ui.density"]["id"] == 1
+
+
+def test_membership_ids_match_version_active_status_predicate() -> None:
+    class MembershipRepo:
+        async def list_org_memberships_for_user(self, user_id: int):
+            assert user_id == 9
+            return [
+                {"org_id": 1, "status": "active"},
+                {"org_id": 2, "status": None},
+                {"org_id": 3, "status": "inactive"},
+                {"org_id": 4, "status": ""},
+            ]
+
+        async def list_active_team_memberships_for_user(self, user_id: int):
+            assert user_id == 9
+            return [{"team_id": 7}]
+
+        async def list_memberships_for_user(self, _user_id: int):
+            raise AssertionError("unfiltered team memberships must not be used")
+
+    service = UserProfileService.__new__(UserProfileService)
+    service._orgs_repo = MembershipRepo()
+
+    assert _run_async(service._get_membership_ids(9)) == ([1, 2], [7])
 
 
 def test_effective_config_layering(auth_headers, tmp_path, monkeypatch) -> None:
@@ -174,5 +199,165 @@ def test_effective_config_layering(auth_headers, tmp_path, monkeypatch) -> None:
             assert effective["preferences.ui.theme"]["source"] == "org"
     finally:
         # Best-effort cleanup so subsequent tests don't inherit this pool.
+        _run_async(reset_db_pool())
+        reset_settings()
+
+
+def test_inactive_memberships_do_not_contribute_inherited_overrides(
+    auth_headers,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / f"users_active_layers_{uuid.uuid4().hex[:8]}.db"
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    reset_settings()
+    _run_async(reset_db_pool())
+    _run_async(ensure_single_user_rbac_seed_if_needed())
+
+    try:
+        with TestClient(app) as client:
+            user_id = _get_user_id(client, auth_headers)
+            suffix = uuid.uuid4().hex[:8]
+
+            async def _setup_and_read():
+                active_org = await create_organization(
+                    name=f"Active Config Org {suffix}",
+                    owner_user_id=None,
+                )
+                inactive_org = await create_organization(
+                    name=f"Inactive Config Org {suffix}",
+                    owner_user_id=None,
+                )
+                active_org_id = int(active_org["id"])
+                inactive_org_id = int(inactive_org["id"])
+                await add_org_member(
+                    org_id=active_org_id,
+                    user_id=user_id,
+                    role="member",
+                )
+                await add_org_member(
+                    org_id=inactive_org_id,
+                    user_id=user_id,
+                    role="member",
+                )
+
+                active_team = await create_team(
+                    org_id=active_org_id,
+                    name=f"Active Config Team {suffix}",
+                )
+                inactive_team = await create_team(
+                    org_id=inactive_org_id,
+                    name=f"Inactive Config Team {suffix}",
+                )
+                active_team_id = int(active_team["id"])
+                inactive_team_id = int(inactive_team["id"])
+                await add_team_member(
+                    team_id=active_team_id,
+                    user_id=user_id,
+                    role="member",
+                )
+                await add_team_member(
+                    team_id=inactive_team_id,
+                    user_id=user_id,
+                    role="member",
+                )
+
+                pool = await get_db_pool()
+                org_repo = OrgProfileOverridesRepo(pool)
+                team_repo = TeamProfileOverridesRepo(pool)
+                await org_repo.ensure_tables()
+                await team_repo.ensure_tables()
+                await org_repo.upsert_override(
+                    org_id=active_org_id,
+                    key="preferences.ui.theme",
+                    value="active-org",
+                    updated_by=user_id,
+                )
+                await org_repo.upsert_override(
+                    org_id=inactive_org_id,
+                    key="preferences.ui.theme",
+                    value="inactive-org",
+                    updated_by=user_id,
+                )
+                await team_repo.upsert_override(
+                    team_id=active_team_id,
+                    key="preferences.ui.density",
+                    value="active-team",
+                    updated_by=user_id,
+                )
+                await team_repo.upsert_override(
+                    team_id=inactive_team_id,
+                    key="preferences.ui.density",
+                    value="inactive-team",
+                    updated_by=user_id,
+                )
+
+                async with pool.transaction() as conn:
+                    await conn.execute(
+                        "UPDATE org_members SET status = 'inactive' "
+                        "WHERE org_id = ? AND user_id = ?",
+                        (inactive_org_id, user_id),
+                    )
+                    await conn.execute(
+                        "UPDATE team_members SET status = 'inactive' "
+                        "WHERE user_id = ? AND team_id IN "
+                        "(SELECT id FROM teams WHERE org_id = ?)",
+                        (user_id, inactive_org_id),
+                    )
+                    await conn.execute(
+                        "UPDATE users SET profile_version = ? WHERE id = ?",
+                        ("2026-01-01T00:00:00.000000Z", user_id),
+                    )
+                    await conn.execute(
+                        "UPDATE org_config_overrides SET updated_at = ? "
+                        "WHERE org_id = ?",
+                        ("2026-01-02T00:00:00.000000Z", active_org_id),
+                    )
+                    await conn.execute(
+                        "UPDATE team_config_overrides SET updated_at = ? "
+                        "WHERE team_id = ?",
+                        ("2026-01-03T00:00:00.000000Z", active_team_id),
+                    )
+                    await conn.execute(
+                        "UPDATE org_config_overrides SET updated_at = ? "
+                        "WHERE org_id = ?",
+                        ("2099-01-01T00:00:00.000000Z", inactive_org_id),
+                    )
+                    await conn.execute(
+                        "UPDATE team_config_overrides SET updated_at = ? "
+                        "WHERE team_id = ?",
+                        ("2099-01-02T00:00:00.000000Z", inactive_team_id),
+                    )
+
+                service = UserProfileService(pool)
+                org_ids, team_ids = await service._get_membership_ids(user_id)
+                raw = await service._build_raw_overrides(
+                    user_id,
+                    mask_secrets=False,
+                )
+                version = await ProfileVersionGateway(pool).read(user_id)
+                return {
+                    "active_org_id": active_org_id,
+                    "inactive_org_id": inactive_org_id,
+                    "active_team_id": active_team_id,
+                    "inactive_team_id": inactive_team_id,
+                    "org_ids": org_ids,
+                    "team_ids": team_ids,
+                    "raw_org_ids": {entry["org_id"] for entry in raw["orgs"]},
+                    "raw_team_ids": {entry["team_id"] for entry in raw["teams"]},
+                    "version": version,
+                }
+
+            result = _run_async(_setup_and_read())
+
+            assert result["active_org_id"] in result["org_ids"]
+            assert result["inactive_org_id"] not in result["org_ids"]
+            assert result["active_team_id"] in result["team_ids"]
+            assert result["inactive_team_id"] not in result["team_ids"]
+            assert result["raw_org_ids"] == {result["active_org_id"]}
+            assert result["raw_team_ids"] == {result["active_team_id"]}
+            assert result["version"].isoformat() == "2026-01-03T00:00:00+00:00"
+    finally:
         _run_async(reset_db_pool())
         reset_settings()

@@ -916,7 +916,8 @@ class CallerHarness:
                 return False
 
         class _TransactionPool:
-            def transaction(self):
+            def transaction(self, *, acquire_timeout_seconds: float | None = None):
+                assert acquire_timeout_seconds is not None
                 return _Transaction()
 
         async def _transaction_pool():
