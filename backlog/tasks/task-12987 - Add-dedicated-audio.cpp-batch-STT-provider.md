@@ -4,7 +4,7 @@ title: Add dedicated audio.cpp batch STT provider
 status: In Progress
 assignee: []
 created_date: '2026-07-26 03:27'
-updated_date: '2026-07-26 13:11'
+updated_date: '2026-07-26 13:38'
 labels:
   - stt
   - benchmark
@@ -68,6 +68,8 @@ Task 5 implementation pass ready for independent spec/quality review. Corrected 
 Task 5 independent quality review fix: verified case-insensitive provider routing exposed a case-sensitive normalize_audio_cpp_model boundary in no-plan execution. TDD RED: focused selector/no-plan suite had 9 expected uppercase canonical/alias failures and 10 lowercase/control passes. Minimal fix lowercases only the selector comparison while preserving the exact server model suffix. GREEN: focused 19/19; exact Task 5 three-file regression 513/513. Quality gates: Ruff clean, compileall clean, git diff --check clean, scoped Bandit 0 errors/0 findings. Separate follow-up commit pending.
 
 Task 5 test-quality follow-up: made selector normalization cases explicit input/expected pairs. Added mixed-case suffix preservation coverage (AUDIO-CPP:Whisper-Small -> Whisper-Small) through normalize_audio_cpp_model and ordinary/no-plan AudioCppAdapter.transcribe_batch, plus uppercase exact AUDIO-CPP/AUDIOCPP/AUDIO_CPP selectors resolving to configured Default-Model through transcribe_batch. No production changes were needed. Verification: focused selector suite 24/24; exact three-file Task 5 regression 518/518; Ruff and git diff --check clean. Bandit not rerun because this follow-up changes tests and Backlog evidence only.
+
+Task 6 implementation pass: added ordinary POST /api/v1/audio/transcriptions coverage using a generated WAV, audio-cpp:whisper-small, the real SttProviderRegistry/AudioCppAdapter, and only the dedicated audio.cpp transcription boundary faked. The test proves canonical audio-cpp adapter selection, whisper-small normalization, response text preservation, canonical WAV delivery, and no fallback lookup. Added real-adapter benchmark preflight coverage proving missing network consent fails, explicit consent succeeds with unresolved/no-download routing, and persisted execution-contract JSON exposes only the opaque endpoint ID rather than audio_cpp_origin or its URL. Added audio.cpp worker classification/scoring coverage proving whitespace-only text becomes status=empty with an empty hypothesis and 100% deletion score rather than adapter_error. Initial targeted runs passed as characterization (API 1/1; benchmark selection 5/5), so no production dispatcher change was justified. Fresh verification: API audio_cpp 1/1; complete test_stt_bench plus integration 400/400; compileall and git diff --check clean. Ruff passes all non-I001 rules; changed scope has exactly the same 8 pre-existing I001 findings as HEAD and none in new blocks. Bandit skipped because Task 6 changes tests and Backlog evidence only.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

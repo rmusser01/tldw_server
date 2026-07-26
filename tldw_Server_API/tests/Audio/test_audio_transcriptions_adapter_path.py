@@ -125,6 +125,122 @@ def test_audio_transcriptions_uses_adapter_base_dir(
         assert captured_conversion["overwrite"] is True
 
 
+def test_audio_cpp_transcription_uses_real_registry_without_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    bypass_api_limits: Any,
+) -> None:
+    """The ordinary endpoint routes an audio.cpp selector through its native adapter."""
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    monkeypatch.setenv("STT_AUDIO_CPP_ENABLED", "true")
+    monkeypatch.setenv("STT_AUDIO_CPP_BASE_URL", "http://127.0.0.1:18080")
+    monkeypatch.setenv("STT_AUDIO_CPP_DEFAULT_MODEL", "unused-default")
+    monkeypatch.setenv("STT_AUDIO_CPP_TIMEOUT_SECONDS", "17.25")
+
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_AudioCpp as audio_cpp,
+    )
+
+    async def _fake_get_request_user() -> User:
+        return User(id=1, username="single_user")
+
+    async def _allow_job(*_args: object, **_kwargs: object) -> tuple[bool, None]:
+        return True, None
+
+    async def _noop_async(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    registry = stt_adapter.SttProviderRegistry()
+    adapter_lookups: list[str] = []
+    get_adapter = registry.get_adapter
+
+    def _trace_adapter_lookup(provider: str) -> Any:
+        adapter_lookups.append(provider)
+        return get_adapter(provider)
+
+    captured: dict[str, object] = {}
+
+    def _fake_transcribe_audio_cpp(
+        audio_path: str,
+        *,
+        route: Any,
+        model_id: str,
+        **_kwargs: object,
+    ) -> Any:
+        captured["audio_path"] = audio_path
+        captured["provider"] = route.provider
+        captured["model_id"] = model_id
+        return stt_adapter.SttTranscriptionOutcome(
+            artifact={
+                "text": "audio.cpp endpoint transcript",
+                "segments": [],
+                "metadata": {
+                    "provider": "audio-cpp",
+                    "contract": "audio_cpp_http_v1",
+                    "model_id": model_id,
+                    "model_family": "whisper",
+                    "model_mode": "offline",
+                    "server_backend": "cpu",
+                },
+            },
+            actual_execution=stt_adapter.actual_execution_from_route(
+                route,
+                device=None,
+            ),
+        )
+
+    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
+    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
+    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
+    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
+    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr(registry, "get_adapter", _trace_adapter_lookup)
+    monkeypatch.setattr(
+        stt_adapter,
+        "get_stt_provider_registry",
+        lambda: registry,
+    )
+    monkeypatch.setattr(
+        audio_cpp,
+        "transcribe_audio_cpp",
+        _fake_transcribe_audio_cpp,
+    )
+
+    app = FastAPI()
+    app.dependency_overrides[get_request_user] = _fake_get_request_user
+    app.include_router(audio_router, prefix="/api/v1/audio")
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        response = client.post(
+            "/api/v1/audio/transcriptions",
+            headers={"X-API-KEY": TEST_API_KEY},
+            files={
+                "file": (
+                    "sample.wav",
+                    io.BytesIO(_make_wav_bytes()),
+                    "audio/wav",
+                )
+            },
+            data={
+                "model": "audio-cpp:whisper-small",
+                "response_format": "json",
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.json()["text"] == "audio.cpp endpoint transcript"
+    assert adapter_lookups == ["audio-cpp"]
+    assert captured["provider"] == "audio-cpp"
+    assert captured["model_id"] == "whisper-small"
+    assert Path(str(captured["audio_path"])).suffix == ".wav"
+
+
 def test_audio_transcriptions_derives_suffix_for_extensionless_upload(
     monkeypatch,
     bypass_api_limits,

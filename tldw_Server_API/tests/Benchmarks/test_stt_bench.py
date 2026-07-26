@@ -2783,6 +2783,37 @@ def _preflight_settings(**overrides):
     return settings
 
 
+def _configure_audio_cpp_planning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> types.ModuleType:
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+    from tldw_Server_API.app.core import http_client
+
+    for name in (
+        "STT_AUDIO_CPP_ENABLED",
+        "STT_AUDIO_CPP_BASE_URL",
+        "STT_AUDIO_CPP_DEFAULT_MODEL",
+        "STT_AUDIO_CPP_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        stt_adapter,
+        "get_stt_config",
+        lambda: {
+            "audio_cpp_enabled": "true",
+            "audio_cpp_base_url": "http://127.0.0.1:18080",
+            "audio_cpp_default_model": "unused-default",
+            "audio_cpp_timeout_seconds": "17.25",
+        },
+    )
+    monkeypatch.setattr(
+        http_client,
+        "resolve_afetch_transport",
+        lambda: "httpx",
+    )
+    return stt_adapter
+
+
 def test_prepared_target_and_worker_settings_are_frozen_pickleable_and_secret_safe():
     plan = _planned_target()
     contract_json, contract_hash = stt_bench.build_execution_contract(
@@ -3081,6 +3112,42 @@ def test_preflight_targets_requires_consent_for_every_network_route(
         adapter_factory_path=f"{__name__}:_preflight_fake_factory",
     )
     assert prepared[0].provider == "network"
+
+
+def test_audio_cpp_preflight_requires_consent_and_exposes_only_opaque_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_audio_cpp_planning(monkeypatch)
+
+    with pytest.raises(ValueError, match="network consent"):
+        stt_bench.preflight_targets(
+            ("audio-cpp=whisper-small",),
+            mode="neutral-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(),
+        )
+
+    prepared = stt_bench.preflight_targets(
+        ("audio-cpp=whisper-small",),
+        mode="neutral-v1",
+        allow_network_targets=True,
+        common_settings=_preflight_settings(),
+    )
+    target = prepared[0]
+    route = target.plan.descriptor.primary_route
+    contract = json.loads(target.execution_contract_json)
+    serialized_contract = target.execution_contract_json
+
+    assert target.provider == "audio-cpp"
+    assert target.model_label == "whisper-small"
+    assert route.identity_resolved is False
+    assert route.artifact_id is None
+    assert route.local_model_available is False
+    assert route.would_download is False
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", route.endpoint_id or "")
+    assert contract["descriptor"]["routes"][0]["endpoint_id"] == route.endpoint_id
+    assert "audio_cpp_origin" not in serialized_contract
+    assert "http://127.0.0.1:18080" not in serialized_contract
 
 
 def test_preflight_targets_rejects_unavailable_and_mismatched_adapters(
@@ -3808,6 +3875,47 @@ def test_worker_artifact_classification_is_allowlisted_and_deterministic():
         "",
     )
     assert "sk-worker-secret" not in json.dumps([ok, empty, sentinel, malformed])
+
+
+def test_audio_cpp_whitespace_artifact_scores_as_empty_hypothesis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stt_adapter = _configure_audio_cpp_planning(monkeypatch)
+    plan = stt_adapter.AudioCppAdapter().plan_batch_execution(
+        model="whisper-small",
+        language="en",
+        task="transcribe",
+        word_timestamps=False,
+        prompt=None,
+        hotwords=(),
+        diarization=False,
+        mode="neutral-v1",
+    )
+    actual = stt_adapter.actual_execution_from_route(
+        plan.descriptor.primary_route,
+        device=None,
+    ).as_safe_dict()
+
+    classified = stt_bench._classify_worker_artifact(
+        {
+            "text": " \n ",
+            "segments": [],
+            "actual_execution": actual,
+        },
+        plan,
+    )
+    score = stt_bench.score_result_text(
+        "one two",
+        classified["hypothesis"],
+        status=classified["status"],
+        normalization_profile=STRICT_PROFILE,
+    )
+
+    assert classified["status"] == "empty"
+    assert classified["hypothesis"] == ""
+    assert classified["error"]["type"] == "EmptyTranscription"
+    assert score.strict_wer == EditCounts(0, 2, 0, 2)
+    assert score.strict_wer.rate == 1.0
 
 
 def test_worker_refuses_truncated_result_history_before_adapter_setup(tmp_path):
