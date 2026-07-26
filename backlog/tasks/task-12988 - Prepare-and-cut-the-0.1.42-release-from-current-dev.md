@@ -4,7 +4,7 @@ title: Prepare and cut the 0.1.42 release from current dev
 status: In Progress
 assignee: []
 created_date: '2026-07-26 13:05'
-updated_date: '2026-07-26 15:19'
+updated_date: '2026-07-26 17:39'
 labels:
   - release
   - operations
@@ -53,6 +53,8 @@ Release PR #2761 opened as a draft against main from exact head a9818a21f8b5bb10
 Requester selected the reviewed-metadata release approach: PR #2761 will carry the complete 0.1.42 changelog, release notes, and visible version surfaces. Because the existing patch helper would calculate 0.1.43 after that pre-bump, publication will tag the reviewed main merge commit as v0.1.42 and create the GitHub Release from the curated changelog entry.
 
 Requester approved the release-specific legal dates on 2026-07-26. The protected trees on the release branch are identical to frozen dev source 0f3983788c413e0d17ffe7eabe8cff4a9f6ae723. Design and implementation plan now include LICENSES/releases/0.1.42, source-only protected publication, and a human legal-record review gate.
+
+0.1.42 release preparation is implemented. Added immutable LICENSES/releases/0.1.42 with approved dates, completed Countdown grant, exact protected source revision, 6,867-file SHA-256 manifest, legal digests/notices, and source-only artifact boundary. Added full changelog/release notes/version surfaces and regenerated Docs/Published idempotently; strict MkDocs build passed. Verification: 46 release utility tests, 19 release-doc tests, 33 published-doc tests, and 185 CI/licensing/workflow tests passed; Actionlint 1.7.12 clean; Bandit returned errors=[] and results=[] excluding standard B101 test assertions; git diff --check clean; both frozen inputs remain ancestors and protected trees remain identical to source 0f3983788c413e0d17ffe7eabe8cff4a9f6ae723. Also removed one stale frontend workflow test assertion that contradicted TASK-12986's required full-history checkout; both old and license-first contracts pass.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

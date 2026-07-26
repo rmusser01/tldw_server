@@ -59,10 +59,10 @@ Record the unchanged protected frontend snapshot at exact commit
 
 ### Task 3: Verify and refresh PR #2761
 
-- [ ] Run focused release, documentation, workflow, and licensing tests.
-- [ ] Run Actionlint, Bandit on touched executable Python, and
+- [x] Run focused release, documentation, workflow, and licensing tests.
+- [x] Run Actionlint, Bandit on touched executable Python, and
   `git diff --check`.
-- [ ] Prove frozen `origin/dev=0f3983788c413e0d17ffe7eabe8cff4a9f6ae723`
+- [x] Prove frozen `origin/dev=0f3983788c413e0d17ffe7eabe8cff4a9f6ae723`
   and `origin/main=d9c245ac14c40df855d1ab6cd19b3c137b16b47b`
   are both ancestors of the exact final PR head.
 - [ ] Push the exact release head and require
