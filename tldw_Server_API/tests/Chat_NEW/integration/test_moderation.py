@@ -393,6 +393,7 @@ def test_output_redaction_non_streaming_with_real_moderation_service(
             }
         ],
     }
+    body_completed = False
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         with patch(
@@ -421,9 +422,13 @@ def test_output_redaction_non_streaming_with_real_moderation_service(
             result.json()["choices"][0]["message"]["content"]
             == "this has [RULE] token"
         )
+        body_completed = True
     finally:
         try:
             _cleanup_db_artifacts(db_path)
+        except Exception:
+            if body_completed:
+                raise
         finally:
             app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
