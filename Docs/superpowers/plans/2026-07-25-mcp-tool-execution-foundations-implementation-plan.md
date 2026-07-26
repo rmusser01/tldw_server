@@ -56,13 +56,13 @@ Out of scope:
 **Goal:** Lock current compatibility behavior and move idempotency code out of `protocol.py` without changing behavior.
 **Success Criteria:** Existing imports still resolve, `IdempotencyManager.__module__` points at `tool_execution.idempotency`, and focused existing tests remain green.
 **Tests:** Extraction AST/import contracts and existing idempotency/category tests.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 2: Expected Failure And Breaker Contract
 **Goal:** Add one generic expected-failure result and identical fallback/injected breaker accounting.
 **Success Criteria:** Closed and half-open neutral/counting matrices pass, safe error envelopes are emitted, and unexpected exceptions retain existing behavior.
 **Tests:** Outcome validation, fallback/injected breaker tests, runtime envelope/reporting tests, safe-log assertions.
-**Status:** Not Started
+**Status:** In Progress
 
 ## Stage 3: Prepared Policy And Admission Integrity
 **Goal:** Remove mutable tool-definition authority from runtime and make admission fail closed when configured.
@@ -134,15 +134,15 @@ Conditional files should be added to the touched set only if their existing cont
 
 ### Steps
 
-- [ ] Add a failing extraction contract proving `protocol.py` no longer defines `class IdempotencyManager` and the compatibility import resolves to the extracted class.
-- [ ] Add characterization tests for local cache replay, argument binding, lock pruning, Redis-unavailable fallback, and the current runtime replacement seam.
-- [ ] Run the focused tests and confirm only the new extraction assertions fail.
-- [ ] Move the class and its private Redis/local helpers verbatim to `tool_execution/idempotency.py`; do not change the state machine in this commit.
-- [ ] Move only imports used exclusively by the manager (`OrderedDict`, Redis exception fallback, Redis redaction helper, and no-client factory) with it.
-- [ ] Re-export with `from .tool_execution.idempotency import IdempotencyManager` in `protocol.py` and from `tool_execution.__init__`.
-- [ ] Preserve `MCPProtocol._idempotency` replacement synchronization and constructor injection exactly.
-- [ ] Run extraction and characterization tests.
-- [ ] Commit the mechanical move separately.
+- [x] Add a failing extraction contract proving `protocol.py` no longer defines `class IdempotencyManager` and the compatibility import resolves to the extracted class.
+- [x] Add characterization tests for local cache replay, argument binding, lock pruning, Redis-unavailable fallback, and the current runtime replacement seam.
+- [x] Run the focused tests and confirm only the new extraction assertions fail.
+- [x] Move the class and its private Redis/local helpers verbatim to `tool_execution/idempotency.py`; do not change the state machine in this commit.
+- [x] Move only imports used exclusively by the manager (`OrderedDict`, Redis exception fallback, Redis redaction helper, and no-client factory) with it.
+- [x] Re-export with `from .tool_execution.idempotency import IdempotencyManager` in `protocol.py` and from `tool_execution.__init__`.
+- [x] Preserve `MCPProtocol._idempotency` replacement synchronization and constructor injection exactly.
+- [x] Run extraction and characterization tests.
+- [x] Commit the mechanical move separately.
 
 Required extraction assertion:
 
