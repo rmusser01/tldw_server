@@ -68,13 +68,13 @@ Out of scope:
 **Goal:** Remove mutable tool-definition authority from runtime and make admission fail closed when configured.
 **Success Criteria:** Policy and snapshots are immutable/HMAC-bound, stale or tampered calls fail before dispatch, and fail-closed rate metadata is generic.
 **Tests:** Canonical encoding, mutation/tamper, live replacement/disable/definition drift, second-check race, and rate-admission tests.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 4: Idempotency Ownership And Success Commit
 **Goal:** Guarantee callback-at-most-once per request with bounded waiting and robust post-success persistence.
 **Success Criteria:** Local/Redis contention, ambiguity, persistence, serialization, mutation, cancellation, late completion, and shutdown fault tests pass.
 **Tests:** Dedicated manager state-machine tests plus runtime observer-ordering tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ## Stage 5: Integration And Security Gate
 **Goal:** Verify compatibility, documentation, package boundaries, lint, compile, and security scanning.
@@ -538,6 +538,7 @@ git commit -m "feat(mcp): bind immutable prepared execution policy"
 
 - Modify `tldw_Server_API/app/core/MCP_unified/tool_execution/security.py`
 - Modify `tldw_Server_API/app/core/MCP_unified/tool_execution/runtime.py`
+- Modify `tldw_Server_API/app/core/MCP_unified/modules/registry.py`
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_prepared_execution_integrity.py`
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_rate_limit_categories.py`
 
@@ -560,6 +561,7 @@ Call the complete check:
 - First, at the start of runtime before rate admission or argument binding/ownership.
 - Second, inside the idempotency owner callback after rate and contention waits and immediately before `module.execute_with_circuit_breaker`.
 - For non-idempotent calls, call the same owner callback directly so the second check is still used.
+- For cached replays, repeat the complete check after the idempotency wait and before hit metrics, reporting, or return; a change completed before the current preparation remains replay-compatible.
 
 ### Rate Admission
 
@@ -591,15 +593,16 @@ This admission runs before idempotency argument binding or ownership. An actual 
 
 ### Required Tests
 
-- [ ] First check blocks a prepared call whose module was unregistered, disabled, replaced under the same ID, remapped, or definition-mutated.
-- [ ] A registry/tool-definition mutation while rate admission is waiting is caught by the second check.
-- [ ] A mutation while idempotency contention is waiting is caught by the second check and the callback/module counter remains zero.
-- [ ] Observer snapshot mutation never changes rate category, fail-closed behavior, effect, or idempotency injection.
-- [ ] Fail-closed backend error returns the generic expected failure before idempotency binding and breaker entry.
-- [ ] Unflagged backend error preserves dispatch compatibility.
-- [ ] Actual rate denial remains `RateLimitExceeded` and existing response/status behavior.
-- [ ] Cancellation during rate admission propagates and does not dispatch, bind idempotency state, or become `rate_limit_unavailable`.
-- [ ] No branch refers to a Skills, model, provider, or concrete tool name.
+- [x] First check blocks a prepared call whose module was unregistered, disabled, non-operational, replaced under the same ID, remapped, or definition-mutated.
+- [x] A registry/tool-definition mutation while rate admission is waiting is caught by the second check.
+- [x] A mutation while idempotency contention is waiting is caught by the second check and the callback/module counter remains zero.
+- [x] A cached replay rechecks live binding after its idempotency wait without breaking replay when a change completed before the current preparation.
+- [x] Observer snapshot mutation never changes rate category, fail-closed behavior, effect, or idempotency injection.
+- [x] Fail-closed backend error returns the generic expected failure before idempotency binding and breaker entry.
+- [x] Unflagged backend error preserves dispatch compatibility.
+- [x] Actual rate denial remains `RateLimitExceeded` and existing response/status behavior.
+- [x] Cancellation during rate admission or cached-replay verification propagates without dispatch, idempotency mutation, or success reporting.
+- [x] No branch refers to a Skills, model, provider, or concrete tool name.
 
 Run:
 
