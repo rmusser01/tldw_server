@@ -104,6 +104,35 @@ jobs:
           ok = compileall.compile_dir('tldw_Server_API/app', force=True, quiet=1)
           sys.exit(0 if ok else 1)
           PY
+  preflight-python-310:
+    name: Governed Preflight (Python 3.10)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Install PortAudio build dependencies
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+      - name: Setup Python 3.10 and dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.10'
+          use-uv: 'true'
+          extras: dev
+      - name: Run governed preflight final gate
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_architecture.py \
+            tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_browser.py \
+            tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_browser_analyzers.py
   shard-coverage:
     name: Shard coverage guard
     needs: admission
@@ -2047,6 +2076,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -3447,6 +3478,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -4698,6 +4731,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -5952,6 +5987,8 @@ jobs:
           if [ "$SHARD_NAME" = "research-websearch" ]; then
             EXTRA_PYTEST_ARGS=(-vv -p pytest_timeout --timeout=120 --timeout-method=thread)
           fi
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             "${EXTRA_PYTEST_ARGS[@]}" \
             -m "not jobs and not e2e" \
@@ -7204,6 +7241,8 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # TEST_PATHS is a matrix-provided list of pytest path arguments.
+          # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \

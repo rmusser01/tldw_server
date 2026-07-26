@@ -207,7 +207,7 @@ ENFORCE_TLS_MIN = (
 )
 ENFORCE_TLS_MIN = is_truthy(str(ENFORCE_TLS_MIN))
 TLS_MIN_VERSION = (os.getenv("HTTP_TLS_MIN_VERSION") or os.getenv("TLS_MIN_VERSION") or "1.2").strip()
-_SENSITIVE_OBSERVABILITY_URL = "https://sensitive-endpoint.invalid/"
+_SENSITIVE_OBSERVABILITY_URL = "https://sensitive-endpoint.invalid"
 _SENSITIVE_HTTP_LOG_CONTEXT = contextvars.ContextVar(
     "tldw_sensitive_http_log_context",
     default=False,
@@ -1157,7 +1157,18 @@ def _sanitize_url_for_logs(u: str | Any) -> str:
         scheme = (parsed.scheme or "").lower()
         host = (parsed.hostname or "").lower()
         if not scheme or not host:
-            return s
+            return "" if _effective_sensitive_observability() else s
+        if _effective_sensitive_observability():
+            try:
+                host = host.encode("idna").decode("ascii")
+                port = parsed.port
+            except (UnicodeError, ValueError):
+                return ""
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            default_port = 443 if scheme == "https" else 80 if scheme == "http" else None
+            authority = host if port is None or port == default_port else f"{host}:{port}"
+            return f"{scheme}://{authority}"
         port = parsed.port
         path = _redact_path_for_logging(host, parsed.path or "/")
         authority = host
@@ -1165,7 +1176,7 @@ def _sanitize_url_for_logs(u: str | Any) -> str:
             authority = f"{host}:{port}"
         return f"{scheme}://{authority}{path}"
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        return s
+        return "" if _effective_sensitive_observability() else s
 
 
 def _raise_if_json_response_exceeds_limit(
@@ -1201,6 +1212,12 @@ def _url_parts(u: str | Any) -> tuple[str, str, str]:
         p = urlparse(s)
         scheme = (p.scheme or "").lower()
         host = (p.hostname or "").lower()
+        if _effective_sensitive_observability():
+            try:
+                host = host.encode("idna").decode("ascii")
+            except UnicodeError:
+                return "", "", ""
+            return scheme, host, ""
         path = _redact_path_for_logging(host, p.path or "/")
         return scheme, host, path  # noqa: TRY300
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -1512,6 +1529,11 @@ def _validate_proxies_or_raise(proxies: str | dict[str, str] | None) -> None:
             raise EgressPolicyError(f"Proxy host not in allowlist: {h}")  # noqa: TRY003
 
 
+def validate_proxies_or_raise(proxies: str | dict[str, str] | None) -> None:
+    """Validate outbound proxies through the central egress policy."""
+    _validate_proxies_or_raise(proxies)
+
+
 def _resolve_proxy_for_url(url: str, proxies: str | dict[str, str] | None) -> str | None:
     if not proxies:
         return None
@@ -1716,6 +1738,23 @@ def _is_aiohttp_client(client: Any) -> bool:
         return isinstance(client, aiohttp.ClientSession)
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         return False
+
+
+def _network_error_classification(exc: BaseException) -> str | None:
+    """Return stable transport-error metadata without parsing exception text."""
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return "timeout"
+    try:
+        if httpx is not None and isinstance(exc, httpx.TimeoutException):
+            return "timeout"
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        pass
+    try:
+        if aiohttp is not None and isinstance(exc, aiohttp.ServerTimeoutError):
+            return "timeout"
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        pass
+    return None
 
 
 def _aiohttp_timeout_from_defaults() -> aiohttp.ClientTimeout:
@@ -2905,7 +2944,7 @@ async def _afetch_httpx(
     _head_disable_h2_tried = False
     _head_get_range_tried = False
 
-    async def _do_once(ac: httpx.AsyncClient, target_url: str) -> tuple[httpx.Response | None, str]:
+    async def _do_once(ac: httpx.AsyncClient, target_url: str) -> tuple[httpx.Response | None, str, str | None]:
         req_headers = _inject_trace_headers(headers)
         req_headers = _strip_sensitive_headers_for_cross_origin(
             req_headers, original_url=url, target_url=target_url
@@ -2945,7 +2984,7 @@ async def _afetch_httpx(
             except EgressPolicyError:
                 raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-                return None, e.__class__.__name__
+                return None, e.__class__.__name__, _network_error_classification(e)
             r = await _httpx_arequest_io(
                 client=ac,
                 method=method_upper,
@@ -2964,7 +3003,7 @@ async def _afetch_httpx(
                     target_url,
                 ),
             )
-            return r, "ok"  # noqa: TRY300
+            return r, "ok", None  # noqa: TRY300
         except EgressPolicyError:
             raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
@@ -2990,10 +3029,10 @@ async def _afetch_httpx(
                 if _is_dns_resolution_error(e):
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         e._tldw_dns_resolution = True
-                    return None, "DNSResolutionError"
+                    return None, "DNSResolutionError", _network_error_classification(e)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                 pass
-            return None, e.__class__.__name__
+            return None, e.__class__.__name__, _network_error_classification(e)
 
     # Create ephemeral client if none provided
     need_close = False
@@ -3026,7 +3065,7 @@ async def _afetch_httpx(
                         configured_endpoint=configured_endpoint,
                         sensitive_observability=sensitive_observability,
                     )
-                    resp, reason = await _do_once(ac, cur_url)
+                    resp, reason, classification = await _do_once(ac, cur_url)
                     if resp is None:
                         # Special HEAD fallbacks: disable HTTP/2, then GET with Range 0-0
                         if method_upper == "HEAD":
@@ -3104,7 +3143,7 @@ async def _afetch_httpx(
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
                         # network exception occurred (no HEAD fallback succeeded)
-                        last_exc = NetworkError(reason)
+                        last_exc = NetworkError(reason, classification=classification)
                         try:
                             if reason == "DNSResolutionError":
                                 last_exc._tldw_dns_resolution = True
@@ -3305,7 +3344,9 @@ async def _afetch_aiohttp(
 
     ssl_override = _aiohttp_ssl_from_verify(verify)
 
-    async def _do_once(session: aiohttp.ClientSession, target_url: str) -> tuple[_AiohttpResponse | None, str]:
+    async def _do_once(
+        session: aiohttp.ClientSession, target_url: str
+    ) -> tuple[_AiohttpResponse | None, str, str | None]:
         req_headers = _inject_trace_headers(headers)
         req_headers = _strip_sensitive_headers_for_cross_origin(
             req_headers, original_url=url, target_url=target_url
@@ -3344,7 +3385,7 @@ async def _afetch_aiohttp(
             except EgressPolicyError:
                 raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-                return None, e.__class__.__name__
+                return None, e.__class__.__name__, _network_error_classification(e)
             resp = await _aiohttp_request_io(
                 session=session,
                 method=method_upper,
@@ -3363,18 +3404,23 @@ async def _afetch_aiohttp(
                     target_url,
                 ),
             )
-            return resp, "ok"  # noqa: TRY300
+            return resp, "ok", None  # noqa: TRY300
         except EgressPolicyError:
             raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
+            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                logger.debug(
+                    "afetch _do_once: caught exception {}",
+                    type(e).__name__,
+                )
             try:
                 if _is_dns_resolution_error(e):
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         e._tldw_dns_resolution = True
-                    return None, "DNSResolutionError"
+                    return None, "DNSResolutionError", _network_error_classification(e)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                 pass
-            return None, e.__class__.__name__
+            return None, e.__class__.__name__, _network_error_classification(e)
 
     session = client or _get_aiohttp_session()
 
@@ -3400,7 +3446,7 @@ async def _afetch_aiohttp(
                     configured_endpoint=configured_endpoint,
                     sensitive_observability=sensitive_observability,
                 )
-                resp, reason = await _do_once(session, cur_url)
+                resp, reason, classification = await _do_once(session, cur_url)
                 if resp is None:
                     if method_upper == "HEAD" and not _head_get_range_tried:
                         _head_get_range_tried = True
@@ -3457,7 +3503,7 @@ async def _afetch_aiohttp(
                             raise
                         except _HTTPCLIENT_REQUEST_EXCEPTIONS:
                             pass
-                    last_exc = NetworkError(reason)
+                    last_exc = NetworkError(reason, classification=classification)
                     try:
                         if reason == "DNSResolutionError":
                             last_exc._tldw_dns_resolution = True
@@ -5798,6 +5844,7 @@ __all__ = [
     "RetryPolicy",
     "SSEEvent",
     "build_limits",
+    "validate_proxies_or_raise",
     "create_async_client",
     "create_client",
     "afetch",

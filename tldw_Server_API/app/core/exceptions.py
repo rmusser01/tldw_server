@@ -31,16 +31,28 @@ class EgressPolicyError(Exception):
         self.reason_code = reason_code
 
 
+NetworkErrorClassification = Literal["timeout"]
+
+
 class NetworkError(Exception):
     """Raised for sanitized transport failures, optionally with an HTTP status."""
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        classification: NetworkErrorClassification | None = None,
+    ) -> None:
         if status_code is not None:
             if type(status_code) is not int:
                 raise TypeError("status_code must be an integer")
             if not 100 <= status_code <= 599:
                 raise ValueError("status_code must be a valid HTTP status")
+        if classification not in (None, "timeout"):
+            raise ValueError("Unsupported network error classification")
         self.status_code = status_code
+        self.classification = classification
         super().__init__(message)
 
 

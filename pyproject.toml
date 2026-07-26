@@ -148,7 +148,7 @@ dependencies = [
 
   # Research/Web
   "arxiv>=2.0.0",
-  "playwright>=1.40.0",
+  "playwright>=1.48.0",
   "playwright-stealth>=1.0.0",
   "requests>=2.31.0",
   "tenacity>=8.2.0",
@@ -293,14 +293,14 @@ ingestion_email = [
 web_research = [
   "arxiv>=2.0.0",
   "genanki>=0.13.0",
-  "playwright>=1.40.0",
+  "playwright>=1.48.0",
   "trafilatura>=1.6.0"
 ]
 
 # Scraper analyzers (optional)
 scrape-analyzers = [
-  "playwright>=1.40.0",
-  "curl-cffi>=0.5.0",
+  "playwright>=1.48.0",
+  "curl-cffi>=0.9.0",
 ]
 
 scrape-analyzers-waf = [

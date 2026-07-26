@@ -54,14 +54,15 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.http_client import afetch
 from tldw_Server_API.app.core.http_client import fetch as http_fetch
-from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
 #
 # Import Local
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import RateLimiter
 from tldw_Server_API.app.core.Web_Scraping.filters import (
     ContentTypeFilter,
@@ -2702,20 +2703,6 @@ def convert_html_to_markdown(html: str) -> str:
     return soup.get_text(separator="\n\n")
 
 
-def _as_bool(value: Any, default: bool = False) -> bool:
-    from tldw_Server_API.app.core.testing import is_truthy
-
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return is_truthy(value)
-    return default
-
-
 def _record_robot_policy_block(url: str, reason: str) -> None:
     if not reason.startswith("robots_"):
         return
@@ -2748,24 +2735,6 @@ def _blocked_article_result(
         "policy_stage": decision.stage,
         "policy_source": decision.source,
     }
-
-
-async def _decide_article_pre_fetch_policy(
-    url: str,
-    *,
-    respect_robots: bool,
-    user_agent: str,
-    config: dict[str, Any],
-    policy_checker: OutboundPolicyChecker | None = None,
-) -> PolicyDecision:
-    checker = policy_checker or _ARTICLE_POLICY_CHECKER
-    return await checker.decide(
-        url,
-        respect_robots=respect_robots,
-        user_agent=user_agent,
-        context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
-        config={"web_scraper": config},
-    )
 
 
 def _fetch_article_lightweight(
@@ -2814,7 +2783,7 @@ async def scrape_article(
     *,
     allow_llm_extraction: bool = True,
 ) -> dict[str, Any]:
-    logging.info(f"Scraping article from URL: {url}")
+    logging.info("Scraping article request.")
     # Resolve scraper plan via router (configurable via YAML)
     ws_cfg: dict[str, Any] = {}
     try:
@@ -2874,90 +2843,62 @@ async def scrape_article(
 
     effective_ua = ua_headers.get("User-Agent", web_scraping_user_agent)
     try:
-        decision = await _decide_article_pre_fetch_policy(
+        target = await preflight_facade.evaluate_target(
             url,
             respect_robots=bool(getattr(plan, "respect_robots", True)),
             user_agent=effective_ua,
-            config=ws_cfg,
+            request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+            config={"web_scraper": ws_cfg},
+            policy_checker=_ARTICLE_POLICY_CHECKER,
         )
+    except asyncio.CancelledError:
+        raise
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-        logging.error(f"Outbound policy evaluation failed: {exc}")
-        return _attach_preflight({
-            "url": url,
-            "title": "N/A",
-            "author": "N/A",
-            "date": "N/A",
-            "content": "",
-            "extraction_successful": False,
-            "error": "Outbound policy evaluation failed. Please contact system administrator.",
-        })
+        logging.error(
+            "Outbound policy evaluation failed. "
+            "source=article_extract stage=pre_fetch "
+            f"exception_type={type(exc).__name__[:80]}"
+        )
+        return _attach_preflight(
+            {
+                "url": url,
+                "title": "N/A",
+                "author": "N/A",
+                "date": "N/A",
+                "content": "",
+                "extraction_successful": False,
+                "error": "Outbound policy evaluation failed. Please contact system administrator.",
+            }
+        )
 
-    if not decision.allowed:
-        return _attach_preflight(_blocked_article_result(url, decision))
+    if not target.decision.allowed:
+        return _attach_preflight(_blocked_article_result(url, target.decision))
 
-    preflight_analysis = None
-    preflight_notes: list[str] = []
-    preflight_method = "auto"
-    if _as_bool(ws_cfg.get("web_scraper_preflight_analyzers", False), False):
-        find_all = _as_bool(ws_cfg.get("web_scraper_preflight_find_all_waf", False), False)
-        impersonate = _as_bool(ws_cfg.get("web_scraper_preflight_impersonate", False), False)
-        scan_depth_raw = str(ws_cfg.get("web_scraper_preflight_scan_depth", "") or "").strip().lower()
-        if scan_depth_raw not in {"default", "thorough", "deep"}:
-            scan_depth_raw = "default"
-
-        try:
-            timeout_s = float(ws_cfg.get("web_scraper_preflight_timeout_s", 0) or 0)
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-            timeout_s = 0.0
-
-        try:
-            from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers import run_analysis
-
-            task = asyncio.to_thread(
-                run_analysis,
-                url,
-                find_all=find_all,
-                impersonate=impersonate,
-                scan_depth=scan_depth_raw,
+    options = preflight_facade.PreflightOptions.from_mapping(ws_cfg)
+    preflight_result = None
+    try:
+        if options.enabled:
+            context = preflight_facade.build_execution_context(
+                target,
+                options,
+                policy_checker=_ARTICLE_POLICY_CHECKER,
             )
-            if timeout_s and timeout_s > 0:
-                preflight_analysis = await asyncio.wait_for(task, timeout=timeout_s)
-            else:
-                preflight_analysis = await task
-        except asyncio.TimeoutError:
-            logging.debug(f"Preflight analysis timed out for {url}")
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-            logging.debug(f"Preflight analysis failed for {url}: {exc}")
+            preflight_result = await preflight_facade.run_preflight(target, options, context)
+    except asyncio.CancelledError:
+        raise
+    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
+        logging.debug("Preflight analysis failed.")
 
-    if preflight_analysis and isinstance(preflight_analysis, dict):
-        results = preflight_analysis.get("results", {})
-        if isinstance(results, dict):
-            js_result = results.get("js", {}) or {}
-            if (
-                preflight_method == "auto"
-                and js_result.get("status") == "success"
-                and (js_result.get("js_required") or js_result.get("is_spa"))
-            ):
-                preflight_method = "playwright"
-                preflight_notes.append("js_required")
-
-            tls_result = results.get("tls", {}) or {}
-            backend_setting = str(getattr(plan, "backend", "auto") or "auto").lower().strip()
-            if backend_setting == "auto" and tls_result.get("status") == "active":
-                backend_choice = "curl"
-                preflight_notes.append("tls_active")
-
-    include_preflight = _as_bool(ws_cfg.get("web_scraper_preflight_include_results", False), False)
-    preflight_payload = None
-    if include_preflight and preflight_analysis is not None:
-        preflight_payload = {
-            "analysis": preflight_analysis,
-            "advice": {
-                "backend": backend_choice,
-                "method": preflight_method,
-                "notes": preflight_notes,
-            },
-        }
+    backend_choice, preflight_method, preflight_result = preflight_facade.apply_preflight_advice(
+        preflight_result,
+        backend=backend_choice,
+        method="auto",
+        backend_setting=str(getattr(plan, "backend", "auto") or "auto").lower().strip(),
+    )
+    preflight_payload = preflight_facade.public_preflight_payload(
+        preflight_result,
+        options.include_results,
+    )
 
     if backend_choice != "playwright" and preflight_method != "playwright":
         # First try lightweight HTTP path (curl/httpx) before Playwright
@@ -3168,7 +3109,7 @@ def scrape_article_blocking(
             )
             if not decision.allowed:
                 return _blocked_article_result(url, decision)
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
+        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
             return {
                 "url": url,
                 "title": "N/A",

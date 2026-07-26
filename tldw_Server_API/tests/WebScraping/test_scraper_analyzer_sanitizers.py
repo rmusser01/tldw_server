@@ -1,14 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
-from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers import (
-    behavioral_detector,
-    captcha_detector,
-    js_detector,
-    rate_limit_profiler,
-    robots_checker,
-)
-
 
 pytestmark = pytest.mark.unit
 
@@ -23,61 +17,156 @@ def _assert_safe_text(value):
     assert "api_key" not in text.lower()
 
 
-def test_captcha_detector_sanitizes_defensive_failures(monkeypatch):
-    def fail_playwright():
-        raise RuntimeError("captcha backend failed at /private/captcha.json")
+class _FailingPageManager:
+    async def __aenter__(self):
+        raise RuntimeError(_LEAKY_ERROR)
 
-    monkeypatch.setattr(captcha_detector, "sync_playwright", fail_playwright)
+    async def __aexit__(self, *_args):
+        return None
 
-    result = captcha_detector.detect_captcha("https://example.com")
+
+class _FailingBrowserProbe:
+    def open_page(self, _options):
+        return _FailingPageManager()
+
+
+def _browser_context(**overrides):
+    values = {
+        "browser": _FailingBrowserProbe(),
+        "browser_identity": lambda: {"User-Agent": "sanitizer-test"},
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+@pytest.mark.asyncio
+async def test_captcha_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.captcha_detector import (
+        _detect_captcha,
+    )
+
+    result = await _detect_captcha("https://example.com", _browser_context())
 
     assert result == {"status": "error", "message": "Captcha detection failed."}
 
 
-def test_behavioral_detector_sanitizes_defensive_failures(monkeypatch):
-    def fail_playwright():
-        raise RuntimeError("behavior backend failed at /private/behavior.json")
+@pytest.mark.asyncio
+async def test_behavioral_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.behavioral_detector import (
+        _detect_honeypots,
+    )
 
-    monkeypatch.setattr(behavioral_detector, "sync_playwright", fail_playwright)
-
-    result = behavioral_detector.detect_honeypots("https://example.com")
+    result = await _detect_honeypots("https://example.com", _browser_context())
 
     assert result == {"status": "error", "message": "Honeypot detection failed."}
 
 
-def test_js_detector_sanitizes_defensive_failures(monkeypatch):
-    def fail_session(*_args, **_kwargs):
-        raise RuntimeError("js backend failed at /private/js.json")
+@pytest.mark.asyncio
+async def test_js_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.js_detector import (
+        _analyze_js_rendering,
+    )
 
-    monkeypatch.setattr(js_detector, "CurlCffiSession", fail_session)
-    monkeypatch.setattr(js_detector, "sync_playwright", lambda: None)
+    class FailingHttpProbe:
+        async def get(self, _request):
+            raise RuntimeError(_LEAKY_ERROR)
 
-    result = js_detector.analyze_js_rendering("https://example.com")
+    result = await _analyze_js_rendering(
+        "https://example.com",
+        _browser_context(http=FailingHttpProbe()),
+    )
 
     assert result == {"status": "error", "message": "JavaScript rendering analysis failed."}
 
 
-def test_robots_checker_sanitizes_fetch_failures(monkeypatch):
-    def fail_fetch(**_kwargs):
-        raise RuntimeError("robots backend failed at /private/robots.txt")
+@pytest.mark.asyncio
+async def test_fingerprint_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.fingerprint_analyzer import (
+        _analyze_fingerprinting,
+    )
 
-    monkeypatch.setattr(robots_checker, "http_fetch", fail_fetch)
+    result = await _analyze_fingerprinting("https://example.com", _browser_context())
 
-    result = robots_checker.check_robots_txt("https://example.com")
-
-    assert result == {"status": "error", "message": "Robots.txt check failed."}
+    assert result == {
+        "status": "error",
+        "message": "Fingerprint analysis failed.",
+        "error_code": "analyzer_error",
+        "detected_services": [],
+        "canvas_fingerprinting_signal": False,
+        "behavioral_listeners_detected": [],
+    }
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_profiler_sanitizes_defensive_failures(monkeypatch):
-    async def fail_profiler(*_args, **_kwargs):
-        raise RuntimeError("rate limit backend failed at /private/rate-limit.json")
+async def test_integrity_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.integrity_analyzer import (
+        _analyze_function_integrity,
+    )
 
-    monkeypatch.setattr(rate_limit_profiler, "_run_rate_limit_profiler", fail_profiler)
+    result = await _analyze_function_integrity("https://example.com", _browser_context())
 
-    result = await rate_limit_profiler.profile_rate_limits("https://example.com", crawl_delay=0)
+    assert result == {
+        "status": "error",
+        "message": "Function integrity analysis failed.",
+        "error_code": "analyzer_error",
+        "modified_functions": {},
+    }
 
-    assert result == {"status": "error", "message": "Rate limit profiling failed."}
+
+@pytest.mark.asyncio
+async def test_robots_checker_sanitizes_injected_probe_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.robots_checker import (
+        _check_robots_txt,
+    )
+
+    class FailingHttpProbe:
+        async def get(self, _request):
+            raise RuntimeError("robots backend failed at /private/robots.txt")
+
+    result = await _check_robots_txt(
+        "https://example.com",
+        SimpleNamespace(http=FailingHttpProbe()),
+    )
+
+    assert result == {
+        "status": "error",
+        "message": "Robots.txt check failed.",
+        "error_code": "analyzer_error",
+    }
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_profiler_sanitizes_injected_probe_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.rate_limit_profiler import (
+        _profile_rate_limits,
+    )
+
+    class FailingHttpProbe:
+        async def get(self, _request):
+            raise RuntimeError("rate limit backend failed at /private/rate-limit.json")
+
+    async def unexpected_sleep(_delay):
+        raise AssertionError("profiling must fail before sleeping")
+
+    def browser_identity():
+        return {"User-Agent": "sanitizer-test"}
+
+    context = SimpleNamespace(
+        http=FailingHttpProbe(),
+        controls=SimpleNamespace(sleep=unexpected_sleep),
+        browser_identity=browser_identity,
+    )
+    result = await _profile_rate_limits(
+        "https://example.com",
+        context,
+        crawl_delay=0,
+    )
+
+    assert result == {
+        "status": "error",
+        "message": "Rate limit profiling failed.",
+        "error_code": "analyzer_error",
+    }
 
 
 def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypatch):
