@@ -12,7 +12,7 @@
 
 ## Scope And Existing Coverage
 
-The branch was initially rebased onto `origin/dev` at `1b9518c68c` before this plan was written and was rebased again onto `origin/dev` at `0f3983788c` before final review. Stage 2A is test-only.
+The branch was initially rebased onto `origin/dev` at `1b9518c68c`, rebased onto `0f3983788c` before final review, and rebased again onto the latest `origin/dev` at `d710e5a5ee` before branch handoff. Stage 2A is test-only.
 
 **Files modified during implementation:**
 
@@ -1070,3 +1070,16 @@ git commit -m "chore(backlog): close embeddings workflow stage 2a"
 - [x] Add direct production endpoint identity and cache-key failure characterization and reconcile the error-routing text.
 - [x] Cover active-request cleanup on reservation denial and noncritical resource-governor commit failure.
 - [x] Normalize Backlog metadata, rerun all verification gates, and obtain final specification and quality approval.
+
+### Task 8: Refresh The Final Dev Base
+
+**Goal**: Rebase the approved Stage 2A branch onto the latest `origin/dev` immediately before handoff.
+
+**Success Criteria**: The rebase is conflict-free, focused post-rebase tests and static checks pass, tracking names the final base, and the branch has no commits behind `origin/dev`.
+
+**Tests**: Focused remediation tests, Ruff, Bandit, and diff/scope checks.
+
+**Status**: Complete
+
+- [x] Rebase the 12 Stage 2A commits onto `origin/dev` at `d710e5a5ee`.
+- [x] Run post-rebase verification and refresh closeout metadata.
