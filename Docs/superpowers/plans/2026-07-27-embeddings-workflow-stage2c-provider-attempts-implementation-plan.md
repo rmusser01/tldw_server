@@ -995,7 +995,7 @@ git commit -m "fix(embeddings): re-resolve fallback write identity"
 - Verify: `tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py`
 - Verify: `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`
 
-- [ ] **Step 1: Run the focused Stage 2C regression suite**
+- [x] **Step 1: Run the focused Stage 2C regression suite**
 
 Run:
 
@@ -1005,7 +1005,7 @@ Run:
 
 Expected: all selected tests pass. Investigate and fix failures before continuing.
 
-- [ ] **Step 2: Run Bandit on touched production code**
+- [x] **Step 2: Run Bandit on touched production code**
 
 Run:
 
@@ -1015,7 +1015,7 @@ Run:
 
 Expected: no new security findings in touched production code.
 
-- [ ] **Step 3: Run a git self-review**
+- [x] **Step 3: Run a git self-review**
 
 Run:
 
@@ -1026,7 +1026,7 @@ git diff origin/codex/embeddings-workflow-stage2b-contracts -- tldw_Server_API/a
 
 Expected: no whitespace errors; diff shows only Stage 2C provider-attempt extraction, shared executor-output relocation, fallback write identity correction, tests, plan, and backlog updates.
 
-- [ ] **Step 4: Update Backlog acceptance criteria and notes**
+- [x] **Step 4: Update Backlog acceptance criteria and notes**
 
 Use Backlog.md tooling, not manual edits, to check completed acceptance criteria, append verification output, and add touched files. Example:
 
@@ -1034,7 +1034,7 @@ Use Backlog.md tooling, not manual edits, to check completed acceptance criteria
 /opt/homebrew/bin/backlog task edit 12973.3 --check-ac 1 --check-ac 2 --check-ac 3 --check-ac 4 --check-ac 5 --check-ac 6 --check-ac 7 --check-ac 8 --check-ac 9 --check-ac 10 --check-ac 11 --check-ac 12 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --append-notes "Verification: provider-attempt, orchestrator, workflow-types, endpoint parity focused tests passed; Bandit touched scope passed."
 ```
 
-- [ ] **Step 5: Commit final tracking updates**
+- [x] **Step 5: Commit final tracking updates**
 
 If the plan has not yet been committed, include it with the final tracking commit:
 
