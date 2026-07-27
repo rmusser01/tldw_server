@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import warnings
 from pathlib import Path
 
 import pytest
@@ -136,9 +137,10 @@ def test_swap_failure_restores_old_output_and_propagates(
     assert not list(tmp_path.glob(".fixtures.backup-*"))
 
 
-def test_backup_cleanup_failure_keeps_committed_output_and_warns(
+def test_backup_cleanup_failure_keeps_committed_output_and_reports_diagnostic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     output = tmp_path / "fixtures"
     output.mkdir()
@@ -152,13 +154,48 @@ def test_backup_cleanup_failure_keeps_committed_output_and_warns(
 
     monkeypatch.setattr(generator.shutil, "rmtree", _fail_backup_cleanup)
 
-    with pytest.warns(RuntimeWarning, match="backup cleanup failed") as warning_records:
+    generator._replace_output_directory(staging, output)
+
+    assert (output / "state.txt").read_text(encoding="utf-8") == "new-sensitive-output\n"
+    backups = list(tmp_path.glob(".fixtures.backup-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "state.txt").read_text(encoding="utf-8") == "old-sensitive-output\n"
+    diagnostic = capsys.readouterr().err
+    assert "fixture output committed; backup cleanup failed" in diagnostic.lower()
+    assert backups[0].name in diagnostic
+    assert str(tmp_path) not in diagnostic
+    assert "old-sensitive-output" not in diagnostic
+    assert "new-sensitive-output" not in diagnostic
+
+
+def test_backup_cleanup_failure_is_nonfatal_when_runtime_warnings_are_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "fixtures"
+    output.mkdir()
+    (output / "state.txt").write_text("old-sensitive-output\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "state.txt").write_text("new-sensitive-output\n", encoding="utf-8")
+
+    def _fail_backup_cleanup(_path: Path) -> None:
+        raise OSError("injected cleanup failure")
+
+    monkeypatch.setattr(generator.shutil, "rmtree", _fail_backup_cleanup)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
         generator._replace_output_directory(staging, output)
 
     assert (output / "state.txt").read_text(encoding="utf-8") == "new-sensitive-output\n"
     backups = list(tmp_path.glob(".fixtures.backup-*"))
     assert len(backups) == 1
     assert (backups[0] / "state.txt").read_text(encoding="utf-8") == "old-sensitive-output\n"
-    warning = str(warning_records[0].message)
-    assert "old-sensitive-output" not in warning
-    assert "new-sensitive-output" not in warning
+    diagnostic = capsys.readouterr().err
+    assert "fixture output committed; backup cleanup failed" in diagnostic.lower()
+    assert backups[0].name in diagnostic
+    assert str(tmp_path) not in diagnostic
+    assert "old-sensitive-output" not in diagnostic
+    assert "new-sensitive-output" not in diagnostic

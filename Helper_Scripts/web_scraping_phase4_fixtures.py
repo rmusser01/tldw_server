@@ -13,7 +13,6 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import uuid
-import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -251,11 +250,10 @@ def _replace_output_directory(staging: Path, output: Path) -> None:
             try:
                 shutil.rmtree(backup)
             except OSError:
-                warnings.warn(
-                    "Fixture output committed; backup cleanup failed. "
-                    f"Backup retained at {backup.name!r} for manual cleanup.",
-                    RuntimeWarning,
-                    stacklevel=2,
+                print(
+                    "warning: fixture output committed; backup cleanup failed; "
+                    f"backup retained as {backup.name!r} for manual cleanup",
+                    file=sys.stderr,
                 )
 
 
