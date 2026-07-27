@@ -863,7 +863,7 @@ git commit -m "test(embeddings): cover provider attempt failure routing"
 - Modify: `tldw_Server_API/app/core/Embeddings/orchestrator.py`
 - Modify: `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`
 
-- [ ] **Step 1: Write the failing fallback write-identity correction test**
+- [x] **Step 1: Write the failing fallback write-identity correction test**
 
 Add this test near the fallback identity coverage in `test_embedding_orchestrator.py`:
 
@@ -933,7 +933,7 @@ async def test_fallback_writeback_re_resolves_backend_identity_after_provider_ex
     ]
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -943,7 +943,7 @@ Run:
 
 Expected: failure because fallback cache writeback uses the read-time identity.
 
-- [ ] **Step 3: Apply the minimal fallback correction**
+- [x] **Step 3: Apply the minimal fallback correction**
 
 In `_execute_coherent_fallback`, keep the existing read identity before cache lookup. After executor success, vector-count validation, and request-specific postprocessing, resolve a second identity before building cache write keys:
 
@@ -969,7 +969,7 @@ In `_execute_coherent_fallback`, keep the existing read identity before cache lo
 
 Do not change primary execution or fallback exception classification in this task.
 
-- [ ] **Step 4: Run the correction and guardrail tests**
+- [x] **Step 4: Run the correction and guardrail tests**
 
 Run:
 
@@ -979,7 +979,7 @@ Run:
 
 Expected: the new correction test passes and the Stage 2D guardrail test still passes.
 
-- [ ] **Step 5: Commit the correction**
+- [x] **Step 5: Commit the correction**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py

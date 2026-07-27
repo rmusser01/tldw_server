@@ -1790,6 +1790,74 @@ async def test_malformed_fallback_cached_vector_becomes_miss_and_is_replaced():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_fallback_writeback_re_resolves_backend_identity_after_provider_execution():
+    fallback_model = "sentence-transformers/all-MiniLM-L6-v2"
+    primary_error = EmbeddingProviderError(
+        "provider_unavailable",
+        "openai unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    cache = RecordingCache()
+    executor = RecordingExecutor(
+        failures={"openai": primary_error},
+        provider_vectors={"huggingface": [[0.25, 0.75]]},
+    )
+    identity_calls: list[tuple[str, str]] = []
+
+    def backend_identity_resolver(provider: str, model: str) -> str:
+        identity_calls.append((provider, model))
+        if provider == "huggingface":
+            fallback_identity_count = sum(
+                1 for call in identity_calls if call == (provider, model)
+            )
+            suffix = "read" if fallback_identity_count == 1 else "write"
+            return f"{provider}:{model}:{suffix}"
+        return f"{provider}:{model}:identity"
+
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=backend_identity_resolver,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": fallback_model,
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "identity correction",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.provider == "huggingface"
+    assert cache.get_keys == [
+        "identity correction|openai|text-embedding-3-small|"
+        "openai:text-embedding-3-small:identity",
+        f"identity correction|huggingface|{fallback_model}|"
+        f"huggingface:{fallback_model}:read",
+    ]
+    assert cache.set_calls == [
+        (
+            f"identity correction|huggingface|{fallback_model}|"
+            f"huggingface:{fallback_model}:write",
+            [0.25, 0.75],
+        )
+    ]
+    assert identity_calls == [
+        ("openai", "text-embedding-3-small"),
+        ("openai", "text-embedding-3-small"),
+        ("huggingface", fallback_model),
+        ("huggingface", fallback_model),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_malformed_numeric_string_vector_is_rejected_without_cache_writeback():
     cache = RecordingCache()
     executor = RecordingExecutor(vectors=["123"])  # type: ignore[list-item]

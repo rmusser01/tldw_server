@@ -383,6 +383,7 @@ class EmbeddingRequestOrchestrator:
                 dimensions=plan.dimensions,
                 dimension_policy=prepared.effective_dimension_policy,
             )
+            write_backend_identity = self._backend_identity_resolver(provider, model)
             for index, text, vector, cache_vector in zip(
                 miss_indices,
                 miss_texts,
@@ -391,7 +392,13 @@ class EmbeddingRequestOrchestrator:
             ):
                 results[index] = vector
                 if not embeddings_from_adapter:
-                    key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
+                    key = self._cache_key(
+                        text,
+                        provider,
+                        model,
+                        plan.dimensions,
+                        write_backend_identity,
+                    )
                     pending_cache_writes.append((key, cache_vector))
 
         vectors = self._vector_processor.validate_vector_count(
