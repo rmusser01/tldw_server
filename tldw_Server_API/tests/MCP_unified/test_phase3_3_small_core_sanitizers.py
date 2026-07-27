@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
     IdempotencyExecutionPolicy,
     PreparedExecutionPolicy,
 )
+from tldw_Server_API.app.core.MCP_unified.tool_observability import (
+    ensure_tool_definition_eval_metadata,
+)
 
 LEAKED_DETAIL = "backend exploded /tmp/mcp-secret-token token=sk-mcp-secret"
 
@@ -126,6 +129,23 @@ class _FakeTelemetry:
 class _FailingToolModule:
     name = "demo_module"
 
+    def __init__(self) -> None:
+        self.tool_definition = ensure_tool_definition_eval_metadata(
+            {
+                "name": "demo.read",
+                "inputSchema": {"type": "object"},
+                "metadata": {"category": "read"},
+            }
+        )
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [self.tool_definition]
+
+    async def get_tool_def(self, tool_name: str) -> dict[str, Any] | None:
+        if tool_name == self.tool_definition["name"]:
+            return self.tool_definition
+        return None
+
     def is_write_tool_call(
         self,
         tool_name: str,
@@ -146,6 +166,21 @@ class _FailingToolModule:
     ) -> Any:
         del tool_name, arguments, context
         raise RuntimeError(LEAKED_DETAIL)
+
+
+class _FailingToolRegistry:
+    def __init__(self, module: _FailingToolModule) -> None:
+        self.module = module
+
+    async def find_module_for_tool(self, tool_name: str) -> _FailingToolModule | None:
+        if tool_name == self.module.tool_definition["name"]:
+            return self.module
+        return None
+
+    def get_module_id_for_tool(self, tool_name: str) -> str | None:
+        if tool_name == self.module.tool_definition["name"]:
+            return self.module.name
+        return None
 
 
 class _ExternalAdapter(ExternalMCPTransportAdapter):
@@ -204,16 +239,15 @@ class _ExternalAdapter(ExternalMCPTransportAdapter):
         return ExternalToolCallResult(content=[{"type": "text", "text": "ok"}])
 
 
-def _prepared_tool_call(protocol: MCPProtocol, context: RequestContext) -> PreparedToolCall:
-    tool_name = "demo.read"
+def _prepared_tool_call(
+    protocol: MCPProtocol,
+    context: RequestContext,
+    module: _FailingToolModule,
+) -> PreparedToolCall:
+    tool_def = module.tool_definition
+    tool_name = tool_def["name"]
     tool_args = {"query": "safe"}
-    module_id = "demo_module"
-    module = _FailingToolModule()
-    tool_def = {
-        "name": tool_name,
-        "inputSchema": {"type": "object"},
-        "metadata": {"category": "read"},
-    }
+    module_id = module.name
     tool_definition_encoded = canonical_json_bytes(tool_def, max_bytes=1_000_000)
     scope_reporting_encoded = canonical_json_bytes(None, max_bytes=256_000)
     tool_definition_snapshot = CanonicalJsonSnapshot(
@@ -325,12 +359,14 @@ async def test_protocol_tool_execution_failure_log_omits_raw_exception_and_trace
     )
 
     fake_telemetry = _FakeTelemetry()
+    module = _FailingToolModule()
     deps = build_default_runtime_dependencies()
+    deps.module_registry = _FailingToolRegistry(module)
     deps.telemetry_provider = fake_telemetry
     protocol = MCPProtocol(dependencies=deps)
     protocol.rate_limiter = _NoopRateLimiter()
     context = RequestContext(request_id="req-tool", client_id="client-tool")
-    prepared = _prepared_tool_call(protocol, context)
+    prepared = _prepared_tool_call(protocol, context, module)
     messages, sink_id = _capture_protocol_logs(level="ERROR")
     try:
         with pytest.raises(RuntimeError):
