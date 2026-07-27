@@ -185,6 +185,8 @@ class IdempotencyManager:
         )
         try:
             self._on_degraded(stage, error_type)
+        except asyncio.CancelledError:
+            raise
         except BaseException as observer_exc:  # noqa: BLE001 - synchronous metrics cannot replace outcomes.
             logger.debug(
                 "MCP idempotency degraded observer failed error_type={error_type}",

@@ -1543,6 +1543,42 @@ async def test_hostile_degraded_observer_cannot_replace_outcome_or_leak_name() -
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_degraded_observer_cancellation_propagates_exact_instance() -> None:
+    cancellation = asyncio.CancelledError("observer cancellation")
+
+    def _cancelling_observer(_stage: str, _error_type: str) -> None:
+        raise cancellation
+
+    manager = _local_manager(on_degraded=_cancelling_observer)
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"value": object()}
+
+    try:
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await manager.execute(
+                "degraded-observer-cancellation",
+                "args",
+                _execute,
+                policy=_policy(),
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert caught.value is cancellation
+    assert calls == 1
+    assert "degraded-observer-cancellation" not in manager._local_cache
+    assert "degraded-observer-cancellation" in manager._local_bindings
+    assert all("degraded observer failed" not in message for message in messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_hostile_exception_attribute_hook_cannot_replace_degraded_outcome() -> None:
     class _HostileObserverError(BaseException):
         def __getattribute__(self, name: str) -> Any:
