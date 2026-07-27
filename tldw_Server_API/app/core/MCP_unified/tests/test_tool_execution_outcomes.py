@@ -13,9 +13,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, Module
 
 
 def _outcomes_module() -> Any:
-    return importlib.import_module(
-        "tldw_Server_API.app.core.MCP_unified.execution_outcomes"
-    )
+    return importlib.import_module("tldw_Server_API.app.core.MCP_unified.execution_outcomes")
 
 
 def test_expected_tool_failure_reason_catalog_is_fixed_and_bounded() -> None:
@@ -57,14 +55,10 @@ def test_expected_tool_failure_reason_catalog_is_fixed_and_bounded() -> None:
     }
 
     assert {
-        name: member.value
-        for name, member in outcomes.ExpectedToolFailureReason.__members__.items()
+        name: member.value for name, member in outcomes.ExpectedToolFailureReason.__members__.items()
     } == expected_values
 
-    values = [
-        member.value
-        for member in outcomes.ExpectedToolFailureReason.__members__.values()
-    ]
+    values = [member.value for member in outcomes.ExpectedToolFailureReason.__members__.values()]
     assert len(values) == len(set(values))
     for reason_code, public_message, breaker_action in values:
         assert re.fullmatch(r"^[a-z][a-z0-9_]{0,63}$", reason_code)
@@ -93,10 +87,19 @@ def test_expected_tool_failure_accepts_only_a_catalog_reason() -> None:
         failure.breaker_action = outcomes.BreakerAction.IGNORE
 
 
+def test_expected_tool_failure_cannot_be_subclassed() -> None:
+    outcomes = _outcomes_module()
+
+    with pytest.raises(TypeError, match="cannot be subclassed"):
+
+        class _InjectingExpectedFailure(outcomes.ExpectedToolFailure):
+            @property
+            def reason_code(self) -> str:
+                return "SENTINEL_EXPECTED_SUBCLASS_SECRET"
+
+
 def test_module_outcome_wrappers_do_not_render_the_original_exception() -> None:
-    base = importlib.import_module(
-        "tldw_Server_API.app.core.MCP_unified.modules.base"
-    )
+    base = importlib.import_module("tldw_Server_API.app.core.MCP_unified.modules.base")
     original = RuntimeError("SENTINEL_WRAPPER_SECRET")
 
     ignored = base._IgnoredModuleOutcome(original)
@@ -178,19 +181,14 @@ async def test_base_module_failure_logs_are_structured_and_message_safe() -> Non
         outcomes = _outcomes_module()
 
         async def fail_expected() -> None:
-            raise outcomes.ExpectedToolFailure(
-                outcomes.ExpectedToolFailureReason.DEPENDENCY_UNAVAILABLE
-            )
+            raise outcomes.ExpectedToolFailure(outcomes.ExpectedToolFailureReason.DEPENDENCY_UNAVAILABLE)
 
         with pytest.raises(outcomes.ExpectedToolFailure):
             await execution_module.execute_with_circuit_breaker(fail_expected)
     finally:
         logger.remove(sink_id)
 
-    rendered = "\n".join(
-        f"{record['message']} {record['extra']!r} {record['exception']!r}"
-        for record in captured
-    )
+    rendered = "\n".join(f"{record['message']} {record['extra']!r} {record['exception']!r}" for record in captured)
     assert "SENTINEL_MODULE_SECRET" not in rendered
     assert "_SentinelModuleError" in rendered
     assert "ExpectedToolFailure" in rendered

@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import re
 import time
+from collections.abc import Iterator, Mapping
 from enum import Enum
 from types import SimpleNamespace
 from typing import Any
@@ -278,6 +279,44 @@ class _RecordingTelemetry:
         return contextlib.nullcontext(span)
 
 
+class _FaultingSpan:
+    def __init__(self, phase: str, failure: BaseException) -> None:
+        self.phase = phase
+        self.failure = failure
+
+    def set_attribute(self, *_args: Any, **_kwargs: Any) -> None:
+        if self.phase == "attribute":
+            raise self.failure
+
+
+class _FaultingSpanContext:
+    def __init__(self, phase: str, failure: BaseException) -> None:
+        self.phase = phase
+        self.failure = failure
+        self.span = _FaultingSpan(phase, failure)
+
+    def __enter__(self) -> _FaultingSpan:
+        if self.phase == "enter":
+            raise self.failure
+        return self.span
+
+    def __exit__(self, *_args: Any) -> bool:
+        if self.phase == "exit":
+            raise self.failure
+        return self.phase == "suppress"
+
+
+class _FaultingTelemetry:
+    def __init__(self, phase: str, failure: BaseException) -> None:
+        self.phase = phase
+        self.failure = failure
+
+    def trace_context(self, *_args: Any, **_kwargs: Any) -> _FaultingSpanContext:
+        if self.phase == "create":
+            raise self.failure
+        return _FaultingSpanContext(self.phase, self.failure)
+
+
 class _ToolModule:
     name = "test_module"
 
@@ -455,6 +494,26 @@ class _ExpectedFailureBreakerModule(BaseModule):
 class _UnavailableRateLimiter:
     async def check_rate_limit(self, *_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("SENTINEL_RATE_LIMIT_BACKEND_SECRET")
+
+
+class _MutableClock:
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _ClockAdvancingRateLimiter:
+    def __init__(self, clock: _MutableClock, now: float, *, fail: bool = False) -> None:
+        self.clock = clock
+        self.now = now
+        self.fail = fail
+
+    async def check_rate_limit(self, *_args: Any, **_kwargs: Any) -> None:
+        self.clock.now = self.now
+        if self.fail:
+            raise RuntimeError("SENTINEL_RATE_LIMIT_BACKEND_SECRET")
 
 
 class _MemoryRedis:
@@ -1586,6 +1645,110 @@ async def test_exotic_invalid_params_metric_cannot_replace_original_failure() ->
         )
 
 
+@pytest.mark.parametrize("phase", ["create", "enter", "attribute", "exit", "suppress"])
+@pytest.mark.asyncio
+async def test_hostile_telemetry_cannot_replace_expected_failure(
+    phase: str,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    sentinel = f"SENTINEL_TELEMETRY_EXPECTED_SECRET:{phase}"
+    reason = ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    module = _ExpectedFailureBreakerModule(ExpectedToolFailure(reason))
+    protocol, recorder = _protocol(
+        module=module,
+        telemetry_provider=_FaultingTelemetry(phase, ExoticObserverError(sentinel)),
+    )
+    captured: list[Any] = []
+    sink_id = logger.add(lambda message: captured.append(message.record), level="DEBUG")
+    try:
+        result = await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"value": "A"}},
+            _request_context(),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    assert module.calls == 1
+    assert len(recorder.events) == 1
+    assert sentinel not in repr((result, recorder.events, captured))
+
+
+@pytest.mark.parametrize("phase", ["create", "enter", "attribute", "exit"])
+@pytest.mark.asyncio
+async def test_hostile_telemetry_cannot_redispatch_idempotent_success(
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    module = _ToolModule(write=True)
+    protocol, _recorder = _protocol(
+        module=module,
+        telemetry_provider=_FaultingTelemetry(
+            phase,
+            ExoticObserverError(f"SENTINEL_TELEMETRY_SUCCESS_SECRET:{phase}"),
+        ),
+    )
+    params = {
+        "name": "test.write",
+        "arguments": {"value": "A"},
+        "idempotencyKey": f"hostile-telemetry-{phase}",
+    }
+    try:
+        first = await protocol._handle_tools_call(params, _request_context())
+        replay = await protocol._handle_tools_call(params, _request_context())
+    finally:
+        get_config.cache_clear()  # type: ignore[attr-defined]
+
+    assert first["content"] == replay["content"]
+    assert module.calls == 1
+
+
+@pytest.mark.parametrize("phase", ["create", "enter", "attribute", "exit"])
+@pytest.mark.asyncio
+async def test_telemetry_boundary_cancellation_propagates_without_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    cancellation = asyncio.CancelledError(f"SENTINEL_TELEMETRY_CANCEL:{phase}")
+    module = _ToolModule(write=True)
+    protocol, recorder = _protocol(
+        module=module,
+        telemetry_provider=_FaultingTelemetry(phase, cancellation),
+    )
+    try:
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await protocol._handle_tools_call(
+                {
+                    "name": "test.write",
+                    "arguments": {"value": "A"},
+                    "idempotencyKey": f"telemetry-cancel-{phase}",
+                },
+                _request_context(),
+            )
+    finally:
+        get_config.cache_clear()  # type: ignore[attr-defined]
+
+    assert caught.value is cancellation
+    assert protocol._idempotency._local_cache == {}
+    assert recorder.events == []
+
+
 def test_reporting_classifier_recognizes_expected_failure_shape_without_message_access() -> None:
     from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
         ExpectedToolFailure,
@@ -1695,6 +1858,110 @@ def test_reporting_classifier_sanitizes_valid_host_neutral_expected_failure_shap
     )
 
 
+def test_reporting_classifier_guards_hostile_class_descriptor() -> None:
+    class _HostileClassDescriptor(LookupError):
+        @property
+        def __class__(self) -> type[object]:
+            raise RuntimeError("SENTINEL_CLASS_DESCRIPTOR_SECRET")
+
+    assert classify_tool_use_exception(_HostileClassDescriptor()) == (
+        "unavailable",
+        "tool_unavailable",
+    )
+
+
+@pytest.mark.parametrize("field", ["governance", "approval"])
+def test_reporting_classifier_guards_hostile_structured_descriptors(field: str) -> None:
+    class _HostileDescriptorError(BaseException):
+        pass
+
+    if field == "governance":
+
+        class GovernanceDeniedError(Exception):
+            @property
+            def governance(self) -> object:
+                raise _HostileDescriptorError("SENTINEL_GOVERNANCE_DESCRIPTOR_SECRET")
+
+        failure: BaseException = GovernanceDeniedError()
+        expected = ("denied", "policy_denied")
+    else:
+
+        class ApprovalRequiredError(Exception):
+            @property
+            def approval(self) -> object:
+                raise _HostileDescriptorError("SENTINEL_APPROVAL_DESCRIPTOR_SECRET")
+
+        failure = ApprovalRequiredError()
+        expected = ("approval_required", "approval_required")
+
+    assert classify_tool_use_exception(failure) == expected
+
+
+def test_reporting_classifier_guards_hostile_mapping_reads() -> None:
+    class _HostileMapping(Mapping[str, object]):
+        def __getitem__(self, _key: str) -> object:
+            raise RuntimeError("SENTINEL_MAPPING_DESCRIPTOR_SECRET")
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(("reason_code",))
+
+        def __len__(self) -> int:
+            return 1
+
+    class GovernanceDeniedError(Exception):
+        governance = _HostileMapping()
+
+    assert classify_tool_use_exception(GovernanceDeniedError()) == (
+        "denied",
+        "policy_denied",
+    )
+
+
+@pytest.mark.parametrize("field", ["governance", "approval", "mapping"])
+def test_reporting_classifier_propagates_structured_descriptor_cancellation(
+    field: str,
+) -> None:
+    cancellation = asyncio.CancelledError()
+
+    if field == "governance":
+
+        class _CancellingFailure(Exception):
+            @property
+            def governance(self) -> object:
+                raise cancellation
+
+        failure: BaseException = _CancellingFailure()
+    elif field == "approval":
+
+        class _CancellingFailure(Exception):  # type: ignore[no-redef]
+            @property
+            def approval(self) -> object:
+                raise cancellation
+
+        failure = _CancellingFailure()
+    else:
+
+        class _CancellingMapping(Mapping[str, object]):
+            def __getitem__(self, _key: str) -> object:
+                raise cancellation
+
+            def __iter__(self) -> Iterator[str]:
+                return iter(("reason_code",))
+
+            def __len__(self) -> int:
+                return 1
+
+        class GovernanceDeniedError(Exception):
+            governance = _CancellingMapping()
+
+        failure = GovernanceDeniedError()
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        classify_tool_use_exception(failure)
+
+    assert caught.value is cancellation
+
+
 @pytest.mark.parametrize("cache_backend", ["local", "redis"])
 @pytest.mark.asyncio
 async def test_expected_write_failure_returns_exact_tool_error_without_result_cache(
@@ -1801,6 +2068,84 @@ async def test_fail_closed_rate_limit_expected_failure_is_observed_before_execut
     assert recorder.events[0].status == "error"
     assert recorder.events[0].reason_code == reason.reason_code
     assert recorder.events[0].execution_origin == "failed_before_execution"
+
+
+@pytest.mark.asyncio
+async def test_pre_module_expected_failure_observers_use_total_elapsed_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_module = __import__(
+        "tldw_Server_API.app.core.MCP_unified.tool_execution.runtime",
+        fromlist=["runtime"],
+    )
+    clock = _MutableClock(100.0)
+    monkeypatch.setattr(runtime_module.time, "time", clock)
+    module = _FailClosedToolModule()
+    hooks = _RecordingPostToolHookManager()
+    protocol, _recorder = _protocol(
+        module=module,
+        rate_limiter=_ClockAdvancingRateLimiter(clock, 100.4, fail=True),
+        hook_manager=hooks,
+    )
+    audit_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        protocol._tool_execution_reporter,
+        "audit_tool_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+
+    await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(),
+    )
+
+    assert [call["duration_ms"] for call in audit_calls] == pytest.approx([400.0])
+    assert [context.duration_ms for context in hooks.after_contexts] == pytest.approx([400.0])
+
+
+@pytest.mark.asyncio
+async def test_module_expected_failure_observers_use_owner_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    runtime_module = __import__(
+        "tldw_Server_API.app.core.MCP_unified.tool_execution.runtime",
+        fromlist=["runtime"],
+    )
+    clock = _MutableClock(100.0)
+    monkeypatch.setattr(runtime_module.time, "time", clock)
+    module = _ExpectedFailureBreakerModule(ExpectedToolFailure(ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE))
+    original_execute_tool = module.execute_tool
+
+    async def _advance_then_fail(*args: Any, **kwargs: Any) -> Any:
+        clock.now = 105.0
+        return await original_execute_tool(*args, **kwargs)
+
+    monkeypatch.setattr(module, "execute_tool", _advance_then_fail)
+    hooks = _RecordingPostToolHookManager()
+    protocol, _recorder = _protocol(
+        module=module,
+        rate_limiter=_ClockAdvancingRateLimiter(clock, 103.0),
+        hook_manager=hooks,
+    )
+    audit_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        protocol._tool_execution_reporter,
+        "audit_tool_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+
+    await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(),
+    )
+
+    assert [call["duration_ms"] for call in audit_calls] == pytest.approx([2000.0])
+    assert [context.duration_ms for context in hooks.after_contexts] == pytest.approx([2000.0])
 
 
 @pytest.mark.parametrize(
@@ -2242,6 +2587,48 @@ async def test_expected_failure_sentinel_is_absent_from_all_observable_surfaces(
     )
     assert sentinel not in surfaces
     assert "ExpectedToolFailure" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_malformed_expected_failure_uses_generic_path_without_secret_disclosure() -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import ExpectedToolFailure
+
+    sentinel = "SENTINEL_MALFORMED_EXPECTED_FAILURE_SECRET"
+
+    class _InjectingReason:
+        reason_code = sentinel
+        public_message = sentinel
+
+    failure = ExpectedToolFailure.__new__(ExpectedToolFailure)
+    Exception.__init__(failure, sentinel)
+    object.__setattr__(failure, "_reason", _InjectingReason())
+    telemetry = _RecordingTelemetry()
+    protocol, recorder = _protocol(
+        module=_ToolModule(fail=failure),
+        telemetry_provider=telemetry,
+    )
+    captured: list[Any] = []
+    sink_id = logger.add(lambda message: captured.append(message.record), level="DEBUG")
+    try:
+        with pytest.raises(RuntimeError, match="^tool_execution_error$") as caught:
+            await protocol._handle_tools_call(
+                {"name": "test.read", "arguments": {"value": "A"}},
+                _request_context(),
+            )
+    finally:
+        logger.remove(sink_id)
+
+    surfaces = repr(
+        {
+            "payload": caught.value,
+            "events": recorder.events,
+            "telemetry": [span.attributes for span in telemetry.spans],
+            "audit_and_logs": captured,
+        }
+    )
+    assert sentinel not in surfaces
+    assert len(recorder.events) == 1
+    assert recorder.events[0].status == "error"
 
 
 @pytest.mark.asyncio

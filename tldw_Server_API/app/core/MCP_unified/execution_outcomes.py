@@ -59,6 +59,10 @@ class ExpectedToolFailure(Exception):
 
     __slots__ = ("_reason",)
 
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        del cls, kwargs
+        raise TypeError("ExpectedToolFailure cannot be subclassed")
+
     def __init__(self, reason: ExpectedToolFailureReason) -> None:
         if not isinstance(reason, ExpectedToolFailureReason):
             raise TypeError("reason must be an ExpectedToolFailureReason")
@@ -80,3 +84,17 @@ class ExpectedToolFailure(Exception):
     @property
     def breaker_action(self) -> BreakerAction:
         return self._reason.breaker_action
+
+
+def get_expected_tool_failure_reason(
+    failure: BaseException,
+) -> ExpectedToolFailureReason | None:
+    """Return the exact stored catalog reason for a valid expected failure."""
+
+    if type(failure) is not ExpectedToolFailure:
+        return None
+    try:
+        reason = object.__getattribute__(failure, "_reason")
+    except (AttributeError, TypeError):
+        return None
+    return reason if type(reason) is ExpectedToolFailureReason else None

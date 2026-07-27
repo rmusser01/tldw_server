@@ -11,7 +11,11 @@ from mcp_unified.tool_use_reporting.builders import classify_tool_use_exception
 from mcp_unified.tool_use_reporting.models import ToolUseStatus
 
 from ..auth.rate_limiter import RateLimitExceeded
-from ..execution_outcomes import ExpectedToolFailure, ExpectedToolFailureReason
+from ..execution_outcomes import (
+    ExpectedToolFailure,
+    ExpectedToolFailureReason,
+    get_expected_tool_failure_reason,
+)
 from ..protocol_types import InvalidParamsException, PreparedToolCall, RequestContext
 from ..tool_observability import (
     attach_execution_eval_metadata,
@@ -39,6 +43,76 @@ def _safe_exception_family(exc: BaseException) -> str:
     except BaseException:  # noqa: BLE001 - hostile exceptions cannot replace outcomes.
         return "Exception"
     return "Exception"
+
+
+class _NoopSpan:
+    """Inert span used when the telemetry adapter is unavailable."""
+
+    def set_attribute(self, _key: str, _value: Any) -> None:
+        return None
+
+
+class _BestEffortSpanContext:
+    """Isolate a synchronous telemetry context from the tool outcome."""
+
+    def __init__(self, context_manager: Any | None) -> None:
+        self._context_manager = context_manager
+        self._entered = False
+
+    def __enter__(self) -> Any:
+        if self._context_manager is None:
+            return _NoopSpan()
+        try:
+            span = self._context_manager.__enter__()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - telemetry is best effort.
+            return _NoopSpan()
+        self._entered = True
+        return span
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> bool:
+        if not self._entered:
+            return False
+        try:
+            self._context_manager.__exit__(exc_type, exc, traceback)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - telemetry cannot replace tool outcomes.
+            return False
+        return False
+
+
+def _best_effort_span_context(
+    telemetry: Any,
+    operation_name: str,
+    attributes: dict[str, Any],
+) -> _BestEffortSpanContext:
+    """Create a tool span without allowing ordinary adapter errors to escape."""
+
+    try:
+        context_manager = telemetry.trace_context(operation_name, attributes)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - telemetry is best effort.
+        context_manager = None
+    return _BestEffortSpanContext(context_manager)
+
+
+def _set_span_attribute(span: Any, key: str, value: Any) -> None:
+    """Set one telemetry attribute without changing the tool outcome."""
+
+    try:
+        span.set_attribute(key, value)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - telemetry is best effort.
+        return None
 
 
 class ToolExecutionRuntime:
@@ -143,7 +217,7 @@ class ToolExecutionRuntime:
             return prepared.scope_payload
 
         def _expected_failure_payload(
-            failure: ExpectedToolFailure,
+            reason: ExpectedToolFailureReason,
         ) -> dict[str, Any]:
             duration_ms = max(0.0, (time.time() - execution_start_ts) * 1000.0)
             execution_eval = execution_eval_metadata_from_tool_definition(
@@ -154,8 +228,8 @@ class ToolExecutionRuntime:
             )
             failure_content = {
                 "status": "failed",
-                "reason_code": failure.reason_code,
-                "message": failure.public_message,
+                "reason_code": reason.reason_code,
+                "message": reason.public_message,
             }
             return {
                 "content": [{"type": "json", "json": failure_content}],
@@ -221,7 +295,7 @@ class ToolExecutionRuntime:
                     "tool={tool_name} error_type={error_type} fail_closed={fail_closed}",
                     module_id=module_id or "unknown",
                     tool_name=tool_name,
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                     fail_closed=policy.rate_limit_fail_closed,
                 )
                 if policy.rate_limit_fail_closed is True:
@@ -235,6 +309,9 @@ class ToolExecutionRuntime:
             record_module_metrics: bool,
             reason_code: str | None = None,
         ) -> None:
+            observer_duration_ms = (
+                owner_duration_ms if module_invoked else max(0.0, (time.time() - execution_start_ts) * 1000.0)
+            )
             try:
                 context.logger.error(  # noqa: TRY400 - the log contains only safe fields.
                     "Tool execution failed: {error_type}",
@@ -265,7 +342,7 @@ class ToolExecutionRuntime:
                     self.metrics.record_module_operation(
                         module=module_name or "unknown",
                         operation="tools_call",
-                        duration=owner_duration_ms / 1000.0,
+                        duration=observer_duration_ms / 1000.0,
                         success=False,
                     )
                 except asyncio.CancelledError:
@@ -281,7 +358,7 @@ class ToolExecutionRuntime:
                     tool_name,
                     module_name,
                     status="failure",
-                    duration_ms=owner_duration_ms,
+                    duration_ms=observer_duration_ms,
                     arguments_hash=args_hash,
                     error=error,
                     reason_code=reason_code,
@@ -304,7 +381,7 @@ class ToolExecutionRuntime:
                     context=context,
                     scope_payload=_observer_scope_payload(),
                     status="failure",
-                    duration_ms=owner_duration_ms,
+                    duration_ms=observer_duration_ms,
                     error=error,
                 )
             except asyncio.CancelledError:
@@ -325,7 +402,9 @@ class ToolExecutionRuntime:
             await _record_prepared_event(
                 status=status,
                 execution_origin=(
-                    self.reporter.execution_origin_for_failure(status) if status != "error" else "executed"
+                    self.reporter.execution_origin_for_failure(status)
+                    if status != "error"
+                    else ("executed" if module_invoked else "failed_before_execution")
                 ),
                 reason_code=reason_code,
             )
@@ -333,17 +412,25 @@ class ToolExecutionRuntime:
         async def _complete_expected_failure(
             failure: ExpectedToolFailure,
         ) -> dict[str, Any]:
+            reason = get_expected_tool_failure_reason(failure)
+            if reason is None:
+                sanitized_failure = self._generic_exception_like(
+                    failure,
+                    self._tool_execution_error,
+                )
+                await _record_execution_failure(sanitized_failure)
+                raise sanitized_failure from None
             await _run_failure_observers(
                 failure,
                 record_module_metrics=module_invoked,
-                reason_code=failure.reason_code,
+                reason_code=reason.reason_code,
             )
             await _record_prepared_event(
                 status="error",
                 execution_origin=("executed" if module_invoked else "failed_before_execution"),
-                reason_code=failure.reason_code,
+                reason_code=reason.reason_code,
             )
-            return _expected_failure_payload(failure)
+            return _expected_failure_payload(reason)
 
         try:
             await self.security.verify_prepared_tool_call(
@@ -366,7 +453,8 @@ class ToolExecutionRuntime:
             nonlocal module_invoked, owner_duration_ms
             t0 = time.time()
 
-            with self.telemetry.trace_context(
+            with _best_effort_span_context(
+                self.telemetry,
                 "mcp.tool_call",
                 {
                     "mcp.tool": tool_name,
@@ -395,40 +483,64 @@ class ToolExecutionRuntime:
                         execution_args,
                         context,
                     )
-                    span.set_attribute("mcp.status", "success")
+                    _set_span_attribute(span, "mcp.status", "success")
                 except asyncio.CancelledError:
                     raise
                 except ExpectedToolFailure as tool_error:
-                    span.set_attribute("mcp.status", "failure")
-                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
+                    _set_span_attribute(span, "mcp.status", "failure")
+                    _set_span_attribute(
+                        span,
+                        "mcp.error_type",
+                        _safe_exception_family(tool_error),
+                    )
                     raise
                 except InvalidParamsException as tool_error:
-                    span.set_attribute("mcp.status", "failure")
-                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
-                    span.set_attribute("mcp.error_message", "invalid_params")
+                    _set_span_attribute(span, "mcp.status", "failure")
+                    _set_span_attribute(
+                        span,
+                        "mcp.error_type",
+                        _safe_exception_family(tool_error),
+                    )
+                    _set_span_attribute(span, "mcp.error_message", "invalid_params")
                     raise
                 except (TypeError, ValueError) as tool_error:
-                    span.set_attribute("mcp.status", "failure")
-                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
-                    span.set_attribute("mcp.error_message", "invalid_params")
+                    _set_span_attribute(span, "mcp.status", "failure")
+                    _set_span_attribute(
+                        span,
+                        "mcp.error_type",
+                        _safe_exception_family(tool_error),
+                    )
+                    _set_span_attribute(span, "mcp.error_message", "invalid_params")
                     raise InvalidParamsException(str(tool_error)) from tool_error
                 except PermissionError as tool_error:
-                    span.set_attribute("mcp.status", "failure")
-                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
-                    span.set_attribute("mcp.error_message", "permission_error")
+                    _set_span_attribute(span, "mcp.status", "failure")
+                    _set_span_attribute(
+                        span,
+                        "mcp.error_type",
+                        _safe_exception_family(tool_error),
+                    )
+                    _set_span_attribute(span, "mcp.error_message", "permission_error")
                     raise
                 except self._noncritical_exceptions as tool_error:
                     sanitized_tool_error = self._generic_exception_like(
                         tool_error,
                         self._tool_execution_error,
                     )
-                    span.set_attribute("mcp.status", "failure")
-                    span.set_attribute("mcp.error_type", sanitized_tool_error.__class__.__name__)
-                    span.set_attribute("mcp.error_message", self._tool_execution_error)
+                    _set_span_attribute(span, "mcp.status", "failure")
+                    _set_span_attribute(
+                        span,
+                        "mcp.error_type",
+                        _safe_exception_family(sanitized_tool_error),
+                    )
+                    _set_span_attribute(
+                        span,
+                        "mcp.error_message",
+                        self._tool_execution_error,
+                    )
                     raise sanitized_tool_error from None
                 finally:
                     owner_duration_ms = max(0.0, (time.time() - t0) * 1000.0)
-                    span.set_attribute("mcp.duration_ms", owner_duration_ms)
+                    _set_span_attribute(span, "mcp.duration_ms", owner_duration_ms)
 
             profile_id = self.extract_eval_profile_id(context)
             result = attach_execution_eval_metadata(
