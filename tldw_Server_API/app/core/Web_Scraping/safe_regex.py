@@ -12,7 +12,14 @@ import regex
 _MAX_PATTERN_CHARS = 4_096
 _MAX_INPUT_CHARS = 1_000_000
 _MAX_TIMEOUT_S = 0.100
-_REGEX_ERRORS = (regex.error, TypeError, ValueError, OverflowError, RecursionError)
+_REGEX_ERRORS = (
+    re.error,
+    regex.error,
+    TypeError,
+    ValueError,
+    OverflowError,
+    RecursionError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +38,6 @@ class SafeRegexResult:
 
 _FLAG_MAP = (
     (int(re.IGNORECASE), int(regex.IGNORECASE)),
-    (int(re.LOCALE), int(regex.LOCALE)),
     (int(re.MULTILINE), int(regex.MULTILINE)),
     (int(re.DOTALL), int(regex.DOTALL)),
     (int(re.UNICODE), int(regex.UNICODE)),
@@ -108,6 +114,11 @@ def search_untrusted(
 
     normalized_flags = _normalize_flags(flags)
     if normalized_flags is None:
+        return SafeRegexResult(matched=False, code="regex_invalid")
+
+    try:
+        re.compile(pattern, int(flags))
+    except _REGEX_ERRORS:
         return SafeRegexResult(matched=False, code="regex_invalid")
 
     try:

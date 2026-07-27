@@ -9,6 +9,7 @@ import regex as regex_engine
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
 from tldw_Server_API.app.core.Web_Scraping import safe_regex as safe_regex_module
+from tldw_Server_API.app.core.Web_Scraping import scraper_router as scraper_router_module
 from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
     SafeRegexLimits,
     SafeRegexResult,
@@ -17,6 +18,11 @@ from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
 _RECURSIVE_PATTERN = "(" * 500 + "a" + ")" * 500
+_LEGACY_INCOMPATIBLE_PATTERNS = (
+    r"(?V1)example",
+    r"(?|example|never)",
+    r"(?P<host>example)(?P<host>\.com)",
+)
 
 
 class _FakeCompiled:
@@ -48,6 +54,38 @@ def _install_fake_compile(
 
     monkeypatch.setattr(safe_regex_module, "_compile_pattern", _fake_compile)
     return compiled, observed
+
+
+def _install_router_budget_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    elapsed_per_search: float,
+    matching_pattern: str | None = None,
+) -> list[tuple[str, float]]:
+    state = {"now": 0.0}
+    calls: list[tuple[str, float]] = []
+
+    def _fake_monotonic() -> float:
+        return state["now"]
+
+    def _fake_search(
+        pattern: str,
+        _value: str,
+        *,
+        limits: SafeRegexLimits,
+    ) -> SafeRegexResult:
+        calls.append((pattern, limits.timeout_s))
+        state["now"] += min(elapsed_per_search, limits.timeout_s)
+        return SafeRegexResult(matched=pattern == matching_pattern)
+
+    monkeypatch.setattr(
+        scraper_router_module,
+        "_monotonic",
+        _fake_monotonic,
+        raising=False,
+    )
+    monkeypatch.setattr(scraper_router_module, "search_untrusted", _fake_search)
+    return calls
 
 
 def _install_regex_llm_response(
@@ -90,6 +128,60 @@ def test_invalid_pattern_returns_stable_code() -> None:
     result = search_untrusted("[", "sample")
 
     assert result == SafeRegexResult(matched=False, code="regex_invalid")
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [r"(?V1)a", r"(?|a|b)"],
+    ids=["version-directive", "branch-reset"],
+)
+def test_regex_only_constructs_are_rejected_before_engine_compile(
+    monkeypatch: pytest.MonkeyPatch,
+    pattern: str,
+) -> None:
+    compiled, observed = _install_fake_compile(monkeypatch)
+
+    result = search_untrusted(pattern, "a")
+
+    assert result == SafeRegexResult(matched=False, code="regex_invalid")
+    assert observed == {}
+    assert compiled.calls == []
+
+
+def test_duplicate_named_group_is_rejected_before_engine_compile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compiled, observed = _install_fake_compile(monkeypatch)
+
+    result = search_untrusted(r"(?P<value>a)(?P<value>b)", "ab")
+
+    assert result == SafeRegexResult(matched=False, code="regex_invalid")
+    assert observed == {}
+    assert compiled.calls == []
+
+
+def test_locale_flag_for_string_pattern_is_rejected_before_engine_compile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compiled, observed = _install_fake_compile(monkeypatch)
+
+    result = search_untrusted("a", "a", flags=re.LOCALE)
+
+    assert result == SafeRegexResult(matched=False, code="regex_invalid")
+    assert observed == {}
+    assert compiled.calls == []
+
+
+def test_incompatible_stdlib_flags_are_rejected_before_engine_compile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compiled, observed = _install_fake_compile(monkeypatch)
+
+    result = search_untrusted("a", "a", flags=re.ASCII | re.UNICODE)
+
+    assert result == SafeRegexResult(matched=False, code="regex_invalid")
+    assert observed == {}
+    assert compiled.calls == []
 
 
 def test_recursive_compile_failure_returns_stable_code_without_disclosure(
@@ -325,6 +417,46 @@ def test_router_validation_drops_invalid_and_oversized_patterns() -> None:
     assert cleaned["domains"]["example.com"]["url_patterns"] == [r"/article/\d+$"]
 
 
+def test_router_validation_caps_configured_pattern_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_router_budget_fakes(monkeypatch, elapsed_per_search=0.0)
+    patterns = [f"pattern-{index}" for index in range(40)]
+
+    cleaned = ScraperRouter.validate_rules({"domains": {"example.com": {"url_patterns": patterns}}})
+
+    assert scraper_router_module._MAX_URL_PATTERNS == 32
+    assert cleaned["domains"]["example.com"]["url_patterns"] == patterns[:32]
+    assert [pattern for pattern, _timeout in calls] == patterns[:32]
+
+
+def test_router_validation_uses_one_shared_pattern_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_router_budget_fakes(monkeypatch, elapsed_per_search=0.040)
+    patterns = [f"pattern-{index}" for index in range(10)]
+
+    cleaned = ScraperRouter.validate_rules({"domains": {"example.com": {"url_patterns": patterns}}})
+
+    assert cleaned["domains"]["example.com"]["url_patterns"] == patterns[:3]
+    assert [pattern for pattern, _timeout in calls] == patterns[:3]
+    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100, 0.060, 0.020])
+
+
+def test_router_validation_drops_legacy_incompatible_patterns() -> None:
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "url_patterns": [*_LEGACY_INCOMPATIBLE_PATTERNS, r"/valid$"],
+                }
+            }
+        }
+    )
+
+    assert cleaned["domains"]["example.com"]["url_patterns"] == [r"/valid$"]
+
+
 def test_router_validation_drops_recursive_pattern_without_raising() -> None:
     cleaned = ScraperRouter.validate_rules(
         {
@@ -364,6 +496,99 @@ def test_directly_constructed_router_recursive_pattern_fails_open() -> None:
                 "example.com": {
                     "backend": "curl",
                     "url_patterns": [_RECURSIVE_PATTERN],
+                }
+            }
+        }
+    )
+
+    plan = router.resolve("https://example.com/article")
+
+    assert plan.backend == "auto"
+
+
+def test_direct_router_caps_pattern_count_before_late_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_router_budget_fakes(
+        monkeypatch,
+        elapsed_per_search=0.0,
+        matching_pattern="match-after-cap",
+    )
+    patterns = [f"no-match-{index}" for index in range(32)]
+    patterns.append("match-after-cap")
+    router = ScraperRouter(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": patterns,
+                }
+            }
+        }
+    )
+
+    plan = router.resolve("https://example.com/article")
+
+    assert plan.backend == "auto"
+    assert [pattern for pattern, _timeout in calls] == patterns[:32]
+
+
+def test_direct_router_uses_one_shared_pattern_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_router_budget_fakes(monkeypatch, elapsed_per_search=0.040)
+    patterns = [f"no-match-{index}" for index in range(10)]
+    router = ScraperRouter(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": patterns,
+                }
+            }
+        }
+    )
+
+    plan = router.resolve("https://example.com/article")
+
+    assert plan.backend == "auto"
+    assert [pattern for pattern, _timeout in calls] == patterns[:3]
+    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100, 0.060, 0.020])
+
+
+def test_direct_router_applies_match_before_shared_deadline_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_router_budget_fakes(
+        monkeypatch,
+        elapsed_per_search=0.040,
+        matching_pattern="match-now",
+    )
+    router = ScraperRouter(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": ["no-match", "match-now", "later"],
+                }
+            }
+        }
+    )
+
+    plan = router.resolve("https://example.com/article")
+
+    assert plan.backend == "curl"
+    assert [pattern for pattern, _timeout in calls] == ["no-match", "match-now"]
+    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100, 0.060])
+
+
+def test_direct_router_legacy_incompatible_patterns_fail_open() -> None:
+    router = ScraperRouter(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": list(_LEGACY_INCOMPATIBLE_PATTERNS),
                 }
             }
         }
@@ -414,7 +639,8 @@ def test_router_pattern_timeout_is_a_non_match(
 
     plan = router.resolve("https://example.com/" + ("a" * 200) + "!")
 
-    assert compiled.calls[0][1] == 0.100
+    first_timeout = compiled.calls[0][1]
+    assert 0 < first_timeout <= 0.100
     assert plan.backend == "auto"
 
 
@@ -482,6 +708,35 @@ def test_generated_regex_recursive_pattern_uses_stable_code_without_disclosure(
     assert result["error"] == "regex_invalid"
     assert _RECURSIVE_PATTERN not in disclosed
     assert "maximum recursion depth exceeded" not in disclosed
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"pattern": _LEGACY_INCOMPATIBLE_PATTERNS[0]},
+        {"pattern": _LEGACY_INCOMPATIBLE_PATTERNS[1]},
+        {"pattern": _LEGACY_INCOMPATIBLE_PATTERNS[2]},
+        {"pattern": "example", "flags": int(re.LOCALE)},
+        {"pattern": "example", "flags": int(re.ASCII | re.UNICODE)},
+    ],
+    ids=[
+        "version-directive",
+        "branch-reset",
+        "duplicate-group",
+        "locale",
+        "ascii-unicode",
+    ],
+)
+def test_generated_regex_legacy_incompatible_input_uses_stable_code(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+) -> None:
+    _install_regex_llm_response(monkeypatch, payload)
+
+    result = _generate_regex("example.com")
+
+    assert result["success"] is False
+    assert result["error"] == "regex_invalid"
 
 
 def test_generated_regex_oversized_pattern_uses_stable_code(

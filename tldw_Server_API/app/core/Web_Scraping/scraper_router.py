@@ -17,6 +17,7 @@ Security:
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -35,6 +36,21 @@ DEFAULT_HANDLER_ALLOWLIST = [
 ]
 
 _ROUTER_REGEX_LIMITS = SafeRegexLimits()
+# Configured patterns are user-controlled, so cap aggregate work per domain rule.
+_MAX_URL_PATTERNS = 32
+_URL_PATTERN_TOTAL_BUDGET_S = 0.100
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def _router_regex_limits(timeout_s: float) -> SafeRegexLimits:
+    return SafeRegexLimits(
+        max_pattern_chars=_ROUTER_REGEX_LIMITS.max_pattern_chars,
+        max_input_chars=_ROUTER_REGEX_LIMITS.max_input_chars,
+        timeout_s=min(timeout_s, _ROUTER_REGEX_LIMITS.timeout_s),
+    )
 
 
 @dataclass
@@ -173,13 +189,17 @@ class ScraperRouter:
                 elif k == "url_patterns":
                     pats: list[str] = []
                     if isinstance(v, list):
-                        for p in v:
+                        deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
+                        for p in v[:_MAX_URL_PATTERNS]:
                             if not isinstance(p, str):
                                 continue
+                            remaining_s = deadline - _monotonic()
+                            if remaining_s <= 0:
+                                break
                             validation = search_untrusted(
                                 p,
                                 "",
-                                limits=_ROUTER_REGEX_LIMITS,
+                                limits=_router_regex_limits(remaining_s),
                             )
                             if validation.code is None:
                                 pats.append(p)
@@ -232,15 +252,27 @@ class ScraperRouter:
         # If url_patterns present, apply only if any matches
         raw_patterns = rule.get("url_patterns", [])
         if raw_patterns:
-            if not isinstance(raw_patterns, list) or not any(
-                isinstance(pattern, str)
-                and search_untrusted(
+            if not isinstance(raw_patterns, list):
+                return plan
+
+            matched_pattern = False
+            deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
+            for pattern in raw_patterns[:_MAX_URL_PATTERNS]:
+                if not isinstance(pattern, str):
+                    continue
+                remaining_s = deadline - _monotonic()
+                if remaining_s <= 0:
+                    break
+                result = search_untrusted(
                     pattern,
                     url,
-                    limits=_ROUTER_REGEX_LIMITS,
-                ).matched
-                for pattern in raw_patterns
-            ):
+                    limits=_router_regex_limits(remaining_s),
+                )
+                if result.matched:
+                    matched_pattern = True
+                    break
+
+            if not matched_pattern:
                 # If rule has patterns and none matched, do not apply; fall back
                 return plan
 
