@@ -1,0 +1,11 @@
+{
+  "cases": {
+    "article_orchestration_fakes": "article_orchestration_fakes.json",
+    "content": "content.json",
+    "extraction": "extraction.json",
+    "metadata": "metadata.json",
+    "selectors": "selectors.json"
+  },
+  "predecessor_commit": "c2a1695744032245acdb1cd115dd888586dc9623",
+  "schema_version": 1
+}
