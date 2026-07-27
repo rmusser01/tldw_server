@@ -656,11 +656,6 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
                 violations.append(
                     f"{path.name}:{node.lineno} reads mutable mapping field {key!r}"
                 )
-            elif key is None and _contains_prepared_tool_authority(node.value):
-                violations.append(
-                    f"{path.name}:{node.lineno} performs dynamic prepared authority read "
-                    f"{_display_node(node)}"
-                )
         elif isinstance(node, ast.Call):
             key: object | None = None
             if (
@@ -681,43 +676,108 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
                 violations.append(
                     f"{path.name}:{node.lineno} reads mutable field {key!r} via dynamic lookup"
                 )
-            elif _is_dynamic_prepared_authority_call(node):
-                violations.append(
-                    f"{path.name}:{node.lineno} performs dynamic prepared authority read "
-                    f"{_display_node(node)}"
-                )
+    authority_visitor = _PreparedAuthorityAliasVisitor(path)
+    for statement in execution.body:
+        authority_visitor.visit(statement)
+    violations.extend(authority_visitor.violations)
     return violations
 
 
-def _contains_prepared_tool_authority(node: ast.AST) -> bool:
+def _contains_prepared_tool_authority(
+    node: ast.AST,
+    aliases: set[str] | None = None,
+) -> bool:
+    authority_aliases = aliases or set()
     return any(
-        isinstance(candidate, ast.Attribute)
-        and _attribute_path(candidate) == ("prepared", "tool_def")
+        (
+            isinstance(candidate, ast.Attribute)
+            and _attribute_path(candidate) == ("prepared", "tool_def")
+        )
+        or isinstance(candidate, ast.Name)
+        and candidate.id in authority_aliases
         for candidate in ast.walk(node)
     )
 
 
-def _is_dynamic_prepared_authority_call(node: ast.Call) -> bool:
-    if (
-        isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
-        and node.args
-        and not isinstance(node.args[0], ast.Constant)
-    ):
-        return _contains_prepared_tool_authority(node.func.value)
-    return bool(
-        isinstance(node.func, ast.Name)
-        and node.func.id == "getattr"
-        and len(node.args) >= 2
-        and not isinstance(node.args[1], ast.Constant)
-        and _contains_prepared_tool_authority(node.args[0])
-    )
+class _PreparedAuthorityAliasVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.aliases: set[str] = set()
+        self.violations: list[str] = []
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        for default in [*node.args.defaults, *node.args.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+        previous = set(self.aliases)
+        for statement in node.body:
+            self.visit(statement)
+        self.aliases = previous
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        self._visit_function(node)
+
+    def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
+        if not isinstance(target, ast.Name):
+            return
+        if _contains_prepared_tool_authority(value, self.aliases):
+            self.aliases.add(target.id)
+        else:
+            self.aliases.discard(target.id)
+
+    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        self.visit(node.value)
+        for target in node.targets:
+            self._update_alias(target, node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+        if node.value is not None:
+            self.visit(node.value)
+            self._update_alias(node.target, node.value)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:  # noqa: N802
+        if (
+            isinstance(node.ctx, ast.Load)
+            and not isinstance(node.slice, ast.Constant)
+            and _contains_prepared_tool_authority(node.value, self.aliases)
+        ):
+            self.violations.append(
+                f"{self.path.name}:{node.lineno} performs dynamic prepared authority read "
+                f"{_display_node(node)}"
+            )
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        dynamic_get = (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and node.args
+            and not isinstance(node.args[0], ast.Constant)
+            and _contains_prepared_tool_authority(node.func.value, self.aliases)
+        )
+        dynamic_getattr = (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and not isinstance(node.args[1], ast.Constant)
+            and _contains_prepared_tool_authority(node.args[0], self.aliases)
+        )
+        if dynamic_get or dynamic_getattr:
+            self.violations.append(
+                f"{self.path.name}:{node.lineno} performs dynamic prepared authority read "
+                f"{_display_node(node)}"
+            )
+        self.generic_visit(node)
 
 
 class _DefaultStrVisitor(ast.NodeVisitor):
     def __init__(self, path: Path) -> None:
         self.path = path
         self.aliases: set[str] = set()
+        self.builtins_modules: set[str] = {"builtins"}
         self.violations: list[str] = []
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
@@ -735,8 +795,13 @@ class _DefaultStrVisitor(ast.NodeVisitor):
     def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
         if not isinstance(target, ast.Name):
             return
-        is_str_alias = isinstance(value, ast.Name) and (
-            value.id == "str" or value.id in self.aliases
+        is_str_alias = (
+            isinstance(value, ast.Name)
+            and (value.id == "str" or value.id in self.aliases)
+            or isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id in self.builtins_modules
+            and value.attr == "str"
         )
         if is_str_alias:
             self.aliases.add(target.id)
@@ -753,11 +818,31 @@ class _DefaultStrVisitor(ast.NodeVisitor):
             self.visit(node.value)
             self._update_alias(node.target, node.value)
 
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        for alias in node.names:
+            if alias.name == "builtins":
+                self.builtins_modules.add(alias.asname or "builtins")
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+        if node.module != "builtins":
+            return
+        for alias in node.names:
+            if alias.name == "str":
+                self.aliases.add(alias.asname or alias.name)
+
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         for keyword in node.keywords:
-            if keyword.arg != "default" or not isinstance(keyword.value, ast.Name):
+            if keyword.arg != "default":
                 continue
-            if keyword.value.id == "str" or keyword.value.id in self.aliases:
+            value = keyword.value
+            if (
+                isinstance(value, ast.Name)
+                and (value.id == "str" or value.id in self.aliases)
+                or isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Name)
+                and value.value.id in self.builtins_modules
+                and value.attr == "str"
+            ):
                 self.violations.append(
                     f"{self.path.name}:{node.lineno} uses coercing default=str serialization"
                 )
@@ -771,13 +856,14 @@ def _default_str_violations_for(path: Path) -> list[str]:
     return visitor.violations
 
 
-def _is_logger_expression(node: ast.AST) -> bool:
+def _is_logger_expression(node: ast.AST, logger_names: set[str] | None = None) -> bool:
+    names = logger_names or {"logger"}
     if isinstance(node, ast.Name):
-        return node.id == "logger"
+        return node.id in names
     if isinstance(node, ast.Attribute):
-        return node.attr == "logger" or _is_logger_expression(node.value)
+        return node.attr == "logger" or _is_logger_expression(node.value, names)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        return _is_logger_expression(node.func.value)
+        return _is_logger_expression(node.func.value, names)
     return False
 
 
@@ -819,6 +905,7 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
     def __init__(self, path: Path) -> None:
         self.path = path
         self.exception_names: set[str] = set()
+        self.logger_names: set[str] = {"logger"}
         self.violations: list[str] = []
 
     @staticmethod
@@ -836,11 +923,13 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
         return names
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        previous = self.exception_names
-        self.exception_names = previous | self._annotated_exception_arguments(node)
+        previous_exceptions = self.exception_names
+        previous_loggers = set(self.logger_names)
+        self.exception_names = previous_exceptions | self._annotated_exception_arguments(node)
         for statement in node.body:
             self.visit(statement)
-        self.exception_names = previous
+        self.exception_names = previous_exceptions
+        self.logger_names = previous_loggers
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
         self._visit_function(node)
@@ -874,18 +963,28 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
         else:
             self.exception_names.difference_update(assigned_names)
 
+    def _update_logger_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
+        assigned_names = self._assigned_names(targets)
+        if _is_logger_expression(value, self.logger_names):
+            self.logger_names.update(assigned_names)
+        else:
+            self.logger_names.difference_update(assigned_names)
+
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
         self._update_exception_aliases(node.targets, node.value)
+        self._update_logger_aliases(node.targets, node.value)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
         if node.value is not None:
             self.visit(node.value)
             self._update_exception_aliases([node.target], node.value)
+            self._update_logger_aliases([node.target], node.value)
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
         self.visit(node.value)
         self._update_exception_aliases([node.target], node.value)
+        self._update_logger_aliases([node.target], node.value)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
         self.visit(node.value)
@@ -922,11 +1021,43 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:  # noqa: N802
         self._visit_with(node)
 
+    @staticmethod
+    def _match_bound_names(pattern: ast.pattern) -> set[str]:
+        names: set[str] = set()
+        for candidate in ast.walk(pattern):
+            if isinstance(candidate, (ast.MatchAs, ast.MatchStar)) and candidate.name:
+                names.add(candidate.name)
+            elif isinstance(candidate, ast.MatchMapping) and candidate.rest:
+                names.add(candidate.rest)
+        return names
+
+    def visit_Match(self, node: ast.Match) -> None:  # noqa: N802
+        self.visit(node.subject)
+        subject_is_exception = _uses_raw_exception_unsafely(
+            node.subject,
+            self.exception_names,
+        )
+        previous = set(self.exception_names)
+        branch_states: list[set[str]] = []
+        for case in node.cases:
+            self.exception_names = set(previous)
+            bound_names = self._match_bound_names(case.pattern)
+            if subject_is_exception:
+                self.exception_names.update(bound_names)
+            else:
+                self.exception_names.difference_update(bound_names)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+            branch_states.append(set(self.exception_names))
+        self.exception_names = previous.union(*branch_states)
+
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         is_logger_call = (
             isinstance(node.func, ast.Attribute)
             and node.func.attr in LOGGER_METHODS
-            and _is_logger_expression(node.func.value)
+            and _is_logger_expression(node.func.value, self.logger_names)
         )
         if is_logger_call:
             if node.func.attr == "exception" and self.exception_names:
@@ -2436,6 +2567,63 @@ def test_runtime_policy_scan_allows_unrelated_dynamic_lookup(tmp_path: Path) -> 
     assert _runtime_mutable_authority_violations_for(sample) == []
 
 
+@pytest.mark.parametrize(
+    ("filename", "assignments", "expression"),
+    [
+        (
+            "tool_def_alias.py",
+            "    tool_def = prepared.tool_def\n",
+            "tool_def[field]",
+        ),
+        (
+            "metadata_alias.py",
+            "    metadata = prepared.tool_def['metadata']\n",
+            "metadata.get(field)",
+        ),
+        (
+            "authority_alias_chain.py",
+            "    tool_def = prepared.tool_def\n"
+            "    metadata = tool_def['metadata']\n",
+            "getattr(metadata, field)",
+        ),
+    ],
+)
+def test_runtime_policy_scan_rejects_dynamic_prepared_authority_aliases(
+    tmp_path: Path,
+    filename: str,
+    assignments: str,
+    expression: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        f"{assignments}"
+        "    field = 'category'\n"
+        f"    return {expression}\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("dynamic prepared authority" in violation for violation in violations)
+
+
+def test_runtime_policy_scan_allows_reassigned_authority_alias(tmp_path: Path) -> None:
+    sample = tmp_path / "reassigned_authority_alias.py"
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        "    tool_def = prepared.tool_def\n"
+        "    tool_def = {'category': 'safe'}\n"
+        "    field = 'category'\n"
+        "    return tool_def[field], policy.effect\n",
+        encoding="utf-8",
+    )
+
+    assert _runtime_mutable_authority_violations_for(sample) == []
+
+
 def test_runtime_has_no_default_str_serialization_fallback() -> None:
     violations = _default_str_violations_for(MCP_ROOT / "tool_execution" / "runtime.py")
 
@@ -2468,6 +2656,52 @@ def test_default_str_scan_allows_reassigned_alias(tmp_path: Path) -> None:
         "def encode(value):\n"
         "    fallback = str\n"
         "    fallback = None\n"
+        "    return json.dumps(value, default=fallback)\n",
+        encoding="utf-8",
+    )
+
+    assert _default_str_violations_for(sample) == []
+
+
+@pytest.mark.parametrize(
+    ("filename", "imports", "assignment"),
+    [
+        ("builtins_attribute.py", "import builtins\n", "    fallback = builtins.str\n"),
+        (
+            "builtins_import_alias.py",
+            "from builtins import str as fallback\n",
+            "",
+        ),
+    ],
+)
+def test_default_str_scan_rejects_builtins_aliases(
+    tmp_path: Path,
+    filename: str,
+    imports: str,
+    assignment: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(
+        "import json\n"
+        f"{imports}"
+        "def encode(value):\n"
+        f"{assignment}"
+        "    return json.dumps(value, default=fallback)\n",
+        encoding="utf-8",
+    )
+
+    violations = _default_str_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "default=str" in violations[0]
+
+
+def test_default_str_scan_allows_non_builtin_attribute(tmp_path: Path) -> None:
+    sample = tmp_path / "non_builtin_attribute.py"
+    sample.write_text(
+        "import json\n"
+        "def encode(value, converters):\n"
+        "    fallback = converters.str\n"
         "    return json.dumps(value, default=fallback)\n",
         encoding="utf-8",
     )
@@ -2575,6 +2809,80 @@ def test_exception_log_scan_rejects_loop_target_aliases(
 
     assert len(violations) == 1
     assert "repr(failure)" in violations[0]
+
+
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        (
+            "logger_alias.py",
+            "from loguru import logger\n"
+            "log = logger\n"
+            "try:\n"
+            "    raise RuntimeError('private provider detail')\n"
+            "except Exception as exc:\n"
+            "    log.error('{}', repr(exc))\n",
+        ),
+        (
+            "match_exception_alias.py",
+            "from loguru import logger\n"
+            "try:\n"
+            "    raise RuntimeError('private provider detail')\n"
+            "except Exception as exc:\n"
+            "    match exc:\n"
+            "        case _ as failure:\n"
+            "            logger.error('{}', repr(failure))\n",
+        ),
+    ],
+)
+def test_exception_log_scan_rejects_logger_and_match_aliases(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 1
+
+
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        (
+            "reassigned_logger_alias.py",
+            "from loguru import logger\n"
+            "log = logger\n"
+            "log = sink\n"
+            "try:\n"
+            "    raise RuntimeError('private provider detail')\n"
+            "except Exception as exc:\n"
+            "    log.error('{}', repr(exc))\n",
+        ),
+        (
+            "safe_match_alias.py",
+            "from loguru import logger\n"
+            "try:\n"
+            "    raise RuntimeError('private provider detail')\n"
+            "except Exception as exc:\n"
+            "    status = 'safe'\n"
+            "    match status:\n"
+            "        case _ as failure:\n"
+            "            logger.error('{}', repr(failure))\n",
+        ),
+    ],
+)
+def test_exception_log_scan_allows_reassigned_logger_and_safe_match_aliases(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    assert _unsafe_exception_log_violations_for(sample) == []
 
 
 def test_exception_log_scan_rejects_loguru_exception_context(tmp_path: Path) -> None:
