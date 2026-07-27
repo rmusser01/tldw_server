@@ -605,7 +605,7 @@ git commit -m "refactor(embeddings): extract provider attempt cache execution"
 - Modify: `tldw_Server_API/app/core/Embeddings/provider_attempt.py`
 - Modify: `tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py`
 
-- [ ] **Step 1: Write failing validation and adapter-origin tests**
+- [x] **Step 1: Write failing validation and adapter-origin tests**
 
 Add these tests:
 
@@ -729,7 +729,7 @@ async def test_provider_attempt_skips_cache_write_for_adapter_originated_executo
     assert cache.set_calls == []
 ```
 
-- [ ] **Step 2: Run the tests and verify RED where behavior is incomplete**
+- [x] **Step 2: Run the tests and verify RED where behavior is incomplete**
 
 Run:
 
@@ -739,7 +739,7 @@ Run:
 
 Expected: any missing validation/writeback behavior fails. If all tests pass because Task 2 implementation already covered them, record that the RED requirement was satisfied by adding the tests before any further production changes in this task.
 
-- [ ] **Step 3: Write failing provider-call and non-provider failure tests**
+- [x] **Step 3: Write failing provider-call and non-provider failure tests**
 
 Add:
 
@@ -830,7 +830,7 @@ async def test_provider_attempt_non_provider_failures_propagate_without_call_fai
     assert exc_info.value is original
 ```
 
-- [ ] **Step 4: Implement the minimal missing behavior**
+- [x] **Step 4: Implement the minimal missing behavior**
 
 If the tests from Steps 1 or 3 fail, adjust only `provider_attempt.py` so:
 
@@ -840,7 +840,7 @@ If the tests from Steps 1 or 3 fail, adjust only `provider_attempt.py` so:
 - The complete ordered result is validated before any `cache.set`.
 - `EmbeddingExecutorOutput(..., embeddings_from_adapter=True)` skips writeback but still returns processed vectors and miss counts.
 
-- [ ] **Step 5: Run provider-attempt tests and verify GREEN**
+- [x] **Step 5: Run provider-attempt tests and verify GREEN**
 
 Run:
 
@@ -850,7 +850,7 @@ Run:
 
 Expected: all provider-attempt tests pass.
 
-- [ ] **Step 6: Commit validation and failure classification**
+- [x] **Step 6: Commit validation and failure classification**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/provider_attempt.py tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py

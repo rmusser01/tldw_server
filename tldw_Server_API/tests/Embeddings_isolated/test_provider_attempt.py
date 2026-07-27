@@ -6,12 +6,14 @@ from tldw_Server_API.app.core.Embeddings.provider_attempt import (
     EmbeddingProviderAttempt,
     EmbeddingProviderReadinessCheck,
     ProviderAttemptSuccess,
+    ProviderCallFailure,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingExecutionPlan,
     EmbeddingExecutionError,
     EmbeddingExecutorOutput,
     EmbeddingPolicyDecision,
+    EmbeddingProviderError,
     NormalizedEmbeddingInput,
     PreparedEmbeddingRequest,
     ProviderModelIntent,
@@ -272,3 +274,236 @@ async def test_provider_attempt_cache_keys_exclude_plan_identity_and_namespace()
     observed_keys = cache.get_keys + [key for key, _ in cache.set_calls]
     assert all("stale-plan" not in key for key in observed_keys)
     assert all("ns" not in key for key in observed_keys)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_attempt_writes_provider_native_vectors_after_full_response_validation():
+    cache = RecordingCache(
+        {"hit|openai|text-embedding-3-small|2|read": [1.0, 0.0, 0.0]}
+    )
+    executor = RecordingExecutor(vectors=[[0.25, 0.75, 0.5]])
+    identities = iter(["read", "write"])
+    attempt = EmbeddingProviderAttempt(
+        cache_key_fn=_cache_key,
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=lambda provider, model: next(identities),
+        vector_processor=EmbeddingVectorProcessor(),
+    )
+
+    result = await attempt.execute(
+        _prepared(["hit", "miss"], dimensions=2),
+        provider="openai",
+        model="text-embedding-3-small",
+    )
+
+    assert isinstance(result, ProviderAttemptSuccess)
+    assert result.vectors == [[1.0, 0.0], [0.25, 0.75]]
+    assert cache.set_calls == [
+        ("miss|openai|text-embedding-3-small|2|write", [0.25, 0.75, 0.5])
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_attempt_rejects_provider_malformed_response_before_writeback():
+    cache = RecordingCache({"hit|openai|text-embedding-3-small|read": [1.0, 0.0]})
+    executor = RecordingExecutor(vectors=[[0.25, 0.75, 0.5]])
+    attempt = EmbeddingProviderAttempt(
+        cache_key_fn=_cache_key,
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=lambda provider, model: "read",
+        vector_processor=EmbeddingVectorProcessor(),
+    )
+
+    with pytest.raises(EmbeddingProviderError) as exc_info:
+        await attempt.execute(
+            _prepared(["hit", "miss"]),
+            provider="openai",
+            model="text-embedding-3-small",
+        )
+
+    assert exc_info.value.code == "provider_malformed_response"
+    assert cache.set_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_attempt_treats_malformed_cached_vector_as_miss():
+    cache = RecordingCache(
+        {"bad|openai|text-embedding-3-small|read": [float("nan")]}
+    )
+    executor = RecordingExecutor(vectors=[[0.1, 0.2]])
+    attempt = EmbeddingProviderAttempt(
+        cache_key_fn=_cache_key,
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=lambda provider, model: "read",
+        vector_processor=EmbeddingVectorProcessor(),
+    )
+
+    result = await attempt.execute(
+        _prepared(["bad"]),
+        provider="openai",
+        model="text-embedding-3-small",
+    )
+
+    assert isinstance(result, ProviderAttemptSuccess)
+    assert result.vectors == [[0.1, 0.2]]
+    assert result.cache_hits == 0
+    assert result.cache_misses == 1
+    assert executor.calls[0]["texts"] == ["bad"]
+    assert cache.set_calls == [
+        ("bad|openai|text-embedding-3-small|read", [0.1, 0.2])
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_attempt_skips_cache_write_for_adapter_originated_executor_output():
+    class AdapterOriginExecutor(RecordingExecutor):
+        async def create(
+            self,
+            texts: list[str],
+            *,
+            provider: str,
+            model: str,
+            dimensions: int | None,
+        ) -> EmbeddingExecutorOutput:
+            self.calls.append(
+                {
+                    "texts": texts,
+                    "provider": provider,
+                    "model": model,
+                    "dimensions": dimensions,
+                }
+            )
+            return EmbeddingExecutorOutput(
+                vectors=[[0.1, 0.2]],
+                embeddings_from_adapter=True,
+            )
+
+    cache = RecordingCache()
+    executor = AdapterOriginExecutor()
+    attempt = EmbeddingProviderAttempt(
+        cache_key_fn=_cache_key,
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=lambda provider, model: "identity",
+        vector_processor=EmbeddingVectorProcessor(),
+    )
+
+    result = await attempt.execute(
+        _prepared(["adapter-origin"]),
+        provider="openai",
+        model="text-embedding-3-small",
+    )
+
+    assert isinstance(result, ProviderAttemptSuccess)
+    assert result.vectors == [[0.1, 0.2]]
+    assert result.embeddings_from_adapter is True
+    assert cache.set_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_attempt_returns_exact_provider_call_failure_from_executor():
+    error = EmbeddingProviderError(
+        "provider_unavailable",
+        "provider down",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+
+    class FailingExecutor(RecordingExecutor):
+        async def create(
+            self,
+            texts: list[str],
+            *,
+            provider: str,
+            model: str,
+            dimensions: int | None,
+        ) -> list[list[float]]:
+            self.calls.append(
+                {
+                    "texts": texts,
+                    "provider": provider,
+                    "model": model,
+                    "dimensions": dimensions,
+                }
+            )
+            raise error
+
+    attempt = EmbeddingProviderAttempt(
+        cache_key_fn=_cache_key,
+        cache=RecordingCache(),
+        executor=FailingExecutor(),
+        backend_identity_resolver=lambda provider, model: "identity",
+        vector_processor=EmbeddingVectorProcessor(),
+    )
+
+    result = await attempt.execute(
+        _prepared(["one"]),
+        provider="openai",
+        model="text-embedding-3-small",
+    )
+
+    assert isinstance(result, ProviderCallFailure)
+    assert result.error is error
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["identity", "cache_key", "cache_get", "cache_set"])
+async def test_provider_attempt_non_provider_failures_propagate_without_call_failure(
+    boundary,
+):
+    original = RuntimeError(f"{boundary} failed")
+
+    def identity(provider: str, model: str) -> str:
+        del provider, model
+        if boundary == "identity":
+            raise original
+        return "identity"
+
+    def cache_key(
+        text: str,
+        provider: str,
+        model: str,
+        dimensions: int | None,
+        backend_identity: str | None,
+    ) -> str:
+        if boundary == "cache_key":
+            raise original
+        return _cache_key(text, provider, model, dimensions, backend_identity)
+
+    class BoundaryCache(RecordingCache):
+        async def get(self, key: str) -> list[float] | None:
+            if boundary == "cache_get":
+                raise original
+            return await super().get(key)
+
+        async def set(self, key: str, value: list[float]) -> object:
+            if boundary == "cache_set":
+                raise original
+            return await super().set(key, value)
+
+    attempt = EmbeddingProviderAttempt(
+        cache_key_fn=cache_key,
+        cache=BoundaryCache(),
+        executor=RecordingExecutor(vectors=[[0.1, 0.2]]),
+        backend_identity_resolver=identity,
+        vector_processor=EmbeddingVectorProcessor(),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await attempt.execute(
+            _prepared(["one"]),
+            provider="openai",
+            model="text-embedding-3-small",
+        )
+
+    assert exc_info.value is original
