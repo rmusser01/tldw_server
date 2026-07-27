@@ -6,17 +6,20 @@ import asyncio
 import contextlib
 import hashlib
 import re
+import time
+from enum import Enum
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from loguru import logger
 from mcp_unified.interfaces.runtime import ToolHookCallContext, ToolHookDecision
 from mcp_unified.tool_hooks import ConfiguredToolCallHookManager, ToolHookRegistration
 from mcp_unified.tool_use_reporting.builders import classify_tool_use_exception
 from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
 
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
-from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module import RunCommandModule
 from tldw_Server_API.app.core.MCP_unified.protocol import (
     ErrorCode,
@@ -257,6 +260,24 @@ class _Telemetry:
         return contextlib.nullcontext(_Span())
 
 
+class _RecordingSpan:
+    def __init__(self) -> None:
+        self.attributes: dict[str, Any] = {}
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        self.attributes[key] = value
+
+
+class _RecordingTelemetry:
+    def __init__(self) -> None:
+        self.spans: list[_RecordingSpan] = []
+
+    def trace_context(self, *_args: Any, **_kwargs: Any):
+        span = _RecordingSpan()
+        self.spans.append(span)
+        return contextlib.nullcontext(span)
+
+
 class _ToolModule:
     name = "test_module"
 
@@ -341,6 +362,99 @@ class _ExpectedFailureWriteModule(_ToolModule):
 
         self.calls += 1
         raise ExpectedToolFailure(ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE)
+
+
+class _FailClosedToolModule(_ToolModule):
+    def _tool_def(self, tool_name: str) -> dict[str, Any]:
+        tool_def = super()._tool_def(tool_name)
+        tool_def["metadata"]["rate_limit_fail_closed"] = True
+        return tool_def
+
+
+class _ExpectedFailureBreakerModule(BaseModule):
+    def __init__(
+        self,
+        failure: BaseException,
+        *,
+        threshold: int = 1,
+        recovery_timeout: int = 60,
+    ) -> None:
+        self.failure = failure
+        self.calls = 0
+        super().__init__(
+            ModuleConfig(
+                name="test_module",
+                circuit_breaker_threshold=threshold,
+                circuit_breaker_timeout=recovery_timeout,
+            )
+        )
+
+    async def on_initialize(self) -> None:
+        return None
+
+    async def on_shutdown(self) -> None:
+        return None
+
+    async def check_health(self) -> dict[str, bool]:
+        return {"ok": True}
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [await self.get_tool_def("test.read")]
+
+    async def get_tool_def(self, tool_name: str) -> dict[str, Any]:
+        return {
+            "name": tool_name,
+            "description": "",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+            },
+            "metadata": {
+                "category": "read",
+                "eval": {
+                    "tool_prompt_id": "mcp.test.read.v1",
+                    "tool_prompt_version": "2026.06.06",
+                    "action_family": "read",
+                    "result_kind": "json",
+                    "prompt_variant": "builtin",
+                },
+            },
+        }
+
+    def sanitize_input(self, args: Any) -> Any:
+        return args
+
+    def validate_tool_arguments(
+        self,
+        _tool_name: str,
+        _tool_args: dict[str, Any],
+    ) -> None:
+        return None
+
+    def is_write_tool_call(
+        self,
+        _tool_name: str,
+        _tool_args: dict[str, Any],
+        *,
+        tool_def: dict[str, Any] | None = None,
+    ) -> bool:
+        del tool_def
+        return False
+
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> dict[str, Any]:
+        del tool_name, arguments, context
+        self.calls += 1
+        raise self.failure
+
+
+class _UnavailableRateLimiter:
+    async def check_rate_limit(self, *_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("SENTINEL_RATE_LIMIT_BACKEND_SECRET")
 
 
 class _MemoryRedis:
@@ -558,6 +672,7 @@ def _protocol(
     module: _ToolModule | None = None,
     recorder: Any | None = None,
     rate_limiter: Any | None = None,
+    telemetry_provider: Any | None = None,
     effective_policy: dict[str, Any] | None = None,
     path_scope_enforcer: Any | None = None,
     hook_manager: Any | None = None,
@@ -569,7 +684,7 @@ def _protocol(
         rbac_policy=_AllowAllRbac(),
         rate_limiter=rate_limiter or _NoopRateLimiter(),
         metrics_collector=_NoopMetrics(),
-        telemetry_provider=_Telemetry(),
+        telemetry_provider=telemetry_provider or _Telemetry(),
         tool_catalog_provider=object(),
         effective_policy_resolver=_StaticEffectivePolicyResolver(effective_policy),
         approval_evaluator=_AllowApprovalEvaluator(),
@@ -625,6 +740,33 @@ def _request_context(
     )
 
 
+def _assert_exact_expected_failure_payload(
+    payload: dict[str, Any],
+    *,
+    reason_code: str,
+    message: str,
+    module: str = "test_module",
+    tool: str = "test.read",
+) -> None:
+    execution_eval = payload["eval"]
+    assert payload == {
+        "content": [
+            {
+                "type": "json",
+                "json": {
+                    "status": "failed",
+                    "reason_code": reason_code,
+                    "message": message,
+                },
+            }
+        ],
+        "isError": True,
+        "module": module,
+        "tool": tool,
+        "eval": execution_eval,
+    }
+
+
 def test_tool_use_file_policy_decisions_bounds_copied_entries() -> None:
     decisions = [
         {
@@ -639,9 +781,7 @@ def test_tool_use_file_policy_decisions_bounds_copied_entries() -> None:
     copied = MCPProtocol._tool_use_file_policy_decisions({"path_decisions": decisions})
 
     assert len(copied) == MAX_FILE_POLICY_DECISIONS
-    assert copied[-1]["normalized_path"] == (
-        f"private/story-{MAX_FILE_POLICY_DECISIONS - 1}.txt"
-    )
+    assert copied[-1]["normalized_path"] == (f"private/story-{MAX_FILE_POLICY_DECISIONS - 1}.txt")
 
 
 def test_protocol_derives_grant_outcome_from_all_file_policy_decisions() -> None:
@@ -1368,19 +1508,16 @@ async def test_exotic_success_observer_cannot_replace_committed_replay(
         monkeypatch.setattr(
             protocol._tool_execution_reporter,
             "audit_tool_event",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                ExoticObserverError("private audit detail")
-            ),
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(ExoticObserverError("private audit detail")),
         )
     if observer == "reporting":
         monkeypatch.setattr(
             protocol._tool_execution_reporter,
             "build_event",
-            lambda **_kwargs: (_ for _ in ()).throw(
-                ExoticObserverError("private reporting detail")
-            ),
+            lambda **_kwargs: (_ for _ in ()).throw(ExoticObserverError("private reporting detail")),
         )
     if observer == "post_hook":
+
         async def _fail_post_hook(**_kwargs: Any) -> None:
             raise ExoticObserverError("private post-hook detail")
 
@@ -1413,19 +1550,16 @@ async def test_exotic_failure_observer_cannot_replace_original_failure(
         monkeypatch.setattr(
             protocol._tool_execution_reporter,
             "audit_tool_event",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                ExoticObserverError("private audit detail")
-            ),
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(ExoticObserverError("private audit detail")),
         )
     if observer == "reporting":
         monkeypatch.setattr(
             protocol._tool_execution_reporter,
             "build_event",
-            lambda **_kwargs: (_ for _ in ()).throw(
-                ExoticObserverError("private reporting detail")
-            ),
+            lambda **_kwargs: (_ for _ in ()).throw(ExoticObserverError("private reporting detail")),
         )
     if observer == "post_hook":
+
         async def _fail_post_hook(**_kwargs: Any) -> None:
             raise ExoticObserverError("private post-hook detail")
 
@@ -1458,9 +1592,7 @@ def test_reporting_classifier_recognizes_expected_failure_shape_without_message_
         ExpectedToolFailureReason,
     )
 
-    failure = ExpectedToolFailure(
-        ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
-    )
+    failure = ExpectedToolFailure(ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE)
 
     assert classify_tool_use_exception(failure) == (
         "error",
@@ -1528,6 +1660,41 @@ def test_reporting_classifier_rejects_spoofed_and_mismatched_expected_shapes() -
     assert classify_tool_use_exception(_MismatchedExpectedFailureShape()) == expected_fallback
 
 
+def test_reporting_classifier_sanitizes_valid_host_neutral_expected_failure_shape() -> None:
+    class _ForeignExpectedReason(Enum):
+        DEPENDENCY = (
+            "private reason/SENTINEL_CLASSIFIER_SECRET",
+            "A bounded public message.",
+            "record_failure",
+        )
+
+        @property
+        def reason_code(self) -> str:
+            return self.value[0]
+
+        @property
+        def public_message(self) -> str:
+            return self.value[1]
+
+        @property
+        def breaker_action(self) -> str:
+            return self.value[2]
+
+    class _ForeignExpectedFailure(Exception):
+        reason = _ForeignExpectedReason.DEPENDENCY
+        reason_code = reason.reason_code
+        public_message = reason.public_message
+        breaker_action = reason.breaker_action
+
+        def __str__(self) -> str:
+            raise AssertionError("classifier must not render exception text")
+
+    assert classify_tool_use_exception(_ForeignExpectedFailure()) == (
+        "error",
+        "unknown",
+    )
+
+
 @pytest.mark.parametrize("cache_backend", ["local", "redis"])
 @pytest.mark.asyncio
 async def test_expected_write_failure_returns_exact_tool_error_without_result_cache(
@@ -1591,6 +1758,493 @@ async def test_expected_write_failure_returns_exact_tool_error_without_result_ca
 
 
 @pytest.mark.asyncio
+async def test_fail_closed_rate_limit_expected_failure_is_observed_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailureReason,
+    )
+
+    module = _FailClosedToolModule()
+    hooks = _RecordingPostToolHookManager()
+    protocol, recorder = _protocol(
+        module=module,
+        rate_limiter=_UnavailableRateLimiter(),
+        hook_manager=hooks,
+    )
+    metrics = _RecordingMetrics()
+    protocol.metrics = metrics
+    audit_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        protocol._tool_execution_reporter,
+        "audit_tool_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+
+    result = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(),
+    )
+
+    reason = ExpectedToolFailureReason.RATE_LIMIT_UNAVAILABLE
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    assert module.calls == 0
+    assert metrics.module_operations == []
+    assert [call["status"] for call in audit_calls] == ["failure"]
+    assert [call["reason_code"] for call in audit_calls] == [reason.reason_code]
+    assert [context.status for context in hooks.after_contexts] == ["failure"]
+    assert len(recorder.events) == 1
+    assert recorder.events[0].status == "error"
+    assert recorder.events[0].reason_code == reason.reason_code
+    assert recorder.events[0].execution_origin == "failed_before_execution"
+
+
+@pytest.mark.parametrize(
+    "reason_name",
+    ["IDEMPOTENCY_IN_PROGRESS", "IDEMPOTENCY_UNAVAILABLE"],
+)
+@pytest.mark.asyncio
+async def test_expected_idempotency_failure_is_observed_before_module_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    reason_name: str,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    module = _ToolModule(write=True)
+    hooks = _RecordingPostToolHookManager()
+    protocol, recorder = _protocol(module=module, hook_manager=hooks)
+    metrics = _RecordingMetrics()
+    protocol.metrics = metrics
+    audit_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        protocol._tool_execution_reporter,
+        "audit_tool_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+    reason = ExpectedToolFailureReason[reason_name]
+
+    async def _fail_idempotency(*_args: Any, **_kwargs: Any) -> Any:
+        raise ExpectedToolFailure(reason)
+
+    monkeypatch.setattr(protocol._idempotency, "execute", _fail_idempotency)
+    try:
+        result = await protocol._handle_tools_call(
+            {
+                "name": "test.write",
+                "arguments": {"value": "A"},
+                "idempotencyKey": f"expected-{reason.reason_code}",
+            },
+            _request_context(),
+        )
+    finally:
+        get_config.cache_clear()  # type: ignore[attr-defined]
+
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+        tool="test.write",
+    )
+    assert module.calls == 0
+    assert metrics.module_operations == []
+    assert [call["reason_code"] for call in audit_calls] == [reason.reason_code]
+    assert [context.status for context in hooks.after_contexts] == ["failure"]
+    assert len(recorder.events) == 1
+    assert recorder.events[0].status == "error"
+    assert recorder.events[0].reason_code == reason.reason_code
+    assert recorder.events[0].execution_origin == "failed_before_execution"
+
+
+@pytest.mark.asyncio
+async def test_second_live_binding_expected_failure_remains_before_module_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    module = _ToolModule()
+    hooks = _RecordingPostToolHookManager()
+    protocol, recorder = _protocol(module=module, hook_manager=hooks)
+    metrics = _RecordingMetrics()
+    protocol.metrics = metrics
+    audit_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        protocol._tool_execution_reporter,
+        "audit_tool_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+    prepared = await protocol.prepare_tool_call(
+        params={"name": "test.read", "arguments": {"value": "A"}},
+        context=_request_context(),
+    )
+    original_verify = protocol._tool_execution_security.verify_prepared_tool_call
+    verify_calls = 0
+
+    async def _fail_second_verification(*args: Any, **kwargs: Any) -> None:
+        nonlocal verify_calls
+        verify_calls += 1
+        if verify_calls == 2:
+            raise ExpectedToolFailure(ExpectedToolFailureReason.STALE_PREPARED_CALL)
+        await original_verify(*args, **kwargs)
+
+    monkeypatch.setattr(
+        protocol._tool_execution_security,
+        "verify_prepared_tool_call",
+        _fail_second_verification,
+    )
+
+    result = await protocol.execute_prepared_tool_call(prepared)
+
+    reason = ExpectedToolFailureReason.STALE_PREPARED_CALL
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    assert verify_calls == 2
+    assert module.calls == 0
+    assert metrics.module_operations == []
+    assert [call["reason_code"] for call in audit_calls] == [reason.reason_code]
+    assert [context.status for context in hooks.after_contexts] == ["failure"]
+    assert len(recorder.events) == 1
+    assert recorder.events[0].status == "error"
+    assert recorder.events[0].reason_code == reason.reason_code
+    assert recorder.events[0].execution_origin == "failed_before_execution"
+
+
+@pytest.mark.asyncio
+async def test_ignored_expected_module_failure_observes_once_and_leaves_breaker_neutral(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    reason = ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    module = _ExpectedFailureBreakerModule(ExpectedToolFailure(reason))
+    hooks = _RecordingPostToolHookManager()
+    protocol, recorder = _protocol(module=module, hook_manager=hooks)
+    metrics = _RecordingMetrics()
+    protocol.metrics = metrics
+    audit_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        protocol._tool_execution_reporter,
+        "audit_tool_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+    breaker = module._circuit_breaker
+    breaker_before = (
+        breaker.failure_count,
+        breaker.success_count,
+        breaker._state,
+        breaker._current_recovery_timeout,
+    )
+
+    result = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(),
+    )
+
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    assert module.calls == 1
+    assert metrics.module_operations == [False]
+    assert [call["reason_code"] for call in audit_calls] == [reason.reason_code]
+    assert [context.status for context in hooks.after_contexts] == ["failure"]
+    assert len(recorder.events) == 1
+    assert recorder.events[0].status == "error"
+    assert recorder.events[0].reason_code == reason.reason_code
+    assert recorder.events[0].execution_origin == "executed"
+    assert (
+        breaker.failure_count,
+        breaker.success_count,
+        breaker._state,
+        breaker._current_recovery_timeout,
+    ) == breaker_before
+
+
+@pytest.mark.asyncio
+async def test_counted_dependency_failure_observes_and_reopens_breaker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    reason = ExpectedToolFailureReason.DEPENDENCY_UNAVAILABLE
+    module = _ExpectedFailureBreakerModule(
+        ExpectedToolFailure(reason),
+        recovery_timeout=1,
+    )
+    hooks = _RecordingPostToolHookManager()
+    protocol, recorder = _protocol(module=module, hook_manager=hooks)
+    metrics = _RecordingMetrics()
+    protocol.metrics = metrics
+    audit_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        protocol._tool_execution_reporter,
+        "audit_tool_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+
+    first = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(request_id="counted-first"),
+    )
+    breaker = module._circuit_breaker
+    assert breaker.failure_count == 1
+    assert breaker._state == "open"
+    breaker._opened_at = time.time() - 2.0
+    second = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(request_id="counted-second"),
+    )
+
+    for result in (first, second):
+        _assert_exact_expected_failure_payload(
+            result,
+            reason_code=reason.reason_code,
+            message=reason.public_message,
+        )
+    assert module.calls == 2
+    assert breaker.failure_count == 2
+    assert breaker._state == "open"
+    assert breaker._current_recovery_timeout == 2.0
+    assert metrics.module_operations == [False, False]
+    assert [call["reason_code"] for call in audit_calls] == [
+        reason.reason_code,
+        reason.reason_code,
+    ]
+    assert [context.status for context in hooks.after_contexts] == [
+        "failure",
+        "failure",
+    ]
+    assert len(recorder.events) == 2
+    assert all(event.status == "error" for event in recorder.events)
+    assert all(event.reason_code == reason.reason_code for event in recorder.events)
+    assert all(event.execution_origin == "executed" for event in recorder.events)
+
+
+@pytest.mark.asyncio
+async def test_unexpected_module_failure_keeps_generic_error_and_breaker_counting() -> None:
+    original = RuntimeError("SENTINEL_UNEXPECTED_PRIVATE_DETAIL")
+    module = _ExpectedFailureBreakerModule(original)
+    protocol, recorder = _protocol(module=module)
+    metrics = _RecordingMetrics()
+    protocol.metrics = metrics
+
+    with pytest.raises(RuntimeError, match="^tool_execution_error$"):
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"value": "A"}},
+            _request_context(),
+        )
+
+    assert module.calls == 1
+    assert module._circuit_breaker.failure_count == 1
+    assert module._circuit_breaker._state == "open"
+    assert metrics.module_operations == [False]
+    assert len(recorder.events) == 1
+    assert recorder.events[0].status == "error"
+    assert recorder.events[0].execution_origin == "executed"
+
+
+@pytest.mark.parametrize("cache_backend", ["local", "redis"])
+@pytest.mark.asyncio
+async def test_pre_success_cancellation_propagates_without_envelope_or_result_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    cache_backend: str,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    cancellation = asyncio.CancelledError("SENTINEL_CANCELLATION_PRIVATE_DETAIL")
+    module = _ToolModule(write=True, fail=cancellation)
+    protocol, recorder = _protocol(module=module)
+    redis = _MemoryRedis()
+    protocol._idempotency._redis_attempted = True
+    protocol._idempotency._redis_ready = cache_backend == "redis"
+    protocol._idempotency._redis_client = redis if cache_backend == "redis" else None
+    params = {
+        "name": "test.write",
+        "arguments": {"value": "A"},
+        "idempotencyKey": f"cancel-{cache_backend}",
+    }
+
+    try:
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await protocol._handle_tools_call(params, _request_context())
+    finally:
+        get_config.cache_clear()  # type: ignore[attr-defined]
+
+    assert caught.value is cancellation
+    assert protocol._idempotency._local_cache == {}
+    assert not any(key.startswith("mcp:idemp:result:") for key in redis.values)
+    assert recorder.events == []
+
+
+@pytest.mark.parametrize("observer", ["module_metrics", "audit", "post_hook", "reporting"])
+@pytest.mark.asyncio
+async def test_exotic_observer_failure_cannot_replace_expected_failure_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    observer: str,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    calls: list[str] = []
+    reason = ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    module = _ExpectedFailureBreakerModule(ExpectedToolFailure(reason))
+    protocol, _recorder = _protocol(module=module)
+
+    class _ExpectedObserverMetrics(_NoopMetrics):
+        def record_module_operation(self, **_kwargs: Any) -> None:
+            calls.append("module_metrics")
+            if observer == "module_metrics":
+                raise ExoticObserverError("SENTINEL_EXPECTED_OBSERVER_SECRET")
+
+    protocol.metrics = _ExpectedObserverMetrics()
+
+    def _audit(*_args: Any, **_kwargs: Any) -> None:
+        calls.append("audit")
+        if observer == "audit":
+            raise ExoticObserverError("SENTINEL_EXPECTED_OBSERVER_SECRET")
+
+    async def _post_hook(**_kwargs: Any) -> None:
+        calls.append("post_hook")
+        if observer == "post_hook":
+            raise ExoticObserverError("SENTINEL_EXPECTED_OBSERVER_SECRET")
+
+    original_build_event = protocol._tool_execution_reporter.build_event
+
+    def _build_event(**kwargs: Any) -> ToolUseEvent:
+        calls.append("reporting")
+        if observer == "reporting":
+            raise ExoticObserverError("SENTINEL_EXPECTED_OBSERVER_SECRET")
+        return original_build_event(**kwargs)
+
+    monkeypatch.setattr(protocol._tool_execution_reporter, "audit_tool_event", _audit)
+    monkeypatch.setattr(protocol._tool_execution_reporter, "build_event", _build_event)
+    protocol._run_post_tool_hooks = _post_hook
+
+    result = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(),
+    )
+
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    assert observer in calls
+
+
+@pytest.mark.asyncio
+async def test_expected_failure_observers_receive_detached_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    reason = ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    module = _ExpectedFailureBreakerModule(ExpectedToolFailure(reason))
+    protocol, recorder = _protocol(module=module)
+    observed: list[dict[str, Any]] = []
+
+    async def _mutate_post_hook(**kwargs: Any) -> None:
+        observed.append(kwargs)
+        kwargs["tool_def"]["metadata"]["category"] = "SENTINEL_MUTATED_CATEGORY"
+
+    protocol._run_post_tool_hooks = _mutate_post_hook
+
+    result = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(),
+    )
+
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    assert len(observed) == 1
+    assert len(recorder.events) == 1
+    assert recorder.events[0].category == "read"
+
+
+@pytest.mark.asyncio
+async def test_expected_failure_sentinel_is_absent_from_all_observable_surfaces() -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    sentinel = "SENTINEL_EXPECTED_FAILURE_INTERNAL_SECRET"
+    failure = ExpectedToolFailure(ExpectedToolFailureReason.DEPENDENCY_UNAVAILABLE)
+    failure.__cause__ = RuntimeError(sentinel)
+    module = _ExpectedFailureBreakerModule(failure)
+    hooks = _RecordingPostToolHookManager()
+    telemetry = _RecordingTelemetry()
+    protocol, recorder = _protocol(
+        module=module,
+        hook_manager=hooks,
+        telemetry_provider=telemetry,
+    )
+    captured: list[Any] = []
+    sink_id = logger.add(lambda message: captured.append(message.record), level="DEBUG")
+    try:
+        result = await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"value": "A"}},
+            _request_context(),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    reason = ExpectedToolFailureReason.DEPENDENCY_UNAVAILABLE
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    audit_records = [record for record in captured if record["extra"].get("audit")]
+    assert any(record["extra"].get("reason_code") == reason.reason_code for record in audit_records)
+    surfaces = repr(
+        {
+            "payload_and_eval": result,
+            "events": recorder.events,
+            "telemetry": [span.attributes for span in telemetry.spans],
+            "hooks": hooks.after_contexts,
+            "audit": audit_records,
+            "logs": captured,
+        }
+    )
+    assert sentinel not in surfaces
+    assert "ExpectedToolFailure" not in repr(result)
+
+
+@pytest.mark.asyncio
 async def test_protocol_process_request_does_not_double_record_handler_rate_limit() -> None:
     protocol, recorder = _protocol(rate_limiter=_ToolOnlyRateLimiter())
 
@@ -1605,9 +2259,7 @@ async def test_protocol_process_request_does_not_double_record_handler_rate_limi
             _request_context(),
         )
 
-    rate_limited_events = [
-        event for event in recorder.events if event.status == "rate_limited"
-    ]
+    rate_limited_events = [event for event in recorder.events if event.status == "rate_limited"]
     assert len(rate_limited_events) == 1
     assert rate_limited_events[0].execution_origin == "failed_before_execution"
 

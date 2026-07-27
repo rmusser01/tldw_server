@@ -34,6 +34,8 @@ def _safe_exception_family(exc: BaseException) -> str:
             and all(character.isalnum() or character == "_" for character in name)
         ):
             return name
+    except asyncio.CancelledError:
+        raise
     except BaseException:  # noqa: BLE001 - hostile exceptions cannot replace outcomes.
         return "Exception"
     return "Exception"
@@ -130,6 +132,9 @@ class ToolExecutionRuntime:
         args_hash = prepared.arguments_hash
         context = prepared.context
         execution_start_ts = time.time()
+        module_name = module_id or getattr(module, "name", None)
+        module_invoked = False
+        owner_duration_ms = 0.0
 
         def _observer_tool_def() -> dict[str, Any] | None:
             return prepared.tool_def
@@ -224,6 +229,122 @@ class ToolExecutionRuntime:
                         ExpectedToolFailureReason.RATE_LIMIT_UNAVAILABLE,
                     ) from None
 
+        async def _run_failure_observers(
+            error: Exception,
+            *,
+            record_module_metrics: bool,
+            reason_code: str | None = None,
+        ) -> None:
+            try:
+                context.logger.error(  # noqa: TRY400 - the log contains only safe fields.
+                    "Tool execution failed: {error_type}",
+                    error_type=_safe_exception_family(error),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
+                logger.debug(
+                    "MCP tool failure log observer failed error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
+            if isinstance(error, InvalidParamsException):
+                try:
+                    self.metrics.record_tool_invalid_params(
+                        getattr(module, "name", "unknown"),
+                        str(tool_name),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
+                    logger.debug(
+                        "MCP tool invalid-params metrics observer failed error_type={error_type}",
+                        error_type=_safe_exception_family(exc),
+                    )
+            if record_module_metrics:
+                try:
+                    self.metrics.record_module_operation(
+                        module=module_name or "unknown",
+                        operation="tools_call",
+                        duration=owner_duration_ms / 1000.0,
+                        success=False,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
+                    logger.debug(
+                        "MCP tool failure metrics observer failed error_type={error_type}",
+                        error_type=_safe_exception_family(exc),
+                    )
+            try:
+                self.reporter.audit_tool_event(
+                    context,
+                    tool_name,
+                    module_name,
+                    status="failure",
+                    duration_ms=owner_duration_ms,
+                    arguments_hash=args_hash,
+                    error=error,
+                    reason_code=reason_code,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
+                logger.debug(
+                    "MCP tool failure audit observer failed error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
+            try:
+                await self._run_post_hooks(
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    module_id=module_name,
+                    tool_def=_observer_tool_def(),
+                    is_write=is_write,
+                    arguments_hash=args_hash,
+                    context=context,
+                    scope_payload=_observer_scope_payload(),
+                    status="failure",
+                    duration_ms=owner_duration_ms,
+                    error=error,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
+                logger.debug(
+                    "MCP tool failure post-hook observer failed error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
+
+        async def _record_execution_failure(error: Exception) -> None:
+            if module_invoked:
+                await _run_failure_observers(
+                    error,
+                    record_module_metrics=True,
+                )
+            status, reason_code = classify_tool_use_exception(error)
+            await _record_prepared_event(
+                status=status,
+                execution_origin=(
+                    self.reporter.execution_origin_for_failure(status) if status != "error" else "executed"
+                ),
+                reason_code=reason_code,
+            )
+
+        async def _complete_expected_failure(
+            failure: ExpectedToolFailure,
+        ) -> dict[str, Any]:
+            await _run_failure_observers(
+                failure,
+                record_module_metrics=module_invoked,
+                reason_code=failure.reason_code,
+            )
+            await _record_prepared_event(
+                status="error",
+                execution_origin=("executed" if module_invoked else "failed_before_execution"),
+                reason_code=failure.reason_code,
+            )
+            return _expected_failure_payload(failure)
+
         try:
             await self.security.verify_prepared_tool_call(
                 prepared,
@@ -239,15 +360,10 @@ class ToolExecutionRuntime:
             )
             raise
         except ExpectedToolFailure as failure:
-            return _expected_failure_payload(failure)
-
-        owner_invoked = False
-        owner_duration_ms = 0.0
-        module_name = module_id or getattr(module, "name", None)
+            return await _complete_expected_failure(failure)
 
         async def _execute_owner() -> dict[str, Any]:
-            nonlocal owner_duration_ms, owner_invoked
-            owner_invoked = True
+            nonlocal module_invoked, owner_duration_ms
             t0 = time.time()
 
             with self.telemetry.trace_context(
@@ -272,6 +388,7 @@ class ToolExecutionRuntime:
                     ):
                         execution_args = dict(tool_args)
                         execution_args["idempotencyKey"] = normalized_idempotency_key
+                    module_invoked = True
                     result = await module.execute_with_circuit_breaker(
                         module.execute_tool,
                         tool_name,
@@ -408,91 +525,6 @@ class ToolExecutionRuntime:
                     error_type=_safe_exception_family(exc),
                 )
 
-        async def _run_failure_observers(error: Exception) -> None:
-            context.logger.error(  # noqa: TRY400 - the log contains only exception family.
-                "Tool execution failed: {error_type}",
-                error_type=_safe_exception_family(error),
-            )
-            if isinstance(error, InvalidParamsException):
-                try:
-                    self.metrics.record_tool_invalid_params(
-                        getattr(module, "name", "unknown"),
-                        str(tool_name),
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
-                    logger.debug(
-                        "MCP tool invalid-params metrics observer failed error_type={error_type}",
-                        error_type=_safe_exception_family(exc),
-                    )
-            try:
-                self.metrics.record_module_operation(
-                    module=module_name or "unknown",
-                    operation="tools_call",
-                    duration=owner_duration_ms / 1000.0,
-                    success=False,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
-                logger.debug(
-                    "MCP tool failure metrics observer failed error_type={error_type}",
-                    error_type=_safe_exception_family(exc),
-                )
-            try:
-                self.reporter.audit_tool_event(
-                    context,
-                    tool_name,
-                    module_name,
-                    status="failure",
-                    duration_ms=owner_duration_ms,
-                    arguments_hash=args_hash,
-                    error=error,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
-                logger.debug(
-                    "MCP tool failure audit observer failed error_type={error_type}",
-                    error_type=_safe_exception_family(exc),
-                )
-            try:
-                await self._run_post_hooks(
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    module_id=module_name,
-                    tool_def=_observer_tool_def(),
-                    is_write=is_write,
-                    arguments_hash=args_hash,
-                    context=context,
-                    scope_payload=_observer_scope_payload(),
-                    status="failure",
-                    duration_ms=owner_duration_ms,
-                    error=error,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
-                logger.debug(
-                    "MCP tool failure post-hook observer failed error_type={error_type}",
-                    error_type=_safe_exception_family(exc),
-                )
-
-        async def _record_execution_failure(error: Exception) -> None:
-            if owner_invoked:
-                await _run_failure_observers(error)
-            status, reason_code = classify_tool_use_exception(error)
-            await _record_prepared_event(
-                status=status,
-                execution_origin=(
-                    self.reporter.execution_origin_for_failure(status)
-                    if status != "error"
-                    else "executed"
-                ),
-                reason_code=reason_code,
-            )
-
         if is_write and idempotency_cache_key:
             try:
                 if args_hash is None:
@@ -512,9 +544,13 @@ class ToolExecutionRuntime:
                     )
                 try:
                     if from_cache:
-                        self.metrics.record_idempotency_hit(module_id or getattr(module, "name", "unknown"), str(tool_name))
+                        self.metrics.record_idempotency_hit(
+                            module_id or getattr(module, "name", "unknown"), str(tool_name)
+                        )
                     else:
-                        self.metrics.record_idempotency_miss(module_id or getattr(module, "name", "unknown"), str(tool_name))
+                        self.metrics.record_idempotency_miss(
+                            module_id or getattr(module, "name", "unknown"), str(tool_name)
+                        )
                 except asyncio.CancelledError:
                     raise
                 except Exception as metrics_exc:  # noqa: BLE001 - metrics cannot replace outcomes.
@@ -523,7 +559,7 @@ class ToolExecutionRuntime:
                         error_type=_safe_exception_family(metrics_exc),
                     )
             except ExpectedToolFailure as failure:
-                return _expected_failure_payload(failure)
+                return await _complete_expected_failure(failure)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -542,7 +578,7 @@ class ToolExecutionRuntime:
         try:
             payload = await _execute_owner()
         except ExpectedToolFailure as failure:
-            return _expected_failure_payload(failure)
+            return await _complete_expected_failure(failure)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

@@ -70,7 +70,7 @@ def _expected_failure_reason_code(exc: BaseException) -> str | None:
         sanitized_reason_code = sanitize_reason_code(reason_code)
         if (
             not isinstance(reason_code, str)
-            or sanitized_reason_code != reason_code
+            or sanitized_reason_code is None
             or reason_code != catalog_reason_code
             or not isinstance(public_message, str)
             or not public_message.strip()
