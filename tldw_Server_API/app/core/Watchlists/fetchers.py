@@ -30,19 +30,28 @@ from lxml.html import HtmlElement
 from tldw_Server_API.app.core.Security.egress import is_url_allowed, is_url_allowed_for_tenant
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.Web_Scraping.selectors import (
-    clear_selector_caches as clear_selector_caches,
-    extract_schema_fields as extract_schema_fields,
-    get_selector_cache_stats as get_selector_cache_stats,
-    validate_selector_rules as validate_selector_rules,
+    clear_selector_caches,
+    extract_schema_fields,
+    get_selector_cache_stats,
+    validate_selector_rules,
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors.engine import (
     _coerce_value,
     _ensure_sequence,
     _extract_value,
     _select_nodes,
-    reload_selector_guardrails_from_env as reload_selector_guardrails_from_env,
+    reload_selector_guardrails_from_env,
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors.schema import _normalize_datetime
+
+# Keep intentional compatibility re-exports visible to static analysis.
+_SELECTOR_COMPATIBILITY_EXPORTS = (
+    clear_selector_caches,
+    extract_schema_fields,
+    get_selector_cache_stats,
+    reload_selector_guardrails_from_env,
+    validate_selector_rules,
+)
 
 _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
