@@ -1710,6 +1710,86 @@ async def test_malformed_cached_vector_becomes_miss_and_is_replaced(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_malformed_fallback_cached_vector_becomes_miss_and_is_replaced():
+    fallback_model = "sentence-transformers/all-MiniLM-L6-v2"
+    fallback_cache_key = (
+        f"replace fallback|huggingface|{fallback_model}|"
+        f"huggingface:{fallback_model}:backend"
+    )
+    cache = RecordingCache(
+        {fallback_cache_key: [True, 0.0]}  # type: ignore[dict-item]
+    )
+    primary_error = EmbeddingProviderError(
+        "provider_unavailable",
+        "openai unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    executor = RecordingExecutor(
+        failures={"openai": primary_error},
+        provider_vectors={"huggingface": [[0.25, 0.75]]},
+    )
+    identity_calls: list[tuple[str, str]] = []
+
+    def backend_identity_resolver(provider: str, model: str) -> str:
+        identity_calls.append((provider, model))
+        return f"{provider}:{model}:backend"
+
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=backend_identity_resolver,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": fallback_model,
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "replace fallback",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.vectors == [[0.25, 0.75]]
+    assert result.provider == "huggingface"
+    assert result.model == fallback_model
+    assert result.fallback_from == "openai"
+    assert result.cache_hits == 0
+    assert result.cache_misses == 1
+    assert cache.get_keys == [
+        "replace fallback|openai|text-embedding-3-small|"
+        "openai:text-embedding-3-small:backend",
+        fallback_cache_key,
+    ]
+    assert executor.calls == [
+        {
+            "texts": ["replace fallback"],
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": None,
+        },
+        {
+            "texts": ["replace fallback"],
+            "provider": "huggingface",
+            "model": fallback_model,
+            "dimensions": None,
+        },
+    ]
+    assert cache.set_calls == [(fallback_cache_key, [0.25, 0.75])]
+    assert cache.values[fallback_cache_key] == [0.25, 0.75]
+    assert identity_calls == [
+        ("openai", "text-embedding-3-small"),
+        ("openai", "text-embedding-3-small"),
+        ("huggingface", fallback_model),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_malformed_numeric_string_vector_is_rejected_without_cache_writeback():
     cache = RecordingCache()
     executor = RecordingExecutor(vectors=["123"])  # type: ignore[list-item]
