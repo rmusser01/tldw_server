@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import json
 import re
+import subprocess
+import sys
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +20,7 @@ from tldw_Server_API.app.core.Web_Scraping.content import metadata as metadata_m
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "phase4"
 CONTENT_ROOT = Path(__file__).resolve().parents[2] / "app" / "core" / "Web_Scraping" / "content"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _CONTENT_CASE_NAMES = (
     "paragraph_and_inline_formatting",
@@ -33,6 +36,16 @@ _METADATA_CASE_NAMES = (
     "body_changes_are_detected",
 )
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
+_CONTENT_IMPORT_ALLOWLIST = {
+    "__init__.py": {".formatting", ".metadata"},
+    "formatting.py": {"bs4", "loguru"},
+    "metadata.py": {"datetime", "hashlib", "json", "typing"},
+}
+_ISOLATION_BLOCKED_MODULES = (
+    "tldw_Server_API.app.core.http_client",
+    "tldw_Server_API.app.core.Metrics",
+    "tldw_Server_API.app.core.Security",
+)
 
 
 def _assert_exact_keys(
@@ -323,27 +336,55 @@ def test_content_implementations_have_single_canonical_owner() -> None:
     assert "ContentMetadataHandler" not in legacy_definitions
 
 
-def test_content_modules_are_neutral_leaves() -> None:
-    banned_fragments = {
-        "article_extractor_lib",
-        "enhanced_web_scraping",
-        "extraction",
-        "orchestration",
-        "policy",
-        "preflight",
-        "routing",
-        "watchlists",
-        "websearch",
-    }
-    violations: dict[str, list[str]] = {}
+def test_content_modules_use_only_allowlisted_leaf_dependencies() -> None:
+    source_files = {path.name for path in CONTENT_ROOT.glob("*.py")}
+    allowlisted_files = set(_CONTENT_IMPORT_ALLOWLIST)
+    inventory_errors = []
+    if unlisted_files := sorted(source_files - allowlisted_files):
+        inventory_errors.append(f"add explicit import allowlists for: {unlisted_files}")
+    if missing_files := sorted(allowlisted_files - source_files):
+        inventory_errors.append(f"remove stale import allowlists for: {missing_files}")
 
-    for path in sorted(CONTENT_ROOT.glob("*.py")):
-        banned_targets = sorted(
-            target
-            for target in _import_targets(path)
-            if any(fragment in target.lower() for fragment in banned_fragments)
-        )
-        if banned_targets:
-            violations[path.name] = banned_targets
+    violations = []
+    for filename, allowed_targets in sorted(_CONTENT_IMPORT_ALLOWLIST.items()):
+        path = CONTENT_ROOT / filename
+        if not path.is_file():
+            continue
+        unexpected_targets = sorted(_import_targets(path) - allowed_targets)
+        if unexpected_targets:
+            violations.append(
+                f"{filename}: disallowed imports {unexpected_targets}; "
+                f"allowed imports are {sorted(allowed_targets)}"
+            )
 
-    assert violations == {}
+    errors = inventory_errors + violations
+    assert not errors, "Content import allowlist violations:\n" + "\n".join(errors)
+
+
+def test_importing_content_formatting_does_not_load_project_infrastructure() -> None:
+    script = f"""
+import importlib
+import json
+import sys
+
+importlib.import_module("tldw_Server_API.app.core.Web_Scraping.content.formatting")
+blocked = {list(_ISOLATION_BLOCKED_MODULES)!r}
+loaded = sorted(
+    name
+    for name in sys.modules
+    if any(name == prefix or name.startswith(prefix + ".") for prefix in blocked)
+)
+print(json.dumps(loaded))
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == [], (
+        "content.formatting imported project infrastructure: " + result.stdout.strip()
+    )

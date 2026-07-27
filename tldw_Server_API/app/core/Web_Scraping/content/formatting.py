@@ -1,6 +1,5 @@
 from bs4 import BeautifulSoup
-
-from tldw_Server_API.app.core.Utils.Utils import logging
+from loguru import logger as logging
 
 
 def convert_html_to_markdown(html: str) -> str:
