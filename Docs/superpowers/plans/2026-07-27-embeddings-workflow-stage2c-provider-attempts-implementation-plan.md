@@ -189,7 +189,7 @@ git commit -m "refactor(embeddings): add provider readiness boundary"
 - Modify: `tldw_Server_API/app/core/Embeddings/provider_attempt.py`
 - Modify: `tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py`
 
-- [ ] **Step 1: Write failing ordered cache and miss tests**
+- [x] **Step 1: Write failing ordered cache and miss tests**
 
 Extend `test_provider_attempt.py` with the helper fakes and tests:
 
@@ -405,7 +405,7 @@ async def test_provider_attempt_cache_keys_exclude_plan_identity_and_namespace()
     assert all("ns" not in key for key in cache.get_keys)
 ```
 
-- [ ] **Step 2: Run the new tests and verify RED**
+- [x] **Step 2: Run the new tests and verify RED**
 
 Run:
 
@@ -415,7 +415,7 @@ Run:
 
 Expected: failures because `EmbeddingProviderAttempt` and `ProviderAttemptSuccess` do not exist.
 
-- [ ] **Step 3: Implement provider-attempt DTOs and ordered cache/miss execution**
+- [x] **Step 3: Implement provider-attempt DTOs and ordered cache/miss execution**
 
 In `provider_attempt.py`, add:
 
@@ -588,11 +588,11 @@ def _coerce_executor_output(
 
 Export the new protocols and DTOs in `provider_attempt.__all__`.
 
-- [ ] **Step 4: Run provider-attempt tests and verify GREEN**
+- [x] **Step 4: Run provider-attempt tests and verify GREEN**
 
 Run the command from Step 2. Expected: all provider-attempt tests pass.
 
-- [ ] **Step 5: Commit the ordered attempt slice**
+- [x] **Step 5: Commit the ordered attempt slice**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/provider_attempt.py tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py
