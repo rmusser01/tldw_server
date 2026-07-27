@@ -47,6 +47,7 @@ _DEGRADED_STAGES = frozenset(
         "redis_release",
         "finalize_timeout",
         "finalizer_stuck",
+        "shutdown_execution_timeout",
     }
 )
 _REDIS_POLL_INTERVAL_SECONDS = 0.05
@@ -188,6 +189,7 @@ class IdempotencyManager:
         ] = {}
         self._closing = False
         self._inflight_executions = 0
+        self._admitted_execution_tasks: dict[asyncio.Task[Any], int] = {}
         self._lifecycle_changed = asyncio.Event()
 
     @property
@@ -229,6 +231,10 @@ class IdempotencyManager:
             return 1.0
         return float(min(configured, 15))
 
+    @staticmethod
+    def _shutdown_execution_bound() -> float:
+        return 15.0
+
     def _discard_finalizer(
         self,
         task: asyncio.Task[Literal["durable", "local", "none"]],
@@ -261,27 +267,49 @@ class IdempotencyManager:
         task.add_done_callback(self._discard_finalizer)
         return task
 
-    def _register_execution(self) -> None:
+    def _register_execution(self) -> asyncio.Task[Any]:
+        task = asyncio.current_task()
+        if task is None:  # pragma: no cover - execute always runs inside an asyncio task.
+            raise RuntimeError("Idempotency execution requires an asyncio task")
         with self._local_guard:
             if self._closing:
                 raise ExpectedToolFailure(
                     ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
                 )
             self._inflight_executions += 1
+            self._admitted_execution_tasks[task] = (
+                self._admitted_execution_tasks.get(task, 0) + 1
+            )
             self._lifecycle_changed.set()
+        return task
 
-    def _finish_execution(self) -> None:
+    def _finish_execution(self, task: asyncio.Task[Any]) -> None:
         with self._local_guard:
             self._inflight_executions -= 1
+            references = self._admitted_execution_tasks[task]
+            if references == 1:
+                del self._admitted_execution_tasks[task]
+            else:
+                self._admitted_execution_tasks[task] = references - 1
             self._lifecycle_changed.set()
 
-    async def _wait_for_execution_creators(self) -> None:
+    async def _wait_for_admitted_executions(self, *, bound: float) -> bool:
+        deadline = asyncio.get_running_loop().time() + bound
         while True:
             with self._local_guard:
-                if self._inflight_executions == 0:
-                    return
+                if not self._admitted_execution_tasks:
+                    return True
                 self._lifecycle_changed.clear()
-            await self._lifecycle_changed.wait()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return False
+            try:
+                await asyncio.wait_for(
+                    self._lifecycle_changed.wait(),
+                    timeout=remaining,
+                )
+            except TimeoutError:
+                return False
 
     async def _await_finalizer_until(
         self,
@@ -1456,7 +1484,7 @@ class IdempotencyManager:
     ) -> IdempotencyRunResult:
         """Bind arguments, acquire ownership, and return a fresh replay or success."""
 
-        self._register_execution()
+        execution_task = self._register_execution()
         try:
             return await self._execute_admitted(
                 cache_key,
@@ -1465,7 +1493,7 @@ class IdempotencyManager:
                 policy=policy,
             )
         finally:
-            self._finish_execution()
+            self._finish_execution(execution_task)
 
     async def _execute_admitted(
         self,
@@ -1521,12 +1549,25 @@ class IdempotencyManager:
         with self._local_guard:
             self._closing = True
             self._lifecycle_changed.set()
-        await self._wait_for_execution_creators()
+        executions_drained = await self._wait_for_admitted_executions(
+            bound=self._shutdown_execution_bound(),
+        )
         with self._local_guard:
             tasks = set(self._finalizers)
             bound = max(
                 (self._finalizer_bounds.get(task, 1.0) for task in tasks),
                 default=1.0,
+            )
+            pending_executions = sum(self._admitted_execution_tasks.values())
+        if not executions_drained and pending_executions:
+            self._record_degraded(
+                "shutdown_execution_timeout",
+                TimeoutError(),
+                remote=False,
+            )
+            logger.warning(
+                "MCP idempotency shutdown executions pending count={count}",
+                count=min(pending_executions, 1_000),
             )
         if not tasks:
             return

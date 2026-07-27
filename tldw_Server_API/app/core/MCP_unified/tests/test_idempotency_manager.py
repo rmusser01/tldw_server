@@ -2178,3 +2178,116 @@ async def test_shutdown_waits_for_late_admitted_success_to_persist_and_release()
     finally:
         allow_callback.set()
         await asyncio.gather(execution, shutdown, return_exceptions=True)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_retains_late_execution_past_hard_deadline_until_durable() -> None:
+    redis = _FakeRedis()
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    manager._shutdown_execution_bound = lambda: 0.01
+    callback_started = asyncio.Event()
+    release_callback = asyncio.Event()
+    payload = {"content": [{"type": "text", "text": "retained-success"}]}
+    key = "retained-owner-shutdown"
+    callback_calls = 0
+    callback_cancellations = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal callback_calls, callback_cancellations
+        callback_calls += 1
+        callback_started.set()
+        while not release_callback.is_set():
+            try:
+                await release_callback.wait()
+            except asyncio.CancelledError:
+                callback_cancellations += 1
+        return payload
+
+    execution = asyncio.create_task(
+        manager.execute(key, "args", _execute, policy=_policy())
+    )
+    await asyncio.wait_for(callback_started.wait(), timeout=0.5)
+    shutdown = asyncio.create_task(manager.shutdown())
+
+    try:
+        await asyncio.wait_for(asyncio.shield(shutdown), timeout=0.5)
+
+        assert execution.done() is False
+        assert manager._admitted_execution_tasks == {execution: 1}
+        assert manager._finalizers == set()
+        assert manager._redis_ready is True
+        assert manager.remote_degraded is False
+        assert stages == [("shutdown_execution_timeout", "TimeoutError")]
+
+        release_callback.set()
+        result = await asyncio.wait_for(execution, timeout=0.5)
+        await asyncio.sleep(0)
+
+        replay_calls = 0
+
+        async def _unexpected_replay_callback() -> dict[str, Any]:
+            nonlocal replay_calls
+            replay_calls += 1
+            return {"unexpected": True}
+
+        replay = await _remote_manager(redis).execute(
+            key,
+            "args",
+            _unexpected_replay_callback,
+            policy=_policy(),
+        )
+
+        assert result.payload is payload
+        assert result.persistence == "durable"
+        assert replay.from_cache is True
+        assert replay.persistence == "durable"
+        assert replay.payload == payload
+        assert callback_calls == 1
+        assert callback_cancellations == 0
+        assert replay_calls == 0
+        assert redis.values[_result_key(key)] == canonical_json_bytes(
+            payload,
+            max_bytes=_policy().max_result_bytes,
+        )
+        assert _lock_key(key) not in redis.values
+        assert redis.result_store_calls == 1
+        assert redis.lock_release_calls == 1
+        assert manager._admitted_execution_tasks == {}
+        assert manager._finalizers == set()
+        assert manager._redis_ready is True
+        assert manager.remote_degraded is False
+    finally:
+        release_callback.set()
+        await asyncio.gather(execution, shutdown, return_exceptions=True)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_nested_same_task_execution_tracking_uses_refcounts() -> None:
+    manager = _local_manager()
+    observed_refcounts: list[int] = []
+
+    async def _execute_inner() -> dict[str, Any]:
+        task = asyncio.current_task()
+        assert task is not None
+        observed_refcounts.append(manager._admitted_execution_tasks[task])
+        return {"inner": True}
+
+    async def _execute_outer() -> dict[str, Any]:
+        task = asyncio.current_task()
+        assert task is not None
+        observed_refcounts.append(manager._admitted_execution_tasks[task])
+        await manager.execute("nested-inner", "inner-args", _execute_inner, policy=_policy())
+        observed_refcounts.append(manager._admitted_execution_tasks[task])
+        return {"outer": True}
+
+    await manager.execute("nested-outer", "outer-args", _execute_outer, policy=_policy())
+
+    assert observed_refcounts == [1, 2, 1]
+    assert manager._admitted_execution_tasks == {}
+    assert manager._inflight_executions == 0

@@ -98,6 +98,14 @@ async def _await_owned_shutdown_task(
             if cancellation is None:
                 cancellation = exc
             if task.done():
+                if task.cancelled():
+                    return cancellation, None
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    return cancellation, None
+                except Exception as task_exc:  # noqa: BLE001 - caller logs safe family only.
+                    return cancellation, task_exc
                 return cancellation, None
         except Exception as exc:  # noqa: BLE001 - teardown errors are contained by the caller.
             return cancellation, exc

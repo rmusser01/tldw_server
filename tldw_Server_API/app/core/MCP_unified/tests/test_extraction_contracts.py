@@ -910,6 +910,39 @@ async def test_mcp_server_shutdown_defers_cancellation_during_connection_close()
 
 
 @pytest.mark.asyncio
+async def test_owned_shutdown_helper_preserves_cancellation_and_child_failure() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import _await_owned_shutdown_task
+
+    child_started = asyncio.Event()
+    release_child = asyncio.Event()
+    child_tasks: list[asyncio.Task[None]] = []
+
+    async def _fail_cleanup() -> None:
+        child_started.set()
+        await release_child.wait()
+        raise _ExoticShutdownError("private cleanup detail")
+
+    async def _wait_for_cleanup() -> tuple[asyncio.CancelledError | None, Exception | None]:
+        child = asyncio.create_task(_fail_cleanup())
+        child_tasks.append(child)
+        return await _await_owned_shutdown_task(child, None)
+
+    waiter = asyncio.create_task(_wait_for_cleanup())
+    await asyncio.wait_for(child_started.wait(), timeout=0.5)
+    release_child.set()
+    await asyncio.sleep(0)
+    assert child_tasks[0].done() is True
+    waiter.cancel("original cancellation")
+
+    cancellation, error = await asyncio.wait_for(waiter, timeout=0.5)
+
+    assert cancellation is not None
+    assert cancellation.args == ("original cancellation",)
+    assert type(error) is _ExoticShutdownError
+    assert child_tasks[0].done() is True
+
+
+@pytest.mark.asyncio
 async def test_mcp_server_initialize_uses_injected_permission_seeder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
