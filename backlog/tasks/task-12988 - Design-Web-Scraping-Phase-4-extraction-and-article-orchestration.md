@@ -1,7 +1,7 @@
 ---
 id: TASK-12988
 title: Design Web_Scraping Phase 4 extraction and article orchestration
-status: Done
+status: In Progress
 created_date: 2026-07-26 23:29
 labels:
 - web-scraping
@@ -18,7 +18,7 @@ documentation:
 - Docs/superpowers/specs/2026-07-26-web-scraping-phase-4-extraction-article-orchestration-design.md
 modified_files:
 - Docs/superpowers/specs/2026-07-26-web-scraping-phase-4-extraction-article-orchestration-design.md
-updated_date: 2026-07-26 23:47
+updated_date: 2026-07-27 15:20
 ---
 
 ## Description
@@ -33,7 +33,9 @@ Write the approved Phase 4 design for moving article extraction and governed sin
 - [x] #2 The design preserves governed preflight, per-fetch egress enforcement, public compatibility contracts, strategy-specific fields, and enhanced-scraper behavior.
 - [x] #3 The design specifies default regex enrichment, explicit strategy-order compatibility, cancellation/event-loop behavior, bounded regex execution, and the verified service keyword fix.
 - [x] #4 The design defines Phase 4A-4D delivery units, test matrices, security gates, exact-base failure handling, and explicit out-of-scope work.
-- [x] #5 The written spec passes placeholder, consistency, ambiguity, and scope self-review and is committed.
+- [ ] #5 The written spec passes placeholder, consistency, ambiguity, and scope self-review and is committed.
+- [ ] #6 The revised design explicitly allowlists guarded direct-browser routing, sanitizes moved observability fields, defines the direct-browser compatibility matrix, and bounds HTTP/browser acquisition.
+- [ ] #7 The revised design specifies executor generation synchronization, deterministic public failure mappings, predecessor-fixture provenance, and active-loop rejection for both sync entry points.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,20 +49,22 @@ Capture the user-approved architecture, data flow, compatibility rules, error/se
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Phase 3 merged in PR #2752. Latest dev still contains multiple unrelated TASK-12970 records, so Phase 4 must use an independently allocated unique ID rather than extending the ambiguous Phase 3 parent.
 The user approved the complete design after section-by-section review. Independent self-review identified five issues: cross-event-loop executor admission, browser interception/DNS guarantees, preflight payload wording, deterministic public error sanitization, and an over-broad final delivery unit. The spec now uses a process-wide BoundedSemaphore with cancellation-aware bounded admission, defines interception coverage and its URL-validation-only DNS guarantee, clarifies payload attachment, lists stable public error codes, and redistributes consumer migrations across 4A-4C. A final pass also documents Playwright DNS rebinding as a residual risk rather than inventing an undefined pinning requirement. Verification: Phase 1 contract baseline passed (19 tests); ASCII and placeholder scans were clean; the final staged diff is checked separately before commit. Bandit is not applicable because this task changes only design and Backlog documentation. No blockers remain; implementation requires a separate reviewed plan and child tasks.
+Written-spec review identified seven changes required before implementation planning: explicitly allowlist guarded direct-browser behavior, resolve URL-label observability contradictions, define browser compatibility fields and cross-origin credential behavior, bound acquired article content, define executor generation/reset synchronization, specify deterministic error and differential-baseline contracts, and name scrape_article_sync in the active-loop guard. The task is reopened to revise and recommit the design.
+Revision implemented in the spec: approved behavior changes now total eleven; direct browser routing is correctly identified as new; moved URL/raw-error observability fields are explicitly removed; browser field parity is tabulated; HTTP, browser-transfer, and rendered-HTML limits are defined with optional bounded simple-fetch support; executor lifecycle uses locked generations and terminal shutdown; public error fields/codes and predecessor fixtures are deterministic; scrape_article_sync shares the before-side-effects loop guard. The document status is set to awaiting final review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed and reviewed the Phase 4 design for extracting shared leaf helpers, the canonical extraction package, and governed single-page article orchestration while retaining the pre-scrape analyzer, compatibility surfaces, enhanced-scraper behavior, per-dispatch egress controls, and deferred crawl/search scope. The design defines four sequential merge units, explicit approved behavior changes, deterministic security/error contracts, cancellation and cross-loop executor semantics, a full test matrix, and completion gates.
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
