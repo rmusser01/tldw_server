@@ -13,7 +13,9 @@ from tldw_Server_API.app.core.Web_Scraping import scraper_router as scraper_rout
 from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
     SafeRegexLimits,
     SafeRegexResult,
+    SafeRegexSubResult,
     search_untrusted,
+    sub_untrusted,
 )
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
@@ -36,6 +38,20 @@ class _FakeCompiled:
         if self.error is not None:
             raise self.error
         return self.match
+
+
+class _FakeSubCompiled:
+    def __init__(self, *, value: str | None = None, error: Exception | None = None) -> None:
+        self.value = value
+        self.error = error
+        self.calls: list[tuple[Any, str, float]] = []
+
+    def sub(self, repl: Any, value: str, *, timeout: float) -> str:
+        self.calls.append((repl, value, timeout))
+        if self.error is not None:
+            raise self.error
+        assert self.value is not None
+        return self.value
 
 
 def _install_fake_compile(
@@ -381,6 +397,114 @@ def test_valid_no_match_has_no_failure_code() -> None:
     result = search_untrusted(r"Order\s+#(\d+)", "No order here")
 
     assert result == SafeRegexResult(matched=False)
+
+
+def test_sub_untrusted_preserves_global_group_replacement_semantics() -> None:
+    result = sub_untrusted(
+        r"(\w+),\s*(\w+)",
+        r"\2 \1",
+        "Lovelace, Ada; Hopper, Grace",
+    )
+
+    assert result == SafeRegexSubResult(value="Ada Lovelace; Grace Hopper")
+
+
+@pytest.mark.parametrize(
+    ("replacement", "value"),
+    [(r"\2", "a"), (r"\2", "no match"), (r"\g<missing>", "a")],
+)
+def test_sub_untrusted_rejects_invalid_group_reference_templates(
+    replacement: str,
+    value: str,
+) -> None:
+    result = sub_untrusted(r"(a)", replacement, value)
+
+    assert result == SafeRegexSubResult(code="regex_invalid")
+
+
+def test_sub_untrusted_bounds_replacement_template_size() -> None:
+    exact_result = sub_untrusted("x", "a" * 4_096, "x")
+    over_result = sub_untrusted("x", "a" * 4_097, "x")
+
+    assert exact_result == SafeRegexSubResult(value="a" * 4_096)
+    assert over_result == SafeRegexSubResult(code="regex_too_large")
+
+
+def test_sub_untrusted_bounds_amplified_output_size() -> None:
+    replacement = "a" * 4_000
+
+    exact_result = sub_untrusted("x", replacement, "x" * 250)
+    over_result = sub_untrusted("x", replacement, "x" * 250 + "y")
+
+    assert exact_result == SafeRegexSubResult(value="a" * 1_000_000)
+    assert over_result == SafeRegexSubResult(code="regex_too_large")
+
+
+def test_sub_untrusted_bounds_backreference_output_amplification() -> None:
+    exact_result = sub_untrusted(r"(a+)", r"\1" * 500, "a" * 2_000)
+    over_result = sub_untrusted(r"(a+)", r"\1" * 501, "a" * 2_000)
+
+    assert exact_result == SafeRegexSubResult(value="a" * 1_000_000)
+    assert over_result == SafeRegexSubResult(code="regex_too_large")
+
+
+@pytest.mark.parametrize(
+    ("pattern", "value", "expected_code"),
+    [
+        ("[", "sample", "regex_invalid"),
+        ("a" * 4_097, "sample", "regex_too_large"),
+        ("a", "x" * 8_193, "regex_too_large"),
+        (r"(?V1)a", "a", "regex_invalid"),
+    ],
+)
+def test_sub_untrusted_uses_search_limits_and_stdlib_dialect(
+    pattern: str,
+    value: str,
+    expected_code: str,
+) -> None:
+    result = sub_untrusted(pattern, "replacement", value)
+
+    assert result == SafeRegexSubResult(code=expected_code)
+
+
+def test_sub_untrusted_passes_the_bounded_timeout_and_sanitizes_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compiled = _FakeSubCompiled(error=TimeoutError("private engine detail"))
+    monkeypatch.setattr(safe_regex_module, "_compile_pattern", lambda *_args: compiled)
+
+    result = sub_untrusted(
+        "x",
+        "replacement",
+        "sample",
+        limits=SafeRegexLimits(timeout_s=0.025),
+    )
+
+    assert len(compiled.calls) == 1
+    replacement, value, timeout = compiled.calls[0]
+    assert callable(replacement)
+    assert (value, timeout) == ("sample", 0.025)
+    assert result == SafeRegexSubResult(code="regex_timeout")
+
+
+def test_sub_untrusted_does_not_disclose_pattern_or_engine_error(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret_pattern = "private-sub-pattern"
+    secret_error = "private-sub-error"
+    compiled = _FakeSubCompiled(error=ValueError(secret_error))
+    monkeypatch.setattr(safe_regex_module, "_compile_pattern", lambda *_args: compiled)
+    caplog.set_level(logging.DEBUG)
+
+    result = sub_untrusted(secret_pattern, "replacement", "sample")
+    captured = capsys.readouterr()
+    disclosed = " ".join([repr(result), caplog.text, captured.out, captured.err])
+
+    assert result == SafeRegexSubResult(code="regex_invalid")
+    assert secret_pattern not in disclosed
+    assert secret_error not in disclosed
 
 
 def test_raw_pattern_and_exception_are_not_returned_or_logged(

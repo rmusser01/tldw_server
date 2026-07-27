@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SELECTORS_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "selectors"
+FETCHERS_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Watchlists" / "fetchers.py"
+ENDPOINT_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "api" / "v1" / "endpoints" / "watchlists.py"
+
+EXPECTED_IMPORTS = {
+    "__init__.py": {".caches", ".schema"},
+    "caches.py": {"__future__", "collections", "threading", "typing"},
+    "engine.py": {
+        ".caches",
+        "__future__",
+        "collections.abc",
+        "functools",
+        "loguru",
+        "lxml.cssselect",
+        "lxml.etree",
+        "lxml.html",
+        "os",
+        "re",
+        "typing",
+    },
+    "schema.py": {
+        "..safe_regex",
+        ".engine",
+        "__future__",
+        "collections.abc",
+        "contextlib",
+        "dateutil",
+        "datetime",
+        "email.utils",
+        "lxml",
+        "lxml.html",
+        "re",
+        "typing",
+        "urllib.parse",
+    },
+}
+
+BANNED_UPWARD_IMPORT_PARTS = {
+    "Article_Extractor_Lib",
+    "Enhanced_Web_Scraping",
+    "Watchlists",
+    "WebSearch",
+    "enhanced_web_scraping",
+    "extraction",
+    "handlers",
+    "orchestration",
+    "policy",
+    "preflight",
+    "routing",
+}
+
+
+def _tree(path: Path) -> ast.Module:
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _imports(path: Path) -> set[str]:
+    imported: set[str] = set()
+    for node in ast.walk(_tree(path)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imported.add("." * node.level + (node.module or ""))
+    return imported
+
+
+def _defined_functions(path: Path) -> set[str]:
+    return {node.name for node in _tree(path).body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _imported_names(path: Path, module: str) -> set[str]:
+    names: set[str] = set()
+    for node in _tree(path).body:
+        if isinstance(node, ast.ImportFrom) and node.module == module:
+            names.update(alias.name for alias in node.names)
+    return names
+
+
+def test_selector_package_has_the_approved_files() -> None:
+    assert {path.name for path in SELECTORS_ROOT.glob("*.py")} == set(EXPECTED_IMPORTS)
+
+
+def test_selector_files_have_an_explicit_dependency_inventory() -> None:
+    actual = {path.name: _imports(path) for path in sorted(SELECTORS_ROOT.glob("*.py"))}
+
+    assert actual == EXPECTED_IMPORTS
+
+
+def test_selector_package_has_no_upward_application_dependencies() -> None:
+    violations: list[str] = []
+    for path in sorted(SELECTORS_ROOT.glob("*.py")):
+        for imported in sorted(_imports(path)):
+            if any(part in imported.split(".") for part in BANNED_UPWARD_IMPORT_PARTS):
+                violations.append(f"{path.name}: {imported}")
+
+    assert violations == []
+
+
+def test_cache_state_has_one_canonical_owner() -> None:
+    cache_tokens = {
+        "_CSS_SELECTOR_CACHE",
+        "_SELECTOR_CACHE_LOCK",
+        "_XPATH_SELECTOR_CACHE",
+    }
+    owners: dict[str, list[str]] = {token: [] for token in cache_tokens}
+    inspected = [*SELECTORS_ROOT.glob("*.py"), FETCHERS_PATH]
+    for path in inspected:
+        text = path.read_text(encoding="utf-8")
+        for token in cache_tokens:
+            if token in text:
+                owners[token].append(path.name)
+
+    assert owners == {token: ["caches.py"] for token in cache_tokens}
+
+
+def test_watchlists_has_direct_canonical_imports_without_selector_bodies() -> None:
+    forbidden_definitions = {
+        "clear_selector_caches",
+        "extract_schema_fields",
+        "get_selector_cache_stats",
+        "reload_selector_guardrails_from_env",
+        "validate_selector_rules",
+    }
+    assert _defined_functions(FETCHERS_PATH).isdisjoint(forbidden_definitions)
+
+    facade_module = "tldw_Server_API.app.core.Web_Scraping.selectors"
+    engine_module = f"{facade_module}.engine"
+    schema_module = f"{facade_module}.schema"
+    assert _imported_names(FETCHERS_PATH, facade_module) == {
+        "clear_selector_caches",
+        "extract_schema_fields",
+        "get_selector_cache_stats",
+        "validate_selector_rules",
+    }
+    assert _imported_names(FETCHERS_PATH, engine_module) == {
+        "_coerce_value",
+        "_ensure_sequence",
+        "_extract_value",
+        "_select_nodes",
+        "reload_selector_guardrails_from_env",
+    }
+    assert _imported_names(FETCHERS_PATH, schema_module) == {"_normalize_datetime"}
+
+
+def test_watchlists_endpoint_imports_validation_from_canonical_facade() -> None:
+    facade_module = "tldw_Server_API.app.core.Web_Scraping.selectors"
+    fetchers_module = "tldw_Server_API.app.core.Watchlists.fetchers"
+
+    assert _imported_names(ENDPOINT_PATH, facade_module) == {"validate_selector_rules"}
+    assert _imported_names(ENDPOINT_PATH, fetchers_module) == {
+        "fetch_rss_feed",
+        "fetch_site_items_with_rules",
+    }
