@@ -81,6 +81,10 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
     PolicyDecision,
     RuntimeRequestContext,
 )
+from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
+    SafeRegexLimits,
+    search_untrusted,
+)
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
     build_browser_headers,
@@ -2122,13 +2126,21 @@ def generate_regex_pattern_from_llm(
     group = obj.get("group")
     group_idx = int(group) if isinstance(group, int) else None
 
-    try:
-        compiled = re.compile(pattern, flags)
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-        result["error"] = f"regex_llm_invalid_pattern: {exc}"
+    safe_result = search_untrusted(
+        pattern,
+        html_text,
+        flags=flags,
+        limits=SafeRegexLimits(
+            max_pattern_chars=4_096,
+            max_input_chars=1_000_000,
+            timeout_s=0.100,
+        ),
+    )
+    if safe_result.code is not None:
+        result["error"] = safe_result.code
         return result
 
-    match = compiled.search(html_text)
+    match = safe_result.match
     if match:
         try:
             matched_value = match.group(group_idx) if group_idx is not None else match.group(0)

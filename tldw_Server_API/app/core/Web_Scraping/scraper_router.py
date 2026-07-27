@@ -17,13 +17,13 @@ Security:
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
 import yaml
 
+from .safe_regex import SafeRegexLimits, search_untrusted
 from .ua_profiles import pick_ua_profile, profile_to_impersonate
 
 DEFAULT_HANDLER = (
@@ -33,6 +33,8 @@ DEFAULT_HANDLER = (
 DEFAULT_HANDLER_ALLOWLIST = [
     "tldw_Server_API.app.core.Web_Scraping.handlers:",
 ]
+
+_ROUTER_REGEX_LIMITS = SafeRegexLimits()
 
 
 @dataclass
@@ -172,12 +174,15 @@ class ScraperRouter:
                     pats: list[str] = []
                     if isinstance(v, list):
                         for p in v:
-                            try:
-                                if isinstance(p, str):
-                                    re.compile(p)
-                                    pats.append(p)
-                            except Exception:
+                            if not isinstance(p, str):
                                 continue
+                            validation = search_untrusted(
+                                p,
+                                "",
+                                limits=_ROUTER_REGEX_LIMITS,
+                            )
+                            if validation.code is None:
+                                pats.append(p)
                     cleaned[k] = pats
                 elif k in ("extra_headers", "cookies"):
                     m = {str(kk): str(vv) for kk, vv in v.items()} if isinstance(v, dict) else {}
@@ -225,10 +230,17 @@ class ScraperRouter:
         handler = _validate_handler(handler_raw, self.allowlist)
 
         # If url_patterns present, apply only if any matches
-        patterns: list[str] = list(rule.get("url_patterns", []) or [])
-        if patterns:
-            compiled = [re.compile(p) for p in patterns]
-            if not any(r.search(url) for r in compiled):
+        raw_patterns = rule.get("url_patterns", [])
+        if raw_patterns:
+            if not isinstance(raw_patterns, list) or not any(
+                isinstance(pattern, str)
+                and search_untrusted(
+                    pattern,
+                    url,
+                    limits=_ROUTER_REGEX_LIMITS,
+                ).matched
+                for pattern in raw_patterns
+            ):
                 # If rule has patterns and none matched, do not apply; fall back
                 return plan
 
