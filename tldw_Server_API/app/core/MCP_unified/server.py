@@ -86,6 +86,25 @@ def _safe_exception_family(exc: BaseException) -> str:
     return "Exception"
 
 
+async def _await_owned_shutdown_task(
+    task: asyncio.Task[None],
+    deferred_cancellation: asyncio.CancelledError | None,
+) -> tuple[asyncio.CancelledError | None, Exception | None]:
+    cancellation = deferred_cancellation
+    while True:
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if cancellation is None:
+                cancellation = exc
+            if task.done():
+                return cancellation, None
+        except Exception as exc:  # noqa: BLE001 - teardown errors are contained by the caller.
+            return cancellation, exc
+        else:
+            return cancellation, None
+
+
 def _is_authnz_exception(exc: Exception) -> bool:
     module = exc.__class__.__module__
     return module == "tldw_Server_API.app.core.AuthNZ.exceptions" or module.startswith(
@@ -719,21 +738,19 @@ class MCPServer:
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Seed default MCP permissions failed: {self._mask_secrets(str(e))}")
 
-    async def shutdown(self):
-        """Gracefully shutdown the server"""
-        logger.info("Shutting down MCP Server")
+    async def _shutdown_resources(self) -> None:
+        try:
+            await self._close_all_connections()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - cleanup continues through ordinary failures.
+            logger.warning(
+                "MCP connection shutdown failed error_type={error_type}",
+                error_type=_safe_exception_family(exc),
+            )
 
-        # Signal shutdown
-        self.shutdown_event.set()
-
-        # Close all WebSocket connections
-        await self._close_all_connections()
-
-        # Cancel background tasks
         for task in self.background_tasks:
             task.cancel()
-
-        # Wait for tasks to complete
         if self.background_tasks:
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
@@ -747,11 +764,39 @@ class MCPServer:
                 error_type=_safe_exception_family(exc),
             )
 
-        # Shutdown modules
-        await self.module_registry.shutdown_all()
+        try:
+            await self.module_registry.shutdown_all()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - teardown is best effort.
+            logger.warning(
+                "MCP module shutdown failed error_type={error_type}",
+                error_type=_safe_exception_family(exc),
+            )
 
         self.initialized = False
         logger.info("MCP Server shutdown complete")
+
+    async def shutdown(self):
+        """Gracefully shutdown the server."""
+        logger.info("Shutting down MCP Server")
+        self.shutdown_event.set()
+
+        cleanup_task = asyncio.create_task(
+            self._shutdown_resources(),
+            name="mcp-server-resource-shutdown",
+        )
+        deferred_cancellation, cleanup_error = await _await_owned_shutdown_task(
+            cleanup_task,
+            None,
+        )
+        if cleanup_error is not None:
+            logger.warning(
+                "MCP resource shutdown failed error_type={error_type}",
+                error_type=_safe_exception_family(cleanup_error),
+            )
+        if deferred_cancellation is not None:
+            raise deferred_cancellation
 
     async def _register_default_modules(self):
         """Register default modules via config/env-driven loader"""

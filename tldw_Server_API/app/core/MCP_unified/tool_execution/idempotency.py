@@ -145,6 +145,18 @@ class _RemotePreOwnerState:
     replay: IdempotencyRunResult | None
 
 
+@dataclass(frozen=True, slots=True)
+class _RemoteResultWrite:
+    state: Literal[
+        "durable",
+        "uncertain",
+        "binding_lost",
+        "ownership_lost",
+        "result_conflict",
+    ]
+    failure: BaseException | None = None
+
+
 class IdempotencyManager:
     """Execute a callback once per bounded idempotency ownership attempt."""
 
@@ -175,9 +187,7 @@ class IdempotencyManager:
             float,
         ] = {}
         self._closing = False
-        self._finalizer_creation_closed = False
         self._inflight_executions = 0
-        self._inflight_execution_bounds: list[float] = []
         self._lifecycle_changed = asyncio.Event()
 
     @property
@@ -242,10 +252,8 @@ class IdempotencyManager:
         ],
         *,
         bound: float,
-    ) -> asyncio.Task[Literal["durable", "local", "none"]] | None:
+    ) -> asyncio.Task[Literal["durable", "local", "none"]]:
         with self._local_guard:
-            if self._finalizer_creation_closed:
-                return None
             task = asyncio.create_task(operation_factory())
             self._finalizers.add(task)
             self._finalizer_bounds[task] = bound
@@ -253,39 +261,27 @@ class IdempotencyManager:
         task.add_done_callback(self._discard_finalizer)
         return task
 
-    def _register_execution(self, *, bound: float) -> None:
+    def _register_execution(self) -> None:
         with self._local_guard:
             if self._closing:
                 raise ExpectedToolFailure(
                     ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
                 )
             self._inflight_executions += 1
-            self._inflight_execution_bounds.append(bound)
             self._lifecycle_changed.set()
 
-    def _finish_execution(self, *, bound: float) -> None:
+    def _finish_execution(self) -> None:
         with self._local_guard:
             self._inflight_executions -= 1
-            self._inflight_execution_bounds.remove(bound)
             self._lifecycle_changed.set()
 
-    async def _wait_for_execution_creators(self, *, bound: float) -> bool:
-        deadline = asyncio.get_running_loop().time() + bound
+    async def _wait_for_execution_creators(self) -> None:
         while True:
             with self._local_guard:
                 if self._inflight_executions == 0:
-                    return True
+                    return
                 self._lifecycle_changed.clear()
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                return False
-            try:
-                await asyncio.wait_for(
-                    self._lifecycle_changed.wait(),
-                    timeout=remaining,
-                )
-            except TimeoutError:
-                return False
+            await self._lifecycle_changed.wait()
 
     async def _await_finalizer_until(
         self,
@@ -991,7 +987,7 @@ class IdempotencyManager:
         *,
         policy: IdempotencyExecutionPolicy,
         deadline: float | None = None,
-    ) -> bool:
+    ) -> Literal["refreshed", "ownership_lost", "uncertain"]:
         self._try_refresh_local_binding(
             cache_key,
             arguments_hash,
@@ -1014,15 +1010,27 @@ class IdempotencyManager:
                     operation,
                     deadline,
                 )
-            if refreshed != 1:
-                raise RuntimeError("Redis argument binding ownership was lost")
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - binding health cannot replace callback outcomes.
             self._mark_remote_failure("redis_binding", exc)
             self._block_remote_key(cache_key, policy=policy)
-            return False
-        return True
+            return "uncertain"
+        if type(refreshed) is not int or refreshed not in {0, 1}:
+            self._mark_remote_failure(
+                "redis_binding",
+                ValueError("Redis binding refresh returned an invalid status"),
+            )
+            self._block_remote_key(cache_key, policy=policy)
+            return "uncertain"
+        if refreshed == 0:
+            self._record_degraded(
+                "redis_binding",
+                RuntimeError("Redis argument binding ownership was lost"),
+                remote=False,
+            )
+            return "ownership_lost"
+        return "refreshed"
 
     async def _store_remote_result(
         self,
@@ -1036,13 +1044,7 @@ class IdempotencyManager:
         encoded: bytes,
         *,
         policy: IdempotencyExecutionPolicy,
-    ) -> Literal[
-        "durable",
-        "uncertain",
-        "binding_lost",
-        "ownership_lost",
-        "result_conflict",
-    ]:
+    ) -> _RemoteResultWrite:
         try:
             stored = await client.eval(
                 _REDIS_STORE_RESULT_SCRIPT,
@@ -1058,16 +1060,14 @@ class IdempotencyManager:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - local commit prevents redispatch.
-            self._mark_remote_failure("redis_result_write", exc)
-            return "uncertain"
+            return _RemoteResultWrite("uncertain", failure=exc)
         if type(stored) is not int:
-            self._mark_remote_failure(
-                "redis_result_write",
-                TypeError("Redis result write returned a non-integer status"),
+            return _RemoteResultWrite(
+                "uncertain",
+                failure=TypeError("Redis result write returned a non-integer status"),
             )
-            return "uncertain"
         if stored == 1:
-            return "durable"
+            return _RemoteResultWrite("durable")
         semantic_states: dict[
             int,
             Literal["binding_lost", "ownership_lost", "result_conflict"],
@@ -1078,11 +1078,10 @@ class IdempotencyManager:
         }
         result_state = semantic_states.get(stored)
         if result_state is None:
-            self._mark_remote_failure(
-                "redis_result_write",
-                ValueError("Redis result write returned an invalid status"),
+            return _RemoteResultWrite(
+                "uncertain",
+                failure=ValueError("Redis result write returned an invalid status"),
             )
-            return "uncertain"
         self._evict_matching_local_replay_and_block(
             cache_key,
             arguments_hash,
@@ -1094,7 +1093,7 @@ class IdempotencyManager:
             RuntimeError("Redis result ownership was lost"),
             remote=False,
         )
-        return result_state
+        return _RemoteResultWrite(result_state)
 
     async def _release_remote_without_replay(
         self,
@@ -1123,7 +1122,7 @@ class IdempotencyManager:
     ) -> Literal["durable", "local", "none"]:
         persistence: Literal["durable", "local", "none"] = "local"
         try:
-            result_state = await self._store_remote_result(
+            result_write = await self._store_remote_result(
                 client,
                 binding_key,
                 result_key,
@@ -1134,16 +1133,29 @@ class IdempotencyManager:
                 encoded,
                 policy=policy,
             )
-            if result_state == "durable":
+            if result_write.state == "durable":
                 persistence = "durable"
-            elif result_state == "uncertain":
-                await self._refresh_remote_binding(
+            elif result_write.state == "uncertain":
+                refresh_state = await self._refresh_remote_binding(
                     client,
                     binding_key,
                     cache_key,
                     arguments_hash,
                     policy=policy,
                 )
+                if refresh_state == "ownership_lost":
+                    self._evict_matching_local_replay_and_block(
+                        cache_key,
+                        arguments_hash,
+                        encoded,
+                        policy=policy,
+                    )
+                    persistence = "none"
+                elif refresh_state == "refreshed":
+                    failure = result_write.failure or RuntimeError(
+                        "Redis result write outcome was uncertain"
+                    )
+                    self._mark_remote_failure("redis_result_write", failure)
             else:
                 persistence = "none"
         finally:
@@ -1195,13 +1207,15 @@ class IdempotencyManager:
         except asyncio.CancelledError:
             raise
         except Exception:
-            await self._refresh_remote_binding(
+            refresh_state = await self._refresh_remote_binding(
                 client,
                 binding_key,
                 cache_key,
                 arguments_hash,
                 policy=policy,
             )
+            if refresh_state == "ownership_lost":
+                self._block_remote_key(cache_key, policy=policy)
             await self._release_remote_without_replay(
                 client,
                 lock_key,
@@ -1222,13 +1236,15 @@ class IdempotencyManager:
                 encoded,
                 policy=policy,
             ):
-                await self._refresh_remote_binding(
+                refresh_state = await self._refresh_remote_binding(
                     client,
                     binding_key,
                     cache_key,
                     arguments_hash,
                     policy=policy,
                 )
+                if refresh_state == "ownership_lost":
+                    self._block_remote_key(cache_key, policy=policy)
                 await self._release_remote_without_replay(
                     client,
                     lock_key,
@@ -1259,12 +1275,6 @@ class IdempotencyManager:
                 ),
                 bound=finalize_bound,
             )
-            if finalizer is None:
-                return IdempotencyRunResult(
-                    payload=cast(dict[str, JsonValue], payload),
-                    from_cache=False,
-                    persistence=persistence,
-                )
             persistence = await self._await_success_finalizer(
                 finalizer,
                 bound=finalize_bound,
@@ -1275,13 +1285,15 @@ class IdempotencyManager:
                 persistence=persistence,
             )
         else:
-            await self._refresh_remote_binding(
+            refresh_state = await self._refresh_remote_binding(
                 client,
                 binding_key,
                 cache_key,
                 arguments_hash,
                 policy=policy,
             )
+            if refresh_state == "ownership_lost":
+                self._block_remote_key(cache_key, policy=policy)
 
         release_state = await self._release_remote_lock(client, lock_key, token)
         if release_state != "released" and canonical is None:
@@ -1444,8 +1456,7 @@ class IdempotencyManager:
     ) -> IdempotencyRunResult:
         """Bind arguments, acquire ownership, and return a fresh replay or success."""
 
-        finalize_bound = self._finalize_bound(policy)
-        self._register_execution(bound=finalize_bound)
+        self._register_execution()
         try:
             return await self._execute_admitted(
                 cache_key,
@@ -1454,7 +1465,7 @@ class IdempotencyManager:
                 policy=policy,
             )
         finally:
-            self._finish_execution(bound=finalize_bound)
+            self._finish_execution()
 
     async def _execute_admitted(
         self,
@@ -1510,21 +1521,12 @@ class IdempotencyManager:
         with self._local_guard:
             self._closing = True
             self._lifecycle_changed.set()
-            creator_bound = max(self._inflight_execution_bounds, default=1.0)
-        creators_drained = await self._wait_for_execution_creators(bound=creator_bound)
+        await self._wait_for_execution_creators()
         with self._local_guard:
-            self._finalizer_creation_closed = True
             tasks = set(self._finalizers)
             bound = max(
                 (self._finalizer_bounds.get(task, 1.0) for task in tasks),
                 default=1.0,
-            )
-            pending_creators = self._inflight_executions
-        if not creators_drained:
-            self._record_degraded("finalizer_stuck", TimeoutError(), remote=True)
-            logger.warning(
-                "MCP idempotency shutdown creators pending count={count}",
-                count=min(pending_creators, 1_000),
             )
         if not tasks:
             return

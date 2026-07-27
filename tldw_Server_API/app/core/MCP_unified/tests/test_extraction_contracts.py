@@ -784,6 +784,132 @@ async def test_mcp_server_shutdown_contains_exotic_error_before_module_teardown(
 
 
 @pytest.mark.asyncio
+async def test_mcp_server_shutdown_defers_repeated_cancellation_through_teardown() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    events: list[str] = []
+    deps = _real_server_runtime_dependencies()
+    deps.module_registry = _RecordingModuleRegistry(events)
+    server = MCPServer(dependencies=deps)
+    idempotency = server.protocol._idempotency
+    finalizer_started = asyncio.Event()
+    release_finalizer = asyncio.Event()
+    protocol_started = asyncio.Event()
+    protocol_tasks: list[asyncio.Task[Any]] = []
+    module_tasks: list[asyncio.Task[Any]] = []
+
+    async def _finalize() -> str:
+        finalizer_started.set()
+        await release_finalizer.wait()
+        events.append("idempotency")
+        return "local"
+
+    original_protocol_shutdown = server.protocol.shutdown
+
+    async def _shutdown_protocol() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        protocol_tasks.append(task)
+        events.append("protocol_start")
+        protocol_started.set()
+        await original_protocol_shutdown()
+        events.append("protocol_done")
+
+    async def _shutdown_modules() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        module_tasks.append(task)
+        events.append("modules")
+
+    server.protocol.shutdown = _shutdown_protocol
+    deps.module_registry.shutdown_all = _shutdown_modules
+    finalizer = idempotency._create_finalizer(_finalize, bound=1.0)
+    assert finalizer is not None
+    await asyncio.wait_for(finalizer_started.wait(), timeout=0.5)
+    shutdown = asyncio.create_task(server.shutdown())
+    await asyncio.wait_for(protocol_started.wait(), timeout=0.5)
+
+    shutdown.cancel("first cancellation")
+    await asyncio.sleep(0)
+    survived_first_cancellation = not shutdown.done()
+    shutdown.cancel("second cancellation")
+    await asyncio.sleep(0)
+    survived_second_cancellation = not shutdown.done()
+    release_finalizer.set()
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await asyncio.wait_for(shutdown, timeout=1.0)
+    await asyncio.wait_for(finalizer, timeout=0.5)
+
+    assert caught.value.args == ("first cancellation",)
+    assert survived_first_cancellation is True
+    assert survived_second_cancellation is True
+    assert events == ["protocol_start", "idempotency", "protocol_done", "modules"]
+    assert protocol_tasks and protocol_tasks[0] is not shutdown
+    assert module_tasks and module_tasks[0] is not shutdown
+    assert all(task.done() for task in protocol_tasks + module_tasks)
+    assert idempotency._finalizers == set()
+    assert server.initialized is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_shutdown_defers_cancellation_during_connection_close() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    events: list[str] = []
+    deps = _real_server_runtime_dependencies()
+    deps.module_registry = _RecordingModuleRegistry(events)
+    server = MCPServer(dependencies=deps)
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+    cleanup_tasks: list[asyncio.Task[Any]] = []
+
+    async def _close_connections() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        cleanup_tasks.append(task)
+        events.append("close_start")
+        close_started.set()
+        await release_close.wait()
+        events.append("close_done")
+
+    original_protocol_shutdown = server.protocol.shutdown
+
+    async def _shutdown_protocol() -> None:
+        events.append("protocol")
+        await original_protocol_shutdown()
+
+    async def _shutdown_modules() -> None:
+        events.append("modules")
+
+    server._close_all_connections = _close_connections
+    server.protocol.shutdown = _shutdown_protocol
+    deps.module_registry.shutdown_all = _shutdown_modules
+    shutdown = asyncio.create_task(server.shutdown())
+    await asyncio.wait_for(close_started.wait(), timeout=0.5)
+
+    shutdown.cancel("close cancellation")
+    await asyncio.sleep(0)
+    survived_first_cancellation = not shutdown.done()
+    shutdown.cancel("repeated cancellation")
+    await asyncio.sleep(0)
+    survived_second_cancellation = not shutdown.done()
+    release_close.set()
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await asyncio.wait_for(shutdown, timeout=1.0)
+
+    assert caught.value.args == ("close cancellation",)
+    assert survived_first_cancellation is True
+    assert survived_second_cancellation is True
+    assert events == ["close_start", "close_done", "protocol", "modules"]
+    assert cleanup_tasks and cleanup_tasks[0] is not shutdown
+    assert all(task.done() for task in cleanup_tasks)
+    assert server.protocol._idempotency._finalizers == set()
+    assert server.initialized is False
+
+
+@pytest.mark.asyncio
 async def test_mcp_server_initialize_uses_injected_permission_seeder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
