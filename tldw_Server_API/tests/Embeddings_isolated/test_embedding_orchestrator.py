@@ -1785,6 +1785,7 @@ async def test_malformed_fallback_cached_vector_becomes_miss_and_is_replaced():
         ("openai", "text-embedding-3-small"),
         ("openai", "text-embedding-3-small"),
         ("huggingface", fallback_model),
+        ("huggingface", fallback_model),
     ]
 
 
