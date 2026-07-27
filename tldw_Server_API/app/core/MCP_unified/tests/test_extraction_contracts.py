@@ -490,6 +490,24 @@ def _stored_names(target: ast.AST) -> set[str]:
     }
 
 
+def _assignment_pairs(target: ast.AST, value: ast.AST) -> list[tuple[ast.AST, ast.AST]]:
+    if (
+        isinstance(target, (ast.Tuple, ast.List))
+        and isinstance(value, (ast.Tuple, ast.List))
+        and len(target.elts) == len(value.elts)
+    ):
+        return [
+            pair
+            for child_target, child_value in zip(
+                target.elts,
+                value.elts,
+                strict=True,
+            )
+            for pair in _assignment_pairs(child_target, child_value)
+        ]
+    return [(target, value)]
+
+
 def _contains_expected_error_result(
     nodes: list[ast.AST],
     aliases: set[str] | None = None,
@@ -955,25 +973,26 @@ def _operator_getitem_bindings_for(tree: ast.Module) -> tuple[set[str], set[str]
     while changed:
         changed = False
         for target, value in assignments:
-            if (
-                isinstance(target, ast.Name)
-                and target.id not in operator_modules
-                and isinstance(value, ast.Name)
-                and value.id in operator_modules
-            ):
-                operator_modules.add(target.id)
-                changed = True
-            if (
-                isinstance(target, ast.Name)
-                and target.id not in operator_getitems
-                and _is_operator_getitem_reference(
-                    value,
-                    operator_modules,
-                    operator_getitems,
-                )
-            ):
-                operator_getitems.add(target.id)
-                changed = True
+            for candidate_target, candidate_value in _assignment_pairs(target, value):
+                if (
+                    isinstance(candidate_target, ast.Name)
+                    and candidate_target.id not in operator_modules
+                    and isinstance(candidate_value, ast.Name)
+                    and candidate_value.id in operator_modules
+                ):
+                    operator_modules.add(candidate_target.id)
+                    changed = True
+                if (
+                    isinstance(candidate_target, ast.Name)
+                    and candidate_target.id not in operator_getitems
+                    and _is_operator_getitem_reference(
+                        candidate_value,
+                        operator_modules,
+                        operator_getitems,
+                    )
+                ):
+                    operator_getitems.add(candidate_target.id)
+                    changed = True
     return operator_modules, operator_getitems
 
 
@@ -1031,38 +1050,28 @@ class _PreparedAuthorityAliasVisitor(ast.NodeVisitor):
         self.operator_getitems = previous_getitems
 
     def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
-        if (
-            isinstance(target, (ast.Tuple, ast.List))
-            and isinstance(value, (ast.Tuple, ast.List))
-            and len(target.elts) == len(value.elts)
-        ):
-            for child_target, child_value in zip(target.elts, value.elts, strict=True):
-                self._update_alias(child_target, child_value)
-            return
-        if _contains_prepared_tool_authority(value, self.aliases):
-            self.aliases.update(
-                candidate.id
-                for candidate in ast.walk(target)
-                if isinstance(candidate, ast.Name)
-                and isinstance(candidate.ctx, ast.Store)
-            )
+        for candidate_target, candidate_value in _assignment_pairs(target, value):
+            if _contains_prepared_tool_authority(candidate_value, self.aliases):
+                self.aliases.update(_stored_names(candidate_target))
         # A later assignment may be conditional, so tainted-name reuse stays tainted.
 
     def _update_operator_getitem_alias(self, target: ast.AST, value: ast.AST) -> None:
-        if isinstance(target, ast.Name) and _is_operator_getitem_reference(
-            value,
-            self.operator_modules,
-            self.operator_getitems,
-        ):
-            self.operator_getitems.add(target.id)
+        for candidate_target, candidate_value in _assignment_pairs(target, value):
+            if isinstance(candidate_target, ast.Name) and _is_operator_getitem_reference(
+                candidate_value,
+                self.operator_modules,
+                self.operator_getitems,
+            ):
+                self.operator_getitems.add(candidate_target.id)
 
     def _update_operator_module_alias(self, target: ast.AST, value: ast.AST) -> None:
-        if (
-            isinstance(target, ast.Name)
-            and isinstance(value, ast.Name)
-            and value.id in self.operator_modules
-        ):
-            self.operator_modules.add(target.id)
+        for candidate_target, candidate_value in _assignment_pairs(target, value):
+            if (
+                isinstance(candidate_target, ast.Name)
+                and isinstance(candidate_value, ast.Name)
+                and candidate_value.id in self.operator_modules
+            ):
+                self.operator_modules.add(candidate_target.id)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
@@ -1077,6 +1086,12 @@ class _PreparedAuthorityAliasVisitor(ast.NodeVisitor):
             self._update_alias(node.target, node.value)
             self._update_operator_module_alias(node.target, node.value)
             self._update_operator_getitem_alias(node.target, node.value)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
+        self.visit(node.value)
+        self._update_alias(node.target, node.value)
+        self._update_operator_module_alias(node.target, node.value)
+        self._update_operator_getitem_alias(node.target, node.value)
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
@@ -1196,8 +1211,11 @@ class _DefaultStrVisitor(ast.NodeVisitor):
         )
 
     def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
-        if isinstance(target, ast.Name) and self._is_str_expression(value):
-            self.aliases.add(target.id)
+        for candidate_target, candidate_value in _assignment_pairs(target, value):
+            if isinstance(candidate_target, ast.Name) and self._is_str_expression(
+                candidate_value
+            ):
+                self.aliases.add(candidate_target.id)
         # A later assignment may be conditional, so tainted-name reuse stays tainted.
 
     def _contains_default_str_mapping(self, value: ast.AST) -> bool:
@@ -1233,21 +1251,41 @@ class _DefaultStrVisitor(ast.NodeVisitor):
         return False
 
     def _update_default_mapping_alias(self, target: ast.AST, value: ast.AST) -> None:
-        if isinstance(target, ast.Name) and self._contains_default_str_mapping(value):
-            self.default_mapping_aliases.add(target.id)
+        for candidate_target, candidate_value in _assignment_pairs(target, value):
+            if isinstance(candidate_target, ast.Name) and self._contains_default_str_mapping(
+                candidate_value
+            ):
+                self.default_mapping_aliases.add(candidate_target.id)
         # Expanded kwargs use the same conservative may-be-tainted name rule.
+
+    def _update_builtins_module_alias(self, target: ast.AST, value: ast.AST) -> None:
+        for candidate_target, candidate_value in _assignment_pairs(target, value):
+            if (
+                isinstance(candidate_target, ast.Name)
+                and isinstance(candidate_value, ast.Name)
+                and candidate_value.id in self.builtins_modules
+            ):
+                self.builtins_modules.add(candidate_target.id)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
         for target in node.targets:
             self._update_alias(target, node.value)
             self._update_default_mapping_alias(target, node.value)
+            self._update_builtins_module_alias(target, node.value)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
         if node.value is not None:
             self.visit(node.value)
             self._update_alias(node.target, node.value)
             self._update_default_mapping_alias(node.target, node.value)
+            self._update_builtins_module_alias(node.target, node.value)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
+        self.visit(node.value)
+        self._update_alias(node.target, node.value)
+        self._update_default_mapping_alias(node.target, node.value)
+        self._update_builtins_module_alias(node.target, node.value)
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
@@ -1303,7 +1341,11 @@ def _is_logger_expression(
     return False
 
 
-def _helper_uses_parameter_unsafely(node: ast.AST, parameter: str) -> bool:
+def _helper_uses_parameter_unsafely(
+    node: ast.AST,
+    parameter: str,
+    helper_name: str,
+) -> bool:
     if (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -1321,7 +1363,8 @@ def _helper_uses_parameter_unsafely(node: ast.AST, parameter: str) -> bool:
         and isinstance(node.args[0], ast.Name)
         and node.args[0].id == parameter
         and isinstance(node.args[1], ast.Constant)
-        and isinstance(node.args[1].value, str)
+        and node.args[1].value == "_reason"
+        and helper_name == "get_expected_tool_failure_reason"
         and not node.keywords
     ):
         return False
@@ -1333,7 +1376,7 @@ def _helper_uses_parameter_unsafely(node: ast.AST, parameter: str) -> bool:
     if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == parameter:
         return True
     return any(
-        _helper_uses_parameter_unsafely(child, parameter)
+        _helper_uses_parameter_unsafely(child, parameter, helper_name)
         for child in ast.iter_child_nodes(node)
     )
 
@@ -1352,6 +1395,8 @@ def _verified_safe_exception_log_helpers(scope: ast.AST) -> set[str]:
     scope_nodes, _ = _lexical_scope_nodes(scope)
     for node in scope_nodes:
         if (
+            isinstance(scope, ast.Module)
+            and
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name in SAFE_EXCEPTION_LOG_HELPERS
         ):
@@ -1376,7 +1421,7 @@ def _verified_safe_exception_log_helpers(scope: ast.AST) -> set[str]:
                 break
             parameter = arguments[0].arg
             if any(
-                _helper_uses_parameter_unsafely(statement, parameter)
+                _helper_uses_parameter_unsafely(statement, parameter, name)
                 for statement in candidate.body
             ):
                 all_safe = False
@@ -1519,39 +1564,50 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
 
     @staticmethod
     def _assigned_names(targets: list[ast.AST]) -> set[str]:
-        return {
-            candidate.id
-            for target in targets
-            for candidate in ast.walk(target)
-            if isinstance(candidate, ast.Name) and isinstance(candidate.ctx, ast.Store)
-        }
+        return set().union(*(_stored_names(target) for target in targets))
 
     def _update_exception_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
-        assigned_names = self._assigned_names(targets)
-        if _uses_raw_exception_unsafely(
-            value,
-            self.exception_names,
-            self.safe_helper_names,
-        ):
-            self.exception_names.update(assigned_names)
+        for target in targets:
+            for candidate_target, candidate_value in _assignment_pairs(target, value):
+                if _uses_raw_exception_unsafely(
+                    candidate_value,
+                    self.exception_names,
+                    self.safe_helper_names,
+                ):
+                    self.exception_names.update(_stored_names(candidate_target))
         # A later assignment may be conditional, so tainted-name reuse stays tainted.
 
     def _update_logger_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
-        assigned_names = self._assigned_names(targets)
-        if _is_logger_expression(value, self.logger_names, self.logger_modules):
-            self.logger_names.update(assigned_names)
+        for target in targets:
+            for candidate_target, candidate_value in _assignment_pairs(target, value):
+                if _is_logger_expression(
+                    candidate_value,
+                    self.logger_names,
+                    self.logger_modules,
+                ):
+                    self.logger_names.update(_stored_names(candidate_target))
         # A later assignment may be conditional, so logger-name reuse stays tainted.
 
     def _update_logger_module_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
-        if isinstance(value, ast.Name) and value.id in self.logger_modules:
-            self.logger_modules.update(self._assigned_names(targets))
+        for target in targets:
+            for candidate_target, candidate_value in _assignment_pairs(target, value):
+                if (
+                    isinstance(candidate_value, ast.Name)
+                    and candidate_value.id in self.logger_modules
+                ):
+                    self.logger_modules.update(_stored_names(candidate_target))
 
     def _update_safe_helper_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
-        assigned_names = self._assigned_names(targets)
-        value_is_safe = isinstance(value, ast.Name) and value.id in self.safe_helper_names
-        self.safe_helper_names.difference_update(assigned_names)
-        if value_is_safe:
-            self.safe_helper_names.update(assigned_names)
+        for target in targets:
+            for candidate_target, candidate_value in _assignment_pairs(target, value):
+                assigned_names = _stored_names(candidate_target)
+                value_is_safe = (
+                    isinstance(candidate_value, ast.Name)
+                    and candidate_value.id in self.safe_helper_names
+                )
+                self.safe_helper_names.difference_update(assigned_names)
+                if value_is_safe:
+                    self.safe_helper_names.update(assigned_names)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
@@ -4158,6 +4214,121 @@ def test_exception_log_scan_resolves_loguru_module_assignment_alias(
 
     assert len(violations) == 1
     assert "repr(exc)" in violations[0]
+
+
+@pytest.mark.parametrize(
+    ("filename", "source", "scanner"),
+    [
+        (
+            "authority_walrus.py",
+            "def execute_prepared_tool_call(prepared, field):\n"
+            "    policy = prepared.policy\n"
+            "    if authority := prepared.tool_def:\n"
+            "        return authority[field], policy.effect\n",
+            _runtime_mutable_authority_violations_for,
+        ),
+        (
+            "operator_destructure.py",
+            "import operator\n"
+            "def execute_prepared_tool_call(prepared, field):\n"
+            "    policy = prepared.policy\n"
+            "    op, other = (operator, None)\n"
+            "    return op.getitem(prepared.tool_def, field), policy.effect\n",
+            _runtime_mutable_authority_violations_for,
+        ),
+        (
+            "default_str_destructure.py",
+            "import json\n"
+            "default, other = (str, None)\n"
+            "def encode(value):\n"
+            "    return json.dumps(value, default=default)\n",
+            _default_str_violations_for,
+        ),
+        (
+            "builtins_assignment_alias.py",
+            "import builtins\n"
+            "import json\n"
+            "b = builtins\n"
+            "def encode(value):\n"
+            "    return json.dumps(value, default=b.str)\n",
+            _default_str_violations_for,
+        ),
+        (
+            "logger_destructure.py",
+            "from loguru import logger\n"
+            "log, other = (logger, None)\n"
+            "def run():\n"
+            "    try:\n"
+            "        raise RuntimeError('secret')\n"
+            "    except Exception as exc:\n"
+            "        log.error('failed: {}', exc)\n",
+            _unsafe_exception_log_violations_for,
+        ),
+    ],
+)
+def test_contract_scanners_propagate_assignment_forms_consistently(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+    scanner: Callable[[Path], list[str]],
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    assert scanner(sample)
+
+
+@pytest.mark.parametrize(
+    ("filename", "helper_body"),
+    [
+        (
+            "helper_getattribute_args.py",
+            "def _safe_error_type(error):\n"
+            "    return object.__getattribute__(error, 'args')\n",
+        ),
+        (
+            "helper_closure.py",
+            "def _safe_error_type(_ignored):\n"
+            "            return str(exc)\n",
+        ),
+    ],
+)
+def test_exception_log_scan_rejects_helper_disclosure_paths(
+    tmp_path: Path,
+    filename: str,
+    helper_body: str,
+) -> None:
+    nested = filename == "helper_closure.py"
+    prefix = "        " if nested else ""
+    helper_source = "".join(prefix + line for line in helper_body.splitlines(keepends=True))
+    sample = tmp_path / filename
+    sample.write_text(
+        "from loguru import logger\n"
+        + ("def run():\n    try:\n        raise RuntimeError('secret')\n    except Exception as exc:\n" if nested else "")
+        + helper_source
+        + ("        logger.error('failed: {}', _safe_error_type(exc))\n" if nested else "def run():\n    try:\n        raise RuntimeError('secret')\n    except Exception as exc:\n        logger.error('failed: {}', _safe_error_type(exc))\n"),
+        encoding="utf-8",
+    )
+
+    assert _unsafe_exception_log_violations_for(sample)
+
+
+def test_exception_log_scan_taints_destructured_values_elementwise(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "exception_destructure_control.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "def run():\n"
+        "    try:\n"
+        "        raise RuntimeError('secret')\n"
+        "    except Exception as exc:\n"
+        "        unsafe, safe = (exc, 'constant')\n"
+        "        logger.error('safe: {}', safe)\n",
+        encoding="utf-8",
+    )
+
+    assert _unsafe_exception_log_violations_for(sample) == []
 
 
 def test_breaker_runtime_and_idempotency_logs_do_not_expose_exception_text() -> None:
