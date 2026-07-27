@@ -2211,6 +2211,17 @@ class MCPProtocol:
 
         await self._idempotency.shutdown()
 
+    @property
+    def has_pending_shutdown_work(self) -> bool:
+        """Whether protocol-owned execution cleanup remains pending."""
+
+        return self._idempotency.has_pending_shutdown_work
+
+    async def wait_for_shutdown_completion(self) -> None:
+        """Wait for retained protocol-owned execution cleanup."""
+
+        await self._idempotency.wait_for_shutdown_completion()
+
     # -------------------------
     # Idempotency cache helpers
     # -------------------------

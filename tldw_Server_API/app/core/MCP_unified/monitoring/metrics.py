@@ -79,6 +79,7 @@ class MetricsCollector:
             "redis_release",
             "finalize_timeout",
             "finalizer_stuck",
+            "shutdown_execution_timeout",
             "unknown",
         }
     )

@@ -943,6 +943,47 @@ async def test_owned_shutdown_helper_preserves_cancellation_and_child_failure() 
 
 
 @pytest.mark.asyncio
+async def test_deferred_module_shutdown_failure_can_be_retried() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    deps = _real_server_runtime_dependencies()
+    server = MCPServer(dependencies=deps)
+    completion_attempts = 0
+    module_shutdown_calls = 0
+
+    async def _wait_for_protocol() -> None:
+        nonlocal completion_attempts
+        completion_attempts += 1
+        if completion_attempts == 1:
+            raise _ExoticShutdownError("private deferred detail")
+
+    async def _shutdown_modules() -> None:
+        nonlocal module_shutdown_calls
+        module_shutdown_calls += 1
+
+    server.protocol.wait_for_shutdown_completion = _wait_for_protocol
+    deps.module_registry.shutdown_all = _shutdown_modules
+    first = server._start_module_shutdown(deferred=True)
+    assert first is not None
+    await asyncio.gather(first, return_exceptions=True)
+    await asyncio.sleep(0)
+
+    assert server._module_shutdown_task is None
+    assert server._module_shutdown_complete is False
+    assert module_shutdown_calls == 0
+
+    second = server._start_module_shutdown(deferred=True)
+    assert second is not None
+    await asyncio.wait_for(second, timeout=0.5)
+    await asyncio.sleep(0)
+
+    assert completion_attempts == 2
+    assert module_shutdown_calls == 1
+    assert server._module_shutdown_task is None
+    assert server._module_shutdown_complete is True
+
+
+@pytest.mark.asyncio
 async def test_mcp_server_initialize_uses_injected_permission_seeder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

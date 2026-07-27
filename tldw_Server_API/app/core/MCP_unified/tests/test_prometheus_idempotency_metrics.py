@@ -137,6 +137,7 @@ async def test_prometheus_exports_idempotency_counters(client):
         ),
     )
     protocol.metrics.record_idempotency_degraded("local_commit")
+    protocol.metrics.record_idempotency_degraded("shutdown_execution_timeout")
 
     # Scrape Prometheus metrics with auth
     r3 = client.get(
@@ -156,3 +157,4 @@ async def test_prometheus_exports_idempotency_counters(client):
     assert "mcp_idempotency_degraded_total" in text  # nosec B101
     assert 'stage="serialization"' in text  # nosec B101
     assert 'stage="local_commit"' in text  # nosec B101
+    assert 'stage="shutdown_execution_timeout"' in text  # nosec B101

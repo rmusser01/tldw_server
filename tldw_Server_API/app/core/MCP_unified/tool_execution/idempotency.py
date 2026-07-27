@@ -198,6 +198,21 @@ class IdempotencyManager:
         with self._local_guard:
             return self._remote_degraded
 
+    @property
+    def has_pending_shutdown_work(self) -> bool:
+        """Whether admitted executions or manager-owned finalizers remain."""
+        with self._local_guard:
+            return bool(self._admitted_execution_tasks or self._finalizers)
+
+    async def wait_for_shutdown_completion(self) -> None:
+        """Wait until retained executions and finalizers have completed."""
+        while True:
+            with self._local_guard:
+                if not self._admitted_execution_tasks and not self._finalizers:
+                    return
+                self._lifecycle_changed.clear()
+            await self._lifecycle_changed.wait()
+
     def _record_degraded(self, stage: str, exc: BaseException, *, remote: bool) -> None:
         if stage not in _DEGRADED_STAGES:  # pragma: no cover - internal invariant
             stage = "serialization"

@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.MCP_unified.protocol_types import (
     AuthenticatedExecutionScope,
     InvalidParamsException,
 )
+from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 from tldw_Server_API.app.core.MCP_unified.tool_execution.canonical import (
     canonical_json_bytes,
 )
@@ -2291,3 +2292,91 @@ async def test_nested_same_task_execution_tracking_uses_refcounts() -> None:
     assert observed_refcounts == [1, 2, 1]
     assert manager._admitted_execution_tasks == {}
     assert manager._inflight_executions == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_server_defers_single_module_shutdown_until_retained_owner_finishes() -> None:
+    redis = _FakeRedis()
+    server = MCPServer()
+    manager = server.protocol._idempotency
+    manager._redis_client = redis
+    manager._redis_attempted = True
+    manager._redis_ready = True
+    manager._shutdown_execution_bound = lambda: 0.01
+    callback_started = asyncio.Event()
+    release_callback = asyncio.Event()
+    modules_stopped = asyncio.Event()
+    payload = {"content": [{"type": "text", "text": "server-retained-success"}]}
+    key = "server-retained-owner"
+    callback_calls = 0
+    module_shutdown_calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal callback_calls
+        callback_calls += 1
+        if modules_stopped.is_set():
+            raise RuntimeError("module teardown overtook callback")
+        callback_started.set()
+        await release_callback.wait()
+        if modules_stopped.is_set():
+            raise RuntimeError("module teardown overtook callback")
+        return payload
+
+    async def _shutdown_modules() -> None:
+        nonlocal module_shutdown_calls
+        module_shutdown_calls += 1
+        modules_stopped.set()
+
+    server.module_registry.shutdown_all = _shutdown_modules
+    execution = asyncio.create_task(
+        manager.execute(key, "args", _execute, policy=_policy())
+    )
+    await asyncio.wait_for(callback_started.wait(), timeout=0.5)
+    shutdown_one = asyncio.create_task(server.shutdown())
+    shutdown_two = asyncio.create_task(server.shutdown())
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(shutdown_one, shutdown_two),
+            timeout=0.5,
+        )
+
+        assert modules_stopped.is_set() is False
+        assert module_shutdown_calls == 0
+        deferred_task = server._module_shutdown_task
+        assert deferred_task is not None
+        assert deferred_task.done() is False
+        assert manager.has_pending_shutdown_work is True
+
+        release_callback.set()
+        result = await asyncio.wait_for(execution, timeout=0.5)
+        await asyncio.wait_for(modules_stopped.wait(), timeout=0.5)
+        await asyncio.sleep(0)
+
+        assert result.payload is payload
+        assert result.persistence == "durable"
+        assert callback_calls == 1
+        assert module_shutdown_calls == 1
+        assert redis.values[_result_key(key)] == canonical_json_bytes(
+            payload,
+            max_bytes=_policy().max_result_bytes,
+        )
+        assert _lock_key(key) not in redis.values
+        assert redis.result_store_calls == 1
+        assert redis.lock_release_calls == 1
+        assert manager.has_pending_shutdown_work is False
+        assert manager._admitted_execution_tasks == {}
+        assert manager._finalizers == set()
+        assert deferred_task.done() is True
+        assert server._module_shutdown_task is None
+        assert server._module_shutdown_complete is True
+        assert server.initialized is False
+    finally:
+        release_callback.set()
+        await asyncio.gather(
+            execution,
+            shutdown_one,
+            shutdown_two,
+            return_exceptions=True,
+        )
