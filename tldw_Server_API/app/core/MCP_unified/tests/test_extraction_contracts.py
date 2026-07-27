@@ -4,6 +4,7 @@ import ast
 import asyncio
 import contextlib
 import inspect
+import re
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ EXPECTED_FAILURE_REASON_CODES = {
     "stale_prepared_call",
 }
 DOMAIN_BRANCH_TOKENS = {"model", "models", "provider", "providers", "skill", "skills"}
+IDENTIFIER_WORD_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+")
 LOGGER_METHODS = {
     "bind",
     "contextualize",
@@ -454,10 +456,15 @@ def _contains_domain_token(node: ast.AST) -> bool:
             value = candidate.attr
         if value is None:
             continue
-        normalized = value.lower()
+        normalized = value
         for separator in ".-_/:":
             normalized = normalized.replace(separator, " ")
-        if DOMAIN_BRANCH_TOKENS.intersection(normalized.split()):
+        words = {
+            word.lower()
+            for segment in normalized.split()
+            for word in IDENTIFIER_WORD_RE.findall(segment)
+        }
+        if DOMAIN_BRANCH_TOKENS.intersection(words):
             return True
     return False
 
@@ -472,6 +479,11 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
             if _node_mentions_symbols(node.type, EXPECTED_FAILURE_SYMBOLS):
                 violations.append(
                     f"{path.name}:{node.lineno} catches ExpectedToolFailure in protocol facade"
+                )
+            elif _contains_domain_token(node.type) and _contains_expected_error_result(node.body):
+                violations.append(
+                    f"{path.name}:{node.lineno} contains a Skills/model/provider "
+                    "exception error-result branch"
                 )
             continue
 
@@ -528,6 +540,35 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
     return violations
 
 
+def _is_policy_binding_node(
+    node: ast.AST,
+    execution: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    if (
+        isinstance(node, ast.Name)
+        and node.id == "policy"
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+    ):
+        return True
+    return (
+        isinstance(node, ast.arg)
+        and node.arg == "policy"
+        or isinstance(node, ast.ExceptHandler)
+        and node.name == "policy"
+        or isinstance(node, (ast.MatchAs, ast.MatchStar))
+        and node.name == "policy"
+        or isinstance(node, ast.MatchMapping)
+        and node.rest == "policy"
+        or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and node is not execution
+        and node.name == "policy"
+        or isinstance(node, ast.alias)
+        and (node.asname == "policy" or (node.asname is None and node.name == "policy"))
+        or isinstance(node, (ast.Global, ast.Nonlocal))
+        and "policy" in node.names
+    )
+
+
 def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
     """Find runtime decisions that bypass the immutable prepared policy."""
 
@@ -547,11 +588,7 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
     violations: list[str] = []
     execution_nodes = list(ast.walk(execution))
     policy_bindings = [
-        node
-        for node in execution_nodes
-        if isinstance(node, ast.Name)
-        and node.id == "policy"
-        and isinstance(node.ctx, (ast.Store, ast.Del))
+        node for node in execution_nodes if _is_policy_binding_node(node, execution)
     ]
     direct_policy_targets: set[int] = set()
     for node in execution_nodes:
@@ -572,18 +609,28 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
         ):
             direct_policy_targets.add(id(node.target))
 
+    direct_policy_bindings = [
+        binding for binding in policy_bindings if id(binding) in direct_policy_targets
+    ]
+    legitimate_policy_binding = (
+        direct_policy_bindings[0] if direct_policy_bindings else None
+    )
     valid_policy_binding = (
-        len(policy_bindings) == 1 and id(policy_bindings[0]) in direct_policy_targets
+        len(policy_bindings) == 1
+        and len(direct_policy_bindings) == 1
+        and policy_bindings[0] is legitimate_policy_binding
     )
     if not policy_bindings:
         violations.append(
             f"{path.name}:{execution.lineno} must bind policy once directly from prepared.policy"
         )
-    elif id(policy_bindings[0]) not in direct_policy_targets:
+    elif legitimate_policy_binding is None:
         violations.append(
             f"{path.name}:{policy_bindings[0].lineno} must bind policy directly from prepared.policy"
         )
-    for binding in policy_bindings[1:]:
+    for binding in policy_bindings:
+        if binding is legitimate_policy_binding:
+            continue
         violations.append(
             f"{path.name}:{binding.lineno} reassigns policy; only one prepared.policy binding is allowed"
         )
@@ -609,6 +656,11 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
                 violations.append(
                     f"{path.name}:{node.lineno} reads mutable mapping field {key!r}"
                 )
+            elif key is None and _contains_prepared_tool_authority(node.value):
+                violations.append(
+                    f"{path.name}:{node.lineno} performs dynamic prepared authority read "
+                    f"{_display_node(node)}"
+                )
         elif isinstance(node, ast.Call):
             key: object | None = None
             if (
@@ -629,22 +681,94 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
                 violations.append(
                     f"{path.name}:{node.lineno} reads mutable field {key!r} via dynamic lookup"
                 )
+            elif _is_dynamic_prepared_authority_call(node):
+                violations.append(
+                    f"{path.name}:{node.lineno} performs dynamic prepared authority read "
+                    f"{_display_node(node)}"
+                )
     return violations
+
+
+def _contains_prepared_tool_authority(node: ast.AST) -> bool:
+    return any(
+        isinstance(candidate, ast.Attribute)
+        and _attribute_path(candidate) == ("prepared", "tool_def")
+        for candidate in ast.walk(node)
+    )
+
+
+def _is_dynamic_prepared_authority_call(node: ast.Call) -> bool:
+    if (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and node.args
+        and not isinstance(node.args[0], ast.Constant)
+    ):
+        return _contains_prepared_tool_authority(node.func.value)
+    return bool(
+        isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 2
+        and not isinstance(node.args[1], ast.Constant)
+        and _contains_prepared_tool_authority(node.args[0])
+    )
+
+
+class _DefaultStrVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.aliases: set[str] = set()
+        self.violations: list[str] = []
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        previous = set(self.aliases)
+        for statement in node.body:
+            self.visit(statement)
+        self.aliases = previous
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        self._visit_function(node)
+
+    def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
+        if not isinstance(target, ast.Name):
+            return
+        is_str_alias = isinstance(value, ast.Name) and (
+            value.id == "str" or value.id in self.aliases
+        )
+        if is_str_alias:
+            self.aliases.add(target.id)
+        else:
+            self.aliases.discard(target.id)
+
+    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        self.visit(node.value)
+        for target in node.targets:
+            self._update_alias(target, node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+        if node.value is not None:
+            self.visit(node.value)
+            self._update_alias(node.target, node.value)
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        for keyword in node.keywords:
+            if keyword.arg != "default" or not isinstance(keyword.value, ast.Name):
+                continue
+            if keyword.value.id == "str" or keyword.value.id in self.aliases:
+                self.violations.append(
+                    f"{self.path.name}:{node.lineno} uses coercing default=str serialization"
+                )
+        self.generic_visit(node)
 
 
 def _default_str_violations_for(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return [
-        f"{path.name}:{node.lineno} uses coercing default=str serialization"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and any(
-            keyword.arg == "default"
-            and isinstance(keyword.value, ast.Name)
-            and keyword.value.id == "str"
-            for keyword in node.keywords
-        )
-    ]
+    visitor = _DefaultStrVisitor(path)
+    visitor.visit(tree)
+    return visitor.violations
 
 
 def _is_logger_expression(node: ast.AST) -> bool:
@@ -771,6 +895,32 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
             self.exception_names,
         ):
             self.exception_names.update(assigned_names)
+
+    def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self._update_exception_aliases([node.target], node.iter)
+        for statement in [*node.body, *node.orelse]:
+            self.visit(statement)
+
+    def visit_For(self, node: ast.For) -> None:  # noqa: N802
+        self._visit_for(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:  # noqa: N802
+        self._visit_for(node)
+
+    def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._update_exception_aliases([item.optional_vars], item.context_expr)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_With(self, node: ast.With) -> None:  # noqa: N802
+        self._visit_with(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:  # noqa: N802
+        self._visit_with(node)
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         is_logger_call = (
@@ -2062,6 +2212,61 @@ def test_protocol_branch_scan_detects_domain_identifiers_patterns_and_guards(
     assert "Skills/model/provider" in violations[0]
 
 
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        (
+            "camel_domain.py",
+            "def handle(tool_name):\n"
+            "    if tool_name in SkillsRunnerTool:\n"
+            "        return {'isError': True}\n"
+            "    return {}\n",
+        ),
+        (
+            "attribute_domain.py",
+            "def handle(tool_name):\n"
+            "    if tool_name in catalog.ProviderRunnerTool:\n"
+            "        return {'isError': True}\n"
+            "    return {}\n",
+        ),
+        (
+            "domain_exception.py",
+            "def handle():\n"
+            "    try:\n"
+            "        run_tool()\n"
+            "    except SkillsRunnerError:\n"
+            "        return {'isError': True}\n"
+            "    return {}\n",
+        ),
+    ],
+)
+def test_protocol_branch_scan_detects_camel_attributes_and_domain_exceptions(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    violations = _protocol_expected_failure_branch_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "Skills/model/provider" in violations[0]
+
+
+def test_protocol_branch_scan_uses_identifier_word_boundaries(tmp_path: Path) -> None:
+    sample = tmp_path / "non_domain_identifier.py"
+    sample.write_text(
+        "def handle(tool_name):\n"
+        "    if tool_name in ModelingRunnerTools:\n"
+        "        return {'isError': True}\n"
+        "    return {}\n",
+        encoding="utf-8",
+    )
+
+    assert _protocol_expected_failure_branch_violations_for(sample) == []
+
+
 def test_runtime_security_decisions_only_read_immutable_prepared_policy() -> None:
     violations = _runtime_mutable_authority_violations_for(
         MCP_ROOT / "tool_execution" / "runtime.py"
@@ -2148,6 +2353,89 @@ def test_runtime_policy_scan_rejects_nested_policy_shadowing(tmp_path: Path) -> 
     assert any("reassigns policy" in violation for violation in violations)
 
 
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        (
+            "nested_parameter_shadow.py",
+            "async def execute_prepared_tool_call(prepared):\n"
+            "    policy = prepared.policy\n"
+            "    def inner(policy=prepared.tool_def['metadata']):\n"
+            "        return policy.effect\n"
+            "    return inner()\n",
+        ),
+        (
+            "lambda_parameter_shadow.py",
+            "async def execute_prepared_tool_call(prepared):\n"
+            "    policy = prepared.policy\n"
+            "    inner = lambda policy=prepared.tool_def['metadata']: policy.effect\n"
+            "    return inner()\n",
+        ),
+        (
+            "except_alias_shadow.py",
+            "async def execute_prepared_tool_call(prepared):\n"
+            "    policy = prepared.policy\n"
+            "    try:\n"
+            "        raise RuntimeError\n"
+            "    except Exception as policy:\n"
+            "        return policy.effect\n",
+        ),
+    ],
+)
+def test_runtime_policy_scan_rejects_parameter_and_except_alias_shadowing(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("reassigns policy" in violation for violation in violations)
+
+
+@pytest.mark.parametrize(
+    ("filename", "expression"),
+    [
+        ("dynamic_subscript.py", "prepared.tool_def['metadata'][field]"),
+        ("dynamic_get.py", "prepared.tool_def['metadata'].get(field)"),
+        ("dynamic_getattr.py", "getattr(prepared.tool_def['metadata'], field)"),
+    ],
+)
+def test_runtime_policy_scan_rejects_dynamic_prepared_authority_reads(
+    tmp_path: Path,
+    filename: str,
+    expression: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        "    field = 'category'\n"
+        f"    return {expression}\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("dynamic prepared authority" in violation for violation in violations)
+
+
+def test_runtime_policy_scan_allows_unrelated_dynamic_lookup(tmp_path: Path) -> None:
+    sample = tmp_path / "unrelated_dynamic_lookup.py"
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        "    field = 'category'\n"
+        "    payload = {'category': 'safe'}\n"
+        "    return payload[field], policy.effect\n",
+        encoding="utf-8",
+    )
+
+    assert _runtime_mutable_authority_violations_for(sample) == []
+
+
 def test_runtime_has_no_default_str_serialization_fallback() -> None:
     violations = _default_str_violations_for(MCP_ROOT / "tool_execution" / "runtime.py")
 
@@ -2155,6 +2443,36 @@ def test_runtime_has_no_default_str_serialization_fallback() -> None:
         "runtime serialization must reject unsupported values instead of coercing them: "
         f"{violations}"
     )
+
+
+def test_default_str_scan_rejects_lexical_alias(tmp_path: Path) -> None:
+    sample = tmp_path / "aliased_default_str.py"
+    sample.write_text(
+        "import json\n"
+        "def encode(value):\n"
+        "    fallback = str\n"
+        "    return json.dumps(value, default=fallback)\n",
+        encoding="utf-8",
+    )
+
+    violations = _default_str_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "default=str" in violations[0]
+
+
+def test_default_str_scan_allows_reassigned_alias(tmp_path: Path) -> None:
+    sample = tmp_path / "reassigned_default.py"
+    sample.write_text(
+        "import json\n"
+        "def encode(value):\n"
+        "    fallback = str\n"
+        "    fallback = None\n"
+        "    return json.dumps(value, default=fallback)\n",
+        encoding="utf-8",
+    )
+
+    assert _default_str_violations_for(sample) == []
 
 
 def test_standalone_reporting_package_does_not_import_host_execution_facade() -> None:
@@ -2220,6 +2538,43 @@ def test_exception_log_scan_rejects_exception_alias_and_repr(tmp_path: Path) -> 
     assert len(violations) == 2
     assert any("failure" in violation for violation in violations)
     assert any("repr(failure)" in violation for violation in violations)
+
+
+@pytest.mark.parametrize(
+    ("filename", "statement"),
+    [
+        (
+            "for_exception_alias.py",
+            "        for failure in [exc]:\n"
+            "            logger.error('{}', repr(failure))\n",
+        ),
+        (
+            "async_for_exception_alias.py",
+            "        async for failure in stream(exc):\n"
+            "            logger.error('{}', repr(failure))\n",
+        ),
+    ],
+)
+def test_exception_log_scan_rejects_loop_target_aliases(
+    tmp_path: Path,
+    filename: str,
+    statement: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(
+        "from loguru import logger\n"
+        "async def run():\n"
+        "    try:\n"
+        "        raise RuntimeError('private provider detail')\n"
+        "    except Exception as exc:\n"
+        f"{statement}",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "repr(failure)" in violations[0]
 
 
 def test_exception_log_scan_rejects_loguru_exception_context(tmp_path: Path) -> None:
