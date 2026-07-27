@@ -59,6 +59,88 @@
 ## Overview
 A secure, production-ready Model Context Protocol implementation that consolidates MCP v1 and v2 with enterprise-grade features.
 
+## Tool Execution Failure And Replay Contract
+
+Expected tool failures use the MCP `tools/call` result envelope. The result sets
+`isError: true` and contains a server-selected reason code and public message;
+it is not a JSON-RPC request failure. JSON-RPC errors remain reserved for
+request/protocol failures such as malformed requests, authorization failures,
+and invalid parameters.
+
+`rate_limit_fail_closed` is trusted, server-authored tool metadata, not a caller
+option. When it is the JSON boolean `true`, only a failure of the rate-admission
+backend changes behavior: the call returns the sanitized
+`rate_limit_unavailable` tool error before module dispatch. Actual rate-limit
+denials keep their existing response, and tools without the flag keep their
+compatibility behavior.
+
+### Idempotency Partitioning And Retention
+
+For an effectful call with an idempotency key, replay ownership is partitioned
+by all of these dimensions:
+
+- owner identity (authenticated user, with the existing client/anonymous fallback);
+- module and tool;
+- normalized idempotency key;
+- canonical public-argument fingerprint; and
+- optional explicit, server-authenticated active organization/team scope.
+
+Generic request metadata does not select the active scope. Personal calls
+without an active scope retain the legacy key shape:
+
+```text
+<owner>|module:<module>|tool:<tool>|key:<key>
+```
+
+An authenticated active scope inserts
+`|scope:sha256:<64-lowercase-hex>|` before the key segment. The scope component
+contains only the SHA-256 digest in owner, argument-binding, and result keys;
+raw organization and team IDs are never included. The same owner, key, and
+arguments in a different authenticated active scope therefore use a different
+replay domain.
+
+A successful normalized response may be retained in the bounded local cache or
+Redis for the configured TTL. The cached object is the complete tool success
+payload and may contain sensitive model or tool output, including content
+derived from sensitive input. Operators must secure both local process memory
+and Redis accordingly. Failed executions are not result-cached, but the
+argument fingerprint remains bound for the same TTL after failure. A retry with
+the same key and arguments may execute again; using the key with different
+arguments remains a conflict.
+
+Replay intentionally returns the original cached response until TTL expiry,
+even when mutable downstream content, tool definitions, provider settings, or
+model configuration changed after the successful call. Use a new idempotency
+key when fresh downstream state is required.
+
+After a valid success, serialization, Redis persistence, or lock-release
+degradation does not replace the caller's result. The manager keeps a bounded
+process-local replay copy when possible and reports degraded persistence. This
+preserves the success but weakens cross-process replay guarantees; it is not a
+durable exactly-once claim.
+
+### Idempotency Bounds
+
+These names and bounds come directly from `MCPConfig`:
+
+| Environment variable | Default | Accepted range | Purpose |
+|---|---:|---:|---|
+| `MCP_IDEMPOTENCY_TTL_SECONDS` | 300 | 1-604800 seconds | Result and argument-binding retention |
+| `MCP_IDEMPOTENCY_CACHE_SIZE` | 512 | 1-100000 entries | Bounded local cache/binding capacity |
+| `MCP_IDEMPOTENCY_WAIT_SECONDS` | 5 | 1-30 seconds | Local/Redis pre-owner contention wait |
+| `MCP_IDEMPOTENCY_FINALIZE_SECONDS` | 5 | 1-15 seconds | Cancellation-shielded Redis success finalization bound |
+| `MCP_IDEMPOTENCY_RESULT_MAX_BYTES` | 256000 | 1-1000000 bytes | Strict canonical success-payload limit |
+
+The contention bound applies only before ownership. Expiry returns the stable
+`idempotency_in_progress` tool error without dispatch; it never times out module
+execution after the owner callback starts. Strict serialization and the local
+replay copy commit before remote finalization. Redis result storage and
+ownership-token-checked lock release then run in a manager-owned task for the
+finalization bound; a timed-out task is cancelled and receives a second bounded
+drain. There is no separate idempotency lock-TTL environment variable. Lock TTL
+is derived as the greater of the replay TTL and twice the module timeout plus
+the finalization bound, with a hard maximum of 604800 seconds.
+
 ## Managed External Credential Brokering
 
 Managed external MCP servers now follow a brokered runtime model instead of static secret hydration.

@@ -80,7 +80,7 @@ Out of scope:
 **Goal:** Verify compatibility, documentation, package boundaries, lint, compile, and security scanning.
 **Success Criteria:** Focused and MCP-wide tests pass, Ruff/Bandit/diff checks are clean, and Backlog records evidence.
 **Tests:** Full MCP Unified test directory, standalone reporting tests in touched scope, compileall, Ruff, Bandit.
-**Status:** Not Started
+**Status:** In Progress
 
 ## Planned File Map
 

@@ -16,6 +16,56 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 STANDALONE_MCP_ROOT = REPO_ROOT / "apps" / "mcp-unified" / "src" / "mcp_unified"
 MCP_PACKAGE = "tldw_Server_API.app.core.MCP_unified"
 EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
+EXPECTED_FAILURE_SYMBOLS = {"ExpectedToolFailure", "ExpectedToolFailureReason"}
+EXPECTED_FAILURE_REASON_CODES = {
+    "dependency_unavailable",
+    "idempotency_in_progress",
+    "idempotency_unavailable",
+    "rate_limit_unavailable",
+    "stale_prepared_call",
+}
+DOMAIN_BRANCH_TOKENS = {"model", "models", "provider", "providers", "skill", "skills"}
+LOGGER_METHODS = {
+    "bind",
+    "contextualize",
+    "critical",
+    "debug",
+    "error",
+    "exception",
+    "info",
+    "log",
+    "opt",
+    "patch",
+    "success",
+    "trace",
+    "warning",
+}
+RUNTIME_POLICY_FIELD_PATHS = {
+    "effect": ("policy", "effect"),
+    "rate_limit_category": ("policy", "rate_limit_category"),
+    "rate_limit_fail_closed": ("policy", "rate_limit_fail_closed"),
+    "inject_argument": ("policy", "idempotency", "inject_argument"),
+    "ttl_seconds": ("policy", "idempotency", "ttl_seconds"),
+    "contention_wait_seconds": ("policy", "idempotency", "contention_wait_seconds"),
+    "finalize_seconds": ("policy", "idempotency", "finalize_seconds"),
+    "lock_ttl_seconds": ("policy", "idempotency", "lock_ttl_seconds"),
+    "max_entries": ("policy", "idempotency", "max_entries"),
+    "max_result_bytes": ("policy", "idempotency", "max_result_bytes"),
+}
+MUTABLE_EXECUTION_FIELDS = set(RUNTIME_POLICY_FIELD_PATHS) | {
+    "category",
+    "idempotency_cache_size",
+    "idempotency_finalize_seconds",
+    "idempotency_result_max_bytes",
+    "idempotency_ttl_seconds",
+    "idempotency_wait_seconds",
+    "inputSchema",
+    "input_schema",
+    "is_write",
+    "module_timeout",
+    "timeout_seconds",
+    "uses_network",
+}
 
 
 def _fake_runtime_dependencies() -> SimpleNamespace:
@@ -336,6 +386,314 @@ def _resolved_import_sources_for(
         elif isinstance(node, ast.ImportFrom):
             imports.append(_resolve_import_from_source(package, node.module, node.level))
     return imports
+
+
+def _attribute_path(node: ast.AST) -> tuple[str, ...]:
+    """Return a dotted name/attribute path when an expression has one."""
+
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return ()
+    parts.append(current.id)
+    return tuple(reversed(parts))
+
+
+def _display_node(node: ast.AST) -> str:
+    return ast.unparse(node)
+
+
+def _node_mentions_symbols(node: ast.AST, symbols: set[str]) -> bool:
+    return any(
+        (isinstance(candidate, ast.Name) and candidate.id in symbols)
+        or (isinstance(candidate, ast.Attribute) and candidate.attr in symbols)
+        for candidate in ast.walk(node)
+    )
+
+
+def _contains_expected_error_result(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if _node_mentions_symbols(node, EXPECTED_FAILURE_SYMBOLS):
+            return True
+        for candidate in ast.walk(node):
+            if isinstance(candidate, ast.Name) and candidate.id in {
+                "_complete_expected_failure",
+                "_expected_failure_payload",
+            }:
+                return True
+            if isinstance(candidate, ast.Constant) and candidate.value in EXPECTED_FAILURE_REASON_CODES:
+                return True
+            if isinstance(candidate, ast.Dict):
+                for key, value in zip(candidate.keys, candidate.values, strict=True):
+                    if (
+                        isinstance(key, ast.Constant)
+                        and key.value == "isError"
+                        and isinstance(value, ast.Constant)
+                        and value.value is True
+                    ):
+                        return True
+    return False
+
+
+def _contains_domain_literal(node: ast.AST) -> bool:
+    for candidate in ast.walk(node):
+        if not isinstance(candidate, ast.Constant) or not isinstance(candidate.value, str):
+            continue
+        normalized = candidate.value.lower()
+        for separator in ".-_/:":
+            normalized = normalized.replace(separator, " ")
+        if DOMAIN_BRANCH_TOKENS.intersection(normalized.split()):
+            return True
+    return False
+
+
+def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
+    """Find expected-failure handling that belongs in the extracted runtime."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ExceptHandler) and node.type is not None:
+            if _node_mentions_symbols(node.type, EXPECTED_FAILURE_SYMBOLS):
+                violations.append(
+                    f"{path.name}:{node.lineno} catches ExpectedToolFailure in protocol facade"
+                )
+            continue
+
+        predicate: ast.AST | None = None
+        bodies: list[ast.AST] = []
+        if isinstance(node, ast.If):
+            predicate = node.test
+            bodies = [*node.body, *node.orelse]
+        elif isinstance(node, ast.IfExp):
+            predicate = node.test
+            bodies = [node.body, node.orelse]
+        elif isinstance(node, ast.Match):
+            predicate = node.subject
+            bodies = list(node.cases)
+        if predicate is None:
+            continue
+        if _node_mentions_symbols(predicate, EXPECTED_FAILURE_SYMBOLS):
+            violations.append(
+                f"{path.name}:{node.lineno} branches on ExpectedToolFailure in protocol facade"
+            )
+        elif _contains_domain_literal(predicate) and _contains_expected_error_result(bodies):
+            violations.append(
+                f"{path.name}:{node.lineno} contains a Skills/model/provider error-result branch"
+            )
+    return violations
+
+
+def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
+    """Find runtime decisions that bypass the immutable prepared policy."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    execution = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "execute_prepared_tool_call"
+        ),
+        None,
+    )
+    if execution is None:
+        return [f"{path.name}: missing execute_prepared_tool_call for policy scan"]
+
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            field = node.attr
+            if field not in MUTABLE_EXECUTION_FIELDS:
+                continue
+            path_parts = _attribute_path(node)
+            allowed_path = RUNTIME_POLICY_FIELD_PATHS.get(field)
+            if allowed_path is None or path_parts != allowed_path:
+                violations.append(
+                    f"{path.name}:{node.lineno} reads {_display_node(node)} outside prepared policy"
+                )
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+            key = node.slice.value if isinstance(node.slice, ast.Constant) else None
+            if key in MUTABLE_EXECUTION_FIELDS:
+                violations.append(
+                    f"{path.name}:{node.lineno} reads mutable mapping field {key!r}"
+                )
+        elif isinstance(node, ast.Call):
+            key: object | None = None
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                key = node.args[0].value
+            elif (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+            ):
+                key = node.args[1].value
+            if key in MUTABLE_EXECUTION_FIELDS:
+                violations.append(
+                    f"{path.name}:{node.lineno} reads mutable field {key!r} via dynamic lookup"
+                )
+    return violations
+
+
+def _default_str_violations_for(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [
+        f"{path.name}:{node.lineno} uses coercing default=str serialization"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and any(
+            keyword.arg == "default"
+            and isinstance(keyword.value, ast.Name)
+            and keyword.value.id == "str"
+            for keyword in node.keywords
+        )
+    ]
+
+
+def _is_logger_expression(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id == "logger"
+    if isinstance(node, ast.Attribute):
+        return node.attr == "logger" or _is_logger_expression(node.value)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        return _is_logger_expression(node.func.value)
+    return False
+
+
+def _is_safe_exception_family_expression(node: ast.AST, exception_names: set[str]) -> bool:
+    if isinstance(node, ast.Call):
+        function_path = _attribute_path(node.func)
+        if function_path and function_path[-1] in {
+            "_safe_error_type",
+            "_safe_exception_family",
+        }:
+            return True
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "type"
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in exception_names
+        ):
+            return True
+    path_parts = _attribute_path(node)
+    return bool(
+        len(path_parts) >= 3
+        and path_parts[0] in exception_names
+        and path_parts[-2:] == ("__class__", "__name__")
+    )
+
+
+def _uses_raw_exception_unsafely(node: ast.AST, exception_names: set[str]) -> bool:
+    if _is_safe_exception_family_expression(node, exception_names):
+        return False
+    if isinstance(node, ast.Name) and node.id in exception_names:
+        return True
+    return any(
+        _uses_raw_exception_unsafely(child, exception_names)
+        for child in ast.iter_child_nodes(node)
+    )
+
+
+class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
+    """Track raw exception names only within their lexical logging scope."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.exception_names: set[str] = set()
+        self.violations: list[str] = []
+
+    @staticmethod
+    def _annotated_exception_arguments(
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> set[str]:
+        names: set[str] = set()
+        for argument in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+            annotation = argument.annotation
+            if annotation is not None and _node_mentions_symbols(
+                annotation,
+                {"BaseException", "Exception"},
+            ):
+                names.add(argument.arg)
+        return names
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        previous = self.exception_names
+        self.exception_names = previous | self._annotated_exception_arguments(node)
+        for statement in node.body:
+            self.visit(statement)
+        self.exception_names = previous
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        self._visit_function(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
+        previous = self.exception_names
+        if isinstance(node.name, str):
+            self.exception_names = previous | {node.name}
+        for statement in node.body:
+            self.visit(statement)
+        self.exception_names = previous
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        is_logger_call = (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in LOGGER_METHODS
+            and _is_logger_expression(node.func.value)
+        )
+        if is_logger_call:
+            if node.func.attr == "exception" and self.exception_names:
+                self.violations.append(
+                    f"{self.path.name}:{node.lineno} uses logger.exception with execution context"
+                )
+            for keyword in node.keywords:
+                if (
+                    keyword.arg in {"exception", "exc_info"}
+                    and self.exception_names
+                    and not (
+                        isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value in {False, None}
+                    )
+                ):
+                    self.violations.append(
+                        f"{self.path.name}:{node.lineno} enables raw {keyword.arg} logging"
+                    )
+            values = [
+                *node.args,
+                *(
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg not in {"exception", "exc_info"}
+                ),
+            ]
+            for value in values:
+                if _uses_raw_exception_unsafely(value, self.exception_names):
+                    self.violations.append(
+                        f"{self.path.name}:{node.lineno} logs raw exception expression "
+                        f"{_display_node(value)}"
+                    )
+        self.generic_visit(node)
+
+
+def _unsafe_exception_log_violations_for(path: Path) -> list[str]:
+    """Return unsafe raw-exception logging violations in one Python module."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    visitor = _UnsafeExceptionLogVisitor(path)
+    visitor.visit(tree)
+    return visitor.violations
 
 
 def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
@@ -1394,17 +1752,24 @@ def test_protocol_reexports_tool_execution_shared_symbols() -> None:
     from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule
 
     expected = {
+        "AuthenticatedExecutionScope",
         "RequestContext",
         "PreparedToolCall",
+        "PreparedExecutionPolicy",
         "InvalidParamsException",
         "GovernanceDeniedError",
         "ApprovalRequiredError",
         "IdempotencyManager",
+        "ToolExecutionCoordinator",
+        "ToolExecutionDependencies",
+        "ToolExecutionReporter",
+        "ToolExecutionRuntime",
+        "ToolExecutionSecurity",
         "_trusted_compat_claims_metadata",
     }
 
     missing = sorted(name for name in expected if not hasattr(protocol, name))
-    assert missing == []
+    assert missing == [], f"protocol.py dropped compatibility exports: {missing}"
 
     hints = get_type_hints(protocol.PreparedToolCall)
     assert hints["module"] is BaseModule
@@ -1421,7 +1786,9 @@ def test_idempotency_manager_is_extracted_with_protocol_compatibility() -> None:
         node.name for node in protocol_tree.body if isinstance(node, ast.ClassDef)
     }
 
-    assert "IdempotencyManager" not in protocol_classes
+    assert "IdempotencyManager" not in protocol_classes, (
+        "protocol.py must only re-export the extracted IdempotencyManager"
+    )
 
     from tldw_Server_API.app.core.MCP_unified.tool_execution import IdempotencyManager, idempotency
 
@@ -1475,4 +1842,184 @@ def test_tool_execution_package_does_not_import_protocol_facade() -> None:
         if uses_facade:
             offenders.setdefault(str(path.relative_to(MCP_ROOT)), []).append("MCPProtocol")
 
-    assert offenders == {}
+    assert offenders == {}, (
+        "tool_execution must not depend on the protocol facade; offenders: "
+        f"{offenders}"
+    )
+
+
+def test_protocol_has_no_expected_failure_or_domain_specific_error_result_branch() -> None:
+    violations = _protocol_expected_failure_branch_violations_for(MCP_ROOT / "protocol.py")
+
+    assert violations == [], (
+        "Expected tool failures belong in the host-neutral execution runtime, not protocol.py: "
+        f"{violations}"
+    )
+
+
+def test_protocol_branch_scan_detects_domain_specific_error_result(tmp_path: Path) -> None:
+    unsafe = tmp_path / "unsafe_protocol.py"
+    unsafe.write_text(
+        "def handle(tool_name):\n"
+        "    if tool_name == 'skills.run':\n"
+        "        return {'isError': True}\n"
+        "    return {}\n",
+        encoding="utf-8",
+    )
+    safe = tmp_path / "safe_protocol.py"
+    safe.write_text(
+        "def configure(model_validator):\n"
+        "    if model_validator is not None:\n"
+        "        return model_validator\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+
+    assert _protocol_expected_failure_branch_violations_for(safe) == []
+    violations = _protocol_expected_failure_branch_violations_for(unsafe)
+    assert len(violations) == 1
+    assert "Skills/model/provider" in violations[0]
+
+
+def test_runtime_security_decisions_only_read_immutable_prepared_policy() -> None:
+    violations = _runtime_mutable_authority_violations_for(
+        MCP_ROOT / "tool_execution" / "runtime.py"
+    )
+
+    assert violations == [], (
+        "execute_prepared_tool_call must not reread mutable metadata, schema, config, "
+        f"idempotency, or effect fields: {violations}"
+    )
+
+
+def test_runtime_policy_scan_distinguishes_typed_policy_from_mutable_reads(
+    tmp_path: Path,
+) -> None:
+    safe = tmp_path / "safe_runtime.py"
+    safe.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        "    return (policy.effect, policy.rate_limit_fail_closed, "
+        "policy.idempotency.ttl_seconds)\n",
+        encoding="utf-8",
+    )
+    unsafe = tmp_path / "unsafe_runtime.py"
+    unsafe.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    category = prepared.tool_def.get('metadata', {}).get('category')\n"
+        "    return prepared.is_write, category\n",
+        encoding="utf-8",
+    )
+
+    assert _runtime_mutable_authority_violations_for(safe) == []
+    violations = _runtime_mutable_authority_violations_for(unsafe)
+    assert len(violations) == 2
+    assert any("'category'" in violation for violation in violations)
+    assert any("prepared.is_write" in violation for violation in violations)
+
+
+def test_runtime_has_no_default_str_serialization_fallback() -> None:
+    violations = _default_str_violations_for(MCP_ROOT / "tool_execution" / "runtime.py")
+
+    assert violations == [], (
+        "runtime serialization must reject unsupported values instead of coercing them: "
+        f"{violations}"
+    )
+
+
+def test_standalone_reporting_package_does_not_import_host_execution_facade() -> None:
+    package_dir = STANDALONE_MCP_ROOT / "tool_use_reporting"
+    offenders: dict[str, list[str]] = {}
+    for path in package_dir.rglob("*.py"):
+        relative_parent = path.relative_to(STANDALONE_MCP_ROOT).parent
+        current_package = ".".join(("mcp_unified", *relative_parent.parts))
+        blocked = sorted(
+            source
+            for source in _resolved_import_sources_for(path, current_package)
+            if source == "tldw_Server_API" or source.startswith("tldw_Server_API.")
+        )
+        if blocked:
+            offenders[str(path.relative_to(STANDALONE_MCP_ROOT))] = blocked
+
+    assert offenders == {}, (
+        "standalone tool-use reporting must remain shape-based and host-neutral: "
+        f"{offenders}"
+    )
+
+
+def test_standalone_expected_failure_classifier_export_remains_available() -> None:
+    from mcp_unified import tool_use_reporting
+    from mcp_unified.tool_use_reporting import builders
+
+    assert "classify_tool_use_exception" in tool_use_reporting.__all__
+    assert tool_use_reporting.classify_tool_use_exception is builders.classify_tool_use_exception
+
+
+def test_exception_log_scan_rejects_raw_exception_interpolation(tmp_path: Path) -> None:
+    sample = tmp_path / "unsafe_logging.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    logger.error('execution failed: {error}', error=str(exc))\n",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "str(exc)" in violations[0]
+
+
+def test_exception_log_scan_rejects_loguru_exception_context(tmp_path: Path) -> None:
+    sample = tmp_path / "unsafe_exception_context.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    logger.opt(exception=True).error('execution failed')\n"
+        "    logger.error('execution failed', exc_info=exc)\n",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 2
+    assert any("exception logging" in violation for violation in violations)
+    assert any("exc_info logging" in violation for violation in violations)
+
+
+def test_exception_log_scan_allows_exception_family_only(tmp_path: Path) -> None:
+    sample = tmp_path / "safe_logging.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    logger.opt(exception=False).bind(\n"
+        "        error_type=exc.__class__.__name__,\n"
+        "    ).error('execution failed')\n",
+        encoding="utf-8",
+    )
+
+    assert _unsafe_exception_log_violations_for(sample) == []
+
+
+def test_breaker_runtime_and_idempotency_logs_do_not_expose_exception_text() -> None:
+    targets = (
+        MCP_ROOT / "modules" / "base.py",
+        MCP_ROOT / "tool_execution" / "runtime.py",
+        MCP_ROOT / "tool_execution" / "idempotency.py",
+    )
+    offenders = {
+        str(path.relative_to(MCP_ROOT)): violations
+        for path in targets
+        if (violations := _unsafe_exception_log_violations_for(path))
+    }
+
+    assert offenders == {}, (
+        "MCP execution logs may use safe exception-family and bounded structural fields only: "
+        f"{offenders}"
+    )
