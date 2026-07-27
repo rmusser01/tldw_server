@@ -88,6 +88,22 @@ class _RecordingIdempotencyShutdown:
         self.pending = 0
 
 
+class _ExoticShutdownError(Exception):
+    def __getattribute__(self, name: str) -> Any:
+        if name == "__class__":
+            raise RuntimeError("hostile shutdown exception class access")
+        return super().__getattribute__(name)
+
+
+class _FailingIdempotencyShutdown:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    async def shutdown(self) -> None:
+        self.events.append("idempotency")
+        raise _ExoticShutdownError("private shutdown detail")
+
+
 class _NoopMetrics:
     """Metrics double with async lifecycle methods used by server tests."""
 
@@ -739,6 +755,22 @@ async def test_mcp_server_drains_idempotency_before_module_registry_shutdown() -
 
     assert events == ["idempotency", "modules"]
     assert idempotency.pending == 0
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_shutdown_contains_exotic_error_before_module_teardown() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    events: list[str] = []
+    deps = _server_runtime_dependencies()
+    deps.module_registry = _RecordingModuleRegistry(events)
+    server = MCPServer(dependencies=deps)
+    server.dependencies.idempotency = _FailingIdempotencyShutdown(events)
+
+    await server.shutdown()
+
+    assert events == ["idempotency", "modules"]
+    assert server.initialized is False
 
 
 @pytest.mark.asyncio

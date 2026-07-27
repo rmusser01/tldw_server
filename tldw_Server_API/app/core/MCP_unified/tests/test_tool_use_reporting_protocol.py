@@ -120,6 +120,35 @@ class _FailingObserverMetrics(_NoopMetrics):
         raise RuntimeError("private miss detail")
 
 
+class ExoticObserverError(Exception):
+    pass
+
+
+class _OriginalToolError(Exception):
+    pass
+
+
+class _ExoticObserverMetrics(_NoopMetrics):
+    def __init__(self, target: str) -> None:
+        self.target = target
+
+    def record_module_operation(self, **_kwargs: Any) -> None:
+        if self.target == "module_metrics":
+            raise ExoticObserverError("private module metrics detail")
+
+    def record_tool_invalid_params(self, *_args: Any, **_kwargs: Any) -> None:
+        if self.target == "invalid_params_metrics":
+            raise ExoticObserverError("private invalid params detail")
+
+    def record_idempotency_hit(self, *_args: Any, **_kwargs: Any) -> None:
+        if self.target == "idempotency_metrics":
+            raise ExoticObserverError("private hit detail")
+
+    def record_idempotency_miss(self, *_args: Any, **_kwargs: Any) -> None:
+        if self.target == "idempotency_metrics":
+            raise ExoticObserverError("private miss detail")
+
+
 class _StaticEffectivePolicyResolver:
     """Test double that returns a fixed effective policy for any context."""
 
@@ -360,10 +389,15 @@ class _MemoryRedis:
             self.values[binding_key] = self._bytes(arguments_hash)
             return 2
 
-        if numkeys == 2 and len(values) == 5:
-            binding_key, result_key, arguments_hash, encoded, _ttl = values
+        if numkeys == 3 and len(values) == 7:
+            binding_key, result_key, lock_key, arguments_hash, encoded, _ttl, token = values
             if self.values.get(binding_key) != self._bytes(arguments_hash):
                 return 0
+            if self.values.get(lock_key) != self._bytes(token):
+                return -1
+            existing = self.values.get(result_key)
+            if existing is not None and existing != self._bytes(encoded):
+                return -2
             self.values[result_key] = encoded
             return 1
 
@@ -1311,6 +1345,111 @@ async def test_idempotent_success_survives_metrics_audit_and_reporting_failures(
 
     assert first["content"] == replay["content"]
     assert module.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "observer",
+    ["module_metrics", "audit", "post_hook", "idempotency_metrics", "reporting"],
+)
+async def test_exotic_success_observer_cannot_replace_committed_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    observer: str,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    module = _ToolModule(write=True)
+    protocol, _recorder = _protocol(module=module)
+    protocol.metrics = _ExoticObserverMetrics(observer)
+
+    if observer == "audit":
+        monkeypatch.setattr(
+            protocol._tool_execution_reporter,
+            "audit_tool_event",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                ExoticObserverError("private audit detail")
+            ),
+        )
+    if observer == "reporting":
+        monkeypatch.setattr(
+            protocol._tool_execution_reporter,
+            "build_event",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                ExoticObserverError("private reporting detail")
+            ),
+        )
+    if observer == "post_hook":
+        async def _fail_post_hook(**_kwargs: Any) -> None:
+            raise ExoticObserverError("private post-hook detail")
+
+        protocol._run_post_tool_hooks = _fail_post_hook
+
+    params = {
+        "name": "test.write",
+        "arguments": {"value": "A"},
+        "idempotencyKey": f"exotic-success-{observer}",
+    }
+
+    first = await protocol._handle_tools_call(params, _request_context())
+    replay = await protocol._handle_tools_call(params, _request_context())
+
+    assert first["content"] == replay["content"]
+    assert module.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observer", ["module_metrics", "audit", "post_hook", "reporting"])
+async def test_exotic_failure_observer_cannot_replace_original_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    observer: str,
+) -> None:
+    original = _OriginalToolError("original module failure")
+    protocol, _recorder = _protocol(module=_ToolModule(fail=original))
+    protocol.metrics = _ExoticObserverMetrics(observer)
+
+    if observer == "audit":
+        monkeypatch.setattr(
+            protocol._tool_execution_reporter,
+            "audit_tool_event",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                ExoticObserverError("private audit detail")
+            ),
+        )
+    if observer == "reporting":
+        monkeypatch.setattr(
+            protocol._tool_execution_reporter,
+            "build_event",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                ExoticObserverError("private reporting detail")
+            ),
+        )
+    if observer == "post_hook":
+        async def _fail_post_hook(**_kwargs: Any) -> None:
+            raise ExoticObserverError("private post-hook detail")
+
+        protocol._run_post_tool_hooks = _fail_post_hook
+
+    with pytest.raises(_OriginalToolError) as caught:
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"value": "A"}},
+            _request_context(),
+        )
+
+    assert caught.value is original
+
+
+@pytest.mark.asyncio
+async def test_exotic_invalid_params_metric_cannot_replace_original_failure() -> None:
+    protocol, _recorder = _protocol(module=_ToolModule(fail=ValueError("original invalid")))
+    protocol.metrics = _ExoticObserverMetrics("invalid_params_metrics")
+
+    with pytest.raises(InvalidParamsException, match="original invalid"):
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"value": "A"}},
+            _request_context(),
+        )
 
 
 def test_reporting_classifier_recognizes_expected_failure_shape_without_message_access() -> None:

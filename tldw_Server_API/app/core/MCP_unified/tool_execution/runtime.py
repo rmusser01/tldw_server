@@ -21,6 +21,24 @@ from ..tool_observability import (
 from .dependencies import ToolExecutionDependencies
 
 
+def _safe_exception_family(exc: BaseException) -> str:
+    """Return a bounded inert exception family for observer-only logs."""
+
+    try:
+        name = type(exc).__name__
+        if (
+            type(name) is str
+            and 1 <= len(name) <= 64
+            and name.isascii()
+            and (name[0].isalpha() or name[0] == "_")
+            and all(character.isalnum() or character == "_" for character in name)
+        ):
+            return name
+    except BaseException:  # noqa: BLE001 - hostile exceptions cannot replace outcomes.
+        return "Exception"
+    return "Exception"
+
+
 class ToolExecutionRuntime:
     """Execute validated MCP tool calls and record runtime side effects."""
 
@@ -175,7 +193,7 @@ class ToolExecutionRuntime:
             except Exception as exc:  # noqa: BLE001 - reporting must not affect tool calls.
                 logger.warning(
                     "Failed to build or record prepared tool-use event: {}",
-                    exc.__class__.__name__,
+                    _safe_exception_family(exc),
                 )
 
         async def _admit_rate_limit() -> None:
@@ -242,6 +260,10 @@ class ToolExecutionRuntime:
                 },
             ) as span:
                 try:
+                    await self.security.verify_prepared_tool_call(
+                        prepared,
+                        require_live_binding=True,
+                    )
                     execution_args = tool_args
                     if (
                         policy.idempotency.inject_argument
@@ -250,10 +272,6 @@ class ToolExecutionRuntime:
                     ):
                         execution_args = dict(tool_args)
                         execution_args["idempotencyKey"] = normalized_idempotency_key
-                    await self.security.verify_prepared_tool_call(
-                        prepared,
-                        require_live_binding=True,
-                    )
                     result = await module.execute_with_circuit_breaker(
                         module.execute_tool,
                         tool_name,
@@ -348,10 +366,10 @@ class ToolExecutionRuntime:
                 )
             except asyncio.CancelledError:
                 raise
-            except self._noncritical_exceptions as exc:
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace committed success.
                 logger.debug(
                     "MCP tool success metrics observer failed error_type={error_type}",
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
             try:
                 self.reporter.audit_tool_event(
@@ -364,10 +382,10 @@ class ToolExecutionRuntime:
                 )
             except asyncio.CancelledError:
                 raise
-            except self._noncritical_exceptions as exc:
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace committed success.
                 logger.debug(
                     "MCP tool success audit observer failed error_type={error_type}",
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
             try:
                 await self._run_post_hooks(
@@ -384,16 +402,16 @@ class ToolExecutionRuntime:
                 )
             except asyncio.CancelledError:
                 raise
-            except self._noncritical_exceptions as exc:
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace committed success.
                 logger.debug(
                     "MCP tool success post-hook observer failed error_type={error_type}",
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
 
         async def _run_failure_observers(error: Exception) -> None:
             context.logger.error(  # noqa: TRY400 - the log contains only exception family.
                 "Tool execution failed: {error_type}",
-                error_type=error.__class__.__name__,
+                error_type=_safe_exception_family(error),
             )
             if isinstance(error, InvalidParamsException):
                 try:
@@ -403,10 +421,10 @@ class ToolExecutionRuntime:
                     )
                 except asyncio.CancelledError:
                     raise
-                except self._noncritical_exceptions as exc:
+                except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
                     logger.debug(
                         "MCP tool invalid-params metrics observer failed error_type={error_type}",
-                        error_type=exc.__class__.__name__,
+                        error_type=_safe_exception_family(exc),
                     )
             try:
                 self.metrics.record_module_operation(
@@ -417,10 +435,10 @@ class ToolExecutionRuntime:
                 )
             except asyncio.CancelledError:
                 raise
-            except self._noncritical_exceptions as exc:
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
                 logger.debug(
                     "MCP tool failure metrics observer failed error_type={error_type}",
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
             try:
                 self.reporter.audit_tool_event(
@@ -434,10 +452,10 @@ class ToolExecutionRuntime:
                 )
             except asyncio.CancelledError:
                 raise
-            except self._noncritical_exceptions as exc:
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
                 logger.debug(
                     "MCP tool failure audit observer failed error_type={error_type}",
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
             try:
                 await self._run_post_hooks(
@@ -455,10 +473,10 @@ class ToolExecutionRuntime:
                 )
             except asyncio.CancelledError:
                 raise
-            except self._noncritical_exceptions as exc:
+            except Exception as exc:  # noqa: BLE001 - observers cannot replace failures.
                 logger.debug(
                     "MCP tool failure post-hook observer failed error_type={error_type}",
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
 
         async def _record_execution_failure(error: Exception) -> None:
@@ -499,10 +517,10 @@ class ToolExecutionRuntime:
                         self.metrics.record_idempotency_miss(module_id or getattr(module, "name", "unknown"), str(tool_name))
                 except asyncio.CancelledError:
                     raise
-                except self._noncritical_exceptions as metrics_exc:
+                except Exception as metrics_exc:  # noqa: BLE001 - metrics cannot replace outcomes.
                     logger.debug(
                         "MCP idempotency metrics skipped after noncritical failure: {error_type}",
-                        error_type=metrics_exc.__class__.__name__,
+                        error_type=_safe_exception_family(metrics_exc),
                     )
             except ExpectedToolFailure as failure:
                 return _expected_failure_payload(failure)

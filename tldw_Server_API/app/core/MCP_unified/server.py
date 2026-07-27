@@ -68,6 +68,24 @@ _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*)
 _JSONRPC_EXPLICIT_NULL_ID_PREFIX = "__tldw_ws_jsonrpc_explicit_null_id_"
 
 
+def _safe_exception_family(exc: BaseException) -> str:
+    """Return a bounded inert exception family for lifecycle logs."""
+
+    try:
+        name = type(exc).__name__
+        if (
+            type(name) is str
+            and 1 <= len(name) <= 64
+            and name.isascii()
+            and (name[0].isalpha() or name[0] == "_")
+            and all(character.isalnum() or character == "_" for character in name)
+        ):
+            return name
+    except BaseException:  # noqa: BLE001 - hostile exceptions cannot break teardown.
+        return "Exception"
+    return "Exception"
+
+
 def _is_authnz_exception(exc: Exception) -> bool:
     module = exc.__class__.__module__
     return module == "tldw_Server_API.app.core.AuthNZ.exceptions" or module.startswith(
@@ -723,10 +741,10 @@ class MCPServer:
             await self.dependencies.idempotency.shutdown()
         except asyncio.CancelledError:
             raise
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+        except Exception as exc:  # noqa: BLE001 - failure cannot skip module teardown.
             logger.warning(
                 "MCP idempotency shutdown failed error_type={error_type}",
-                error_type=exc.__class__.__name__,
+                error_type=_safe_exception_family(exc),
             )
 
         # Shutdown modules

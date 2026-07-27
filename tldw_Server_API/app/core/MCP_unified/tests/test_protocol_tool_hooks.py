@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import contextlib
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
@@ -608,6 +609,66 @@ async def test_idempotent_success_is_committed_before_raising_post_hook(
     assert first["content"] == replay["content"]
     assert module.executions == 1
     assert post_hook_calls == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_second_live_verification_precedes_idempotency_argument_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+    from tldw_Server_API.app.core.MCP_unified.tool_execution import runtime as runtime_module
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    protocol, module, _hooks = _protocol(module=_WriteToolModuleStub())
+    prepared = await protocol.prepare_tool_call(
+        {
+            "name": "stub.write",
+            "arguments": {"target": "verified-before-copy"},
+            "idempotencyKey": "verify-before-inject",
+        },
+        _context(),
+    )
+    assert prepared.policy.idempotency.inject_argument is True
+
+    events: list[str] = []
+    verify_calls = 0
+    second_verification_complete = False
+    original_verify = protocol._tool_execution_security.verify_prepared_tool_call
+
+    async def _record_verify(*args: Any, **kwargs: Any) -> None:
+        nonlocal second_verification_complete, verify_calls
+        verify_calls += 1
+        await original_verify(*args, **kwargs)
+        events.append(f"verify:{verify_calls}")
+        if verify_calls == 2:
+            second_verification_complete = True
+
+    class _TrackingDictMeta(type):
+        def __instancecheck__(cls, instance: object) -> bool:
+            return isinstance(instance, builtins.dict)
+
+        def __call__(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            events.append("argument-copy")
+            assert second_verification_complete
+            return builtins.dict(*args, **kwargs)
+
+    class _TrackingDict(metaclass=_TrackingDictMeta):
+        pass
+
+    monkeypatch.setattr(
+        protocol._tool_execution_security,
+        "verify_prepared_tool_call",
+        _record_verify,
+    )
+    monkeypatch.setattr(runtime_module, "dict", _TrackingDict, raising=False)
+
+    result = await protocol.execute_prepared_tool_call(prepared)
+
+    assert result["tool"] == "stub.write"
+    assert module.executions == 1
+    assert events[:3] == ["verify:1", "verify:2", "argument-copy"]
 
 
 @pytest.mark.unit

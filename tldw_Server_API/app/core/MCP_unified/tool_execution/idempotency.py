@@ -78,6 +78,9 @@ return {1, result}
 """
 _REDIS_STORE_RESULT_SCRIPT = """
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call('GET', KEYS[3]) ~= ARGV[4] then return -1 end
+local existing = redis.call('GET', KEYS[2])
+if existing and existing ~= ARGV[2] then return -2 end
 redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
 redis.call('EXPIRE', KEYS[1], ARGV[3])
 return 1
@@ -934,21 +937,31 @@ class IdempotencyManager:
         client: Any,
         binding_key: str,
         result_key: str,
+        lock_key: str,
+        token: bytes,
         cache_key: str,
         arguments_hash: str,
         encoded: bytes,
         *,
         policy: IdempotencyExecutionPolicy,
-    ) -> Literal["durable", "uncertain", "binding_lost"]:
+    ) -> Literal[
+        "durable",
+        "uncertain",
+        "binding_lost",
+        "ownership_lost",
+        "result_conflict",
+    ]:
         try:
             stored = await client.eval(
                 _REDIS_STORE_RESULT_SCRIPT,
-                2,
+                3,
                 binding_key,
                 result_key,
+                lock_key,
                 arguments_hash.encode("utf-8"),
                 encoded,
                 policy.ttl_seconds,
+                token,
             )
         except asyncio.CancelledError:
             raise
@@ -956,10 +969,15 @@ class IdempotencyManager:
             self._mark_remote_failure("redis_result_write", exc)
             return "uncertain"
         if stored != 1:
-            exc = RuntimeError("Redis argument binding changed before result commit")
+            result_state = {
+                0: "binding_lost",
+                -1: "ownership_lost",
+                -2: "result_conflict",
+            }.get(stored, "ownership_lost")
+            exc = RuntimeError("Redis result ownership check failed")
             self._mark_remote_failure("redis_result_write", exc)
             self._block_remote_key(cache_key, policy=policy)
-            return "binding_lost"
+            return result_state
         return "durable"
 
     async def _release_remote_without_replay(
@@ -993,6 +1011,8 @@ class IdempotencyManager:
                 client,
                 binding_key,
                 result_key,
+                lock_key,
+                token,
                 cache_key,
                 arguments_hash,
                 encoded,

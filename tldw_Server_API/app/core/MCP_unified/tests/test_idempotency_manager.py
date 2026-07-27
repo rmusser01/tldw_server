@@ -233,10 +233,15 @@ class _FakeRedis:
                 raise RedisError("binding credential=TOP_SECRET")
             return 2
 
-        if key_count == 2 and len(values) == 5:
-            binding_key, result_key, arguments_hash, encoded, ttl = values
+        if key_count == 3 and len(values) == 7:
+            binding_key, result_key, lock_key, arguments_hash, encoded, ttl, token = values
             if self.values.get(str(binding_key)) != self._bytes(arguments_hash):
                 return 0
+            if self.values.get(str(lock_key)) != self._bytes(token):
+                return -1
+            existing = self.values.get(str(result_key))
+            if existing is not None and existing != self._bytes(encoded):
+                return -2
             self.values[str(result_key)] = self._bytes(encoded)
             self.set_expirations.append((str(result_key), int(ttl)))
             self.expirations.append((str(binding_key), int(ttl)))
@@ -282,7 +287,7 @@ class _BlockingResultRedis(_FakeRedis):
         self.write_cancellations = 0
 
     async def eval(self, script: str, key_count: int, *values: Any) -> Any:
-        if key_count == 2 and len(values) == 5:
+        if key_count == 3 and len(values) == 7:
             self.write_started.set()
             while not self.allow_write.is_set():
                 try:
@@ -1864,6 +1869,44 @@ async def test_cancellation_resistant_finalizer_stays_owned_and_shutdown_drains_
         for message in messages
         if "MCP idempotency degraded stage=" in message
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stale_finalizer_cannot_overwrite_new_owner_payload() -> None:
+    redis = _BlockingResultRedis(ignore_cancellation=True)
+    manager = _remote_manager(redis)
+    key = "stale-finalizer-owner"
+    stale_payload = {"content": [{"type": "text", "text": "stale"}]}
+    newer_payload = {"content": [{"type": "text", "text": "newer"}]}
+    newer_encoded = canonical_json_bytes(
+        newer_payload,
+        max_bytes=_policy().max_result_bytes,
+    )
+
+    execution = asyncio.create_task(
+        manager.execute(
+            key,
+            "args",
+            lambda: _async_payload(stale_payload),
+            policy=_policy(),
+        )
+    )
+    await asyncio.wait_for(redis.write_started.wait(), timeout=0.5)
+    result = await asyncio.wait_for(execution, timeout=2.5)
+
+    assert result.payload is stale_payload
+    assert result.persistence == "local"
+    assert len(manager._finalizers) == 1
+
+    redis.values[_lock_key(key)] = b"new-owner-token"
+    redis.values[_result_key(key)] = newer_encoded
+    redis.allow_write.set()
+    await asyncio.wait_for(manager.shutdown(), timeout=1.0)
+
+    assert redis.values[_result_key(key)] == newer_encoded
+    assert redis.values[_lock_key(key)] == b"new-owner-token"
+    assert manager._finalizers == set()
 
 
 @pytest.mark.unit
