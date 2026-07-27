@@ -404,7 +404,7 @@ class BaseModule(ABC):
                 logger.bind(
                     module_id=self.name,
                     reason_code="module_initialization_failed",
-                    error_type=e.__class__.__name__,
+                    error_type=_safe_exception_family(e),
                 ).error("MCP module initialization failed")
                 self._health = ModuleHealth(
                     status=HealthStatus.UNHEALTHY,
@@ -446,7 +446,7 @@ class BaseModule(ABC):
                 logger.bind(
                     module_id=self.name,
                     reason_code="module_shutdown_failed",
-                    error_type=e.__class__.__name__,
+                    error_type=_safe_exception_family(e),
                 ).error("MCP module shutdown failed")
                 # Continue shutdown even if there's an error
 
@@ -497,7 +497,7 @@ class BaseModule(ABC):
             logger.bind(
                 module_id=self.name,
                 reason_code="module_health_check_failed",
-                error_type=e.__class__.__name__,
+                error_type=_safe_exception_family(e),
             ).error("MCP module health check failed")
             self._health = ModuleHealth(
                 status=HealthStatus.UNHEALTHY,
@@ -616,7 +616,7 @@ class BaseModule(ABC):
                 module_id=self.name,
                 tool_id=tool_name,
                 reason_code="module_tool_cache_lookup_failed",
-                error_type=tool_lookup_error.__class__.__name__,
+                error_type=_safe_exception_family(tool_lookup_error),
             ).debug("MCP module tool cache lookup failed")
         return None
 

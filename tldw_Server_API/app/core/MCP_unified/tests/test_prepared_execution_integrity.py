@@ -467,6 +467,7 @@ def test_public_prepared_execution_annotations_resolve_at_runtime() -> None:
     )
 
     assert prepared_hints["policy"] is PreparedExecutionPolicy
+    assert prepared_hints["arguments_snapshot"] is CanonicalJsonSnapshot
     assert prepared_hints["tool_definition_snapshot"] is CanonicalJsonSnapshot
     assert prepared_hints["scope_reporting_snapshot"] is CanonicalJsonSnapshot
     assert scope_hints == {"active_org_id": int | None, "active_team_id": int | None}
@@ -616,6 +617,7 @@ async def test_prepared_integrity_rejects_manually_signed_noncanonical_snapshot(
     [
         "policy",
         "oversized_policy",
+        "arguments_snapshot",
         "tool_snapshot",
         "scope_snapshot",
         "raw_key",
@@ -648,6 +650,14 @@ async def test_prepared_integrity_rejects_authoritative_state_tampering(
         candidate = replace(
             prepared,
             policy=replace(prepared.policy, rate_limit_category="x" * 64_000),
+        )
+    elif tamper_target == "arguments_snapshot":
+        candidate = replace(
+            prepared,
+            arguments_snapshot=replace(
+                prepared.arguments_snapshot,
+                encoded=b"null",
+            ),
         )
     elif tamper_target == "tool_snapshot":
         candidate = replace(
@@ -1150,6 +1160,38 @@ async def test_final_live_check_runs_after_module_queue_admission(
     assert module.breaker_entry_count == 1
     assert module._circuit_breaker.failure_count == 0
     assert module.execute_count == 0
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_immutable_prepared_argument_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(
+        monkeypatch,
+        idempotency_key=None,
+    )
+    dispatch_entered = asyncio.Event()
+    dispatch_release = asyncio.Event()
+
+    async def _blocked_execute(
+        _tool_name: str,
+        arguments: dict[str, Any],
+        _context: RequestContext | None = None,
+    ) -> dict[str, Any]:
+        dispatch_entered.set()
+        await dispatch_release.wait()
+        module.last_arguments = dict(arguments)
+        return {"value": arguments["value"]}
+
+    monkeypatch.setattr(module, "execute_tool", _blocked_execute)
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(dispatch_entered.wait(), timeout=2)
+    prepared.tool_args["value"] = "mutated after final admission"
+    dispatch_release.set()
+    payload = await asyncio.wait_for(execution, timeout=2)
+
+    assert payload["content"][0]["json"]["value"] == "alpha"
+    assert module.last_arguments == {"value": "alpha"}
 
 
 @pytest.mark.parametrize("drift", ["unregistered", "disabled", "definition_changed"])

@@ -41,6 +41,7 @@ from .canonical import (
     TOOL_DEFINITION_MAX_BYTES,
     JsonValue,
     canonical_json_bytes,
+    decode_canonical_json,
     decode_canonical_json_object_or_none,
 )
 from .dependencies import ToolExecutionDependencies
@@ -84,6 +85,26 @@ def _is_truthy(value: Any) -> bool:
         return str(value or "").strip().lower() in _TRUTHY_VALUES
     except Exception:  # noqa: BLE001 - best-effort normalization must fail closed.
         return False
+
+
+def _safe_exception_family(exc: BaseException) -> str:
+    """Return a bounded inert exception family for security-path logs."""
+
+    try:
+        name = type(exc).__name__
+        if (
+            type(name) is str
+            and 1 <= len(name) <= 64
+            and name.isascii()
+            and (name[0].isalpha() or name[0] == "_")
+            and all(character.isalnum() or character == "_" for character in name)
+        ):
+            return name
+    except asyncio.CancelledError:
+        raise
+    except BaseException:  # noqa: BLE001 - logs must not inspect hostile descriptors.
+        return "Exception"
+    return "Exception"
 
 
 def _is_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
@@ -203,7 +224,7 @@ class ToolExecutionSecurity:
             except self._noncritical_exceptions as exc:
                 logger.debug(
                     "MCP API key scope normalization failed; using local fallback: {}",
-                    exc.__class__.__name__,
+                    _safe_exception_family(exc),
                 )
 
         if isinstance(raw, str):
@@ -721,6 +742,28 @@ class ToolExecutionSecurity:
             raise cls._integrity_failure(f"non-canonical {name} snapshot")
 
     @classmethod
+    def _verify_arguments_snapshot(cls, snapshot: CanonicalJsonSnapshot) -> None:
+        if type(snapshot) is not CanonicalJsonSnapshot or type(snapshot.encoded) is not bytes:
+            raise cls._integrity_failure("invalid arguments snapshot")
+        stored_digest = cls._require_fixed_sha256(
+            snapshot.sha256,
+            name="arguments snapshot digest",
+        )
+        actual_digest = hashlib.sha256(snapshot.encoded).hexdigest()
+        if not hmac.compare_digest(stored_digest, actual_digest):
+            raise cls._integrity_failure("arguments snapshot digest mismatch")
+        try:
+            decoded = decode_canonical_json(
+                snapshot.encoded,
+                max_bytes=ARGUMENTS_MAX_BYTES,
+            )
+            canonical = canonical_json_bytes(decoded, max_bytes=ARGUMENTS_MAX_BYTES)
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise cls._integrity_failure("invalid arguments snapshot") from exc
+        if not hmac.compare_digest(snapshot.encoded, canonical):
+            raise cls._integrity_failure("non-canonical arguments snapshot")
+
+    @classmethod
     def _validate_prepared_policy(cls, policy: PreparedExecutionPolicy) -> None:
         if type(policy) is not PreparedExecutionPolicy:
             raise cls._integrity_failure("invalid execution policy")
@@ -754,6 +797,7 @@ class ToolExecutionSecurity:
             raise self._integrity_failure("invalid tool name")
 
         self._validate_prepared_policy(prepared.policy)
+        self._verify_arguments_snapshot(prepared.arguments_snapshot)
         self._verify_snapshot(
             prepared.tool_definition_snapshot,
             max_bytes=TOOL_DEFINITION_MAX_BYTES,
@@ -769,6 +813,8 @@ class ToolExecutionSecurity:
         if expected_hash is None:
             raise self._integrity_failure("invalid JSON arguments")
         prepared_hash = self._require_fixed_sha256(prepared.arguments_hash, name="argument fingerprint")
+        if not hmac.compare_digest(prepared.arguments_snapshot.sha256, prepared_hash):
+            raise self._integrity_failure("argument snapshot mismatch")
         if not hmac.compare_digest(expected_hash, prepared_hash):
             raise self._integrity_failure("argument fingerprint mismatch")
 
@@ -1099,7 +1145,10 @@ class ToolExecutionSecurity:
                 metadata=metadata,
             )
         except self._noncritical_exceptions as exc:
-            logger.warning("Failed to resolve MCP Hub effective policy: {}", exc)
+            logger.warning(
+                "Failed to resolve MCP Hub effective policy error_type={error_type}",
+                error_type=_safe_exception_family(exc),
+            )
             policy = {
                 "enabled": True,
                 "allowed_tools": [],
@@ -1174,7 +1223,10 @@ class ToolExecutionSecurity:
                 scope_payload=scope_payload,
             )
         except self._noncritical_exceptions as exc:
-            logger.debug("Failed to evaluate MCP Hub runtime approval: {}", exc)
+            logger.debug(
+                "Failed to evaluate MCP Hub runtime approval error_type={error_type}",
+                error_type=_safe_exception_family(exc),
+            )
             if policy.get("approval_policy_id") is not None or policy.get("approval_mode"):
                 return {"status": "deny", "reason": "approval_unavailable"}
             return {"status": "allow" if within_effective_policy else "deny", "reason": "approval_not_configured"}
@@ -1237,7 +1289,10 @@ class ToolExecutionSecurity:
         except TypeError:
             raise
         except self._noncritical_exceptions as exc:
-            logger.debug("Failed to evaluate MCP Hub path scope: {}", exc)
+            logger.debug(
+                "Failed to evaluate MCP Hub path scope error_type={error_type}",
+                error_type=_safe_exception_family(exc),
+            )
             return {
                 "enabled": True,
                 "within_scope": False,
@@ -1349,7 +1404,10 @@ class ToolExecutionSecurity:
                 )
                 metadata["_mcp_effective_external_access"] = cached
             except self._noncritical_exceptions as exc:
-                logger.debug("Failed to evaluate MCP Hub external access: {}", exc)
+                logger.debug(
+                    "Failed to evaluate MCP Hub external access error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
                 return {
                     "enabled": True,
                     "within_scope": False,
@@ -1474,7 +1532,10 @@ class ToolExecutionSecurity:
                     if category:
                         return category
         except Exception as exc:  # noqa: BLE001 - category fallback should not fail preflight.
-            logger.debug("Falling back to tool-name governance category: {error_type}", error_type=exc.__class__.__name__)
+            logger.debug(
+                "Falling back to tool-name governance category error_type={error_type}",
+                error_type=_safe_exception_family(exc),
+            )
 
         if isinstance(tool_name, str) and "." in tool_name:
             prefix = tool_name.split(".", 1)[0].strip().lower()
@@ -1496,13 +1557,16 @@ class ToolExecutionSecurity:
                 str(raw_mode) if raw_mode is not None else None
             )
         except self._noncritical_exceptions as exc:
-            logger.debug("Unable to resolve governance rollout mode from config: {}", exc)
+            logger.debug(
+                "Unable to resolve governance rollout mode from config error_type={error_type}",
+                error_type=_safe_exception_family(exc),
+            )
             candidate = str(raw_mode or "").strip().lower()
             return candidate if candidate in {"off", "shadow", "enforce"} else "off"
         except Exception as exc:  # noqa: BLE001 - config resolver exceptions should not block tools.
             logger.debug(
-                "Unable to resolve governance rollout mode from app config: {error_type}",
-                error_type=exc.__class__.__name__,
+                "Unable to resolve governance rollout mode from app config error_type={error_type}",
+                error_type=_safe_exception_family(exc),
             )
             candidate = str(raw_mode or "").strip().lower()
             return candidate if candidate in {"off", "shadow", "enforce"} else "off"
@@ -1541,7 +1605,7 @@ class ToolExecutionSecurity:
             except Exception as exc:  # noqa: BLE001 - decision fallback handles noncritical model errors.
                 logger.debug(
                     "Falling back to attribute governance decision serialization: {error_type}",
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
         payload: dict[str, Any] = {}
         for key in ("action", "status", "category", "category_source", "fallback_reason", "matched_rules"):
@@ -1561,7 +1625,11 @@ class ToolExecutionSecurity:
                 from tldw_Server_API.app.core.Governance.service import GovernanceService
                 from tldw_Server_API.app.core.Governance.store import GovernanceStore
             except self._noncritical_exceptions as exc:
-                logger.debug("MCP governance preflight unavailable (import failure): {}", exc)
+                logger.debug(
+                    "MCP governance preflight unavailable reason=import_failure "
+                    "error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
                 return None
 
             try:
@@ -1576,7 +1644,11 @@ class ToolExecutionSecurity:
                 self._governance_service = GovernanceService(store=self._governance_store)
                 return self._governance_service
             except self._noncritical_exceptions as exc:
-                logger.debug("MCP governance preflight disabled (service init failure): {}", exc)
+                logger.debug(
+                    "MCP governance preflight disabled reason=service_init_failure "
+                    "error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
                 self._governance_service = None
                 self._governance_store = None
                 return None
@@ -1658,7 +1730,10 @@ class ToolExecutionSecurity:
                 rollout_mode=rollout_mode,
             )
             try:
-                context.logger.debug(f"Governance preflight failed open: {exc}")
+                context.logger.debug(
+                    "Governance preflight failed open error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
             except self._noncritical_exceptions:
                 pass
             return None
@@ -1919,17 +1994,28 @@ class ToolExecutionSecurity:
             except asyncio.CancelledError:
                 raise
             except self._noncritical_exceptions as exc:
-                context.logger.opt(exception=exc).debug(
+                context.logger.debug(
                     "Failed to attach eval metadata to resolved tool definition: module_id={module_id} "
                     "tool_name={tool_name} error_type={error_type}",
                     module_id=module_id,
                     tool_name=tool_name,
-                    error_type=exc.__class__.__name__,
+                    error_type=_safe_exception_family(exc),
                 )
         tool_args = self.harden_and_sanitize_tool_arguments(module, tool_args)
-        args_hash = self.hash_arguments(tool_args)
-        if args_hash is None:
-            raise InvalidParamsException("Tool arguments must contain only valid JSON values")
+        try:
+            arguments_snapshot = self.build_canonical_snapshot(
+                tool_args,
+                max_bytes=ARGUMENTS_MAX_BYTES,
+            )
+            tool_args = decode_canonical_json(
+                arguments_snapshot.encoded,
+                max_bytes=ARGUMENTS_MAX_BYTES,
+            )
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise InvalidParamsException(
+                "Tool arguments must contain only valid JSON values"
+            ) from exc
+        args_hash = arguments_snapshot.sha256
 
         # Determine write-capable status from sanitized arguments.
         is_write = self.resolve_write_classification(
@@ -1969,12 +2055,12 @@ class ToolExecutionSecurity:
                 except asyncio.CancelledError:
                     raise
                 except self._noncritical_exceptions as exc:
-                    context.logger.opt(exception=exc).debug(
+                    context.logger.debug(
                         "Failed to attach eval metadata to resolved tool definition: "
                         "module_id={module_id} tool_name={tool_name} error_type={error_type}",
                         module_id=module_id,
                         tool_name=tool_name,
-                        error_type=exc.__class__.__name__,
+                        error_type=_safe_exception_family(exc),
                     )
 
         idempotency_cache_key = None
@@ -2143,7 +2229,10 @@ class ToolExecutionSecurity:
             raise RuntimeError("ToolExecutionHooks dependency is required")
         await hooks.run_pre_tool_hooks(
             tool_name=tool_name,
-            tool_args=tool_args,
+            tool_args=decode_canonical_json(
+                arguments_snapshot.encoded,
+                max_bytes=ARGUMENTS_MAX_BYTES,
+            ),
             module_id=module_id,
             tool_def=decode_canonical_json_object_or_none(
                 tool_definition_snapshot.encoded,
@@ -2180,10 +2269,14 @@ class ToolExecutionSecurity:
 
         return PreparedToolCall(
             tool_name=tool_name,
-            tool_args=tool_args,
+            tool_args=decode_canonical_json(
+                arguments_snapshot.encoded,
+                max_bytes=ARGUMENTS_MAX_BYTES,
+            ),
             module=module,
             module_id=module_id,
             policy=prepared_policy,
+            arguments_snapshot=arguments_snapshot,
             tool_definition_snapshot=tool_definition_snapshot,
             scope_reporting_snapshot=scope_reporting_snapshot,
             normalized_idempotency_key=normalized_idempotency_key,

@@ -1332,8 +1332,6 @@ def _is_logger_expression(
     if isinstance(node, ast.Attribute):
         return (
             node.attr == "logger"
-            and isinstance(node.value, ast.Name)
-            and node.value.id in modules
             or _is_logger_expression(node.value, names, modules)
         )
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
@@ -1447,20 +1445,7 @@ def _is_safe_exception_log_expression(
             and not node.keywords
         ):
             return True
-        if (
-            isinstance(node.func, ast.Name)
-            and node.func.id == "type"
-            and len(node.args) == 1
-            and isinstance(node.args[0], ast.Name)
-            and node.args[0].id in exception_names
-        ):
-            return True
-    path_parts = _attribute_path(node)
-    return bool(
-        len(path_parts) >= 3
-        and path_parts[0] in exception_names
-        and path_parts[-2:] == ("__class__", "__name__")
-    )
+    return False
 
 
 def _uses_raw_exception_unsafely(
@@ -3870,13 +3855,17 @@ def test_exception_log_scan_rejects_shadowed_safe_helper(tmp_path: Path) -> None
             "try:\n"
             "    raise RuntimeError('private provider detail')\n"
             "except Exception as exc:\n"
-            "    log.error('{}', type(exc).__name__)\n",
+            "    log.error('{}', 'Exception')\n",
         ),
         (
             "verified_safe_helper.py",
             "from loguru import logger\n"
             "def _safe_error_type(exc):\n"
-            "    return type(exc).__name__\n"
+            "    try:\n"
+            "        name = type(exc).__name__\n"
+            "        return name if type(name) is str and name.isascii() and len(name) <= 64 else 'Exception'\n"
+            "    except BaseException:\n"
+            "        return 'Exception'\n"
             "try:\n"
             "    raise RuntimeError('private provider detail')\n"
             "except Exception as exc:\n"
@@ -3951,20 +3940,42 @@ def test_exception_log_scan_rejects_loguru_exception_context(tmp_path: Path) -> 
     assert any("exc_info logging" in violation for violation in violations)
 
 
-def test_exception_log_scan_allows_exception_family_only(tmp_path: Path) -> None:
+def test_exception_log_scan_allows_verified_exception_family_helper(tmp_path: Path) -> None:
     sample = tmp_path / "safe_logging.py"
     sample.write_text(
         "from loguru import logger\n"
+        "def _safe_exception_family(exc):\n"
+        "    name = type(exc).__name__\n"
+        "    return name if type(name) is str else 'Exception'\n"
         "try:\n"
         "    raise RuntimeError('private provider detail')\n"
         "except Exception as exc:\n"
         "    logger.opt(exception=False).bind(\n"
-        "        error_type=exc.__class__.__name__,\n"
+        "        error_type=_safe_exception_family(exc),\n"
         "    ).error('execution failed')\n",
         encoding="utf-8",
     )
 
     assert _unsafe_exception_log_violations_for(sample) == []
+
+
+def test_exception_log_scan_rejects_direct_exception_family_descriptors(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "unsafe_exception_family.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    logger.error('failed {}', exc.__class__.__name__)\n"
+        "    logger.error('failed {}', type(exc).__name__)\n",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 2
 
 
 def test_protocol_branch_scan_resolves_expected_failure_import_alias(
@@ -4336,6 +4347,7 @@ def test_breaker_runtime_and_idempotency_logs_do_not_expose_exception_text() -> 
         MCP_ROOT / "modules" / "base.py",
         MCP_ROOT / "tool_execution" / "runtime.py",
         MCP_ROOT / "tool_execution" / "idempotency.py",
+        MCP_ROOT / "tool_execution" / "security.py",
     )
     offenders = {
         str(path.relative_to(MCP_ROOT)): violations

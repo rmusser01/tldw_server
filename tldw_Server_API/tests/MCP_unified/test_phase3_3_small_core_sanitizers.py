@@ -248,11 +248,16 @@ def _prepared_tool_call(
     tool_name = tool_def["name"]
     tool_args = {"query": "safe"}
     module_id = module.name
+    arguments_encoded = canonical_json_bytes(tool_args, max_bytes=1_000_000)
     tool_definition_encoded = canonical_json_bytes(tool_def, max_bytes=1_000_000)
     scope_reporting_encoded = canonical_json_bytes(None, max_bytes=256_000)
     tool_definition_snapshot = CanonicalJsonSnapshot(
         encoded=tool_definition_encoded,
         sha256=hashlib.sha256(tool_definition_encoded).hexdigest(),
+    )
+    arguments_snapshot = CanonicalJsonSnapshot(
+        encoded=arguments_encoded,
+        sha256=hashlib.sha256(arguments_encoded).hexdigest(),
     )
     scope_reporting_snapshot = CanonicalJsonSnapshot(
         encoded=scope_reporting_encoded,
@@ -293,6 +298,7 @@ def _prepared_tool_call(
         module=module,
         module_id=module_id,
         policy=policy,
+        arguments_snapshot=arguments_snapshot,
         tool_definition_snapshot=tool_definition_snapshot,
         scope_reporting_snapshot=scope_reporting_snapshot,
         normalized_idempotency_key=None,

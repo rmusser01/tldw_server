@@ -23,6 +23,7 @@ from ..tool_observability import (
     execution_eval_metadata_from_tool_definition,
     sanitize_eval_profile_id,
 )
+from .canonical import ARGUMENTS_MAX_BYTES, decode_canonical_json
 from .dependencies import ToolExecutionDependencies
 
 
@@ -441,6 +442,10 @@ class ToolExecutionRuntime:
                 prepared,
                 require_live_binding=True,
             )
+            tool_args = decode_canonical_json(
+                prepared.arguments_snapshot.encoded,
+                max_bytes=ARGUMENTS_MAX_BYTES,
+            )
             await _admit_rate_limit()
         except RateLimitExceeded as exc:
             status, reason_code = classify_tool_use_exception(exc)
@@ -456,6 +461,7 @@ class ToolExecutionRuntime:
         async def _execute_owner() -> dict[str, Any]:
             nonlocal module_invoked, owner_duration_ms
             t0 = time.time()
+            admitted_tool_args: Any = None
 
             with _best_effort_span_context(
                 self.telemetry,
@@ -469,20 +475,25 @@ class ToolExecutionRuntime:
             ) as span:
                 try:
                     async def _verify_module_admission() -> None:
+                        nonlocal admitted_tool_args
                         await self.security.verify_prepared_tool_call(
                             prepared,
                             require_live_binding=True,
                         )
+                        admitted_tool_args = decode_canonical_json(
+                            prepared.arguments_snapshot.encoded,
+                            max_bytes=ARGUMENTS_MAX_BYTES,
+                        )
 
                     async def _invoke_admitted_module() -> dict[str, Any]:
                         nonlocal module_invoked
-                        execution_args = tool_args
+                        execution_args = admitted_tool_args
                         if (
                             policy.idempotency.inject_argument
                             and normalized_idempotency_key
-                            and isinstance(tool_args, dict)
+                            and isinstance(admitted_tool_args, dict)
                         ):
-                            execution_args = dict(tool_args)
+                            execution_args = dict(admitted_tool_args)
                             execution_args["idempotencyKey"] = normalized_idempotency_key
                         module_invoked = True
                         return await module.execute_tool(

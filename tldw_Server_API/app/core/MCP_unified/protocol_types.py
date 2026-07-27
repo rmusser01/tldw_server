@@ -183,6 +183,7 @@ class PreparedToolCall:
     module: BaseModule
     module_id: str | None
     policy: PreparedExecutionPolicy
+    arguments_snapshot: CanonicalJsonSnapshot
     tool_definition_snapshot: CanonicalJsonSnapshot
     scope_reporting_snapshot: CanonicalJsonSnapshot
     normalized_idempotency_key: str | None

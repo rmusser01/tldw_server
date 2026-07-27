@@ -967,6 +967,38 @@ async def test_oversized_success_cancellation_retains_remote_cleanup_owner() -> 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_uncacheable_success_observer_cancellation_releases_remote_lock() -> None:
+    redis = _FakeRedis()
+    cancellation = asyncio.CancelledError("degraded observer cancellation")
+
+    def _cancel_degraded_observer(_stage: str, _error_type: str) -> None:
+        raise cancellation
+
+    manager = _remote_manager(redis, on_degraded=_cancel_degraded_observer)
+    key = "uncacheable-observer-cancel"
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"value": "x" * 1_000}
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await manager.execute(
+            key,
+            "args",
+            _execute,
+            policy=_policy(max_result_bytes=64),
+        )
+
+    assert exc_info.value is cancellation
+    assert calls == 1
+    assert _lock_key(key) not in redis.values
+    assert manager._finalizers == set()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_remote_uncacheable_success_survives_local_binding_refresh_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

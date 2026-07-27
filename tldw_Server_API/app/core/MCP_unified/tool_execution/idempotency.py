@@ -1296,7 +1296,12 @@ class IdempotencyManager:
             )
             raise
 
-        canonical = self._canonicalize_success(payload, policy=policy)
+        canonicalization_cancellation: asyncio.CancelledError | None = None
+        try:
+            canonical = self._canonicalize_success(payload, policy=policy)
+        except asyncio.CancelledError as exc:
+            canonical = None
+            canonicalization_cancellation = exc
         persistence: Literal["durable", "local", "none"] = "none"
         if canonical is not None:
             encoded, template = canonical
@@ -1375,6 +1380,8 @@ class IdempotencyManager:
                 bound=finalize_bound,
                 fallback="none",
             )
+        if canonicalization_cancellation is not None:
+            raise canonicalization_cancellation
         return IdempotencyRunResult(
             payload=cast(dict[str, JsonValue], payload),
             from_cache=False,

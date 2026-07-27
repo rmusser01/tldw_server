@@ -587,8 +587,11 @@ including effect classification, the final rate-limit category,
 injection, TTL, contention wait, success finalization, lock, entry-count, and
 serialized-result limits.
 The prepared-call HMAC covers every policy field; the normalized idempotency-key
-digest; and digests of strict canonical JSON tool-definition and scope-reporting
-snapshots. The snapshots are bounded and detached from their mutable sources.
+digest; the strict canonical argument digest; and digests of strict canonical
+JSON tool-definition and scope-reporting snapshots. The argument snapshot is
+the immutable dispatch authority; the compatibility `tool_args` view must match
+its signed digest but is never passed to a module. All snapshots are bounded and
+detached from their mutable sources.
 The shared encoder accepts only JSON values with string object keys, uses UTF-8
 with `ensure_ascii=False`, `allow_nan=False`, sorted keys, and compact
 separators, and has no coercing fallback such as `default=str`. Canonical
@@ -616,6 +619,16 @@ includes every explicit server-authenticated identity field, including numeric
 active team and organization scope when added by the model adapter work. A
 stale prepared call is a sanitized, breaker-neutral, uncached protocol failure
 and cannot fall back to a previous module object or mutated request context.
+
+Authorization, approval, governance, and effective-policy evaluation use a
+bounded request snapshot established during preparation. Changes in external
+RBAC or policy stores after preparation apply to newly prepared calls; this
+design does not claim continuous mid-request revocation while a bounded rate,
+idempotency, or module wait is in progress. The second check does reject any
+mutation of the signed request identity/context or prepared policy itself. A
+future continuous-revocation feature must add and bind an explicit policy epoch
+or lease instead of silently rerunning a second policy transaction with
+different side effects.
 
 The policy type and integrity-payload version are explicit compatibility
 boundaries. Any future execution control derived from tool metadata, schema, or
