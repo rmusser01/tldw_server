@@ -8,18 +8,18 @@ from typing import Any, Literal, Protocol
 
 from tldw_Server_API.app.core.Embeddings.embedding_policy import (
     adjust_dimensions,
-    enforce_embedding_policy,
     map_model_for_provider,
 )
-from tldw_Server_API.app.core.Embeddings.input_normalizer import normalize_embedding_input
-from tldw_Server_API.app.core.Embeddings.provider_resolution import (
-    ProviderGuesser,
-    resolve_provider_model,
+from tldw_Server_API.app.core.Embeddings.preparation import (
+    BackendIdentityResolver,
+    EmbeddingPreparationPipeline,
+    TokenCounter,
+    TokenDecoder,
 )
+from tldw_Server_API.app.core.Embeddings.provider_resolution import ProviderGuesser
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
     EmbeddingExecutionError,
-    EmbeddingExecutionPlan,
     EmbeddingExecutionResult,
     EmbeddingProviderError,
     EmbeddingRequestContext,
@@ -63,9 +63,6 @@ class EmbeddingAdapterExecutor(Protocol):
 
 
 CacheKeyFn = Callable[[str, str, str, int | None, str | None], str]
-TokenCounter = Callable[[str, str], int]
-TokenDecoder = Callable[[list[int] | list[list[int]], str], object]
-BackendIdentityResolver = Callable[[str, str], str | None]
 DimensionAdjustmentRecorder = Callable[[str, str, str], None]
 ProviderPreflight = Callable[[str, str], Awaitable[None]]
 
@@ -119,82 +116,37 @@ class EmbeddingRequestOrchestrator:
         batch_size: int | None = None,
         execution_path: Literal["legacy", "adapter"] = "legacy",
     ) -> None:
-        self._count_tokens = count_tokens
-        self._tokens_to_texts = tokens_to_texts
         self._cache_key_fn = cache_key_fn
         self._cache = cache
         self._executor = executor
-        self._settings_config = settings_config
-        self._max_tokens = max_tokens
-        self._implemented_providers = implemented_providers
-        self._allowed_providers = allowed_providers
-        self._allowed_models = allowed_models
-        self._enforce_policy = enforce_policy
-        self._allow_fallback_with_header = allow_fallback_with_header
-        self._settings_fallback_chain = settings_fallback_chain
         self._settings_fallback_model_map = settings_fallback_model_map
-        self._dimension_policy = dimension_policy
-        self._require_model = require_model
-        self._guess_provider = guess_provider
         self._backend_identity_resolver = backend_identity_resolver or _no_backend_identity
         self._record_dimension_adjustment = record_dimension_adjustment
         self._provider_preflight = provider_preflight or _no_provider_preflight
-        self._cache_namespace = cache_namespace
-        self._batch_size = batch_size
-        self._execution_path = execution_path
+        self._preparation_pipeline = EmbeddingPreparationPipeline(
+            count_tokens=count_tokens,
+            tokens_to_texts=tokens_to_texts,
+            settings_config=settings_config,
+            max_tokens=max_tokens,
+            implemented_providers=implemented_providers,
+            allowed_providers=allowed_providers,
+            allowed_models=allowed_models,
+            enforce_policy=enforce_policy,
+            allow_fallback_with_header=allow_fallback_with_header,
+            settings_fallback_chain=settings_fallback_chain,
+            settings_fallback_model_map=settings_fallback_model_map,
+            dimension_policy=dimension_policy,
+            require_model=require_model,
+            guess_provider=guess_provider,
+            backend_identity_resolver=self._backend_identity_resolver,
+            cache_namespace=cache_namespace,
+            batch_size=batch_size,
+            execution_path=execution_path,
+        )
 
     def prepare(self, raw_input: Any, context: EmbeddingRequestContext) -> PreparedEmbeddingRequest:
         """Normalize, resolve, validate, and plan an embedding request."""
-        intent = resolve_provider_model(
-            context.model_field,
-            context.provider_header,
-            settings_config=self._settings_config,
-            require_model=self._require_model,
-            guess_provider=self._guess_provider,
-        )
-        normalized_input = normalize_embedding_input(
-            raw_input,
-            model=intent.model,
-            max_tokens=self._max_tokens,
-            count_tokens=self._count_tokens,
-            tokens_to_texts=self._tokens_to_texts,
-        )
-        decision = enforce_embedding_policy(
-            intent,
-            context,
-            allowed_providers=self._allowed_providers,
-            allowed_models=self._allowed_models,
-            implemented_providers=self._implemented_providers,
-            enforce_policy=self._enforce_policy,
-            allow_fallback_with_header=self._allow_fallback_with_header,
-            settings_fallback_chain=self._settings_fallback_chain,
-            settings_fallback_model_map=self._settings_fallback_model_map,
-        )
-        effective_dimension_policy = self._effective_dimension_policy(context.encoding_format, decision.dimensions)
-        execution_plan = EmbeddingExecutionPlan(
-            provider=decision.provider,
-            model=decision.model,
-            dimensions=decision.dimensions,
-            backend_identity=self._backend_identity_resolver(decision.provider, decision.model),
-            fallback_chain=list(decision.fallback_chain),
-            cache_namespace=self._cache_namespace,
-            batch_size=self._batch_size,
-            execution_path=self._execution_path,
-            observability_tags={
-                "provider": decision.provider,
-                "model": decision.model,
-                "fallback_allowed": decision.fallback_allowed,
-            },
-        )
-        return PreparedEmbeddingRequest(
-            normalized_input=normalized_input,
-            provider_intent=intent,
-            policy_decision=decision,
-            execution_plan=execution_plan,
-            effective_dimension_policy=effective_dimension_policy,
-            prompt_tokens=normalized_input.total_tokens,
-            total_tokens=normalized_input.total_tokens,
-        )
+        return self._preparation_pipeline.prepare(raw_input, context)
 
     async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionResult:
         """Execute a prepared request through cache and provider executor."""
@@ -594,11 +546,6 @@ class EmbeddingRequestOrchestrator:
         if dimensions is not None:
             headers["X-Embeddings-Dimensions-Policy"] = dimension_policy
         return headers
-
-    def _effective_dimension_policy(self, encoding_format: str | None, dimensions: int | None) -> str:
-        if dimensions is not None and encoding_format == "base64":
-            return "reduce"
-        return self._dimension_policy
 
 
 def _canonical_vector(vector: object) -> list[float]:
