@@ -36,13 +36,13 @@ from tldw_Server_API.app.core.Web_Scraping.selectors import (
     validate_selector_rules,
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors.engine import (
-    _coerce_value,
-    _ensure_sequence,
-    _extract_value,
-    _select_nodes,
+    coerce_value,
+    ensure_sequence,
+    extract_value,
     reload_selector_guardrails_from_env,
+    select_nodes,
 )
-from tldw_Server_API.app.core.Web_Scraping.selectors.schema import _normalize_datetime
+from tldw_Server_API.app.core.Web_Scraping.selectors.schema import normalize_datetime
 
 # Keep intentional compatibility re-exports visible to static analysis.
 _SELECTOR_COMPATIBILITY_EXPORTS = (
@@ -129,8 +129,8 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
             or rules.get("item_selector")
         )
         nodes: list[HtmlElement] = []
-        for selector in _ensure_sequence(entry_selectors) or ["//article", "//item"]:
-            nodes.extend([n for n in _select_nodes(document, selector) if isinstance(n, HtmlElement)])
+        for selector in ensure_sequence(entry_selectors) or ["//article", "//item"]:
+            nodes.extend([n for n in select_nodes(document, selector) if isinstance(n, HtmlElement)])
         if not nodes:
             nodes = [document]
 
@@ -138,7 +138,7 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
         content_join = str(rule_set.get("content_join_with") or rules.get("content_join_with") or "\n")
 
         for node in nodes:
-            link = _extract_value(
+            link = extract_value(
                 node,
                 rule_set.get("link_xpath")
                 or rule_set.get("url_xpath")
@@ -154,14 +154,17 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
             seen.add(link)
 
             item: dict[str, Any] = {"url": link}
-            title = _extract_value(
+            title = extract_value(
                 node,
-                rule_set.get("title_xpath") or rule_set.get("title_selector") or rules.get("title_xpath") or rules.get("title_selector"),
+                rule_set.get("title_xpath")
+                or rule_set.get("title_selector")
+                or rules.get("title_xpath")
+                or rules.get("title_selector"),
                 join=False,
             )
             if title:
                 item["title"] = title
-            summary = _extract_value(
+            summary = extract_value(
                 node,
                 rule_set.get("summary_xpath")
                 or rule_set.get("description_xpath")
@@ -174,7 +177,7 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
             )
             if summary:
                 item["summary"] = summary
-            content = _extract_value(
+            content = extract_value(
                 node,
                 rule_set.get("content_xpath")
                 or rule_set.get("content_selector")
@@ -185,21 +188,27 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
             )
             if content:
                 item["content"] = content
-            author = _extract_value(
+            author = extract_value(
                 node,
-                rule_set.get("author_xpath") or rule_set.get("author_selector") or rules.get("author_xpath") or rules.get("author_selector"),
+                rule_set.get("author_xpath")
+                or rule_set.get("author_selector")
+                or rules.get("author_xpath")
+                or rules.get("author_selector"),
                 join=False,
             )
             if author:
                 item["author"] = author
-            guid = _extract_value(
+            guid = extract_value(
                 node,
-                rule_set.get("guid_xpath") or rule_set.get("id_xpath") or rules.get("guid_xpath") or rules.get("id_xpath"),
+                rule_set.get("guid_xpath")
+                or rule_set.get("id_xpath")
+                or rules.get("guid_xpath")
+                or rules.get("id_xpath"),
                 join=False,
             )
             if guid:
                 item["guid"] = guid
-            published_raw = _extract_value(
+            published_raw = extract_value(
                 node,
                 rule_set.get("published_xpath")
                 or rule_set.get("date_xpath")
@@ -211,8 +220,13 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
             )
             if published_raw:
                 item["published_raw"] = published_raw
-                fmt = rule_set.get("published_format") or rules.get("published_format") or rule_set.get("date_format") or rules.get("date_format")
-                parsed = _normalize_datetime(published_raw, fmt if isinstance(fmt, str) else None)
+                fmt = (
+                    rule_set.get("published_format")
+                    or rules.get("published_format")
+                    or rule_set.get("date_format")
+                    or rules.get("date_format")
+                )
+                parsed = normalize_datetime(published_raw, fmt if isinstance(fmt, str) else None)
                 if parsed:
                     item["published"] = parsed
 
@@ -241,7 +255,7 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
     pagination_cfg = rules.get("pagination") if isinstance(rules.get("pagination"), dict) else None
     next_pages: list[str] = []
     if pagination_cfg:
-        candidate_selectors = _ensure_sequence(
+        candidate_selectors = ensure_sequence(
             pagination_cfg.get("next_xpath")
             or pagination_cfg.get("next_selector")
             or pagination_cfg.get("next_link_xpath")
@@ -249,15 +263,15 @@ def parse_scraped_items(html_text: str, base_url: str, rules: dict[str, Any]) ->
         )
         attr = pagination_cfg.get("next_attribute") or "href"
         for selector in candidate_selectors:
-            matches = _select_nodes(document, selector)
+            matches = select_nodes(document, selector)
             for match in matches:
                 url = None
                 if isinstance(match, HtmlElement):
                     url = match.get(attr)
                     if not url:
-                        url = _coerce_value(match)
+                        url = coerce_value(match)
                 else:
-                    url = _coerce_value(match)
+                    url = coerce_value(match)
                 if not url:
                     continue
                 absolute = urljoin(base_url, url)

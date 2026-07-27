@@ -90,6 +90,12 @@ from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
     search_untrusted,
 )
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
+from tldw_Server_API.app.core.Web_Scraping.selectors import (
+    clear_selector_caches,
+    extract_schema_fields,
+    get_selector_cache_stats,
+    validate_selector_rules,
+)
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
     build_browser_headers,
     pick_ua_profile,
@@ -501,9 +507,7 @@ def get_extraction_cache_stats() -> dict[str, int]:
         "strategy_limit_count": strategy_limits,
     }
     try:
-        from tldw_Server_API.app.core.Watchlists import fetchers as _fetchers
-
-        stats.update(_fetchers.get_selector_cache_stats())
+        stats.update(get_selector_cache_stats())
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
         pass
     return stats
@@ -521,9 +525,7 @@ def clear_extraction_caches() -> None:
     with _STRATEGY_LIMITS_LOCK:
         _STRATEGY_LIMITS.clear()
     try:
-        from tldw_Server_API.app.core.Watchlists import fetchers as _fetchers
-
-        _fetchers.clear_selector_caches()
+        clear_selector_caches()
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -2036,8 +2038,6 @@ def generate_schema_rules_from_llm(
         return result
 
     try:
-        from tldw_Server_API.app.core.Watchlists.fetchers import validate_selector_rules
-
         validation = validate_selector_rules(schema_obj, html_text=html_text)
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
         validation = {"errors": [{"key": "validation", "error": str(exc)}], "warnings": []}
@@ -2531,15 +2531,6 @@ def extract_article_with_pipeline(
             continue
         if strategy == "schema":
             if isinstance(schema_rules, dict) and schema_rules:
-                try:
-                    from tldw_Server_API.app.core.Watchlists.fetchers import (
-                        extract_schema_fields,
-                        validate_selector_rules,
-                    )
-                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-                    trace.append(_trace_entry(strategy, "failed", "schema_import_error"))
-                    _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
-                    continue
                 cache_key = _schema_cache_key(html, url, schema_rules)
                 cached = _schema_cache_get(cache_key)
                 if cached and cached.get("extraction_successful"):

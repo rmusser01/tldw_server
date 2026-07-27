@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import ast
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SELECTORS_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "selectors"
 FETCHERS_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Watchlists" / "fetchers.py"
 ENDPOINT_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "api" / "v1" / "endpoints" / "watchlists.py"
+ARTICLE_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "Article_Extractor_Lib.py"
 
 EXPECTED_IMPORTS = {
     "__init__.py": {".caches", ".schema"},
@@ -15,6 +19,7 @@ EXPECTED_IMPORTS = {
         ".caches",
         "__future__",
         "collections.abc",
+        "cssselect",
         "functools",
         "loguru",
         "lxml.cssselect",
@@ -30,12 +35,14 @@ EXPECTED_IMPORTS = {
         "__future__",
         "collections.abc",
         "contextlib",
+        "dataclasses",
         "dateutil",
         "datetime",
         "email.utils",
         "lxml",
         "lxml.html",
         "re",
+        "string",
         "typing",
         "urllib.parse",
     },
@@ -139,13 +146,72 @@ def test_watchlists_has_direct_canonical_imports_without_selector_bodies() -> No
         "validate_selector_rules",
     }
     assert _imported_names(FETCHERS_PATH, engine_module) == {
-        "_coerce_value",
-        "_ensure_sequence",
-        "_extract_value",
-        "_select_nodes",
+        "coerce_value",
+        "ensure_sequence",
+        "extract_value",
         "reload_selector_guardrails_from_env",
+        "select_nodes",
     }
-    assert _imported_names(FETCHERS_PATH, schema_module) == {"_normalize_datetime"}
+    assert _imported_names(FETCHERS_PATH, schema_module) == {"normalize_datetime"}
+
+    private_imports = {
+        alias.name
+        for node in ast.walk(_tree(FETCHERS_PATH))
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(facade_module)
+        for alias in node.names
+        if alias.name.startswith("_")
+    }
+    assert private_imports == set()
+
+
+def test_article_selector_responsibilities_import_the_canonical_facade() -> None:
+    facade_module = "tldw_Server_API.app.core.Web_Scraping.selectors"
+    selector_names = {
+        "clear_selector_caches",
+        "extract_schema_fields",
+        "get_selector_cache_stats",
+        "validate_selector_rules",
+    }
+
+    assert _imported_names(ARTICLE_PATH, facade_module) == selector_names
+
+    violations = []
+    for node in ast.walk(_tree(ARTICLE_PATH)):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = node.module or ""
+        imported = {alias.name for alias in node.names}
+        if ".Watchlists" in module and imported & selector_names:
+            violations.append({"module": module, "names": sorted(imported & selector_names)})
+    assert violations == []
+
+
+def test_article_cache_stats_do_not_load_watchlists_in_a_fresh_process() -> None:
+    script = """
+import json
+import sys
+
+from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+
+article.get_extraction_cache_stats()
+loaded = sorted(
+    name
+    for name in sys.modules
+    if name == "tldw_Server_API.app.core.Watchlists"
+    or name.startswith("tldw_Server_API.app.core.Watchlists.")
+)
+print("SELECTOR_ARCH=" + json.dumps(loaded))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    marker = next(line for line in result.stdout.splitlines() if line.startswith("SELECTOR_ARCH="))
+
+    assert json.loads(marker.removeprefix("SELECTOR_ARCH=")) == []
 
 
 def test_watchlists_endpoint_imports_validation_from_canonical_facade() -> None:

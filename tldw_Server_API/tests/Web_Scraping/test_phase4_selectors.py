@@ -392,3 +392,357 @@ def test_selector_cache_operations_are_thread_safe() -> None:
     stats = selectors.get_selector_cache_stats()
     assert stats["selector_xpath_cache_size"] <= caches._SELECTOR_CACHE_MAX
     assert stats["selector_css_cache_size"] <= caches._SELECTOR_CACHE_MAX
+
+
+def test_generic_css_validation_and_extraction_share_the_compiler() -> None:
+    rules = {"fields": [{"name": "title", "selector": "css:.headline"}]}
+    html_text = '<article><h1 class="headline">Shared compiler</h1></article>'
+
+    report = selectors.validate_selector_rules(rules, html_text=html_text, include_counts=True)
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+    )
+
+    assert report == {
+        "errors": [],
+        "warnings": [],
+        "selector_counts": {"fields.title": 1},
+    }
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": True,
+        "schema_fields": {"title": "Shared compiler"},
+        "title": "Shared compiler",
+    }
+    assert selectors.get_selector_cache_stats()["selector_css_cache_size"] == 1
+
+
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [
+        ("css:table caption", "Quarterly table"),
+        ("css:table thead tr td:nth-child(2)", "Header data"),
+        ("css:table tbody tr:nth-child(1) td:nth-child(2)", "Row 1 data"),
+        ("css:table tbody tr:nth-child(2) td:nth-child(1)", "Row 2 first"),
+        ("css:table tbody tr td", "Row 1 data Row 2 first Row 2 second"),
+        ("css:div.mixed span:nth-child(2)", "Second element"),
+        ("css:table tbody tr:nth-child(3)", None),
+    ],
+)
+def test_css_nth_child_counts_all_element_siblings_and_section_boundaries(
+    selector: str,
+    expected: str | None,
+) -> None:
+    html_text = """
+    <article>
+      <table>
+        <caption>Quarterly table</caption>
+        <thead><tr><th>Header label</th><td>Header data</td></tr></thead>
+        <tbody>
+          <tr><th>Row 1 label</th><td>Row 1 data</td></tr>
+          <tr><td>Row 2 first</td><td>Row 2 second</td></tr>
+        </tbody>
+      </table>
+      <div class="mixed"><em>First element</em><span>Second element</span></div>
+    </article>
+    """
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        {"fields": [{"name": "value", "selector": selector}]},
+    )
+
+    assert result["schema_fields"].get("value") == expected
+
+
+def _computed_rules(template: str) -> dict[str, Any]:
+    return {
+        "fields": [
+            {"name": "title", "selector": "//h1"},
+            {"name": "computed", "type": "computed", "template": template},
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "{title",
+        "{title:5000000}",
+        "{title.__class__}",
+        "{title[0]}",
+        "{title!r}",
+    ],
+)
+def test_invalid_computed_templates_validate_and_extract_fail_soft(template: str) -> None:
+    rules = _computed_rules(template)
+
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert [entry["error"] for entry in report["errors"]] == ["selector_invalid"]
+    assert result["schema_fields"] == {"title": "Headline"}
+
+
+@pytest.mark.parametrize(
+    ("template", "expected"),
+    [
+        ("{{literal}} {title}", "{literal} Headline"),
+        ("before {missing} after", "before  after"),
+        ("Title: {title}", "Title: Headline"),
+    ],
+)
+def test_safe_computed_templates_preserve_normal_rendering(
+    template: str,
+    expected: str,
+) -> None:
+    rules = _computed_rules(template)
+
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert report["errors"] == []
+    assert result["schema_fields"]["computed"] == expected
+
+
+def test_oversized_computed_template_has_a_stable_complexity_error() -> None:
+    code = "selector_too_complex:template_length>4096"
+    rules = _computed_rules("x" * 4_097)
+
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert [entry["error"] for entry in report["errors"]] == [code]
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": code,
+    }
+
+
+def test_oversized_computed_render_has_a_stable_complexity_error() -> None:
+    code = "selector_too_complex:rendered_output>1000000"
+    title = "x" * 500_001
+
+    result = selectors.extract_schema_fields(
+        f"<article><h1>{title}</h1></article>",
+        "https://example.com/post",
+        _computed_rules("{title}{title}"),
+    )
+
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": code,
+    }
+
+
+def _nested_rules(depth: int) -> dict[str, Any]:
+    field: dict[str, Any] = {"name": "leaf", "selector": "//h1"}
+    for index in range(depth - 1):
+        field = {
+            "name": f"level_{index}",
+            "type": "nested",
+            "fields": [field],
+        }
+    return {"fields": [field]}
+
+
+@pytest.mark.parametrize(
+    ("rules", "limits", "code"),
+    [
+        (
+            _nested_rules(33),
+            None,
+            "selector_too_complex:schema_depth>32",
+        ),
+        (
+            {"fields": [{"name": f"field_{index}", "value": "x"} for index in range(257)]},
+            None,
+            "selector_too_complex:schema_fields>256",
+        ),
+        (
+            {"fields": [{"name": f"field_{index}", "selector": "//h1"} for index in range(3)]},
+            {"max_selector_evaluations": 2},
+            "selector_too_complex:selector_evaluations>2",
+        ),
+    ],
+    ids=["depth", "fields", "selector-evaluations"],
+)
+def test_schema_structure_and_evaluation_budgets_are_shared(
+    rules: dict[str, Any],
+    limits: Any,
+    code: str,
+) -> None:
+    kwargs = {"_limits": schema._SchemaLimits(**limits)} if limits is not None else {}
+
+    report = selectors.validate_selector_rules(
+        rules,
+        html_text="<article><h1>Headline</h1></article>",
+        **kwargs,
+    )
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+        **kwargs,
+    )
+
+    assert [entry["error"] for entry in report["errors"]] == [code]
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": code,
+    }
+
+
+def test_five_hundred_nested_fields_fail_before_python_recursion() -> None:
+    code = "selector_too_complex:schema_depth>32"
+    rules = _nested_rules(500)
+
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert [entry["error"] for entry in report["errors"]] == [code]
+    assert result["error"] == code
+
+
+@pytest.mark.parametrize(
+    ("rules", "html_text", "max_evaluations"),
+    [
+        (
+            {
+                "fields": [
+                    {
+                        "name": "nested",
+                        "type": "nested",
+                        "selector": "//section",
+                        "fields": [{"name": "value", "selector": ".//span"}],
+                    }
+                ]
+            },
+            "<section><span>one</span></section>",
+            1,
+        ),
+        (
+            {
+                "fields": [
+                    {
+                        "name": "nested_list",
+                        "type": "nested_list",
+                        "selector": "//section",
+                        "fields": [{"name": "value", "selector": ".//span"}],
+                    }
+                ]
+            },
+            "<main><section><span>one</span></section><section><span>two</span></section></main>",
+            2,
+        ),
+        (
+            {
+                "fields": [
+                    {
+                        "name": "items",
+                        "type": "list",
+                        "selector": "//ul",
+                        "itemSelector": ".//li",
+                    }
+                ]
+            },
+            "<ul><li>one</li><li>two</li></ul>",
+            1,
+        ),
+    ],
+    ids=["nested", "nested-list", "list-item-selector"],
+)
+def test_nested_paths_count_every_selector_evaluation(
+    rules: dict[str, Any],
+    html_text: str,
+    max_evaluations: int,
+) -> None:
+    limits = schema._SchemaLimits(max_selector_evaluations=max_evaluations)
+    code = f"selector_too_complex:selector_evaluations>{max_evaluations}"
+
+    report = selectors.validate_selector_rules(
+        rules,
+        html_text=html_text,
+        _limits=limits,
+    )
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=limits,
+    )
+
+    assert [entry["error"] for entry in report["errors"]] == [code]
+    assert result["error"] == code
+
+
+def test_aggregate_match_budget_is_shared_by_validation_and_extraction() -> None:
+    limits = schema._SchemaLimits(max_aggregate_matches=3)
+    code = "selector_too_complex:selector_matches>3"
+    rules = {"fields": [{"name": "items", "type": "list", "selector": "//li"}]}
+    html_text = "<ul><li>1</li><li>2</li><li>3</li><li>4</li></ul>"
+
+    report = selectors.validate_selector_rules(rules, html_text=html_text, _limits=limits)
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=limits,
+    )
+
+    assert [entry["error"] for entry in report["errors"]] == [code]
+    assert result["error"] == code
+
+
+def test_aggregate_retained_output_budget_fails_without_partial_results() -> None:
+    limits = schema._SchemaLimits(max_retained_output_chars=5)
+    code = "selector_too_complex:retained_output_chars>5"
+
+    result = selectors.extract_schema_fields(
+        "<article><h1>123456</h1></article>",
+        "https://example.com/post",
+        {"fields": [{"name": "title", "selector": "//h1"}]},
+        _limits=limits,
+    )
+
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": code,
+    }
+
+
+def test_schema_limit_defaults_are_explicit_and_conservative() -> None:
+    assert (
+        schema._SchemaLimits(
+            max_depth=32,
+            max_total_fields=256,
+            max_selector_evaluations=512,
+            max_aggregate_matches=10_000,
+            max_retained_output_chars=1_000_000,
+            max_template_length=4_096,
+            max_rendered_output_chars=1_000_000,
+        )
+        == schema._DEFAULT_SCHEMA_LIMITS
+    )

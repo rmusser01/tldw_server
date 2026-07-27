@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any
 
+from cssselect import SelectorError
 from loguru import logger
 from lxml.etree import XPath, XPathError
 from lxml.html import HtmlElement
@@ -32,6 +33,7 @@ _SELECTOR_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     UnicodeDecodeError,
     XPathError,
+    SelectorError,
 )
 _DEFAULT_MAX_SELECTOR_EXPR_LEN = 512
 _DEFAULT_MAX_XPATH_DESCENDANT_STEPS = 12
@@ -173,20 +175,18 @@ def _selector_validation_error(selector: str) -> str | None:
         if not css_expr:
             return None
         try:
-            from lxml.cssselect import CSSSelector
-
-            CSSSelector(css_expr)
+            _compile_css_selector(css_expr)
         except _SELECTOR_NONCRITICAL_EXCEPTIONS:
             return "selector_invalid"
         return None
     try:
-        XPath(stripped)
+        _compile_xpath_selector(stripped)
     except _SELECTOR_NONCRITICAL_EXCEPTIONS:
         return "selector_invalid"
     return None
 
 
-def _ensure_sequence(value: Sequence[str] | str | None) -> list[str]:
+def ensure_sequence(value: Sequence[str] | str | None) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
@@ -224,63 +224,24 @@ def _contextualize_xpath(expr: str, node: Any) -> str:
     return expr
 
 
-def _parse_nth_token(
-    token: str,
-    allowed: set[str],
-) -> tuple[str | None, int | None]:
-    match = re.fullmatch(
-        r"(?P<tag>[a-zA-Z0-9_-]+)(?::nth-child\((?P<index>\d+)\))?",
-        token,
-    )
-    if not match:
-        return None, None
-    tag = match.group("tag").lower()
-    if tag not in allowed:
-        return None, None
-    idx = match.group("index")
-    return tag, int(idx) if idx else None
+def _compile_css_selector(css_expr: str) -> Any:
+    compiled = _get_css_selector(css_expr)
+    if compiled is not None:
+        return compiled
+    from lxml.cssselect import CSSSelector
+
+    compiled = CSSSelector(css_expr)
+    _put_css_selector(css_expr, compiled)
+    return compiled
 
 
-def _css_table_nth_xpath(css_expr: str) -> str | None:
-    expr = re.sub(r"\s+", " ", css_expr.strip())
-    if not expr.startswith("table "):
-        return None
-    tokens = expr.split(" ")
-    if not tokens or tokens[0] != "table":
-        return None
-    idx = 1
-    section = None
-    if idx < len(tokens) and tokens[idx] in {"tbody", "thead", "tfoot"}:
-        section = tokens[idx]
-        idx += 1
-    if idx >= len(tokens):
-        return None
-    tr_tag, tr_idx = _parse_nth_token(tokens[idx], {"tr"})
-    if not tr_tag:
-        return None
-    idx += 1
-    cell_tag = None
-    cell_idx = None
-    if idx < len(tokens):
-        cell_tag, cell_idx = _parse_nth_token(tokens[idx], {"td", "th"})
-        if not cell_tag:
-            return None
-        idx += 1
-    if idx != len(tokens):
-        return None
-    parts = [".//table"]
-    if section:
-        parts.append(f"//{section}")
-    tr_expr = f"//{tr_tag}"
-    if tr_idx:
-        tr_expr = f"{tr_expr}[position()={tr_idx}]"
-    parts.append(tr_expr)
-    if cell_tag:
-        cell_expr = f"//{cell_tag}"
-        if cell_idx:
-            cell_expr = f"{cell_expr}[position()={cell_idx}]"
-        parts.append(cell_expr)
-    return "".join(parts)
+def _compile_xpath_selector(expr: str) -> XPath:
+    compiled = _get_xpath_selector(expr)
+    if compiled is not None:
+        return compiled
+    compiled = XPath(expr)
+    _put_xpath_selector(expr, compiled)
+    return compiled
 
 
 def _select_nodes_with_status(
@@ -301,31 +262,18 @@ def _select_nodes_with_status(
         css_expr = expr[4:].strip()
         if not css_expr:
             return [], False
-        fast_xpath = _css_table_nth_xpath(css_expr)
-        if fast_xpath:
-            expr = fast_xpath
-        else:
-            try:
-                from lxml.cssselect import CSSSelector
-
-                compiled = _get_css_selector(css_expr)
-                if compiled is None:
-                    compiled = CSSSelector(css_expr)
-                    _put_css_selector(css_expr, compiled)
-                return list(compiled(node)), False
-            except _SELECTOR_NONCRITICAL_EXCEPTIONS:
-                logger.debug("CSS selector compilation or evaluation failed")
-                return [], True
+        try:
+            return list(_compile_css_selector(css_expr)(node)), False
+        except _SELECTOR_NONCRITICAL_EXCEPTIONS:
+            logger.debug("CSS selector compilation or evaluation failed")
+            return [], True
     if context_sensitive:
         expr = _contextualize_xpath(expr, node)
-    compiled_xpath = _get_xpath_selector(expr)
-    if compiled_xpath is None:
-        try:
-            compiled_xpath = XPath(expr)
-            _put_xpath_selector(expr, compiled_xpath)
-        except _SELECTOR_NONCRITICAL_EXCEPTIONS:
-            logger.debug("XPath selector compilation failed")
-            return [], True
+    try:
+        compiled_xpath = _compile_xpath_selector(expr)
+    except _SELECTOR_NONCRITICAL_EXCEPTIONS:
+        logger.debug("XPath selector compilation failed")
+        return [], True
     try:
         result = compiled_xpath(node)
     except _SELECTOR_NONCRITICAL_EXCEPTIONS:
@@ -336,7 +284,7 @@ def _select_nodes_with_status(
     return [result], False
 
 
-def _select_nodes(
+def select_nodes(
     node: HtmlElement,
     selector: str,
     *,
@@ -350,7 +298,7 @@ def _select_nodes(
     return matches
 
 
-def _coerce_value(value: Any) -> str | None:
+def coerce_value(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
@@ -380,7 +328,7 @@ def _coerce_value(value: Any) -> str | None:
 def _reduce_matches(matches: Sequence[Any], join_with: str) -> str | None:
     parts: list[str] = []
     for match in matches:
-        value = _coerce_value(match)
+        value = coerce_value(match)
         if value:
             parts.append(value)
     if not parts:
@@ -388,18 +336,26 @@ def _reduce_matches(matches: Sequence[Any], join_with: str) -> str | None:
     return join_with.join(parts).strip() or None
 
 
-def _extract_value(
+def extract_value(
     node: HtmlElement,
     selectors: Sequence[str] | str | None,
     *,
     join: bool = False,
     join_with: str = " ",
 ) -> str | None:
-    for expr in _ensure_sequence(selectors):
-        matches = _select_nodes(node, expr, context_sensitive=True)
+    for expr in ensure_sequence(selectors):
+        matches = select_nodes(node, expr, context_sensitive=True)
         if not matches:
             continue
-        value = _reduce_matches(matches, join_with) if join else _coerce_value(matches[0])
+        value = _reduce_matches(matches, join_with) if join else coerce_value(matches[0])
         if value:
             return value
     return None
+
+
+# Preserve the pre-extraction private test surface while consumers use the
+# supported submodule APIs above.
+_coerce_value = coerce_value
+_ensure_sequence = ensure_sequence
+_extract_value = extract_value
+_select_nodes = select_nodes
