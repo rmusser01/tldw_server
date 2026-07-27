@@ -8,7 +8,7 @@ falsification triggering, anti-context retrieval, and adjudication.
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -307,16 +307,35 @@ class TestFVAPipelineProcessClaim:
         ) as observe_histogram, patch(
             "tldw_Server_API.app.core.Claims_Extraction.fva_pipeline.increment_counter"
         ) as increment_counter:
+            metric_calls = Mock()
+            metric_calls.attach_mock(observe_histogram, "observe_histogram")
+            metric_calls.attach_mock(increment_counter, "increment_counter")
             await pipeline.process_claim(
                 claim=MockClaim(id="1", text="Test claim"),
                 query="test",
                 documents=[Document(id="1", content="Support", metadata={}, score=0.8)],
             )
 
+        metric_order = [
+            (call[0], call.args[0])
+            for call in metric_calls.mock_calls
+            if call.args
+        ]
         histogram_names = [call.args[0] for call in observe_histogram.call_args_list if call.args]
         anti_context_index = histogram_names.index("fva_anti_context_docs")
         first_adjudication_index = histogram_names.index("fva_adjudication_scores")
         assert anti_context_index < first_adjudication_index
+        adjudication_indices = [
+            index
+            for index, event in enumerate(metric_order)
+            if event == ("observe_histogram", "fva_adjudication_scores")
+        ]
+        duration_index = metric_order.index(("observe_histogram", "fva_processing_duration_seconds"))
+        processed_index = metric_order.index(("increment_counter", "fva_claims_processed_total"))
+        assert adjudication_indices == list(
+            range(adjudication_indices[0], adjudication_indices[0] + 3)
+        )
+        assert adjudication_indices[-1] < duration_index < processed_index
         score_types = {
             call.kwargs["labels"]["score_type"]
             for call in observe_histogram.call_args_list
@@ -324,8 +343,8 @@ class TestFVAPipelineProcessClaim:
         }
         assert score_types == {"support", "contradict", "contestation"}
         assert not any(
-            call.args and call.args[0] == "fva_wasted_falsification_total"
-            for call in increment_counter.call_args_list
+            event == ("increment_counter", "fva_wasted_falsification_total")
+            for event in metric_order
         )
 
     @pytest.mark.unit

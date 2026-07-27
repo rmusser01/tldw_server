@@ -10,7 +10,7 @@ labels:
 references:
 - https://github.com/rmusser01/tldw_server/pull/2526
 - TASK-9937
-updated_date: 2026-07-24 00:16
+updated_date: 2026-07-27 15:48
 modified_files:
 - backlog/tasks/task-12015 - Address-PR-2526-Claims-Jobs-review-comments.md
 - tldw_Server_API/app/core/Claims_Extraction/claims_alert_delivery.py
@@ -20,6 +20,7 @@ modified_files:
 - tldw_Server_API/app/core/Claims_Extraction/fva_pipeline.py
 - tldw_Server_API/app/services/claims_jobs_worker.py
 - tldw_Server_API/tests/Claims/test_claims_rebuild_stale_policy.py
+- tldw_Server_API/tests/Claims_Extraction/test_fva_pipeline.py
 ---
 
 ## Description
@@ -54,6 +55,8 @@ Post-rebase verification after git rebase origin/dev: branch is 0 behind and 40 
 2026-07-18 follow-up complete: rebased PR #2526 on latest origin/dev, resolved the rebase conflict in MediaDatabase imports/wiring, re-fetched current Qodo/CodeRabbit/Gemini PR feedback, and addressed the still-valid review comments. Implemented canonical owner validation parity, legacy fallback on Jobs enqueue failures, conditional alert Jobs routing, bounded alert dedupe DB helper, review notification all-channel success semantics, noncritical webhook telemetry isolation, non-transient 4xx fast-fail, empty extraction stale-claim soft-delete, per-owner bulk review notification grouping, DB_Management-owned review latency stats, deterministic/marked/typed tests, dashboard jobs-summary assertions, and duplicate Backlog heading cleanup. Verification: py_compile on touched files passed; Ruff check on touched files passed; focused pytest slice passed with 121 passed; git diff --check passed; Bandit on touched application files wrote /tmp/bandit_claims_pr2526_followup.json and exited 0.
 2026-07-23 follow-up: PR #2526 still has cancelled/red GitHub checks and a CodeRabbit docstring-coverage warning after the 2026-07-18 push. Latest origin/dev is now 178 commits ahead of the PR branch, so reopen this task to rebase on current dev, verify current PR comments/checks, and address any still-valid findings before pushing a fresh head.
 2026-07-23 completion: rebased PR #2526 on current origin/dev (branch now 0 behind / 42 ahead of origin/dev before this final commit), verified current PR feedback. Qodo's latest summary reports its findings resolved; the remaining actionable CodeRabbit comment was a docstring-coverage warning. Added concise docstrings to the PR-added Claims Jobs modules and lifecycle worker so those modules measure 100% documented by AST, fixed a rebased fva_pipeline import-order/unused-import lint finding, and updated a stale rebuild fallback test to assert the legacy fallback required by prior review feedback. Verification after final edits: Ruff on all changed Python files passed; py_compile on all changed Python files passed; git diff --check passed; Bandit on changed application files wrote /tmp/bandit_claims_pr2526_20260723.json with empty results and exited 0; focused Claims/Jobs/FVA/worker pytest slice passed with 139 passed.
+2026-07-27 follow-up: rebased PR #2526 onto latest origin/dev, re-fetched unresolved GitHub review threads, and verified the remaining CodeRabbit threads against rebased code. The alert telemetry, 4xx fast-fail, all-channel notification delivery, alert Jobs enqueue-count routing, review persistence readback, and deterministic worker queue assertions were already present after the prior follow-ups. Tightened the remaining FVA test gap by tracking histogram/counter calls through one parent mock and asserting adjudication histograms are emitted before final duration/processed metrics, with no wasted-falsification counter on the anti-context path.
+2026-07-27 verification: focused Claims/Jobs/FVA/worker pytest slice passed with 132 passed, 441 warnings; Ruff on changed Python files passed; py_compile on changed Python files passed; git diff --check passed; Bandit on changed application scope wrote /tmp/bandit_claims_pr2526_20260727.json with empty results.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
