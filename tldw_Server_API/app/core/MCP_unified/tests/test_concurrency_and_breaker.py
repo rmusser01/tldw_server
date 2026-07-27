@@ -58,6 +58,26 @@ async def test_per_module_concurrency_guard_limits_parallelism():
     assert mod.max_seen <= 2
 
 
+@pytest.mark.asyncio
+async def test_per_module_concurrency_queue_wait_is_bounded_by_operation_timeout():
+    mod = SlowModule(
+        ModuleConfig(name="bounded_queue", max_concurrent=1, timeout_seconds=0.01)
+    )
+    assert mod._semaphore is not None
+    await mod._semaphore.acquire()
+
+    try:
+        with pytest.raises(Exception, match="Operation timeout after 0.01s"):
+            await asyncio.wait_for(
+                mod.execute_with_circuit_breaker(mod._work, 0),
+                timeout=0.5,
+            )
+    finally:
+        mod._semaphore.release()
+
+    assert mod.current == 0
+
+
 class FlappyModule(BaseModule):
     def __init__(self, config: ModuleConfig):
         super().__init__(config)

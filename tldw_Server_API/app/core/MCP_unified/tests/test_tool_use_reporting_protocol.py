@@ -279,6 +279,36 @@ class _RecordingTelemetry:
         return contextlib.nullcontext(span)
 
 
+class _ExitRecordingSpanContext:
+    def __init__(self, telemetry: _ExitRecordingTelemetry) -> None:
+        self.telemetry = telemetry
+        self.span = _RecordingSpan()
+
+    def __enter__(self) -> _RecordingSpan:
+        self.telemetry.spans.append(self.span)
+        return self.span
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> bool:
+        self.telemetry.exits.append((exc_type, exc, traceback))
+        return False
+
+
+class _ExitRecordingTelemetry:
+    def __init__(self) -> None:
+        self.spans: list[_RecordingSpan] = []
+        self.exits: list[
+            tuple[type[BaseException] | None, BaseException | None, Any]
+        ] = []
+
+    def trace_context(self, *_args: Any, **_kwargs: Any) -> _ExitRecordingSpanContext:
+        return _ExitRecordingSpanContext(self)
+
+
 class _FaultingSpan:
     def __init__(self, phase: str, failure: BaseException) -> None:
         self.phase = phase
@@ -2587,6 +2617,37 @@ async def test_expected_failure_sentinel_is_absent_from_all_observable_surfaces(
     )
     assert sentinel not in surfaces
     assert "ExpectedToolFailure" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_expected_failure_exits_telemetry_without_raw_exception() -> None:
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        ExpectedToolFailure,
+        ExpectedToolFailureReason,
+    )
+
+    sentinel = "SENTINEL_EXPECTED_FAILURE_TELEMETRY_SECRET"
+    failure = ExpectedToolFailure(ExpectedToolFailureReason.DEPENDENCY_UNAVAILABLE)
+    failure.__cause__ = RuntimeError(sentinel)
+    telemetry = _ExitRecordingTelemetry()
+    protocol, _recorder = _protocol(
+        module=_ExpectedFailureBreakerModule(failure),
+        telemetry_provider=telemetry,
+    )
+
+    result = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "A"}},
+        _request_context(),
+    )
+
+    reason = ExpectedToolFailureReason.DEPENDENCY_UNAVAILABLE
+    _assert_exact_expected_failure_payload(
+        result,
+        reason_code=reason.reason_code,
+        message=reason.public_message,
+    )
+    assert telemetry.exits == [(None, None, None)]
+    assert sentinel not in repr(telemetry.exits)
 
 
 @pytest.mark.asyncio

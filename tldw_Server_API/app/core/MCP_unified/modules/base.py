@@ -27,6 +27,31 @@ from ..tool_observability import ensure_tool_definition_eval_metadata
 T = TypeVar("T")
 
 
+class AdmittedModuleOperation:
+    """Run a final admission check before entering module breaker accounting."""
+
+    __slots__ = ("_admission_check", "_admitted", "_operation")
+
+    def __init__(
+        self,
+        admission_check: Callable[[], Awaitable[None]],
+        operation: Callable[..., Awaitable[Any]],
+    ) -> None:
+        self._admission_check = admission_check
+        self._operation = operation
+        self._admitted = False
+
+    async def admit(self) -> None:
+        if self._admitted:
+            return
+        await self._admission_check()
+        self._admitted = True
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        await self.admit()
+        return await self._operation(*args, **kwargs)
+
+
 def _safe_exception_family(exc: BaseException) -> str:
     """Return a bounded real exception type for structured module logs."""
 
@@ -500,17 +525,23 @@ class BaseModule(ABC):
 
         Delegates to the unified breaker's ``call_async`` for correct
         half-open probe slot management and exception-type filtering.
-        The semaphore concurrency guard and timeout wrapping are applied
-        as an inner wrapper around the operation.
+        Semaphore admission is bounded separately from the operation timeout.
+        A runtime admission check, when present, runs after slot acquisition but
+        before the actual operation enters breaker accounting.
         """
         start_time = time.time()
+        acquired = False
+
+        async def _acquire_and_admit():
+            nonlocal acquired
+            if self._semaphore is not None:
+                await self._semaphore.acquire()
+                acquired = True
+            if type(operation) is AdmittedModuleOperation:
+                await operation.admit()
 
         async def _guarded_operation():
-            acquired = False
             try:
-                if self._semaphore is not None:
-                    await self._semaphore.acquire()
-                    acquired = True
                 return await asyncio.wait_for(
                     operation(*args, **kwargs),
                     timeout=self.config.timeout_seconds,
@@ -518,10 +549,6 @@ class BaseModule(ABC):
             except asyncio.TimeoutError:
                 logger.error(f"Operation timeout in module {self.name}")
                 raise Exception(f"Operation timeout after {self.config.timeout_seconds}s") from None
-            finally:
-                if acquired:
-                    with contextlib.suppress(Exception):
-                        self._semaphore.release()
 
         async def _breaker_operation():
             try:
@@ -537,6 +564,16 @@ class BaseModule(ABC):
         original_to_raise: Exception | None = None
         original_traceback = None
         try:
+            try:
+                await asyncio.wait_for(
+                    _acquire_and_admit(),
+                    timeout=self.config.timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Operation timeout in module {self.name}")
+                raise Exception(
+                    f"Operation timeout after {self.config.timeout_seconds}s"
+                ) from None
             result = await self._circuit_breaker.call_async(_breaker_operation)
             latency_ms = (time.time() - start_time) * 1000
             self._metrics.record_request(True, latency_ms)
@@ -565,6 +602,10 @@ class BaseModule(ABC):
                 error_type=_safe_exception_family(e),
             ).error("MCP module operation failed")
             raise
+        finally:
+            if acquired:
+                with contextlib.suppress(Exception):
+                    self._semaphore.release()
 
         if original_to_raise is not None:
             raise original_to_raise.with_traceback(original_traceback)

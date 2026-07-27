@@ -49,6 +49,7 @@ class _IntegrityWriteModule(BaseModule):
         super().__init__(config)
         self.tool_name = str(config.settings.get("tool_name") or f"{config.name}.write")
         self.breaker_entry_count = 0
+        self.breaker_entered = asyncio.Event()
         self.execute_count = 0
         self.last_arguments: dict[str, Any] | None = None
         self.tool_def_calls = 0
@@ -134,6 +135,7 @@ class _IntegrityWriteModule(BaseModule):
         **kwargs: Any,
     ) -> Any:
         self.breaker_entry_count += 1
+        self.breaker_entered.set()
         return await super().execute_with_circuit_breaker(operation, *args, **kwargs)
 
 
@@ -162,13 +164,18 @@ async def _prepare_call(
     metadata: dict[str, Any] | None = None,
     scope_payload: dict[str, Any] | None = None,
     idempotency_key: str | None = "idem-key",
+    max_concurrent: int = 10,
 ) -> tuple[MCPProtocol, _IntegrityWriteModule, Any, dict[str, Any]]:
     module_id = f"prepared_integrity_{uuid4().hex}"
     registry = get_module_registry()
     await registry.register_module(
         module_id,
         _IntegrityWriteModule,
-        ModuleConfig(name=module_id, timeout_seconds=module_timeout),
+        ModuleConfig(
+            name=module_id,
+            timeout_seconds=module_timeout,
+            max_concurrent=max_concurrent,
+        ),
     )
     module = await registry.get_module(module_id)
     assert isinstance(module, _IntegrityWriteModule)
@@ -721,6 +728,21 @@ def test_personal_idempotency_key_preserves_exact_legacy_shape() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unicode_idempotency_key_round_trips_prepared_integrity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, _, prepared, _ = await _prepare_call(
+        monkeypatch,
+        idempotency_key="clé-一",
+    )
+
+    assert prepared.normalized_idempotency_key == "clé-一"
+    assert prepared.idempotency_cache_key is not None
+    assert prepared.idempotency_cache_key.endswith("|key:clé-一")
+    protocol._verify_prepared_tool_call_integrity(prepared)
+
+
+@pytest.mark.asyncio
 async def test_preparation_preserves_patched_protocol_cache_key_facade(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1008,7 +1030,8 @@ async def test_second_live_check_rechecks_integrity_after_awaited_lookup(
 
     assert registry.calls == 4
     assert rate_limiter.calls == 1
-    assert module.breaker_entry_count == 0
+    assert module.breaker_entry_count == 1
+    assert module._circuit_breaker.failure_count == 0
     assert module.execute_count == 0
 
 
@@ -1049,7 +1072,8 @@ async def test_second_live_check_rechecks_binding_after_definition_await(
 
     _assert_stale_prepared_call(payload)
     assert rate_limiter.calls == 1
-    assert module.breaker_entry_count == 0
+    assert module.breaker_entry_count == 1
+    assert module._circuit_breaker.failure_count == 0
     assert module.execute_count == 0
 
 
@@ -1073,7 +1097,8 @@ async def test_second_live_check_blocks_definition_mutation_during_rate_wait(
 
     _assert_stale_prepared_call(payload)
     assert rate_limiter.calls == 1
-    assert module.breaker_entry_count == 0
+    assert module.breaker_entry_count == 1
+    assert module._circuit_breaker.failure_count == 0
     assert module.execute_count == 0
 
 
@@ -1097,7 +1122,33 @@ async def test_second_live_check_blocks_definition_mutation_during_idempotency_w
     _assert_stale_prepared_call(payload)
     assert rate_limiter.calls == 1
     assert len(idempotency.execute_keys) == 1
-    assert module.breaker_entry_count == 0
+    assert module.breaker_entry_count == 1
+    assert module._circuit_breaker.failure_count == 0
+    assert module.execute_count == 0
+
+
+@pytest.mark.asyncio
+async def test_final_live_check_runs_after_module_queue_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, module, prepared, _ = await _prepare_call(
+        monkeypatch,
+        idempotency_key=None,
+        max_concurrent=1,
+    )
+    assert module._semaphore is not None
+    await module._semaphore.acquire()
+
+    execution = asyncio.create_task(protocol.execute_prepared_tool_call(prepared))
+    await asyncio.wait_for(module.breaker_entered.wait(), timeout=2)
+    module.source_tool_def["description"] = "changed during module queueing"
+    module.invalidate_capability_caches()
+    module._semaphore.release()
+    payload = await asyncio.wait_for(execution, timeout=2)
+
+    _assert_stale_prepared_call(payload)
+    assert module.breaker_entry_count == 1
+    assert module._circuit_breaker.failure_count == 0
     assert module.execute_count == 0
 
 

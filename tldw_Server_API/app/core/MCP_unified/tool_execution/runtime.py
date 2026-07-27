@@ -16,6 +16,7 @@ from ..execution_outcomes import (
     ExpectedToolFailureReason,
     get_expected_tool_failure_reason,
 )
+from ..modules.base import AdmittedModuleOperation
 from ..protocol_types import InvalidParamsException, PreparedToolCall, RequestContext
 from ..tool_observability import (
     attach_execution_eval_metadata,
@@ -80,7 +81,10 @@ class _BestEffortSpanContext:
         if not self._entered:
             return False
         try:
-            self._context_manager.__exit__(exc_type, exc, traceback)
+            if type(exc) is ExpectedToolFailure:
+                self._context_manager.__exit__(None, None, None)
+            else:
+                self._context_manager.__exit__(exc_type, exc, traceback)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - telemetry cannot replace tool outcomes.
@@ -464,24 +468,34 @@ class ToolExecutionRuntime:
                 },
             ) as span:
                 try:
-                    await self.security.verify_prepared_tool_call(
-                        prepared,
-                        require_live_binding=True,
-                    )
-                    execution_args = tool_args
-                    if (
-                        policy.idempotency.inject_argument
-                        and normalized_idempotency_key
-                        and isinstance(tool_args, dict)
-                    ):
-                        execution_args = dict(tool_args)
-                        execution_args["idempotencyKey"] = normalized_idempotency_key
-                    module_invoked = True
+                    async def _verify_module_admission() -> None:
+                        await self.security.verify_prepared_tool_call(
+                            prepared,
+                            require_live_binding=True,
+                        )
+
+                    async def _invoke_admitted_module() -> dict[str, Any]:
+                        nonlocal module_invoked
+                        execution_args = tool_args
+                        if (
+                            policy.idempotency.inject_argument
+                            and normalized_idempotency_key
+                            and isinstance(tool_args, dict)
+                        ):
+                            execution_args = dict(tool_args)
+                            execution_args["idempotencyKey"] = normalized_idempotency_key
+                        module_invoked = True
+                        return await module.execute_tool(
+                            tool_name,
+                            execution_args,
+                            context,
+                        )
+
                     result = await module.execute_with_circuit_breaker(
-                        module.execute_tool,
-                        tool_name,
-                        execution_args,
-                        context,
+                        AdmittedModuleOperation(
+                            _verify_module_admission,
+                            _invoke_admitted_module,
+                        ),
                     )
                     _set_span_attribute(span, "mcp.status", "success")
                 except asyncio.CancelledError:

@@ -816,9 +816,12 @@ class ToolExecutionSecurity:
                 prepared.tool_name,
                 prepared.normalized_idempotency_key,
             )
+        prepared_cache_key = prepared.idempotency_cache_key
+        if prepared_cache_key is not None and type(prepared_cache_key) is not str:
+            raise self._integrity_failure("invalid idempotency cache key")
         if not hmac.compare_digest(
-            expected_cache_key or "",
-            prepared.idempotency_cache_key or "",
+            (expected_cache_key or "").encode("utf-8"),
+            (prepared_cache_key or "").encode("utf-8"),
         ):
             raise self._integrity_failure("idempotency cache key mismatch")
 
