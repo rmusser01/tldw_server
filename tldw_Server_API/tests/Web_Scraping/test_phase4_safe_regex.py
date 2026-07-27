@@ -61,9 +61,11 @@ def _install_router_budget_fakes(
     *,
     elapsed_per_search: float,
     matching_pattern: str | None = None,
+    rejected_patterns: set[str] | None = None,
 ) -> list[tuple[str, float]]:
     state = {"now": 0.0}
     calls: list[tuple[str, float]] = []
+    rejected = rejected_patterns or set()
 
     def _fake_monotonic() -> float:
         return state["now"]
@@ -76,6 +78,8 @@ def _install_router_budget_fakes(
     ) -> SafeRegexResult:
         calls.append((pattern, limits.timeout_s))
         state["now"] += min(elapsed_per_search, limits.timeout_s)
+        if pattern in rejected:
+            return SafeRegexResult(matched=False, code="regex_invalid")
         return SafeRegexResult(matched=pattern == matching_pattern)
 
     monkeypatch.setattr(
@@ -417,6 +421,110 @@ def test_router_validation_drops_invalid_and_oversized_patterns() -> None:
     assert cleaned["domains"]["example.com"]["url_patterns"] == [r"/article/\d+$"]
 
 
+def test_router_validation_discards_rule_when_all_configured_patterns_are_rejected() -> None:
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": ["[", "a" * 4_097],
+                }
+            }
+        }
+    )
+
+    assert "example.com" not in cleaned["domains"]
+    assert ScraperRouter(cleaned).resolve("https://example.com/article").backend == "auto"
+
+
+def test_router_validation_discards_rule_when_pattern_cap_prevents_a_survivor() -> None:
+    patterns = ["["] * scraper_router_module._MAX_URL_PATTERNS + [r"/article$"]
+
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": patterns,
+                }
+            }
+        }
+    )
+
+    assert "example.com" not in cleaned["domains"]
+
+
+def test_router_validation_discards_rule_when_budget_expires_before_a_survivor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_router_budget_fakes(
+        monkeypatch,
+        elapsed_per_search=0.100,
+        rejected_patterns={"rejected"},
+    )
+
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": ["rejected", "survivor"],
+                }
+            }
+        }
+    )
+
+    assert "example.com" not in cleaned["domains"]
+    assert [pattern for pattern, _timeout in calls] == ["rejected"]
+
+
+def test_router_validation_preserves_explicit_empty_pattern_constraint() -> None:
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": [],
+                }
+            }
+        }
+    )
+
+    assert cleaned["domains"]["example.com"]["url_patterns"] == []
+    assert ScraperRouter(cleaned).resolve("https://example.com/article").backend == "curl"
+
+
+def test_router_validation_keeps_rule_when_at_least_one_pattern_survives() -> None:
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": ["[", r"/article$"],
+                }
+            }
+        }
+    )
+
+    assert cleaned["domains"]["example.com"]["url_patterns"] == [r"/article$"]
+    assert ScraperRouter(cleaned).resolve("https://example.com/article").backend == "curl"
+
+
+def test_router_validation_discards_rule_with_non_list_pattern_constraint() -> None:
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": r"/article$",
+                }
+            }
+        }
+    )
+
+    assert "example.com" not in cleaned["domains"]
+
+
 def test_router_validation_caps_configured_pattern_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -469,7 +577,7 @@ def test_router_validation_drops_recursive_pattern_without_raising() -> None:
         }
     )
 
-    assert cleaned["domains"]["example.com"]["url_patterns"] == []
+    assert "example.com" not in cleaned["domains"]
 
 
 def test_directly_constructed_router_invalid_pattern_fails_open() -> None:

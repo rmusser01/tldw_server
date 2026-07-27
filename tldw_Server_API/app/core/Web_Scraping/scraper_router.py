@@ -180,6 +180,7 @@ class ScraperRouter:
                 continue
 
             cleaned: dict[str, Any] = {}
+            discard_rule = False
             for k, v in rule.items():
                 if k not in allowed_keys:
                     continue
@@ -187,22 +188,31 @@ class ScraperRouter:
                     val = str(v).lower().strip()
                     cleaned[k] = val if val in allowed_backends else "auto"
                 elif k == "url_patterns":
+                    if not isinstance(v, list):
+                        discard_rule = True
+                        break
+                    if not v:
+                        cleaned[k] = []
+                        continue
+
                     pats: list[str] = []
-                    if isinstance(v, list):
-                        deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
-                        for p in v[:_MAX_URL_PATTERNS]:
-                            if not isinstance(p, str):
-                                continue
-                            remaining_s = deadline - _monotonic()
-                            if remaining_s <= 0:
-                                break
-                            validation = search_untrusted(
-                                p,
-                                "",
-                                limits=_router_regex_limits(remaining_s),
-                            )
-                            if validation.code is None:
-                                pats.append(p)
+                    deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
+                    for p in v[:_MAX_URL_PATTERNS]:
+                        if not isinstance(p, str):
+                            continue
+                        remaining_s = deadline - _monotonic()
+                        if remaining_s <= 0:
+                            break
+                        validation = search_untrusted(
+                            p,
+                            "",
+                            limits=_router_regex_limits(remaining_s),
+                        )
+                        if validation.code is None:
+                            pats.append(p)
+                    if not pats:
+                        discard_rule = True
+                        break
                     cleaned[k] = pats
                 elif k in ("extra_headers", "cookies"):
                     m = {str(kk): str(vv) for kk, vv in v.items()} if isinstance(v, dict) else {}
@@ -221,7 +231,8 @@ class ScraperRouter:
                 else:
                     cleaned[k] = v
 
-            out["domains"][dom] = cleaned
+            if not discard_rule:
+                out["domains"][dom] = cleaned
         return out
 
     def resolve(self, url: str) -> ScrapePlan:
