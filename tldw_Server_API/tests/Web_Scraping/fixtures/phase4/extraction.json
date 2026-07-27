@@ -385,6 +385,7 @@
     {
       "allow_llm_extraction": false,
       "behavior_change": 1,
+      "difference_contract": "change_1_default_regex_non_terminal",
       "expected": {
         "cache_stats": {
           "cluster_embedding_cache_size": 0,

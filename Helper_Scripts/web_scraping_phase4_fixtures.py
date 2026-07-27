@@ -306,6 +306,7 @@ def _build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
         _case(
             {
                 "behavior_change": 7,
+                "difference_contract": "change_7_selector_invalid",
                 "include_counts": False,
                 "name": "invalid_xpath_error",
                 "operation": "validate",
@@ -562,6 +563,7 @@ def _build_extraction_cases(article: Any) -> list[dict[str, Any]]:
             {
                 "allow_llm_extraction": False,
                 "behavior_change": 1,
+                "difference_contract": "change_1_default_regex_non_terminal",
                 "html": "<html><body>Contact predecessor@example.com</body></html>",
                 "name": "default_regex_is_terminal_in_predecessor",
                 "operation": "pipeline",
@@ -741,6 +743,7 @@ async def _build_article_cases(
             {
                 "backend": "httpx",
                 "behavior_change": 7,
+                "difference_contract": "change_7_policy_error",
                 "name": "policy_error_is_publicly_bounded",
                 "scenario": "policy_error",
                 "url": "https://example.com/policy-error",

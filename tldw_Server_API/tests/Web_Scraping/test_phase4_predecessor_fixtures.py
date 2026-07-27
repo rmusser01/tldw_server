@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -64,31 +66,258 @@ _FIXED_SELECTOR_ENV = {
 }
 
 
+class _DifferenceToken(Enum):
+    ANY_PATH = "<ANY_PATH>"
+    MISSING = "<MISSING>"
+
+
+_ANY_PATH = _DifferenceToken.ANY_PATH
+_MISSING = _DifferenceToken.MISSING
+_PathPart = str | int
+_PathPatternPart = _PathPart | _DifferenceToken
+
+
+@dataclass(frozen=True)
+class _Difference:
+    path: tuple[_PathPart, ...]
+    actual: object
+    expected: object
+
+
+@dataclass(frozen=True)
+class _DifferenceRule:
+    path: tuple[_PathPatternPart, ...]
+    description: str
+    validator: Callable[[_Difference], bool]
+
+
+@dataclass(frozen=True)
+class _DifferenceContract:
+    behavior_change: int
+    rules: tuple[_DifferenceRule, ...]
+
+
+def _changed_from_to(expected: str, actual: str) -> Callable[[_Difference], bool]:
+    return lambda difference: difference.expected == expected and difference.actual == actual
+
+
+def _regex_becomes_non_terminal(difference: _Difference) -> bool:
+    return (
+        difference.expected == "regex"
+        and isinstance(difference.actual, str)
+        and difference.actual in {"cluster", "llm", "trafilatura"}
+    )
+
+
+def _regex_trace_reason_becomes_non_terminal(difference: _Difference) -> bool:
+    return (
+        difference.expected == "regex_extracted"
+        and isinstance(difference.actual, str)
+        and difference.actual in {"regex_enriched", "regex_non_terminal"}
+    )
+
+
+def _regex_trace_status_becomes_non_terminal(difference: _Difference) -> bool:
+    return (
+        difference.expected == "success"
+        and isinstance(difference.actual, str)
+        and difference.actual in {"continued", "enriched"}
+    )
+
+
+def _is_new_downstream_trace_step(difference: _Difference) -> bool:
+    if difference.expected is not _MISSING or not isinstance(difference.actual, Mapping):
+        return False
+    strategy = difference.actual.get("strategy")
+    status = difference.actual.get("status")
+    return (
+        isinstance(strategy, str)
+        and strategy in {"cluster", "llm", "trafilatura"}
+        and isinstance(status, str)
+        and status in {"failed", "skipped", "success"}
+    )
+
+
+def _is_new_regex_or_downstream_metric(difference: _Difference) -> bool:
+    if difference.expected is not _MISSING or not isinstance(difference.actual, Mapping):
+        return False
+    labels = difference.actual.get("labels")
+    strategy = labels.get("strategy") if isinstance(labels, Mapping) else None
+    name = difference.actual.get("name")
+    return (
+        isinstance(strategy, str)
+        and strategy in {"cluster", "llm", "regex", "trafilatura"}
+        and isinstance(name, str)
+        and name.startswith("extraction_")
+    )
+
+
+DIFFERENCE_CONTRACTS = {
+    "change_1_default_regex_non_terminal": _DifferenceContract(
+        behavior_change=1,
+        rules=(
+            _DifferenceRule(
+                path=("result", "extraction_strategy"),
+                description="regex no longer terminates the default extraction pipeline",
+                validator=_regex_becomes_non_terminal,
+            ),
+            _DifferenceRule(
+                path=("result", "extraction_trace", _ANY_PATH, "reason"),
+                description="the regex trace records enrichment rather than terminal extraction",
+                validator=_regex_trace_reason_becomes_non_terminal,
+            ),
+            _DifferenceRule(
+                path=("result", "extraction_trace", _ANY_PATH, "status"),
+                description="the regex trace records continued extraction",
+                validator=_regex_trace_status_becomes_non_terminal,
+            ),
+            _DifferenceRule(
+                path=("result", "extraction_trace", _ANY_PATH),
+                description="a downstream strategy runs after regex enrichment",
+                validator=_is_new_downstream_trace_step,
+            ),
+            _DifferenceRule(
+                path=("metrics", _ANY_PATH, "labels", "status"),
+                description="regex metrics record continued extraction",
+                validator=_regex_trace_status_becomes_non_terminal,
+            ),
+            _DifferenceRule(
+                path=("metrics", _ANY_PATH),
+                description="regex enrichment emits downstream extraction metrics",
+                validator=_is_new_regex_or_downstream_metric,
+            ),
+        ),
+    ),
+    "change_7_policy_error": _DifferenceContract(
+        behavior_change=7,
+        rules=(
+            _DifferenceRule(
+                path=("result", "error"),
+                description="policy exception text is replaced by a stable public code",
+                validator=_changed_from_to(
+                    "Outbound policy evaluation failed. Please contact system administrator.",
+                    "policy_error",
+                ),
+            ),
+        ),
+    ),
+    "change_7_selector_invalid": _DifferenceContract(
+        behavior_change=7,
+        rules=(
+            _DifferenceRule(
+                path=("result", "errors", _ANY_PATH, "error"),
+                description="selector parser text is replaced by a stable public code",
+                validator=_changed_from_to("Invalid expression", "selector_invalid"),
+            ),
+        ),
+    ),
+    "change_11_response_too_large": _DifferenceContract(
+        behavior_change=11,
+        rules=(
+            _DifferenceRule(
+                path=("result", "error"),
+                description="oversized direct responses return the approved stable code",
+                validator=_changed_from_to("Upstream response accepted", "response_too_large"),
+            ),
+        ),
+    ),
+}
+
+
+def _collect_differences(
+    actual: object,
+    expected: object,
+    path: tuple[_PathPart, ...] = (),
+) -> list[_Difference]:
+    if actual is _MISSING or expected is _MISSING:
+        return [_Difference(path=path, actual=actual, expected=expected)]
+    if isinstance(actual, Mapping) and isinstance(expected, Mapping):
+        differences: list[_Difference] = []
+        for key in sorted(set(actual) | set(expected), key=str):
+            differences.extend(
+                _collect_differences(
+                    actual.get(key, _MISSING),
+                    expected.get(key, _MISSING),
+                    (*path, key),
+                )
+            )
+        return differences
+    if isinstance(actual, (list, tuple)) and isinstance(expected, (list, tuple)):
+        differences = []
+        for index in range(max(len(actual), len(expected))):
+            differences.extend(
+                _collect_differences(
+                    actual[index] if index < len(actual) else _MISSING,
+                    expected[index] if index < len(expected) else _MISSING,
+                    (*path, index),
+                )
+            )
+        return differences
+    if actual != expected:
+        return [_Difference(path=path, actual=actual, expected=expected)]
+    return []
+
+
+def _path_matches(pattern: tuple[_PathPatternPart, ...], path: tuple[_PathPart, ...]) -> bool:
+    return len(pattern) == len(path) and all(
+        expected_part is _ANY_PATH or expected_part == actual_part for expected_part, actual_part in zip(pattern, path)
+    )
+
+
+def _format_path(path: tuple[_PathPart, ...]) -> str:
+    formatted = "$"
+    for part in path:
+        formatted += f"[{part}]" if isinstance(part, int) else f".{part}"
+    return formatted
+
+
 def assert_predecessor_behavior(
     actual: object,
     expected: object,
     *,
     behavior_change: int | None = None,
+    difference_contract: str | None = None,
 ) -> None:
-    """Assert predecessor parity or identify one approved Phase 4 difference."""
+    """Assert parity or validate every difference against one approved change contract."""
     if behavior_change is not None and (
         type(behavior_change) is not int or behavior_change not in APPROVED_BEHAVIOR_CHANGES
     ):
         raise ValueError("behavior_change must be one integer in range 1..11")
-    if actual == expected:
-        return
     if behavior_change is None:
+        if difference_contract is not None:
+            raise ValueError("difference_contract requires behavior_change")
         assert actual == expected
+        return
+    assert difference_contract is not None, "A difference contract is required for an approved change"
+    try:
+        contract = DIFFERENCE_CONTRACTS[difference_contract]
+    except KeyError as exc:
+        raise ValueError(f"Unknown difference contract: {difference_contract}") from exc
+    if contract.behavior_change != behavior_change:
+        raise ValueError(
+            f"Difference contract {difference_contract!r} belongs to behavior change "
+            f"{contract.behavior_change}, not {behavior_change}"
+        )
+
+    for difference in _collect_differences(actual, expected):
+        matching_rules = [rule for rule in contract.rules if _path_matches(rule.path, difference.path)]
+        path = _format_path(difference.path)
+        assert matching_rules, f"Difference at {path} is not covered by difference contract {difference_contract!r}"
+        assert (
+            len(matching_rules) == 1
+        ), f"Difference at {path} is covered by more than one rule in {difference_contract!r}"
+        rule = matching_rules[0]
+        assert rule.validator(difference), f"Difference at {path} violates contract rule: {rule.description}"
 
 
-def _load_manifest_or_skip() -> dict[str, Any]:
+def _load_manifest() -> dict[str, Any]:
     if not MANIFEST.is_file():
-        pytest.skip("Phase 4 predecessor manifest has not been generated")
+        raise FileNotFoundError(f"Missing phase 4 predecessor manifest: {MANIFEST}")
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
 
 def _load_cases(category: str) -> list[dict[str, Any]]:
-    manifest = _load_manifest_or_skip()
+    manifest = _load_manifest()
     case_path = FIXTURE_ROOT / manifest["cases"][category]
     if not case_path.is_file():
         pytest.fail(f"Missing predecessor fixture: {case_path.name}")
@@ -105,6 +334,7 @@ def _assert_case(case: Mapping[str, Any], actual: object) -> None:
             actual,
             case["expected"],
             behavior_change=case.get("behavior_change"),
+            difference_contract=case.get("difference_contract"),
         )
     except AssertionError as exc:
         raise AssertionError(f"Predecessor case failed: {case['name']}") from exc
@@ -327,7 +557,7 @@ def test_phase4_fixture_manifest_is_pinned() -> None:
 
 
 def test_phase4_fixture_json_is_canonical_and_complete() -> None:
-    manifest = _load_manifest_or_skip()
+    manifest = _load_manifest()
     expected_names = {"manifest.json", *manifest["cases"].values()}
     assert {path.name for path in FIXTURE_ROOT.glob("*.json")} == expected_names
 
@@ -339,6 +569,39 @@ def test_phase4_fixture_json_is_canonical_and_complete() -> None:
         assert decoded == canonical, path.name
 
 
+def test_missing_manifest_is_a_hard_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    missing_manifest = tmp_path / "manifest.json"
+    monkeypatch.setitem(globals(), "MANIFEST", missing_manifest)
+
+    def _reject_skip(reason: str) -> None:
+        pytest.fail(f"Missing immutable fixtures must fail, not skip: {reason}")
+
+    monkeypatch.setattr(pytest, "skip", _reject_skip)
+    with pytest.raises(FileNotFoundError, match="Missing phase 4 predecessor manifest"):
+        _load_manifest()
+
+
+def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:
+    tagged_cases = {
+        case["name"]: (case["behavior_change"], case.get("difference_contract"))
+        for category in sorted(CASE_KEYS)
+        for case in _load_cases(category)
+        if "behavior_change" in case
+    }
+
+    assert tagged_cases == {
+        "default_regex_is_terminal_in_predecessor": (
+            1,
+            "change_1_default_regex_non_terminal",
+        ),
+        "invalid_xpath_error": (7, "change_7_selector_invalid"),
+        "policy_error_is_publicly_bounded": (7, "change_7_policy_error"),
+    }
+
+
 def test_differential_helper_requires_a_tag_for_a_difference() -> None:
     with pytest.raises(AssertionError):
         assert_predecessor_behavior({"value": "current"}, {"value": "predecessor"})
@@ -348,13 +611,83 @@ def test_differential_helper_accepts_none_for_equal_values() -> None:
     assert_predecessor_behavior({"value": "same"}, {"value": "same"}, behavior_change=None)
 
 
-@pytest.mark.parametrize("behavior_change", [1, 11])
-def test_differential_helper_accepts_boundary_behavior_changes(behavior_change: int) -> None:
+def test_differential_helper_rejects_valid_change_without_a_contract() -> None:
+    with pytest.raises(AssertionError, match="difference contract"):
+        assert_predecessor_behavior(
+            {"result": {"url": "https://current.example"}},
+            {"result": {"url": "https://predecessor.example"}},
+            behavior_change=1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("behavior_change", "difference_contract", "actual", "expected"),
+    [
+        (
+            1,
+            "change_1_default_regex_non_terminal",
+            {"result": {"extraction_strategy": "trafilatura"}},
+            {"result": {"extraction_strategy": "regex"}},
+        ),
+        (
+            11,
+            "change_11_response_too_large",
+            {"result": {"error": "response_too_large"}},
+            {"result": {"error": "Upstream response accepted"}},
+        ),
+    ],
+)
+def test_differential_helper_accepts_semantically_constrained_boundary_changes(
+    behavior_change: int,
+    difference_contract: str,
+    actual: object,
+    expected: object,
+) -> None:
     assert_predecessor_behavior(
-        {"value": "current"},
-        {"value": "predecessor"},
+        actual,
+        expected,
         behavior_change=behavior_change,
+        difference_contract=difference_contract,
     )
+
+
+def test_differential_helper_accepts_a_covered_planned_difference() -> None:
+    assert_predecessor_behavior(
+        {
+            "result": {
+                "error": "policy_error",
+                "url": "https://example.com/policy-error",
+            }
+        },
+        {
+            "result": {
+                "error": "Outbound policy evaluation failed. Please contact system administrator.",
+                "url": "https://example.com/policy-error",
+            }
+        },
+        behavior_change=7,
+        difference_contract="change_7_policy_error",
+    )
+
+
+def test_differential_helper_rejects_an_extra_unrelated_difference() -> None:
+    with pytest.raises(AssertionError, match="not covered"):
+        assert_predecessor_behavior(
+            {
+                "result": {
+                    "error": "policy_error",
+                    "url": "https://unrelated.example/policy-error",
+                }
+            },
+            {
+                "result": {
+                    "error": ("Outbound policy evaluation failed. " "Please contact system administrator."),
+                    "url": "https://example.com/policy-error",
+                }
+            },
+            behavior_change=7,
+            difference_contract="change_7_policy_error",
+        )
 
 
 @pytest.mark.parametrize("behavior_change", [0, 12, "1", 1.0, True])

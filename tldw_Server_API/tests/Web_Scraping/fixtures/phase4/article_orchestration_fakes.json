@@ -57,6 +57,7 @@
     {
       "backend": "httpx",
       "behavior_change": 7,
+      "difference_contract": "change_7_policy_error",
       "expected": {
         "cache_stats": {
           "cluster_embedding_cache_size": 0,
