@@ -943,42 +943,167 @@ async def test_owned_shutdown_helper_preserves_cancellation_and_child_failure() 
 
 
 @pytest.mark.asyncio
-async def test_deferred_module_shutdown_failure_can_be_retried() -> None:
+async def test_public_shutdown_retries_failed_module_cleanup_single_flight() -> None:
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
     deps = _real_server_runtime_dependencies()
     server = MCPServer(dependencies=deps)
-    completion_attempts = 0
+    server.initialized = True
+    protocol_shutdown_calls = 0
     module_shutdown_calls = 0
+    retry_started = asyncio.Event()
+    release_retry = asyncio.Event()
+    messages: list[str] = []
 
-    async def _wait_for_protocol() -> None:
-        nonlocal completion_attempts
-        completion_attempts += 1
-        if completion_attempts == 1:
-            raise _ExoticShutdownError("private deferred detail")
+    original_protocol_shutdown = server.protocol.shutdown
+
+    async def _shutdown_protocol() -> None:
+        nonlocal protocol_shutdown_calls
+        protocol_shutdown_calls += 1
+        await original_protocol_shutdown()
 
     async def _shutdown_modules() -> None:
         nonlocal module_shutdown_calls
         module_shutdown_calls += 1
+        if module_shutdown_calls == 1:
+            raise _ExoticShutdownError("private module shutdown detail")
+        retry_started.set()
+        await release_retry.wait()
 
-    server.protocol.wait_for_shutdown_completion = _wait_for_protocol
+    from loguru import logger
+
+    server.protocol.shutdown = _shutdown_protocol
     deps.module_registry.shutdown_all = _shutdown_modules
-    first = server._start_module_shutdown(deferred=True)
-    assert first is not None
-    await asyncio.gather(first, return_exceptions=True)
-    await asyncio.sleep(0)
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    retries: list[asyncio.Task[None]] = []
+    try:
+        await server.shutdown()
+        await asyncio.sleep(0)
+        first_resource_task = server._resource_shutdown_task
 
+        assert first_resource_task is not None
+        assert first_resource_task.done() is True
+        resource_error = first_resource_task.exception()
+        assert resource_error is not None
+        assert type(resource_error).__name__ == "_ModuleShutdownFailure"
+        assert str(resource_error) == ""
+        assert resource_error.__cause__ is None
+        assert resource_error.__context__ is None
+        assert server.initialized is False
+        assert server._module_shutdown_task is None
+        assert server._module_shutdown_complete is False
+        assert protocol_shutdown_calls == 1
+        assert module_shutdown_calls == 1
+
+        retries = [
+            asyncio.create_task(server.shutdown()),
+            asyncio.create_task(server.shutdown()),
+        ]
+        await asyncio.wait_for(retry_started.wait(), timeout=0.5)
+        assert protocol_shutdown_calls == 2
+        assert module_shutdown_calls == 2
+        assert all(not task.done() for task in retries)
+        release_retry.set()
+        await asyncio.wait_for(asyncio.gather(*retries), timeout=0.5)
+        await asyncio.sleep(0)
+    finally:
+        release_retry.set()
+        await asyncio.gather(*retries, return_exceptions=True)
+        logger.remove(sink_id)
+
+    assert server._resource_shutdown_task is not first_resource_task
+    assert server._resource_shutdown_task is not None
+    assert server._resource_shutdown_task.done() is True
     assert server._module_shutdown_task is None
-    assert server._module_shutdown_complete is False
-    assert module_shutdown_calls == 0
+    assert server._module_shutdown_complete is True
+    assert protocol_shutdown_calls == 2
+    assert module_shutdown_calls == 2
+    assert all("private module shutdown detail" not in message for message in messages)
+    assert any("error_type=_ExoticShutdownError" in message for message in messages)
 
-    second = server._start_module_shutdown(deferred=True)
-    assert second is not None
-    await asyncio.wait_for(second, timeout=0.5)
-    await asyncio.sleep(0)
 
-    assert completion_attempts == 2
-    assert module_shutdown_calls == 1
+@pytest.mark.asyncio
+async def test_deferred_module_shutdown_failure_retries_after_shared_resource_success() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    deps = _real_server_runtime_dependencies()
+    server = MCPServer(dependencies=deps)
+    manager = server.protocol._idempotency
+    finalizer_started = asyncio.Event()
+    release_finalizer = asyncio.Event()
+    first_module_attempted = asyncio.Event()
+    retry_started = asyncio.Event()
+    release_retry = asyncio.Event()
+    protocol_shutdown_calls = 0
+    module_shutdown_calls = 0
+
+    async def _finalize() -> str:
+        finalizer_started.set()
+        while not release_finalizer.is_set():
+            try:
+                await release_finalizer.wait()
+            except asyncio.CancelledError:
+                continue
+        return "local"
+
+    original_protocol_shutdown = server.protocol.shutdown
+
+    async def _shutdown_protocol() -> None:
+        nonlocal protocol_shutdown_calls
+        protocol_shutdown_calls += 1
+        await original_protocol_shutdown()
+
+    async def _shutdown_modules() -> None:
+        nonlocal module_shutdown_calls
+        module_shutdown_calls += 1
+        if module_shutdown_calls == 1:
+            first_module_attempted.set()
+            raise _ExoticShutdownError("private deferred module detail")
+        retry_started.set()
+        await release_retry.wait()
+
+    server.protocol.shutdown = _shutdown_protocol
+    deps.module_registry.shutdown_all = _shutdown_modules
+    finalizer = manager._create_finalizer(_finalize, bound=0.01)
+    await asyncio.wait_for(finalizer_started.wait(), timeout=0.5)
+    retries: list[asyncio.Task[None]] = []
+    try:
+        await asyncio.wait_for(server.shutdown(), timeout=0.5)
+        resource_task = server._resource_shutdown_task
+
+        assert resource_task is not None
+        assert resource_task.done() is True
+        assert protocol_shutdown_calls == 1
+        assert module_shutdown_calls == 0
+        assert manager.has_pending_shutdown_work is True
+
+        release_finalizer.set()
+        await asyncio.wait_for(finalizer, timeout=0.5)
+        await asyncio.wait_for(first_module_attempted.wait(), timeout=0.5)
+        await asyncio.sleep(0)
+
+        assert server._resource_shutdown_task is resource_task
+        assert server._module_shutdown_task is None
+        assert server._module_shutdown_complete is False
+
+        retries = [
+            asyncio.create_task(server.shutdown()),
+            asyncio.create_task(server.shutdown()),
+        ]
+        await asyncio.wait_for(retry_started.wait(), timeout=0.5)
+        assert protocol_shutdown_calls == 1
+        assert module_shutdown_calls == 2
+        release_retry.set()
+        await asyncio.wait_for(asyncio.gather(*retries), timeout=0.5)
+        await asyncio.sleep(0)
+    finally:
+        release_finalizer.set()
+        release_retry.set()
+        await asyncio.gather(finalizer, *retries, return_exceptions=True)
+
+    assert protocol_shutdown_calls == 1
+    assert module_shutdown_calls == 2
+    assert manager.has_pending_shutdown_work is False
     assert server._module_shutdown_task is None
     assert server._module_shutdown_complete is True
 

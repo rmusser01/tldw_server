@@ -2296,6 +2296,95 @@ async def test_nested_same_task_execution_tracking_uses_refcounts() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_public_server_shutdown_is_single_flight_for_staggered_callers() -> None:
+    redis = _BlockingResultRedis(ignore_cancellation=True)
+    server = MCPServer()
+    manager = server.protocol._idempotency
+    manager._redis_client = redis
+    manager._redis_attempted = True
+    manager._redis_ready = True
+    manager._finalize_bound = lambda _policy: 0.01
+    payload = {"content": [{"type": "text", "text": "shared-shutdown"}]}
+    expected = canonical_json_bytes(payload, max_bytes=_policy().max_result_bytes)
+    key = "shared-resource-shutdown"
+    protocol_started = asyncio.Event()
+    modules_stopped = asyncio.Event()
+    protocol_shutdown_calls = 0
+    module_shutdown_calls = 0
+
+    original_protocol_shutdown = server.protocol.shutdown
+
+    async def _shutdown_protocol() -> None:
+        nonlocal protocol_shutdown_calls
+        protocol_shutdown_calls += 1
+        protocol_started.set()
+        await original_protocol_shutdown()
+
+    async def _shutdown_modules() -> None:
+        nonlocal module_shutdown_calls
+        module_shutdown_calls += 1
+        modules_stopped.set()
+
+    server.protocol.shutdown = _shutdown_protocol
+    server.module_registry.shutdown_all = _shutdown_modules
+    execution = asyncio.create_task(
+        manager.execute(
+            key,
+            "args",
+            lambda: _async_payload(payload),
+            policy=_policy(),
+        )
+    )
+    await asyncio.wait_for(redis.write_started.wait(), timeout=0.5)
+    result = await asyncio.wait_for(execution, timeout=0.5)
+    cancellation_count_before_shutdown = redis.write_cancellations
+    first = asyncio.create_task(server.shutdown())
+    await asyncio.wait_for(protocol_started.wait(), timeout=0.5)
+    second = asyncio.create_task(server.shutdown())
+    first.cancel("first staggered cancellation")
+    await asyncio.sleep(0)
+    first_survived_cancellation = not first.done()
+
+    try:
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(first, timeout=0.5)
+        await asyncio.wait_for(second, timeout=0.5)
+
+        assert caught.value.args == ("first staggered cancellation",)
+        assert first_survived_cancellation is True
+        assert protocol_shutdown_calls == 1
+        assert redis.write_cancellations == cancellation_count_before_shutdown + 1
+        assert modules_stopped.is_set() is False
+        resource_task = server._resource_shutdown_task
+        assert resource_task is not None
+        assert resource_task.done() is True
+
+        redis.allow_write.set()
+        await asyncio.wait_for(modules_stopped.wait(), timeout=0.5)
+        await asyncio.sleep(0)
+
+        assert result.payload is payload
+        assert result.persistence == "local"
+        assert redis.values[_result_key(key)] == expected
+        assert _lock_key(key) not in redis.values
+        assert redis.result_store_calls == 1
+        assert redis.lock_release_calls == 1
+        assert module_shutdown_calls == 1
+        assert manager._admitted_execution_tasks == {}
+        assert manager._finalizers == set()
+        assert server._module_shutdown_task is None
+
+        await server.shutdown()
+        assert server._resource_shutdown_task is resource_task
+        assert protocol_shutdown_calls == 1
+        assert module_shutdown_calls == 1
+    finally:
+        redis.allow_write.set()
+        await asyncio.gather(execution, first, second, return_exceptions=True)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_server_defers_single_module_shutdown_until_retained_owner_finishes() -> None:
     redis = _FakeRedis()
     server = MCPServer()
