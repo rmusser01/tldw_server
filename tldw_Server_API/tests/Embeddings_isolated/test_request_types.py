@@ -157,6 +157,59 @@ def test_execution_outcome_copies_mutable_vectors_into_nested_tuples():
 
 
 @pytest.mark.unit
+def test_execution_outcome_canonicalizes_numeric_vector_leaves_to_floats():
+    values = _valid_execution_outcome_values()
+    values.update(
+        {
+            "vectors": [[1, 2], [3.5, 4]],
+            "cache_misses": 2,
+        }
+    )
+
+    outcome = EmbeddingExecutionOutcome(**values)
+
+    assert outcome.vectors == ((1.0, 2.0), (3.5, 4.0))
+    assert all(type(value) is float for vector in outcome.vectors for value in vector)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("vectors", "cache_misses"),
+    [
+        ([[[1.0], 2.0]], 1),
+        ([["not-a-number"]], 1),
+        ([[True]], 1),
+        ([[float("nan")]], 1),
+        ([[float("inf")]], 1),
+        ([[1.0], [2.0, 3.0]], 2),
+        ([[]], 1),
+        ([1.0], 1),
+    ],
+    ids=(
+        "nested-mutable-leaf",
+        "non-numeric-leaf",
+        "boolean-leaf",
+        "nan-leaf",
+        "infinite-leaf",
+        "non-rectangular",
+        "empty-vector",
+        "non-vector-item",
+    ),
+)
+def test_execution_outcome_rejects_malformed_vectors(
+    vectors: object,
+    cache_misses: int,
+):
+    values = _valid_execution_outcome_values()
+    values.update({"vectors": vectors, "cache_misses": cache_misses})
+
+    with pytest.raises(ValueError) as exc_info:
+        EmbeddingExecutionOutcome(**values)
+
+    assert str(exc_info.value) == ("vectors must contain equally sized, non-empty vectors of finite numbers")
+
+
+@pytest.mark.unit
 def test_execution_outcome_accepts_zero_total_with_positive_prompt_tokens():
     outcome = EmbeddingExecutionOutcome(
         vectors=((0.1, 0.2),),
@@ -218,6 +271,77 @@ def test_execution_outcome_rejects_invalid_success_invariants(
         EmbeddingExecutionOutcome(**values)
 
     assert str(exc_info.value) == expected_message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("overrides", "expected_message"),
+    [
+        (
+            {"fallback_from": "openai"},
+            "fallback_from requires a positive fallback_attempt_count",
+        ),
+        (
+            {"attempt_count": 2, "fallback_attempt_count": 1},
+            "positive fallback_attempt_count requires fallback_from",
+        ),
+        (
+            {"attempt_count": 99},
+            "attempt_count - fallback_attempt_count must be 1 or 2",
+        ),
+        (
+            {
+                "attempt_count": 4,
+                "fallback_attempt_count": 1,
+                "fallback_from": "openai",
+            },
+            "attempt_count - fallback_attempt_count must be 1 or 2",
+        ),
+    ],
+)
+def test_execution_outcome_rejects_inconsistent_attempt_metadata(
+    overrides: dict[str, object],
+    expected_message: str,
+):
+    values = _valid_execution_outcome_values()
+    values.update(overrides)
+
+    with pytest.raises(ValueError) as exc_info:
+        EmbeddingExecutionOutcome(**values)
+
+    assert str(exc_info.value) == expected_message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("attempt_count", "fallback_attempt_count", "fallback_from"),
+    [
+        (1, 0, None),
+        (2, 0, None),
+        (2, 1, "openai"),
+        (3, 1, "openai"),
+        (3, 2, "openai"),
+        (4, 2, "openai"),
+    ],
+)
+def test_execution_outcome_accepts_attempt_count_boundaries(
+    attempt_count: int,
+    fallback_attempt_count: int,
+    fallback_from: str | None,
+):
+    values = _valid_execution_outcome_values()
+    values.update(
+        {
+            "attempt_count": attempt_count,
+            "fallback_attempt_count": fallback_attempt_count,
+            "fallback_from": fallback_from,
+        }
+    )
+
+    outcome = EmbeddingExecutionOutcome(**values)
+
+    assert outcome.attempt_count - outcome.fallback_attempt_count in (1, 2)
+    assert outcome.fallback_from == fallback_from
 
 
 @pytest.mark.unit
