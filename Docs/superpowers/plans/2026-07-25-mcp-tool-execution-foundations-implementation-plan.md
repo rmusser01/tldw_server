@@ -74,7 +74,7 @@ Out of scope:
 **Goal:** Guarantee callback-at-most-once per request with bounded waiting and robust post-success persistence.
 **Success Criteria:** Local/Redis contention, ambiguity, persistence, serialization, mutation, cancellation, late completion, and shutdown fault tests pass.
 **Tests:** Dedicated manager state-machine tests plus runtime observer-ordering tests.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 5: Integration And Security Gate
 **Goal:** Verify compatibility, documentation, package boundaries, lint, compile, and security scanning.
@@ -811,15 +811,15 @@ For idempotent fresh success, observer exceptions and observer cancellation occu
 
 ### Required Cancellation And Ordering Tests
 
-- [ ] Block Redis write, cancel caller after local commit, release finalizer within bound: cancellation propagates only after exact bytes persist and callback count remains one.
-- [ ] Redis write exceeds bound but honors cancellation: original success remains locally replayable, finalizer set drains, remote health degrades.
-- [ ] Redis write ignores cancellation: manager retains a strong reference; later completion cannot replace payload; `shutdown()` drains it.
-- [ ] Post-hook raises after committed success: returned idempotent result remains success and replayable, callback count one.
-- [ ] Post-hook is cancelled after committed success: cancellation may propagate, and retry replays the committed result without module invocation.
-- [ ] Audit, metrics, and reporting failures after commit do not redispatch or alter result.
-- [ ] Cached replay does not execute module success observers but records one cached tool-use event.
-- [ ] No finalizer task is pending after normal manager/server shutdown tests.
-- [ ] Finalization timeout/stuck paths publish only the fixed degraded stage and exception family to metrics/logs and set `remote_degraded`.
+- [x] Block Redis write, cancel caller after local commit, release finalizer within bound: cancellation propagates only after exact bytes persist and callback count remains one.
+- [x] Redis write exceeds bound but honors cancellation: original success remains locally replayable, finalizer set drains, remote health degrades.
+- [x] Redis write ignores cancellation: manager retains a strong reference; later completion cannot replace payload; `shutdown()` drains it.
+- [x] Post-hook raises after committed success: returned idempotent result remains success and replayable, callback count one.
+- [x] Post-hook is cancelled after committed success: cancellation may propagate, and retry replays the committed result without module invocation.
+- [x] Audit, metrics, and reporting failures after commit do not redispatch or alter result.
+- [x] Cached replay does not execute module success observers but records one cached tool-use event.
+- [x] No finalizer task is pending after normal manager/server shutdown tests.
+- [x] Finalization timeout/stuck paths publish only the fixed degraded stage and exception family to metrics/logs and set `remote_degraded`.
 
 Run:
 
