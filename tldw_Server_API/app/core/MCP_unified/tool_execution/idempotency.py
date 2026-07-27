@@ -66,13 +66,15 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('EXPIRE', KEYS[1], ARGV[2])
 return 1
 """
-_REDIS_REFRESH_REPLAY_SCRIPT = """
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+_REDIS_READ_REPLAY_SCRIPT = """
+local binding = redis.call('GET', KEYS[1])
+if not binding then return {-2} end
+if binding ~= ARGV[1] then return {-1} end
 local result = redis.call('GET', KEYS[2])
-if result ~= ARGV[2] then return -1 end
-redis.call('EXPIRE', KEYS[1], ARGV[3])
-redis.call('EXPIRE', KEYS[2], ARGV[3])
-return 1
+if not result then return {0} end
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+redis.call('EXPIRE', KEYS[2], ARGV[2])
+return {1, result}
 """
 _REDIS_STORE_RESULT_SCRIPT = """
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
@@ -651,6 +653,31 @@ class IdempotencyManager:
             raise ValueError("Redis idempotency result is not canonical")
         return raw, template
 
+    def _decode_remote_replay_response(
+        self,
+        response: Any,
+        *,
+        policy: IdempotencyExecutionPolicy,
+    ) -> tuple[bytes, dict[str, JsonValue]] | Literal[
+        "missing",
+        "binding_mismatch",
+        "binding_missing",
+    ]:
+        if type(response) is not list or not response:
+            raise TypeError("Redis idempotency replay response must be a non-empty list")
+        status = response[0]
+        if type(status) is not int:
+            raise TypeError("Redis idempotency replay status must be an integer")
+        if status == 0 and len(response) == 1:
+            return "missing"
+        if status == -1 and len(response) == 1:
+            return "binding_mismatch"
+        if status == -2 and len(response) == 1:
+            return "binding_missing"
+        if status == 1 and len(response) == 2:
+            return self._decode_remote_replay(response[1], policy=policy)
+        raise ValueError("Redis idempotency replay response has an invalid shape")
+
     async def _read_remote_replay(
         self,
         client: Any,
@@ -664,11 +691,21 @@ class IdempotencyManager:
         deadline: float | None,
     ) -> _RemoteReplayRead:
         try:
+            def operation() -> Awaitable[Any]:
+                return client.eval(
+                    _REDIS_READ_REPLAY_SCRIPT,
+                    2,
+                    binding_key,
+                    result_key,
+                    arguments_hash.encode("utf-8"),
+                    policy.ttl_seconds,
+                )
+
             if deadline is None:
-                raw = await client.get(result_key)
+                response = await operation()
             else:
-                raw = await self._call_before_deadline(
-                    lambda: client.get(result_key),
+                response = await self._call_before_deadline(
+                    operation,
                     deadline,
                 )
         except asyncio.CancelledError:
@@ -681,26 +718,29 @@ class IdempotencyManager:
             raise ExpectedToolFailure(
                 ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
             ) from exc
-        if raw is None:
-            return _RemoteReplayRead(replay=None)
         try:
-            encoded, template = self._decode_remote_replay(raw, policy=policy)
+            replay_state = self._decode_remote_replay_response(
+                response,
+                policy=policy,
+            )
         except Exception as exc:  # noqa: BLE001 - corrupt remote bytes must fail closed.
             self._mark_remote_failure("redis_result_read", exc)
             self._block_remote_key(cache_key, policy=policy)
             raise ExpectedToolFailure(
                 ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
             ) from exc
-        await self._refresh_remote_replay(
-            client,
-            binding_key,
-            result_key,
-            cache_key,
-            arguments_hash,
-            encoded,
-            policy=policy,
-            deadline=deadline,
-        )
+        if replay_state == "missing":
+            return _RemoteReplayRead(replay=None)
+        if replay_state == "binding_mismatch":
+            raise InvalidParamsException(
+                "Idempotency key was already used with different arguments"
+            )
+        if replay_state == "binding_missing":
+            self._block_remote_key(cache_key, policy=policy)
+            raise ExpectedToolFailure(
+                ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+            )
+        encoded, template = replay_state
         local_committed = self._try_commit_local_replay(
             cache_key,
             arguments_hash,
@@ -775,60 +815,6 @@ class IdempotencyManager:
             self._block_remote_key(cache_key, policy=policy)
             return False
         return True
-
-    async def _refresh_remote_replay(
-        self,
-        client: Any,
-        binding_key: str,
-        result_key: str,
-        cache_key: str,
-        arguments_hash: str,
-        encoded: bytes,
-        *,
-        policy: IdempotencyExecutionPolicy,
-        deadline: float | None,
-    ) -> None:
-        try:
-            def operation() -> Awaitable[Any]:
-                return client.eval(
-                    _REDIS_REFRESH_REPLAY_SCRIPT,
-                    2,
-                    binding_key,
-                    result_key,
-                    arguments_hash.encode("utf-8"),
-                    encoded,
-                    policy.ttl_seconds,
-                )
-
-            if deadline is None:
-                refreshed = await operation()
-            else:
-                refreshed = await self._call_before_deadline(
-                    operation,
-                    deadline,
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - replay coordination must fail closed.
-            self._mark_remote_failure("redis_result_read", exc)
-            self._block_remote_key(cache_key, policy=policy)
-            raise ExpectedToolFailure(
-                ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
-            ) from exc
-
-        if refreshed == 1:
-            return
-        if refreshed == 0:
-            stage = "redis_binding"
-            exc = RuntimeError("Redis argument binding changed before replay refresh")
-        else:
-            stage = "redis_result_read"
-            exc = RuntimeError("Redis result changed before replay refresh")
-        self._mark_remote_failure(stage, exc)
-        self._block_remote_key(cache_key, policy=policy)
-        raise ExpectedToolFailure(
-            ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
-        ) from exc
 
     async def _store_remote_result(
         self,

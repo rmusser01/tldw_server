@@ -309,7 +309,17 @@ class _MemoryRedis:
     def _bytes(value: Any) -> bytes:
         return value if isinstance(value, bytes) else str(value).encode("utf-8")
 
-    async def eval(self, _script: str, numkeys: int, *values: Any) -> int:
+    async def eval(self, script: str, numkeys: int, *values: Any) -> Any:
+        if numkeys == 2 and len(values) == 4 and "return {1, result}" in script:
+            binding_key, result_key, arguments_hash, _ttl = values
+            binding = self.values.get(binding_key)
+            if binding is None:
+                return [-2]
+            if binding != self._bytes(arguments_hash):
+                return [-1]
+            result = self.values.get(result_key)
+            return [0] if result is None else [1, result]
+
         if numkeys == 2 and len(values) == 4:
             binding_key, result_key, arguments_hash, _ttl = values
             existing = self.values.get(binding_key)

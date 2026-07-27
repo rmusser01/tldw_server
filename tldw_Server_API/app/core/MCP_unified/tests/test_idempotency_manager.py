@@ -97,7 +97,7 @@ class _FakeRedis:
         self.calls: list[tuple[str, str]] = []
         self.set_expirations: list[tuple[str, int | None]] = []
         self.expirations: list[tuple[str, int]] = []
-        self.replay_refreshes: list[tuple[str, str, bytes, bytes, int]] = []
+        self.replay_reads: list[tuple[str, str, bytes, int]] = []
         self.lock_contended = asyncio.Event()
         self.lock_denials = 0
         self.binding_write_then_raise = False
@@ -113,6 +113,8 @@ class _FakeRedis:
         self.cleanup_entered = asyncio.Event()
         self.cleanup_release = asyncio.Event()
         self.replace_binding_after_result_read = False
+        self.remove_binding_during_replay_read = False
+        self.expire_result_during_replay_read = False
 
     @staticmethod
     def _bytes(value: Any) -> bytes:
@@ -130,6 +132,9 @@ class _FakeRedis:
         if self.fail_poll_read and key.startswith("mcp:idemp:result:") and self.lock_denials:
             raise RedisError("poll credential=TOP_SECRET")
         value = self.values.get(key)
+        if self.expire_result_during_replay_read and key.startswith("mcp:idemp:result:"):
+            self.expire_result_during_replay_read = False
+            self.values.pop(key, None)
         if self.replace_binding_after_result_read and key.startswith("mcp:idemp:result:"):
             self.replace_binding_after_result_read = False
             cache_key = key.removeprefix("mcp:idemp:result:")
@@ -172,10 +177,44 @@ class _FakeRedis:
             await self.cleanup_release.wait()
         return key in self.values
 
-    async def eval(self, script: str, key_count: int, *values: Any) -> int:
+    async def eval(self, script: str, key_count: int, *values: Any) -> Any:
         keys = [str(value) for value in values[:key_count]]
         for key in keys:
             self.calls.append(("eval", key))
+
+        if key_count == 2 and len(values) == 4 and "return {1, result}" in script:
+            binding_key, result_key, arguments_hash, ttl = values
+            binding_key = str(binding_key)
+            result_key = str(result_key)
+            encoded_hash = self._bytes(arguments_hash)
+            self.replay_reads.append((binding_key, result_key, encoded_hash, int(ttl)))
+            if self.fail_pre_owner_read:
+                self.fail_pre_owner_read = False
+                raise RedisError("pre-owner credential=TOP_SECRET")
+            if self.block_poll_read and self.lock_denials:
+                await self.poll_read_release.wait()
+            if self.fail_poll_read and self.lock_denials:
+                raise RedisError("poll credential=TOP_SECRET")
+            if self.replace_binding_after_result_read:
+                self.replace_binding_after_result_read = False
+                self.values[binding_key] = b"different-arguments"
+            if self.remove_binding_during_replay_read:
+                self.remove_binding_during_replay_read = False
+                self.values.pop(binding_key, None)
+            binding = self.values.get(binding_key)
+            if binding is None:
+                return [-2]
+            if binding != encoded_hash:
+                return [-1]
+            if self.expire_result_during_replay_read:
+                self.expire_result_during_replay_read = False
+                self.values.pop(result_key, None)
+            result = self.values.get(result_key)
+            if result is None:
+                return [0]
+            self.expirations.append((binding_key, int(ttl)))
+            self.expirations.append((result_key, int(ttl)))
+            return [1, result]
 
         if key_count == 2 and len(values) == 4:
             binding_key, result_key, arguments_hash, ttl = values
@@ -193,27 +232,6 @@ class _FakeRedis:
             if self.binding_write_then_raise:
                 raise RedisError("binding credential=TOP_SECRET")
             return 2
-
-        if key_count == 2 and len(values) == 5 and "local result" in script:
-            binding_key, result_key, arguments_hash, encoded, ttl = values
-            encoded_hash = self._bytes(arguments_hash)
-            encoded_result = self._bytes(encoded)
-            if self.values.get(str(binding_key)) != encoded_hash:
-                return 0
-            if self.values.get(str(result_key)) != encoded_result:
-                return -1
-            self.expirations.append((str(binding_key), int(ttl)))
-            self.expirations.append((str(result_key), int(ttl)))
-            self.replay_refreshes.append(
-                (
-                    str(binding_key),
-                    str(result_key),
-                    encoded_hash,
-                    encoded_result,
-                    int(ttl),
-                )
-            )
-            return 1
 
         if key_count == 2 and len(values) == 5:
             binding_key, result_key, arguments_hash, encoded, ttl = values
@@ -1087,19 +1105,59 @@ async def test_remote_replay_atomically_renews_result_and_binding_ttl() -> None:
     assert replay.payload == payload
     assert replay.persistence == "durable"
     assert redis.values[_result_key(key)] == encoded
-    assert redis.replay_refreshes == [
+    assert redis.replay_reads == [
         (
             _binding_key(key),
             _result_key(key),
             b"args",
-            encoded,
             _policy().ttl_seconds,
         )
     ]
+    assert ("get", _result_key(key)) not in redis.calls
     assert redis.expirations[-2:] == [
         (_binding_key(key), _policy().ttl_seconds),
         (_result_key(key), _policy().ttl_seconds),
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_expired_remote_result_during_atomic_read_proceeds_without_degradation() -> None:
+    redis = _FakeRedis()
+    key = "remote-replay-expired"
+    redis.values[_binding_key(key)] = b"args"
+    redis.values[_result_key(key)] = canonical_json_bytes(
+        {"stale": True},
+        max_bytes=_policy().max_result_bytes,
+    )
+    redis.expire_result_during_replay_read = True
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    calls = 0
+    original = {"fresh": True}
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return original
+
+    result = await manager.execute(key, "args", _execute, policy=_policy())
+
+    assert calls == 1
+    assert result.payload is original
+    assert result.from_cache is False
+    assert result.persistence == "durable"
+    assert manager._redis_ready is True
+    assert manager.remote_degraded is False
+    assert stages == []
+    assert ("get", _result_key(key)) not in redis.calls
+    assert redis.values[_result_key(key)] == canonical_json_bytes(
+        original,
+        max_bytes=_policy().max_result_bytes,
+    )
 
 
 @pytest.mark.unit
@@ -1126,14 +1184,49 @@ async def test_remote_replay_binding_change_during_ttl_renewal_fails_closed() ->
         calls += 1
         return {"unexpected": True}
 
+    with pytest.raises(InvalidParamsException):
+        await manager.execute(key, "args", _execute, policy=_policy())
+
+    assert calls == 0
+    assert key not in manager._local_cache
+    assert manager._redis_ready is True
+    assert manager.remote_degraded is False
+    assert stages == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_remote_replay_missing_binding_fails_key_only_without_degradation() -> None:
+    redis = _FakeRedis()
+    key = "remote-replay-binding-missing"
+    redis.values[_binding_key(key)] = b"args"
+    redis.values[_result_key(key)] = canonical_json_bytes(
+        {"content": [{"type": "text", "text": "durable"}]},
+        max_bytes=_policy().max_result_bytes,
+    )
+    redis.remove_binding_during_replay_read = True
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"unexpected": True}
+
     with pytest.raises(ExpectedToolFailure) as caught:
         await manager.execute(key, "args", _execute, policy=_policy())
 
     assert caught.value.reason is ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
     assert calls == 0
     assert key not in manager._local_cache
-    assert manager.remote_degraded is True
-    assert stages == [("redis_binding", "RuntimeError")]
+    assert key in manager._remote_uncertain
+    assert manager._redis_ready is True
+    assert manager.remote_degraded is False
+    assert stages == []
 
 
 @pytest.mark.unit
