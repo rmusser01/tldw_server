@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
     EmbeddingExecutionError,
     EmbeddingExecutionResult,
+    EmbeddingExecutorOutput,
     EmbeddingProviderError,
     EmbeddingRequestContext,
     PreparedEmbeddingRequest,
@@ -64,12 +65,6 @@ class EmbeddingAdapterExecutor(Protocol):
 
 CacheKeyFn = Callable[[str, str, str, int | None, str | None], str]
 ProviderPreflight = Callable[[str, str], Awaitable[None]]
-
-
-@dataclass(frozen=True, slots=True)
-class EmbeddingExecutorOutput:
-    vectors: list[list[float]]
-    embeddings_from_adapter: bool = False
 
 
 @dataclass(frozen=True, slots=True)

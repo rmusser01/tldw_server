@@ -44,7 +44,7 @@
 - Create: `tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py`
 - Test: `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`
 
-- [ ] **Step 1: Write the failing readiness and executor-output import tests**
+- [x] **Step 1: Write the failing readiness and executor-output import tests**
 
 Create `tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py` with the initial helper fixtures and tests:
 
@@ -111,7 +111,7 @@ def test_executor_output_contract_is_shared_from_request_types():
     assert output.embeddings_from_adapter is True
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -121,7 +121,7 @@ Run:
 
 Expected: import failures because `provider_attempt.py` does not exist and `EmbeddingExecutorOutput` is not exported from `request_types.py`.
 
-- [ ] **Step 3: Implement the minimal shared contract and readiness wrapper**
+- [x] **Step 3: Implement the minimal shared contract and readiness wrapper**
 
 Move the existing frozen `EmbeddingExecutorOutput` dataclass from `orchestrator.py` to `request_types.py`:
 
@@ -172,11 +172,11 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the command from Step 2. Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit the shared contract slice**
+- [x] **Step 5: Commit the shared contract slice**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/core/Embeddings/provider_attempt.py tldw_Server_API/tests/Embeddings_isolated/test_provider_attempt.py

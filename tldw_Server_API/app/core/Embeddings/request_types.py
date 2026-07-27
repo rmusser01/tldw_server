@@ -97,6 +97,12 @@ class PreparedEmbeddingRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class EmbeddingExecutorOutput:
+    vectors: list[list[float]]
+    embeddings_from_adapter: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class EmbeddingExecutionOutcome:
     vectors: tuple[tuple[float, ...], ...]
     provider: str
@@ -178,6 +184,7 @@ __all__ = [
     "EmbeddingExecutionOutcome",
     "EmbeddingExecutionPlan",
     "EmbeddingExecutionResult",
+    "EmbeddingExecutorOutput",
     "EmbeddingInputError",
     "EmbeddingPolicyDecision",
     "EmbeddingPolicyError",
