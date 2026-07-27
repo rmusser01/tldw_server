@@ -11,7 +11,7 @@ from lxml import html
 
 from tldw_Server_API.app.core.Watchlists import fetchers
 from tldw_Server_API.app.core.Web_Scraping import selectors
-from tldw_Server_API.app.core.Web_Scraping.selectors import caches, engine
+from tldw_Server_API.app.core.Web_Scraping.selectors import caches, engine, schema
 from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
     assert_predecessor_behavior,
 )
@@ -114,6 +114,115 @@ def test_validation_sanitizes_xpath_evaluation_errors() -> None:
         }
     ]
     assert "Unregistered function" not in repr(report)
+
+
+@pytest.mark.parametrize(
+    ("rules", "expected"),
+    [
+        (
+            {"fields": [{"name": "title", "selector": "//h1"}]},
+            {
+                "url": "https://example.com/post",
+                "extraction_successful": True,
+                "schema_fields": {"title": "Example Title"},
+                "title": "Example Title",
+            },
+        ),
+        (
+            {"baseFields": [{"name": "title", "selector": "//h1"}]},
+            {
+                "url": "https://example.com/post",
+                "extraction_successful": True,
+                "schema_fields": {"title": "Example Title"},
+                "title": "Example Title",
+            },
+        ),
+        (
+            {"baseFields": {"title": {"selector": "//h1"}}},
+            {
+                "url": "https://example.com/post",
+                "extraction_successful": True,
+                "schema_fields": {"title": "Example Title"},
+                "title": "Example Title",
+            },
+        ),
+        (
+            {"fields": {"title": {"selector": "//h1"}}},
+            {
+                "url": "https://example.com/post",
+                "extraction_successful": False,
+            },
+        ),
+        (
+            {"baseSelector": "//article"},
+            {
+                "url": "https://example.com/post",
+                "extraction_successful": False,
+            },
+        ),
+    ],
+    ids=[
+        "fields-list-is-dsl",
+        "base-fields-list-is-dsl",
+        "base-fields-mapping-is-dsl",
+        "fields-mapping-is-legacy",
+        "base-selector-alone-is-legacy",
+    ],
+)
+def test_schema_dsl_detection_preserves_predecessor_result_shapes(
+    rules: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    result = selectors.extract_schema_fields(
+        "<html><body><article><h1>Example Title</h1></article></body></html>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("class_name", "expected"),
+    [
+        ("", False),
+        ("css-abc", False),
+        ("css-abcd", True),
+        ("sc-abcde", False),
+        ("jsx-abcd", False),
+        ("CSS-abcd", False),
+        ("Css-abcd", False),
+        ("stableClass12", True),
+    ],
+)
+def test_fragile_class_name_preserves_predecessor_boundaries(
+    class_name: str,
+    expected: bool,
+) -> None:
+    assert schema._is_fragile_class_name(class_name) is expected
+
+
+@pytest.mark.parametrize(
+    ("class_name", "expect_warning"),
+    [
+        ("css-abcd", True),
+        ("sc-abcde", False),
+        ("jsx-abcd", False),
+        ("CSS-abcd", False),
+        ("Css-abcd", False),
+    ],
+)
+def test_fragile_class_warnings_preserve_prefix_and_case_parity(
+    class_name: str,
+    expect_warning: bool,
+) -> None:
+    report = selectors.validate_selector_rules(
+        {"title_selector": f"css:.{class_name}"},
+        html_text=f'<html><body><div class="{class_name}">Title</div></body></html>',
+    )
+
+    fragile_warnings = [warning for warning in report["warnings"] if warning["warning"] == "fragile_selector"]
+    assert bool(fragile_warnings) is expect_warning
 
 
 def test_endpoint_uses_canonical_validation_and_preserves_diagnostics() -> None:

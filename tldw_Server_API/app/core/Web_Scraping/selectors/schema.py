@@ -390,7 +390,7 @@ def _extract_fields_from_node(
 
 
 def _is_schema_dsl(rules: dict[str, Any]) -> bool:
-    return "fields" in rules or "baseFields" in rules or "baseSelector" in rules
+    return isinstance(rules.get("fields"), list) or isinstance(rules.get("baseFields"), (list, dict))
 
 
 def _has_nonempty_value(value: Any) -> bool:
@@ -406,14 +406,13 @@ def _has_nonempty_value(value: Any) -> bool:
 
 
 def _is_fragile_class_name(value: str) -> bool:
-    if len(value) < 8:
+    if not value:
         return False
-    lowered = value.lower()
-    if lowered.startswith(("css-", "jsx-", "sc-")):
+    if value.startswith("css-") and len(value) >= 8:
         return True
     if len(value) >= 12 and re.fullmatch(r"[A-Za-z0-9_-]+", value):
-        digits = sum(char.isdigit() for char in value)
-        letters = sum(char.isalpha() for char in value)
+        digits = sum(ch.isdigit() for ch in value)
+        letters = sum(ch.isalpha() for ch in value)
         return digits >= 2 and letters >= 4
     return False
 
