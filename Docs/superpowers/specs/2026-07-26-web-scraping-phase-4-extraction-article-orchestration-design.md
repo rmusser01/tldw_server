@@ -1,6 +1,6 @@
 # Web Scraping Phase 4: Extraction And Article Orchestration Design
 
-**Status:** Revised; awaiting final review
+**Status:** Approved for implementation planning
 **Date:** 2026-07-26
 **Backlog:** TASK-12988
 **Roadmap phase:** Phase 4, Extraction Package Move
