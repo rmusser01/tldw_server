@@ -719,6 +719,16 @@ class MCPServer:
         if self.background_tasks:
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
+        try:
+            await self.dependencies.idempotency.shutdown()
+        except asyncio.CancelledError:
+            raise
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP idempotency shutdown failed error_type={error_type}",
+                error_type=exc.__class__.__name__,
+            )
+
         # Shutdown modules
         await self.module_registry.shutdown_all()
 

@@ -164,6 +164,8 @@ class IdempotencyManager:
         self._redis_client_factory = redis_client_factory or _no_redis_client_factory
         self._on_degraded = on_degraded or _noop_degraded
         self._remote_degraded = False
+        self._finalizers: set[asyncio.Task[Literal["durable", "local"]]] = set()
+        self._finalizer_bounds: dict[asyncio.Task[Literal["durable", "local"]], float] = {}
 
     @property
     def remote_degraded(self) -> bool:
@@ -196,6 +198,115 @@ class IdempotencyManager:
     def _mark_remote_failure(self, stage: str, exc: BaseException) -> None:
         self._redis_ready = False
         self._record_degraded(stage, exc, remote=True)
+
+    @staticmethod
+    def _finalize_bound(policy: IdempotencyExecutionPolicy) -> float:
+        configured = policy.finalize_seconds
+        if type(configured) is not int or configured < 1:
+            return 1.0
+        return float(min(configured, 15))
+
+    def _discard_finalizer(
+        self,
+        task: asyncio.Task[Literal["durable", "local"]],
+    ) -> None:
+        self._finalizers.discard(task)
+        self._finalizer_bounds.pop(task, None)
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            return
+        except BaseException:  # noqa: BLE001 - completion retrieval must not leak task failures.
+            return
+
+    def _create_finalizer(
+        self,
+        operation: Awaitable[Literal["durable", "local"]],
+        *,
+        bound: float,
+    ) -> asyncio.Task[Literal["durable", "local"]]:
+        task = asyncio.create_task(operation)
+        self._finalizers.add(task)
+        self._finalizer_bounds[task] = bound
+        task.add_done_callback(self._discard_finalizer)
+        return task
+
+    async def _await_finalizer_until(
+        self,
+        task: asyncio.Task[Literal["durable", "local"]],
+        *,
+        deadline: float,
+        deferred_cancellation: asyncio.CancelledError | None,
+    ) -> tuple[bool, Literal["durable", "local"] | None, asyncio.CancelledError | None]:
+        cancellation = deferred_cancellation
+        while True:
+            if task.done():
+                if task.cancelled():
+                    return True, None, cancellation
+                return True, task.result(), cancellation
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return False, None, cancellation
+            try:
+                persistence = await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=remaining,
+                )
+                return True, persistence, cancellation
+            except TimeoutError:
+                if task.done():
+                    continue
+                return False, None, cancellation
+            except asyncio.CancelledError as exc:
+                if task.done() and task.cancelled():
+                    return True, None, cancellation
+                if cancellation is None:
+                    cancellation = exc
+
+    def _record_finalizer_degraded(
+        self,
+        stage: Literal["finalize_timeout", "finalizer_stuck"],
+        deferred_cancellation: asyncio.CancelledError | None,
+    ) -> asyncio.CancelledError | None:
+        try:
+            self._record_degraded(stage, TimeoutError(), remote=True)
+        except asyncio.CancelledError as exc:
+            return deferred_cancellation or exc
+        return deferred_cancellation
+
+    async def _await_success_finalizer(
+        self,
+        task: asyncio.Task[Literal["durable", "local"]],
+        *,
+        bound: float,
+    ) -> Literal["durable", "local"]:
+        loop = asyncio.get_running_loop()
+        completed, persistence, cancellation = await self._await_finalizer_until(
+            task,
+            deadline=loop.time() + bound,
+            deferred_cancellation=None,
+        )
+        if not completed:
+            cancellation = self._record_finalizer_degraded(
+                "finalize_timeout",
+                cancellation,
+            )
+            task.cancel()
+            completed, drained_persistence, cancellation = await self._await_finalizer_until(
+                task,
+                deadline=loop.time() + bound,
+                deferred_cancellation=cancellation,
+            )
+            if drained_persistence is not None:
+                persistence = drained_persistence
+            if not completed:
+                cancellation = self._record_finalizer_degraded(
+                    "finalizer_stuck",
+                    cancellation,
+                )
+        if cancellation is not None:
+            raise cancellation
+        return persistence or "local"
 
     async def _ensure_redis(self) -> bool:
         if self._redis_attempted:
@@ -863,6 +974,44 @@ class IdempotencyManager:
         if not await self._release_remote_lock(client, lock_key, token):
             self._block_remote_key(cache_key, policy=policy)
 
+    async def _finalize_remote_success(
+        self,
+        client: Any,
+        binding_key: str,
+        result_key: str,
+        lock_key: str,
+        token: bytes,
+        cache_key: str,
+        arguments_hash: str,
+        encoded: bytes,
+        *,
+        policy: IdempotencyExecutionPolicy,
+    ) -> Literal["durable", "local"]:
+        persistence: Literal["durable", "local"] = "local"
+        try:
+            result_state = await self._store_remote_result(
+                client,
+                binding_key,
+                result_key,
+                cache_key,
+                arguments_hash,
+                encoded,
+                policy=policy,
+            )
+            if result_state == "durable":
+                persistence = "durable"
+            elif result_state == "uncertain":
+                await self._refresh_remote_binding(
+                    client,
+                    binding_key,
+                    cache_key,
+                    arguments_hash,
+                    policy=policy,
+                )
+        finally:
+            await self._release_remote_lock(client, lock_key, token)
+        return persistence
+
     async def _execute_remote_owner(
         self,
         client: Any,
@@ -955,25 +1104,32 @@ class IdempotencyManager:
                     persistence="none",
                 )
             persistence = "local"
-            result_state = await self._store_remote_result(
-                client,
-                binding_key,
-                result_key,
-                cache_key,
-                arguments_hash,
-                encoded,
-                policy=policy,
-            )
-            if result_state == "durable":
-                persistence = "durable"
-            elif result_state == "uncertain":
-                await self._refresh_remote_binding(
+            committed_bytes = bytes(encoded)
+            owner_token = bytes(token)
+            finalize_bound = self._finalize_bound(policy)
+            finalizer = self._create_finalizer(
+                self._finalize_remote_success(
                     client,
                     binding_key,
+                    result_key,
+                    lock_key,
+                    owner_token,
                     cache_key,
                     arguments_hash,
+                    committed_bytes,
                     policy=policy,
-                )
+                ),
+                bound=finalize_bound,
+            )
+            persistence = await self._await_success_finalizer(
+                finalizer,
+                bound=finalize_bound,
+            )
+            return IdempotencyRunResult(
+                payload=cast(dict[str, JsonValue], payload),
+                from_cache=False,
+                persistence=persistence,
+            )
         else:
             await self._refresh_remote_binding(
                 client,
@@ -1184,5 +1340,21 @@ class IdempotencyManager:
         )
 
     async def shutdown(self) -> None:
-        """Task 5 lifecycle hook; Task 6 owns finalizer draining semantics."""
+        """Drain manager-owned remote finalizers within their signed bounds."""
+
+        tasks = set(self._finalizers)
+        if not tasks:
+            return
+        bound = max((self._finalizer_bounds.get(task, 1.0) for task in tasks), default=1.0)
+        _done, pending = await asyncio.wait(tasks, timeout=bound)
+        if pending:
+            for task in pending:
+                task.cancel()
+            _done, pending = await asyncio.wait(pending, timeout=bound)
+        if pending:
+            self._record_degraded("finalizer_stuck", TimeoutError(), remote=True)
+            logger.warning(
+                "MCP idempotency shutdown finalizers pending count={count}",
+                count=min(len(pending), 1_000),
+            )
         return None

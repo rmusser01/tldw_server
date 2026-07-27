@@ -60,9 +60,10 @@ class _RecordingLifecycleGuard:
 class _RecordingModuleRegistry:
     """Small module registry double for MCPServer dependency-injection tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, events: list[str] | None = None) -> None:
         self.started = 0
         self.registrations: list[dict[str, Any]] = []
+        self.events = events
 
     async def start_health_monitoring(self) -> None:
         self.started += 1
@@ -73,7 +74,18 @@ class _RecordingModuleRegistry:
         )
 
     async def shutdown_all(self) -> None:
-        return None
+        if self.events is not None:
+            self.events.append("modules")
+
+
+class _RecordingIdempotencyShutdown:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.pending = 1
+
+    async def shutdown(self) -> None:
+        self.events.append("idempotency")
+        self.pending = 0
 
 
 class _NoopMetrics:
@@ -710,6 +722,23 @@ def test_mcp_server_registers_shutdown_family_through_injected_lifecycle_guard()
     assert registration["family"] == "mcp.websocket"
     assert callable(registration["active_count"])
     assert callable(registration["drain"])
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_drains_idempotency_before_module_registry_shutdown() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    events: list[str] = []
+    deps = _server_runtime_dependencies()
+    deps.module_registry = _RecordingModuleRegistry(events)
+    server = MCPServer(dependencies=deps)
+    idempotency = _RecordingIdempotencyShutdown(events)
+    server.dependencies.idempotency = idempotency
+
+    await server.shutdown()
+
+    assert events == ["idempotency", "modules"]
+    assert idempotency.pending == 0
 
 
 @pytest.mark.asyncio

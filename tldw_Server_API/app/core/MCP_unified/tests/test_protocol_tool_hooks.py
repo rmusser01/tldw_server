@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
@@ -172,6 +173,37 @@ class _SandboxModuleStub(_ToolModuleStub):
     ) -> bool:
         """Classify sandbox.run as write-capable for protocol governance."""
 
+        del tool_def
+        return True
+
+
+class _WriteToolModuleStub(_ToolModuleStub):
+    """Effectful module used to exercise idempotent observer ordering."""
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [await self.get_tool_def("stub.write")]
+
+    async def get_tool_def(self, tool_name: str) -> dict[str, Any]:
+        return {
+            "name": tool_name,
+            "description": "Write test arguments.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string"},
+                    "idempotencyKey": {"type": "string"},
+                },
+            },
+            "metadata": {"category": "management"},
+        }
+
+    def is_write_tool_call(
+        self,
+        _tool_name: str,
+        _arguments: dict[str, Any],
+        *,
+        tool_def: dict[str, Any] | None = None,
+    ) -> bool:
         del tool_def
         return True
 
@@ -544,6 +576,73 @@ async def test_post_hook_failure_preserves_success_result() -> None:
     assert hooks.after_contexts[0].tool_name == "stub.echo"
     assert hooks.after_contexts[0].module_id == "stub"
     assert hooks.after_contexts[0].status == "success"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_idempotent_success_is_committed_before_raising_post_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    protocol, module, _hooks = _protocol(module=_WriteToolModuleStub())
+    post_hook_calls = 0
+
+    async def _raise_after_success(**_kwargs: Any) -> None:
+        nonlocal post_hook_calls
+        post_hook_calls += 1
+        raise RuntimeError("private post-hook detail")
+
+    protocol._run_post_tool_hooks = _raise_after_success
+    params = {
+        "name": "stub.write",
+        "arguments": {"target": "eta"},
+        "idempotencyKey": "post-hook-raise",
+    }
+
+    first = await protocol._handle_tools_call(params, _context())
+    replay = await protocol._handle_tools_call(params, _context())
+
+    assert first["content"] == replay["content"]
+    assert module.executions == 1
+    assert post_hook_calls == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_hook_cancellation_after_commit_replays_without_module_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    protocol, module, _hooks = _protocol(module=_WriteToolModuleStub())
+    cancellation = asyncio.CancelledError("post-hook cancellation")
+    post_hook_calls = 0
+
+    async def _cancel_after_success(**_kwargs: Any) -> None:
+        nonlocal post_hook_calls
+        post_hook_calls += 1
+        raise cancellation
+
+    protocol._run_post_tool_hooks = _cancel_after_success
+    params = {
+        "name": "stub.write",
+        "arguments": {"target": "theta"},
+        "idempotencyKey": "post-hook-cancel",
+    }
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await protocol._handle_tools_call(params, _context())
+    replay = await protocol._handle_tools_call(params, _context())
+
+    assert caught.value is cancellation
+    assert replay["tool"] == "stub.write"
+    assert module.executions == 1
+    assert post_hook_calls == 1
 
 
 @pytest.mark.unit

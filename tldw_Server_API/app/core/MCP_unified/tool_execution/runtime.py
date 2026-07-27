@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from typing import Any
 
@@ -224,138 +223,153 @@ class ToolExecutionRuntime:
         except ExpectedToolFailure as failure:
             return _expected_failure_payload(failure)
 
+        owner_invoked = False
+        owner_duration_ms = 0.0
+        module_name = module_id or getattr(module, "name", None)
+
         async def _execute_owner() -> dict[str, Any]:
-            # Execute tool with circuit breaker (pass context through)
+            nonlocal owner_duration_ms, owner_invoked
+            owner_invoked = True
             t0 = time.time()
 
-            try:
-                # Trace the tool call with OTEL
-                with self.telemetry.trace_context(
-                    "mcp.tool_call",
-                    {
-                        "mcp.tool": tool_name,
-                        "mcp.module": getattr(module, "name", "unknown"),
-                        "mcp.user_id": str(context.user_id or ""),
-                        "mcp.client_id": str(context.client_id or ""),
-                    },
-                ) as span:
-                    try:
-                        execution_args = tool_args
-                        if (
-                            policy.idempotency.inject_argument
-                            and normalized_idempotency_key
-                            and isinstance(tool_args, dict)
-                        ):
-                            execution_args = dict(tool_args)
-                            execution_args["idempotencyKey"] = normalized_idempotency_key
-                        await self.security.verify_prepared_tool_call(
-                            prepared,
-                            require_live_binding=True,
-                        )
-                        result = await module.execute_with_circuit_breaker(
-                            module.execute_tool,
-                            tool_name,
-                            execution_args,
-                            context,
-                        )
-                        span.set_attribute("mcp.status", "success")
-                    except asyncio.CancelledError:
-                        raise
-                    except InvalidParamsException as _tool_e:
-                        span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        with contextlib.suppress(self._noncritical_exceptions):
-                            self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
-                        raise
-                    except (TypeError, ValueError) as _tool_e:
-                        # Module argument validators often raise ValueError/TypeError.
-                        # Normalize those to INVALID_PARAMS so HTTP callers receive 400.
-                        span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        with contextlib.suppress(self._noncritical_exceptions):
-                            self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
-                        raise InvalidParamsException(str(_tool_e)) from _tool_e
-                    except PermissionError as _tool_e:
-                        span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        raise
-                    except self._noncritical_exceptions as _tool_e:
-                        sanitized_tool_error = self._generic_exception_like(
-                            _tool_e,
-                            self._tool_execution_error,
-                        )
-                        span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", sanitized_tool_error.__class__.__name__)
-                        span.set_attribute("mcp.error_message", self._tool_execution_error)
-                        raise sanitized_tool_error from None
-                    finally:
-                        span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - t0) * 1000.0))
-
-                # Format result
-                duration_ms = max(0.0, (time.time() - t0) * 1000.0)
-                profile_id = self.extract_eval_profile_id(context)
-                result = attach_execution_eval_metadata(
-                    result,
-                    tool_name=tool_name,
-                    tool_def=_observer_tool_def(),
-                    profile_id=profile_id,
-                    duration_ms=duration_ms,
-                )
-                execution_eval = execution_eval_metadata_from_tool_definition(
-                    tool_name=tool_name,
-                    tool_def=_observer_tool_def(),
-                    profile_id=profile_id,
-                    duration_ms=duration_ms,
-                )
-                result_eval = self._tool_use_eval_metadata(payload=result if isinstance(result, dict) else None)
-                for key in (
-                    "tool_prompt_id",
-                    "tool_prompt_version",
-                    "action_family",
-                    "result_kind",
-                    "path_filter_used",
-                    "truncated",
-                    "reason_code",
-                ):
-                    if key in result_eval:
-                        execution_eval[key] = result_eval[key]
-                if isinstance(result, str):
-                    content = [{"type": "text", "text": result}]
-                elif isinstance(result, list):
-                    content = result
-                elif isinstance(result, dict):
-                    # Preserve structured tool results as JSON content instead of stringifying.
-                    content = [{"type": "json", "json": result}]
-                else:
-                    content = [{"type": "text", "text": str(result)}]
-
-                module_name = module_id or getattr(module, "name", None)
-                # Record module operation metrics
+            with self.telemetry.trace_context(
+                "mcp.tool_call",
+                {
+                    "mcp.tool": tool_name,
+                    "mcp.module": getattr(module, "name", "unknown"),
+                    "mcp.user_id": str(context.user_id or ""),
+                    "mcp.client_id": str(context.client_id or ""),
+                },
+            ) as span:
                 try:
-                    duration = max(0.0, time.time() - t0)
-                    self.metrics.record_module_operation(module=module_name or "unknown", operation="tools_call", duration=duration, success=True)
-                except self._noncritical_exceptions as metrics_exc:
-                    logger.debug(
-                        "MCP tool success metrics skipped after noncritical failure: {error_type}",
-                        error_type=metrics_exc.__class__.__name__,
+                    execution_args = tool_args
+                    if (
+                        policy.idempotency.inject_argument
+                        and normalized_idempotency_key
+                        and isinstance(tool_args, dict)
+                    ):
+                        execution_args = dict(tool_args)
+                        execution_args["idempotencyKey"] = normalized_idempotency_key
+                    await self.security.verify_prepared_tool_call(
+                        prepared,
+                        require_live_binding=True,
                     )
+                    result = await module.execute_with_circuit_breaker(
+                        module.execute_tool,
+                        tool_name,
+                        execution_args,
+                        context,
+                    )
+                    span.set_attribute("mcp.status", "success")
+                except asyncio.CancelledError:
+                    raise
+                except ExpectedToolFailure as tool_error:
+                    span.set_attribute("mcp.status", "failure")
+                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
+                    raise
+                except InvalidParamsException as tool_error:
+                    span.set_attribute("mcp.status", "failure")
+                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
+                    span.set_attribute("mcp.error_message", "invalid_params")
+                    raise
+                except (TypeError, ValueError) as tool_error:
+                    span.set_attribute("mcp.status", "failure")
+                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
+                    span.set_attribute("mcp.error_message", "invalid_params")
+                    raise InvalidParamsException(str(tool_error)) from tool_error
+                except PermissionError as tool_error:
+                    span.set_attribute("mcp.status", "failure")
+                    span.set_attribute("mcp.error_type", tool_error.__class__.__name__)
+                    span.set_attribute("mcp.error_message", "permission_error")
+                    raise
+                except self._noncritical_exceptions as tool_error:
+                    sanitized_tool_error = self._generic_exception_like(
+                        tool_error,
+                        self._tool_execution_error,
+                    )
+                    span.set_attribute("mcp.status", "failure")
+                    span.set_attribute("mcp.error_type", sanitized_tool_error.__class__.__name__)
+                    span.set_attribute("mcp.error_message", self._tool_execution_error)
+                    raise sanitized_tool_error from None
+                finally:
+                    owner_duration_ms = max(0.0, (time.time() - t0) * 1000.0)
+                    span.set_attribute("mcp.duration_ms", owner_duration_ms)
+
+            profile_id = self.extract_eval_profile_id(context)
+            result = attach_execution_eval_metadata(
+                result,
+                tool_name=tool_name,
+                tool_def=_observer_tool_def(),
+                profile_id=profile_id,
+                duration_ms=owner_duration_ms,
+            )
+            execution_eval = execution_eval_metadata_from_tool_definition(
+                tool_name=tool_name,
+                tool_def=_observer_tool_def(),
+                profile_id=profile_id,
+                duration_ms=owner_duration_ms,
+            )
+            result_eval = self._tool_use_eval_metadata(
+                payload=result if isinstance(result, dict) else None,
+            )
+            for key in (
+                "tool_prompt_id",
+                "tool_prompt_version",
+                "action_family",
+                "result_kind",
+                "path_filter_used",
+                "truncated",
+                "reason_code",
+            ):
+                if key in result_eval:
+                    execution_eval[key] = result_eval[key]
+            if isinstance(result, str):
+                content = [{"type": "text", "text": result}]
+            elif isinstance(result, list):
+                content = result
+            elif isinstance(result, dict):
+                content = [{"type": "json", "json": result}]
+            else:
+                content = [{"type": "text", "text": str(result)}]
+            return {
+                "content": content,
+                "module": module_name,
+                "tool": tool_name,
+                "eval": execution_eval,
+            }
+
+        async def _run_success_observers() -> None:
+            try:
+                self.metrics.record_module_operation(
+                    module=module_name or "unknown",
+                    operation="tools_call",
+                    duration=owner_duration_ms / 1000.0,
+                    success=True,
+                )
+            except asyncio.CancelledError:
+                raise
+            except self._noncritical_exceptions as exc:
+                logger.debug(
+                    "MCP tool success metrics observer failed error_type={error_type}",
+                    error_type=exc.__class__.__name__,
+                )
+            try:
                 self.reporter.audit_tool_event(
                     context,
                     tool_name,
                     module_name,
                     status="success",
-                    duration_ms=duration_ms,
+                    duration_ms=owner_duration_ms,
                     arguments_hash=args_hash,
                 )
-                response_payload = {
-                    "content": content,
-                    "module": module_name,
-                    "tool": tool_name,
-                    "eval": execution_eval,
-                }
+            except asyncio.CancelledError:
+                raise
+            except self._noncritical_exceptions as exc:
+                logger.debug(
+                    "MCP tool success audit observer failed error_type={error_type}",
+                    error_type=exc.__class__.__name__,
+                )
+            try:
                 await self._run_post_hooks(
                     tool_name=tool_name,
                     tool_args=tool_args,
@@ -366,49 +380,100 @@ class ToolExecutionRuntime:
                     context=context,
                     scope_payload=_observer_scope_payload(),
                     status="success",
-                    duration_ms=duration_ms,
+                    duration_ms=owner_duration_ms,
                 )
-                return response_payload
-
             except asyncio.CancelledError:
                 raise
-            except self._noncritical_exceptions as e:
-                duration_ms = max(0.0, (time.time() - t0) * 1000.0)
-                context.logger.error(  # noqa: TRY400 - structured audit log records sanitized type only.
-                    "Tool execution failed: {error_type}",
-                    error_type=e.__class__.__name__,
+            except self._noncritical_exceptions as exc:
+                logger.debug(
+                    "MCP tool success post-hook observer failed error_type={error_type}",
+                    error_type=exc.__class__.__name__,
                 )
+
+        async def _run_failure_observers(error: Exception) -> None:
+            context.logger.error(  # noqa: TRY400 - the log contains only exception family.
+                "Tool execution failed: {error_type}",
+                error_type=error.__class__.__name__,
+            )
+            if isinstance(error, InvalidParamsException):
                 try:
-                    duration = max(0.0, time.time() - t0)
-                    self.metrics.record_module_operation(module=getattr(module, "name", "unknown"), operation="tools_call", duration=duration, success=False)
-                except self._noncritical_exceptions as metrics_exc:
-                    logger.debug(
-                        "MCP tool failure metrics skipped after noncritical failure: {error_type}",
-                        error_type=metrics_exc.__class__.__name__,
+                    self.metrics.record_tool_invalid_params(
+                        getattr(module, "name", "unknown"),
+                        str(tool_name),
                     )
+                except asyncio.CancelledError:
+                    raise
+                except self._noncritical_exceptions as exc:
+                    logger.debug(
+                        "MCP tool invalid-params metrics observer failed error_type={error_type}",
+                        error_type=exc.__class__.__name__,
+                    )
+            try:
+                self.metrics.record_module_operation(
+                    module=module_name or "unknown",
+                    operation="tools_call",
+                    duration=owner_duration_ms / 1000.0,
+                    success=False,
+                )
+            except asyncio.CancelledError:
+                raise
+            except self._noncritical_exceptions as exc:
+                logger.debug(
+                    "MCP tool failure metrics observer failed error_type={error_type}",
+                    error_type=exc.__class__.__name__,
+                )
+            try:
                 self.reporter.audit_tool_event(
                     context,
                     tool_name,
-                    module_id or getattr(module, "name", None),
+                    module_name,
                     status="failure",
-                    duration_ms=duration_ms,
+                    duration_ms=owner_duration_ms,
                     arguments_hash=args_hash,
-                    error=e,
+                    error=error,
                 )
+            except asyncio.CancelledError:
+                raise
+            except self._noncritical_exceptions as exc:
+                logger.debug(
+                    "MCP tool failure audit observer failed error_type={error_type}",
+                    error_type=exc.__class__.__name__,
+                )
+            try:
                 await self._run_post_hooks(
                     tool_name=tool_name,
                     tool_args=tool_args,
-                    module_id=module_id or getattr(module, "name", None),
+                    module_id=module_name,
                     tool_def=_observer_tool_def(),
                     is_write=is_write,
                     arguments_hash=args_hash,
                     context=context,
                     scope_payload=_observer_scope_payload(),
                     status="failure",
-                    duration_ms=duration_ms,
-                    error=e,
+                    duration_ms=owner_duration_ms,
+                    error=error,
                 )
+            except asyncio.CancelledError:
                 raise
+            except self._noncritical_exceptions as exc:
+                logger.debug(
+                    "MCP tool failure post-hook observer failed error_type={error_type}",
+                    error_type=exc.__class__.__name__,
+                )
+
+        async def _record_execution_failure(error: Exception) -> None:
+            if owner_invoked:
+                await _run_failure_observers(error)
+            status, reason_code = classify_tool_use_exception(error)
+            await _record_prepared_event(
+                status=status,
+                execution_origin=(
+                    self.reporter.execution_origin_for_failure(status)
+                    if status != "error"
+                    else "executed"
+                ),
+                reason_code=reason_code,
+            )
 
         if is_write and idempotency_cache_key:
             try:
@@ -432,6 +497,8 @@ class ToolExecutionRuntime:
                         self.metrics.record_idempotency_hit(module_id or getattr(module, "name", "unknown"), str(tool_name))
                     else:
                         self.metrics.record_idempotency_miss(module_id or getattr(module, "name", "unknown"), str(tool_name))
+                except asyncio.CancelledError:
+                    raise
                 except self._noncritical_exceptions as metrics_exc:
                     logger.debug(
                         "MCP idempotency metrics skipped after noncritical failure: {error_type}",
@@ -442,17 +509,10 @@ class ToolExecutionRuntime:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                status, reason_code = classify_tool_use_exception(exc)
-                await _record_prepared_event(
-                    status=status,
-                    execution_origin=(
-                        self.reporter.execution_origin_for_failure(status)
-                        if status != "error"
-                        else "executed"
-                    ),
-                    reason_code=reason_code,
-                )
+                await _record_execution_failure(exc)
                 raise
+            if not from_cache:
+                await _run_success_observers()
             await _record_prepared_event(
                 status="success",
                 execution_origin="cached" if from_cache else "executed",
@@ -468,17 +528,9 @@ class ToolExecutionRuntime:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            status, reason_code = classify_tool_use_exception(exc)
-            await _record_prepared_event(
-                status=status,
-                execution_origin=(
-                    self.reporter.execution_origin_for_failure(status)
-                    if status != "error"
-                    else "executed"
-                ),
-                reason_code=reason_code,
-            )
+            await _record_execution_failure(exc)
             raise
+        await _run_success_observers()
         await _record_prepared_event(
             status="success",
             execution_origin="executed",

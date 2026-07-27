@@ -69,6 +69,17 @@ class _FailingPostToolHookManager:
         raise RuntimeError("post hook failed for /Users/example/private.txt")
 
 
+class _RecordingPostToolHookManager:
+    def __init__(self) -> None:
+        self.after_contexts: list[ToolHookCallContext] = []
+
+    async def before_tool_call(self, _context: ToolHookCallContext) -> None:
+        return None
+
+    async def after_tool_call(self, context: ToolHookCallContext) -> None:
+        self.after_contexts.append(context)
+
+
 class _AllowAllRbac:
     async def check_permission(self, *_args: Any, **_kwargs: Any) -> bool:
         return True
@@ -88,6 +99,25 @@ class _ToolOnlyRateLimiter:
 class _NoopMetrics:
     def __getattr__(self, _name: str):
         return lambda *args, **kwargs: None
+
+
+class _RecordingMetrics(_NoopMetrics):
+    def __init__(self) -> None:
+        self.module_operations: list[bool] = []
+
+    def record_module_operation(self, **kwargs: Any) -> None:
+        self.module_operations.append(bool(kwargs["success"]))
+
+
+class _FailingObserverMetrics(_NoopMetrics):
+    def record_module_operation(self, **_kwargs: Any) -> None:
+        raise RuntimeError("private metrics detail")
+
+    def record_idempotency_hit(self, *_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("private hit detail")
+
+    def record_idempotency_miss(self, *_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("private miss detail")
 
 
 class _StaticEffectivePolicyResolver:
@@ -1220,7 +1250,16 @@ async def test_protocol_records_idempotency_replay(monkeypatch: pytest.MonkeyPat
 
     get_config.cache_clear()  # type: ignore[attr-defined]
     module = _ToolModule(write=True)
-    protocol, recorder = _protocol(module=module)
+    hooks = _RecordingPostToolHookManager()
+    protocol, recorder = _protocol(module=module, hook_manager=hooks)
+    metrics = _RecordingMetrics()
+    protocol.metrics = metrics
+    audit_calls: list[str] = []
+
+    def _record_audit(*_args: Any, **kwargs: Any) -> None:
+        audit_calls.append(str(kwargs["status"]))
+
+    monkeypatch.setattr(protocol._tool_execution_reporter, "audit_tool_event", _record_audit)
     context = _request_context()
     params = {
         "name": "test.write",
@@ -1233,8 +1272,45 @@ async def test_protocol_records_idempotency_replay(monkeypatch: pytest.MonkeyPat
 
     assert first["content"] == second["content"]
     assert module.calls == 1
-    assert recorder.events[-1].execution_origin == "cached"
-    assert recorder.events[-1].idempotency_replay is True
+    assert metrics.module_operations == [True]
+    assert audit_calls == ["success"]
+    assert len(hooks.after_contexts) == 1
+    cached_events = [event for event in recorder.events if event.execution_origin == "cached"]
+    assert len(cached_events) == 1
+    assert cached_events[0].idempotency_replay is True
+
+
+@pytest.mark.asyncio
+async def test_idempotent_success_survives_metrics_audit_and_reporting_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    from tldw_Server_API.app.core.MCP_unified.config import get_config
+
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    module = _ToolModule(write=True)
+    protocol, _recorder = _protocol(module=module)
+    protocol.metrics = _FailingObserverMetrics()
+
+    def _fail_audit(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("private audit detail")
+
+    def _fail_event(**_kwargs: Any) -> ToolUseEvent:
+        raise RuntimeError("private reporting detail")
+
+    monkeypatch.setattr(protocol._tool_execution_reporter, "audit_tool_event", _fail_audit)
+    monkeypatch.setattr(protocol._tool_execution_reporter, "build_event", _fail_event)
+    params = {
+        "name": "test.write",
+        "arguments": {"value": "A"},
+        "idempotencyKey": "observer-failures",
+    }
+
+    first = await protocol._handle_tools_call(params, _request_context())
+    replay = await protocol._handle_tools_call(params, _request_context())
+
+    assert first["content"] == replay["content"]
+    assert module.calls == 1
 
 
 def test_reporting_classifier_recognizes_expected_failure_shape_without_message_access() -> None:

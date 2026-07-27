@@ -271,6 +271,29 @@ class _FakeRedis:
         return deleted
 
 
+class _BlockingResultRedis(_FakeRedis):
+    """Redis double that can hold a result write across cancellation."""
+
+    def __init__(self, *, ignore_cancellation: bool = False) -> None:
+        super().__init__()
+        self.ignore_cancellation = ignore_cancellation
+        self.write_started = asyncio.Event()
+        self.allow_write = asyncio.Event()
+        self.write_cancellations = 0
+
+    async def eval(self, script: str, key_count: int, *values: Any) -> Any:
+        if key_count == 2 and len(values) == 5:
+            self.write_started.set()
+            while not self.allow_write.is_set():
+                try:
+                    await self.allow_write.wait()
+                except asyncio.CancelledError:
+                    self.write_cancellations += 1
+                    if not self.ignore_cancellation:
+                        raise
+        return await super().eval(script, key_count, *values)
+
+
 @pytest.mark.unit
 def test_run_result_and_executor_are_frozen_narrow_types() -> None:
     models = importlib.import_module(
@@ -1705,7 +1728,155 @@ async def test_degraded_stages_are_bounded_safe_and_remote_health_is_specific() 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_shutdown_is_available_without_task6_finalizers() -> None:
-    manager = _local_manager()
+async def test_caller_cancellation_waits_for_exact_remote_commit() -> None:
+    redis = _BlockingResultRedis()
+    manager = _remote_manager(redis)
+    payload = {"content": [{"type": "text", "text": "exact-result"}]}
+    expected = canonical_json_bytes(payload, max_bytes=_policy().max_result_bytes)
+    calls = 0
 
-    assert await manager.shutdown() is None
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return payload
+
+    task = asyncio.create_task(
+        manager.execute("cancel-after-local", "args", _execute, policy=_policy())
+    )
+    await asyncio.wait_for(redis.write_started.wait(), timeout=0.5)
+    task.cancel()
+    await asyncio.sleep(0)
+    cancellation_was_deferred = not task.done()
+    redis.allow_write.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.5)
+
+    replay = await manager.execute(
+        "cancel-after-local",
+        "args",
+        _execute,
+        policy=_policy(),
+    )
+    assert cancellation_was_deferred is True
+    assert redis.values[_result_key("cancel-after-local")] == expected
+    assert replay.payload == payload
+    assert replay.from_cache is True
+    assert calls == 1
+    assert manager._finalizers == set()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_remote_finalize_timeout_keeps_local_replay_and_drains_cancelled_task() -> None:
+    redis = _BlockingResultRedis()
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    payload = {"content": [{"type": "text", "text": "local-after-timeout"}]}
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return payload
+
+    result = await asyncio.wait_for(
+        manager.execute("finalize-timeout", "args", _execute, policy=_policy()),
+        timeout=2.5,
+    )
+    replay = await manager.execute(
+        "finalize-timeout",
+        "args",
+        _execute,
+        policy=_policy(),
+    )
+
+    assert result.payload is payload
+    assert result.persistence == "local"
+    assert replay.payload == payload
+    assert replay.from_cache is True
+    assert calls == 1
+    assert redis.write_cancellations == 1
+    assert manager._finalizers == set()
+    assert manager.remote_degraded is True
+    assert stages == [("finalize_timeout", "TimeoutError")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cancellation_resistant_finalizer_stays_owned_and_shutdown_drains_exact_bytes() -> None:
+    redis = _BlockingResultRedis(ignore_cancellation=True)
+    stages: list[tuple[str, str]] = []
+    messages: list[str] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    payload = {"content": [{"type": "text", "text": "captured-before-mutation"}]}
+    expected = canonical_json_bytes(payload, max_bytes=_policy().max_result_bytes)
+
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    task = asyncio.create_task(
+        manager.execute(
+            "stuck-finalizer-private-key",
+            "args",
+            lambda: _async_payload(payload),
+            policy=_policy(),
+        )
+    )
+    try:
+        done, _pending = await asyncio.wait({task}, timeout=3.0)
+        returned_before_release = task in done
+        if not returned_before_release:
+            redis.allow_write.set()
+            await task
+
+        result = task.result()
+        payload["content"][0]["text"] = "mutated-after-return"
+        retained_before_shutdown = len(manager._finalizers)
+        shutdown_task = asyncio.create_task(manager.shutdown())
+        await asyncio.sleep(0)
+        redis.allow_write.set()
+        await asyncio.wait_for(shutdown_task, timeout=1.0)
+    finally:
+        redis.allow_write.set()
+        await asyncio.gather(task, return_exceptions=True)
+        logger.remove(sink_id)
+
+    assert returned_before_release is True
+    assert result.persistence == "local"
+    assert retained_before_shutdown == 1
+    assert redis.values[_result_key("stuck-finalizer-private-key")] == expected
+    assert manager._finalizers == set()
+    assert manager.remote_degraded is True
+    assert stages == [
+        ("finalize_timeout", "TimeoutError"),
+        ("finalizer_stuck", "TimeoutError"),
+    ]
+    assert all("stuck-finalizer-private-key" not in message for message in messages)
+    assert all("captured-before-mutation" not in message for message in messages)
+    assert all(
+        "stage=finalize_timeout error_type=TimeoutError" in message
+        or "stage=finalizer_stuck error_type=TimeoutError" in message
+        for message in messages
+        if "MCP idempotency degraded stage=" in message
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_normal_manager_shutdown_leaves_no_finalizer_pending() -> None:
+    manager = _remote_manager(_FakeRedis())
+
+    await manager.execute(
+        "normal-shutdown",
+        "args",
+        lambda: _async_payload({"ok": True}),
+        policy=_policy(),
+    )
+    await manager.shutdown()
+
+    assert manager._finalizers == set()
