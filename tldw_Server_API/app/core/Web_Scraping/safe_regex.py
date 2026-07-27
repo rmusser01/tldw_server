@@ -12,7 +12,7 @@ import regex
 _MAX_PATTERN_CHARS = 4_096
 _MAX_INPUT_CHARS = 1_000_000
 _MAX_TIMEOUT_S = 0.100
-_REGEX_ERRORS = (regex.error, TypeError, ValueError, OverflowError)
+_REGEX_ERRORS = (regex.error, TypeError, ValueError, OverflowError, RecursionError)
 
 
 @dataclass(frozen=True, slots=True)

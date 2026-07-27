@@ -16,6 +16,8 @@ from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
 )
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
+_RECURSIVE_PATTERN = "(" * 500 + "a" + ")" * 500
+
 
 class _FakeCompiled:
     def __init__(self, *, match: Any = None, error: Exception | None = None) -> None:
@@ -88,6 +90,21 @@ def test_invalid_pattern_returns_stable_code() -> None:
     result = search_untrusted("[", "sample")
 
     assert result == SafeRegexResult(matched=False, code="regex_invalid")
+
+
+def test_recursive_compile_failure_returns_stable_code_without_disclosure(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    result = search_untrusted(_RECURSIVE_PATTERN, "a")
+    captured = capsys.readouterr()
+    disclosed = " ".join([repr(result), caplog.text, captured.out, captured.err])
+
+    assert result == SafeRegexResult(matched=False, code="regex_invalid")
+    assert _RECURSIVE_PATTERN not in disclosed
+    assert "maximum recursion depth exceeded" not in disclosed
 
 
 def test_pattern_size_boundary_accepts_exact_limit_and_rejects_one_over(
@@ -308,6 +325,21 @@ def test_router_validation_drops_invalid_and_oversized_patterns() -> None:
     assert cleaned["domains"]["example.com"]["url_patterns"] == [r"/article/\d+$"]
 
 
+def test_router_validation_drops_recursive_pattern_without_raising() -> None:
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": [_RECURSIVE_PATTERN],
+                }
+            }
+        }
+    )
+
+    assert cleaned["domains"]["example.com"]["url_patterns"] == []
+
+
 def test_directly_constructed_router_invalid_pattern_fails_open() -> None:
     router = ScraperRouter(
         {
@@ -315,6 +347,23 @@ def test_directly_constructed_router_invalid_pattern_fails_open() -> None:
                 "example.com": {
                     "backend": "curl",
                     "url_patterns": ["["],
+                }
+            }
+        }
+    )
+
+    plan = router.resolve("https://example.com/article")
+
+    assert plan.backend == "auto"
+
+
+def test_directly_constructed_router_recursive_pattern_fails_open() -> None:
+    router = ScraperRouter(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": [_RECURSIVE_PATTERN],
                 }
             }
         }
@@ -415,6 +464,24 @@ def test_generated_regex_invalid_pattern_uses_stable_code(
 
     assert result["success"] is False
     assert result["error"] == "regex_invalid"
+
+
+def test_generated_regex_recursive_pattern_uses_stable_code_without_disclosure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _install_regex_llm_response(monkeypatch, {"pattern": _RECURSIVE_PATTERN})
+    caplog.set_level(logging.DEBUG)
+
+    result = _generate_regex("a")
+    captured = capsys.readouterr()
+    disclosed = " ".join([repr(result), caplog.text, captured.out, captured.err])
+
+    assert result["success"] is False
+    assert result["error"] == "regex_invalid"
+    assert _RECURSIVE_PATTERN not in disclosed
+    assert "maximum recursion depth exceeded" not in disclosed
 
 
 def test_generated_regex_oversized_pattern_uses_stable_code(
