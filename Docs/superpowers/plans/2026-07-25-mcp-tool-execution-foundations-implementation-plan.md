@@ -724,19 +724,19 @@ Delete the current broad `except RedisError: return await _run_local(...)` path 
 
 ### Required Fault Tests
 
-- [ ] Local and Redis replay call the callback once and return equivalent fresh copies.
-- [ ] Mutating first response or one replay does not alter future replay.
-- [ ] Concurrent local waiter times out at the configured bound without cancelling the owner.
-- [ ] Concurrent Redis waiter returns cache if it appears before the bound; otherwise returns `idempotency_in_progress` without dispatch.
-- [ ] Redis lock `SET NX` stores then raises: callback count zero, `idempotency_unavailable`, no local fallback.
-- [ ] Redis result `SET` fails after callback: callback count one, original success returned, local replay available, no second backend execution.
-- [ ] Redis release fails after callback: same callback-at-most-once assertion.
-- [ ] Argument-binding ambiguity fails closed without callback.
-- [ ] Non-JSON, NaN, and over-limit valid callback payloads are returned unchanged but not cached.
-- [ ] Expected and unexpected callback failures are absent from both local and Redis result caches.
-- [ ] Cancellation before a valid callback result propagates, invokes no fallback path, and stores no result.
-- [ ] Different active scope digest cannot replay or conflict with another scope; no-scope compatibility remains exact.
-- [ ] Every degraded path increments one bounded-stage metric, sets remote health degraded when applicable, and logs only stage plus exception family.
+- [x] Local and Redis replay call the callback once and return equivalent fresh copies.
+- [x] Mutating first response or one replay does not alter future replay.
+- [x] Concurrent local waiter times out at the configured bound without cancelling the owner.
+- [x] Concurrent Redis waiter returns cache if it appears before the bound; otherwise returns `idempotency_in_progress` without dispatch.
+- [x] Redis lock `SET NX` stores then raises: callback count zero, `idempotency_unavailable`, no local fallback.
+- [x] Redis result `SET` fails after callback: callback count one, original success returned, local replay available, no second backend execution.
+- [x] Redis release fails after callback: same callback-at-most-once assertion.
+- [x] Argument-binding ambiguity fails closed without callback.
+- [x] Non-JSON, NaN, and over-limit valid callback payloads are returned unchanged but not cached.
+- [x] Expected and unexpected callback failures are absent from both local and Redis result caches.
+- [x] Cancellation before a valid callback result propagates, invokes no fallback path, and stores no result.
+- [x] Different active scope digest cannot replay or conflict with another scope; no-scope compatibility remains exact.
+- [x] Every degraded path increments one bounded-stage metric, sets remote health degraded when applicable, and logs only stage plus exception family.
 
 Use monotonic-time assertions with generous scheduling tolerance; do not sleep for full production defaults. Construct a policy with a one-second wait and coordinate owners with `asyncio.Event`.
 
