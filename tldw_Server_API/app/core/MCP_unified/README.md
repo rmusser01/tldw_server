@@ -108,10 +108,12 @@ argument fingerprint remains bound for the same TTL after failure. A retry with
 the same key and arguments may execute again; using the key with different
 arguments remains a conflict.
 
-Replay intentionally returns the original cached response until TTL expiry,
-even when mutable downstream content, tool definitions, provider settings, or
-model configuration changed after the successful call. Use a new idempotency
-key when fresh downstream state is required.
+Replay intentionally returns the original cached response until TTL expiry.
+Mutable downstream content, provider settings, model configuration, and tool
+definition changes completed before the current call was prepared can replay
+prior cached output. Tool-definition drift after the current preparation fails
+closed as `stale_prepared_call` instead of replaying. Use a new idempotency key
+when fresh downstream state is required.
 
 After a valid success, serialization, Redis persistence, or lock-release
 degradation does not replace the caller's result. The manager keeps a bounded

@@ -40,6 +40,11 @@ LOGGER_METHODS = {
     "trace",
     "warning",
 }
+SAFE_EXCEPTION_LOG_HELPERS = {
+    "_safe_error_type",
+    "_safe_exception_family",
+    "get_expected_tool_failure_reason",
+}
 RUNTIME_POLICY_FIELD_PATHS = {
     "effect": ("policy", "effect"),
     "rate_limit_category": ("policy", "rate_limit_category"),
@@ -438,11 +443,18 @@ def _contains_expected_error_result(nodes: list[ast.AST]) -> bool:
     return False
 
 
-def _contains_domain_literal(node: ast.AST) -> bool:
+def _contains_domain_token(node: ast.AST) -> bool:
     for candidate in ast.walk(node):
-        if not isinstance(candidate, ast.Constant) or not isinstance(candidate.value, str):
+        value: str | None = None
+        if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str):
+            value = candidate.value
+        elif isinstance(candidate, ast.Name):
+            value = candidate.id
+        elif isinstance(candidate, ast.Attribute):
+            value = candidate.attr
+        if value is None:
             continue
-        normalized = candidate.value.lower()
+        normalized = value.lower()
         for separator in ".-_/:":
             normalized = normalized.replace(separator, " ")
         if DOMAIN_BRANCH_TOKENS.intersection(normalized.split()):
@@ -463,6 +475,38 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
                 )
             continue
 
+        if isinstance(node, ast.Match):
+            if _node_mentions_symbols(node.subject, EXPECTED_FAILURE_SYMBOLS):
+                violations.append(
+                    f"{path.name}:{node.lineno} branches on ExpectedToolFailure in protocol facade"
+                )
+            elif _contains_domain_token(node.subject) and _contains_expected_error_result(
+                list(node.cases)
+            ):
+                violations.append(
+                    f"{path.name}:{node.lineno} contains a Skills/model/provider error-result branch"
+                )
+            for case in node.cases:
+                predicates = [case.pattern]
+                if case.guard is not None:
+                    predicates.append(case.guard)
+                if any(
+                    _node_mentions_symbols(predicate, EXPECTED_FAILURE_SYMBOLS)
+                    for predicate in predicates
+                ):
+                    violations.append(
+                        f"{path.name}:{case.pattern.lineno} branches on ExpectedToolFailure "
+                        "in protocol facade"
+                    )
+                elif any(_contains_domain_token(predicate) for predicate in predicates) and (
+                    _contains_expected_error_result(case.body)
+                ):
+                    violations.append(
+                        f"{path.name}:{case.pattern.lineno} contains a Skills/model/provider "
+                        "error-result branch"
+                    )
+            continue
+
         predicate: ast.AST | None = None
         bodies: list[ast.AST] = []
         if isinstance(node, ast.If):
@@ -471,16 +515,13 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
         elif isinstance(node, ast.IfExp):
             predicate = node.test
             bodies = [node.body, node.orelse]
-        elif isinstance(node, ast.Match):
-            predicate = node.subject
-            bodies = list(node.cases)
         if predicate is None:
             continue
         if _node_mentions_symbols(predicate, EXPECTED_FAILURE_SYMBOLS):
             violations.append(
                 f"{path.name}:{node.lineno} branches on ExpectedToolFailure in protocol facade"
             )
-        elif _contains_domain_literal(predicate) and _contains_expected_error_result(bodies):
+        elif _contains_domain_token(predicate) and _contains_expected_error_result(bodies):
             violations.append(
                 f"{path.name}:{node.lineno} contains a Skills/model/provider error-result branch"
             )
@@ -504,14 +545,61 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
         return [f"{path.name}: missing execute_prepared_tool_call for policy scan"]
 
     violations: list[str] = []
-    for node in ast.walk(tree):
+    execution_nodes = list(ast.walk(execution))
+    policy_bindings = [
+        node
+        for node in execution_nodes
+        if isinstance(node, ast.Name)
+        and node.id == "policy"
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+    ]
+    direct_policy_targets: set[int] = set()
+    for node in execution_nodes:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "policy"
+            and _attribute_path(node.value) == ("prepared", "policy")
+        ):
+            direct_policy_targets.add(id(node.targets[0]))
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "policy"
+            and node.value is not None
+            and _attribute_path(node.value) == ("prepared", "policy")
+        ):
+            direct_policy_targets.add(id(node.target))
+
+    valid_policy_binding = (
+        len(policy_bindings) == 1 and id(policy_bindings[0]) in direct_policy_targets
+    )
+    if not policy_bindings:
+        violations.append(
+            f"{path.name}:{execution.lineno} must bind policy once directly from prepared.policy"
+        )
+    elif id(policy_bindings[0]) not in direct_policy_targets:
+        violations.append(
+            f"{path.name}:{policy_bindings[0].lineno} must bind policy directly from prepared.policy"
+        )
+    for binding in policy_bindings[1:]:
+        violations.append(
+            f"{path.name}:{binding.lineno} reassigns policy; only one prepared.policy binding is allowed"
+        )
+
+    for node in execution_nodes:
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             field = node.attr
             if field not in MUTABLE_EXECUTION_FIELDS:
                 continue
             path_parts = _attribute_path(node)
             allowed_path = RUNTIME_POLICY_FIELD_PATHS.get(field)
-            if allowed_path is None or path_parts != allowed_path:
+            if (
+                allowed_path is None
+                or path_parts != allowed_path
+                or not valid_policy_binding
+            ):
                 violations.append(
                     f"{path.name}:{node.lineno} reads {_display_node(node)} outside prepared policy"
                 )
@@ -569,13 +657,10 @@ def _is_logger_expression(node: ast.AST) -> bool:
     return False
 
 
-def _is_safe_exception_family_expression(node: ast.AST, exception_names: set[str]) -> bool:
+def _is_safe_exception_log_expression(node: ast.AST, exception_names: set[str]) -> bool:
     if isinstance(node, ast.Call):
         function_path = _attribute_path(node.func)
-        if function_path and function_path[-1] in {
-            "_safe_error_type",
-            "_safe_exception_family",
-        }:
+        if function_path and function_path[-1] in SAFE_EXCEPTION_LOG_HELPERS:
             return True
         if (
             isinstance(node.func, ast.Name)
@@ -594,7 +679,7 @@ def _is_safe_exception_family_expression(node: ast.AST, exception_names: set[str
 
 
 def _uses_raw_exception_unsafely(node: ast.AST, exception_names: set[str]) -> bool:
-    if _is_safe_exception_family_expression(node, exception_names):
+    if _is_safe_exception_log_expression(node, exception_names):
         return False
     if isinstance(node, ast.Name) and node.id in exception_names:
         return True
@@ -640,12 +725,52 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
         self._visit_function(node)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
-        previous = self.exception_names
+        previous = set(self.exception_names)
+        self.exception_names = set(previous)
         if isinstance(node.name, str):
-            self.exception_names = previous | {node.name}
+            self.exception_names.add(node.name)
         for statement in node.body:
             self.visit(statement)
-        self.exception_names = previous
+        if isinstance(node.name, str):
+            self.exception_names.discard(node.name)
+
+    @staticmethod
+    def _assigned_names(targets: list[ast.AST]) -> set[str]:
+        return {
+            candidate.id
+            for target in targets
+            for candidate in ast.walk(target)
+            if isinstance(candidate, ast.Name) and isinstance(candidate.ctx, ast.Store)
+        }
+
+    def _update_exception_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
+        assigned_names = self._assigned_names(targets)
+        if _uses_raw_exception_unsafely(value, self.exception_names):
+            self.exception_names.update(assigned_names)
+        else:
+            self.exception_names.difference_update(assigned_names)
+
+    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        self.visit(node.value)
+        self._update_exception_aliases(node.targets, node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+        if node.value is not None:
+            self.visit(node.value)
+            self._update_exception_aliases([node.target], node.value)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
+        self.visit(node.value)
+        self._update_exception_aliases([node.target], node.value)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
+        self.visit(node.value)
+        assigned_names = self._assigned_names([node.target])
+        if assigned_names.intersection(self.exception_names) or _uses_raw_exception_unsafely(
+            node.value,
+            self.exception_names,
+        ):
+            self.exception_names.update(assigned_names)
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         is_logger_call = (
@@ -694,6 +819,11 @@ def _unsafe_exception_log_violations_for(path: Path) -> list[str]:
     visitor = _UnsafeExceptionLogVisitor(path)
     visitor.visit(tree)
     return visitor.violations
+
+
+def _defined_class_names_for(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return {node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
 
 
 def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
@@ -1778,13 +1908,7 @@ def test_protocol_reexports_tool_execution_shared_symbols() -> None:
 def test_idempotency_manager_is_extracted_with_protocol_compatibility() -> None:
     from tldw_Server_API.app.core.MCP_unified import protocol
 
-    protocol_tree = ast.parse(
-        (MCP_ROOT / "protocol.py").read_text(encoding="utf-8"),
-        filename=str(MCP_ROOT / "protocol.py"),
-    )
-    protocol_classes = {
-        node.name for node in protocol_tree.body if isinstance(node, ast.ClassDef)
-    }
+    protocol_classes = _defined_class_names_for(MCP_ROOT / "protocol.py")
 
     assert "IdempotencyManager" not in protocol_classes, (
         "protocol.py must only re-export the extracted IdempotencyManager"
@@ -1794,6 +1918,19 @@ def test_idempotency_manager_is_extracted_with_protocol_compatibility() -> None:
 
     assert protocol.IdempotencyManager is IdempotencyManager
     assert inspect.getmodule(protocol.IdempotencyManager) is idempotency
+
+
+def test_protocol_class_scan_detects_nested_idempotency_manager(tmp_path: Path) -> None:
+    sample = tmp_path / "nested_idempotency_manager.py"
+    sample.write_text(
+        "def build_manager():\n"
+        "    class IdempotencyManager:\n"
+        "        pass\n"
+        "    return IdempotencyManager\n",
+        encoding="utf-8",
+    )
+
+    assert "IdempotencyManager" in _defined_class_names_for(sample)
 
 
 def test_tool_execution_package_does_not_import_protocol_facade() -> None:
@@ -1881,6 +2018,50 @@ def test_protocol_branch_scan_detects_domain_specific_error_result(tmp_path: Pat
     assert "Skills/model/provider" in violations[0]
 
 
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        (
+            "identifier_domain.py",
+            "SKILLS_TOOLS = {'skills.run'}\n"
+            "def handle(tool_name):\n"
+            "    if tool_name in SKILLS_TOOLS:\n"
+            "        return {'isError': True}\n"
+            "    return {}\n",
+        ),
+        (
+            "match_pattern_domain.py",
+            "def handle(tool_name):\n"
+            "    match tool_name:\n"
+            "        case 'model.run':\n"
+            "            return {'isError': True}\n"
+            "    return {}\n",
+        ),
+        (
+            "match_guard_domain.py",
+            "PROVIDER_TOOLS = {'provider.run'}\n"
+            "def handle(tool_name):\n"
+            "    match tool_name:\n"
+            "        case candidate if candidate in PROVIDER_TOOLS:\n"
+            "            return {'isError': True}\n"
+            "    return {}\n",
+        ),
+    ],
+)
+def test_protocol_branch_scan_detects_domain_identifiers_patterns_and_guards(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    violations = _protocol_expected_failure_branch_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "Skills/model/provider" in violations[0]
+
+
 def test_runtime_security_decisions_only_read_immutable_prepared_policy() -> None:
     violations = _runtime_mutable_authority_violations_for(
         MCP_ROOT / "tool_execution" / "runtime.py"
@@ -1913,9 +2094,58 @@ def test_runtime_policy_scan_distinguishes_typed_policy_from_mutable_reads(
 
     assert _runtime_mutable_authority_violations_for(safe) == []
     violations = _runtime_mutable_authority_violations_for(unsafe)
-    assert len(violations) == 2
+    assert len(violations) == 3
+    assert any("prepared.policy" in violation for violation in violations)
     assert any("'category'" in violation for violation in violations)
     assert any("prepared.is_write" in violation for violation in violations)
+
+
+def test_runtime_policy_scan_rejects_policy_bound_to_mutable_metadata(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "mutable_policy_alias.py"
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.tool_def['metadata']\n"
+        "    return policy.effect\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("prepared.policy" in violation for violation in violations)
+
+
+def test_runtime_policy_scan_rejects_policy_rebinding(tmp_path: Path) -> None:
+    sample = tmp_path / "rebound_policy.py"
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        "    policy = prepared.policy\n"
+        "    return policy.effect\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("reassigns policy" in violation for violation in violations)
+
+
+def test_runtime_policy_scan_rejects_nested_policy_shadowing(tmp_path: Path) -> None:
+    sample = tmp_path / "shadowed_policy.py"
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        "    def effect_from_metadata():\n"
+        "        policy = prepared.tool_def['metadata']\n"
+        "        return policy.effect\n"
+        "    return effect_from_metadata()\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("reassigns policy" in violation for violation in violations)
 
 
 def test_runtime_has_no_default_str_serialization_fallback() -> None:
@@ -1970,6 +2200,26 @@ def test_exception_log_scan_rejects_raw_exception_interpolation(tmp_path: Path) 
 
     assert len(violations) == 1
     assert "str(exc)" in violations[0]
+
+
+def test_exception_log_scan_rejects_exception_alias_and_repr(tmp_path: Path) -> None:
+    sample = tmp_path / "unsafe_exception_alias.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    failure = exc\n"
+        "    logger.error('execution failed: {error}', error=failure)\n"
+        "    logger.error('execution failed: {error}', error=repr(failure))\n",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 2
+    assert any("failure" in violation for violation in violations)
+    assert any("repr(failure)" in violation for violation in violations)
 
 
 def test_exception_log_scan_rejects_loguru_exception_context(tmp_path: Path) -> None:
