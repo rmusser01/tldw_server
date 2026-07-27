@@ -733,6 +733,354 @@ def test_aggregate_retained_output_budget_fails_without_partial_results() -> Non
     }
 
 
+@pytest.mark.parametrize(
+    ("rules", "html_text", "extractor_name", "max_output_chars", "expected_calls"),
+    [
+        (
+            {"fields": [{"name": "items", "type": "list", "selector": "//li"}]},
+            "<ul>" + "".join("<li>x</li>" for _ in range(10)) + "</ul>",
+            "_extract_text_from_node",
+            1,
+            2,
+        ),
+        (
+            {
+                "fields": [
+                    {
+                        "name": "items",
+                        "type": "nested_list",
+                        "selector": "//section",
+                        "fields": [{"name": "value", "selector": ".//span"}],
+                    }
+                ]
+            },
+            "<main>" + "".join("<section><span>x</span></section>" for _ in range(10)) + "</main>",
+            "_extract_text_from_node",
+            1,
+            2,
+        ),
+        (
+            {"content_xpath": "//p"},
+            "<article>" + "".join("<p>x</p>" for _ in range(10)) + "</article>",
+            "coerce_value",
+            1,
+            2,
+        ),
+        (
+            {
+                "fields": [
+                    {
+                        "name": "items",
+                        "type": "list",
+                        "selector": "//li",
+                        "itemType": "html",
+                    }
+                ]
+            },
+            "<ul>" + "".join("<li>x</li>" for _ in range(10)) + "</ul>",
+            "_extract_html_from_node",
+            10,
+            2,
+        ),
+    ],
+    ids=["list", "nested-list", "legacy-join", "html-serialization"],
+)
+def test_output_budget_stops_collection_materialization_incrementally(
+    monkeypatch: pytest.MonkeyPatch,
+    rules: dict[str, Any],
+    html_text: str,
+    extractor_name: str,
+    max_output_chars: int,
+    expected_calls: int,
+) -> None:
+    owner = engine if extractor_name == "coerce_value" else schema
+    original = getattr(owner, extractor_name)
+    calls = 0
+
+    def counting_extract(node: Any) -> str | None:
+        nonlocal calls
+        calls += 1
+        return original(node)
+
+    monkeypatch.setattr(owner, extractor_name, counting_extract)
+    if extractor_name == "coerce_value":
+        monkeypatch.setattr(schema, extractor_name, counting_extract)
+    code = f"selector_too_complex:retained_output_chars>{max_output_chars}"
+
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(max_retained_output_chars=max_output_chars),
+    )
+
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": code,
+    }
+    assert calls == expected_calls
+
+
+@pytest.mark.parametrize(
+    ("html_text", "replacement"),
+    [
+        ("<article><h1>xx</h1></article>", ""),
+        ("<article><h1>x</h1></article>", "xx"),
+    ],
+    ids=["raw-input", "transform-result"],
+)
+def test_transform_materialization_uses_rendered_output_limit(
+    html_text: str,
+    replacement: str,
+) -> None:
+    code = "selector_too_complex:rendered_output>1"
+    rules = {
+        "fields": [
+            {
+                "name": "value",
+                "selector": "//h1",
+                "transforms": [{"name": "regex_replace", "pattern": "x", "repl": replacement}],
+            }
+        ]
+    }
+
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(
+            max_retained_output_chars=1,
+            max_rendered_output_chars=1,
+        ),
+    )
+
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": code,
+    }
+
+
+def test_transform_reduction_succeeds_under_final_retained_limit() -> None:
+    rules = {
+        "fields": [
+            {
+                "name": "value",
+                "selector": "//h1",
+                "transforms": [{"name": "regex_replace", "pattern": "x", "repl": ""}],
+            }
+        ]
+    }
+
+    result = selectors.extract_schema_fields(
+        "<article><h1>xx</h1></article>",
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(
+            max_retained_output_chars=1,
+            max_rendered_output_chars=2,
+        ),
+    )
+
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "schema_fields": {"value": ""},
+    }
+
+
+@pytest.mark.parametrize(
+    ("selector", "html_text"),
+    [
+        ("//li", "<ul><li>aa</li><li>bb</li></ul>"),
+        ("css:table td", "<table><tbody><tr><td>aa</td><td>bb</td></tr></tbody></table>"),
+    ],
+    ids=["list", "table"],
+)
+def test_compatibility_projection_is_charged_at_exact_output_boundary(
+    selector: str,
+    html_text: str,
+) -> None:
+    rules = {"fields": [{"name": "content", "type": "list", "selector": selector}]}
+
+    exact = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(max_retained_output_chars=9),
+    )
+    one_over = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(max_retained_output_chars=8),
+    )
+
+    assert exact == {
+        "url": "https://example.com/post",
+        "extraction_successful": True,
+        "schema_fields": {"content": ["aa", "bb"]},
+        "content": "aa\nbb",
+    }
+    assert one_over == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": "selector_too_complex:retained_output_chars>8",
+    }
+
+
+def test_table_shaped_compatibility_projection_is_charged_separately() -> None:
+    rules = {
+        "fields": [
+            {
+                "name": "content",
+                "type": "nested_list",
+                "selector": "//tr",
+                "fields": [{"name": "cell", "selector": ".//td"}],
+            }
+        ]
+    }
+    html_text = "<table><tr><td>aa</td></tr><tr><td>bb</td></tr></table>"
+
+    exact = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(max_retained_output_chars=8),
+    )
+    one_over = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(max_retained_output_chars=7),
+    )
+
+    table = [{"cell": "aa"}, {"cell": "bb"}]
+    assert exact == {
+        "url": "https://example.com/post",
+        "extraction_successful": True,
+        "schema_fields": {"content": table},
+        "content": table,
+    }
+    assert one_over == {
+        "url": "https://example.com/post",
+        "extraction_successful": False,
+        "error": "selector_too_complex:retained_output_chars>7",
+    }
+
+
+@pytest.mark.parametrize("case", ["exact", "one-over"])
+def test_default_projection_budget_without_large_dom(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    values = ["a" * 166_666, "b" * 166_666, "c" * 166_667] if case == "exact" else ["a" * 250_000, "b" * 250_000]
+    value_iterator = iter(values)
+    monkeypatch.setattr(schema, "_extract_text_from_node", lambda _node: next(value_iterator))
+    html_text = "<ul>" + "".join("<li>x</li>" for _ in values) + "</ul>"
+
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        {"fields": [{"name": "content", "type": "list", "selector": "//li"}]},
+    )
+
+    if case == "exact":
+        assert result["extraction_successful"] is True
+        assert result["schema_fields"]["content"] == values
+        assert len(result["content"]) == 500_001
+    else:
+        assert result == {
+            "url": "https://example.com/post",
+            "extraction_successful": False,
+            "error": "selector_too_complex:retained_output_chars>1000000",
+        }
+
+
+def test_irrelevant_item_selector_is_compile_only_at_evaluation_boundary() -> None:
+    rules = {
+        "fields": [
+            {
+                "name": "title",
+                "selector": "//h1",
+                "itemSelector": "//span[",
+            }
+        ]
+    }
+    limits = schema._SchemaLimits(max_selector_evaluations=1)
+
+    report = selectors.validate_selector_rules(
+        rules,
+        html_text="<article><h1>Headline</h1></article>",
+        include_counts=True,
+        _limits=limits,
+    )
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+        _limits=limits,
+    )
+
+    assert report == {
+        "errors": [
+            {
+                "key": "fields.title.item_selector",
+                "selector": "//span[",
+                "error": "selector_invalid",
+            }
+        ],
+        "warnings": [],
+        "selector_counts": {"fields.title": 1},
+    }
+    assert result["schema_fields"] == {"title": "Headline"}
+
+
+@pytest.mark.parametrize(
+    ("selectors_in_order", "max_evaluations", "expected_title", "expected_error"),
+    [
+        (["//h1", "//h2"], 1, "First", None),
+        (["//missing", "//h2"], 2, "Second", None),
+        (
+            ["//missing", "//h2"],
+            1,
+            None,
+            "selector_too_complex:selector_evaluations>1",
+        ),
+    ],
+    ids=["first-nonempty", "fallback-exact-limit", "fallback-one-over"],
+)
+def test_fallback_validation_matches_extraction_evaluation_path(
+    selectors_in_order: list[str],
+    max_evaluations: int,
+    expected_title: str | None,
+    expected_error: str | None,
+) -> None:
+    rules = {"title_xpath": selectors_in_order}
+    html_text = "<article><h1>First</h1><h2>Second</h2></article>"
+    limits = schema._SchemaLimits(max_selector_evaluations=max_evaluations)
+
+    report = selectors.validate_selector_rules(
+        rules,
+        html_text=html_text,
+        _limits=limits,
+    )
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=limits,
+    )
+
+    if expected_error:
+        assert [entry["error"] for entry in report["errors"]] == [expected_error]
+        assert result["error"] == expected_error
+    else:
+        assert report["errors"] == []
+        assert result["title"] == expected_title
+
+
 def test_schema_limit_defaults_are_explicit_and_conservative() -> None:
     assert (
         schema._SchemaLimits(

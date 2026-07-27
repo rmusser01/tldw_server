@@ -4,21 +4,23 @@ from __future__ import annotations
 
 import contextlib
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from string import Formatter
 from typing import Any
 from urllib.parse import urljoin
 
+from cssselect import SelectorError
 from lxml import html
+from lxml.cssselect import CSSSelector
+from lxml.etree import XPath, XPathError
 from lxml.html import HtmlElement
 
 from ..safe_regex import search_untrusted, sub_untrusted
 from .engine import (
-    _reduce_matches,
     _select_nodes_with_status,
-    _selector_validation_error,
+    _selector_safety_error,
     coerce_value,
     ensure_sequence,
 )
@@ -65,6 +67,8 @@ class _SchemaBudget:
     selector_evaluations: int = 0
     aggregate_matches: int = 0
     retained_output_chars: int = 0
+    selection_observer: Callable[[dict[str, Any], Sequence[Any], bool], None] | None = None
+    enforce_output: bool = True
 
     def begin_selection(self) -> None:
         self.selector_evaluations += 1
@@ -78,24 +82,35 @@ class _SchemaBudget:
         if self.aggregate_matches > self.limits.max_aggregate_matches:
             raise _SchemaBudgetExceeded("selector_too_complex:selector_matches>" f"{self.limits.max_aggregate_matches}")
 
+    def remaining_output_chars(self) -> int | None:
+        if not self.enforce_output:
+            return None
+        return self.limits.max_retained_output_chars - self.retained_output_chars
+
     def retain_output(self, value: Any) -> None:
-        pending = [value]
-        added = 0
-        while pending:
-            current = pending.pop()
-            if isinstance(current, str):
-                added += len(current)
-            elif isinstance(current, dict):
-                pending.extend(current.values())
-            elif isinstance(current, (list, tuple)):
-                pending.extend(current)
-            elif current is not None:
-                added += len(str(current))
-            if self.retained_output_chars + added > self.limits.max_retained_output_chars:
-                raise _SchemaBudgetExceeded(
-                    "selector_too_complex:retained_output_chars>" f"{self.limits.max_retained_output_chars}"
-                )
+        if not self.enforce_output:
+            return
+        added = _output_chars(value, stop_after=self.remaining_output_chars())
+        self.ensure_output_chars(added)
         self.retained_output_chars += added
+
+    def ensure_output_chars(self, added: int) -> None:
+        if not self.enforce_output:
+            return
+        if self.retained_output_chars + added > self.limits.max_retained_output_chars:
+            raise _schema_limit_error(
+                "retained_output_chars",
+                self.limits.max_retained_output_chars,
+            )
+
+    def observe_selection(
+        self,
+        spec: dict[str, Any] | None,
+        matches: Sequence[Any],
+        failed: bool,
+    ) -> None:
+        if spec is not None and self.selection_observer is not None:
+            self.selection_observer(spec, matches, failed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +122,75 @@ class _SchemaFieldRecord:
 
 def _schema_limit_error(kind: str, limit: int) -> _SchemaBudgetExceeded:
     return _SchemaBudgetExceeded(f"selector_too_complex:{kind}>{limit}")
+
+
+def _output_chars(value: Any, *, stop_after: int | None = None) -> int:
+    pending = [value]
+    total = 0
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            total += len(current)
+        elif isinstance(current, dict):
+            pending.extend(current.values())
+        elif isinstance(current, (list, tuple)):
+            pending.extend(current)
+        elif current is not None:
+            total += len(str(current))
+        if stop_after is not None and total > stop_after:
+            return total
+    return total
+
+
+def _ensure_chars_within_limit(chars: int, limit: int | None, kind: str) -> None:
+    if limit is not None and chars > limit:
+        raise _schema_limit_error(kind, limit)
+
+
+def _bounded_join(
+    values: Sequence[Any],
+    join_with: str,
+    max_chars: int | None,
+    *,
+    coerce: Callable[[Any], str | None] = coerce_value,
+    strip_result: bool = False,
+    error_kind: str = "retained_output_chars",
+    error_limit: int | None = None,
+) -> str | None:
+    parts: list[str] = []
+    total = 0
+    for item in values:
+        value = coerce(item)
+        if not value:
+            continue
+        total += len(value) + (len(join_with) if parts else 0)
+        if max_chars is not None and total > max_chars:
+            raise _schema_limit_error(
+                error_kind,
+                max_chars if error_limit is None else error_limit,
+            )
+        parts.append(value)
+    if not parts:
+        return None
+    joined = join_with.join(parts)
+    return joined.strip() if strip_result else joined
+
+
+def _compile_only_selector_error(selector: str) -> str | None:
+    stripped = selector.strip()
+    safety_error = _selector_safety_error(stripped)
+    if safety_error:
+        return safety_error
+    try:
+        if stripped.startswith("css:"):
+            css_expr = stripped[4:].strip()
+            if css_expr:
+                CSSSelector(css_expr)
+        else:
+            XPath(stripped)
+    except _SCHEMA_NONCRITICAL_EXCEPTIONS + (XPathError, SelectorError):
+        return "selector_invalid"
+    return None
 
 
 def _normalize_selector_expr(
@@ -293,14 +377,40 @@ def _apply_single_transform(
     return value
 
 
-def _apply_transforms(value: Any, transforms: Any, base_url: str) -> Any:
+def _apply_transforms(
+    value: Any,
+    transforms: Any,
+    base_url: str,
+    max_rendered_output_chars: int | None,
+) -> Any:
     if value is None or not transforms:
         return value
     transform_list = transforms if isinstance(transforms, list) else [transforms]
+    _ensure_chars_within_limit(
+        _output_chars(value, stop_after=max_rendered_output_chars),
+        max_rendered_output_chars,
+        "rendered_output",
+    )
     if isinstance(value, list):
-        return [
-            item for item in (_apply_transforms(item, transform_list, base_url) for item in value) if item is not None
-        ]
+        transformed: list[Any] = []
+        transformed_chars = 0
+        for item in value:
+            result = _apply_transforms(
+                item,
+                transform_list,
+                base_url,
+                max_rendered_output_chars,
+            )
+            if result is None:
+                continue
+            transformed_chars += _output_chars(result)
+            _ensure_chars_within_limit(
+                transformed_chars,
+                max_rendered_output_chars,
+                "rendered_output",
+            )
+            transformed.append(result)
+        return transformed
     if isinstance(value, dict):
         return value
     result: str | None = str(value)
@@ -308,6 +418,11 @@ def _apply_transforms(value: Any, transforms: Any, base_url: str) -> Any:
         result = _apply_single_transform(result, transform, base_url)
         if result is None:
             break
+        _ensure_chars_within_limit(
+            len(result),
+            max_rendered_output_chars,
+            "rendered_output",
+        )
     return result
 
 
@@ -389,29 +504,21 @@ def _join_computed_sources(
     sources: Sequence[Any],
     context: dict[str, Any],
     join_with: str,
-    budget: _SchemaBudget,
-    *,
-    retain_output: bool,
+    max_chars: int | None,
+    error_kind: str,
+    error_limit: int | None,
 ) -> str:
-    parts: list[str] = []
-    rendered_chars = 0
-    max_chars = budget.limits.max_retained_output_chars
-    if retain_output:
-        max_chars -= budget.retained_output_chars
-    for source in sources:
-        value = str(context.get(source, ""))
-        if not value:
-            continue
-        if parts:
-            rendered_chars += len(join_with)
-        rendered_chars += len(value)
-        if rendered_chars > max_chars:
-            raise _schema_limit_error(
-                "retained_output_chars",
-                budget.limits.max_retained_output_chars,
-            )
-        parts.append(value)
-    return join_with.join(parts)
+    return (
+        _bounded_join(
+            sources,
+            join_with,
+            max_chars,
+            coerce=lambda source: str(context.get(source, "")),
+            error_kind=error_kind,
+            error_limit=error_limit,
+        )
+        or ""
+    )
 
 
 def _template_validation_errors(
@@ -465,6 +572,7 @@ def _select_nodes_with_budget_status(
     budget: _SchemaBudget,
     *,
     context_sensitive: bool = False,
+    observation_spec: dict[str, Any] | None = None,
 ) -> tuple[list[Any], bool]:
     budget.begin_selection()
     matches, failed = _select_nodes_with_status(
@@ -473,6 +581,7 @@ def _select_nodes_with_budget_status(
         context_sensitive=context_sensitive,
     )
     budget.retain_matches(len(matches))
+    budget.observe_selection(observation_spec, matches, failed)
     return matches, failed
 
 
@@ -482,12 +591,14 @@ def _select_nodes_with_budget(
     budget: _SchemaBudget,
     *,
     context_sensitive: bool = False,
+    observation_spec: dict[str, Any] | None = None,
 ) -> list[Any]:
     matches, _failed = _select_nodes_with_budget_status(
         node,
         selector,
         budget,
         context_sensitive=context_sensitive,
+        observation_spec=observation_spec,
     )
     return matches
 
@@ -497,6 +608,7 @@ def _extract_value_with_budget(
     selectors: Sequence[str] | str | None,
     budget: _SchemaBudget,
     *,
+    key: str,
     join: bool = False,
     join_with: str = " ",
 ) -> str | None:
@@ -506,10 +618,27 @@ def _extract_value_with_budget(
             expr,
             budget,
             context_sensitive=True,
+            observation_spec={
+                "key": key,
+                "selector": expr,
+                "allow_multiple": join,
+                "expect_nonzero": True,
+            },
         )
         if not matches:
             continue
-        value = _reduce_matches(matches, join_with) if join else coerce_value(matches[0])
+        value = (
+            _bounded_join(
+                matches,
+                join_with,
+                budget.remaining_output_chars(),
+                coerce=coerce_value,
+                strip_result=True,
+                error_limit=budget.limits.max_retained_output_chars,
+            )
+            if join
+            else coerce_value(matches[0])
+        )
         if value:
             return value
     return None
@@ -537,6 +666,10 @@ def _extract_list_items(
     base_url: str,
     budget: _SchemaBudget,
     context: dict[str, Any],
+    path: str,
+    max_output_chars: int | None,
+    output_error_kind: str,
+    output_error_limit: int | None,
 ) -> list[Any] | None:
     selector = _field_selector(field)
     nodes = (
@@ -545,6 +678,12 @@ def _extract_list_items(
             selector,
             budget,
             context_sensitive=True,
+            observation_spec={
+                "key": path,
+                "selector": selector,
+                "allow_multiple": True,
+                "expect_nonzero": True,
+            },
         )
         if selector
         else []
@@ -560,6 +699,7 @@ def _extract_list_items(
     attr = field.get("attribute") or field.get("attr")
     join_with = str(field.get("join_with") or " ")
     values: list[Any] = []
+    value_chars = 0
     for match in nodes:
         target_nodes = [match]
         if item_selector and isinstance(match, HtmlElement):
@@ -568,6 +708,12 @@ def _extract_list_items(
                 item_selector,
                 budget,
                 context_sensitive=True,
+                observation_spec={
+                    "key": f"{path}.item_selector",
+                    "selector": item_selector,
+                    "allow_multiple": True,
+                    "expect_nonzero": False,
+                },
             )
         if not target_nodes:
             continue
@@ -582,14 +728,33 @@ def _extract_list_items(
             base_text = _extract_text_from_node(target_nodes[0]) or ""
             value = _extract_regex_from_text(base_text, field)
         elif len(target_nodes) > 1:
-            value = _reduce_matches(target_nodes, join_with)
+            value = _bounded_join(
+                target_nodes,
+                join_with,
+                max_output_chars,
+                coerce=coerce_value,
+                strip_result=True,
+                error_kind=output_error_kind,
+                error_limit=output_error_limit,
+            )
         else:
             value = _extract_text_from_node(target_nodes[0])
         if value:
+            value_chars += _output_chars(value)
+            if max_output_chars is not None and value_chars > max_output_chars:
+                raise _schema_limit_error(
+                    output_error_kind,
+                    max_output_chars if output_error_limit is None else output_error_limit,
+                )
             values.append(value)
     if not values:
         return None
-    return _apply_transforms(values, field.get("transforms"), base_url)
+    return _apply_transforms(
+        values,
+        field.get("transforms"),
+        base_url,
+        budget.limits.max_rendered_output_chars if budget.enforce_output else None,
+    )
 
 
 def _extract_fields_from_node(
@@ -600,19 +765,56 @@ def _extract_fields_from_node(
     budget: _SchemaBudget,
     context: dict[str, Any] | None = None,
     retain_output: bool = True,
+    path_prefix: str = "",
+    max_output_chars: int | None = None,
+    output_error_kind: str = "retained_output_chars",
+    output_error_limit: int | None = None,
 ) -> dict[str, Any]:
     extracted: dict[str, Any] = {}
     computed_fields: list[dict[str, Any]] = []
     ctx = dict(context or {})
+    local_output_chars = 0
+
+    def remaining_local_output() -> int | None:
+        if retain_output:
+            return budget.remaining_output_chars()
+        if max_output_chars is None:
+            return None
+        return max_output_chars - local_output_chars
+
+    def construction_bound(transforms: Any) -> tuple[int | None, str, int | None]:
+        if transforms and budget.enforce_output:
+            rendered_limit = budget.limits.max_rendered_output_chars
+            return rendered_limit, "rendered_output", rendered_limit
+        public_limit = output_error_limit
+        if public_limit is None and output_error_kind == "retained_output_chars":
+            public_limit = budget.limits.max_retained_output_chars
+        return remaining_local_output(), output_error_kind, public_limit
+
+    def retain_constructed_value(value: Any) -> None:
+        nonlocal local_output_chars
+        if retain_output:
+            budget.retain_output(value)
+            return
+        added = _output_chars(value, stop_after=remaining_local_output())
+        if max_output_chars is not None and local_output_chars + added > max_output_chars:
+            raise _schema_limit_error(
+                output_error_kind,
+                max_output_chars if output_error_limit is None else output_error_limit,
+            )
+        local_output_chars += added
 
     for field in fields:
         name = str(field.get("name") or "").strip()
         if not name:
             continue
+        path = f"{path_prefix}{name}"
         field_type = str(field.get("type") or "text").strip().lower()
         if field_type == "computed":
             computed_fields.append(field)
             continue
+        transforms = field.get("transforms")
+        field_limit, field_error_kind, field_error_limit = construction_bound(transforms)
 
         if field_type == "nested":
             selector = _field_selector(field)
@@ -622,6 +824,12 @@ def _extract_fields_from_node(
                     selector,
                     budget,
                     context_sensitive=True,
+                    observation_spec={
+                        "key": path,
+                        "selector": selector,
+                        "allow_multiple": False,
+                        "expect_nonzero": True,
+                    },
                 )
                 if selector
                 else [node]
@@ -636,6 +844,10 @@ def _extract_fields_from_node(
                     budget=budget,
                     context=ctx,
                     retain_output=False,
+                    path_prefix=f"{path}.",
+                    max_output_chars=field_limit,
+                    output_error_kind=field_error_kind,
+                    output_error_limit=field_error_limit,
                 )
         elif field_type == "nested_list":
             selector = _field_selector(field)
@@ -645,6 +857,12 @@ def _extract_fields_from_node(
                     selector,
                     budget,
                     context_sensitive=True,
+                    observation_spec={
+                        "key": path,
+                        "selector": selector,
+                        "allow_multiple": True,
+                        "expect_nonzero": True,
+                    },
                 )
                 if selector
                 else []
@@ -653,6 +871,7 @@ def _extract_fields_from_node(
             value = None
             if matches and nested_fields:
                 items: list[dict[str, Any]] = []
+                item_chars = 0
                 for match in matches:
                     if not isinstance(match, HtmlElement):
                         continue
@@ -663,8 +882,13 @@ def _extract_fields_from_node(
                         budget=budget,
                         context=ctx,
                         retain_output=False,
+                        path_prefix=f"{path}.",
+                        max_output_chars=(None if field_limit is None else field_limit - item_chars),
+                        output_error_kind=field_error_kind,
+                        output_error_limit=field_error_limit,
                     )
                     if item:
+                        item_chars += _output_chars(item)
                         items.append(item)
                 if items:
                     value = items
@@ -675,6 +899,10 @@ def _extract_fields_from_node(
                 base_url=base_url,
                 budget=budget,
                 context=ctx,
+                path=path,
+                max_output_chars=field_limit,
+                output_error_kind=field_error_kind,
+                output_error_limit=field_error_limit,
             )
         else:
             selector = _field_selector(field)
@@ -684,6 +912,12 @@ def _extract_fields_from_node(
                     selector,
                     budget,
                     context_sensitive=True,
+                    observation_spec={
+                        "key": path,
+                        "selector": selector,
+                        "allow_multiple": False,
+                        "expect_nonzero": True,
+                    },
                 )
                 if selector
                 else []
@@ -703,12 +937,28 @@ def _extract_fields_from_node(
                 value = _extract_regex_from_text(base_text, field)
             else:
                 join_with = str(field.get("join_with") or " ")
-                value = _reduce_matches(matches, join_with) if len(matches) > 1 else _extract_text_from_node(matches[0])
+                value = (
+                    _bounded_join(
+                        matches,
+                        join_with,
+                        field_limit,
+                        coerce=coerce_value,
+                        strip_result=True,
+                        error_kind=field_error_kind,
+                        error_limit=field_error_limit,
+                    )
+                    if len(matches) > 1
+                    else _extract_text_from_node(matches[0])
+                )
 
-        value = _apply_transforms(value, field.get("transforms"), base_url)
+        value = _apply_transforms(
+            value,
+            transforms,
+            base_url,
+            budget.limits.max_rendered_output_chars if budget.enforce_output else None,
+        )
         if value is not None:
-            if retain_output:
-                budget.retain_output(value)
+            retain_constructed_value(value)
             extracted[name] = value
             ctx[name] = value
 
@@ -716,6 +966,8 @@ def _extract_fields_from_node(
         name = str(field.get("name") or "").strip()
         if not name:
             continue
+        transforms = field.get("transforms")
+        field_limit, field_error_kind, field_error_limit = construction_bound(transforms)
         value = None
         if "template" in field and isinstance(field.get("template"), str):
             value, template_error = _render_computed_template(
@@ -733,17 +985,22 @@ def _extract_fields_from_node(
                     source,
                     ctx,
                     join_with,
-                    budget,
-                    retain_output=retain_output,
+                    field_limit,
+                    field_error_kind,
+                    field_error_limit,
                 )
             elif isinstance(source, str):
                 value = ctx.get(source)
             elif "value" in field:
                 value = field.get("value")
-        value = _apply_transforms(value, field.get("transforms"), base_url)
+        value = _apply_transforms(
+            value,
+            transforms,
+            base_url,
+            budget.limits.max_rendered_output_chars if budget.enforce_output else None,
+        )
         if value is not None:
-            if retain_output:
-                budget.retain_output(value)
+            retain_constructed_value(value)
             extracted[name] = value
             ctx[name] = value
 
@@ -828,17 +1085,6 @@ _PAGINATION_SELECTOR_KEYS = (
     "next_link_xpath",
     "next_link_selector",
 )
-_WATCHLIST_MULTI_KEYS = {
-    "summary_xpath",
-    "summary_selector",
-    "description_xpath",
-    "content_xpath",
-    "content_selector",
-    "entry_xpath",
-    "entry_selector",
-    "item_xpath",
-    "items_xpath",
-}
 
 
 def _iter_rule_selectors(rules: dict[str, Any]) -> list[tuple[str, str]]:
@@ -859,44 +1105,6 @@ def _iter_rule_selectors(rules: dict[str, Any]) -> list[tuple[str, str]]:
             for key, expr in _iter_rule_selectors(alternate):
                 selectors.append((f"alternates[{index}].{key}", expr))
     return selectors
-
-
-def _iter_watchlist_selector_specs(rules: dict[str, Any]) -> list[dict[str, Any]]:
-    specs: list[dict[str, Any]] = []
-    for key in _SCHEMA_SELECTOR_KEYS:
-        for expr in ensure_sequence(rules.get(key)):
-            specs.append(
-                {
-                    "key": key,
-                    "selector": expr,
-                    "allow_multiple": key in _WATCHLIST_MULTI_KEYS,
-                    "expect_nonzero": True,
-                    "check_html": True,
-                }
-            )
-    pagination = rules.get("pagination")
-    if isinstance(pagination, dict):
-        for key in _PAGINATION_SELECTOR_KEYS:
-            for expr in ensure_sequence(pagination.get(key)):
-                specs.append(
-                    {
-                        "key": f"pagination.{key}",
-                        "selector": expr,
-                        "allow_multiple": True,
-                        "expect_nonzero": False,
-                        "check_html": True,
-                    }
-                )
-    alternates = rules.get("alternates")
-    if isinstance(alternates, list):
-        for index, alternate in enumerate(alternates):
-            if not isinstance(alternate, dict):
-                continue
-            for spec in _iter_watchlist_selector_specs(alternate):
-                alternate_spec = dict(spec)
-                alternate_spec["key"] = f"alternates[{index}].{spec['key']}"
-                specs.append(alternate_spec)
-    return specs
 
 
 def _iter_schema_dsl_selector_specs(
@@ -963,90 +1171,6 @@ def _record_validation_selection(
     observation["failed"] = observation["failed"] or failed
 
 
-def _evaluate_dsl_fields_for_validation(
-    node: HtmlElement,
-    fields: Sequence[dict[str, Any]],
-    prefix: str,
-    budget: _SchemaBudget,
-    observations: dict[tuple[Any, str], dict[str, Any]],
-) -> None:
-    for field in fields:
-        name = str(field.get("name") or "").strip()
-        if not name:
-            continue
-        path = f"{prefix}{name}"
-        field_type = str(field.get("type") or "text").strip().lower()
-        selector = _field_selector(field)
-        matches: list[Any]
-        if selector:
-            matches, failed = _select_nodes_with_budget_status(
-                node,
-                selector,
-                budget,
-                context_sensitive=True,
-            )
-            _record_validation_selection(
-                observations,
-                {
-                    "key": path,
-                    "selector": selector,
-                    "allow_multiple": field_type in {"list", "nested_list"},
-                    "expect_nonzero": True,
-                },
-                matches,
-                failed,
-            )
-        elif field_type == "nested":
-            matches = [node]
-        else:
-            matches = []
-
-        item_selector = _normalize_selector_expr(
-            field.get("item_selector") or field.get("itemSelector"),
-            css=field.get("itemCss") or field.get("item_css"),
-            xpath=field.get("itemXpath") or field.get("item_xpath"),
-        )
-        if item_selector:
-            item_spec = {
-                "key": f"{path}.item_selector",
-                "selector": item_selector,
-                "allow_multiple": True,
-                "expect_nonzero": False,
-            }
-            for match in matches:
-                if not isinstance(match, HtmlElement):
-                    continue
-                item_matches, failed = _select_nodes_with_budget_status(
-                    match,
-                    item_selector,
-                    budget,
-                    context_sensitive=True,
-                )
-                _record_validation_selection(
-                    observations,
-                    item_spec,
-                    item_matches,
-                    failed,
-                )
-
-        if field_type not in {"nested", "nested_list"}:
-            continue
-        nested_fields = _normalize_field_definitions(field.get("fields") or {})
-        if not nested_fields:
-            continue
-        nested_nodes = matches[:1] if field_type == "nested" else matches
-        for match in nested_nodes:
-            if not isinstance(match, HtmlElement):
-                continue
-            _evaluate_dsl_fields_for_validation(
-                match,
-                nested_fields,
-                f"{path}.",
-                budget,
-                observations,
-            )
-
-
 def _evaluate_validation_rules(
     rules: dict[str, Any],
     document: HtmlElement,
@@ -1055,55 +1179,29 @@ def _evaluate_validation_rules(
     is_dsl: bool,
 ) -> list[dict[str, Any]]:
     observations: dict[tuple[Any, str], dict[str, Any]] = {}
-    if not is_dsl:
-        for spec in _iter_watchlist_selector_specs(rules):
-            if not spec.get("check_html", True):
-                continue
-            selector = str(spec.get("selector") or "").strip()
-            if not selector:
-                continue
-            matches, failed = _select_nodes_with_budget_status(
-                document,
-                selector,
-                budget,
-            )
-            _record_validation_selection(observations, spec, matches, failed)
-        return list(observations.values())
-
-    base_node = document
-    base_selector = _base_selector(rules)
-    if base_selector:
-        matches, failed = _select_nodes_with_budget_status(
+    budget.selection_observer = lambda spec, matches, failed: _record_validation_selection(
+        observations,
+        spec,
+        matches,
+        failed,
+    )
+    budget.enforce_output = False
+    result: dict[str, Any] = {"url": "", "extraction_successful": False}
+    if is_dsl:
+        _extract_dsl_schema_fields(
             document,
-            base_selector,
+            "",
+            rules,
+            result,
             budget,
         )
-        spec = {
-            "key": "baseSelector",
-            "selector": base_selector,
-            "allow_multiple": False,
-            "expect_nonzero": True,
-        }
-        _record_validation_selection(observations, spec, matches, failed)
-        base_node = next(
-            (match for match in matches if isinstance(match, HtmlElement)),
+    else:
+        _extract_legacy_schema_fields(
             document,
+            rules,
+            result,
+            budget,
         )
-
-    _evaluate_dsl_fields_for_validation(
-        base_node,
-        _normalize_field_definitions(rules.get("baseFields") or []),
-        "baseFields.",
-        budget,
-        observations,
-    )
-    _evaluate_dsl_fields_for_validation(
-        base_node,
-        _normalize_field_definitions(rules.get("fields") or []),
-        "fields.",
-        budget,
-        observations,
-    )
     return list(observations.values())
 
 
@@ -1156,7 +1254,7 @@ def validate_selector_rules(
         stripped = (spec.get("selector") or "").strip()
         if not stripped:
             continue
-        error = _selector_validation_error(stripped)
+        error = _compile_only_selector_error(stripped)
         if error:
             errors.append({"key": key, "selector": stripped, "error": error})
             invalid_selectors.add((key, stripped))
@@ -1250,7 +1348,19 @@ def _extract_dsl_schema_fields(
     nodes: list[HtmlElement] = []
     if base_selector:
         nodes.extend(
-            node for node in _select_nodes_with_budget(document, base_selector, budget) if isinstance(node, HtmlElement)
+            node
+            for node in _select_nodes_with_budget(
+                document,
+                base_selector,
+                budget,
+                observation_spec={
+                    "key": "baseSelector",
+                    "selector": base_selector,
+                    "allow_multiple": False,
+                    "expect_nonzero": True,
+                },
+            )
+            if isinstance(node, HtmlElement)
         )
     base_node = nodes[0] if nodes else document
 
@@ -1265,6 +1375,7 @@ def _extract_dsl_schema_fields(
                 base_url=base_url,
                 budget=budget,
                 context={},
+                path_prefix="baseFields.",
             )
         )
     if fields:
@@ -1275,6 +1386,7 @@ def _extract_dsl_schema_fields(
                 base_url=base_url,
                 budget=budget,
                 context=schema_fields,
+                path_prefix="fields.",
             )
         )
 
@@ -1295,13 +1407,32 @@ def _extract_dsl_schema_fields(
             continue
         value = schema_fields.get(key)
         if isinstance(value, list) and all(isinstance(item, str) for item in value):
-            joined = "\n".join(item.strip() for item in value if item and item.strip())
-            result[key] = joined if joined else value
+            joined = _bounded_join(
+                value,
+                "\n",
+                budget.remaining_output_chars(),
+                coerce=lambda item: item.strip() or None,
+                error_limit=budget.limits.max_retained_output_chars,
+            )
+            projected = joined if joined else value
         else:
-            result[key] = value
+            projected = value
+        budget.retain_output(projected)
+        result[key] = projected
 
     result["extraction_successful"] = any(_has_nonempty_value(value) for value in schema_fields.values())
     return result
+
+
+def _first_configured_rule(
+    rules: dict[str, Any],
+    keys: Sequence[str],
+) -> tuple[str, Any]:
+    for key in keys:
+        value = rules.get(key)
+        if value:
+            return key, value
+    return keys[0], None
 
 
 def _extract_legacy_schema_fields(
@@ -1310,65 +1441,111 @@ def _extract_legacy_schema_fields(
     result: dict[str, Any],
     budget: _SchemaBudget,
 ) -> dict[str, Any]:
-    base_selectors = (
-        rules.get("base_xpath")
-        or rules.get("base_selector")
-        or rules.get("entry_xpath")
-        or rules.get("entry_selector")
-        or rules.get("item_xpath")
-        or rules.get("items_xpath")
+    base_key, base_selectors = _first_configured_rule(
+        rules,
+        (
+            "base_xpath",
+            "base_selector",
+            "entry_xpath",
+            "entry_selector",
+            "item_xpath",
+            "items_xpath",
+        ),
     )
     nodes: list[HtmlElement] = []
     for selector in ensure_sequence(base_selectors):
         nodes.extend(
-            node for node in _select_nodes_with_budget(document, selector, budget) if isinstance(node, HtmlElement)
+            node
+            for node in _select_nodes_with_budget(
+                document,
+                selector,
+                budget,
+                observation_spec={
+                    "key": base_key,
+                    "selector": selector,
+                    "allow_multiple": True,
+                    "expect_nonzero": True,
+                },
+            )
+            if isinstance(node, HtmlElement)
         )
     base_node = nodes[0] if nodes else document
 
     summary_join = str(rules.get("summary_join_with") or " ")
     content_join = str(rules.get("content_join_with") or "\n")
+    title_key, title_selectors = _first_configured_rule(
+        rules,
+        ("title_xpath", "title_selector"),
+    )
     title = _extract_value_with_budget(
         base_node,
-        rules.get("title_xpath") or rules.get("title_selector"),
+        title_selectors,
         budget,
+        key=title_key,
         join=False,
+    )
+    if title:
+        budget.retain_output(title)
+        result["title"] = title
+
+    summary_key, summary_selectors = _first_configured_rule(
+        rules,
+        ("summary_xpath", "description_xpath", "summary_selector"),
     )
     summary = _extract_value_with_budget(
         base_node,
-        rules.get("summary_xpath") or rules.get("description_xpath") or rules.get("summary_selector"),
+        summary_selectors,
         budget,
+        key=summary_key,
         join=True,
         join_with=summary_join,
     )
+    if summary:
+        budget.retain_output(summary)
+        result["summary"] = summary
+
+    content_key, content_selectors = _first_configured_rule(
+        rules,
+        ("content_xpath", "content_selector"),
+    )
     content = _extract_value_with_budget(
         base_node,
-        rules.get("content_xpath") or rules.get("content_selector"),
+        content_selectors,
         budget,
+        key=content_key,
         join=True,
         join_with=content_join,
     )
+    if content:
+        budget.retain_output(content)
+        result["content"] = content
+
+    author_key, author_selectors = _first_configured_rule(
+        rules,
+        ("author_xpath", "author_selector"),
+    )
     author = _extract_value_with_budget(
         base_node,
-        rules.get("author_xpath") or rules.get("author_selector"),
+        author_selectors,
         budget,
+        key=author_key,
         join=False,
+    )
+    if author:
+        budget.retain_output(author)
+        result["author"] = author
+
+    published_key, published_selectors = _first_configured_rule(
+        rules,
+        ("published_xpath", "date_xpath", "date_selector"),
     )
     published_raw = _extract_value_with_budget(
         base_node,
-        rules.get("published_xpath") or rules.get("date_xpath") or rules.get("date_selector"),
+        published_selectors,
         budget,
+        key=published_key,
         join=False,
     )
-
-    for key, value in (
-        ("title", title),
-        ("summary", summary),
-        ("content", content),
-        ("author", author),
-    ):
-        if value:
-            budget.retain_output(value)
-            result[key] = value
     if published_raw:
         budget.retain_output(published_raw)
         result["published_raw"] = published_raw
