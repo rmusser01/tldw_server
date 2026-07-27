@@ -421,16 +421,21 @@ def _node_mentions_symbols(node: ast.AST, symbols: set[str]) -> bool:
     )
 
 
-def _contains_expected_error_result(nodes: list[ast.AST]) -> bool:
+def _contains_expected_error_result(
+    nodes: list[ast.AST],
+    aliases: set[str] | None = None,
+) -> bool:
+    error_result_aliases = aliases or set()
     for node in nodes:
         if _node_mentions_symbols(node, EXPECTED_FAILURE_SYMBOLS):
             return True
         for candidate in ast.walk(node):
-            if isinstance(candidate, ast.Name) and candidate.id in {
-                "_complete_expected_failure",
-                "_expected_failure_payload",
-            }:
-                return True
+            if isinstance(candidate, ast.Name):
+                if candidate.id in error_result_aliases or candidate.id in {
+                    "_complete_expected_failure",
+                    "_expected_failure_payload",
+                }:
+                    return True
             if isinstance(candidate, ast.Constant) and candidate.value in EXPECTED_FAILURE_REASON_CODES:
                 return True
             if isinstance(candidate, ast.Dict):
@@ -443,6 +448,28 @@ def _contains_expected_error_result(nodes: list[ast.AST]) -> bool:
                     ):
                         return True
     return False
+
+
+def _expected_error_result_aliases(tree: ast.AST) -> set[str]:
+    assignments: list[tuple[list[ast.AST], ast.AST]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            assignments.append((node.targets, node.value))
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            assignments.append(([node.target], node.value))
+
+    aliases: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for targets, value in assignments:
+            if not _contains_expected_error_result([value], aliases):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in aliases:
+                    aliases.add(target.id)
+                    changed = True
+    return aliases
 
 
 def _contains_domain_token(node: ast.AST) -> bool:
@@ -473,6 +500,7 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
     """Find expected-failure handling that belongs in the extracted runtime."""
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    error_result_aliases = _expected_error_result_aliases(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ExceptHandler) and node.type is not None:
@@ -480,7 +508,10 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
                 violations.append(
                     f"{path.name}:{node.lineno} catches ExpectedToolFailure in protocol facade"
                 )
-            elif _contains_domain_token(node.type) and _contains_expected_error_result(node.body):
+            elif _contains_domain_token(node.type) and _contains_expected_error_result(
+                node.body,
+                error_result_aliases,
+            ):
                 violations.append(
                     f"{path.name}:{node.lineno} contains a Skills/model/provider "
                     "exception error-result branch"
@@ -493,7 +524,8 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
                     f"{path.name}:{node.lineno} branches on ExpectedToolFailure in protocol facade"
                 )
             elif _contains_domain_token(node.subject) and _contains_expected_error_result(
-                list(node.cases)
+                list(node.cases),
+                error_result_aliases,
             ):
                 violations.append(
                     f"{path.name}:{node.lineno} contains a Skills/model/provider error-result branch"
@@ -511,7 +543,7 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
                         "in protocol facade"
                     )
                 elif any(_contains_domain_token(predicate) for predicate in predicates) and (
-                    _contains_expected_error_result(case.body)
+                    _contains_expected_error_result(case.body, error_result_aliases)
                 ):
                     violations.append(
                         f"{path.name}:{case.pattern.lineno} contains a Skills/model/provider "
@@ -533,7 +565,10 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
             violations.append(
                 f"{path.name}:{node.lineno} branches on ExpectedToolFailure in protocol facade"
             )
-        elif _contains_domain_token(predicate) and _contains_expected_error_result(bodies):
+        elif _contains_domain_token(predicate) and _contains_expected_error_result(
+            bodies,
+            error_result_aliases,
+        ):
             violations.append(
                 f"{path.name}:{node.lineno} contains a Skills/model/provider error-result branch"
             )
@@ -725,8 +760,7 @@ class _PreparedAuthorityAliasVisitor(ast.NodeVisitor):
             return
         if _contains_prepared_tool_authority(value, self.aliases):
             self.aliases.add(target.id)
-        else:
-            self.aliases.discard(target.id)
+        # A later assignment may be conditional, so tainted-name reuse stays tainted.
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
@@ -805,8 +839,7 @@ class _DefaultStrVisitor(ast.NodeVisitor):
         )
         if is_str_alias:
             self.aliases.add(target.id)
-        else:
-            self.aliases.discard(target.id)
+        # A later assignment may be conditional, so tainted-name reuse stays tainted.
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
@@ -960,15 +993,13 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
         assigned_names = self._assigned_names(targets)
         if _uses_raw_exception_unsafely(value, self.exception_names):
             self.exception_names.update(assigned_names)
-        else:
-            self.exception_names.difference_update(assigned_names)
+        # A later assignment may be conditional, so tainted-name reuse stays tainted.
 
     def _update_logger_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
         assigned_names = self._assigned_names(targets)
         if _is_logger_expression(value, self.logger_names):
             self.logger_names.update(assigned_names)
-        else:
-            self.logger_names.difference_update(assigned_names)
+        # A later assignment may be conditional, so logger-name reuse stays tainted.
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
@@ -2299,6 +2330,41 @@ def test_protocol_branch_scan_detects_domain_specific_error_result(tmp_path: Pat
     assert "Skills/model/provider" in violations[0]
 
 
+def test_protocol_branch_scan_detects_prebuilt_error_result_alias(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "prebuilt_error_result.py"
+    sample.write_text(
+        "def handle(tool_name):\n"
+        "    error_result = {'isError': True}\n"
+        "    if tool_name == 'skills.run':\n"
+        "        return error_result\n"
+        "    return {}\n",
+        encoding="utf-8",
+    )
+
+    violations = _protocol_expected_failure_branch_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "Skills/model/provider" in violations[0]
+
+
+def test_protocol_branch_scan_allows_prebuilt_non_error_result_alias(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "prebuilt_success_result.py"
+    sample.write_text(
+        "def handle(tool_name):\n"
+        "    success_result = {'content': []}\n"
+        "    if tool_name == 'skills.run':\n"
+        "        return success_result\n"
+        "    return {}\n",
+        encoding="utf-8",
+    )
+
+    assert _protocol_expected_failure_branch_violations_for(sample) == []
+
+
 @pytest.mark.parametrize(
     ("filename", "source"),
     [
@@ -2609,15 +2675,37 @@ def test_runtime_policy_scan_rejects_dynamic_prepared_authority_aliases(
     assert any("dynamic prepared authority" in violation for violation in violations)
 
 
-def test_runtime_policy_scan_allows_reassigned_authority_alias(tmp_path: Path) -> None:
-    sample = tmp_path / "reassigned_authority_alias.py"
+def test_runtime_policy_scan_rejects_conditional_authority_alias_reassignment(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "conditional_authority_alias.py"
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared, cond):\n"
+        "    policy = prepared.policy\n"
+        "    metadata = prepared.tool_def['metadata']\n"
+        "    if cond:\n"
+        "        metadata = {}\n"
+        "    field = 'category'\n"
+        "    return metadata[field], policy.effect\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("dynamic prepared authority" in violation for violation in violations)
+
+
+def test_runtime_policy_scan_allows_distinct_untainted_dynamic_lookup(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "distinct_untainted_authority_alias.py"
     sample.write_text(
         "async def execute_prepared_tool_call(prepared):\n"
         "    policy = prepared.policy\n"
-        "    tool_def = prepared.tool_def\n"
-        "    tool_def = {'category': 'safe'}\n"
+        "    metadata = prepared.tool_def['metadata']\n"
+        "    payload = {'category': 'safe'}\n"
         "    field = 'category'\n"
-        "    return tool_def[field], policy.effect\n",
+        "    return payload[field], policy.effect\n",
         encoding="utf-8",
     )
 
@@ -2649,12 +2737,30 @@ def test_default_str_scan_rejects_lexical_alias(tmp_path: Path) -> None:
     assert "default=str" in violations[0]
 
 
-def test_default_str_scan_allows_reassigned_alias(tmp_path: Path) -> None:
-    sample = tmp_path / "reassigned_default.py"
+def test_default_str_scan_rejects_conditional_alias_reassignment(tmp_path: Path) -> None:
+    sample = tmp_path / "conditional_default.py"
+    sample.write_text(
+        "import json\n"
+        "def encode(value, cond):\n"
+        "    fallback = str\n"
+        "    if cond:\n"
+        "        fallback = None\n"
+        "    return json.dumps(value, default=fallback)\n",
+        encoding="utf-8",
+    )
+
+    violations = _default_str_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "default=str" in violations[0]
+
+
+def test_default_str_scan_allows_distinct_untainted_default(tmp_path: Path) -> None:
+    sample = tmp_path / "distinct_untainted_default.py"
     sample.write_text(
         "import json\n"
         "def encode(value):\n"
-        "    fallback = str\n"
+        "    coercing_fallback = str\n"
         "    fallback = None\n"
         "    return json.dumps(value, default=fallback)\n",
         encoding="utf-8",
@@ -2774,6 +2880,47 @@ def test_exception_log_scan_rejects_exception_alias_and_repr(tmp_path: Path) -> 
     assert any("repr(failure)" in violation for violation in violations)
 
 
+def test_exception_log_scan_rejects_conditional_alias_reassignment(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "conditional_exception_alias.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "def run(cond):\n"
+        "    try:\n"
+        "        raise RuntimeError('private provider detail')\n"
+        "    except Exception as exc:\n"
+        "        failure = exc\n"
+        "        if cond:\n"
+        "            failure = 'safe'\n"
+        "        logger.error('{}', failure)\n",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "failure" in violations[0]
+
+
+def test_exception_log_scan_allows_distinct_untainted_log_value(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "distinct_untainted_exception_value.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    failure = exc\n"
+        "    message = 'safe'\n"
+        "    logger.error('{}', message)\n",
+        encoding="utf-8",
+    )
+
+    assert _unsafe_exception_log_violations_for(sample) == []
+
+
 @pytest.mark.parametrize(
     ("filename", "statement"),
     [
@@ -2852,9 +2999,9 @@ def test_exception_log_scan_rejects_logger_and_match_aliases(
     ("filename", "source"),
     [
         (
-            "reassigned_logger_alias.py",
+            "distinct_logger_name.py",
             "from loguru import logger\n"
-            "log = logger\n"
+            "logger_alias = logger\n"
             "log = sink\n"
             "try:\n"
             "    raise RuntimeError('private provider detail')\n"
@@ -2874,7 +3021,7 @@ def test_exception_log_scan_rejects_logger_and_match_aliases(
         ),
     ],
 )
-def test_exception_log_scan_allows_reassigned_logger_and_safe_match_aliases(
+def test_exception_log_scan_allows_distinct_logger_and_safe_match_aliases(
     tmp_path: Path,
     filename: str,
     source: str,
