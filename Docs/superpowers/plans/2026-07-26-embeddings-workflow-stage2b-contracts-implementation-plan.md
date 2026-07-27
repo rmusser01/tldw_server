@@ -710,7 +710,7 @@ Expected: no endpoint diff; the mapper deferral and removal stage are explicit; 
 
 Review the complete `origin/dev...HEAD` diff for behavior drift, DTO mutability, import cycles, phase/error precedence, accidental endpoint wiring, and missing parity tests. Apply only findings reproduced against current code, then rerun Steps 1–4.
 
-- [ ] **Step 6: Finalize task evidence through Backlog.md tooling**
+- [x] **Step 6: Finalize task evidence through Backlog.md tooling**
 
 Check all satisfied acceptance criteria and definition-of-done items on `TASK-12973.2`. Record exact test counts, Ruff/Bandit results, known warnings/skips, changed files, commits, and the final summary. Keep parent `TASK-12973` in progress because Stage 2C–2E remain.
 
