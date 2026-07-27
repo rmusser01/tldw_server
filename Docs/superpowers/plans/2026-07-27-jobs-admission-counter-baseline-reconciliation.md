@@ -177,7 +177,7 @@ Execution evidence: all four cases passed against SQLite and required real Postg
 **Goal:** Prove the corrected baseline across neighboring Jobs behavior and close the merged lifecycle stream accurately.
 **Success Criteria:** Required PostgreSQL matrices have zero skips; lint/security/diff checks pass; child task and plan carry merge evidence; ambiguous parent records are untouched.
 **Tests:** Focused admission suites, the unchanged 104-case neighboring matrix, Ruff, Bandit, and `git diff --check`.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Verify and finalize
 
@@ -225,6 +225,8 @@ Record in `TASK-12988` that four files currently claim `TASK-12969`, making pare
 
 Execution evidence: `TASK-12969.3` is Done with merge and verification evidence; Stage 5 and Task 13 Step 4 are complete. The four ambiguous `TASK-12969` parent records remain untouched and the collision is recorded in both child and stabilization tasks.
 
-- [ ] **Step 6: Commit and open the stabilization PR**
+- [x] **Step 6: Commit and open the stabilization PR**
 
 Stage only the test, plan, and Backlog files owned by this task. Commit with a message explaining that the change reconciles the test baseline with already-merged durability semantics, then open a PR against `dev` with a requester-owned Change summary placeholder.
+
+Execution evidence: commit `f9a5b8e733` was pushed on `codex/jobs-admission-baseline-reconcile`, and draft PR #2765 was opened against `dev`: https://github.com/rmusser01/tldw_server/pull/2765. The PR remains merge-blocked until the requester replaces the Change summary placeholder with their own explanation of what changed and why.

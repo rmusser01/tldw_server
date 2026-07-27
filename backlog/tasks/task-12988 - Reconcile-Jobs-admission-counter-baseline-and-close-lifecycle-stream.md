@@ -14,6 +14,8 @@ references:
 - TASK-12969.3
 - https://github.com/rmusser01/tldw_server/pull/2763
 - origin/dev 616d6dd35d48849f22b320d34823bfcfecbc4b74
+- https://github.com/rmusser01/tldw_server/pull/2765
+- branch commit f9a5b8e733c18be1e4c73a374ac82d932a68284e
 documentation:
 - Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md
 - Docs/superpowers/specs/2026-06-24-jobs-backend-parity-refactor-design.md
@@ -23,7 +25,7 @@ modified_files:
 - Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md
 - Docs/superpowers/plans/2026-07-27-jobs-admission-counter-baseline-reconciliation.md
 - backlog/tasks/task-12969.3 - Extract-Jobs-single-job-lease-renewal-and-release-operations.md
-updated_date: 2026-07-27 15:24
+updated_date: 2026-07-27 15:34
 ---
 
 ## Description
@@ -55,12 +57,13 @@ Align the admission counter failure regression tests with the already-merged bac
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 No production files are in scope. The project currently has four records with ID TASK-12969, so the parent cannot be safely mutated through the Backlog MCP; record the collision rather than editing any ambiguous parent.
 Baseline on clean origin/dev 616d6dd35d reproduced two SQLite passes and two required PostgreSQL failures (`Failed: DID NOT RAISE RuntimeError`). The test was split into explicit backend contracts with no production change. Focused contract: 4 passed, zero skips. Admission-focused matrix: 110 passed, zero skips. Full neighboring matrix: 104 passed, zero skips or deselections. Ruff, compileall, and git diff --check pass. Full Bandit reports 110 expected test-only B101 assertion findings and zero errors; a second scan excluding B101 reports zero findings and zero errors. TASK-12969.3 is Done and the prior plan's Stage 5/Task 13 Step 4 are complete with PR #2763 merge evidence. Four files still claim TASK-12969, so all ambiguous parent records remain untouched.
+Commit f9a5b8e733 was pushed on codex/jobs-admission-baseline-reconcile and draft PR #2765 opened against dev. The task remains In Progress until merge. The PR is merge-blocked by the requester-owned Change summary placeholder required by repository policy.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Reconciled the Jobs admission counter regression baseline without changing production behavior. SQLite now explicitly proves that a counter failure rolls back the admitted job and durable created event; PostgreSQL explicitly proves that its savepoint-isolated optional counter failure still commits the job and created event while leaving the counter unpersisted. Finalized the already-merged TASK-12969.3 lifecycle extraction and plan stage with PR #2763 merge evidence, and documented rather than mutating the four ambiguous TASK-12969 parent records. Draft PR #2765 contains the stabilization change and remains pending requester summary and merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -69,6 +72,6 @@ Baseline on clean origin/dev 616d6dd35d reproduced two SQLite passes and two req
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
