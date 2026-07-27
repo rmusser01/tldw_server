@@ -894,16 +894,16 @@ Update the standalone shape-based reporting classifier to recognize an exception
 
 ### Required Tests
 
-- [ ] Domain ignored failure produces JSON-RPC success containing a `tools/call` `isError: true` payload.
-- [ ] Content contains exactly one JSON object with exactly `status`, `reason_code`, and `message`.
-- [ ] Fail-closed rate, idempotency in-progress/unavailable, stale prepared call, and counted dependency failure share the envelope.
-- [ ] Expected failures are absent from local/Redis result caches.
-- [ ] Ignored failure records metrics/audit/hooks/reporting but leaves breaker counters/state unchanged.
-- [ ] Counted dependency failure records the same observers and increments/reopens the breaker.
-- [ ] Unexpected exceptions keep the existing generic JSON-RPC/internal-error path and counted breaker behavior.
-- [ ] Existing invalid params, permission, approval, governance, actual rate limit, and argument conflict tests remain unchanged.
-- [ ] Cancellation before a valid result propagates as cancellation and produces neither an error envelope nor a cached result.
-- [ ] Sentinel secrets embedded in internal exception messages do not occur in result, eval, event, telemetry, audit, or captured logs.
+- [x] Domain ignored failure produces JSON-RPC success containing a `tools/call` `isError: true` payload.
+- [x] Content contains exactly one JSON object with exactly `status`, `reason_code`, and `message`.
+- [x] Fail-closed rate, idempotency in-progress/unavailable, stale prepared call, and counted dependency failure share the envelope.
+- [x] Expected failures are absent from local/Redis result caches.
+- [x] Ignored failure records metrics/audit/hooks/reporting but leaves breaker counters/state unchanged.
+- [x] Counted dependency failure records the same observers and increments/reopens the breaker.
+- [x] Unexpected exceptions keep the existing generic JSON-RPC/internal-error path and counted breaker behavior.
+- [x] Existing invalid params, permission, approval, governance, actual rate limit, and argument conflict tests remain unchanged.
+- [x] Cancellation before a valid result propagates as cancellation and produces neither an error envelope nor a cached result.
+- [x] Sentinel secrets embedded in internal exception messages do not occur in result, eval, event, telemetry, audit, or captured logs.
 
 Run:
 
