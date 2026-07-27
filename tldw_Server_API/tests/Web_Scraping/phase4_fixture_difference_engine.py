@@ -45,6 +45,52 @@ class DifferenceContract:
     profile_validator: Callable[[object, object], None] | None = None
 
 
+def validate_json_value(
+    value: object,
+    *,
+    label: str,
+    path: tuple[PathPart, ...] = (),
+) -> None:
+    """Require a recursively valid JSON value made only from exact built-in types."""
+    value_type = type(value)
+    location = format_path(path)
+    if value_type is dict:
+        assert isinstance(value, dict)
+        for key in value:
+            if type(key) is not str:
+                raise AssertionError(
+                    f"Strict JSON validation failed for {label} at {location}: "
+                    f"object key type must be exact str, got {type(key).__name__}"
+                )
+        for key in sorted(value):
+            validate_json_value(
+                value[key],
+                label=label,
+                path=(*path, key),
+            )
+        return
+    if value_type is list:
+        assert isinstance(value, list)
+        for index, item in enumerate(value):
+            validate_json_value(
+                item,
+                label=label,
+                path=(*path, index),
+            )
+        return
+    if value_type is float:
+        assert isinstance(value, float)
+        if not math.isfinite(value):
+            raise AssertionError(f"Strict JSON validation failed for {label} at {location}: " "float must be finite")
+        return
+    if value_type in {str, int, bool, type(None)}:
+        return
+    raise AssertionError(
+        f"Strict JSON validation failed for {label} at {location}: "
+        f"expected an exact built-in JSON type, got {value_type.__name__}"
+    )
+
+
 def collect_differences(
     actual: object,
     expected: object,

@@ -107,3 +107,58 @@ def test_write_failure_leaves_existing_output_untouched(
 
     after = {path.name: path.read_bytes() for path in output.iterdir()}
     assert after == before
+
+
+def test_swap_failure_restores_old_output_and_propagates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    output.mkdir()
+    (output / "state.txt").write_text("old-output\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "state.txt").write_text("new-output\n", encoding="utf-8")
+    original_replace = Path.replace
+
+    def _fail_staging_swap(path: Path, target: Path) -> Path:
+        if path == staging:
+            raise OSError("injected staging swap failure")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", _fail_staging_swap)
+
+    with pytest.raises(OSError, match="injected staging swap failure"):
+        generator._replace_output_directory(staging, output)
+
+    assert (output / "state.txt").read_text(encoding="utf-8") == "old-output\n"
+    assert (staging / "state.txt").read_text(encoding="utf-8") == "new-output\n"
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+
+
+def test_backup_cleanup_failure_keeps_committed_output_and_warns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    output.mkdir()
+    (output / "state.txt").write_text("old-sensitive-output\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "state.txt").write_text("new-sensitive-output\n", encoding="utf-8")
+
+    def _fail_backup_cleanup(_path: Path) -> None:
+        raise OSError("injected cleanup failure")
+
+    monkeypatch.setattr(generator.shutil, "rmtree", _fail_backup_cleanup)
+
+    with pytest.warns(RuntimeWarning, match="backup cleanup failed") as warning_records:
+        generator._replace_output_directory(staging, output)
+
+    assert (output / "state.txt").read_text(encoding="utf-8") == "new-sensitive-output\n"
+    backups = list(tmp_path.glob(".fixtures.backup-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "state.txt").read_text(encoding="utf-8") == "old-sensitive-output\n"
+    warning = str(warning_records[0].message)
+    assert "old-sensitive-output" not in warning
+    assert "new-sensitive-output" not in warning

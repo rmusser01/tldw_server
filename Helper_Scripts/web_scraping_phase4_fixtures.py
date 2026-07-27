@@ -13,6 +13,7 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import uuid
+import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -247,7 +248,15 @@ def _replace_output_directory(staging: Path, output: Path) -> None:
         raise
     else:
         if backup is not None:
-            shutil.rmtree(backup)
+            try:
+                shutil.rmtree(backup)
+            except OSError:
+                warnings.warn(
+                    "Fixture output committed; backup cleanup failed. "
+                    f"Backup retained at {backup.name!r} for manual cleanup.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
 
 def generate_fixtures(

@@ -15,6 +15,7 @@ from tldw_Server_API.tests.Web_Scraping.phase4_fixture_difference_engine import 
     collect_differences,
     format_path,
     path_matches,
+    validate_json_value,
 )
 
 APPROVED_BEHAVIOR_CHANGES = {
@@ -94,6 +95,8 @@ def assert_predecessor_behavior(
     difference_contract: str | None = None,
 ) -> None:
     """Assert parity or validate every difference against one approved change contract."""
+    validate_json_value(actual, label="actual")
+    validate_json_value(expected, label="expected")
     if behavior_change is not None and (
         type(behavior_change) is not int or behavior_change not in APPROVED_BEHAVIOR_CHANGES
     ):

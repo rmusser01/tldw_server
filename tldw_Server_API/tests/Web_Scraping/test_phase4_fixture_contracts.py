@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from enum import Enum
 
 import pytest
 
@@ -9,6 +10,14 @@ from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
 )
 
 _CHANGE_1_CONTRACT = "change_1_default_regex_non_terminal"
+
+
+class _StringSubclass(str):
+    pass
+
+
+class _StrategyLabel(str, Enum):
+    TRAFILATURA = "trafilatura"
 
 
 def _counter(strategy: str, status: str) -> dict[str, object]:
@@ -158,6 +167,16 @@ def test_differential_helper_accepts_a_covered_planned_difference() -> None:
     )
 
 
+def test_tagged_contract_rejects_str_subclass_at_approved_path() -> None:
+    with pytest.raises(AssertionError, match="Strict JSON validation failed"):
+        assert_predecessor_behavior(
+            {"result": {"error": _StringSubclass("policy_error")}},
+            {"result": {"error": ("Outbound policy evaluation failed. " "Please contact system administrator.")}},
+            behavior_change=7,
+            difference_contract="change_7_policy_error",
+        )
+
+
 def test_differential_helper_rejects_an_extra_unrelated_difference() -> None:
     with pytest.raises(AssertionError, match="not covered"):
         assert_predecessor_behavior(
@@ -299,6 +318,46 @@ def test_change_1_contract_rejects_added_metric_with_extra_label() -> None:
     labels["request_url"] = "https://sensitive.example/path"
 
     with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_enum_string_subclass_in_added_metric() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[9]
+    assert isinstance(metric, dict)
+    labels = metric["labels"]
+    assert isinstance(labels, dict)
+    labels["strategy"] = _StrategyLabel.TRAFILATURA
+
+    with pytest.raises(AssertionError, match="Strict JSON validation failed"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_non_string_key_in_added_metric() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[9]
+    assert isinstance(metric, dict)
+    labels = metric["labels"]
+    assert isinstance(labels, dict)
+    labels[1] = "not-json"
+
+    with pytest.raises(AssertionError, match="Strict JSON validation failed"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_non_finite_float_in_added_metric() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[11]
+    assert isinstance(metric, dict)
+    metric["value"] = float("inf")
+
+    with pytest.raises(AssertionError, match="Strict JSON validation failed"):
         _assert_change_1(actual, expected)
 
 
