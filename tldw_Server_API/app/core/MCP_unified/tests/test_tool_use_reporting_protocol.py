@@ -2591,20 +2591,25 @@ async def test_expected_failure_sentinel_is_absent_from_all_observable_surfaces(
 
 @pytest.mark.asyncio
 async def test_malformed_expected_failure_uses_generic_path_without_secret_disclosure() -> None:
-    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import ExpectedToolFailure
+    from tldw_Server_API.app.core.MCP_unified.execution_outcomes import (
+        BreakerAction,
+        ExpectedToolFailure,
+    )
 
     sentinel = "SENTINEL_MALFORMED_EXPECTED_FAILURE_SECRET"
 
     class _InjectingReason:
         reason_code = sentinel
         public_message = sentinel
+        breaker_action = BreakerAction.IGNORE
 
     failure = ExpectedToolFailure.__new__(ExpectedToolFailure)
     Exception.__init__(failure, sentinel)
     object.__setattr__(failure, "_reason", _InjectingReason())
     telemetry = _RecordingTelemetry()
+    module = _ExpectedFailureBreakerModule(failure, threshold=1)
     protocol, recorder = _protocol(
-        module=_ToolModule(fail=failure),
+        module=module,
         telemetry_provider=telemetry,
     )
     captured: list[Any] = []
@@ -2627,8 +2632,14 @@ async def test_malformed_expected_failure_uses_generic_path_without_secret_discl
         }
     )
     assert sentinel not in surfaces
+    assert module.calls == 1
+    assert module._circuit_breaker.failure_count == 1
+    assert module._circuit_breaker._state == "open"
     assert len(recorder.events) == 1
     assert recorder.events[0].status == "error"
+    module_failure_logs = [record for record in captured if record["message"] == "MCP module operation failed"]
+    assert [record["extra"].get("reason_code") for record in module_failure_logs] == ["module_operation_failed"]
+    assert [record["extra"].get("error_type") for record in module_failure_logs] == ["ExpectedToolFailure"]
 
 
 @pytest.mark.asyncio

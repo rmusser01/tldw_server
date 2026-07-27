@@ -17,10 +17,34 @@ from typing import Any, Optional, TypeVar
 from loguru import logger
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 
-from ..execution_outcomes import BreakerAction, ExpectedToolFailure
+from ..execution_outcomes import (
+    BreakerAction,
+    ExpectedToolFailure,
+    get_expected_tool_failure_reason,
+)
 from ..tool_observability import ensure_tool_definition_eval_metadata
 
 T = TypeVar("T")
+
+
+def _safe_exception_family(exc: BaseException) -> str:
+    """Return a bounded real exception type for structured module logs."""
+
+    try:
+        name = type(exc).__name__
+        if (
+            type(name) is str
+            and 1 <= len(name) <= 64
+            and name.isascii()
+            and (name[0].isalpha() or name[0] == "_")
+            and all(character.isalnum() or character == "_" for character in name)
+        ):
+            return name
+    except asyncio.CancelledError:
+        raise
+    except BaseException:  # noqa: BLE001 - logging must not inspect hostile descriptors.
+        return "Exception"
+    return "Exception"
 
 
 class HealthStatus(str, Enum):
@@ -503,7 +527,8 @@ class BaseModule(ABC):
             try:
                 return await _guarded_operation()
             except ExpectedToolFailure as exc:
-                if exc.breaker_action is BreakerAction.IGNORE:
+                reason = get_expected_tool_failure_reason(exc)
+                if reason is not None and reason.breaker_action is BreakerAction.IGNORE:
                     raise _IgnoredModuleOutcome(exc) from None
                 raise _CountedModuleOutcome(exc) from None
             except Exception as exc:
@@ -522,15 +547,12 @@ class BaseModule(ABC):
             self._metrics.record_request(False, latency_ms)
             original_to_raise = wrapped.original
             original_traceback = original_to_raise.__traceback__
-            reason_code = (
-                original_to_raise.reason_code
-                if isinstance(original_to_raise, ExpectedToolFailure)
-                else "module_operation_failed"
-            )
+            expected_reason = get_expected_tool_failure_reason(original_to_raise)
+            reason_code = expected_reason.reason_code if expected_reason is not None else "module_operation_failed"
             logger.bind(
                 module_id=self.name,
                 reason_code=reason_code,
-                error_type=original_to_raise.__class__.__name__,
+                error_type=_safe_exception_family(original_to_raise),
             ).error("MCP module operation failed")
         except Exception as e:
             if _is_circuit_breaker_open_error(e):
@@ -540,7 +562,7 @@ class BaseModule(ABC):
             logger.bind(
                 module_id=self.name,
                 reason_code="module_operation_failed",
-                error_type=e.__class__.__name__,
+                error_type=_safe_exception_family(e),
             ).error("MCP module operation failed")
             raise
 
