@@ -47,6 +47,13 @@ SAFE_EXCEPTION_LOG_HELPERS = {
     "_safe_exception_family",
     "get_expected_tool_failure_reason",
 }
+LEXICAL_SCOPE_NODES = (
+    ast.Module,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ClassDef,
+)
 RUNTIME_POLICY_FIELD_PATHS = {
     "effect": ("policy", "effect"),
     "rate_limit_category": ("policy", "rate_limit_category"),
@@ -429,7 +436,9 @@ def _contains_expected_error_result(
     for node in nodes:
         if _node_mentions_symbols(node, EXPECTED_FAILURE_SYMBOLS):
             return True
-        for candidate in ast.walk(node):
+        pending = [node]
+        while pending:
+            candidate = pending.pop()
             if isinstance(candidate, ast.Name):
                 if candidate.id in error_result_aliases or candidate.id in {
                     "_complete_expected_failure",
@@ -447,29 +456,76 @@ def _contains_expected_error_result(
                         and value.value is True
                     ):
                         return True
+            if not isinstance(candidate, LEXICAL_SCOPE_NODES):
+                pending.extend(ast.iter_child_nodes(candidate))
     return False
 
 
-def _expected_error_result_aliases(tree: ast.AST) -> set[str]:
-    assignments: list[tuple[list[ast.AST], ast.AST]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            assignments.append((node.targets, node.value))
-        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
-            assignments.append(([node.target], node.value))
+def _expected_error_result_aliases_by_node(tree: ast.Module) -> dict[int, set[str]]:
+    aliases_by_node: dict[int, set[str]] = {}
 
-    aliases: set[str] = set()
-    changed = True
-    while changed:
-        changed = False
-        for targets, value in assignments:
-            if not _contains_expected_error_result([value], aliases):
-                continue
-            for target in targets:
-                if isinstance(target, ast.Name) and target.id not in aliases:
-                    aliases.add(target.id)
-                    changed = True
-    return aliases
+    def assigned_names(targets: list[ast.AST]) -> set[str]:
+        return {
+            candidate.id
+            for target in targets
+            for candidate in ast.walk(target)
+            if isinstance(candidate, ast.Name) and isinstance(candidate.ctx, ast.Store)
+        }
+
+    def collect_scope(scope: ast.AST, inherited_aliases: set[str]) -> None:
+        scope_nodes: list[ast.AST] = []
+        nested_scopes: list[ast.AST] = []
+
+        def collect_node(node: ast.AST) -> None:
+            scope_nodes.append(node)
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, LEXICAL_SCOPE_NODES):
+                    nested_scopes.append(child)
+                else:
+                    collect_node(child)
+
+        collect_node(scope)
+        assignments: list[tuple[list[ast.AST], ast.AST]] = []
+        bound_names: set[str] = set()
+        for node in scope_nodes:
+            if isinstance(node, ast.Assign):
+                assignments.append((node.targets, node.value))
+                bound_names.update(assigned_names(node.targets))
+            elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+                assignments.append(([node.target], node.value))
+                bound_names.update(assigned_names([node.target]))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound_names.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                bound_names.update(
+                    alias.asname or alias.name.split(".", maxsplit=1)[0]
+                    for alias in node.names
+                )
+            elif isinstance(node, ast.ExceptHandler) and isinstance(node.name, str):
+                bound_names.add(node.name)
+            elif isinstance(node, ast.arg):
+                bound_names.add(node.arg)
+
+        aliases: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for targets, value in assignments:
+                if not _contains_expected_error_result([value], aliases):
+                    continue
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id not in aliases:
+                        aliases.add(target.id)
+                        changed = True
+
+        visible_aliases = (inherited_aliases - bound_names) | aliases
+        for node in scope_nodes:
+            aliases_by_node[id(node)] = visible_aliases
+        for nested_scope in nested_scopes:
+            collect_scope(nested_scope, visible_aliases)
+
+    collect_scope(tree, set())
+    return aliases_by_node
 
 
 def _contains_domain_token(node: ast.AST) -> bool:
@@ -500,9 +556,10 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
     """Find expected-failure handling that belongs in the extracted runtime."""
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    error_result_aliases = _expected_error_result_aliases(tree)
+    error_result_aliases = _expected_error_result_aliases_by_node(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
+        node_error_aliases = error_result_aliases.get(id(node), set())
         if isinstance(node, ast.ExceptHandler) and node.type is not None:
             if _node_mentions_symbols(node.type, EXPECTED_FAILURE_SYMBOLS):
                 violations.append(
@@ -510,7 +567,7 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
                 )
             elif _contains_domain_token(node.type) and _contains_expected_error_result(
                 node.body,
-                error_result_aliases,
+                node_error_aliases,
             ):
                 violations.append(
                     f"{path.name}:{node.lineno} contains a Skills/model/provider "
@@ -525,7 +582,7 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
                 )
             elif _contains_domain_token(node.subject) and _contains_expected_error_result(
                 list(node.cases),
-                error_result_aliases,
+                node_error_aliases,
             ):
                 violations.append(
                     f"{path.name}:{node.lineno} contains a Skills/model/provider error-result branch"
@@ -543,7 +600,7 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
                         "in protocol facade"
                     )
                 elif any(_contains_domain_token(predicate) for predicate in predicates) and (
-                    _contains_expected_error_result(case.body, error_result_aliases)
+                    _contains_expected_error_result(case.body, node_error_aliases)
                 ):
                     violations.append(
                         f"{path.name}:{case.pattern.lineno} contains a Skills/model/provider "
@@ -567,7 +624,7 @@ def _protocol_expected_failure_branch_violations_for(path: Path) -> list[str]:
             )
         elif _contains_domain_token(predicate) and _contains_expected_error_result(
             bodies,
-            error_result_aliases,
+            node_error_aliases,
         ):
             violations.append(
                 f"{path.name}:{node.lineno} contains a Skills/model/provider error-result branch"
@@ -711,7 +768,12 @@ def _runtime_mutable_authority_violations_for(path: Path) -> list[str]:
                 violations.append(
                     f"{path.name}:{node.lineno} reads mutable field {key!r} via dynamic lookup"
                 )
-    authority_visitor = _PreparedAuthorityAliasVisitor(path)
+    operator_modules, operator_getitems = _operator_getitem_bindings_for(tree.body)
+    authority_visitor = _PreparedAuthorityAliasVisitor(
+        path,
+        operator_modules=operator_modules,
+        operator_getitems=operator_getitems,
+    )
     for statement in execution.body:
         authority_visitor.visit(statement)
     violations.extend(authority_visitor.violations)
@@ -734,10 +796,71 @@ def _contains_prepared_tool_authority(
     )
 
 
+def _is_operator_getitem_reference(
+    node: ast.AST,
+    operator_modules: set[str],
+    operator_getitems: set[str],
+) -> bool:
+    path = _attribute_path(node)
+    return bool(
+        isinstance(node, ast.Name)
+        and node.id in operator_getitems
+        or len(path) == 2
+        and path[0] in operator_modules
+        and path[1] == "getitem"
+    )
+
+
+def _operator_getitem_bindings_for(
+    statements: list[ast.stmt],
+) -> tuple[set[str], set[str]]:
+    operator_modules: set[str] = set()
+    operator_getitems: set[str] = set()
+    assignments: list[tuple[ast.AST, ast.AST]] = []
+    for statement in statements:
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                if alias.name == "operator":
+                    operator_modules.add(alias.asname or alias.name)
+        elif isinstance(statement, ast.ImportFrom) and statement.module == "operator":
+            for alias in statement.names:
+                if alias.name == "getitem":
+                    operator_getitems.add(alias.asname or alias.name)
+        elif isinstance(statement, ast.Assign):
+            assignments.extend((target, statement.value) for target in statement.targets)
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            assignments.append((statement.target, statement.value))
+
+    changed = True
+    while changed:
+        changed = False
+        for target, value in assignments:
+            if (
+                isinstance(target, ast.Name)
+                and target.id not in operator_getitems
+                and _is_operator_getitem_reference(
+                    value,
+                    operator_modules,
+                    operator_getitems,
+                )
+            ):
+                operator_getitems.add(target.id)
+                changed = True
+    return operator_modules, operator_getitems
+
+
 class _PreparedAuthorityAliasVisitor(ast.NodeVisitor):
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        operator_modules: set[str],
+        operator_getitems: set[str],
+    ) -> None:
         self.path = path
         self.aliases: set[str] = set()
+        self.operator_modules = set(operator_modules)
+        self.operator_getitems = set(operator_getitems)
         self.violations: list[str] = []
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
@@ -756,21 +879,54 @@ class _PreparedAuthorityAliasVisitor(ast.NodeVisitor):
         self._visit_function(node)
 
     def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
-        if not isinstance(target, ast.Name):
+        if (
+            isinstance(target, (ast.Tuple, ast.List))
+            and isinstance(value, (ast.Tuple, ast.List))
+            and len(target.elts) == len(value.elts)
+        ):
+            for child_target, child_value in zip(target.elts, value.elts, strict=True):
+                self._update_alias(child_target, child_value)
             return
         if _contains_prepared_tool_authority(value, self.aliases):
-            self.aliases.add(target.id)
+            self.aliases.update(
+                candidate.id
+                for candidate in ast.walk(target)
+                if isinstance(candidate, ast.Name)
+                and isinstance(candidate.ctx, ast.Store)
+            )
         # A later assignment may be conditional, so tainted-name reuse stays tainted.
+
+    def _update_operator_getitem_alias(self, target: ast.AST, value: ast.AST) -> None:
+        if isinstance(target, ast.Name) and _is_operator_getitem_reference(
+            value,
+            self.operator_modules,
+            self.operator_getitems,
+        ):
+            self.operator_getitems.add(target.id)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
         for target in node.targets:
             self._update_alias(target, node.value)
+            self._update_operator_getitem_alias(target, node.value)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
         if node.value is not None:
             self.visit(node.value)
             self._update_alias(node.target, node.value)
+            self._update_operator_getitem_alias(node.target, node.value)
+
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        for alias in node.names:
+            if alias.name == "operator":
+                self.operator_modules.add(alias.asname or alias.name)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+        if node.module != "operator":
+            return
+        for alias in node.names:
+            if alias.name == "getitem":
+                self.operator_getitems.add(alias.asname or alias.name)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:  # noqa: N802
         if (
@@ -799,7 +955,20 @@ class _PreparedAuthorityAliasVisitor(ast.NodeVisitor):
             and not isinstance(node.args[1], ast.Constant)
             and _contains_prepared_tool_authority(node.args[0], self.aliases)
         )
-        if dynamic_get or dynamic_getattr:
+        operator_getitem = (
+            _is_operator_getitem_reference(
+                node.func,
+                self.operator_modules,
+                self.operator_getitems,
+            )
+            and len(node.args) >= 2
+            and _contains_prepared_tool_authority(node.args[0], self.aliases)
+            and (
+                not isinstance(node.args[1], ast.Constant)
+                or node.args[1].value in MUTABLE_EXECUTION_FIELDS
+            )
+        )
+        if dynamic_get or dynamic_getattr or operator_getitem:
             self.violations.append(
                 f"{self.path.name}:{node.lineno} performs dynamic prepared authority read "
                 f"{_display_node(node)}"
@@ -811,14 +980,17 @@ class _DefaultStrVisitor(ast.NodeVisitor):
     def __init__(self, path: Path) -> None:
         self.path = path
         self.aliases: set[str] = set()
+        self.default_mapping_aliases: set[str] = set()
         self.builtins_modules: set[str] = {"builtins"}
         self.violations: list[str] = []
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        previous = set(self.aliases)
+        previous_aliases = set(self.aliases)
+        previous_mappings = set(self.default_mapping_aliases)
         for statement in node.body:
             self.visit(statement)
-        self.aliases = previous
+        self.aliases = previous_aliases
+        self.default_mapping_aliases = previous_mappings
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
         self._visit_function(node)
@@ -826,10 +998,8 @@ class _DefaultStrVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
         self._visit_function(node)
 
-    def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
-        if not isinstance(target, ast.Name):
-            return
-        is_str_alias = (
+    def _is_str_expression(self, value: ast.AST) -> bool:
+        return bool(
             isinstance(value, ast.Name)
             and (value.id == "str" or value.id in self.aliases)
             or isinstance(value, ast.Attribute)
@@ -837,19 +1007,57 @@ class _DefaultStrVisitor(ast.NodeVisitor):
             and value.value.id in self.builtins_modules
             and value.attr == "str"
         )
-        if is_str_alias:
+
+    def _update_alias(self, target: ast.AST, value: ast.AST) -> None:
+        if isinstance(target, ast.Name) and self._is_str_expression(value):
             self.aliases.add(target.id)
         # A later assignment may be conditional, so tainted-name reuse stays tainted.
+
+    def _contains_default_str_mapping(self, value: ast.AST) -> bool:
+        if isinstance(value, ast.Name):
+            return value.id in self.default_mapping_aliases
+        if isinstance(value, ast.Dict):
+            return any(
+                isinstance(key, ast.Constant)
+                and key.value == "default"
+                and self._is_str_expression(item)
+                or key is None
+                and self._contains_default_str_mapping(item)
+                for key, item in zip(value.keys, value.values, strict=True)
+            )
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "dict"
+        ):
+            return any(
+                keyword.arg == "default" and self._is_str_expression(keyword.value)
+                or keyword.arg is None
+                and self._contains_default_str_mapping(keyword.value)
+                for keyword in value.keywords
+            )
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.BitOr):
+            return self._contains_default_str_mapping(
+                value.left
+            ) or self._contains_default_str_mapping(value.right)
+        return False
+
+    def _update_default_mapping_alias(self, target: ast.AST, value: ast.AST) -> None:
+        if isinstance(target, ast.Name) and self._contains_default_str_mapping(value):
+            self.default_mapping_aliases.add(target.id)
+        # Expanded kwargs use the same conservative may-be-tainted name rule.
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
         for target in node.targets:
             self._update_alias(target, node.value)
+            self._update_default_mapping_alias(target, node.value)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
         if node.value is not None:
             self.visit(node.value)
             self._update_alias(node.target, node.value)
+            self._update_default_mapping_alias(node.target, node.value)
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
@@ -864,21 +1072,16 @@ class _DefaultStrVisitor(ast.NodeVisitor):
                 self.aliases.add(alias.asname or alias.name)
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
-        for keyword in node.keywords:
-            if keyword.arg != "default":
-                continue
-            value = keyword.value
-            if (
-                isinstance(value, ast.Name)
-                and (value.id == "str" or value.id in self.aliases)
-                or isinstance(value, ast.Attribute)
-                and isinstance(value.value, ast.Name)
-                and value.value.id in self.builtins_modules
-                and value.attr == "str"
-            ):
-                self.violations.append(
-                    f"{self.path.name}:{node.lineno} uses coercing default=str serialization"
-                )
+        uses_default_str = any(
+            keyword.arg == "default" and self._is_str_expression(keyword.value)
+            or keyword.arg is None
+            and self._contains_default_str_mapping(keyword.value)
+            for keyword in node.keywords
+        )
+        if uses_default_str:
+            self.violations.append(
+                f"{self.path.name}:{node.lineno} uses coercing default=str serialization"
+            )
         self.generic_visit(node)
 
 
@@ -889,21 +1092,117 @@ def _default_str_violations_for(path: Path) -> list[str]:
     return visitor.violations
 
 
-def _is_logger_expression(node: ast.AST, logger_names: set[str] | None = None) -> bool:
+def _is_logger_expression(
+    node: ast.AST,
+    logger_names: set[str] | None = None,
+    logger_modules: set[str] | None = None,
+) -> bool:
     names = logger_names or {"logger"}
+    modules = logger_modules or {"loguru"}
     if isinstance(node, ast.Name):
         return node.id in names
     if isinstance(node, ast.Attribute):
-        return node.attr == "logger" or _is_logger_expression(node.value, names)
+        return (
+            node.attr == "logger"
+            and isinstance(node.value, ast.Name)
+            and node.value.id in modules
+            or _is_logger_expression(node.value, names, modules)
+        )
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        return _is_logger_expression(node.func.value, names)
+        return _is_logger_expression(node.func.value, names, modules)
     return False
 
 
-def _is_safe_exception_log_expression(node: ast.AST, exception_names: set[str]) -> bool:
+def _helper_uses_parameter_unsafely(node: ast.AST, parameter: str) -> bool:
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "type"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == parameter
+        and not node.keywords
+    ):
+        return False
+    if (
+        isinstance(node, ast.Call)
+        and _attribute_path(node.func) == ("object", "__getattribute__")
+        and len(node.args) == 2
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == parameter
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+        and not node.keywords
+    ):
+        return False
+    if (
+        isinstance(node, ast.Attribute)
+        and _attribute_path(node) == (parameter, "__class__", "__name__")
+    ):
+        return False
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == parameter:
+        return True
+    return any(
+        _helper_uses_parameter_unsafely(child, parameter)
+        for child in ast.iter_child_nodes(node)
+    )
+
+
+def _verified_safe_exception_log_helpers(tree: ast.Module) -> set[str]:
+    definitions: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in SAFE_EXCEPTION_LOG_HELPERS
+        ):
+            definitions.setdefault(node.name, []).append(node)
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and node.module.endswith("execution_outcomes")
+        ):
+            imported.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "get_expected_tool_failure_reason"
+            )
+
+    verified = set(imported)
+    for name, candidates in definitions.items():
+        all_safe = True
+        for candidate in candidates:
+            arguments = [*candidate.args.posonlyargs, *candidate.args.args]
+            if not arguments:
+                all_safe = False
+                break
+            parameter = arguments[0].arg
+            if any(
+                _helper_uses_parameter_unsafely(statement, parameter)
+                for statement in candidate.body
+            ):
+                all_safe = False
+                break
+        if all_safe:
+            verified.add(name)
+    return verified
+
+
+def _is_safe_exception_log_expression(
+    node: ast.AST,
+    exception_names: set[str],
+    safe_helper_names: set[str],
+) -> bool:
     if isinstance(node, ast.Call):
         function_path = _attribute_path(node.func)
-        if function_path and function_path[-1] in SAFE_EXCEPTION_LOG_HELPERS:
+        if (
+            function_path
+            and function_path[-1] in safe_helper_names
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in exception_names
+            and not node.keywords
+        ):
             return True
         if (
             isinstance(node.func, ast.Name)
@@ -921,13 +1220,17 @@ def _is_safe_exception_log_expression(node: ast.AST, exception_names: set[str]) 
     )
 
 
-def _uses_raw_exception_unsafely(node: ast.AST, exception_names: set[str]) -> bool:
-    if _is_safe_exception_log_expression(node, exception_names):
+def _uses_raw_exception_unsafely(
+    node: ast.AST,
+    exception_names: set[str],
+    safe_helper_names: set[str],
+) -> bool:
+    if _is_safe_exception_log_expression(node, exception_names, safe_helper_names):
         return False
     if isinstance(node, ast.Name) and node.id in exception_names:
         return True
     return any(
-        _uses_raw_exception_unsafely(child, exception_names)
+        _uses_raw_exception_unsafely(child, exception_names, safe_helper_names)
         for child in ast.iter_child_nodes(node)
     )
 
@@ -935,10 +1238,12 @@ def _uses_raw_exception_unsafely(node: ast.AST, exception_names: set[str]) -> bo
 class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
     """Track raw exception names only within their lexical logging scope."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, safe_helper_names: set[str]) -> None:
         self.path = path
         self.exception_names: set[str] = set()
         self.logger_names: set[str] = {"logger"}
+        self.logger_modules: set[str] = {"loguru"}
+        self.safe_helper_names = set(safe_helper_names)
         self.violations: list[str] = []
 
     @staticmethod
@@ -958,11 +1263,13 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         previous_exceptions = self.exception_names
         previous_loggers = set(self.logger_names)
+        previous_logger_modules = set(self.logger_modules)
         self.exception_names = previous_exceptions | self._annotated_exception_arguments(node)
         for statement in node.body:
             self.visit(statement)
         self.exception_names = previous_exceptions
         self.logger_names = previous_loggers
+        self.logger_modules = previous_logger_modules
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
         self._visit_function(node)
@@ -991,13 +1298,17 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
 
     def _update_exception_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
         assigned_names = self._assigned_names(targets)
-        if _uses_raw_exception_unsafely(value, self.exception_names):
+        if _uses_raw_exception_unsafely(
+            value,
+            self.exception_names,
+            self.safe_helper_names,
+        ):
             self.exception_names.update(assigned_names)
         # A later assignment may be conditional, so tainted-name reuse stays tainted.
 
     def _update_logger_aliases(self, targets: list[ast.AST], value: ast.AST) -> None:
         assigned_names = self._assigned_names(targets)
-        if _is_logger_expression(value, self.logger_names):
+        if _is_logger_expression(value, self.logger_names, self.logger_modules):
             self.logger_names.update(assigned_names)
         # A later assignment may be conditional, so logger-name reuse stays tainted.
 
@@ -1012,6 +1323,18 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
             self._update_exception_aliases([node.target], node.value)
             self._update_logger_aliases([node.target], node.value)
 
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        for alias in node.names:
+            if alias.name == "loguru":
+                self.logger_modules.add(alias.asname or alias.name)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+        if node.module != "loguru":
+            return
+        for alias in node.names:
+            if alias.name == "logger":
+                self.logger_names.add(alias.asname or alias.name)
+
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
         self.visit(node.value)
         self._update_exception_aliases([node.target], node.value)
@@ -1023,6 +1346,7 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
         if assigned_names.intersection(self.exception_names) or _uses_raw_exception_unsafely(
             node.value,
             self.exception_names,
+            self.safe_helper_names,
         ):
             self.exception_names.update(assigned_names)
 
@@ -1067,6 +1391,7 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
         subject_is_exception = _uses_raw_exception_unsafely(
             node.subject,
             self.exception_names,
+            self.safe_helper_names,
         )
         previous = set(self.exception_names)
         branch_states: list[set[str]] = []
@@ -1088,7 +1413,11 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
         is_logger_call = (
             isinstance(node.func, ast.Attribute)
             and node.func.attr in LOGGER_METHODS
-            and _is_logger_expression(node.func.value, self.logger_names)
+            and _is_logger_expression(
+                node.func.value,
+                self.logger_names,
+                self.logger_modules,
+            )
         )
         if is_logger_call:
             if node.func.attr == "exception" and self.exception_names:
@@ -1116,7 +1445,11 @@ class _UnsafeExceptionLogVisitor(ast.NodeVisitor):
                 ),
             ]
             for value in values:
-                if _uses_raw_exception_unsafely(value, self.exception_names):
+                if _uses_raw_exception_unsafely(
+                    value,
+                    self.exception_names,
+                    self.safe_helper_names,
+                ):
                     self.violations.append(
                         f"{self.path.name}:{node.lineno} logs raw exception expression "
                         f"{_display_node(value)}"
@@ -1128,7 +1461,10 @@ def _unsafe_exception_log_violations_for(path: Path) -> list[str]:
     """Return unsafe raw-exception logging violations in one Python module."""
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    visitor = _UnsafeExceptionLogVisitor(path)
+    visitor = _UnsafeExceptionLogVisitor(
+        path,
+        safe_helper_names=_verified_safe_exception_log_helpers(tree),
+    )
     visitor.visit(tree)
     return visitor.violations
 
@@ -2366,6 +2702,45 @@ def test_protocol_branch_scan_allows_prebuilt_non_error_result_alias(
 
 
 @pytest.mark.parametrize(
+    ("filename", "error_scope"),
+    [
+        (
+            "function_scope.py",
+            "def build_error():\n"
+            "    result = {'isError': True}\n"
+            "    return result\n",
+        ),
+        (
+            "lambda_scope.py",
+            "build_error = lambda: (result := {'isError': True})\n",
+        ),
+        (
+            "class_scope.py",
+            "class ErrorFactory:\n"
+            "    result = {'isError': True}\n",
+        ),
+    ],
+)
+def test_protocol_branch_scan_isolates_expected_error_aliases_by_lexical_scope(
+    tmp_path: Path,
+    filename: str,
+    error_scope: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(
+        f"{error_scope}"
+        "def handle(tool_name):\n"
+        "    result = {'content': []}\n"
+        "    if tool_name == 'skills.run':\n"
+        "        return result\n"
+        "    return {}\n",
+        encoding="utf-8",
+    )
+
+    assert _protocol_expected_failure_branch_violations_for(sample) == []
+
+
+@pytest.mark.parametrize(
     ("filename", "source"),
     [
         (
@@ -2712,6 +3087,100 @@ def test_runtime_policy_scan_allows_distinct_untainted_dynamic_lookup(
     assert _runtime_mutable_authority_violations_for(sample) == []
 
 
+@pytest.mark.parametrize(
+    ("filename", "imports", "lookup"),
+    [
+        ("operator_module.py", "import operator as op\n", "op.getitem"),
+        (
+            "operator_import_alias.py",
+            "from operator import getitem as read_item\n",
+            "read_item",
+        ),
+    ],
+)
+def test_runtime_policy_scan_rejects_operator_getitem_authority_reads(
+    tmp_path: Path,
+    filename: str,
+    imports: str,
+    lookup: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(
+        f"{imports}"
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        f"    metadata = {lookup}(prepared.tool_def, 'metadata')\n"
+        "    field = 'category'\n"
+        f"    return {lookup}(metadata, field), policy.effect\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("dynamic prepared authority" in violation for violation in violations)
+
+
+def test_runtime_policy_scan_rejects_destructured_authority_alias(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "destructured_authority_alias.py"
+    sample.write_text(
+        "async def execute_prepared_tool_call(prepared):\n"
+        "    policy = prepared.policy\n"
+        "    metadata, unused = prepared.tool_def['metadata'], {}\n"
+        "    field = 'category'\n"
+        "    return metadata[field], policy.effect\n",
+        encoding="utf-8",
+    )
+
+    violations = _runtime_mutable_authority_violations_for(sample)
+
+    assert any("dynamic prepared authority" in violation for violation in violations)
+
+
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        (
+            "unrelated_operator_lookup.py",
+            "import operator\n"
+            "async def execute_prepared_tool_call(prepared):\n"
+            "    policy = prepared.policy\n"
+            "    payload = {'category': 'safe'}\n"
+            "    field = 'category'\n"
+            "    return operator.getitem(payload, field), policy.effect\n",
+        ),
+        (
+            "unrelated_getitem_function.py",
+            "def getitem(mapping, key):\n"
+            "    return mapping[key]\n"
+            "async def execute_prepared_tool_call(prepared):\n"
+            "    policy = prepared.policy\n"
+            "    metadata = getitem(prepared.tool_def, 'metadata')\n"
+            "    field = 'category'\n"
+            "    return getitem(metadata, field), policy.effect\n",
+        ),
+        (
+            "unrelated_destructuring.py",
+            "async def execute_prepared_tool_call(prepared):\n"
+            "    policy = prepared.policy\n"
+            "    payload, unused = {'category': 'safe'}, {}\n"
+            "    field = 'category'\n"
+            "    return payload[field], policy.effect\n",
+        ),
+    ],
+)
+def test_runtime_policy_scan_allows_unrelated_getitem_and_destructuring(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    assert _runtime_mutable_authority_violations_for(sample) == []
+
+
 def test_runtime_has_no_default_str_serialization_fallback() -> None:
     violations = _default_str_violations_for(MCP_ROOT / "tool_execution" / "runtime.py")
 
@@ -2763,6 +3232,59 @@ def test_default_str_scan_allows_distinct_untainted_default(tmp_path: Path) -> N
         "    coercing_fallback = str\n"
         "    fallback = None\n"
         "    return json.dumps(value, default=fallback)\n",
+        encoding="utf-8",
+    )
+
+    assert _default_str_violations_for(sample) == []
+
+
+@pytest.mark.parametrize(
+    ("filename", "assignments", "expanded_name"),
+    [
+        (
+            "expanded_default.py",
+            "    options = {'default': str}\n",
+            "options",
+        ),
+        (
+            "expanded_default_alias.py",
+            "    options = {'default': str}\n"
+            "    kwargs = options\n"
+            "    if cond:\n"
+            "        kwargs = {}\n",
+            "kwargs",
+        ),
+    ],
+)
+def test_default_str_scan_rejects_expanded_kwargs_aliases(
+    tmp_path: Path,
+    filename: str,
+    assignments: str,
+    expanded_name: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(
+        "import json\n"
+        "def encode(value, cond=False):\n"
+        f"{assignments}"
+        f"    return json.dumps(value, **{expanded_name})\n",
+        encoding="utf-8",
+    )
+
+    violations = _default_str_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "default=str" in violations[0]
+
+
+def test_default_str_scan_allows_unrelated_expanded_kwargs(tmp_path: Path) -> None:
+    sample = tmp_path / "expanded_safe_options.py"
+    sample.write_text(
+        "import json\n"
+        "def encode(value):\n"
+        "    options = {'sort_keys': True}\n"
+        "    kwargs = options\n"
+        "    return json.dumps(value, **kwargs)\n",
         encoding="utf-8",
     )
 
@@ -2993,6 +3515,76 @@ def test_exception_log_scan_rejects_logger_and_match_aliases(
     violations = _unsafe_exception_log_violations_for(sample)
 
     assert len(violations) == 1
+
+
+def test_exception_log_scan_rejects_loguru_import_alias(tmp_path: Path) -> None:
+    sample = tmp_path / "loguru_import_alias.py"
+    sample.write_text(
+        "from loguru import logger as log\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    log.error('{}', repr(exc))\n",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "repr(exc)" in violations[0]
+
+
+def test_exception_log_scan_rejects_shadowed_safe_helper(tmp_path: Path) -> None:
+    sample = tmp_path / "shadowed_safe_helper.py"
+    sample.write_text(
+        "from loguru import logger\n"
+        "def _safe_error_type(exc):\n"
+        "    return str(exc)\n"
+        "try:\n"
+        "    raise RuntimeError('private provider detail')\n"
+        "except Exception as exc:\n"
+        "    logger.error('{}', _safe_error_type(exc))\n",
+        encoding="utf-8",
+    )
+
+    violations = _unsafe_exception_log_violations_for(sample)
+
+    assert len(violations) == 1
+    assert "_safe_error_type(exc)" in violations[0]
+
+
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        (
+            "safe_loguru_alias.py",
+            "from loguru import logger as log\n"
+            "try:\n"
+            "    raise RuntimeError('private provider detail')\n"
+            "except Exception as exc:\n"
+            "    log.error('{}', type(exc).__name__)\n",
+        ),
+        (
+            "verified_safe_helper.py",
+            "from loguru import logger\n"
+            "def _safe_error_type(exc):\n"
+            "    return type(exc).__name__\n"
+            "try:\n"
+            "    raise RuntimeError('private provider detail')\n"
+            "except Exception as exc:\n"
+            "    logger.error('{}', _safe_error_type(exc))\n",
+        ),
+    ],
+)
+def test_exception_log_scan_allows_verified_logger_and_helper_bindings(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    sample = tmp_path / filename
+    sample.write_text(source, encoding="utf-8")
+
+    assert _unsafe_exception_log_violations_for(sample) == []
 
 
 @pytest.mark.parametrize(
