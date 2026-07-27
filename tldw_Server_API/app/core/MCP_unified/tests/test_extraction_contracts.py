@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import contextlib
 import inspect
 from collections.abc import Callable
@@ -78,30 +79,11 @@ class _RecordingModuleRegistry:
             self.events.append("modules")
 
 
-class _RecordingIdempotencyShutdown:
-    def __init__(self, events: list[str]) -> None:
-        self.events = events
-        self.pending = 1
-
-    async def shutdown(self) -> None:
-        self.events.append("idempotency")
-        self.pending = 0
-
-
 class _ExoticShutdownError(Exception):
     def __getattribute__(self, name: str) -> Any:
         if name == "__class__":
             raise RuntimeError("hostile shutdown exception class access")
         return super().__getattribute__(name)
-
-
-class _FailingIdempotencyShutdown:
-    def __init__(self, events: list[str]) -> None:
-        self.events = events
-
-    async def shutdown(self) -> None:
-        self.events.append("idempotency")
-        raise _ExoticShutdownError("private shutdown detail")
 
 
 class _NoopMetrics:
@@ -287,6 +269,12 @@ def _server_runtime_dependencies() -> SimpleNamespace:
     deps.policy_context_provider = _FakePolicyContextProvider(enabled=False)
     deps.auth_provider = _FakeAuthProvider()
     return deps
+
+
+def _real_server_runtime_dependencies() -> Any:
+    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
+
+    return MCPRuntimeDependencies(**vars(_server_runtime_dependencies()))
 
 
 def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[str]:
@@ -745,16 +733,33 @@ async def test_mcp_server_drains_idempotency_before_module_registry_shutdown() -
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
     events: list[str] = []
-    deps = _server_runtime_dependencies()
+    deps = _real_server_runtime_dependencies()
     deps.module_registry = _RecordingModuleRegistry(events)
     server = MCPServer(dependencies=deps)
-    idempotency = _RecordingIdempotencyShutdown(events)
-    server.dependencies.idempotency = idempotency
+    idempotency = server.protocol._idempotency
+    finalizer_started = asyncio.Event()
+    release_finalizer = asyncio.Event()
 
-    await server.shutdown()
+    async def _finalize() -> str:
+        finalizer_started.set()
+        await release_finalizer.wait()
+        events.append("idempotency")
+        return "local"
 
+    finalizer = idempotency._create_finalizer(_finalize, bound=1.0)
+    assert finalizer is not None
+    await asyncio.wait_for(finalizer_started.wait(), timeout=0.5)
+    shutdown = asyncio.create_task(server.shutdown())
+    await asyncio.sleep(0)
+    events_before_release = list(events)
+    release_finalizer.set()
+    await asyncio.wait_for(shutdown, timeout=1.0)
+    await asyncio.wait_for(finalizer, timeout=0.5)
+
+    assert not hasattr(deps, "idempotency")
+    assert events_before_release == []
     assert events == ["idempotency", "modules"]
-    assert idempotency.pending == 0
+    assert idempotency._finalizers == set()
 
 
 @pytest.mark.asyncio
@@ -762,10 +767,15 @@ async def test_mcp_server_shutdown_contains_exotic_error_before_module_teardown(
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
     events: list[str] = []
-    deps = _server_runtime_dependencies()
+    deps = _real_server_runtime_dependencies()
     deps.module_registry = _RecordingModuleRegistry(events)
     server = MCPServer(dependencies=deps)
-    server.dependencies.idempotency = _FailingIdempotencyShutdown(events)
+
+    async def _fail_protocol_shutdown() -> None:
+        events.append("idempotency")
+        raise _ExoticShutdownError("private shutdown detail")
+
+    server.protocol.shutdown = _fail_protocol_shutdown
 
     await server.shutdown()
 

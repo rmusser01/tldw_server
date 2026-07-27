@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.MCP_unified.tool_execution.idempotency import (
 )
 from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
     IdempotencyExecutionPolicy,
+    IdempotencyRunResult,
 )
 from tldw_Server_API.app.core.MCP_unified.tool_execution.runtime import (
     ToolExecutionRuntime,
@@ -115,6 +116,7 @@ class _FakeRedis:
         self.replace_binding_after_result_read = False
         self.remove_binding_during_replay_read = False
         self.expire_result_during_replay_read = False
+        self.binding_refresh_returns_false = False
 
     @staticmethod
     def _bytes(value: Any) -> bytes:
@@ -251,6 +253,8 @@ class _FakeRedis:
 
         if key_count == 1 and len(values) == 3:
             binding_key, arguments_hash, ttl = values
+            if self.binding_refresh_returns_false:
+                return 0
             if self.values.get(str(binding_key)) != self._bytes(arguments_hash):
                 return 0
             self.expirations.append((str(binding_key), int(ttl)))
@@ -606,7 +610,8 @@ async def test_redis_post_callback_fault_returns_original_and_keeps_local_replay
     assert replay.from_cache is True
     assert replay.payload == original
     assert replay.payload is not original
-    assert manager.remote_degraded is True
+    expected_remote_degraded = fault != "release_returns_false"
+    assert manager.remote_degraded is expected_remote_degraded
     if fault == "result_write_then_raise":
         assert stages == [("redis_result_write", "RedisError")]
     elif fault == "release_delete_then_raise":
@@ -632,6 +637,34 @@ async def test_redis_post_callback_fault_returns_original_and_keeps_local_replay
         assert fresh_replay.from_cache is True
         assert fresh_replay.persistence == "durable"
         assert redis.calls.count(("set", lock_key)) == lock_sets_before
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_valid_local_replay_precedes_block_after_write_and_refresh_uncertainty() -> None:
+    redis = _FakeRedis()
+    redis.result_write_then_raise = True
+    redis.binding_refresh_returns_false = True
+    manager = _remote_manager(redis)
+    payload = {"content": [{"type": "text", "text": "committed-local"}]}
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return payload
+
+    first = await manager.execute("uncertain-local", "args", _execute, policy=_policy())
+    replay = await manager.execute("uncertain-local", "args", _execute, policy=_policy())
+
+    assert first.persistence == "local"
+    assert replay.from_cache is True
+    assert replay.payload == payload
+    assert calls == 1
+    assert "uncertain-local" in manager._local_cache
+    assert "uncertain-local" in manager._remote_uncertain
+    assert manager._redis_ready is False
+    assert manager.remote_degraded is True
 
 
 @pytest.mark.unit
@@ -722,9 +755,69 @@ async def test_stale_remote_owner_cannot_publish_after_argument_rebind() -> None
 
     assert calls == 1
     assert result.payload is original
-    assert result.persistence == "local"
+    assert result.persistence == "none"
     assert _result_key(key) not in redis.values
     assert stages == [("redis_result_write", "RuntimeError")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "semantic_outcome",
+    ["binding_lost", "ownership_lost", "result_conflict"],
+)
+async def test_semantic_result_rejection_is_key_local_and_evicts_stale_replay(
+    semantic_outcome: str,
+) -> None:
+    redis = _FakeRedis()
+    key = f"semantic-{semantic_outcome}"
+    stages: list[tuple[str, str]] = []
+    manager = _remote_manager(
+        redis,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
+    stale_payload = {"content": [{"type": "text", "text": "stale"}]}
+    newer_payload = {"content": [{"type": "text", "text": "newer"}]}
+    newer_encoded = canonical_json_bytes(
+        newer_payload,
+        max_bytes=_policy().max_result_bytes,
+    )
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if semantic_outcome == "binding_lost":
+            redis.values[_binding_key(key)] = b"new-binding"
+        elif semantic_outcome == "ownership_lost":
+            redis.values[_lock_key(key)] = b"new-owner-token"
+        else:
+            redis.values[_result_key(key)] = newer_encoded
+        return stale_payload
+
+    result = await manager.execute(key, "args", _execute, policy=_policy())
+
+    with pytest.raises(ExpectedToolFailure) as retry_caught:
+        await manager.execute(key, "args", _execute, policy=_policy())
+
+    unrelated = await manager.execute(
+        f"unrelated-{semantic_outcome}",
+        "other-args",
+        lambda: _async_payload({"unrelated": True}),
+        policy=_policy(),
+    )
+
+    assert result.payload is stale_payload
+    assert result.persistence == "none"
+    assert retry_caught.value.reason is ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    assert calls == 1
+    assert key not in manager._local_cache
+    assert key in manager._remote_uncertain
+    assert unrelated.persistence == "durable"
+    assert manager._redis_ready is True
+    assert manager.remote_degraded is False
+    assert stages[0] == ("redis_result_write", "RuntimeError")
+    assert all(stage in {"redis_result_write", "redis_release"} for stage, _ in stages)
 
 
 @pytest.mark.unit
@@ -1923,3 +2016,103 @@ async def test_normal_manager_shutdown_leaves_no_finalizer_pending() -> None:
     await manager.shutdown()
 
     assert manager._finalizers == set()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_waits_for_admitted_execution_to_create_and_drain_finalizer() -> None:
+    redis = _BlockingResultRedis()
+    manager = _remote_manager(redis)
+    callback_started = asyncio.Event()
+    allow_callback = asyncio.Event()
+    original_payload = {"content": [{"type": "text", "text": "original"}]}
+    later_callback_calls = 0
+
+    async def _execute_original() -> dict[str, Any]:
+        callback_started.set()
+        await allow_callback.wait()
+        return original_payload
+
+    async def _execute_later() -> dict[str, Any]:
+        nonlocal later_callback_calls
+        later_callback_calls += 1
+        return {"unexpected": True}
+
+    execution = asyncio.create_task(
+        manager.execute("shutdown-race", "args", _execute_original, policy=_policy())
+    )
+    await asyncio.wait_for(callback_started.wait(), timeout=0.5)
+    shutdown = asyncio.create_task(manager.shutdown())
+    await asyncio.sleep(0)
+    shutdown_returned_before_creator = shutdown.done()
+    later_execution = asyncio.create_task(
+        manager.execute("after-closing", "args", _execute_later, policy=_policy())
+    )
+    await asyncio.sleep(0)
+
+    allow_callback.set()
+    await asyncio.wait_for(redis.write_started.wait(), timeout=0.5)
+    redis.allow_write.set()
+    execution_result, later_result = await asyncio.gather(
+        execution,
+        later_execution,
+        return_exceptions=True,
+    )
+    await asyncio.wait_for(shutdown, timeout=1.0)
+    await asyncio.sleep(0)
+
+    assert shutdown_returned_before_creator is False
+    assert isinstance(execution_result, IdempotencyRunResult)
+    assert execution_result.payload is original_payload
+    assert isinstance(later_result, ExpectedToolFailure)
+    assert later_result.reason is ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    assert later_callback_calls == 0
+    assert manager._inflight_executions == 0
+    assert manager._finalizers == set()
+
+    with pytest.raises(ExpectedToolFailure) as post_shutdown:
+        await manager.execute("after-return", "args", _execute_later, policy=_policy())
+    assert post_shutdown.value.reason is ExpectedToolFailureReason.IDEMPOTENCY_UNAVAILABLE
+    assert later_callback_calls == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_bounds_stuck_admitted_execution_without_late_finalizer() -> None:
+    redis = _BlockingResultRedis()
+    manager = _remote_manager(redis)
+    callback_started = asyncio.Event()
+    allow_callback = asyncio.Event()
+    payload = {"content": [{"type": "text", "text": "late-success"}]}
+
+    async def _execute() -> dict[str, Any]:
+        callback_started.set()
+        await allow_callback.wait()
+        return payload
+
+    execution = asyncio.create_task(
+        manager.execute("stuck-shutdown", "args", _execute, policy=_policy())
+    )
+    await asyncio.wait_for(callback_started.wait(), timeout=0.5)
+    shutdown = asyncio.create_task(manager.shutdown())
+
+    try:
+        await asyncio.wait_for(asyncio.shield(shutdown), timeout=2.0)
+
+        assert execution.done() is False
+        assert execution.cancelled() is False
+        assert manager._finalizers == set()
+
+        allow_callback.set()
+        result = await asyncio.wait_for(execution, timeout=0.5)
+        await asyncio.sleep(0)
+
+        assert result.payload is payload
+        assert result.persistence == "local"
+        assert redis.write_started.is_set() is False
+        assert manager._inflight_executions == 0
+        assert manager._finalizers == set()
+    finally:
+        allow_callback.set()
+        redis.allow_write.set()
+        await asyncio.gather(execution, shutdown, return_exceptions=True)

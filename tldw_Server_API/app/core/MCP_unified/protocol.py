@@ -2206,6 +2206,11 @@ class MCPProtocol:
         self._sync_tool_execution_dependencies()
         return await self._tool_execution_runtime.execute_prepared_tool_call(prepared)
 
+    async def shutdown(self) -> None:
+        """Terminally drain protocol-owned tool execution state."""
+
+        await self._idempotency.shutdown()
+
     # -------------------------
     # Idempotency cache helpers
     # -------------------------

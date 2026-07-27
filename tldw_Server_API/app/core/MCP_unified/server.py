@@ -738,7 +738,7 @@ class MCPServer:
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
         try:
-            await self.dependencies.idempotency.shutdown()
+            await self.protocol.shutdown()
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - failure cannot skip module teardown.
