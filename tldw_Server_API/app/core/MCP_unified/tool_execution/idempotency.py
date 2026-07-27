@@ -378,6 +378,7 @@ class IdempotencyManager:
         task: asyncio.Task[Literal["durable", "local", "none"]],
         *,
         bound: float,
+        fallback: Literal["durable", "local", "none"] = "local",
     ) -> Literal["durable", "local", "none"]:
         loop = asyncio.get_running_loop()
         completed, persistence, cancellation = await self._await_finalizer_until(
@@ -405,7 +406,7 @@ class IdempotencyManager:
                 )
         if cancellation is not None:
             raise cancellation
-        return persistence or "local"
+        return persistence or fallback
 
     async def _ensure_redis(self) -> bool:
         if self._redis_attempted:
@@ -1205,6 +1206,33 @@ class IdempotencyManager:
             await self._release_remote_lock(client, lock_key, token)
         return persistence
 
+    async def _finalize_remote_uncacheable_success(
+        self,
+        client: Any,
+        binding_key: str,
+        lock_key: str,
+        token: bytes,
+        cache_key: str,
+        arguments_hash: str,
+        *,
+        policy: IdempotencyExecutionPolicy,
+    ) -> Literal["none"]:
+        try:
+            refresh_state = await self._refresh_remote_binding(
+                client,
+                binding_key,
+                cache_key,
+                arguments_hash,
+                policy=policy,
+            )
+            if refresh_state == "ownership_lost":
+                self._block_remote_key(cache_key, policy=policy)
+        finally:
+            release_state = await self._release_remote_lock(client, lock_key, token)
+            if release_state != "released":
+                self._block_remote_key(cache_key, policy=policy)
+        return "none"
+
     async def _execute_remote_owner(
         self,
         client: Any,
@@ -1328,19 +1356,25 @@ class IdempotencyManager:
                 persistence=persistence,
             )
         else:
-            refresh_state = await self._refresh_remote_binding(
-                client,
-                binding_key,
-                cache_key,
-                arguments_hash,
-                policy=policy,
+            owner_token = bytes(token)
+            finalize_bound = self._finalize_bound(policy)
+            finalizer = self._create_finalizer(
+                lambda: self._finalize_remote_uncacheable_success(
+                    client,
+                    binding_key,
+                    lock_key,
+                    owner_token,
+                    cache_key,
+                    arguments_hash,
+                    policy=policy,
+                ),
+                bound=finalize_bound,
             )
-            if refresh_state == "ownership_lost":
-                self._block_remote_key(cache_key, policy=policy)
-
-        release_state = await self._release_remote_lock(client, lock_key, token)
-        if release_state != "released" and canonical is None:
-            self._block_remote_key(cache_key, policy=policy)
+            persistence = await self._await_success_finalizer(
+                finalizer,
+                bound=finalize_bound,
+                fallback="none",
+            )
         return IdempotencyRunResult(
             payload=cast(dict[str, JsonValue], payload),
             from_cache=False,

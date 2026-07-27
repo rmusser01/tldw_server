@@ -929,6 +929,44 @@ async def test_uncacheable_success_is_returned_unchanged_without_persistence(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_oversized_success_cancellation_retains_remote_cleanup_owner() -> None:
+    redis = _FakeRedis()
+    redis.block_cleanup = True
+    manager = _remote_manager(redis)
+    key = "oversized-cancel-cleanup"
+    payload = {"value": "x" * 1_000}
+    calls = 0
+
+    async def _execute() -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return payload
+
+    task = asyncio.create_task(
+        manager.execute(
+            key,
+            "args",
+            _execute,
+            policy=_policy(max_result_bytes=64),
+        )
+    )
+    await asyncio.wait_for(redis.cleanup_entered.wait(), timeout=0.5)
+    task.cancel()
+    await asyncio.sleep(0)
+
+    assert task.done() is False
+    assert len(manager._finalizers) == 1
+    redis.cleanup_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.5)
+
+    assert calls == 1
+    assert _lock_key(key) not in redis.values
+    assert manager._finalizers == set()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_remote_uncacheable_success_survives_local_binding_refresh_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

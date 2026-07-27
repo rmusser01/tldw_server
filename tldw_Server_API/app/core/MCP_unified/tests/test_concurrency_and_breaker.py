@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified.modules.base import (
+    AdmittedModuleOperation,
     BaseModule,
     ModuleCircuitBreakerOpenError,
     ModuleConfig,
@@ -76,6 +77,59 @@ async def test_per_module_concurrency_queue_wait_is_bounded_by_operation_timeout
         mod._semaphore.release()
 
     assert mod.current == 0
+
+
+@pytest.mark.asyncio
+async def test_admission_check_dispatches_before_scheduled_definition_drift():
+    mod = SlowModule(ModuleConfig(name="admission_handoff", max_concurrent=1))
+    definition = {"version": "prepared"}
+    observed_versions: list[str] = []
+
+    class _MutatingBreaker:
+        async def call_async(self, operation):
+            definition["version"] = "changed"
+            return await operation()
+
+    async def _admit() -> None:
+        if definition["version"] != "prepared":
+            raise RuntimeError("stale definition")
+
+    async def _dispatch() -> str:
+        observed_versions.append(definition["version"])
+        await asyncio.sleep(0)
+        return "done"
+
+    mod._circuit_breaker = _MutatingBreaker()
+    with pytest.raises(RuntimeError, match="stale definition"):
+        await mod.execute_with_circuit_breaker(AdmittedModuleOperation(_admit, _dispatch))
+
+    assert observed_versions == []
+
+
+@pytest.mark.asyncio
+async def test_open_breaker_rejects_before_saturated_concurrency_queue():
+    mod = FlappyModule(
+        ModuleConfig(
+            name="open_before_queue",
+            max_concurrent=1,
+            timeout_seconds=0.01,
+            circuit_breaker_threshold=1,
+            circuit_breaker_timeout=60,
+        )
+    )
+    with pytest.raises(RuntimeError):
+        await mod.execute_with_circuit_breaker(mod._always_fail)
+
+    assert mod._semaphore is not None
+    await mod._semaphore.acquire()
+    try:
+        with pytest.raises(ModuleCircuitBreakerOpenError):
+            await asyncio.wait_for(
+                mod.execute_with_circuit_breaker(mod._always_fail),
+                timeout=0.5,
+            )
+    finally:
+        mod._semaphore.release()
 
 
 class FlappyModule(BaseModule):
@@ -322,6 +376,46 @@ async def test_ignored_expected_failure_is_neutral_in_half_open_and_releases_pro
 
     assert await module.execute_with_circuit_breaker(succeed) == "ok"
     assert _breaker_state_name(module) == "closed"
+
+
+@pytest.mark.parametrize("breaker_kind", ["fallback", "injected"])
+@pytest.mark.asyncio
+async def test_admission_timeout_error_is_neutral_in_half_open(
+    breaker_kind: str,
+) -> None:
+    module = _breaker_module(breaker_kind, threshold=1)
+    with pytest.raises(RuntimeError):
+        await module.execute_with_circuit_breaker(_raise_runtime_error)
+    _force_half_open(module)
+    before = (
+        module._circuit_breaker.failure_count,
+        module._circuit_breaker.success_count,
+        _current_recovery_timeout(module),
+    )
+    admission_error = TimeoutError("admission backend timeout")
+    invoked = False
+
+    async def _admit() -> None:
+        raise admission_error
+
+    async def _invoke() -> None:
+        nonlocal invoked
+        invoked = True
+
+    with pytest.raises(TimeoutError) as exc_info:
+        await module.execute_with_circuit_breaker(
+            AdmittedModuleOperation(_admit, _invoke)
+        )
+
+    assert exc_info.value is admission_error
+    assert invoked is False
+    assert _breaker_state_name(module) == "half_open"
+    assert _half_open_calls(module) == 0
+    assert (
+        module._circuit_breaker.failure_count,
+        module._circuit_breaker.success_count,
+        _current_recovery_timeout(module),
+    ) == before
 
 
 @pytest.mark.parametrize("breaker_kind", ["fallback", "injected"])

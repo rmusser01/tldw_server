@@ -30,7 +30,7 @@ T = TypeVar("T")
 class AdmittedModuleOperation:
     """Run a final admission check before entering module breaker accounting."""
 
-    __slots__ = ("_admission_check", "_admitted", "_operation")
+    __slots__ = ("_admission_check", "_operation")
 
     def __init__(
         self,
@@ -39,17 +39,16 @@ class AdmittedModuleOperation:
     ) -> None:
         self._admission_check = admission_check
         self._operation = operation
-        self._admitted = False
 
     async def admit(self) -> None:
-        if self._admitted:
-            return
         await self._admission_check()
-        self._admitted = True
+
+    async def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._operation(*args, **kwargs)
 
     async def __call__(self, *args: Any, **kwargs: Any) -> Any:
         await self.admit()
-        return await self._operation(*args, **kwargs)
+        return await self.invoke(*args, **kwargs)
 
 
 def _safe_exception_family(exc: BaseException) -> str:
@@ -525,55 +524,49 @@ class BaseModule(ABC):
 
         Delegates to the unified breaker's ``call_async`` for correct
         half-open probe slot management and exception-type filtering.
-        Semaphore admission is bounded separately from the operation timeout.
-        A runtime admission check, when present, runs after slot acquisition but
-        before the actual operation enters breaker accounting.
+        The breaker rejects open circuits before bounded semaphore admission.
+        A runtime admission check, when present, runs after slot acquisition and
+        immediately before dispatch without entering breaker failure accounting.
         """
         start_time = time.time()
-        acquired = False
-
-        async def _acquire_and_admit():
-            nonlocal acquired
-            if self._semaphore is not None:
-                await self._semaphore.acquire()
-                acquired = True
-            if type(operation) is AdmittedModuleOperation:
-                await operation.admit()
-
-        async def _guarded_operation():
-            try:
-                return await asyncio.wait_for(
-                    operation(*args, **kwargs),
-                    timeout=self.config.timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"Operation timeout in module {self.name}")
-                raise Exception(f"Operation timeout after {self.config.timeout_seconds}s") from None
 
         async def _breaker_operation():
+            acquired = False
             try:
-                return await _guarded_operation()
-            except ExpectedToolFailure as exc:
-                reason = get_expected_tool_failure_reason(exc)
-                if reason is not None and reason.breaker_action is BreakerAction.IGNORE:
-                    raise _IgnoredModuleOutcome(exc) from None
-                raise _CountedModuleOutcome(exc) from None
-            except Exception as exc:
-                raise _CountedModuleOutcome(exc) from None
+                async with asyncio.timeout(self.config.timeout_seconds):
+                    if self._semaphore is not None:
+                        await self._semaphore.acquire()
+                        acquired = True
+                    if type(operation) is AdmittedModuleOperation:
+                        try:
+                            await operation.admit()
+                        except Exception as exc:
+                            raise _IgnoredModuleOutcome(exc) from None
+                    try:
+                        if type(operation) is AdmittedModuleOperation:
+                            return await operation.invoke(*args, **kwargs)
+                        return await operation(*args, **kwargs)
+                    except ExpectedToolFailure as exc:
+                        reason = get_expected_tool_failure_reason(exc)
+                        if reason is not None and reason.breaker_action is BreakerAction.IGNORE:
+                            raise _IgnoredModuleOutcome(exc) from None
+                        raise _CountedModuleOutcome(exc) from None
+                    except Exception as exc:
+                        raise _CountedModuleOutcome(exc) from None
+            except asyncio.TimeoutError:
+                logger.error(f"Operation timeout in module {self.name}")
+                timeout_error = Exception(
+                    f"Operation timeout after {self.config.timeout_seconds}s"
+                )
+                raise _CountedModuleOutcome(timeout_error) from None
+            finally:
+                if acquired:
+                    with contextlib.suppress(Exception):
+                        self._semaphore.release()
 
         original_to_raise: Exception | None = None
         original_traceback = None
         try:
-            try:
-                await asyncio.wait_for(
-                    _acquire_and_admit(),
-                    timeout=self.config.timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"Operation timeout in module {self.name}")
-                raise Exception(
-                    f"Operation timeout after {self.config.timeout_seconds}s"
-                ) from None
             result = await self._circuit_breaker.call_async(_breaker_operation)
             latency_ms = (time.time() - start_time) * 1000
             self._metrics.record_request(True, latency_ms)
@@ -602,10 +595,6 @@ class BaseModule(ABC):
                 error_type=_safe_exception_family(e),
             ).error("MCP module operation failed")
             raise
-        finally:
-            if acquired:
-                with contextlib.suppress(Exception):
-                    self._semaphore.release()
 
         if original_to_raise is not None:
             raise original_to_raise.with_traceback(original_traceback)
