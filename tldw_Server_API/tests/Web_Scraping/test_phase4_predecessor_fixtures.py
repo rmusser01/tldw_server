@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from enum import Enum
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +16,9 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchResponse,
     PolicyDecision,
     RuntimeRequestContext,
+)
+from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
+    assert_predecessor_behavior,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -31,29 +33,16 @@ CASE_KEYS = {
     "metadata",
     "selectors",
 }
-
-APPROVED_BEHAVIOR_CHANGES = {
-    1: "default regex becomes non-terminal enrichment",
-    2: "caller cancellation is re-raised",
-    3: "sync entry points reject active event loops before side effects",
-    4: "regex validation and execution failures are bounded and sanitized",
-    5: "the individual URL service passes system_message",
-    6: "raw-browser sync performs governed admission",
-    7: "public exception text is replaced by stable sanitized codes",
-    8: "extraction work submission is bounded",
-    9: "direct Playwright routing installs egress controls",
-    10: "moved observability removes sensitive and high-cardinality fields",
-    11: "direct article acquisition enforces response size limits",
-}
+PINNED_PREDECESSOR_COMMIT = "c2a1695744032245acdb1cd115dd888586dc9623"
 
 _FIXED_EXTRACTION_ENV = {
     "CLUSTER_LINKAGE": "",
     "EXTRACTOR_CLEAR_CACHES": "",
     "EXTRACTOR_MAX_RETRIES": "0",
     "EXTRACTOR_MAX_WORKERS": "",
-    "EXTRACTOR_REGEX_MASK_PII": "false",
     "EXTRACTOR_RETRY_BASE_MS": "0",
     "EXTRACTOR_RETRY_JITTER_MS": "0",
+    "REGEX_PII_MASK": "false",
     "SIM_THRESHOLD": "",
     "WORD_COUNT_THRESHOLD": "",
 }
@@ -64,335 +53,6 @@ _FIXED_SELECTOR_ENV = {
     "WATCHLIST_SELECTOR_MAX_XPATH_FUNCTION_CALLS": "8",
     "WATCHLIST_SELECTOR_MAX_XPATH_PREDICATES": "10",
 }
-
-
-class _DifferenceToken(Enum):
-    ANY_PATH = "<ANY_PATH>"
-    MISSING = "<MISSING>"
-
-
-_ANY_PATH = _DifferenceToken.ANY_PATH
-_MISSING = _DifferenceToken.MISSING
-_PathPart = str | int
-_PathPatternPart = _PathPart | _DifferenceToken
-
-
-@dataclass(frozen=True)
-class _Difference:
-    path: tuple[_PathPart, ...]
-    actual: object
-    expected: object
-
-
-@dataclass(frozen=True)
-class _DifferenceRule:
-    path: tuple[_PathPatternPart, ...]
-    description: str
-    validator: Callable[[_Difference], bool]
-
-
-@dataclass(frozen=True)
-class _DifferenceContract:
-    behavior_change: int
-    rules: tuple[_DifferenceRule, ...]
-
-
-def _changed_from_to(expected: str, actual: str) -> Callable[[_Difference], bool]:
-    return lambda difference: difference.expected == expected and difference.actual == actual
-
-
-_DOWNSTREAM_STRATEGIES = frozenset({"cluster", "trafilatura"})
-_TRACE_KEYS = frozenset({"reason", "status", "strategy"})
-_TRACE_DETAIL_KEYS = _TRACE_KEYS | {"detail"}
-_TRACE_COMBINATIONS_WITHOUT_DETAIL = frozenset(
-    {
-        ("trafilatura", "failed", "extractor_error"),
-        ("trafilatura", "failed", "no_content"),
-        ("trafilatura", "success", "extracted"),
-    }
-)
-_CLUSTER_FAILURE_DETAILS = frozenset(
-    {
-        "cluster_empty_content",
-        "cluster_empty_html",
-        "cluster_no_blocks",
-        "cluster_no_clusters",
-    }
-)
-_COUNTER_METRIC_KEYS = frozenset({"emitter", "kind", "labels", "name"})
-_HISTOGRAM_METRIC_KEYS = _COUNTER_METRIC_KEYS | {"value"}
-_STRATEGY_STATUS_LABEL_KEYS = frozenset({"status", "strategy"})
-_STRATEGY_LABEL_KEYS = frozenset({"strategy"})
-
-
-def _regex_becomes_non_terminal(difference: _Difference) -> bool:
-    return (
-        difference.expected == "regex"
-        and isinstance(difference.actual, str)
-        and difference.actual in _DOWNSTREAM_STRATEGIES
-    )
-
-
-def _regex_trace_reason_becomes_non_terminal(difference: _Difference) -> bool:
-    return (
-        difference.expected == "regex_extracted"
-        and isinstance(difference.actual, str)
-        and difference.actual in {"regex_enriched", "regex_non_terminal"}
-    )
-
-
-def _regex_trace_status_becomes_non_terminal(difference: _Difference) -> bool:
-    return (
-        difference.expected == "success"
-        and isinstance(difference.actual, str)
-        and difference.actual in {"continued", "enriched"}
-    )
-
-
-def _is_new_downstream_trace_step(difference: _Difference) -> bool:
-    if difference.expected is not _MISSING or not isinstance(difference.actual, Mapping):
-        return False
-    keys = frozenset(difference.actual)
-    strategy = difference.actual.get("strategy")
-    status = difference.actual.get("status")
-    reason = difference.actual.get("reason")
-    if not all(isinstance(value, str) for value in (strategy, status, reason)):
-        return False
-
-    combination = (strategy, status, reason)
-    if combination in _TRACE_COMBINATIONS_WITHOUT_DETAIL:
-        return keys == _TRACE_KEYS
-    if combination == ("cluster", "success", "cluster_extracted"):
-        detail = difference.actual.get("detail")
-        return (
-            keys == _TRACE_DETAIL_KEYS
-            and isinstance(detail, str)
-            and re.fullmatch(r"cluster_blocks=[1-9][0-9]*", detail) is not None
-        )
-    if combination == ("cluster", "failed", "cluster_no_content"):
-        detail = difference.actual.get("detail")
-        return keys == _TRACE_DETAIL_KEYS and isinstance(detail, str) and detail in _CLUSTER_FAILURE_DETAILS
-    return False
-
-
-def _has_strategy_status_labels(value: object) -> bool:
-    if not isinstance(value, Mapping) or frozenset(value) != _STRATEGY_STATUS_LABEL_KEYS:
-        return False
-    strategy = value.get("strategy")
-    status = value.get("status")
-    return (
-        isinstance(strategy, str)
-        and strategy in _DOWNSTREAM_STRATEGIES
-        and isinstance(status, str)
-        and status in {"failed", "success"}
-    )
-
-
-def _has_strategy_labels(value: object) -> bool:
-    if not isinstance(value, Mapping) or frozenset(value) != _STRATEGY_LABEL_KEYS:
-        return False
-    strategy = value.get("strategy")
-    return isinstance(strategy, str) and strategy in _DOWNSTREAM_STRATEGIES
-
-
-def _is_new_regex_or_downstream_metric(difference: _Difference) -> bool:
-    if difference.expected is not _MISSING or not isinstance(difference.actual, Mapping):
-        return False
-    keys = frozenset(difference.actual)
-    emitter = difference.actual.get("emitter")
-    kind = difference.actual.get("kind")
-    name = difference.actual.get("name")
-    labels = difference.actual.get("labels")
-    value = difference.actual.get("value")
-
-    if name == "extraction_strategy_total":
-        return (
-            keys == _COUNTER_METRIC_KEYS
-            and emitter == "log_counter"
-            and kind == "counter"
-            and _has_strategy_status_labels(labels)
-        )
-    if name == "extraction_strategy_duration_seconds":
-        return (
-            keys == _HISTOGRAM_METRIC_KEYS
-            and emitter == "observe_histogram"
-            and kind == "histogram"
-            and _has_strategy_status_labels(labels)
-            and value == "<TIMING>"
-        )
-    if name == "extraction_content_length_bytes":
-        return (
-            keys == _HISTOGRAM_METRIC_KEYS
-            and emitter == "observe_histogram"
-            and kind == "histogram"
-            and _has_strategy_labels(labels)
-            and type(value) is int
-            and value > 0
-        )
-    return False
-
-
-DIFFERENCE_CONTRACTS = {
-    "change_1_default_regex_non_terminal": _DifferenceContract(
-        behavior_change=1,
-        rules=(
-            _DifferenceRule(
-                path=("result", "extraction_strategy"),
-                description="regex no longer terminates the default extraction pipeline",
-                validator=_regex_becomes_non_terminal,
-            ),
-            _DifferenceRule(
-                path=("result", "extraction_trace", 2, "reason"),
-                description="the regex trace records enrichment rather than terminal extraction",
-                validator=_regex_trace_reason_becomes_non_terminal,
-            ),
-            _DifferenceRule(
-                path=("result", "extraction_trace", 2, "status"),
-                description="the regex trace records continued extraction",
-                validator=_regex_trace_status_becomes_non_terminal,
-            ),
-            _DifferenceRule(
-                path=("result", "extraction_trace", _ANY_PATH),
-                description="a downstream strategy runs after regex enrichment",
-                validator=_is_new_downstream_trace_step,
-            ),
-            _DifferenceRule(
-                path=("metrics", 4, "labels", "status"),
-                description="regex metrics record continued extraction",
-                validator=_regex_trace_status_becomes_non_terminal,
-            ),
-            _DifferenceRule(
-                path=("metrics", 5, "labels", "status"),
-                description="regex timing metrics record continued extraction",
-                validator=_regex_trace_status_becomes_non_terminal,
-            ),
-            _DifferenceRule(
-                path=("metrics", _ANY_PATH),
-                description="regex enrichment emits downstream extraction metrics",
-                validator=_is_new_regex_or_downstream_metric,
-            ),
-        ),
-    ),
-    "change_7_policy_error": _DifferenceContract(
-        behavior_change=7,
-        rules=(
-            _DifferenceRule(
-                path=("result", "error"),
-                description="policy exception text is replaced by a stable public code",
-                validator=_changed_from_to(
-                    "Outbound policy evaluation failed. Please contact system administrator.",
-                    "policy_error",
-                ),
-            ),
-        ),
-    ),
-    "change_7_selector_invalid": _DifferenceContract(
-        behavior_change=7,
-        rules=(
-            _DifferenceRule(
-                path=("result", "errors", _ANY_PATH, "error"),
-                description="selector parser text is replaced by a stable public code",
-                validator=_changed_from_to("Invalid expression", "selector_invalid"),
-            ),
-        ),
-    ),
-    "change_11_response_too_large": _DifferenceContract(
-        behavior_change=11,
-        rules=(
-            _DifferenceRule(
-                path=("result", "error"),
-                description="oversized direct responses return the approved stable code",
-                validator=_changed_from_to("Upstream response accepted", "response_too_large"),
-            ),
-        ),
-    ),
-}
-
-
-def _collect_differences(
-    actual: object,
-    expected: object,
-    path: tuple[_PathPart, ...] = (),
-) -> list[_Difference]:
-    if actual is _MISSING or expected is _MISSING:
-        return [_Difference(path=path, actual=actual, expected=expected)]
-    if isinstance(actual, Mapping) and isinstance(expected, Mapping):
-        differences: list[_Difference] = []
-        for key in sorted(set(actual) | set(expected), key=str):
-            differences.extend(
-                _collect_differences(
-                    actual.get(key, _MISSING),
-                    expected.get(key, _MISSING),
-                    (*path, key),
-                )
-            )
-        return differences
-    if isinstance(actual, (list, tuple)) and isinstance(expected, (list, tuple)):
-        differences = []
-        for index in range(max(len(actual), len(expected))):
-            differences.extend(
-                _collect_differences(
-                    actual[index] if index < len(actual) else _MISSING,
-                    expected[index] if index < len(expected) else _MISSING,
-                    (*path, index),
-                )
-            )
-        return differences
-    if actual != expected:
-        return [_Difference(path=path, actual=actual, expected=expected)]
-    return []
-
-
-def _path_matches(pattern: tuple[_PathPatternPart, ...], path: tuple[_PathPart, ...]) -> bool:
-    return len(pattern) == len(path) and all(
-        expected_part is _ANY_PATH or expected_part == actual_part for expected_part, actual_part in zip(pattern, path)
-    )
-
-
-def _format_path(path: tuple[_PathPart, ...]) -> str:
-    formatted = "$"
-    for part in path:
-        formatted += f"[{part}]" if isinstance(part, int) else f".{part}"
-    return formatted
-
-
-def assert_predecessor_behavior(
-    actual: object,
-    expected: object,
-    *,
-    behavior_change: int | None = None,
-    difference_contract: str | None = None,
-) -> None:
-    """Assert parity or validate every difference against one approved change contract."""
-    if behavior_change is not None and (
-        type(behavior_change) is not int or behavior_change not in APPROVED_BEHAVIOR_CHANGES
-    ):
-        raise ValueError("behavior_change must be one integer in range 1..11")
-    if behavior_change is None:
-        if difference_contract is not None:
-            raise ValueError("difference_contract requires behavior_change")
-        assert actual == expected
-        return
-    assert difference_contract is not None, "A difference contract is required for an approved change"
-    try:
-        contract = DIFFERENCE_CONTRACTS[difference_contract]
-    except KeyError as exc:
-        raise ValueError(f"Unknown difference contract: {difference_contract}") from exc
-    if contract.behavior_change != behavior_change:
-        raise ValueError(
-            f"Difference contract {difference_contract!r} belongs to behavior change "
-            f"{contract.behavior_change}, not {behavior_change}"
-        )
-
-    for difference in _collect_differences(actual, expected):
-        matching_rules = [rule for rule in contract.rules if _path_matches(rule.path, difference.path)]
-        path = _format_path(difference.path)
-        assert matching_rules, f"Difference at {path} is not covered by difference contract {difference_contract!r}"
-        assert (
-            len(matching_rules) == 1
-        ), f"Difference at {path} is covered by more than one rule in {difference_contract!r}"
-        rule = matching_rules[0]
-        assert rule.validator(difference), f"Difference at {path} violates contract rule: {rule.description}"
 
 
 def _load_manifest() -> dict[str, Any]:
@@ -636,7 +296,7 @@ def test_phase4_fixture_manifest_is_pinned() -> None:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert re.fullmatch(r"[0-9a-f]{40}", manifest["predecessor_commit"])
+    assert manifest["predecessor_commit"] == PINNED_PREDECESSOR_COMMIT
     assert set(manifest["cases"]) == CASE_KEYS
     assert list(manifest["cases"]) == sorted(manifest["cases"])
 
@@ -685,323 +345,6 @@ def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:
         "invalid_xpath_error": (7, "change_7_selector_invalid"),
         "policy_error_is_publicly_bounded": (7, "change_7_policy_error"),
     }
-
-
-def test_differential_helper_requires_a_tag_for_a_difference() -> None:
-    with pytest.raises(AssertionError):
-        assert_predecessor_behavior({"value": "current"}, {"value": "predecessor"})
-
-
-def test_differential_helper_accepts_none_for_equal_values() -> None:
-    assert_predecessor_behavior({"value": "same"}, {"value": "same"}, behavior_change=None)
-
-
-def test_differential_helper_rejects_valid_change_without_a_contract() -> None:
-    with pytest.raises(AssertionError, match="difference contract"):
-        assert_predecessor_behavior(
-            {"result": {"url": "https://current.example"}},
-            {"result": {"url": "https://predecessor.example"}},
-            behavior_change=1,
-        )
-
-
-@pytest.mark.parametrize(
-    ("behavior_change", "difference_contract", "actual", "expected"),
-    [
-        (
-            1,
-            "change_1_default_regex_non_terminal",
-            {"result": {"extraction_strategy": "trafilatura"}},
-            {"result": {"extraction_strategy": "regex"}},
-        ),
-        (
-            11,
-            "change_11_response_too_large",
-            {"result": {"error": "response_too_large"}},
-            {"result": {"error": "Upstream response accepted"}},
-        ),
-    ],
-)
-def test_differential_helper_accepts_semantically_constrained_boundary_changes(
-    behavior_change: int,
-    difference_contract: str,
-    actual: object,
-    expected: object,
-) -> None:
-    assert_predecessor_behavior(
-        actual,
-        expected,
-        behavior_change=behavior_change,
-        difference_contract=difference_contract,
-    )
-
-
-def test_differential_helper_accepts_a_covered_planned_difference() -> None:
-    assert_predecessor_behavior(
-        {
-            "result": {
-                "error": "policy_error",
-                "url": "https://example.com/policy-error",
-            }
-        },
-        {
-            "result": {
-                "error": "Outbound policy evaluation failed. Please contact system administrator.",
-                "url": "https://example.com/policy-error",
-            }
-        },
-        behavior_change=7,
-        difference_contract="change_7_policy_error",
-    )
-
-
-def test_differential_helper_rejects_an_extra_unrelated_difference() -> None:
-    with pytest.raises(AssertionError, match="not covered"):
-        assert_predecessor_behavior(
-            {
-                "result": {
-                    "error": "policy_error",
-                    "url": "https://unrelated.example/policy-error",
-                }
-            },
-            {
-                "result": {
-                    "error": ("Outbound policy evaluation failed. " "Please contact system administrator."),
-                    "url": "https://example.com/policy-error",
-                }
-            },
-            behavior_change=7,
-            difference_contract="change_7_policy_error",
-        )
-
-
-def test_change_1_contract_rejects_added_trace_with_extra_key() -> None:
-    with pytest.raises(AssertionError, match="violates contract rule"):
-        assert_predecessor_behavior(
-            {
-                "result": {
-                    "extraction_trace": [
-                        {
-                            "reason": "extracted",
-                            "secret": "must-not-be-approved",
-                            "status": "success",
-                            "strategy": "trafilatura",
-                        }
-                    ]
-                }
-            },
-            {"result": {"extraction_trace": []}},
-            behavior_change=1,
-            difference_contract="change_1_default_regex_non_terminal",
-        )
-
-
-def test_change_1_contract_rejects_added_metric_with_extra_top_level_key() -> None:
-    with pytest.raises(AssertionError, match="violates contract rule"):
-        assert_predecessor_behavior(
-            {
-                "metrics": [
-                    {
-                        "emitter": "log_counter",
-                        "kind": "counter",
-                        "labels": {
-                            "status": "success",
-                            "strategy": "trafilatura",
-                        },
-                        "name": "extraction_strategy_total",
-                        "secret": "must-not-be-approved",
-                    }
-                ]
-            },
-            {"metrics": []},
-            behavior_change=1,
-            difference_contract="change_1_default_regex_non_terminal",
-        )
-
-
-def test_change_1_contract_rejects_added_metric_with_extra_label() -> None:
-    with pytest.raises(AssertionError, match="violates contract rule"):
-        assert_predecessor_behavior(
-            {
-                "metrics": [
-                    {
-                        "emitter": "log_counter",
-                        "kind": "counter",
-                        "labels": {
-                            "request_url": "https://sensitive.example/path",
-                            "status": "success",
-                            "strategy": "trafilatura",
-                        },
-                        "name": "extraction_strategy_total",
-                    }
-                ]
-            },
-            {"metrics": []},
-            behavior_change=1,
-            difference_contract="change_1_default_regex_non_terminal",
-        )
-
-
-def test_change_1_contract_rejects_detail_for_trace_reason_without_detail() -> None:
-    with pytest.raises(AssertionError, match="violates contract rule"):
-        assert_predecessor_behavior(
-            {
-                "result": {
-                    "extraction_trace": [
-                        {
-                            "detail": "must-not-be-approved",
-                            "reason": "extracted",
-                            "status": "success",
-                            "strategy": "trafilatura",
-                        }
-                    ]
-                }
-            },
-            {"result": {"extraction_trace": []}},
-            behavior_change=1,
-            difference_contract="change_1_default_regex_non_terminal",
-        )
-
-
-@pytest.mark.parametrize(
-    "trace_entry",
-    [
-        {
-            "reason": "extracted",
-            "status": "success",
-            "strategy": "trafilatura",
-        },
-        {
-            "detail": "cluster_blocks=2",
-            "reason": "cluster_extracted",
-            "status": "success",
-            "strategy": "cluster",
-        },
-    ],
-)
-def test_change_1_contract_accepts_canonical_added_trace(trace_entry: dict[str, object]) -> None:
-    assert_predecessor_behavior(
-        {"result": {"extraction_trace": [trace_entry]}},
-        {"result": {"extraction_trace": []}},
-        behavior_change=1,
-        difference_contract="change_1_default_regex_non_terminal",
-    )
-
-
-@pytest.mark.parametrize(
-    "trace_entry",
-    [
-        {
-            "reason": "extracted",
-            "status": "skipped",
-            "strategy": "trafilatura",
-        },
-        {
-            "detail": "cluster_blocks=unknown",
-            "reason": "cluster_extracted",
-            "status": "success",
-            "strategy": "cluster",
-        },
-    ],
-)
-def test_change_1_contract_rejects_noncanonical_added_trace(
-    trace_entry: dict[str, object],
-) -> None:
-    with pytest.raises(AssertionError, match="violates contract rule"):
-        assert_predecessor_behavior(
-            {"result": {"extraction_trace": [trace_entry]}},
-            {"result": {"extraction_trace": []}},
-            behavior_change=1,
-            difference_contract="change_1_default_regex_non_terminal",
-        )
-
-
-@pytest.mark.parametrize(
-    "metric",
-    [
-        {
-            "emitter": "log_counter",
-            "kind": "counter",
-            "labels": {"status": "success", "strategy": "trafilatura"},
-            "name": "extraction_strategy_total",
-        },
-        {
-            "emitter": "observe_histogram",
-            "kind": "histogram",
-            "labels": {"status": "failed", "strategy": "cluster"},
-            "name": "extraction_strategy_duration_seconds",
-            "value": "<TIMING>",
-        },
-        {
-            "emitter": "observe_histogram",
-            "kind": "histogram",
-            "labels": {"strategy": "trafilatura"},
-            "name": "extraction_content_length_bytes",
-            "value": 128,
-        },
-    ],
-)
-def test_change_1_contract_accepts_canonical_added_metric(metric: dict[str, object]) -> None:
-    assert_predecessor_behavior(
-        {"metrics": [metric]},
-        {"metrics": []},
-        behavior_change=1,
-        difference_contract="change_1_default_regex_non_terminal",
-    )
-
-
-@pytest.mark.parametrize(
-    "metric",
-    [
-        {
-            "emitter": "increment_counter",
-            "kind": "counter",
-            "labels": {"status": "success", "strategy": "trafilatura"},
-            "name": "extraction_strategy_total",
-        },
-        {
-            "emitter": "observe_histogram",
-            "kind": "counter",
-            "labels": {"status": "failed", "strategy": "cluster"},
-            "name": "extraction_strategy_duration_seconds",
-            "value": "<TIMING>",
-        },
-        {
-            "emitter": "observe_histogram",
-            "kind": "histogram",
-            "labels": {"strategy": "trafilatura"},
-            "name": "extraction_unapproved_value",
-            "value": 128,
-        },
-        {
-            "emitter": "observe_histogram",
-            "kind": "histogram",
-            "labels": {"strategy": "trafilatura"},
-            "name": "extraction_content_length_bytes",
-            "value": -1,
-        },
-    ],
-)
-def test_change_1_contract_rejects_noncanonical_added_metric(
-    metric: dict[str, object],
-) -> None:
-    with pytest.raises(AssertionError, match="violates contract rule"):
-        assert_predecessor_behavior(
-            {"metrics": [metric]},
-            {"metrics": []},
-            behavior_change=1,
-            difference_contract="change_1_default_regex_non_terminal",
-        )
-
-
-@pytest.mark.parametrize("behavior_change", [0, 12, "1", 1.0, True])
-def test_differential_helper_rejects_invalid_behavior_changes(behavior_change: object) -> None:
-    with pytest.raises(ValueError, match="range 1..11"):
-        assert_predecessor_behavior(
-            {"value": "current"},
-            {"value": "predecessor"},
-            behavior_change=behavior_change,  # type: ignore[arg-type]
-        )
 
 
 def test_content_formatting_matches_predecessor() -> None:
@@ -1066,6 +409,36 @@ def test_selector_validation_and_extraction_match_predecessor(
             fetchers.clear_selector_caches()
             _assert_case(case, actual)
     fetchers.reload_selector_guardrails_from_env()
+
+
+def test_extraction_replay_overrides_and_restores_regex_pii_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = next(
+        case for case in _load_cases("extraction") if case["name"] == "default_regex_is_terminal_in_predecessor"
+    )
+    monkeypatch.setenv("REGEX_PII_MASK", "true")
+
+    with monkeypatch.context() as environment:
+        recorder = _install_metric_recorder(environment)
+        _set_environment(environment, _FIXED_EXTRACTION_ENV)
+        environment.setattr(article.random, "uniform", lambda *_args, **_kwargs: 0.0)
+        article.clear_extraction_caches()
+        result = article.extract_article_with_pipeline(
+            case["html"],
+            case["url"],
+            strategy_order=case.get("strategy_order"),
+            allow_llm_extraction=case.get("allow_llm_extraction", False),
+        )
+        actual = {
+            "cache_stats": article.get_extraction_cache_stats(),
+            "metrics": recorder.events,
+            "result": result,
+        }
+        article.clear_extraction_caches()
+
+    assert os.environ["REGEX_PII_MASK"] == "true"
+    _assert_case(case, actual)
 
 
 def test_extraction_behavior_matches_predecessor(monkeypatch: pytest.MonkeyPatch) -> None:

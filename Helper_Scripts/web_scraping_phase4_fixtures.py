@@ -11,8 +11,10 @@ import re
 import shutil
 import subprocess  # nosec B404
 import sys
-from collections.abc import Mapping
-from contextlib import ExitStack
+import tempfile
+import uuid
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -27,21 +29,23 @@ CASE_NAMES = (
     "selectors",
 )
 
-_FIXED_ENV = {
-    "CLUSTER_LINKAGE": "",
-    "EXTRACTOR_CLEAR_CACHES": "",
-    "EXTRACTOR_MAX_RETRIES": "0",
-    "EXTRACTOR_MAX_WORKERS": "",
-    "EXTRACTOR_REGEX_MASK_PII": "false",
-    "EXTRACTOR_RETRY_BASE_MS": "0",
-    "EXTRACTOR_RETRY_JITTER_MS": "0",
-    "SIM_THRESHOLD": "",
-    "WATCHLIST_SELECTOR_MAX_EXPR_LEN": "512",
-    "WATCHLIST_SELECTOR_MAX_XPATH_DESCENDANT_STEPS": "12",
-    "WATCHLIST_SELECTOR_MAX_XPATH_FUNCTION_CALLS": "8",
-    "WATCHLIST_SELECTOR_MAX_XPATH_PREDICATES": "10",
-    "WORD_COUNT_THRESHOLD": "",
-}
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from Helper_Scripts.web_scraping_phase4.content_metadata import (  # noqa: E402
+    build_content_cases,
+    build_metadata_cases,
+)
+from Helper_Scripts.web_scraping_phase4.extraction import (  # noqa: E402
+    build_extraction_cases,
+)
+from Helper_Scripts.web_scraping_phase4.orchestration import (  # noqa: E402
+    build_article_cases,
+)
+from Helper_Scripts.web_scraping_phase4.selectors import (  # noqa: E402
+    build_selector_cases,
+)
+from Helper_Scripts.web_scraping_phase4.shared import FIXED_ENV  # noqa: E402
 
 
 def build_manifest(predecessor_commit: str, case_files: dict[str, str]) -> dict[str, object]:
@@ -54,13 +58,13 @@ def build_manifest(predecessor_commit: str, case_files: dict[str, str]) -> dict[
     }
 
 
-def _git_head() -> str:
+def _run_git(source_root: Path, *args: str) -> str:
     git_executable = shutil.which("git")
     if git_executable is None:
         raise OSError("git executable not found")
     completed = subprocess.run(  # nosec B603
-        [git_executable, "rev-parse", "HEAD"],
-        cwd=REPO_ROOT,
+        [git_executable, *args],
+        cwd=source_root,
         check=True,
         capture_output=True,
         text=True,
@@ -68,15 +72,112 @@ def _git_head() -> str:
     return completed.stdout.strip()
 
 
-def _validate_provenance(predecessor_commit: str) -> None:
+def _validate_source_root(predecessor_commit: str, source_root: Path) -> Path:
     build_manifest(predecessor_commit, {})
-    head = _git_head()
+    resolved_root = source_root.resolve(strict=True)
+    top_level = Path(_run_git(resolved_root, "rev-parse", "--show-toplevel")).resolve()
+    if top_level != resolved_root:
+        raise ValueError(f"source-root must be the git worktree root: {resolved_root}")
+
+    head = _run_git(resolved_root, "rev-parse", "HEAD")
     if predecessor_commit != head:
-        raise ValueError(f"predecessor_commit {predecessor_commit} does not match workspace HEAD {head}")
+        raise ValueError(f"predecessor_commit {predecessor_commit} does not match source-root HEAD {head}")
+
+    status = _run_git(
+        resolved_root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignored=no",
+    )
+    if status:
+        raise ValueError(f"source-root is not clean: {resolved_root}\n{status}")
+    return resolved_root
 
 
-def _canonical_data(value: Any) -> Any:
-    return json.loads(json.dumps(value, ensure_ascii=True, sort_keys=True))
+def _remove_loaded_production_modules() -> dict[str, Any]:
+    removed: dict[str, Any] = {}
+    for name in tuple(sys.modules):
+        if name == "tldw_Server_API" or name.startswith("tldw_Server_API."):
+            removed[name] = sys.modules.pop(name)
+    return removed
+
+
+def _assert_production_modules_under(source_root: Path) -> None:
+    for name, module in tuple(sys.modules.items()):
+        if name != "tldw_Server_API" and not name.startswith("tldw_Server_API."):
+            continue
+        module_file = getattr(module, "__file__", None)
+        if module_file is not None:
+            resolved_locations = (Path(module_file).resolve(),)
+        else:
+            module_path = getattr(module, "__path__", None)
+            if module_path is None:
+                raise RuntimeError(f"Imported predecessor module {name} has no resolvable path")
+            resolved_locations = tuple(Path(location).resolve() for location in module_path)
+            if not resolved_locations:
+                raise RuntimeError(f"Imported predecessor module {name} has an empty package path")
+        outside_root = [location for location in resolved_locations if not location.is_relative_to(source_root)]
+        if outside_root:
+            raise RuntimeError(
+                f"Imported predecessor module {name} resolved outside source-root: "
+                f"{', '.join(map(str, outside_root))}"
+            )
+
+
+@contextmanager
+def _predecessor_modules(source_root: Path) -> Iterator[tuple[Any, Any, Any, Any]]:
+    previous_modules = _remove_loaded_production_modules()
+    previous_path = list(sys.path)
+    sys.path.insert(0, str(source_root))
+    try:
+        from tldw_Server_API.app.core.Watchlists import fetchers
+        from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+        from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
+
+        _assert_production_modules_under(source_root)
+        yield article, fetchers, FetchResponse, PolicyDecision
+        _assert_production_modules_under(source_root)
+    finally:
+        _remove_loaded_production_modules()
+        sys.modules.update(previous_modules)
+        sys.path[:] = previous_path
+
+
+def build_case_payloads(source_root: Path) -> dict[str, dict[str, Any]]:
+    with _predecessor_modules(source_root) as modules:
+        article, fetchers, FetchResponse, PolicyDecision = modules
+        try:
+            with patch.dict(os.environ, FIXED_ENV, clear=False):
+                fetchers.reload_selector_guardrails_from_env()
+                payloads = {
+                    "article_orchestration_fakes": {
+                        "category": "article_orchestration_fakes",
+                        "cases": asyncio.run(build_article_cases(article, FetchResponse, PolicyDecision)),
+                    },
+                    "content": {
+                        "category": "content",
+                        "cases": build_content_cases(article),
+                    },
+                    "extraction": {
+                        "category": "extraction",
+                        "cases": build_extraction_cases(article),
+                    },
+                    "metadata": {
+                        "category": "metadata",
+                        "cases": build_metadata_cases(article),
+                    },
+                    "selectors": {
+                        "category": "selectors",
+                        "cases": build_selector_cases(fetchers),
+                    },
+                }
+        finally:
+            fetchers.reload_selector_guardrails_from_env()
+
+    if set(payloads) != set(CASE_NAMES):
+        raise RuntimeError("Fixture category set is incomplete")
+    return payloads
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -84,724 +185,11 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(encoded, encoding="utf-8", newline="\n")
 
 
-def _normalize_formatted_metadata(value: str) -> str:
-    return re.sub(
-        r'("ingestion_date":\s*)"[^"]+"',
-        r'\1"<TIMESTAMP>"',
-        value,
-        count=1,
-    )
-
-
-class _MetricRecorder:
-    def __init__(self) -> None:
-        self.events: list[dict[str, Any]] = []
-
-    def counter(self, emitter: str):
-        def _record(name: str, labels: Mapping[str, Any] | None = None, **_kwargs: Any) -> None:
-            self.events.append(
-                {
-                    "emitter": emitter,
-                    "kind": "counter",
-                    "labels": dict(sorted((labels or {}).items())),
-                    "name": name,
-                }
-            )
-
-        return _record
-
-    def histogram(self, emitter: str):
-        def _record(
-            name: str,
-            value: int | float,
-            labels: Mapping[str, Any] | None = None,
-            **_kwargs: Any,
-        ) -> None:
-            normalized_value: int | float | str = value
-            if "duration" in name or "latency" in name:
-                normalized_value = "<TIMING>"
-            self.events.append(
-                {
-                    "emitter": emitter,
-                    "kind": "histogram",
-                    "labels": dict(sorted((labels or {}).items())),
-                    "name": name,
-                    "value": normalized_value,
-                }
-            )
-
-        return _record
-
-
-def _metric_patches(stack: ExitStack, article: Any) -> _MetricRecorder:
-    recorder = _MetricRecorder()
-    stack.enter_context(patch.object(article, "increment_counter", recorder.counter("increment_counter")))
-    stack.enter_context(patch.object(article, "log_counter", recorder.counter("log_counter")))
-    stack.enter_context(patch.object(article, "observe_histogram", recorder.histogram("observe_histogram")))
-    stack.enter_context(patch.object(article, "log_histogram", recorder.histogram("log_histogram")))
-    return recorder
-
-
-def _case(payload: dict[str, Any]) -> dict[str, Any]:
-    return _canonical_data(payload)
-
-
-def _load_predecessor_modules() -> tuple[Any, Any, Any, Any, Any, Any]:
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
-
-    from tldw_Server_API.app.core.Watchlists import fetchers
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
-    from tldw_Server_API.app.core.Web_Scraping.runtime import (
-        FetchRequest,
-        FetchResponse,
-        PolicyDecision,
-        RuntimeRequestContext,
-    )
-
-    return article, fetchers, FetchRequest, FetchResponse, PolicyDecision, RuntimeRequestContext
-
-
-def _build_content_cases(article: Any) -> list[dict[str, Any]]:
-    cases = [
-        _case(
-            {
-                "html": (
-                    "<html><body><h1>Fixture &amp; Title</h1>"
-                    "<p>First paragraph.</p>"
-                    "<p>Second <strong>bold</strong> paragraph.</p></body></html>"
-                ),
-                "name": "paragraph_and_inline_formatting",
-                "operation": "convert_html_to_markdown",
-            }
-        ),
-        _case(
-            {
-                "html": "<div>Lead<span>inline</span></div><p>Tail paragraph.</p>",
-                "name": "mixed_block_and_paragraph_formatting",
-                "operation": "convert_html_to_markdown",
-            }
-        ),
-    ]
-    for case in cases:
-        case["expected"] = article.convert_html_to_markdown(case["html"])
-    return cases
-
-
-def _metadata_inspection(handler: Any, content: str) -> dict[str, Any]:
-    metadata, clean_content = handler.extract_metadata(content)
-    return {
-        "clean_content": clean_content,
-        "content_hash": handler.get_content_hash(content),
-        "has_metadata": handler.has_metadata(content),
-        "metadata": metadata,
-        "stripped": handler.strip_metadata(content),
-    }
-
-
-def _build_metadata_cases(article: Any) -> list[dict[str, Any]]:
-    handler = article.ContentMetadataHandler
-    canonical_envelope = (
-        "  [METADATA]\n"
-        '{"url":"https://example.com/article","literal":"brackets [{]} and \\"quotes\\""}\n'
-        "[/METADATA]\n\nArticle body"
-    )
-    accepted_nested = '[METADATA]{"value":' + "[" * 63 + "0" + "]" * 63 + "}[/METADATA]\nArticle body"
-    rejected_nested = '[METADATA]{"value":' + "[" * 64 + "0" + "]" * 64 + "}[/METADATA]\nArticle body"
-    cases = [
-        _case(
-            {
-                "additional_metadata": {"author": "Ada", "language": "en"},
-                "content": "Fixture body with caf\u00e9.",
-                "name": "canonical_formatted_envelope",
-                "operation": "format",
-                "pipeline": "FixturePipeline",
-                "url": "https://example.com/article",
-            }
-        ),
-        _case(
-            {
-                "content": canonical_envelope,
-                "name": "canonical_envelope_inspection",
-                "operation": "inspect",
-            }
-        ),
-        _case(
-            {
-                "content": '[METADATA]{"url":"https://example.com"}\nArticle body',
-                "name": "malformed_envelope_passes_through",
-                "operation": "inspect",
-            }
-        ),
-        _case(
-            {
-                "content": accepted_nested,
-                "name": "nesting_boundary_is_accepted",
-                "operation": "inspect",
-            }
-        ),
-        _case(
-            {
-                "content": rejected_nested,
-                "name": "nesting_over_boundary_is_rejected",
-                "operation": "inspect",
-            }
-        ),
-        _case(
-            {
-                "name": "metadata_only_changes_do_not_change_body_hash",
-                "new_content": '[METADATA]{"version":2}[/METADATA]\nSame body',
-                "old_content": '[METADATA]{"version":1}[/METADATA]\nSame body',
-                "operation": "content_changed",
-            }
-        ),
-        _case(
-            {
-                "name": "body_changes_are_detected",
-                "new_content": '[METADATA]{"version":2}[/METADATA]\nNew body',
-                "old_content": '[METADATA]{"version":1}[/METADATA]\nOld body',
-                "operation": "content_changed",
-            }
-        ),
-    ]
-    for case in cases:
-        if case["operation"] == "format":
-            case["expected"] = _normalize_formatted_metadata(
-                handler.format_content_with_metadata(
-                    case["url"],
-                    case["content"],
-                    pipeline=case["pipeline"],
-                    additional_metadata=case["additional_metadata"],
-                )
-            )
-        elif case["operation"] == "inspect":
-            case["expected"] = _metadata_inspection(handler, case["content"])
-        else:
-            case["expected"] = handler.content_changed(case["old_content"], case["new_content"])
-    return cases
-
-
-def _build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
-    schema_html = (
-        "<html><body><article><h1> Example Title </h1>"
-        '<time>2025-01-15</time><span class="views">1,234</span>'
-        '<p class="content">First paragraph.</p><p class="content">Second paragraph.</p>'
-        '<a class="more" href="/read-more">Read more</a>'
-        '<span class="tag">News</span><span class="tag">Tech</span>'
-        "</article></body></html>"
-    )
-    cases = [
-        _case(
-            {
-                "html": ("<html><body><h1>One</h1><h1>Two</h1>" '<div class="body">Body</div></body></html>'),
-                "include_counts": True,
-                "name": "validation_counts_and_warnings",
-                "operation": "validate",
-                "rules": {
-                    "content_xpath": "//div[@class='body']",
-                    "title_xpath": "//h1",
-                },
-            }
-        ),
-        _case(
-            {
-                "behavior_change": 7,
-                "difference_contract": "change_7_selector_invalid",
-                "include_counts": False,
-                "name": "invalid_xpath_error",
-                "operation": "validate",
-                "rules": {"content_xpath": "//article["},
-            }
-        ),
-        _case(
-            {
-                "include_counts": False,
-                "name": "selector_complexity_guard",
-                "operation": "validate",
-                "rules": {"content_xpath": "//div" + "/span" * 200},
-            }
-        ),
-        _case(
-            {
-                "base_url": "https://example.com/post",
-                "html": schema_html,
-                "name": "schema_dsl_transforms_and_lists",
-                "operation": "extract_schema_fields",
-                "rules": {
-                    "baseFields": [
-                        {
-                            "name": "title",
-                            "selector": ".//h1",
-                            "transforms": ["strip"],
-                            "type": "text",
-                        },
-                        {
-                            "join_with": "\n",
-                            "name": "content",
-                            "selector": ".//p[@class='content']",
-                            "type": "text",
-                        },
-                        {
-                            "name": "published",
-                            "selector": ".//time",
-                            "transforms": [{"format": "%Y-%m-%d", "name": "date_normalize"}],
-                            "type": "text",
-                        },
-                        {
-                            "name": "views",
-                            "selector": ".//span[@class='views']",
-                            "transforms": [{"name": "number_normalize"}],
-                            "type": "text",
-                        },
-                    ],
-                    "baseSelector": "//article",
-                    "fields": [
-                        {
-                            "attribute": "href",
-                            "name": "link",
-                            "selector": ".//a[@class='more']",
-                            "transforms": [{"name": "urljoin"}],
-                            "type": "attribute",
-                        },
-                        {
-                            "itemType": "text",
-                            "name": "tags",
-                            "selector": ".//span[@class='tag']",
-                            "transforms": ["lowercase"],
-                            "type": "list",
-                        },
-                        {
-                            "from": "title",
-                            "name": "slug",
-                            "transforms": [
-                                "lowercase",
-                                {"name": "regex_replace", "pattern": r"\s+", "repl": "-"},
-                            ],
-                            "type": "computed",
-                        },
-                    ],
-                    "name": "article",
-                },
-            }
-        ),
-        _case(
-            {
-                "base_url": "https://example.com/article",
-                "html": (
-                    "<html><body><main><h1>Legacy title</h1>"
-                    '<div class="body"><p>One</p><p>Two</p></div>'
-                    '<a rel="author">Grace Hopper</a></main></body></html>'
-                ),
-                "name": "legacy_selector_field_extraction",
-                "operation": "extract_schema_fields",
-                "rules": {
-                    "author_xpath": ".//a[@rel='author']",
-                    "base_xpath": "//main",
-                    "content_xpath": ".//div[@class='body']/p",
-                    "title_xpath": ".//h1",
-                },
-            }
-        ),
-    ]
-
-    for case in cases:
-        fetchers.clear_selector_caches()
-        if case["operation"] == "validate":
-            result = fetchers.validate_selector_rules(
-                case["rules"],
-                html_text=case.get("html"),
-                include_counts=case["include_counts"],
-            )
-        else:
-            result = fetchers.extract_schema_fields(case["html"], case["base_url"], case["rules"])
-        case["expected"] = {
-            "cache_stats": fetchers.get_selector_cache_stats(),
-            "result": result,
-        }
-        fetchers.clear_selector_caches()
-    return cases
-
-
-def _run_extraction_case(article: Any, case: Mapping[str, Any]) -> dict[str, Any]:
-    with ExitStack() as stack:
-        recorder = _metric_patches(stack, article)
-        stack.enter_context(patch.object(article.random, "uniform", lambda *_args, **_kwargs: 0.0))
-        stack.enter_context(patch.dict(os.environ, _FIXED_ENV, clear=False))
-        article.clear_extraction_caches()
-        operation = case["operation"]
-        if operation == "regex":
-            result = article.extract_regex_entities(case["html"], case["url"], mask_pii=case["mask_pii"])
-        elif operation == "jsonld":
-            result = article.extract_jsonld_entities(case["html"], case["url"])
-        elif operation == "cluster":
-            result = article.extract_cluster_entities(
-                case["html"], case["url"], cluster_settings=case["cluster_settings"]
-            )
-        elif operation == "pipeline":
-            fallback_result = case.get("fallback_result")
-
-            def _fallback(_html: str, url: str) -> dict[str, Any]:
-                return {"url": url, **dict(fallback_result or {})}
-
-            result = article.extract_article_with_pipeline(
-                case["html"],
-                case["url"],
-                strategy_order=case.get("strategy_order"),
-                fallback_extractor=_fallback if fallback_result is not None else None,
-                allow_llm_extraction=case["allow_llm_extraction"],
-            )
-        else:
-            raise ValueError(f"Unknown extraction operation: {operation}")
-
-        actual = {
-            "cache_stats": article.get_extraction_cache_stats(),
-            "metrics": recorder.events,
-            "result": result,
-        }
-        article.clear_extraction_caches()
-        return actual
-
-
-def _build_extraction_cases(article: Any) -> list[dict[str, Any]]:
-    description_only_jsonld = (
-        '<html><head><script type="application/ld+json">'
-        '{"@context":"https://schema.org","@type":"Article",'
-        '"headline":"Structured title","description":"Structured summary"}'
-        "</script></head><body></body></html>"
-    )
-    cases = [
-        _case(
-            {
-                "html": (
-                    "<html><head><title>Contacts</title></head><body>"
-                    "Email demo@example.com or call +1 (415) 555-2671."
-                    "</body></html>"
-                ),
-                "mask_pii": False,
-                "name": "regex_catalog_matches",
-                "operation": "regex",
-                "url": "https://example.com/contacts",
-            }
-        ),
-        _case(
-            {
-                "html": (
-                    '<html><head><script type="application/ld+json">'
-                    '{"@context":"https://schema.org","@type":"NewsArticle",'
-                    '"headline":"JSON-LD Title","author":{"@type":"Person","name":"Jane Doe"},'
-                    '"datePublished":"2024-05-01","articleBody":"JSON-LD body text."}'
-                    "</script></head><body></body></html>"
-                ),
-                "name": "jsonld_article",
-                "operation": "jsonld",
-                "url": "https://example.com/jsonld",
-            }
-        ),
-        _case(
-            {
-                "cluster_settings": {
-                    "cluster_threshold": 0.1,
-                    "embed_dims": 32,
-                    "max_blocks": 10,
-                    "method": "greedy",
-                    "min_block_chars": 20,
-                    "min_word_count": 4,
-                    "prefilter_threshold": 0.0,
-                    "tag_keywords": {
-                        "research": ["research", "dataset"],
-                        "security": ["security", "encryption"],
-                    },
-                    "tag_top_k": 2,
-                },
-                "html": (
-                    "<html><head><title>Cluster Fixture</title></head><body><article>"
-                    "<p>Security research explains encryption controls for a stable local fixture.</p>"
-                    "<p>The research dataset contains deterministic examples for repeatable extraction.</p>"
-                    "</article></body></html>"
-                ),
-                "name": "cluster_extraction",
-                "operation": "cluster",
-                "url": "https://example.com/cluster",
-            }
-        ),
-        _case(
-            {
-                "allow_llm_extraction": False,
-                "fallback_result": {
-                    "author": "Fixture Author",
-                    "content": "Fallback body",
-                    "date": "2026-07-27",
-                    "extraction_successful": True,
-                    "summary": "   ",
-                    "title": "Fallback title",
-                },
-                "html": description_only_jsonld,
-                "name": "jsonld_summary_carries_to_fallback",
-                "operation": "pipeline",
-                "strategy_order": ["jsonld", "trafilatura"],
-                "url": "https://example.com/summary",
-            }
-        ),
-        _case(
-            {
-                "allow_llm_extraction": False,
-                "fallback_result": {
-                    "author": "Fixture Author",
-                    "content": "Fallback body",
-                    "date": "2026-07-27",
-                    "extraction_successful": True,
-                    "title": "Fallback title",
-                },
-                "html": "<html><body><p>Fallback input.</p></body></html>",
-                "name": "unknown_strategy_is_traced",
-                "operation": "pipeline",
-                "strategy_order": ["mystery", "trafilatura"],
-                "url": "https://example.com/unknown",
-            }
-        ),
-        _case(
-            {
-                "allow_llm_extraction": False,
-                "behavior_change": 1,
-                "difference_contract": "change_1_default_regex_non_terminal",
-                "html": "<html><body>Contact predecessor@example.com</body></html>",
-                "name": "default_regex_is_terminal_in_predecessor",
-                "operation": "pipeline",
-                "strategy_order": None,
-                "url": "https://example.com/regex-default",
-            }
-        ),
-    ]
-    for case in cases:
-        case["expected"] = _run_extraction_case(article, case)
-    return cases
-
-
-def _serialize_request(request: Any) -> dict[str, Any]:
-    return {
-        "allow_redirects": request.allow_redirects,
-        "backend": request.backend,
-        "cookies": dict(sorted(request.cookies.items())),
-        "headers": dict(sorted(request.headers.items())),
-        "method": request.method,
-        "timeout": request.timeout,
-        "url": request.url,
-    }
-
-
-class _FakePolicyChecker:
-    def __init__(self, decision: Any, *, error: bool = False) -> None:
-        self.decision = decision
-        self.error = error
-        self.calls: list[dict[str, Any]] = []
-
-    async def decide(
-        self,
-        url: str,
-        *,
-        respect_robots: bool,
-        user_agent: str | None,
-        context: Any,
-        config: Mapping[str, Any] | None,
-    ) -> Any:
-        self.calls.append(
-            {
-                "config": dict((config or {}).get("web_scraper", {})),
-                "context_source": context.source,
-                "context_stage": context.stage,
-                "respect_robots": respect_robots,
-                "url": url,
-                "user_agent": user_agent,
-            }
-        )
-        if self.error:
-            raise RuntimeError("fixture policy failure")
-        return self.decision
-
-
-class _FakeFetchClient:
-    def __init__(self, responses: list[Any]) -> None:
-        self.responses = list(responses)
-        self.requests: list[Any] = []
-
-    def fetch(self, request: Any) -> Any:
-        self.requests.append(request)
-        response = self.responses.pop(0)
-        if isinstance(response, BaseException):
-            raise response
-        return response
-
-
-async def _run_article_case(
-    article: Any,
-    FetchResponse: Any,
-    PolicyDecision: Any,
-    case: Mapping[str, Any],
-) -> dict[str, Any]:
-    with ExitStack() as stack:
-        recorder = _metric_patches(stack, article)
-        stack.enter_context(patch.object(article.random, "uniform", lambda *_args, **_kwargs: 0.0))
-        stack.enter_context(patch.dict(os.environ, _FIXED_ENV, clear=False))
-        article.clear_extraction_caches()
-
-        config = {
-            "web_scraper": {
-                "web_scraper_preflight_analyzers": False,
-                "web_scraper_respect_robots": True,
-            }
-        }
-        rules = {
-            "domains": {
-                "example.com": {
-                    "backend": case.get("backend", "httpx"),
-                    "cookies": {"mode": "fixture", "session": "plan"},
-                    "extra_headers": {"X-Fixture": "phase4"},
-                    "handler": "fixture:handler",
-                    "respect_robots": True,
-                    "ua_profile": "chrome_120_win",
-                }
-            }
-        }
-        stack.enter_context(patch.object(article, "load_and_log_configs", lambda: config))
-        stack.enter_context(patch.object(article.ScraperRouter, "load_rules_from_yaml", lambda _path: rules))
-        stack.enter_context(patch.object(article, "_js_required", lambda *_args, **_kwargs: False))
-
-        handler_result = dict(case.get("handler_result", {}))
-
-        def _handler(_html: str, url: str) -> dict[str, Any]:
-            return {"url": url, **handler_result}
-
-        stack.enter_context(patch.object(article, "resolve_handler", lambda _path: _handler))
-
-        scenario = case["scenario"]
-        decision = None
-        if scenario != "policy_error":
-            allowed = scenario != "policy_denied"
-            decision = PolicyDecision(
-                allowed=allowed,
-                mode="compat" if allowed else "strict",
-                reason="allowed" if allowed else "robots_disallowed",
-                stage="pre_fetch",
-                source="article_extract",
-            )
-        policy_checker = _FakePolicyChecker(decision, error=scenario == "policy_error")
-        responses: list[Any] = []
-        if scenario in {"lightweight_success", "curl_fallback"}:
-            if scenario == "curl_fallback":
-                responses.append(RuntimeError("fixture curl failure"))
-            responses.append(
-                FetchResponse(
-                    url=case["url"],
-                    status=200,
-                    headers={"Content-Type": "text/html"},
-                    text=case["html"],
-                    backend="httpx",
-                )
-            )
-        fetch_client = _FakeFetchClient(responses)
-        stack.enter_context(patch.object(article, "_ARTICLE_POLICY_CHECKER", policy_checker))
-        stack.enter_context(patch.object(article, "_ARTICLE_FETCH_CLIENT", fetch_client))
-
-        result = await article.scrape_article(
-            case["url"],
-            custom_cookies=case.get("custom_cookies"),
-            allow_llm_extraction=False,
-        )
-        actual = {
-            "cache_stats": article.get_extraction_cache_stats(),
-            "fetch_requests": [_serialize_request(request) for request in fetch_client.requests],
-            "metrics": recorder.events,
-            "policy_calls": policy_checker.calls,
-            "result": result,
-        }
-        article.clear_extraction_caches()
-        return actual
-
-
-async def _build_article_cases(
-    article: Any,
-    FetchResponse: Any,
-    PolicyDecision: Any,
-) -> list[dict[str, Any]]:
-    success_result = {
-        "author": "Fixture Author",
-        "content": "Fixture body",
-        "date": "2026-07-27",
-        "extraction_successful": True,
-        "title": "Fixture title",
-    }
-    cases = [
-        _case(
-            {
-                "backend": "httpx",
-                "name": "policy_denial_short_circuits_fetch",
-                "scenario": "policy_denied",
-                "url": "https://example.com/blocked",
-            }
-        ),
-        _case(
-            {
-                "backend": "httpx",
-                "behavior_change": 7,
-                "difference_contract": "change_7_policy_error",
-                "name": "policy_error_is_publicly_bounded",
-                "scenario": "policy_error",
-                "url": "https://example.com/policy-error",
-            }
-        ),
-        _case(
-            {
-                "backend": "httpx",
-                "custom_cookies": [{"name": "session", "value": "custom"}],
-                "handler_result": success_result,
-                "html": "<html><body><article>Fixture source</article></body></html>",
-                "name": "lightweight_http_success",
-                "scenario": "lightweight_success",
-                "url": "https://example.com/article",
-            }
-        ),
-        _case(
-            {
-                "backend": "curl",
-                "custom_cookies": [{"name": "session", "value": "custom"}],
-                "handler_result": success_result,
-                "html": "<html><body><article>Fixture source</article></body></html>",
-                "name": "curl_falls_back_to_httpx",
-                "scenario": "curl_fallback",
-                "url": "https://example.com/fallback",
-            }
-        ),
-    ]
-    for case in cases:
-        case["expected"] = await _run_article_case(article, FetchResponse, PolicyDecision, case)
-    return cases
-
-
-def build_case_payloads() -> dict[str, dict[str, Any]]:
-    article, fetchers, _FetchRequest, FetchResponse, PolicyDecision, _RuntimeContext = _load_predecessor_modules()
-    with patch.dict(os.environ, _FIXED_ENV, clear=False):
-        fetchers.reload_selector_guardrails_from_env()
-        payloads = {
-            "article_orchestration_fakes": {
-                "category": "article_orchestration_fakes",
-                "cases": asyncio.run(_build_article_cases(article, FetchResponse, PolicyDecision)),
-            },
-            "content": {"category": "content", "cases": _build_content_cases(article)},
-            "extraction": {"category": "extraction", "cases": _build_extraction_cases(article)},
-            "metadata": {"category": "metadata", "cases": _build_metadata_cases(article)},
-            "selectors": {"category": "selectors", "cases": _build_selector_cases(fetchers)},
-        }
-    fetchers.reload_selector_guardrails_from_env()
-    if set(payloads) != set(CASE_NAMES):
-        raise RuntimeError("Fixture category set is incomplete")
-    return payloads
-
-
-def generate_fixtures(predecessor_commit: str, output: Path) -> None:
-    _validate_provenance(predecessor_commit)
-    payloads = build_case_payloads()
-    output.mkdir(parents=True, exist_ok=True)
-
+def _write_fixture_set(
+    output: Path,
+    predecessor_commit: str,
+    payloads: Mapping[str, object],
+) -> None:
     case_files: dict[str, str] = {}
     for category in sorted(payloads):
         filename = f"{category}.json"
@@ -811,18 +199,106 @@ def generate_fixtures(predecessor_commit: str, output: Path) -> None:
     _write_json(output / "manifest.json", build_manifest(predecessor_commit, case_files))
 
 
+def _validate_fixture_set(output: Path, predecessor_commit: str) -> None:
+    case_files = {category: f"{category}.json" for category in CASE_NAMES}
+    expected_names = {"manifest.json", *case_files.values()}
+    actual_names = {path.name for path in output.iterdir() if path.is_file()}
+    if actual_names != expected_names:
+        raise RuntimeError(
+            f"Generated fixture set is incomplete: expected {sorted(expected_names)}, " f"found {sorted(actual_names)}"
+        )
+
+    decoded: dict[str, object] = {}
+    for path in sorted(output.iterdir()):
+        if not path.is_file():
+            raise RuntimeError(f"Generated fixture set contains a non-file entry: {path.name}")
+        raw = path.read_bytes()
+        payload = json.loads(raw.decode("ascii"))
+        canonical = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
+        if raw != canonical:
+            raise RuntimeError(f"Generated fixture is not canonical JSON: {path.name}")
+        decoded[path.name] = payload
+
+    expected_manifest = build_manifest(predecessor_commit, case_files)
+    if decoded["manifest.json"] != expected_manifest:
+        raise RuntimeError("Generated fixture manifest does not match the requested provenance")
+    for category, filename in case_files.items():
+        payload = decoded[filename]
+        if not isinstance(payload, dict) or payload.get("category") != category:
+            raise RuntimeError(f"Generated fixture category is invalid: {filename}")
+        cases = payload.get("cases")
+        if not isinstance(cases, list) or not cases:
+            raise RuntimeError(f"Generated fixture has no cases: {filename}")
+
+
+def _replace_output_directory(staging: Path, output: Path) -> None:
+    backup: Path | None = None
+    if output.exists():
+        if not output.is_dir():
+            raise ValueError(f"output must be a directory: {output}")
+        backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}")
+        output.replace(backup)
+
+    try:
+        staging.replace(output)
+    except BaseException:
+        if backup is not None and backup.exists() and not output.exists():
+            backup.replace(output)
+        raise
+    else:
+        if backup is not None:
+            shutil.rmtree(backup)
+
+
+def generate_fixtures(
+    predecessor_commit: str,
+    output: Path,
+    *,
+    source_root: Path | None = None,
+) -> None:
+    resolved_source_root = _validate_source_root(
+        predecessor_commit,
+        source_root or REPO_ROOT,
+    )
+    try:
+        payloads = build_case_payloads(resolved_source_root)
+    finally:
+        _validate_source_root(predecessor_commit, resolved_source_root)
+
+    output = output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(
+            prefix=f".{output.name}.staging-",
+            dir=output.parent,
+        )
+    )
+    try:
+        _write_fixture_set(staging, predecessor_commit, payloads)
+        _validate_fixture_set(staging, predecessor_commit)
+        _replace_output_directory(staging, output)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predecessor-commit", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--source-root", type=Path)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     try:
-        generate_fixtures(args.predecessor_commit, args.output)
-    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        generate_fixtures(
+            args.predecessor_commit,
+            args.output,
+            source_root=args.source_root,
+        )
+    except (OSError, RuntimeError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 0
