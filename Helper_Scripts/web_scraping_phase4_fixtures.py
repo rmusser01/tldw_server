@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
+import hashlib
 import json
 import os
 import re
@@ -18,6 +20,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - exercised on POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 SCHEMA_VERSION = 1
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -199,43 +211,162 @@ def _write_fixture_set(
     _write_json(output / "manifest.json", build_manifest(predecessor_commit, case_files))
 
 
-def _validate_fixture_set(output: Path, predecessor_commit: str) -> None:
+def _invalid_json_constant(_value: str) -> None:
+    raise ValueError("non-finite JSON value")
+
+
+def _validate_fixture_set(output: Path, predecessor_commit: str | None) -> None:
     case_files = {category: f"{category}.json" for category in CASE_NAMES}
     expected_names = {"manifest.json", *case_files.values()}
-    actual_names = {path.name for path in output.iterdir() if path.is_file()}
+    try:
+        entries = list(output.iterdir())
+    except OSError:
+        raise RuntimeError("Fixture set could not be inspected") from None
+
+    actual_names = {path.name for path in entries}
     if actual_names != expected_names:
-        raise RuntimeError(
-            f"Generated fixture set is incomplete: expected {sorted(expected_names)}, " f"found {sorted(actual_names)}"
-        )
+        raise RuntimeError("Fixture set does not contain the exact required files")
+    if any(path.is_symlink() or not path.is_file() for path in entries):
+        raise RuntimeError("Fixture set entries must be regular files")
 
     decoded: dict[str, object] = {}
-    for path in sorted(output.iterdir()):
-        if not path.is_file():
-            raise RuntimeError(f"Generated fixture set contains a non-file entry: {path.name}")
-        raw = path.read_bytes()
-        payload = json.loads(raw.decode("ascii"))
+    for path in sorted(entries):
+        try:
+            raw = path.read_bytes()
+            payload = json.loads(
+                raw.decode("ascii"),
+                parse_constant=_invalid_json_constant,
+            )
+        except (OSError, UnicodeError, ValueError):
+            raise RuntimeError(f"Fixture set contains invalid JSON: {path.name}") from None
         canonical = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
         if raw != canonical:
-            raise RuntimeError(f"Generated fixture is not canonical JSON: {path.name}")
+            raise RuntimeError(f"Fixture set contains noncanonical JSON: {path.name}")
         decoded[path.name] = payload
 
-    expected_manifest = build_manifest(predecessor_commit, case_files)
-    if decoded["manifest.json"] != expected_manifest:
-        raise RuntimeError("Generated fixture manifest does not match the requested provenance")
+    manifest = decoded["manifest.json"]
+    if type(manifest) is not dict or set(manifest) != {"schema_version", "predecessor_commit", "cases"}:
+        raise RuntimeError("Fixture set manifest structure is invalid")
+    manifest_commit = manifest["predecessor_commit"]
+    if type(manifest_commit) is not str or re.fullmatch(r"[0-9a-f]{40}", manifest_commit) is None:
+        raise RuntimeError("Fixture set manifest predecessor is invalid")
+    if type(manifest["schema_version"]) is not int or manifest["schema_version"] != SCHEMA_VERSION:
+        raise RuntimeError("Fixture set manifest schema version is invalid")
+    if type(manifest["cases"]) is not dict or manifest["cases"] != case_files:
+        raise RuntimeError("Fixture set manifest cases are invalid")
+    if manifest != build_manifest(manifest_commit, case_files):
+        raise RuntimeError("Fixture set manifest structure is invalid")
+    if predecessor_commit is not None and manifest_commit != predecessor_commit:
+        raise RuntimeError("Fixture set manifest does not match the requested provenance")
+
     for category, filename in case_files.items():
         payload = decoded[filename]
-        if not isinstance(payload, dict) or payload.get("category") != category:
-            raise RuntimeError(f"Generated fixture category is invalid: {filename}")
-        cases = payload.get("cases")
-        if not isinstance(cases, list) or not cases:
-            raise RuntimeError(f"Generated fixture has no cases: {filename}")
+        if type(payload) is not dict or set(payload) != {"category", "cases"}:
+            raise RuntimeError(f"Fixture set category structure is invalid: {filename}")
+        if type(payload["category"]) is not str or payload["category"] != category:
+            raise RuntimeError(f"Fixture set category is invalid: {filename}")
+        if type(payload["cases"]) is not list or not payload["cases"]:
+            raise RuntimeError(f"Fixture set cases are invalid: {filename}")
+
+
+def _resolve_output_path(output: Path, source_root: Path) -> Path:
+    try:
+        resolved_output = output.resolve()
+    except (OSError, RuntimeError):
+        raise ValueError("output path could not be resolved") from None
+
+    if source_root.is_relative_to(resolved_output):
+        raise ValueError("output must not be source-root or an ancestor of source-root")
+
+    if resolved_output.exists():
+        if not resolved_output.is_dir():
+            raise ValueError("existing output must be a directory")
+        return resolved_output
+
+    existing_parent = resolved_output.parent
+    while not existing_parent.exists() and existing_parent != existing_parent.parent:
+        existing_parent = existing_parent.parent
+    if not existing_parent.is_dir():
+        raise ValueError("output parent must be a directory")
+    return resolved_output
+
+
+def _validate_existing_output(output: Path) -> None:
+    if output.exists():
+        if not output.is_dir():
+            raise ValueError("existing output must be a directory")
+        _validate_fixture_set(output, predecessor_commit=None)
+
+
+def _lock_path_for_output(output: Path) -> Path:
+    normalized_output = os.path.normcase(str(output.resolve()))
+    identity = hashlib.sha256(normalized_output.encode("utf-8")).hexdigest()
+    lock_root = Path(tempfile.gettempdir()).resolve() / "tldw-phase4-fixture-locks"
+    return lock_root / f"{identity}.lock"
+
+
+def _acquire_file_lock(lock_file: Any) -> None:
+    if fcntl is not None:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        except OSError:
+            raise RuntimeError("Fixture publication lock could not be acquired") from None
+        return
+
+    if msvcrt is not None:  # pragma: no cover - exercised on Windows
+        lock_file.seek(0, os.SEEK_END)
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        while True:
+            lock_file.seek(0)
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise RuntimeError("Fixture publication lock could not be acquired") from None
+            else:
+                return
+
+    raise RuntimeError("Interprocess fixture publication locking is unavailable")
+
+
+def _release_file_lock(lock_file: Any) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        return
+    if msvcrt is not None:  # pragma: no cover - exercised on Windows
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+@contextmanager
+def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
+    lock_path = _lock_path_for_output(output)
+    if lock_path.is_relative_to(source_root):
+        raise RuntimeError("Fixture publication lock must be outside source-root")
+    try:
+        lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        flags = os.O_CREAT | os.O_RDWR
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError:
+        raise RuntimeError("Fixture publication lock could not be opened") from None
+
+    with os.fdopen(descriptor, "r+b", buffering=0) as lock_file:
+        _acquire_file_lock(lock_file)
+        try:
+            yield
+        finally:
+            _release_file_lock(lock_file)
 
 
 def _replace_output_directory(staging: Path, output: Path) -> None:
+    _validate_fixture_set(staging, predecessor_commit=None)
     backup: Path | None = None
     if output.exists():
-        if not output.is_dir():
-            raise ValueError(f"output must be a directory: {output}")
+        _validate_existing_output(output)
         backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}")
         output.replace(backup)
 
@@ -267,26 +398,28 @@ def generate_fixtures(
         predecessor_commit,
         source_root or REPO_ROOT,
     )
-    try:
-        payloads = build_case_payloads(resolved_source_root)
-    finally:
-        _validate_source_root(predecessor_commit, resolved_source_root)
+    output = _resolve_output_path(output, resolved_source_root)
+    with _publication_lock(output, resolved_source_root):
+        _validate_existing_output(output)
+        try:
+            payloads = build_case_payloads(resolved_source_root)
+        finally:
+            _validate_source_root(predecessor_commit, resolved_source_root)
 
-    output = output.resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(
-        tempfile.mkdtemp(
-            prefix=f".{output.name}.staging-",
-            dir=output.parent,
+        output.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=f".{output.name}.staging-",
+                dir=output.parent,
+            )
         )
-    )
-    try:
-        _write_fixture_set(staging, predecessor_commit, payloads)
-        _validate_fixture_set(staging, predecessor_commit)
-        _replace_output_directory(staging, output)
-    finally:
-        if staging.exists():
-            shutil.rmtree(staging)
+        try:
+            _write_fixture_set(staging, predecessor_commit, payloads)
+            _validate_fixture_set(staging, predecessor_commit)
+            _replace_output_directory(staging, output)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
