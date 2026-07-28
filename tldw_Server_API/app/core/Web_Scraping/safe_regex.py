@@ -10,6 +10,7 @@ import re
 import subprocess  # nosec B404
 import sys
 import threading
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -591,6 +592,31 @@ def _parse_replacement_template(
                 return None
             references.append(group_index)
             continue
+        if dialect == "regex" and escaped in {"x", "u", "U"}:
+            width = {"x": 2, "u": 4, "U": 8}[escaped]
+            digits = repl[index : index + width]
+            if len(digits) != width or any(char not in "0123456789abcdefABCDEF" for char in digits):
+                return None
+            try:
+                chr(int(digits, 16))
+            except ValueError:
+                return None
+            literal_chars += 1
+            index += width
+            continue
+        if dialect == "regex" and escaped == "N":
+            if index >= len(repl) or repl[index] != "{":
+                return None
+            closing = repl.find("}", index + 1)
+            if closing < 0:
+                return None
+            try:
+                unicodedata.lookup(repl[index + 1 : closing])
+            except KeyError:
+                return None
+            literal_chars += 1
+            index = closing + 1
+            continue
         if escaped == "0":
             for _offset in range(2):
                 if index < len(repl) and repl[index] in "01234567":
@@ -612,7 +638,7 @@ def _parse_replacement_template(
                 ):
                     digits += repl[index]
                     index += 1
-                    if int(digits, 8) > 0o377:
+                    if int(digits, 8) > (0o777 if dialect == "regex" else 0o377):
                         return None
                     literal_chars += 1
                     continue

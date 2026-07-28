@@ -785,6 +785,93 @@ def test_regex_dialect_substitution_preserves_group_replacement_semantics() -> N
 
 
 @pytest.mark.parametrize(
+    "replacement",
+    [
+        r"\x41",
+        r"\u0041",
+        r"\U00000041",
+        r"\N{LATIN CAPITAL LETTER A}",
+        r"\400",
+        r"\777",
+    ],
+)
+def test_regex_dialect_replacement_escapes_match_regex_engine(replacement: str) -> None:
+    expected = regex_engine.sub(r"(x)", replacement, "x")
+
+    result = sub_untrusted(r"(x)", replacement, "x", dialect="regex")
+
+    assert result == SafeRegexSubResult(value=expected)
+
+
+def test_regex_dialect_mixed_replacement_template_matches_regex_engine() -> None:
+    replacement = r"pre-\1-\x41-\u0041-\U00000041-\N{LATIN CAPITAL LETTER A}-\400-\777-post"
+    expected = regex_engine.sub(r"(x)", replacement, "x")
+
+    result = sub_untrusted(r"(x)", replacement, "x", dialect="regex")
+
+    assert result == SafeRegexSubResult(value=expected)
+
+
+def test_regex_dialect_decoded_escape_output_boundaries() -> None:
+    exact_result = sub_untrusted(
+        "x",
+        r"\x41",
+        "xx",
+        max_output_chars=2,
+        dialect="regex",
+    )
+    over_result = sub_untrusted(
+        "x",
+        r"\x41",
+        "xx",
+        max_output_chars=1,
+        dialect="regex",
+    )
+
+    assert exact_result == SafeRegexSubResult(value="AA")
+    assert over_result == SafeRegexSubResult(code="regex_too_large")
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        r"\x4",
+        r"\xGG",
+        r"\u004",
+        r"\u004G",
+        r"\U0000004",
+        r"\U00110000",
+        r"\N",
+        r"\N{}",
+        r"\N{NO SUCH NAME}",
+        r"\N{LATIN CAPITAL LETTER A",
+        r"\778",
+    ],
+)
+def test_regex_dialect_rejects_malformed_replacement_escapes(replacement: str) -> None:
+    result = sub_untrusted(r"(x)", replacement, "x", dialect="regex")
+
+    assert result == SafeRegexSubResult(code="regex_invalid")
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        r"\x41",
+        r"\u0041",
+        r"\U00000041",
+        r"\N{LATIN CAPITAL LETTER A}",
+        r"\400",
+        r"\777",
+    ],
+)
+def test_stdlib_dialect_keeps_replacement_escape_rejections(replacement: str) -> None:
+    result = sub_untrusted(r"(x)", replacement, "x")
+
+    assert result == SafeRegexSubResult(code="regex_invalid")
+
+
+@pytest.mark.parametrize(
     ("replacement", "value"),
     [(r"\2", "a"), (r"\2", "no match"), (r"\g<missing>", "a")],
 )
