@@ -812,6 +812,42 @@ def test_regex_dialect_mixed_replacement_template_matches_regex_engine() -> None
     assert result == SafeRegexSubResult(value=expected)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CJK UNIFIED IDEOGRAPH-4E00",
+        "HANGUL JUNGSEONG O-E",
+        "VARIATION SELECTOR-1",
+        "KEYCAP DIGIT ONE",
+    ],
+)
+def test_regex_dialect_replacement_parser_rejects_engine_invalid_names(name: str) -> None:
+    replacement = rf"\N{{{name}}}"
+    with pytest.raises((regex_engine.error, TypeError)):
+        regex_engine.sub("x", replacement, "x")
+
+    parsed = safe_regex_module._parse_replacement_template("x", replacement, 0, "regex")
+
+    assert parsed is None
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("LF", "\n"), ("lf", "\n"), ("latin capital letter a", "A")],
+)
+def test_regex_dialect_replacement_parser_accepts_engine_valid_names(
+    name: str,
+    expected: str,
+) -> None:
+    replacement = rf"\N{{{name}}}"
+
+    assert regex_engine.sub("x", replacement, "x") == expected
+    assert safe_regex_module._parse_replacement_template("x", replacement, 0, "regex") == (
+        1,
+        (),
+    )
+
+
 def test_regex_dialect_decoded_escape_output_boundaries() -> None:
     exact_result = sub_untrusted(
         "x",

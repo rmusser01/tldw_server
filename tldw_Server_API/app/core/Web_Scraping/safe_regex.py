@@ -607,12 +607,16 @@ def _parse_replacement_template(
         if dialect == "regex" and escaped == "N":
             if index >= len(repl) or repl[index] != "{":
                 return None
-            closing = repl.find("}", index + 1)
-            if closing < 0:
+            closing = index + 1
+            while closing < len(repl) and repl[closing].isascii() and (repl[closing].isalpha() or repl[closing] == " "):
+                closing += 1
+            if closing >= len(repl) or repl[closing] != "}":
                 return None
             try:
-                unicodedata.lookup(repl[index + 1 : closing])
+                named_char = unicodedata.lookup(repl[index + 1 : closing])
             except KeyError:
+                return None
+            if len(named_char) != 1:
                 return None
             literal_chars += 1
             index = closing + 1
