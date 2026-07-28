@@ -223,12 +223,13 @@ async def _run_article_case(case: Mapping[str, Any], monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(article.random, "uniform", lambda *_args, **_kwargs: 0.0)
     article.clear_extraction_caches()
 
-    config = {
-        "web_scraper": {
-            "web_scraper_preflight_analyzers": False,
-            "web_scraper_respect_robots": True,
-        }
+    web_scraper_config = {
+        "web_scraper_preflight_analyzers": case.get("preflight_enabled", False),
+        "web_scraper_respect_robots": True,
     }
+    if "preflight_include_results" in case:
+        web_scraper_config["web_scraper_preflight_include_results"] = case["preflight_include_results"]
+    config = {"web_scraper": web_scraper_config}
     rules = {
         "domains": {
             "example.com": {
@@ -252,10 +253,32 @@ async def _run_article_case(case: Mapping[str, Any], monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(article, "resolve_handler", lambda _path: _handler)
 
+    preflight_calls = {
+        "build_execution_context": 0,
+        "run_preflight": 0,
+    }
+
+    def _build_execution_context(*_args: Any, **_kwargs: Any) -> object:
+        preflight_calls["build_execution_context"] += 1
+        return object()
+
+    async def _run_preflight(*_args: Any, **_kwargs: Any) -> Any:
+        preflight_calls["run_preflight"] += 1
+        return article.preflight_facade.PreflightResult(
+            analysis=case.get("preflight_analysis", {}),
+        )
+
+    monkeypatch.setattr(
+        article.preflight_facade,
+        "build_execution_context",
+        _build_execution_context,
+    )
+    monkeypatch.setattr(article.preflight_facade, "run_preflight", _run_preflight)
+
     decision = _policy_decision(case)
     policy_checker = _FakePolicyChecker(decision, error=case["scenario"] == "policy_error")
     responses: list[FetchResponse | BaseException] = []
-    if case["scenario"] in {"lightweight_success", "curl_fallback"}:
+    if case["scenario"] in {"lightweight_success", "curl_fallback", "preflight_success"}:
         if case["scenario"] == "curl_fallback":
             responses.append(RuntimeError("fixture curl failure"))
         responses.append(
@@ -278,13 +301,16 @@ async def _run_article_case(case: Mapping[str, Any], monkeypatch: pytest.MonkeyP
     )
     cache_stats = article.get_extraction_cache_stats()
     article.clear_extraction_caches()
-    return {
+    actual: dict[str, Any] = {
         "cache_stats": cache_stats,
         "fetch_requests": [_serialize_request(request) for request in fetch_client.requests],
         "metrics": recorder.events,
         "policy_calls": policy_checker.calls,
         "result": result,
     }
+    if case.get("preflight_enabled"):
+        actual["preflight_calls"] = preflight_calls
+    return actual
 
 
 def test_phase4_fixture_generator_is_explicit_and_checked_in() -> None:
@@ -312,6 +338,33 @@ def test_phase4_fixture_json_is_canonical_and_complete() -> None:
         payload = json.loads(decoded)
         canonical = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
         assert decoded == canonical, path.name
+
+
+def test_article_orchestration_fixture_pins_enabled_preflight() -> None:
+    cases = {fixture_case["name"]: fixture_case for fixture_case in _load_cases("article_orchestration_fakes")}
+
+    legacy_case_names = {
+        "curl_falls_back_to_httpx",
+        "lightweight_http_success",
+        "policy_denial_short_circuits_fetch",
+        "policy_error_is_publicly_bounded",
+    }
+    for name in legacy_case_names:
+        policy_config = cases[name]["expected"]["policy_calls"][0]["config"]
+        assert "web_scraper_preflight_include_results" not in policy_config
+
+    fixture_case = cases["preflight_success_applies_advice_and_attaches_payload"]
+    assert fixture_case["preflight_enabled"] is True
+    assert fixture_case["preflight_include_results"] is True
+    assert fixture_case["expected"]["preflight_calls"] == {
+        "build_execution_context": 1,
+        "run_preflight": 1,
+    }
+    assert fixture_case["expected"]["fetch_requests"][0]["backend"] == "curl"
+    assert fixture_case["expected"]["result"]["preflight_analysis"] == {
+        "advice": {"backend": "curl", "method": "auto", "notes": ["tls_active"]},
+        "analysis": {"results": {"tls": {"status": "active"}}},
+    }
 
 
 def test_missing_manifest_is_a_hard_failure(

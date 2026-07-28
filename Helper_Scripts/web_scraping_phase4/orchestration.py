@@ -78,12 +78,16 @@ async def _run_article_case(
         stack.enter_context(patch.dict(os.environ, FIXED_ENV, clear=False))
         article.clear_extraction_caches()
 
-        config = {
-            "web_scraper": {
-                "web_scraper_preflight_analyzers": False,
-                "web_scraper_respect_robots": True,
-            }
+        web_scraper_config = {
+            "web_scraper_preflight_analyzers": fixture_case.get(
+                "preflight_enabled",
+                False,
+            ),
+            "web_scraper_respect_robots": True,
         }
+        if "preflight_include_results" in fixture_case:
+            web_scraper_config["web_scraper_preflight_include_results"] = fixture_case["preflight_include_results"]
+        config = {"web_scraper": web_scraper_config}
         rules = {
             "domains": {
                 "example.com": {
@@ -107,6 +111,36 @@ async def _run_article_case(
 
         stack.enter_context(patch.object(article, "resolve_handler", lambda _path: _handler))
 
+        preflight_calls = {
+            "build_execution_context": 0,
+            "run_preflight": 0,
+        }
+
+        def _build_execution_context(*_args: Any, **_kwargs: Any) -> object:
+            preflight_calls["build_execution_context"] += 1
+            return object()
+
+        async def _run_preflight(*_args: Any, **_kwargs: Any) -> Any:
+            preflight_calls["run_preflight"] += 1
+            return article.preflight_facade.PreflightResult(
+                analysis=fixture_case.get("preflight_analysis", {}),
+            )
+
+        stack.enter_context(
+            patch.object(
+                article.preflight_facade,
+                "build_execution_context",
+                _build_execution_context,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                article.preflight_facade,
+                "run_preflight",
+                _run_preflight,
+            )
+        )
+
         scenario = fixture_case["scenario"]
         decision = None
         if scenario != "policy_error":
@@ -120,7 +154,7 @@ async def _run_article_case(
             )
         policy_checker = _FakePolicyChecker(decision, error=scenario == "policy_error")
         responses: list[Any] = []
-        if scenario in {"lightweight_success", "curl_fallback"}:
+        if scenario in {"lightweight_success", "curl_fallback", "preflight_success"}:
             if scenario == "curl_fallback":
                 responses.append(RuntimeError("fixture curl failure"))
             responses.append(
@@ -141,13 +175,15 @@ async def _run_article_case(
             custom_cookies=fixture_case.get("custom_cookies"),
             allow_llm_extraction=False,
         )
-        actual = {
+        actual: dict[str, Any] = {
             "cache_stats": article.get_extraction_cache_stats(),
             "fetch_requests": [_serialize_request(request) for request in fetch_client.requests],
             "metrics": recorder.events,
             "policy_calls": policy_checker.calls,
             "result": result,
         }
+        if fixture_case.get("preflight_enabled"):
+            actual["preflight_calls"] = preflight_calls
         article.clear_extraction_caches()
         return actual
 
@@ -203,6 +239,19 @@ async def build_article_cases(
                 "name": "curl_falls_back_to_httpx",
                 "scenario": "curl_fallback",
                 "url": "https://example.com/fallback",
+            }
+        ),
+        case(
+            {
+                "backend": "auto",
+                "handler_result": success_result,
+                "html": "<html><body><article>Fixture source</article></body></html>",
+                "name": "preflight_success_applies_advice_and_attaches_payload",
+                "preflight_analysis": {"results": {"tls": {"status": "active"}}},
+                "preflight_enabled": True,
+                "preflight_include_results": True,
+                "scenario": "preflight_success",
+                "url": "https://example.com/preflight",
             }
         ),
     ]

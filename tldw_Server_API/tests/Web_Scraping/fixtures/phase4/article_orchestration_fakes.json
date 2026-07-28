@@ -471,6 +471,205 @@
       "name": "curl_falls_back_to_httpx",
       "scenario": "curl_fallback",
       "url": "https://example.com/fallback"
+    },
+    {
+      "backend": "auto",
+      "expected": {
+        "cache_stats": {
+          "cluster_embedding_cache_size": 0,
+          "llm_provider_last_call_count": 0,
+          "llm_provider_limit_count": 0,
+          "schema_result_cache_size": 0,
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0,
+          "strategy_limit_count": 0
+        },
+        "fetch_requests": [
+          {
+            "allow_redirects": true,
+            "backend": "curl",
+            "cookies": {
+              "mode": "fixture",
+              "session": "plan"
+            },
+            "headers": {
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+              "Accept-Encoding": "gzip, deflate, br, zstd",
+              "Accept-Language": "en-US,en;q=0.9",
+              "Sec-Fetch-Dest": "document",
+              "Sec-Fetch-Mode": "navigate",
+              "Sec-Fetch-Site": "none",
+              "Upgrade-Insecure-Requests": "1",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "X-Fixture": "phase4",
+              "sec-ch-ua": "\"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
+              "sec-ch-ua-mobile": "?0",
+              "sec-ch-ua-platform": "\"Windows\""
+            },
+            "method": "GET",
+            "timeout": 15.0,
+            "url": "https://example.com/preflight"
+          }
+        ],
+        "metrics": [
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "backend": "httpx"
+            },
+            "name": "scrape_fetch_latency_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "success",
+              "strategy": "schema"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "success",
+              "strategy": "schema"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "strategy": "schema"
+            },
+            "name": "extraction_content_length_bytes",
+            "value": 12
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "backend": "httpx"
+            },
+            "name": "scrape_content_length_bytes",
+            "value": 12
+          },
+          {
+            "emitter": "increment_counter",
+            "kind": "counter",
+            "labels": {
+              "backend": "httpx",
+              "outcome": "success"
+            },
+            "name": "scrape_fetch_total"
+          }
+        ],
+        "policy_calls": [
+          {
+            "config": {
+              "web_scraper_preflight_analyzers": true,
+              "web_scraper_preflight_include_results": true,
+              "web_scraper_respect_robots": true
+            },
+            "context_source": "article_extract",
+            "context_stage": "pre_fetch",
+            "respect_robots": true,
+            "url": "https://example.com/preflight",
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+        ],
+        "preflight_calls": {
+          "build_execution_context": 1,
+          "run_preflight": 1
+        },
+        "result": {
+          "author": "Fixture Author",
+          "content": "Fixture body",
+          "date": "2026-07-27",
+          "extraction_strategy": "schema",
+          "extraction_strategy_order": [
+            "jsonld",
+            "schema",
+            "regex",
+            "cluster",
+            "trafilatura"
+          ],
+          "extraction_successful": true,
+          "extraction_trace": [
+            {
+              "reason": "jsonld_no_content",
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            {
+              "reason": "handler_extracted",
+              "status": "success",
+              "strategy": "schema"
+            }
+          ],
+          "preflight_analysis": {
+            "advice": {
+              "backend": "curl",
+              "method": "auto",
+              "notes": [
+                "tls_active"
+              ]
+            },
+            "analysis": {
+              "results": {
+                "tls": {
+                  "status": "active"
+                }
+              }
+            }
+          },
+          "title": "Fixture title",
+          "url": "https://example.com/preflight"
+        }
+      },
+      "handler_result": {
+        "author": "Fixture Author",
+        "content": "Fixture body",
+        "date": "2026-07-27",
+        "extraction_successful": true,
+        "title": "Fixture title"
+      },
+      "html": "<html><body><article>Fixture source</article></body></html>",
+      "name": "preflight_success_applies_advice_and_attaches_payload",
+      "preflight_analysis": {
+        "results": {
+          "tls": {
+            "status": "active"
+          }
+        }
+      },
+      "preflight_enabled": true,
+      "preflight_include_results": true,
+      "scenario": "preflight_success",
+      "url": "https://example.com/preflight"
     }
   ],
   "category": "article_orchestration_fakes"
