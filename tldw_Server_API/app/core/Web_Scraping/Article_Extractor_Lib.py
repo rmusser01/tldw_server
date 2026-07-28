@@ -2799,17 +2799,28 @@ async def scrape_article(
     logging.info("Scraping article request.")
     # Resolve scraper plan via router (configurable via YAML)
     ws_cfg: dict[str, Any] = {}
-    try:
+
+    def _resolve_scrape_plan() -> Any:
+        nonlocal ws_cfg
         cfg = load_and_log_configs() or {}
-        ws_cfg = cfg.get('web_scraper', {}) or {}
-        rules_path = ws_cfg.get('custom_scrapers_yaml_path', _default_rules_path())
+        ws_cfg = cfg.get("web_scraper", {}) or {}
+        rules_path = ws_cfg.get("custom_scrapers_yaml_path", _default_rules_path())
         rules = ScraperRouter.load_rules_from_yaml(rules_path)
-        ua_mode = str(ws_cfg.get('web_scraper_ua_mode', 'fixed') or 'fixed')
-        respect_robots_default = ws_cfg.get('web_scraper_respect_robots', True)
+        ua_mode = str(ws_cfg.get("web_scraper_ua_mode", "fixed") or "fixed")
+        respect_robots_default = ws_cfg.get("web_scraper_respect_robots", True)
         if isinstance(respect_robots_default, str):
             respect_robots_default = _is_truthy(respect_robots_default.strip())
-        router = ScraperRouter(rules, ua_mode=ua_mode, default_respect_robots=bool(respect_robots_default))
-        plan = router.resolve(url)
+        router = ScraperRouter(
+            rules,
+            ua_mode=ua_mode,
+            default_respect_robots=bool(respect_robots_default),
+        )
+        return router.resolve(url)
+
+    try:
+        plan = await asyncio.to_thread(_resolve_scrape_plan)
+    except asyncio.CancelledError:
+        raise
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
         # Safe default plan
         class _P:  # minimal stand-in
