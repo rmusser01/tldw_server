@@ -17,7 +17,6 @@ Security:
 from __future__ import annotations
 
 import os
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -33,9 +32,6 @@ DEFAULT_HANDLER = "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic
 DEFAULT_HANDLER_ALLOWLIST = ("tldw_Server_API.app.core.Web_Scraping.handlers:",)
 
 _ROUTER_REGEX_LIMITS = SafeRegexLimits()
-# Configured patterns are user-controlled, so cap aggregate work per domain rule.
-_MAX_URL_PATTERNS = 32
-_URL_PATTERN_TOTAL_BUDGET_S = 0.100
 _BACKEND_LOOKUP = {
     "auto": "auto",
     "curl": "curl",
@@ -43,18 +39,6 @@ _BACKEND_LOOKUP = {
     "playwright": "playwright",
 }
 _INVALID_VALUE = object()
-
-
-def _monotonic() -> float:
-    return time.monotonic()
-
-
-def _router_regex_limits(timeout_s: float) -> SafeRegexLimits:
-    return SafeRegexLimits(
-        max_pattern_chars=_ROUTER_REGEX_LIMITS.max_pattern_chars,
-        max_input_chars=_ROUTER_REGEX_LIMITS.max_input_chars,
-        timeout_s=min(timeout_s, _ROUTER_REGEX_LIMITS.timeout_s),
-    )
 
 
 def _is_config_mapping_key(value: Any) -> bool:
@@ -359,17 +343,13 @@ class ScraperRouter:
                         continue
 
                     pats: list[str] = []
-                    deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
-                    for p in v[: min(pattern_count, _MAX_URL_PATTERNS)]:
+                    for p in v:
                         if type(p) is not str:
                             continue
-                        remaining_s = deadline - _monotonic()
-                        if remaining_s <= 0:
-                            break
                         validation = search_untrusted(
                             p,
                             "",
-                            limits=_router_regex_limits(remaining_s),
+                            limits=_ROUTER_REGEX_LIMITS,
                         )
                         if validation.code is None:
                             pats.append(p)
@@ -437,17 +417,13 @@ class ScraperRouter:
             pattern_count = len(raw_patterns)
             if pattern_count > 0:
                 matched_pattern = False
-                deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
-                for pattern in raw_patterns[: min(pattern_count, _MAX_URL_PATTERNS)]:
+                for pattern in raw_patterns:
                     if type(pattern) is not str:
                         continue
-                    remaining_s = deadline - _monotonic()
-                    if remaining_s <= 0:
-                        break
                     result = search_untrusted(
                         pattern,
                         url,
-                        limits=_router_regex_limits(remaining_s),
+                        limits=_ROUTER_REGEX_LIMITS,
                     )
                     if result.matched:
                         matched_pattern = True

@@ -2,6 +2,8 @@ from collections import UserDict
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping import scraper_router as scraper_router_module
+from tldw_Server_API.app.core.Web_Scraping.safe_regex import SafeRegexResult
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import (
     DEFAULT_HANDLER,
     DEFAULT_HANDLER_ALLOWLIST,
@@ -253,3 +255,55 @@ def test_direct_router_falsy_non_list_pattern_constraint_fails_open():
     )
 
     assert router.resolve("https://example.com/path").backend == "auto"
+
+
+def test_direct_rule_applies_match_at_url_pattern_position_33():
+    patterns = [rf"/never-{index}$" for index in range(32)] + [r"/target$"]
+    router = ScraperRouter(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": patterns,
+                }
+            }
+        }
+    )
+
+    plan = router.resolve("https://example.com/target")
+
+    assert plan.backend == "curl"
+
+
+def test_direct_rule_checks_later_match_after_prior_search_time(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    state = {"now": 0.0}
+    calls: list[tuple[str, float]] = []
+
+    def fake_monotonic() -> float:
+        return state["now"]
+
+    def fake_search(pattern, _value, *, limits):
+        calls.append((pattern, limits.timeout_s))
+        state["now"] += min(0.040, limits.timeout_s)
+        return SafeRegexResult(matched=pattern == "match-later")
+
+    monkeypatch.setattr(scraper_router_module, "_monotonic", fake_monotonic, raising=False)
+    monkeypatch.setattr(scraper_router_module, "search_untrusted", fake_search)
+    patterns = ["no-match-1", "no-match-2", "no-match-3", "match-later"]
+    router = ScraperRouter(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": patterns,
+                }
+            }
+        }
+    )
+
+    plan = router.resolve("https://example.com/target")
+
+    assert plan.backend == "curl"
+    assert calls == [(pattern, 0.100) for pattern in patterns]

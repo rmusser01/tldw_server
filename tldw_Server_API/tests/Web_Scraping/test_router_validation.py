@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping import scraper_router as scraper_router_module
+from tldw_Server_API.app.core.Web_Scraping.safe_regex import SafeRegexResult
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import (
     DEFAULT_HANDLER,
     ScraperRouter,
@@ -708,6 +710,49 @@ def test_exact_empty_url_pattern_list_remains_an_unconditional_constraint():
 
     assert direct == validated
     assert direct.backend == "curl"
+
+
+def test_validated_rule_applies_match_at_url_pattern_position_33():
+    patterns = [rf"/never-{index}$" for index in range(32)] + [r"/target$"]
+    rules = {
+        "domains": {
+            "example.com": {
+                "backend": "curl",
+                "url_patterns": patterns,
+            }
+        }
+    }
+
+    cleaned = ScraperRouter.validate_rules(rules)
+    plan = ScraperRouter(cleaned).resolve("https://example.com/target")
+
+    assert cleaned["domains"]["example.com"]["url_patterns"] == patterns
+    assert plan.backend == "curl"
+
+
+def test_validation_checks_later_pattern_after_prior_search_time(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    state = {"now": 0.0}
+    calls: list[tuple[str, float]] = []
+
+    def fake_monotonic() -> float:
+        return state["now"]
+
+    def fake_search(pattern, _value, *, limits):
+        calls.append((pattern, limits.timeout_s))
+        state["now"] += min(0.040, limits.timeout_s)
+        code = "regex_invalid" if pattern.startswith("rejected") else None
+        return SafeRegexResult(matched=False, code=code)
+
+    monkeypatch.setattr(scraper_router_module, "_monotonic", fake_monotonic, raising=False)
+    monkeypatch.setattr(scraper_router_module, "search_untrusted", fake_search)
+    patterns = ["rejected-1", "rejected-2", "rejected-3", "survivor"]
+
+    cleaned = ScraperRouter.validate_rules({"domains": {"example.com": {"backend": "curl", "url_patterns": patterns}}})
+
+    assert cleaned["domains"]["example.com"]["url_patterns"] == ["survivor"]
+    assert calls == [(pattern, 0.100) for pattern in patterns]
 
 
 def test_malformed_rule_values_normalize_without_widening_types():
