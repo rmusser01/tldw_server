@@ -629,7 +629,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 10,
+        "line": 14,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py",
         "target_name": "Article_Extractor_Lib"
@@ -1945,7 +1945,7 @@
       {
         "import_kind": "from",
         "imported_name": "scraper_router",
-        "line": 12,
+        "line": 16,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py",
         "target_name": "scraper_router"
@@ -1953,7 +1953,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScraperRouter",
-        "line": 20,
+        "line": 24,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py",
         "target_name": "scraper_router"
