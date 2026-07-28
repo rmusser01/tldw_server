@@ -1584,9 +1584,120 @@ def test_write_failure_leaves_existing_output_untouched(
     assert after == before
 
 
+def test_parent_identity_failure_happens_before_staging_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    monkeypatch.setattr(
+        generator,
+        "build_case_payloads",
+        lambda _source_root: _fixture_payloads("replacement"),
+    )
+    real_path_identity = generator._path_identity
+    sensitive_marker = "sensitive parent identity failure"
+    sensitive_detail = f"{sensitive_marker} at {tmp_path}"
+
+    def _fail_parent_identity(path: Path, error_message: str) -> tuple[int, int, int]:
+        if path == output.parent:
+            raise RuntimeError(sensitive_detail)
+        return real_path_identity(path, error_message)
+
+    monkeypatch.setattr(generator, "_path_identity", _fail_parent_identity)
+    real_mkdtemp = generator.tempfile.mkdtemp
+    staging_paths: list[Path] = []
+
+    def _record_mkdtemp(*args: Any, **kwargs: Any) -> str:
+        staging = Path(real_mkdtemp(*args, **kwargs))
+        staging_paths.append(staging)
+        return str(staging)
+
+    monkeypatch.setattr(generator.tempfile, "mkdtemp", _record_mkdtemp)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(
+            RuntimeError,
+            match="^Fixture staging directory could not be cleaned up$",
+        ) as exc_info:
+            generator.generate_fixtures(
+                source_commit,
+                output,
+                source_root=source_root,
+            )
+
+    assert staging_paths == []
+    assert not list(output.parent.glob(f".{output.name}.staging-*"))
+    assert str(tmp_path) not in str(exc_info.value)
+    assert sensitive_marker not in str(exc_info.value)
+    assert capsys.readouterr().err == ""
+
+
+def test_staging_identity_failure_retains_staging_with_fixed_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    monkeypatch.setattr(
+        generator,
+        "build_case_payloads",
+        lambda _source_root: _fixture_payloads("replacement"),
+    )
+    real_path_identity = generator._path_identity
+    staging_paths: list[Path] = []
+    sensitive_marker = "sensitive staging identity failure"
+    sensitive_detail = f"{sensitive_marker} at {tmp_path}"
+
+    real_mkdtemp = generator.tempfile.mkdtemp
+
+    def _record_mkdtemp(*args: Any, **kwargs: Any) -> str:
+        staging = Path(real_mkdtemp(*args, **kwargs))
+        staging_paths.append(staging)
+        return str(staging)
+
+    monkeypatch.setattr(generator.tempfile, "mkdtemp", _record_mkdtemp)
+
+    def _fail_staging_identity(path: Path, error_message: str) -> tuple[int, int, int]:
+        if staging_paths and path == staging_paths[0]:
+            raise RuntimeError(sensitive_detail)
+        return real_path_identity(path, error_message)
+
+    monkeypatch.setattr(generator, "_path_identity", _fail_staging_identity)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(
+            RuntimeError,
+            match="^Fixture staging directory could not be cleaned up$",
+        ) as exc_info:
+            generator.generate_fixtures(
+                source_commit,
+                output,
+                source_root=source_root,
+            )
+
+    assert len(staging_paths) == 1
+    staging = staging_paths[0]
+    assert staging.is_dir()
+    assert str(tmp_path) not in str(exc_info.value)
+    assert sensitive_marker not in str(exc_info.value)
+    diagnostic = capsys.readouterr().err
+    assert diagnostic == "warning: fixture staging directory retained for manual cleanup\n"
+    assert str(tmp_path) not in diagnostic
+    assert staging.name not in diagnostic
+    assert sensitive_marker not in diagnostic
+
+
 def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     class PrimaryFixturePublicationError(BaseException):
         pass
@@ -1605,30 +1716,35 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     sensitive_path = str(tmp_path / "private-fixture-staging")
     cleanup_detail = f"{sensitive_marker} at {sensitive_path}"
     cleanup_attempts: list[Path] = []
+    primary_tracebacks_during_cleanup: list[Any] = []
 
     def _fail_publication(_staging: Path, _output: Path) -> None:
         raise primary_error
 
     def _fail_staging_cleanup(path: Path) -> None:
         cleanup_attempts.append(path)
+        primary_tracebacks_during_cleanup.append(primary_error.__traceback__)
         raise OSError(cleanup_detail)
 
     monkeypatch.setattr(generator, "_replace_output_directory", _fail_publication)
     monkeypatch.setattr(generator.shutil, "rmtree", _fail_staging_cleanup)
 
-    with pytest.raises(
-        PrimaryFixturePublicationError,
-        match="^primary fixture publication failure$",
-    ) as exc_info:
-        generator.generate_fixtures(
-            source_commit,
-            output,
-            source_root=source_root,
-        )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(
+            PrimaryFixturePublicationError,
+            match="^primary fixture publication failure$",
+        ) as exc_info:
+            generator.generate_fixtures(
+                source_commit,
+                output,
+                source_root=source_root,
+            )
 
     assert exc_info.value is primary_error
     assert type(exc_info.value) is PrimaryFixturePublicationError
     assert str(exc_info.value) == primary_message
+    assert primary_tracebacks_during_cleanup
     assert len(cleanup_attempts) == 1
     assert cleanup_attempts[0].parent == output.parent
     assert cleanup_attempts[0].name.startswith(f".{output.name}.staging-")
@@ -1642,6 +1758,12 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     )
     assert sensitive_marker not in formatted_diagnostic
     assert sensitive_path not in formatted_diagnostic
+    assert "_fail_publication" in formatted_diagnostic
+    assert "_fail_staging_cleanup" not in formatted_diagnostic
+    diagnostic = capsys.readouterr().err
+    assert diagnostic == "warning: fixture staging directory retained for manual cleanup\n"
+    assert sensitive_marker not in diagnostic
+    assert sensitive_path not in diagnostic
 
 
 def test_recreated_staging_path_is_retained_after_atomic_publication(

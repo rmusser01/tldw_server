@@ -43,6 +43,14 @@ CASE_NAMES = (
 )
 _STABLE_IDENTITY_ERROR = "Fixture filesystem does not provide stable identity"
 _STAGING_CLEANUP_ERROR = "Fixture staging directory could not be cleaned up"
+_STAGING_RETAINED_DIAGNOSTIC = "warning: fixture staging directory retained for manual cleanup"
+
+
+def _report_staging_retained() -> None:
+    try:
+        print(_STAGING_RETAINED_DIAGNOSTIC, file=sys.stderr)
+    except BaseException:
+        pass
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -839,6 +847,10 @@ def generate_fixtures(
             _validate_source_root(predecessor_commit, resolved_source_root)
 
         output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            staging_parent_identity = _path_identity(output.parent, _STAGING_CLEANUP_ERROR)
+        except (OSError, RuntimeError):
+            raise RuntimeError(_STAGING_CLEANUP_ERROR) from None
         staging = Path(
             tempfile.mkdtemp(
                 prefix=f".{output.name}.staging-",
@@ -846,23 +858,26 @@ def generate_fixtures(
             )
         )
         try:
-            staging_parent_identity = _path_identity(staging.parent, _STAGING_CLEANUP_ERROR)
             staging_identity = _path_identity(staging, _STAGING_CLEANUP_ERROR)
-        except RuntimeError:
+        except (OSError, RuntimeError):
+            _report_staging_retained()
             raise RuntimeError(_STAGING_CLEANUP_ERROR) from None
         try:
             _write_fixture_set(staging, predecessor_commit, payloads)
             _validate_fixture_set(staging, predecessor_commit)
             _replace_output_directory(staging, output)
         except BaseException:
+            cleanup_failed = False
             try:
                 _cleanup_staging_directory(
                     staging,
                     staging_parent_identity,
                     staging_identity,
                 )
-            except (OSError, RuntimeError):
-                pass
+            except BaseException:
+                cleanup_failed = True
+            if cleanup_failed:
+                _report_staging_retained()
             raise
         else:
             _cleanup_staging_directory(
