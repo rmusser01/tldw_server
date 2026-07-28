@@ -64,14 +64,77 @@ class _SchemaBudgetExceeded(Exception):
 
 
 @dataclass(slots=True)
+class _OutputSlotIndexNode:
+    subtree_chars: int = 0
+    slot: tuple[Any, ...] | None = None
+    slot_chars: int = 0
+    children: dict[Any, _OutputSlotIndexNode] = dataclass_field(default_factory=dict)
+
+
+class _OutputSlotSnapshot(dict[tuple[Any, ...], int]):
+    def __init__(
+        self,
+        prefix: tuple[Any, ...],
+        index_subtree: _OutputSlotIndexNode,
+    ) -> None:
+        super().__init__()
+        self._prefix = prefix
+        self._index_subtree = index_subtree
+
+
+@dataclass(slots=True)
 class _SchemaBudget:
     limits: _SchemaLimits
     selector_evaluations: int = 0
     aggregate_matches: int = 0
     retained_output_chars: int = 0
     output_slots: dict[tuple[Any, ...], int] = dataclass_field(default_factory=dict)
+    _output_slot_index: _OutputSlotIndexNode = dataclass_field(
+        default_factory=_OutputSlotIndexNode,
+        init=False,
+        repr=False,
+    )
     selection_observer: Callable[[dict[str, Any], Sequence[Any], bool], None] | None = None
     enforce_output: bool = True
+
+    def __post_init__(self) -> None:
+        for slot, chars in self.output_slots.items():
+            self._index_output_slot(slot, chars)
+
+    def _output_index_path(
+        self,
+        slot: tuple[Any, ...],
+        *,
+        create: bool,
+    ) -> list[_OutputSlotIndexNode] | None:
+        node = self._output_slot_index
+        nodes = [node]
+        for part in slot:
+            child = node.children.get(part)
+            if child is None:
+                if not create:
+                    return None
+                child = _OutputSlotIndexNode()
+                node.children[part] = child
+            node = child
+            nodes.append(node)
+        return nodes
+
+    def _index_output_slot(self, slot: tuple[Any, ...], chars: int) -> None:
+        nodes = self._output_index_path(slot, create=True)
+        if nodes is None:
+            raise RuntimeError("output slot index path creation failed")
+        terminal = nodes[-1]
+        replaced = terminal.slot_chars if terminal.slot is not None else 0
+        terminal.slot = slot
+        terminal.slot_chars = chars
+        delta = chars - replaced
+        for node in nodes:
+            node.subtree_chars += delta
+
+    def _indexed_subtree_chars(self, prefix: tuple[Any, ...]) -> int:
+        nodes = self._output_index_path(prefix, create=False)
+        return nodes[-1].subtree_chars if nodes is not None else 0
 
     def begin_selection(self) -> None:
         self.selector_evaluations += 1
@@ -91,11 +154,7 @@ class _SchemaBudget:
     def remaining_output_chars(self, slot: tuple[Any, ...] | None = None) -> int | None:
         if not self.enforce_output:
             return None
-        replaced = (
-            sum(chars for output_slot, chars in self.output_slots.items() if output_slot[: len(slot)] == slot)
-            if slot is not None
-            else 0
-        )
+        replaced = self._indexed_subtree_chars(slot) if slot is not None else 0
         return self.limits.max_retained_output_chars - self.retained_output_chars + replaced
 
     def retain_output(self, value: Any, *, slot: tuple[Any, ...] | None = None) -> None:
@@ -111,16 +170,40 @@ class _SchemaBudget:
         if slot is not None:
             self.take_output_prefix(slot)
             self.output_slots[slot] = added
+            self._index_output_slot(slot, added)
         self.retained_output_chars += added
 
     def take_output_prefix(
         self,
         prefix: tuple[Any, ...],
     ) -> dict[tuple[Any, ...], int]:
-        replaced = {slot: chars for slot, chars in self.output_slots.items() if slot[: len(prefix)] == prefix}
-        for slot, chars in replaced.items():
-            self.retained_output_chars -= chars
-            del self.output_slots[slot]
+        nodes = self._output_index_path(prefix, create=False)
+        if nodes is None:
+            return {}
+
+        subtree = nodes[-1]
+        removed_index_chars = subtree.subtree_chars
+        replaced = _OutputSlotSnapshot(prefix, subtree)
+        pending = [subtree]
+        while pending:
+            node = pending.pop()
+            if node.slot is not None:
+                replaced[node.slot] = self.output_slots.pop(node.slot)
+            pending.extend(node.children.values())
+
+        if prefix:
+            del nodes[-2].children[prefix[-1]]
+            for node in nodes[:-1]:
+                node.subtree_chars -= removed_index_chars
+            for depth in range(len(nodes) - 2, 0, -1):
+                node = nodes[depth]
+                if node.slot is not None or node.children:
+                    break
+                del nodes[depth - 1].children[prefix[depth - 1]]
+        else:
+            self._output_slot_index = _OutputSlotIndexNode()
+
+        self.retained_output_chars -= sum(replaced.values())
         return replaced
 
     def restore_output_prefix(
@@ -129,8 +212,26 @@ class _SchemaBudget:
         snapshot: dict[tuple[Any, ...], int],
     ) -> None:
         self.take_output_prefix(prefix)
-        self.output_slots.update(snapshot)
-        self.retained_output_chars += sum(snapshot.values())
+        if isinstance(snapshot, _OutputSlotSnapshot) and snapshot._prefix == prefix:
+            nodes = self._output_index_path(prefix, create=True)
+            if nodes is None:
+                raise RuntimeError("output slot index path creation failed")
+            if prefix:
+                nodes[-2].children[prefix[-1]] = snapshot._index_subtree
+                for node in nodes[:-1]:
+                    node.subtree_chars += snapshot._index_subtree.subtree_chars
+            else:
+                self._output_slot_index = snapshot._index_subtree
+            self.output_slots.update(snapshot)
+            self.retained_output_chars += sum(snapshot.values())
+            return
+
+        restored_chars = 0
+        for slot, chars in snapshot.items():
+            self.output_slots[slot] = chars
+            self._index_output_slot(slot, chars)
+            restored_chars += chars
+        self.retained_output_chars += restored_chars
 
     def ensure_output_chars(self, added: int) -> None:
         if not self.enforce_output:

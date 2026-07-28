@@ -1362,6 +1362,147 @@ def test_failed_output_slot_subtree_replacement_is_atomic() -> None:
     assert budget.output_slots == {slot: len(value) for slot, value in reservations.items()}
 
 
+class _IterationCountingSlots(dict[tuple[Any, ...], int]):
+    def __init__(self, values: dict[tuple[Any, ...], int]) -> None:
+        super().__init__(values)
+        self.iteration_calls = 0
+
+    def __iter__(self):
+        self.iteration_calls += 1
+        return super().__iter__()
+
+    def items(self):
+        self.iteration_calls += 1
+        return super().items()
+
+
+def _output_slot_index_signature(
+    budget: schema._SchemaBudget,
+) -> dict[tuple[Any, ...], tuple[int, tuple[Any, ...] | None, int]]:
+    signature: dict[tuple[Any, ...], tuple[int, tuple[Any, ...] | None, int]] = {}
+    pending = [((), budget._output_slot_index)]
+    while pending:
+        path, node = pending.pop()
+        signature[path] = (node.subtree_chars, node.slot, node.slot_chars)
+        pending.extend((path + (part,), child) for part, child in node.children.items())
+    return signature
+
+
+def _output_slot_index_node(
+    budget: schema._SchemaBudget,
+    path: tuple[Any, ...],
+) -> schema._OutputSlotIndexNode:
+    node = budget._output_slot_index
+    for part in path:
+        node = node.children[part]
+    return node
+
+
+def _assert_output_slot_index_consistent(budget: schema._SchemaBudget) -> None:
+    indexed_slots: dict[tuple[Any, ...], int] = {}
+    calculated_totals: dict[int, int] = {}
+    pending = [(budget._output_slot_index, False)]
+    while pending:
+        node, expanded = pending.pop()
+        if not expanded:
+            pending.append((node, True))
+            pending.extend((child, False) for child in node.children.values())
+            continue
+        expected = node.slot_chars if node.slot is not None else 0
+        expected += sum(calculated_totals[id(child)] for child in node.children.values())
+        assert node.subtree_chars == expected
+        calculated_totals[id(node)] = expected
+        if node.slot is not None:
+            indexed_slots[node.slot] = node.slot_chars
+
+    assert indexed_slots == budget.output_slots
+    assert budget._output_slot_index.subtree_chars == budget.retained_output_chars
+
+
+def test_output_slot_operations_do_not_iterate_the_global_mapping() -> None:
+    budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=1_000))
+    for index in range(256):
+        budget.retain_output("x", slot=("schema_fields", f"value{index}"))
+    tracked_slots = _IterationCountingSlots(budget.output_slots)
+    budget.output_slots = tracked_slots
+
+    fresh_slot = ("schema_fields", "fresh")
+    assert budget.remaining_output_chars(fresh_slot) == 744
+    budget.retain_output("y", slot=fresh_slot)
+    removed = budget.take_output_prefix(("schema_fields", "value128"))
+    assert removed == {("schema_fields", "value128"): 1}
+    budget.restore_output_prefix(("schema_fields", "value128"), removed)
+
+    assert tracked_slots.iteration_calls == 0
+    assert tracked_slots[fresh_slot] == 1
+
+
+def test_output_slot_rollback_reattaches_the_detached_subtree_index() -> None:
+    budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=10))
+    prefix = ("schema_fields", "value")
+    budget.retain_output("aa", slot=prefix + ("left",))
+    budget.retain_output("bb", slot=prefix + ("right",))
+    detached_index = _output_slot_index_node(budget, prefix)
+
+    snapshot = budget.take_output_prefix(prefix)
+    assert snapshot._index_subtree is detached_index
+    budget.restore_output_prefix(prefix, snapshot)
+
+    assert _output_slot_index_node(budget, prefix) is detached_index
+    _assert_output_slot_index_consistent(budget)
+
+
+def test_output_slot_index_stays_consistent_across_rollback_and_zero_slots() -> None:
+    budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=5))
+    value_slot = ("schema_fields", "value")
+    empty_slot = ("schema_fields", "empty")
+    reservations = {
+        value_slot + ("leaf",): "aa",
+        ("schema_fields", "value2"): "b",
+        ("root", "value"): "r",
+        empty_slot: "",
+    }
+    for slot, value in reservations.items():
+        budget.retain_output(value, slot=slot)
+    _assert_output_slot_index_consistent(budget)
+
+    before_slots = dict(budget.output_slots)
+    before_index = _output_slot_index_signature(budget)
+    with pytest.raises(
+        schema._SchemaBudgetExceeded,
+        match="selector_too_complex:retained_output_chars>5",
+    ):
+        budget.retain_output("xxxx", slot=value_slot)
+    assert budget.output_slots == before_slots
+    assert _output_slot_index_signature(budget) == before_index
+    _assert_output_slot_index_consistent(budget)
+
+    snapshot = budget.take_output_prefix(value_slot)
+    assert snapshot == {value_slot + ("leaf",): 2}
+    assert value_slot not in _output_slot_index_signature(budget)
+    _assert_output_slot_index_consistent(budget)
+
+    budget.restore_output_prefix(value_slot, snapshot)
+    assert budget.output_slots == before_slots
+    _assert_output_slot_index_consistent(budget)
+
+    budget.retain_output("bb", slot=value_slot)
+    assert budget.output_slots == {
+        ("schema_fields", "value2"): 1,
+        ("root", "value"): 1,
+        empty_slot: 0,
+        value_slot: 2,
+    }
+    _assert_output_slot_index_consistent(budget)
+
+    empty_snapshot = budget.take_output_prefix(empty_slot)
+    assert empty_snapshot == {empty_slot: 0}
+    assert empty_slot not in _output_slot_index_signature(budget)
+    budget.restore_output_prefix(empty_slot, empty_snapshot)
+    assert empty_slot in budget.output_slots
+    _assert_output_slot_index_consistent(budget)
+
+
 def test_nested_list_output_slots_include_item_indices_without_container_charge() -> None:
     rules = {
         "fields": [
