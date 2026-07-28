@@ -1276,6 +1276,10 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
     real_close = generator.os.close
     root_descriptor: int | None = None
     lock_descriptor: int | None = None
+    root_close_attempts: list[int] = []
+    lock_close_attempts: list[int] = []
+    sensitive_marker = "sensitive root close failure"
+    sensitive_path = str(tmp_path / "private-root-descriptor")
 
     def _controlled_open(
         path: os.PathLike[str] | str,
@@ -1295,9 +1299,13 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
         return descriptor
 
     def _failing_root_close(descriptor: int) -> None:
-        real_close(descriptor)
         if descriptor == root_descriptor:
-            raise OSError("sensitive root close failure")
+            root_close_attempts.append(descriptor)
+            if not lock_open_fails and len(root_close_attempts) == 1:
+                raise OSError(f"{sensitive_marker} at {sensitive_path}")
+        elif descriptor == lock_descriptor:
+            lock_close_attempts.append(descriptor)
+        real_close(descriptor)
 
     monkeypatch.setattr(generator.os, "open", _controlled_open)
     monkeypatch.setattr(
@@ -1316,14 +1324,27 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
         generator._open_lock_descriptor(lock_root, "output.lock")
 
     assert root_descriptor is not None
+    assert str(exc_info.value) == expected
+    expected_root_attempts = 1 if lock_open_fails else 2
+    assert root_close_attempts == [root_descriptor] * expected_root_attempts
     with pytest.raises(OSError) as root_closed:
         os.fstat(root_descriptor)
     assert root_closed.value.errno == errno.EBADF
     if lock_descriptor is not None:
+        assert lock_close_attempts == [lock_descriptor]
         with pytest.raises(OSError) as lock_closed:
             os.fstat(lock_descriptor)
         assert lock_closed.value.errno == errno.EBADF
-    assert "sensitive" not in str(exc_info.value)
+    formatted_diagnostic = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+            chain=True,
+        )
+    )
+    assert sensitive_marker not in formatted_diagnostic
+    assert sensitive_path not in formatted_diagnostic
 
 
 @pytest.mark.skipif(

@@ -650,6 +650,7 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
     try:
         os.close(root_descriptor)
     except OSError:
+        _close_descriptor_quietly(root_descriptor)
         _close_descriptor_quietly(lock_descriptor)
         raise RuntimeError("Fixture publication lock root could not be closed") from None
     except BaseException:
