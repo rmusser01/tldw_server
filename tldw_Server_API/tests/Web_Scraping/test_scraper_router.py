@@ -4,10 +4,30 @@ import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import (
     DEFAULT_HANDLER,
+    DEFAULT_HANDLER_ALLOWLIST,
     ScraperRouter,
     _match_domain_rule,
     _validate_handler,
 )
+
+
+class _HandlerStringSubclass(str):
+    def startswith(self, prefix, *args):
+        return True
+
+
+class _PrefixStringSubclass(str):
+    pass
+
+
+class _DomainStringSubclass(str):
+    def startswith(self, prefix, *args):
+        raise RuntimeError("caller-owned domain startswith must not run")
+
+
+class _AllowlistBoolTrap(list):
+    def __bool__(self) -> bool:
+        raise RuntimeError("custom allowlist bool must not run")
 
 
 def test_router_precedence_exact_over_wildcard_and_patterns():
@@ -124,12 +144,83 @@ def test_non_mapping_exact_rule_does_not_fall_through_to_wildcard():
     assert _match_domain_rule("example.com", rules) is None
 
 
+def test_domain_key_string_subclasses_fail_safely_without_string_hooks():
+    domain = _DomainStringSubclass("*.example.com")
+    rules = {"domains": {domain: {"backend": "curl"}}}
+
+    assert ScraperRouter.validate_rules(rules) == {"domains": {}}
+    assert ScraperRouter(rules).resolve("https://sub.example.com/path").backend == "auto"
+
+
 def test_validate_handler_ignores_non_string_allowlist_entries():
     allowlist = [123, None, "approved.handlers:", {"invalid": "prefix"}]
 
     assert _validate_handler("approved.handlers:extract", allowlist) == ("approved.handlers:extract")
     assert _validate_handler(123, allowlist) == DEFAULT_HANDLER
     assert _validate_handler("approved.handlers:extract", object()) == DEFAULT_HANDLER
+
+
+@pytest.mark.parametrize(
+    ("handler", "allowlist"),
+    [
+        ("math:sqrt", [""]),
+        ("math:sqrt", [_PrefixStringSubclass("math:")]),
+        (_HandlerStringSubclass("math:sqrt"), list(DEFAULT_HANDLER_ALLOWLIST)),
+        ("math:sqrt", _AllowlistBoolTrap(["math:"])),
+    ],
+    ids=["empty-prefix", "prefix-subclass", "handler-subclass", "container-bool"],
+)
+def test_validate_handler_rejects_protocol_subclasses_and_empty_prefixes(
+    handler,
+    allowlist,
+):
+    assert _validate_handler(handler, allowlist) == DEFAULT_HANDLER
+
+
+@pytest.mark.parametrize(
+    "allowlist",
+    [
+        [""],
+        [_PrefixStringSubclass("math:")],
+        _AllowlistBoolTrap(["math:"]),
+    ],
+    ids=["empty-prefix", "prefix-subclass", "container-bool"],
+)
+def test_router_canonicalizes_unsafe_allowlists_to_safe_tuple(allowlist):
+    rules = {"domains": {"example.com": {"handler": "math:sqrt"}}}
+
+    router = ScraperRouter(rules, handler_allowlist=allowlist)
+    plan = router.resolve("https://example.com/path")
+
+    assert type(router.allowlist) is tuple
+    assert router.allowlist == tuple(DEFAULT_HANDLER_ALLOWLIST)
+    assert plan.handler == DEFAULT_HANDLER
+
+
+def test_router_canonicalizes_mixed_allowlist_without_subclass_prefixes():
+    rules = {
+        "domains": {
+            "example.com": {
+                "handler": "approved.handlers:extract",
+            }
+        }
+    }
+
+    router = ScraperRouter(
+        rules,
+        handler_allowlist=[
+            "",
+            123,
+            _PrefixStringSubclass("math:"),
+            "approved.handlers:",
+        ],
+    )
+    plan = router.resolve("https://example.com/path")
+
+    assert type(router.allowlist) is tuple
+    assert router.allowlist == ("approved.handlers:",)
+    assert plan.handler == "approved.handlers:extract"
+    assert type(plan.handler) is str
 
 
 def test_direct_router_handler_allowlist_with_non_string_entries_is_safe():

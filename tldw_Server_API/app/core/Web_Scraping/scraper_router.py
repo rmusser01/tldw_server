@@ -28,19 +28,20 @@ import yaml
 from .safe_regex import SafeRegexLimits, search_untrusted
 from .ua_profiles import pick_ua_profile, profile_to_impersonate
 
-DEFAULT_HANDLER = (
-    "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html"
-)
+DEFAULT_HANDLER = "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html"
 
-DEFAULT_HANDLER_ALLOWLIST = [
-    "tldw_Server_API.app.core.Web_Scraping.handlers:",
-]
+DEFAULT_HANDLER_ALLOWLIST = ("tldw_Server_API.app.core.Web_Scraping.handlers:",)
 
 _ROUTER_REGEX_LIMITS = SafeRegexLimits()
 # Configured patterns are user-controlled, so cap aggregate work per domain rule.
 _MAX_URL_PATTERNS = 32
 _URL_PATTERN_TOTAL_BUDGET_S = 0.100
-_ALLOWED_BACKENDS = frozenset({"auto", "curl", "httpx", "playwright"})
+_BACKEND_LOOKUP = {
+    "auto": "auto",
+    "curl": "curl",
+    "httpx": "httpx",
+    "playwright": "playwright",
+}
 _INVALID_VALUE = object()
 
 
@@ -56,11 +57,20 @@ def _router_regex_limits(timeout_s: float) -> SafeRegexLimits:
     )
 
 
+def _snapshot_mapping(value: Any) -> dict[Any, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        return dict(value)
+    except Exception:
+        return None
+
+
 def _normalize_backend(value: Any) -> str:
-    if not isinstance(value, str):
+    if type(value) is not str:
         return "auto"
     normalized = value.strip().lower()
-    return normalized if normalized in _ALLOWED_BACKENDS else "auto"
+    return _BACKEND_LOOKUP.get(normalized, "auto")
 
 
 def _normalize_scalar_string(
@@ -70,7 +80,21 @@ def _normalize_scalar_string(
 ) -> str | None | object:
     if value is None:
         return None if allow_none else _INVALID_VALUE
-    if isinstance(value, str):
+    if type(value) is str:
+        return value
+    if type(value) in {bool, int, float}:
+        return str(value)
+    return _INVALID_VALUE
+
+
+def _normalize_bool(value: Any) -> bool | object:
+    if type(value) in {bool, int, float, str}:
+        return bool(value)
+    return _INVALID_VALUE
+
+
+def _stringify_safe_scalar(value: Any) -> str | object:
+    if type(value) is str:
         return value
     if type(value) in {bool, int, float}:
         return str(value)
@@ -78,36 +102,34 @@ def _normalize_scalar_string(
 
 
 def _normalize_string_mapping(value: Any) -> dict[str, str]:
-    if not isinstance(value, Mapping):
+    snapshot = _snapshot_mapping(value)
+    if snapshot is None:
         return {}
 
     normalized: dict[str, str] = {}
-    for key, item in value.items():
-        try:
-            normalized_key = str(key)
-            normalized_item = str(item)
-        except Exception:
-            normalized_key = None
-            normalized_item = None
-        if normalized_key is not None and normalized_item is not None:
+    for key, item in snapshot.items():
+        normalized_key = _stringify_safe_scalar(key)
+        normalized_item = _stringify_safe_scalar(item)
+        if normalized_key is not _INVALID_VALUE and normalized_item is not _INVALID_VALUE:
             normalized[normalized_key] = normalized_item
     return normalized
 
 
 def _normalize_string_list(value: Any) -> list[str] | object:
-    if not isinstance(value, list):
+    if type(value) is not list:
         return _INVALID_VALUE
-    return [item for item in value if isinstance(item, str)]
+    return [item for item in value if type(item) is str]
 
 
 def _normalize_object_mapping(value: Any) -> dict[Any, Any] | object:
-    if not isinstance(value, Mapping):
+    snapshot = _snapshot_mapping(value)
+    if snapshot is None:
         return _INVALID_VALUE
-    return dict(value)
+    return snapshot
 
 
 def _mapping_alias(
-    rule: Mapping[Any, Any],
+    rule: dict[Any, Any],
     primary: str,
     alias: str,
 ) -> dict[Any, Any] | None:
@@ -116,6 +138,18 @@ def _mapping_alias(
         if normalized is not _INVALID_VALUE:
             return normalized
     return None
+
+
+def _normalize_handler_allowlist(value: Any) -> tuple[str, ...]:
+    if type(value) not in {list, tuple, set, frozenset}:
+        return DEFAULT_HANDLER_ALLOWLIST
+
+    prefixes = [item for item in value if type(item) is str and len(item) > 0]
+    if type(value) in {set, frozenset}:
+        prefixes.sort()
+    if len(prefixes) == 0:
+        return DEFAULT_HANDLER_ALLOWLIST
+    return tuple(prefixes)
 
 
 @dataclass
@@ -138,12 +172,10 @@ class ScrapePlan:
 
 
 def _validate_handler(handler: Any, allowlist: Any) -> str:
-    if not isinstance(handler, str):
+    if type(handler) is not str or len(handler) == 0:
         return DEFAULT_HANDLER
-    if not isinstance(allowlist, (list, tuple, set, frozenset)):
-        return DEFAULT_HANDLER
-    for prefix in allowlist:
-        if isinstance(prefix, str) and handler.startswith(prefix):
+    for prefix in _normalize_handler_allowlist(allowlist):
+        if handler.startswith(prefix):
             return handler
     # Fallback to safe default
     return DEFAULT_HANDLER
@@ -156,28 +188,36 @@ def _parse_domain(url: str) -> str:
 def _match_domain_rule(
     domain: str,
     rules: Any,
-) -> tuple[str, Mapping[Any, Any]] | None:
+) -> tuple[str, dict[Any, Any]] | None:
     # 1) Exact
-    if not isinstance(rules, Mapping):
+    if type(domain) is not str:
         return None
-    dom_rules = rules.get("domains", {})
-    if not isinstance(dom_rules, Mapping):
+    rules_snapshot = _snapshot_mapping(rules)
+    if rules_snapshot is None:
         return None
-    if domain in dom_rules:
-        rule = dom_rules[domain]
-        return (domain, rule) if isinstance(rule, Mapping) else None
+    dom_rules = _snapshot_mapping(rules_snapshot.get("domains"))
+    if dom_rules is None:
+        return None
+    for key, raw_rule in dom_rules.items():
+        if type(key) is not str:
+            continue
+        if key == domain:
+            rule = _snapshot_mapping(raw_rule)
+            return (domain, rule) if rule is not None else None
 
     # 2) Wildcard (*.example.com)
-    best_match: tuple[str, Mapping[Any, Any]] | None = None
+    best_match: tuple[str, dict[Any, Any]] | None = None
     best_suffix_len = -1
-    for key, rule in dom_rules.items():
-        if isinstance(key, str) and isinstance(rule, Mapping) and key.startswith("*."):
-            suffix = key[1:]  # remove leading '*'
-            if domain.endswith(suffix):
-                # Pick the longest suffix for specificity
-                if len(suffix) > best_suffix_len:
-                    best_match = (key, rule)
-                    best_suffix_len = len(suffix)
+    for key, raw_rule in dom_rules.items():
+        if type(key) is not str or not key.startswith("*."):
+            continue
+        suffix = key[1:]  # remove leading '*'
+        if not domain.endswith(suffix) or len(suffix) <= best_suffix_len:
+            continue
+        rule = _snapshot_mapping(raw_rule)
+        if rule is not None:
+            best_match = (key, rule)
+            best_suffix_len = len(suffix)
 
     if best_match:
         return best_match
@@ -195,13 +235,12 @@ class ScraperRouter:
         ua_mode: Any = "fixed",
         default_respect_robots: bool = True,
     ) -> None:
-        self.rules = rules if isinstance(rules, Mapping) else {}
-        if isinstance(handler_allowlist, (list, tuple, set, frozenset)) and handler_allowlist:
-            self.allowlist = handler_allowlist
-        else:
-            self.allowlist = DEFAULT_HANDLER_ALLOWLIST
-        self.ua_mode = ua_mode if isinstance(ua_mode, str) else "fixed"
-        self.default_respect_robots = bool(default_respect_robots)
+        rules_snapshot = _snapshot_mapping(rules)
+        self.rules = rules_snapshot if rules_snapshot is not None else {}
+        self.allowlist = _normalize_handler_allowlist(handler_allowlist)
+        self.ua_mode = ua_mode if type(ua_mode) is str else "fixed"
+        normalized_robots = _normalize_bool(default_respect_robots)
+        self.default_respect_robots = normalized_robots if normalized_robots is not _INVALID_VALUE else True
 
     @staticmethod
     def load_rules_from_yaml(path: str) -> dict[str, Any]:
@@ -225,10 +264,11 @@ class ScraperRouter:
         - Normalize headers/cookies to string maps
         """
         out: dict[str, Any] = {"domains": {}}
-        if not isinstance(data, Mapping):
+        data_snapshot = _snapshot_mapping(data)
+        if data_snapshot is None:
             return out
-        domains = data.get("domains", {})
-        if not isinstance(domains, Mapping):
+        domains = _snapshot_mapping(data_snapshot.get("domains"))
+        if domains is None:
             return out
 
         allowed_keys = {
@@ -251,22 +291,25 @@ class ScraperRouter:
             "cluster_settings",
             "cluster",
         }
-        for dom, rule in domains.items():
-            if not isinstance(dom, str) or not isinstance(rule, Mapping):
+        for dom, raw_rule in domains.items():
+            if type(dom) is not str:
                 continue
             # minimal domain/wildcard sanity: must contain a dot or start with '*.'
             if not (dom.startswith("*.") or "." in dom):
+                continue
+            rule = _snapshot_mapping(raw_rule)
+            if rule is None:
                 continue
 
             cleaned: dict[str, Any] = {}
             discard_rule = False
             for k, v in rule.items():
-                if k not in allowed_keys:
+                if type(k) is not str or k not in allowed_keys:
                     continue
                 if k == "backend":
                     cleaned[k] = _normalize_backend(v)
                 elif k == "handler":
-                    cleaned[k] = v if isinstance(v, str) else DEFAULT_HANDLER
+                    cleaned[k] = v if type(v) is str and len(v) > 0 else DEFAULT_HANDLER
                 elif k == "ua_profile":
                     normalized = _normalize_scalar_string(v)
                     if normalized is not _INVALID_VALUE:
@@ -276,17 +319,18 @@ class ScraperRouter:
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized
                 elif k == "url_patterns":
-                    if not isinstance(v, list):
+                    if type(v) is not list:
                         discard_rule = True
                         break
-                    if not v:
+                    pattern_count = len(v)
+                    if pattern_count == 0:
                         cleaned[k] = []
                         continue
 
                     pats: list[str] = []
                     deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
-                    for p in v[:_MAX_URL_PATTERNS]:
-                        if not isinstance(p, str):
+                    for p in v[: min(pattern_count, _MAX_URL_PATTERNS)]:
+                        if type(p) is not str:
                             continue
                         remaining_s = deadline - _monotonic()
                         if remaining_s <= 0:
@@ -305,7 +349,9 @@ class ScraperRouter:
                 elif k in ("extra_headers", "cookies", "proxies"):
                     cleaned[k] = _normalize_string_mapping(v)
                 elif k == "respect_robots":
-                    cleaned[k] = bool(v)
+                    normalized = _normalize_bool(v)
+                    if normalized is not _INVALID_VALUE:
+                        cleaned[k] = normalized
                 elif k == "strategy_order":
                     normalized = _normalize_string_list(v)
                     if normalized is not _INVALID_VALUE:
@@ -354,14 +400,15 @@ class ScraperRouter:
         # If url_patterns present, apply only if any matches
         if "url_patterns" in rule:
             raw_patterns = rule.get("url_patterns")
-            if not isinstance(raw_patterns, list):
+            if type(raw_patterns) is not list:
                 return plan
 
-            if raw_patterns:
+            pattern_count = len(raw_patterns)
+            if pattern_count > 0:
                 matched_pattern = False
                 deadline = _monotonic() + _URL_PATTERN_TOTAL_BUDGET_S
-                for pattern in raw_patterns[:_MAX_URL_PATTERNS]:
-                    if not isinstance(pattern, str):
+                for pattern in raw_patterns[: min(pattern_count, _MAX_URL_PATTERNS)]:
+                    if type(pattern) is not str:
                         continue
                     remaining_s = deadline - _monotonic()
                     if remaining_s <= 0:
@@ -401,7 +448,9 @@ class ScraperRouter:
         plan.proxies = _normalize_string_mapping(rule.get("proxies"))
         # Per-rule robots override
         if "respect_robots" in rule:
-            plan.respect_robots = bool(rule.get("respect_robots"))
+            normalized_robots = _normalize_bool(rule.get("respect_robots"))
+            if normalized_robots is not _INVALID_VALUE:
+                plan.respect_robots = normalized_robots
         strategy_order = _normalize_string_list(rule.get("strategy_order", _INVALID_VALUE))
         if strategy_order is not _INVALID_VALUE:
             plan.strategy_order = strategy_order
