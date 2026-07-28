@@ -697,13 +697,13 @@ def _replace_output_directory(
     expected_parent_identity: tuple[int, int, int] | None = None,
 ) -> None:
     """Atomically publish with best-effort identity checks around destructive operations."""
+    _validate_fixture_set(staging, predecessor_commit=None)
     publication_error = "Fixture output parent changed during publication"
     if expected_parent_identity is None:
         parent_identity = _path_identity(output.parent, publication_error)
     else:
         parent_identity = expected_parent_identity
         _require_path_identity(output.parent, parent_identity, publication_error)
-    _validate_fixture_set(staging, predecessor_commit=None)
     staging_identity = _path_identity(
         staging,
         "Fixture staging directory changed during publication",

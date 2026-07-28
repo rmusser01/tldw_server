@@ -1971,6 +1971,42 @@ def test_original_staging_cleanup_oserror_is_sanitized(
     _assert_fixture_marker(staging_paths[0], "unpublished")
 
 
+@pytest.mark.parametrize("parent_state", ["missing", "mismatched-identity"])
+def test_malformed_staging_validation_precedes_parent_identity_checks(
+    tmp_path: Path,
+    parent_state: str,
+) -> None:
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "1" * 40, "staged")
+    (staging / "content.json").write_text("{sensitive malformed", encoding="ascii")
+    before_staging = _snapshot_path(staging)
+
+    replace_kwargs: dict[str, tuple[int, int, int]] = {}
+    if parent_state == "missing":
+        output = tmp_path / "missing-parent" / "fixtures"
+    else:
+        output = tmp_path / "fixtures"
+        parent_identity = generator._path_identity(output.parent, "identity failure")
+        replace_kwargs["expected_parent_identity"] = (
+            parent_identity[0],
+            parent_identity[1],
+            parent_identity[2] + 1,
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"^Fixture set contains invalid JSON: content\.json$",
+    ) as exc_info:
+        generator._replace_output_directory(staging, output, **replace_kwargs)
+
+    assert _snapshot_path(staging) == before_staging
+    assert not output.exists()
+    if parent_state == "missing":
+        assert not output.parent.exists()
+    assert str(tmp_path) not in str(exc_info.value)
+    assert "sensitive" not in str(exc_info.value)
+
+
 @pytest.mark.parametrize("identity_boundary", ["parent", "output"])
 def test_publication_rejects_zero_inode_with_dedicated_diagnostic(
     tmp_path: Path,
