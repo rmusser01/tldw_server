@@ -91,7 +91,11 @@ class _SchemaBudget:
     def remaining_output_chars(self, slot: tuple[Any, ...] | None = None) -> int | None:
         if not self.enforce_output:
             return None
-        replaced = self.output_slots.get(slot, 0) if slot is not None else 0
+        replaced = (
+            sum(chars for output_slot, chars in self.output_slots.items() if output_slot[: len(slot)] == slot)
+            if slot is not None
+            else 0
+        )
         return self.limits.max_retained_output_chars - self.retained_output_chars + replaced
 
     def retain_output(self, value: Any, *, slot: tuple[Any, ...] | None = None) -> None:
@@ -104,10 +108,10 @@ class _SchemaBudget:
                 "retained_output_chars",
                 self.limits.max_retained_output_chars,
             )
-        replaced = self.output_slots.get(slot, 0) if slot is not None else 0
-        self.retained_output_chars = self.retained_output_chars - replaced + added
         if slot is not None:
+            self.take_output_prefix(slot)
             self.output_slots[slot] = added
+        self.retained_output_chars += added
 
     def take_output_prefix(
         self,

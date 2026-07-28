@@ -1180,6 +1180,154 @@ def test_replaced_output_slots_release_prior_reservations(rules: dict[str, Any])
     assert result["schema_fields"] == {"value": "bb"}
 
 
+@pytest.mark.parametrize(
+    "rules",
+    [
+        {
+            "fields": [
+                {
+                    "name": "value",
+                    "type": "nested",
+                    "fields": [{"name": "leaf", "selector": "//i"}],
+                },
+                {"name": "value", "selector": "//b"},
+            ]
+        },
+        {
+            "fields": [
+                {
+                    "name": "value",
+                    "type": "nested",
+                    "fields": [{"name": "leaf", "selector": "//i"}],
+                },
+                {"name": "value", "type": "computed", "value": "bb"},
+            ]
+        },
+        {
+            "baseFields": [
+                {
+                    "name": "value",
+                    "type": "nested",
+                    "fields": [{"name": "leaf", "selector": "//i"}],
+                }
+            ],
+            "fields": [{"name": "value", "selector": "//b"}],
+        },
+        {
+            "fields": [
+                {"name": "value", "selector": "//i"},
+                {
+                    "name": "value",
+                    "type": "nested",
+                    "fields": [{"name": "leaf", "selector": "//b"}],
+                },
+            ]
+        },
+        {
+            "fields": [
+                {
+                    "name": "value",
+                    "type": "nested",
+                    "fields": [{"name": "leaf", "selector": "//i"}],
+                },
+                {
+                    "name": "value",
+                    "type": "nested",
+                    "fields": [{"name": "leaf", "selector": "//b"}],
+                },
+            ]
+        },
+    ],
+    ids=[
+        "nested-to-scalar",
+        "nested-to-computed",
+        "base-nested-to-field-scalar",
+        "scalar-to-nested",
+        "nested-to-nested",
+    ],
+)
+def test_shape_changing_slot_replacement_boundaries(rules: dict[str, Any]) -> None:
+    html_text = "<article><i>a</i><b>bb</b></article>"
+    exact_limits = schema._SchemaLimits(max_retained_output_chars=2)
+    one_over_limits = schema._SchemaLimits(max_retained_output_chars=1)
+    one_over_code = "selector_too_complex:retained_output_chars>1"
+
+    exact_report = selectors.validate_selector_rules(
+        rules,
+        html_text=html_text,
+        _limits=exact_limits,
+    )
+    exact_result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=exact_limits,
+    )
+    one_over_report = selectors.validate_selector_rules(
+        rules,
+        html_text=html_text,
+        _limits=one_over_limits,
+    )
+    one_over_result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=one_over_limits,
+    )
+
+    expected = {"value": "bb"}
+    if rules["fields"][-1].get("type") == "nested":
+        expected = {"value": {"leaf": "bb"}}
+    assert exact_report["errors"] == []
+    assert exact_result["schema_fields"] == expected
+    assert [entry["error"] for entry in one_over_report["errors"]] == [one_over_code]
+    assert one_over_result["error"] == one_over_code
+
+
+def test_slot_subtree_replacement_preserves_exact_prefix_siblings() -> None:
+    rules = {
+        "fields": [
+            {
+                "name": "value",
+                "type": "nested",
+                "fields": [{"name": "leaf", "selector": "//i"}],
+            },
+            {"name": "value2", "selector": "//u"},
+            {"name": "value", "selector": "//b"},
+        ]
+    }
+    html_text = "<article><i>a</i><u>b</u><b>cc</b></article>"
+
+    exact_report = selectors.validate_selector_rules(
+        rules,
+        html_text=html_text,
+        _limits=schema._SchemaLimits(max_retained_output_chars=3),
+    )
+    exact_result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(max_retained_output_chars=3),
+    )
+    one_over_report = selectors.validate_selector_rules(
+        rules,
+        html_text=html_text,
+        _limits=schema._SchemaLimits(max_retained_output_chars=2),
+    )
+    one_over_result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+        _limits=schema._SchemaLimits(max_retained_output_chars=2),
+    )
+
+    code = "selector_too_complex:retained_output_chars>2"
+    assert exact_report["errors"] == []
+    assert exact_result["schema_fields"] == {"value": "cc", "value2": "b"}
+    assert [entry["error"] for entry in one_over_report["errors"]] == [code]
+    assert one_over_result["error"] == code
+
+
 def test_failed_output_slot_replacement_is_atomic() -> None:
     budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=2))
     slot = ("schema_fields", "value")
@@ -1190,6 +1338,28 @@ def test_failed_output_slot_replacement_is_atomic() -> None:
 
     assert budget.retained_output_chars == 2
     assert budget.output_slots == {slot: 2}
+
+
+def test_failed_output_slot_subtree_replacement_is_atomic() -> None:
+    budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=5))
+    value_slot = ("schema_fields", "value")
+    reservations = {
+        value_slot + ("leaf",): "aa",
+        ("schema_fields", "value2"): "b",
+        ("root", "value"): "r",
+    }
+    for slot, value in reservations.items():
+        budget.retain_output(value, slot=slot)
+
+    assert budget.remaining_output_chars(value_slot) == 3
+    with pytest.raises(
+        schema._SchemaBudgetExceeded,
+        match="selector_too_complex:retained_output_chars>5",
+    ):
+        budget.retain_output("xxxx", slot=value_slot)
+
+    assert budget.retained_output_chars == 4
+    assert budget.output_slots == {slot: len(value) for slot, value in reservations.items()}
 
 
 def test_nested_list_output_slots_include_item_indices_without_container_charge() -> None:
