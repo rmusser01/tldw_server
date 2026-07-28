@@ -1277,13 +1277,16 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
     real_close = generator.os.close
     root_descriptor: int | None = None
     lock_descriptor: int | None = None
+    unrelated_descriptor: int | None = None
+    interleaving_injected = False
     root_close_attempts: list[int] = []
     lock_close_attempts: list[int] = []
     sensitive_marker = "sensitive root close failure"
     sensitive_path = str(tmp_path / "private-root-descriptor")
+    unrelated_path = tmp_path / "unrelated-open"
 
     def _retire_descriptors() -> None:
-        for descriptor in (lock_descriptor, root_descriptor):
+        for descriptor in (lock_descriptor, root_descriptor, unrelated_descriptor):
             if descriptor is not None:
                 try:
                     real_close(descriptor)
@@ -1299,13 +1302,22 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
         *,
         dir_fd: int | None = None,
     ) -> int:
-        nonlocal root_descriptor, lock_descriptor
-        if dir_fd is not None and lock_open_fails:
+        nonlocal root_descriptor, lock_descriptor, unrelated_descriptor, interleaving_injected
+        is_root_open = dir_fd is None and os.fspath(path) == os.fspath(lock_root)
+        is_lock_open = dir_fd == root_descriptor and os.fspath(path) == "output.lock"
+        if is_lock_open and not interleaving_injected:
+            interleaving_injected = True
+            unrelated_descriptor = _controlled_open(
+                unrelated_path,
+                os.O_CREAT | os.O_RDWR,
+                0o600,
+            )
+        if is_lock_open and lock_open_fails:
             raise OSError("sensitive lock open failure")
         descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
-        if dir_fd is None:
+        if is_root_open:
             root_descriptor = descriptor
-        else:
+        elif is_lock_open:
             lock_descriptor = descriptor
         return descriptor
 
@@ -1335,6 +1347,8 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
         generator._open_lock_descriptor(lock_root, "output.lock")
 
     assert root_descriptor is not None
+    assert unrelated_descriptor is not None
+    os.fstat(unrelated_descriptor)
     assert str(exc_info.value) == expected
     assert root_close_attempts == [root_descriptor]
     if lock_open_fails:
