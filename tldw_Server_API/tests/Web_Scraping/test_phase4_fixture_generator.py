@@ -82,9 +82,16 @@ def _isolated_lock_path(
 
 
 class _CloseFailingLockFile:
-    def __init__(self, lock_file: Any, close_detail: str) -> None:
+    def __init__(
+        self,
+        lock_file: Any,
+        close_detail: str,
+        *,
+        close_underlying_before_error: bool = True,
+    ) -> None:
         self._lock_file = lock_file
         self._close_detail = close_detail
+        self._close_underlying_before_error = close_underlying_before_error
         self.descriptor = lock_file.fileno()
         self.close_calls = 0
         self.underlying_close_calls = 0
@@ -104,7 +111,7 @@ class _CloseFailingLockFile:
 
     def close(self) -> None:
         self.close_calls += 1
-        if not self._lock_file.closed:
+        if self._close_underlying_before_error and not self._lock_file.closed:
             self._lock_file.close()
             self.underlying_close_calls += 1
         raise OSError(self._close_detail)
@@ -113,12 +120,18 @@ class _CloseFailingLockFile:
 def _install_close_failing_fdopen(
     monkeypatch: pytest.MonkeyPatch,
     close_detail: str,
+    *,
+    close_underlying_before_error: bool = True,
 ) -> list[_CloseFailingLockFile]:
     real_fdopen = generator.os.fdopen
     lock_files: list[_CloseFailingLockFile] = []
 
     def _close_failing_fdopen(descriptor: int, *args: Any, **kwargs: Any) -> _CloseFailingLockFile:
-        lock_file = _CloseFailingLockFile(real_fdopen(descriptor, *args, **kwargs), close_detail)
+        lock_file = _CloseFailingLockFile(
+            real_fdopen(descriptor, *args, **kwargs),
+            close_detail,
+            close_underlying_before_error=close_underlying_before_error,
+        )
         lock_files.append(lock_file)
         return lock_file
 
@@ -133,11 +146,14 @@ class _DirectCloseFailingLockFile:
         close_error: BaseException,
         primary_error: BaseException,
         primary_tracebacks: list[Any],
+        *,
+        close_underlying_before_error: bool = True,
     ) -> None:
         self._lock_file = lock_file
         self._close_error = close_error
         self._primary_error = primary_error
         self._primary_tracebacks = primary_tracebacks
+        self._close_underlying_before_error = close_underlying_before_error
         self.descriptor = lock_file.fileno()
         self.close_calls = 0
         self.underlying_close_calls = 0
@@ -151,7 +167,7 @@ class _DirectCloseFailingLockFile:
 
     def close(self) -> None:
         self.close_calls += 1
-        if not self._lock_file.closed:
+        if self._close_underlying_before_error and not self._lock_file.closed:
             self._lock_file.close()
             self.underlying_close_calls += 1
         self._primary_tracebacks.append(self._primary_error.__traceback__)
@@ -163,6 +179,8 @@ def _install_direct_close_failing_fdopen(
     close_error: BaseException,
     primary_error: BaseException,
     primary_tracebacks: list[Any],
+    *,
+    close_underlying_before_error: bool = True,
 ) -> list[_DirectCloseFailingLockFile]:
     real_fdopen = generator.os.fdopen
     lock_files: list[_DirectCloseFailingLockFile] = []
@@ -177,6 +195,7 @@ def _install_direct_close_failing_fdopen(
             close_error,
             primary_error,
             primary_tracebacks,
+            close_underlying_before_error=close_underlying_before_error,
         )
         lock_files.append(lock_file)
         return lock_file
@@ -1144,6 +1163,103 @@ def test_fake_windows_locking_branch_remains_usable(
     assert fake_msvcrt.operations == [fake_msvcrt.LK_LOCK, fake_msvcrt.LK_UNLCK]
 
 
+@pytest.mark.parametrize(
+    "failure_stage",
+    ["seek-end", "tell", "write", "flush", "loop-seek"],
+)
+def test_fake_windows_acquisition_setup_oserror_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    class _SetupFailingLockFile:
+        def __init__(self) -> None:
+            self.seek_calls = 0
+
+        def seek(self, _offset: int, _whence: int = os.SEEK_SET) -> None:
+            self.seek_calls += 1
+            stage = "seek-end" if self.seek_calls == 1 else "loop-seek"
+            if failure_stage == stage:
+                raise OSError(sensitive_detail)
+
+        def tell(self) -> int:
+            if failure_stage == "tell":
+                raise OSError(sensitive_detail)
+            return 0
+
+        def write(self, _payload: bytes) -> None:
+            if failure_stage == "write":
+                raise OSError(sensitive_detail)
+
+        def flush(self) -> None:
+            if failure_stage == "flush":
+                raise OSError(sensitive_detail)
+
+        def fileno(self) -> int:
+            return 41
+
+    class _FakeMsvcrt:
+        LK_LOCK = 1
+
+        def __init__(self) -> None:
+            self.operations: list[int] = []
+
+        def locking(self, _descriptor: int, operation: int, _length: int) -> None:
+            self.operations.append(operation)
+
+    sensitive_marker = f"sensitive Windows {failure_stage} failure"
+    sensitive_path = str(tmp_path / "private-lock-file")
+    sensitive_detail = f"{sensitive_marker} at {sensitive_path}"
+    fake_msvcrt = _FakeMsvcrt()
+    monkeypatch.setattr(generator, "fcntl", None)
+    monkeypatch.setattr(generator, "msvcrt", fake_msvcrt)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture publication lock could not be acquired$",
+    ) as exc_info:
+        generator._acquire_file_lock(_SetupFailingLockFile())
+
+    assert exc_info.value.__suppress_context__
+    assert fake_msvcrt.operations == []
+    formatted_diagnostic = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+            chain=True,
+        )
+    )
+    assert sensitive_marker not in formatted_diagnostic
+    assert sensitive_path not in formatted_diagnostic
+
+
+def test_fake_windows_acquisition_retries_transient_lock_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RetryingMsvcrt:
+        LK_LOCK = 1
+
+        def __init__(self) -> None:
+            self.operations: list[int] = []
+            self.transient_errnos = [errno.EACCES, errno.EAGAIN, errno.EDEADLK]
+
+        def locking(self, _descriptor: int, operation: int, _length: int) -> None:
+            self.operations.append(operation)
+            if self.transient_errnos:
+                raise OSError(self.transient_errnos.pop(0), "sensitive transient failure")
+
+    fake_msvcrt = _RetryingMsvcrt()
+    monkeypatch.setattr(generator, "fcntl", None)
+    monkeypatch.setattr(generator, "msvcrt", fake_msvcrt)
+
+    with tempfile.TemporaryFile() as lock_file:
+        generator._acquire_file_lock(lock_file)
+
+    assert fake_msvcrt.operations == [fake_msvcrt.LK_LOCK] * 4
+    assert fake_msvcrt.transient_errnos == []
+
+
 @pytest.mark.skipif(
     generator.fcntl is None or os.open not in os.supports_dir_fd,
     reason="descriptor-relative POSIX lock opening is unavailable",
@@ -1231,6 +1347,7 @@ def test_direct_root_close_baseexception_closes_lock_and_preserves_root_error(
     real_fstat = generator.os.fstat
     root_descriptor: int | None = None
     lock_descriptor: int | None = None
+    root_close_attempts: list[int] = []
     lock_close_attempts: list[int] = []
     primary_message = "direct root descriptor close failure"
     primary_error = DirectRootCloseFailure(primary_message)
@@ -1254,8 +1371,11 @@ def test_direct_root_close_baseexception_closes_lock_and_preserves_root_error(
 
     def _failing_close(descriptor: int) -> None:
         if descriptor == root_descriptor:
+            root_close_attempts.append(descriptor)
+            if len(root_close_attempts) == 1:
+                raise primary_error
             real_close(descriptor)
-            raise primary_error
+            return
         if descriptor == lock_descriptor:
             lock_close_attempts.append(descriptor)
             primary_tracebacks_during_lock_close.append(primary_error.__traceback__)
@@ -1280,6 +1400,7 @@ def test_direct_root_close_baseexception_closes_lock_and_preserves_root_error(
         assert str(exc_info.value) == primary_message
         assert root_descriptor is not None
         assert lock_descriptor is not None
+        assert root_close_attempts == [root_descriptor, root_descriptor]
         assert lock_close_attempts == [lock_descriptor]
         assert len(primary_tracebacks_during_lock_close) == 1
         final_traceback = exc_info.value.__traceback__
@@ -1711,6 +1832,18 @@ def test_publication_lock_standalone_direct_close_baseexception_is_preserved(
         close_error,
         close_tracebacks,
     )
+    real_close_descriptor_quietly = generator._close_descriptor_quietly
+    fallback_descriptors: list[int | None] = []
+
+    def _tracking_descriptor_fallback(descriptor: int | None) -> None:
+        fallback_descriptors.append(descriptor)
+        real_close_descriptor_quietly(descriptor)
+
+    monkeypatch.setattr(
+        generator,
+        "_close_descriptor_quietly",
+        _tracking_descriptor_fallback,
+    )
 
     with pytest.raises(DirectCloseFailure, match=f"^{close_message}$") as exc_info:
         with generator._publication_lock(output, source_root):
@@ -1723,6 +1856,136 @@ def test_publication_lock_standalone_direct_close_baseexception_is_preserved(
     assert lock_files[0].close_calls == 1
     assert lock_files[0].underlying_close_calls == 1
     assert lock_files[0].closed
+    assert fallback_descriptors == []
+    with pytest.raises(OSError) as closed_descriptor:
+        os.fstat(lock_files[0].descriptor)
+    assert closed_descriptor.value.errno == errno.EBADF
+
+
+def test_publication_lock_direct_close_before_underlying_uses_descriptor_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    class DirectCloseFailure(BaseException):
+        pass
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    close_message = "direct standalone close failure"
+    close_error = DirectCloseFailure(close_message)
+    primary_tracebacks: list[Any] = []
+    lock_files = _install_direct_close_failing_fdopen(
+        monkeypatch,
+        close_error,
+        close_error,
+        primary_tracebacks,
+        close_underlying_before_error=False,
+    )
+
+    def _retire_file_objects() -> None:
+        for lock_file in lock_files:
+            try:
+                lock_file._lock_file.close()
+            except OSError:
+                pass
+
+    request.addfinalizer(_retire_file_objects)
+    real_close_descriptor_quietly = generator._close_descriptor_quietly
+    fallback_descriptors: list[int | None] = []
+    close_tracebacks_during_fallback: list[Any] = []
+
+    def _tracking_descriptor_fallback(descriptor: int | None) -> None:
+        fallback_descriptors.append(descriptor)
+        close_tracebacks_during_fallback.append(close_error.__traceback__)
+        real_close_descriptor_quietly(descriptor)
+
+    monkeypatch.setattr(
+        generator,
+        "_close_descriptor_quietly",
+        _tracking_descriptor_fallback,
+    )
+
+    with pytest.raises(DirectCloseFailure, match=f"^{close_message}$") as exc_info:
+        with generator._publication_lock(output, source_root):
+            pass
+
+    assert exc_info.value is close_error
+    assert type(exc_info.value) is DirectCloseFailure
+    assert str(exc_info.value) == close_message
+    assert len(lock_files) == 1
+    assert lock_files[0].close_calls == 1
+    assert lock_files[0].underlying_close_calls == 0
+    assert fallback_descriptors == [lock_files[0].descriptor]
+    assert len(close_tracebacks_during_fallback) == 1
+    recorded_traceback = close_tracebacks_during_fallback[0]
+    assert recorded_traceback is not None
+    final_traceback = exc_info.value.__traceback__
+    assert final_traceback is not None
+    assert final_traceback.tb_next is not None
+    assert final_traceback.tb_next.tb_next is not None
+    assert final_traceback.tb_next.tb_next.tb_next is recorded_traceback
+    recorded_tail = recorded_traceback
+    while recorded_tail.tb_next is not None:
+        recorded_tail = recorded_tail.tb_next
+    final_tail = final_traceback
+    while final_tail.tb_next is not None:
+        final_tail = final_tail.tb_next
+    assert final_tail is recorded_tail
+    with pytest.raises(OSError) as closed_descriptor:
+        os.fstat(lock_files[0].descriptor)
+    assert closed_descriptor.value.errno == errno.EBADF
+
+
+def test_publication_lock_oserror_close_before_underlying_is_sanitized_and_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    sensitive_marker = "sensitive before-close failure"
+    sensitive_path = str(tmp_path / "private-lock-file")
+    lock_files = _install_close_failing_fdopen(
+        monkeypatch,
+        f"{sensitive_marker} at {sensitive_path}",
+        close_underlying_before_error=False,
+    )
+
+    def _retire_file_objects() -> None:
+        for lock_file in lock_files:
+            try:
+                lock_file._lock_file.close()
+            except OSError:
+                pass
+
+    request.addfinalizer(_retire_file_objects)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture publication lock file could not be closed$",
+    ) as exc_info:
+        with generator._publication_lock(output, source_root):
+            pass
+
+    assert exc_info.value.__suppress_context__
+    assert len(lock_files) == 1
+    assert lock_files[0].close_calls == 1
+    assert lock_files[0].underlying_close_calls == 0
+    formatted_diagnostic = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+            chain=True,
+        )
+    )
+    assert sensitive_marker not in formatted_diagnostic
+    assert sensitive_path not in formatted_diagnostic
     with pytest.raises(OSError) as closed_descriptor:
         os.fstat(lock_files[0].descriptor)
     assert closed_descriptor.value.errno == errno.EBADF

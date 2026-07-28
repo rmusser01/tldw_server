@@ -489,6 +489,19 @@ def _close_descriptor_quietly(descriptor: int | None) -> None:
         pass
 
 
+def _close_lock_file(lock_file: Any, descriptor: int) -> None:
+    try:
+        lock_file.close()
+    except BaseException:  # noqa: BLE001 - preserve the file close failure
+        try:
+            lock_file_closed = lock_file.closed
+        except BaseException:  # noqa: BLE001 - preserve the file close failure
+            lock_file_closed = False
+        if not lock_file_closed:
+            _close_descriptor_quietly(descriptor)
+        raise
+
+
 def _prepare_lock_root(lock_root: Path, source_root: Path) -> Path:
     try:
         if _is_link_like(lock_root):
@@ -640,6 +653,7 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
         _close_descriptor_quietly(lock_descriptor)
         raise RuntimeError("Fixture publication lock root could not be closed") from None
     except BaseException:
+        _close_descriptor_quietly(root_descriptor)
         _close_descriptor_quietly(lock_descriptor)
         raise
     return lock_descriptor
@@ -654,19 +668,23 @@ def _acquire_file_lock(lock_file: Any) -> None:
         return
 
     if msvcrt is not None:  # pragma: no cover - exercised on Windows
-        lock_file.seek(0, os.SEEK_END)
-        if lock_file.tell() == 0:
-            lock_file.write(b"\0")
-            lock_file.flush()
-        while True:
-            lock_file.seek(0)
-            try:
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
-            except OSError as exc:
-                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                    raise RuntimeError("Fixture publication lock could not be acquired") from None
-            else:
-                return
+        try:
+            lock_file.seek(0, os.SEEK_END)
+            if lock_file.tell() == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            while True:
+                lock_file.seek(0)
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                except OSError as exc:
+                    if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                        continue
+                    raise
+                else:
+                    return
+        except OSError:
+            raise RuntimeError("Fixture publication lock could not be acquired") from None
 
     raise RuntimeError("Interprocess fixture publication locking is unavailable")
 
@@ -710,13 +728,13 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
                 raise RuntimeError("Fixture publication lock could not be released") from None
     except BaseException:
         try:
-            lock_file.close()
+            _close_lock_file(lock_file, descriptor)
         except BaseException:  # noqa: BLE001 - preserve the active lock failure
             pass
         raise
     else:
         try:
-            lock_file.close()
+            _close_lock_file(lock_file, descriptor)
         except OSError:
             raise RuntimeError("Fixture publication lock file could not be closed") from None
 
