@@ -97,6 +97,61 @@ def test_router_proxies_parsed():
     assert plan.proxies.get("http").startswith("http://")
 
 
+def _has_int_digit_limit_behavior() -> bool:
+    try:
+        str(10**5000)
+    except ValueError:
+        return True
+    return False
+
+
+_INT_DIGIT_LIMIT_ACTIVE = _has_int_digit_limit_behavior()
+
+
+@pytest.mark.skipif(
+    not _INT_DIGIT_LIMIT_ACTIVE,
+    reason="interpreter does not enforce a decimal digit limit for int-to-string conversion",
+)
+@pytest.mark.parametrize("bad_setting", ["ua_profile", "impersonate"])
+def test_direct_router_drops_only_digit_limited_scalar_values(bad_setting):
+    huge = 10**5000
+    rule = {
+        "backend": "curl",
+        "ua_profile": "firefox_120_win",
+        "impersonate": "firefox120",
+        "extra_headers": {
+            "X-Ordinary": "header-value",
+            "X-Integer": 7,
+            huge: "drop-huge-key",
+            "X-Huge-Value": huge,
+        },
+        "cookies": {
+            "session": "cookie-value",
+            huge: "drop-huge-key",
+            "drop-cookie-value": huge,
+        },
+        "proxies": {
+            "http": "http://proxy.local",
+            huge: "drop-huge-key",
+            "drop-proxy-value": huge,
+        },
+    }
+    rule[bad_setting] = huge
+
+    plan = ScraperRouter({"domains": {"example.com": rule}}).resolve("https://example.com/path")
+
+    assert plan.backend == "curl"
+    if bad_setting == "ua_profile":
+        assert plan.ua_profile == "chrome_120_win"
+        assert plan.impersonate == "firefox120"
+    else:
+        assert plan.ua_profile == "firefox_120_win"
+        assert plan.impersonate == "firefox120"
+    assert plan.extra_headers == {"X-Ordinary": "header-value", "X-Integer": "7"}
+    assert plan.cookies == {"session": "cookie-value"}
+    assert plan.proxies == {"http": "http://proxy.local"}
+
+
 @pytest.mark.parametrize(
     "rules",
     [

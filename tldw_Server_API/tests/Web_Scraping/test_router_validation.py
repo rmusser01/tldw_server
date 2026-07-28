@@ -217,6 +217,17 @@ def _resolve_both(rule):
     return direct, validated
 
 
+def _has_int_digit_limit_behavior() -> bool:
+    try:
+        str(10**5000)
+    except ValueError:
+        return True
+    return False
+
+
+_INT_DIGIT_LIMIT_ACTIVE = _has_int_digit_limit_behavior()
+
+
 def test_validate_rules_normalizes_and_drops_invalid():
     raw = {
         "domains": {
@@ -967,3 +978,48 @@ def test_valid_scalar_ua_values_have_validated_and_direct_plan_parity():
     assert direct.handler == DEFAULT_HANDLER
     assert direct.ua_profile == "123"
     assert direct.impersonate == "456"
+
+
+@pytest.mark.skipif(
+    not _INT_DIGIT_LIMIT_ACTIVE,
+    reason="interpreter does not enforce a decimal digit limit for int-to-string conversion",
+)
+@pytest.mark.parametrize("bad_setting", ["ua_profile", "impersonate"])
+def test_validated_router_drops_only_digit_limited_scalar_values(bad_setting):
+    huge = 10**5000
+    rule = {
+        "backend": "curl",
+        "ua_profile": "firefox_120_win",
+        "impersonate": "firefox120",
+        "extra_headers": {
+            "X-Ordinary": "header-value",
+            "X-Integer": 7,
+            huge: "drop-huge-key",
+            "X-Huge-Value": huge,
+        },
+        "cookies": {
+            "session": "cookie-value",
+            huge: "drop-huge-key",
+            "drop-cookie-value": huge,
+        },
+        "proxies": {
+            "http": "http://proxy.local",
+            huge: "drop-huge-key",
+            "drop-proxy-value": huge,
+        },
+    }
+    rule[bad_setting] = huge
+
+    cleaned = ScraperRouter.validate_rules({"domains": {"example.com": rule}})
+    plan = ScraperRouter(cleaned).resolve("https://example.com/path")
+
+    assert plan.backend == "curl"
+    if bad_setting == "ua_profile":
+        assert plan.ua_profile == "chrome_120_win"
+        assert plan.impersonate == "firefox120"
+    else:
+        assert plan.ua_profile == "firefox_120_win"
+        assert plan.impersonate == "firefox120"
+    assert plan.extra_headers == {"X-Ordinary": "header-value", "X-Integer": "7"}
+    assert plan.cookies == {"session": "cookie-value"}
+    assert plan.proxies == {"http": "http://proxy.local"}

@@ -88,6 +88,15 @@ def _normalize_backend(value: Any) -> str:
     return _BACKEND_LOOKUP.get(normalized, "auto")
 
 
+def _stringify_exact_scalar(value: Any) -> str | object:
+    if type(value) not in {bool, int, float}:
+        return _INVALID_VALUE
+    try:
+        return str(value)
+    except (ValueError, OverflowError):
+        return _INVALID_VALUE
+
+
 def _normalize_scalar_string(
     value: Any,
     *,
@@ -97,9 +106,7 @@ def _normalize_scalar_string(
         return None if allow_none else _INVALID_VALUE
     if type(value) is str:
         return value
-    if type(value) in {bool, int, float}:
-        return str(value)
-    return _INVALID_VALUE
+    return _stringify_exact_scalar(value)
 
 
 def _normalize_bool(value: Any) -> bool | object:
@@ -111,9 +118,7 @@ def _normalize_bool(value: Any) -> bool | object:
 def _stringify_safe_scalar(value: Any) -> str | object:
     if type(value) is str:
         return value
-    if type(value) in {bool, int, float}:
-        return str(value)
-    return _INVALID_VALUE
+    return _stringify_exact_scalar(value)
 
 
 def _normalize_string_mapping(value: Any) -> dict[str, str]:
