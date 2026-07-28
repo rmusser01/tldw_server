@@ -49,8 +49,9 @@ _STAGING_RETAINED_DIAGNOSTIC = "warning: fixture staging directory retained for 
 def _report_staging_retained() -> None:
     try:
         print(_STAGING_RETAINED_DIAGNOSTIC, file=sys.stderr)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - diagnostics must never replace the active failure
         pass
+
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -874,7 +875,7 @@ def generate_fixtures(
                     staging_parent_identity,
                     staging_identity,
                 )
-            except BaseException:
+            except BaseException:  # noqa: BLE001 - preserve any primary BaseException
                 cleanup_failed = True
             if cleanup_failed:
                 _report_staging_retained()
