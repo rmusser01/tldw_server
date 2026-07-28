@@ -690,13 +690,20 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
             raise RuntimeError("Fixture publication lock file could not be closed") from None
 
 
-def _replace_output_directory(staging: Path, output: Path) -> None:
+def _replace_output_directory(
+    staging: Path,
+    output: Path,
+    *,
+    expected_parent_identity: tuple[int, int, int] | None = None,
+) -> None:
     """Atomically publish with best-effort identity checks around destructive operations."""
+    publication_error = "Fixture output parent changed during publication"
+    if expected_parent_identity is None:
+        parent_identity = _path_identity(output.parent, publication_error)
+    else:
+        parent_identity = expected_parent_identity
+        _require_path_identity(output.parent, parent_identity, publication_error)
     _validate_fixture_set(staging, predecessor_commit=None)
-    parent_identity = _path_identity(
-        output.parent,
-        "Fixture output parent changed during publication",
-    )
     staging_identity = _path_identity(
         staging,
         "Fixture staging directory changed during publication",
@@ -866,7 +873,11 @@ def generate_fixtures(
         try:
             _write_fixture_set(staging, predecessor_commit, payloads)
             _validate_fixture_set(staging, predecessor_commit)
-            _replace_output_directory(staging, output)
+            _replace_output_directory(
+                staging,
+                output,
+                expected_parent_identity=staging_parent_identity,
+            )
         except BaseException:
             cleanup_failed = False
             try:

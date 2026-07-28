@@ -1636,6 +1636,67 @@ def test_parent_identity_failure_happens_before_staging_creation(
     assert capsys.readouterr().err == ""
 
 
+def test_parent_substitution_before_publication_does_not_publish_fixtures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    publication_parent = tmp_path / "publication"
+    publication_parent.mkdir()
+    output = publication_parent / "fixtures"
+    original_parent = tmp_path / "original-publication-parent"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    monkeypatch.setattr(
+        generator,
+        "build_case_payloads",
+        lambda _source_root: _fixture_payloads("replacement"),
+    )
+    replace_output_directory = generator._replace_output_directory
+    substitution_performed = False
+
+    def _substitute_parent_before_publication(
+        staging: Path,
+        target: Path,
+        **kwargs: Any,
+    ) -> None:
+        nonlocal substitution_performed
+        publication_parent.replace(original_parent)
+        publication_parent.mkdir()
+        (original_parent / staging.name).replace(staging)
+        substitution_performed = True
+        replace_output_directory(staging, target, **kwargs)
+
+    monkeypatch.setattr(
+        generator,
+        "_replace_output_directory",
+        _substitute_parent_before_publication,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture output parent changed during publication$",
+    ) as exc_info:
+        generator.generate_fixtures(
+            source_commit,
+            output,
+            source_root=source_root,
+        )
+
+    assert substitution_performed
+    assert not output.exists()
+    assert not (original_parent / output.name).exists()
+    retained_staging = list(publication_parent.iterdir())
+    assert len(retained_staging) == 1
+    assert retained_staging[0].name.startswith(f".{output.name}.staging-")
+    assert retained_staging[0].is_dir()
+    assert str(tmp_path) not in str(exc_info.value)
+    diagnostic = capsys.readouterr().err
+    assert diagnostic == "warning: fixture staging directory retained for manual cleanup\n"
+    assert str(tmp_path) not in diagnostic
+    assert retained_staging[0].name not in diagnostic
+
+
 def test_staging_identity_failure_retains_staging_with_fixed_diagnostic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1702,6 +1763,9 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     class PrimaryFixturePublicationError(BaseException):
         pass
 
+    class DirectCleanupFailure(BaseException):
+        pass
+
     source_root, source_commit = _create_clean_source_root(tmp_path)
     output = tmp_path / "fixtures"
     _isolated_lock_path(tmp_path, monkeypatch, output)
@@ -1718,13 +1782,19 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     cleanup_attempts: list[Path] = []
     primary_tracebacks_during_cleanup: list[Any] = []
 
-    def _fail_publication(_staging: Path, _output: Path) -> None:
+    def _fail_publication(
+        _staging: Path,
+        _output: Path,
+        *,
+        expected_parent_identity: tuple[int, int, int] | None = None,
+    ) -> None:
+        del expected_parent_identity
         raise primary_error
 
     def _fail_staging_cleanup(path: Path) -> None:
         cleanup_attempts.append(path)
         primary_tracebacks_during_cleanup.append(primary_error.__traceback__)
-        raise OSError(cleanup_detail)
+        raise DirectCleanupFailure(cleanup_detail)
 
     monkeypatch.setattr(generator, "_replace_output_directory", _fail_publication)
     monkeypatch.setattr(generator.shutil, "rmtree", _fail_staging_cleanup)
@@ -1744,7 +1814,17 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     assert exc_info.value is primary_error
     assert type(exc_info.value) is PrimaryFixturePublicationError
     assert str(exc_info.value) == primary_message
-    assert primary_tracebacks_during_cleanup
+    assert len(primary_tracebacks_during_cleanup) == 1
+    final_traceback = exc_info.value.__traceback__
+    assert final_traceback is not None
+    assert final_traceback.tb_next is primary_tracebacks_during_cleanup[0]
+    recorded_tail = primary_tracebacks_during_cleanup[0]
+    while recorded_tail is not None and recorded_tail.tb_next is not None:
+        recorded_tail = recorded_tail.tb_next
+    final_tail = final_traceback
+    while final_tail is not None and final_tail.tb_next is not None:
+        final_tail = final_tail.tb_next
+    assert final_tail is recorded_tail
     assert len(cleanup_attempts) == 1
     assert cleanup_attempts[0].parent == output.parent
     assert cleanup_attempts[0].name.startswith(f".{output.name}.staging-")
@@ -1784,8 +1864,17 @@ def test_recreated_staging_path_is_retained_after_atomic_publication(
     replacement_marker = "replacement staging object"
     cleanup_detail = f"sensitive cleanup failure at {tmp_path}"
 
-    def _publish_and_leave_staging(staging: Path, target: Path) -> None:
-        replace_output_directory(staging, target)
+    def _publish_and_leave_staging(
+        staging: Path,
+        target: Path,
+        *,
+        expected_parent_identity: tuple[int, int, int] | None = None,
+    ) -> None:
+        replace_output_directory(
+            staging,
+            target,
+            expected_parent_identity=expected_parent_identity,
+        )
         staging.mkdir()
         (staging / "replacement.txt").write_text(replacement_marker, encoding="utf-8")
         staging_paths.append(staging)
@@ -1842,7 +1931,13 @@ def test_original_staging_cleanup_oserror_is_sanitized(
     cleanup_attempts: list[Path] = []
     cleanup_detail = f"sensitive cleanup failure at {tmp_path}"
 
-    def _leave_original_staging(staging: Path, _target: Path) -> None:
+    def _leave_original_staging(
+        staging: Path,
+        _target: Path,
+        *,
+        expected_parent_identity: tuple[int, int, int] | None = None,
+    ) -> None:
+        del expected_parent_identity
         staging_paths.append(staging)
 
     def _fail_staging_cleanup(path: Path) -> None:
