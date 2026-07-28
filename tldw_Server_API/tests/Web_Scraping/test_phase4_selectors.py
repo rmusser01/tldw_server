@@ -116,6 +116,153 @@ def test_validation_sanitizes_xpath_evaluation_errors() -> None:
     assert "Unregistered function" not in repr(report)
 
 
+def test_validation_reports_every_legacy_selector_alias_like_predecessor() -> None:
+    report = selectors.validate_selector_rules(
+        {
+            "title_xpath": "//h1",
+            "title_selector": "css:.css-abc123",
+        },
+        html_text='<article><h1 class="css-abc123">Headline</h1></article>',
+        include_counts=True,
+    )
+
+    assert report == {
+        "errors": [],
+        "warnings": [
+            {
+                "key": "title_selector",
+                "selector": "css:.css-abc123",
+                "warning": "fragile_selector",
+                "detail": "fragile class 'css-abc123'",
+            }
+        ],
+        "selector_counts": {
+            "title_xpath": 1,
+            "title_selector": 1,
+        },
+    }
+
+
+def test_validation_reports_missing_alternate_like_predecessor() -> None:
+    report = selectors.validate_selector_rules(
+        {
+            "title_xpath": "//h1",
+            "alternates": [{"title_selector": "css:.missing"}],
+        },
+        html_text="<article><h1>Headline</h1></article>",
+        include_counts=True,
+    )
+
+    assert report == {
+        "errors": [],
+        "warnings": [
+            {
+                "key": "alternates[0].title_selector",
+                "selector": "css:.missing",
+                "warning": "no_matches",
+            }
+        ],
+        "selector_counts": {
+            "title_xpath": 1,
+            "alternates[0].title_selector": 0,
+        },
+    }
+
+
+def test_validation_reports_pagination_and_supplemental_dsl_selectors() -> None:
+    legacy_report = selectors.validate_selector_rules(
+        {"pagination": {"next_selector": "css:.missing-next"}},
+        html_text="<article><h1>Headline</h1></article>",
+        include_counts=True,
+    )
+    dsl_report = selectors.validate_selector_rules(
+        {
+            "fields": [
+                {
+                    "name": "title",
+                    "selector": "//h1",
+                    "itemSelector": "//span",
+                }
+            ]
+        },
+        html_text="<article><h1>Headline</h1><span>Detail</span></article>",
+        include_counts=True,
+    )
+
+    assert legacy_report == {
+        "errors": [],
+        "warnings": [],
+        "selector_counts": {"pagination.next_selector": 0},
+    }
+    assert dsl_report == {
+        "errors": [],
+        "warnings": [],
+        "selector_counts": {
+            "fields.title": 1,
+            "fields.title.item_selector": 1,
+        },
+    }
+
+
+def test_validation_deduplicates_exact_selector_specs_before_budgeting() -> None:
+    report = selectors.validate_selector_rules(
+        {"title_xpath": ["//missing", "//missing"]},
+        html_text="<article><h1>Headline</h1></article>",
+        include_counts=True,
+        _limits=schema._SchemaLimits(max_selector_evaluations=1),
+    )
+
+    assert report == {
+        "errors": [],
+        "warnings": [
+            {
+                "key": "title_xpath",
+                "selector": "//missing",
+                "warning": "no_matches",
+            }
+        ],
+        "selector_counts": {"title_xpath": 0},
+    }
+
+
+def test_validation_deduplicates_exact_dsl_specs_per_context() -> None:
+    field = {"name": "title", "selector": "//h1"}
+    report = selectors.validate_selector_rules(
+        {"fields": [field, dict(field)]},
+        html_text="<article><h1>Headline</h1></article>",
+        include_counts=True,
+        _limits=schema._SchemaLimits(max_selector_evaluations=1),
+    )
+
+    assert report == {
+        "errors": [],
+        "warnings": [],
+        "selector_counts": {"fields.title": 1},
+    }
+
+
+def test_validation_budgets_all_distinct_configured_selectors() -> None:
+    report = selectors.validate_selector_rules(
+        {
+            "title_xpath": "//h1",
+            "title_selector": "css:.headline",
+        },
+        html_text='<article><h1 class="headline">Headline</h1></article>',
+        _limits=schema._SchemaLimits(max_selector_evaluations=1),
+    )
+
+    assert report == {
+        "errors": [
+            {
+                "key": "schema",
+                "selector": "",
+                "error": "selector_too_complex:selector_evaluations>1",
+            }
+        ],
+        "warnings": [],
+    }
+
+
 @pytest.mark.parametrize(
     ("rules", "expected"),
     [
@@ -516,8 +663,10 @@ def _computed_rules(template: str) -> dict[str, Any]:
         "{title",
         "{title:5000000}",
         "{title.__class__}",
-        "{title[0]}",
-        "{title!r}",
+        "{title[-1]}",
+        "{title[first]}",
+        "{title:{title}}",
+        "{title!q}",
     ],
 )
 def test_invalid_computed_templates_validate_and_extract_fail_soft(template: str) -> None:
@@ -532,6 +681,102 @@ def test_invalid_computed_templates_validate_and_extract_fail_soft(template: str
 
     assert [entry["error"] for entry in report["errors"]] == ["selector_invalid"]
     assert result["schema_fields"] == {"title": "Headline"}
+
+
+@pytest.mark.parametrize(
+    ("template", "expected"),
+    [
+        ("{title!r}", "'Headline'"),
+        ("{title[0]}", "H"),
+        ("{title:10}", "Headline  "),
+        ("{title:>10}", "  Headline"),
+        ("{title!s}", "Headline"),
+        ("{title!a}", "'Headline'"),
+    ],
+)
+def test_computed_templates_preserve_bounded_predecessor_formatting(
+    template: str,
+    expected: str,
+) -> None:
+    rules = _computed_rules(template)
+
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert report == {"errors": [], "warnings": []}
+    assert result == {
+        "url": "https://example.com/post",
+        "extraction_successful": True,
+        "schema_fields": {"title": "Headline", "computed": expected},
+        "title": "Headline",
+    }
+
+
+@pytest.mark.parametrize(
+    ("format_spec", "expected_length"),
+    [
+        (">65536", 65_536),
+        (".65536", len("Headline")),
+    ],
+    ids=["width", "precision"],
+)
+def test_computed_template_format_components_have_an_explicit_hard_boundary(
+    format_spec: str,
+    expected_length: int,
+) -> None:
+    exact_width = 65_536
+    exact_rules = _computed_rules(f"{{title:{format_spec}}}")
+    one_over_spec = format_spec.replace(str(exact_width), str(exact_width + 1))
+    one_over_rules = _computed_rules(f"{{title:{one_over_spec}}}")
+
+    exact_report = selectors.validate_selector_rules(exact_rules)
+    exact_result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        exact_rules,
+    )
+    one_over_report = selectors.validate_selector_rules(one_over_rules)
+    one_over_result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        one_over_rules,
+    )
+
+    assert exact_report["errors"] == []
+    assert len(exact_result["schema_fields"]["computed"]) == expected_length
+    assert [entry["error"] for entry in one_over_report["errors"]] == ["selector_invalid"]
+    assert one_over_result["schema_fields"] == {"title": "Headline"}
+
+
+def test_computed_template_total_output_has_an_explicit_hard_boundary() -> None:
+    exact_chars = 1_048_576
+
+    exact, exact_error = schema._render_computed_template(
+        "{title}",
+        {"title": "x" * exact_chars},
+        schema._SchemaLimits(),
+        None,
+        "rendered_output",
+        None,
+    )
+    one_over, one_over_error = schema._render_computed_template(
+        "{title}",
+        {"title": "x" * (exact_chars + 1)},
+        schema._SchemaLimits(),
+        None,
+        "rendered_output",
+        None,
+    )
+
+    assert exact is not None
+    assert len(exact) == exact_chars
+    assert exact_error is None
+    assert one_over is None
+    assert one_over_error == "selector_invalid"
 
 
 @pytest.mark.parametrize(
@@ -1090,7 +1335,12 @@ def test_irrelevant_item_selector_is_compile_only_at_evaluation_boundary() -> No
 @pytest.mark.parametrize(
     ("selectors_in_order", "max_evaluations", "expected_title", "expected_error"),
     [
-        (["//h1", "//h2"], 1, "First", None),
+        (
+            ["//h1", "//h2"],
+            1,
+            "First",
+            "selector_too_complex:selector_evaluations>1",
+        ),
         (["//missing", "//h2"], 2, "Second", None),
         (
             ["//missing", "//h2"],
@@ -1125,7 +1375,10 @@ def test_fallback_validation_matches_extraction_evaluation_path(
 
     if expected_error:
         assert [entry["error"] for entry in report["errors"]] == [expected_error]
-        assert result["error"] == expected_error
+        if "error" in result:
+            assert result["error"] == expected_error
+        else:
+            assert result["title"] == expected_title
     else:
         assert report["errors"] == []
         assert result["title"] == expected_title

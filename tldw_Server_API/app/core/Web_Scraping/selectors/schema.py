@@ -134,6 +134,11 @@ class _SchemaBudget:
         default=None,
         init=False,
     )
+    validation_selection_cache: dict[tuple[int, Any, str], tuple[list[Any], bool]] | None = dataclass_field(
+        default=None,
+        init=False,
+        repr=False,
+    )
     enforce_output: bool = dataclass_field(default=True, init=False)
 
     def _output_index_path(
@@ -711,6 +716,11 @@ def _apply_transforms(
 
 
 _TEMPLATE_FORMATTER = Formatter()
+_COMPUTED_FIELD_RE = re.compile(r"(?P<root>[A-Za-z_]\w*)(?P<indices>(?:\[\d+\])*)\Z")
+_COMPUTED_INDEX_RE = re.compile(r"\[(\d+)\]")
+_COMPUTED_STRING_FORMAT_RE = re.compile(r"(?:(?:[^{}][<^>])|[<^>])?(?P<width>\d+)?(?:\.(?P<precision>\d+))?s?\Z")
+_MAX_COMPUTED_FORMAT_WIDTH = 65_536
+_MAX_COMPUTED_TEMPLATE_OUTPUT_CHARS = 1_048_576
 
 
 def _replacement_field_tokens(template: str) -> list[str] | None:
@@ -745,18 +755,118 @@ def _parse_computed_template(
     field_parts = [part for part in parsed if part[1] is not None]
     if tokens is None or len(tokens) != len(field_parts):
         return None, "selector_invalid"
-    for token, (_literal, field_name, format_spec, conversion) in zip(
-        tokens,
-        field_parts,
-        strict=True,
-    ):
-        if ":" in token or "!" in token:
+    for _token, (_literal, field_name, format_spec, conversion) in zip(tokens, field_parts, strict=True):
+        field_match = _COMPUTED_FIELD_RE.fullmatch(field_name or "")
+        if field_match is None:
             return None, "selector_invalid"
-        if not field_name or not field_name.isidentifier():
+        if conversion not in {None, "s", "r", "a"}:
             return None, "selector_invalid"
-        if conversion is not None or format_spec:
+        format_match = _COMPUTED_STRING_FORMAT_RE.fullmatch(format_spec)
+        if format_match is None:
             return None, "selector_invalid"
+        for component in (format_match.group("width"), format_match.group("precision")):
+            if component is not None and not _format_component_within_limit(component):
+                return None, "selector_invalid"
     return parsed, None
+
+
+def _format_component_within_limit(component: str) -> bool:
+    normalized = component.lstrip("0") or "0"
+    maximum = str(_MAX_COMPUTED_FORMAT_WIDTH)
+    if len(normalized) != len(maximum):
+        return len(normalized) < len(maximum)
+    return normalized <= maximum
+
+
+def _resolve_computed_field(
+    field_name: str,
+    context: Mapping[str, Any],
+) -> tuple[Any, bool]:
+    match = _COMPUTED_FIELD_RE.fullmatch(field_name)
+    if match is None:
+        return None, False
+    root = match.group("root")
+    value = context.get(root, "")
+    for index_text in _COMPUTED_INDEX_RE.findall(match.group("indices")):
+        index = int(index_text)
+        if type(value) in {str, list, tuple}:
+            if index >= len(value):
+                return None, False
+            value = value[index]
+            continue
+        if type(value) is dict and index in value:
+            value = value[index]
+            continue
+        return None, False
+    return value, True
+
+
+def _format_computed_field(
+    value: Any,
+    format_spec: str,
+    conversion: str | None,
+) -> tuple[str | None, bool]:
+    if conversion == "s":
+        rendered = str(value)
+    elif conversion == "r":
+        rendered = repr(value)
+    elif conversion == "a":
+        rendered = ascii(value)
+    else:
+        rendered = str(value)
+    try:
+        return format(rendered, format_spec), True
+    except (TypeError, ValueError):
+        return None, False
+
+
+def _rendered_template_error(
+    rendered_chars: int,
+    max_chars: int | None,
+    error_kind: str,
+    public_limit: int | None,
+) -> str | None:
+    if rendered_chars > _MAX_COMPUTED_TEMPLATE_OUTPUT_CHARS:
+        return "selector_invalid"
+    if max_chars is not None and rendered_chars > max_chars:
+        return f"selector_too_complex:{error_kind}>{public_limit}"
+    return None
+
+
+def _append_computed_piece(
+    pieces: list[str],
+    piece: str,
+    rendered_chars: int,
+    max_chars: int | None,
+    error_kind: str,
+    public_limit: int | None,
+) -> tuple[int, str | None]:
+    rendered_chars += len(piece)
+    error = _rendered_template_error(
+        rendered_chars,
+        max_chars,
+        error_kind,
+        public_limit,
+    )
+    if error:
+        return rendered_chars, error
+    pieces.append(piece)
+    return rendered_chars, None
+
+
+def _computed_template_piece(
+    field_name: str,
+    format_spec: str,
+    conversion: str | None,
+    context: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
+    value, resolved = _resolve_computed_field(field_name, context)
+    if not resolved:
+        return None, "selector_invalid"
+    rendered, formatted = _format_computed_field(value, format_spec, conversion)
+    if not formatted:
+        return None, "selector_invalid"
+    return rendered, None
 
 
 def _render_computed_template(
@@ -773,18 +883,37 @@ def _render_computed_template(
     pieces: list[str] = []
     rendered_chars = 0
     public_limit = max_chars if error_limit is None else error_limit
-    for literal, field_name, _format_spec, _conversion in parsed:
-        rendered_chars += len(literal)
-        if max_chars is not None and rendered_chars > max_chars:
-            return None, f"selector_too_complex:{error_kind}>{public_limit}"
-        pieces.append(literal)
+    for literal, field_name, format_spec, conversion in parsed:
+        rendered_chars, error = _append_computed_piece(
+            pieces,
+            literal,
+            rendered_chars,
+            max_chars,
+            error_kind,
+            public_limit,
+        )
+        if error:
+            return None, error
         if field_name is None:
             continue
-        value = str(context.get(field_name, ""))
-        rendered_chars += len(value)
-        if max_chars is not None and rendered_chars > max_chars:
-            return None, f"selector_too_complex:{error_kind}>{public_limit}"
-        pieces.append(value)
+        value, error = _computed_template_piece(
+            field_name,
+            format_spec,
+            conversion,
+            context,
+        )
+        if error or value is None:
+            return None, error
+        rendered_chars, error = _append_computed_piece(
+            pieces,
+            value,
+            rendered_chars,
+            max_chars,
+            error_kind,
+            public_limit,
+        )
+        if error:
+            return None, error
     return "".join(pieces), None
 
 
@@ -895,6 +1024,15 @@ def _select_nodes_with_budget_status(
     context_sensitive: bool = False,
     observation_spec: dict[str, Any] | None = None,
 ) -> tuple[list[Any], bool]:
+    cache_key: tuple[int, Any, str] | None = None
+    if observation_spec is not None and budget.validation_selection_cache is not None:
+        cache_key = (
+            id(node),
+            observation_spec.get("key"),
+            str(observation_spec.get("selector") or "").strip(),
+        )
+        if cache_key in budget.validation_selection_cache:
+            return budget.validation_selection_cache[cache_key]
     budget.begin_selection()
     remaining_match_capacity = budget.remaining_match_capacity()
     matches, failed = _select_nodes_with_status(
@@ -905,6 +1043,8 @@ def _select_nodes_with_budget_status(
     )
     budget.retain_matches(len(matches))
     budget.observe_selection(observation_spec, matches, failed)
+    if cache_key is not None and budget.validation_selection_cache is not None:
+        budget.validation_selection_cache[cache_key] = (matches, failed)
     return matches, failed
 
 
@@ -1421,6 +1561,17 @@ _PAGINATION_SELECTOR_KEYS = (
     "next_link_xpath",
     "next_link_selector",
 )
+_LEGACY_MULTI_SELECTOR_KEYS = {
+    "summary_xpath",
+    "summary_selector",
+    "description_xpath",
+    "content_xpath",
+    "content_selector",
+    "entry_xpath",
+    "entry_selector",
+    "item_xpath",
+    "items_xpath",
+}
 
 
 def _preflight_rule_selectors(
@@ -1514,13 +1665,48 @@ def _iter_schema_dsl_selector_specs(
     return specs
 
 
+def _legacy_validation_specs(
+    rule_selectors: Sequence[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for key, selector in rule_selectors:
+        selector_key = key.rsplit(".", 1)[-1]
+        is_pagination = ".pagination." in f".{key}."
+        specs.append(
+            {
+                "key": key,
+                "selector": selector,
+                "allow_multiple": is_pagination or selector_key in _LEGACY_MULTI_SELECTOR_KEYS,
+                "expect_nonzero": not is_pagination,
+                "check_html": True,
+            }
+        )
+    return specs
+
+
+def _validation_spec_identity(spec: Mapping[str, Any]) -> tuple[Any, str]:
+    return spec.get("key"), str(spec.get("selector") or "").strip()
+
+
+def _unique_validation_specs(specs: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[Any, str]] = set()
+    for spec in specs:
+        identity = _validation_spec_identity(spec)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(spec)
+    return unique
+
+
 def _record_validation_selection(
     observations: dict[tuple[Any, str], dict[str, Any]],
     spec: dict[str, Any],
     matches: Sequence[Any],
     failed: bool,
 ) -> None:
-    identity = (spec.get("key"), str(spec.get("selector") or ""))
+    identity = _validation_spec_identity(spec)
     observation = observations.setdefault(
         identity,
         {"spec": spec, "count": 0, "failed": False},
@@ -1535,8 +1721,11 @@ def _evaluate_validation_rules(
     budget: _SchemaBudget,
     *,
     is_dsl: bool,
+    configured_specs: Sequence[dict[str, Any]],
+    invalid_selectors: set[tuple[Any, str]],
 ) -> list[dict[str, Any]]:
     observations: dict[tuple[Any, str], dict[str, Any]] = {}
+    budget.validation_selection_cache = {}
     budget.selection_observer = lambda spec, matches, failed: _record_validation_selection(
         observations,
         spec,
@@ -1558,6 +1747,19 @@ def _evaluate_validation_rules(
             rules,
             result,
             budget,
+        )
+    for spec in configured_specs:
+        identity = _validation_spec_identity(spec)
+        if identity in observations or identity in invalid_selectors or not spec.get("check_html", True):
+            continue
+        selector = identity[1]
+        if not selector:
+            continue
+        _select_nodes_with_budget_status(
+            document,
+            selector,
+            budget,
+            observation_spec=spec,
         )
     return list(observations.values())
 
@@ -1604,9 +1806,10 @@ def validate_selector_rules(
     errors = _template_validation_errors(records, limits)
     warnings: list[dict[str, Any]] = []
     selector_counts: dict[str, int] = {}
-    compile_specs: list[dict[str, Any]] = [{"key": key, "selector": expr} for key, expr in rule_selectors]
+    compile_specs = _legacy_validation_specs(rule_selectors)
     dsl_specs = _iter_schema_dsl_selector_specs(normalized_rules, records) if is_dsl else []
     compile_specs.extend(dsl_specs)
+    compile_specs = _unique_validation_specs(compile_specs)
     invalid_selectors: set[tuple[Any, str]] = set()
 
     for spec in compile_specs:
@@ -1639,6 +1842,8 @@ def validate_selector_rules(
                 document,
                 budget,
                 is_dsl=is_dsl,
+                configured_specs=compile_specs,
+                invalid_selectors=invalid_selectors,
             )
         except _SchemaBudgetExceeded as exc:
             return _complexity_validation_result(
