@@ -5,7 +5,7 @@ from __future__ import annotations
 import codecs
 import contextlib
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -71,35 +71,70 @@ class _OutputSlotIndexNode:
     children: dict[Any, _OutputSlotIndexNode] = dataclass_field(default_factory=dict)
 
 
-class _OutputSlotSnapshot(dict[tuple[Any, ...], int]):
+class _OutputSlotSnapshotError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class _OutputSlotSnapshot(Mapping[tuple[Any, ...], int]):
+    __slots__ = ("__entries", "__index_subtree", "__prefix", "__used")
+
     def __init__(
         self,
         prefix: tuple[Any, ...],
-        index_subtree: _OutputSlotIndexNode,
+        entries: Mapping[tuple[Any, ...], int],
+        index_subtree: _OutputSlotIndexNode | None,
     ) -> None:
-        super().__init__()
-        self._prefix = prefix
-        self._index_subtree = index_subtree
+        self.__entries = dict(entries)
+        self.__prefix = prefix
+        self.__index_subtree = index_subtree
+        self.__used = False
+
+    def __getitem__(self, slot: tuple[Any, ...]) -> int:
+        return self.__entries[slot]
+
+    def __iter__(self) -> Iterator[tuple[Any, ...]]:
+        return iter(self.__entries)
+
+    def __len__(self) -> int:
+        return len(self.__entries)
+
+    @property
+    def _owns_detached_subtree(self) -> bool:
+        return self.__index_subtree is not None
+
+    def _claim(self, prefix: tuple[Any, ...]) -> _OutputSlotIndexNode | None:
+        if prefix != self.__prefix:
+            raise _OutputSlotSnapshotError("output_slot_snapshot_prefix_mismatch")
+        if self.__used:
+            raise _OutputSlotSnapshotError("output_slot_snapshot_already_used")
+        self.__used = True
+        subtree = self.__index_subtree
+        self.__index_subtree = None
+        return subtree
 
 
 @dataclass(slots=True)
 class _SchemaBudget:
     limits: _SchemaLimits
-    selector_evaluations: int = 0
-    aggregate_matches: int = 0
-    retained_output_chars: int = 0
-    output_slots: dict[tuple[Any, ...], int] = dataclass_field(default_factory=dict)
+    selector_evaluations: int = dataclass_field(default=0, init=False)
+    aggregate_matches: int = dataclass_field(default=0, init=False)
+    retained_output_chars: int = dataclass_field(default=0, init=False)
+    output_slots: dict[tuple[Any, ...], int] = dataclass_field(
+        default_factory=dict,
+        init=False,
+    )
     _output_slot_index: _OutputSlotIndexNode = dataclass_field(
         default_factory=_OutputSlotIndexNode,
         init=False,
         repr=False,
     )
-    selection_observer: Callable[[dict[str, Any], Sequence[Any], bool], None] | None = None
-    enforce_output: bool = True
-
-    def __post_init__(self) -> None:
-        for slot, chars in self.output_slots.items():
-            self._index_output_slot(slot, chars)
+    selection_observer: Callable[[dict[str, Any], Sequence[Any], bool], None] | None = dataclass_field(
+        default=None,
+        init=False,
+    )
+    enforce_output: bool = dataclass_field(default=True, init=False)
 
     def _output_index_path(
         self,
@@ -176,14 +211,14 @@ class _SchemaBudget:
     def take_output_prefix(
         self,
         prefix: tuple[Any, ...],
-    ) -> dict[tuple[Any, ...], int]:
+    ) -> _OutputSlotSnapshot:
         nodes = self._output_index_path(prefix, create=False)
         if nodes is None:
-            return {}
+            return _OutputSlotSnapshot(prefix, {}, None)
 
         subtree = nodes[-1]
         removed_index_chars = subtree.subtree_chars
-        replaced = _OutputSlotSnapshot(prefix, subtree)
+        replaced: dict[tuple[Any, ...], int] = {}
         pending = [subtree]
         while pending:
             node = pending.pop()
@@ -204,34 +239,29 @@ class _SchemaBudget:
             self._output_slot_index = _OutputSlotIndexNode()
 
         self.retained_output_chars -= sum(replaced.values())
-        return replaced
+        return _OutputSlotSnapshot(prefix, replaced, subtree)
 
     def restore_output_prefix(
         self,
         prefix: tuple[Any, ...],
-        snapshot: dict[tuple[Any, ...], int],
+        snapshot: _OutputSlotSnapshot,
     ) -> None:
+        if not isinstance(snapshot, _OutputSlotSnapshot):
+            raise _OutputSlotSnapshotError("output_slot_snapshot_invalid")
+        subtree = snapshot._claim(prefix)
         self.take_output_prefix(prefix)
-        if isinstance(snapshot, _OutputSlotSnapshot) and snapshot._prefix == prefix:
+        if subtree is not None:
             nodes = self._output_index_path(prefix, create=True)
             if nodes is None:
                 raise RuntimeError("output slot index path creation failed")
             if prefix:
-                nodes[-2].children[prefix[-1]] = snapshot._index_subtree
+                nodes[-2].children[prefix[-1]] = subtree
                 for node in nodes[:-1]:
-                    node.subtree_chars += snapshot._index_subtree.subtree_chars
+                    node.subtree_chars += subtree.subtree_chars
             else:
-                self._output_slot_index = snapshot._index_subtree
-            self.output_slots.update(snapshot)
-            self.retained_output_chars += sum(snapshot.values())
-            return
-
-        restored_chars = 0
-        for slot, chars in snapshot.items():
-            self.output_slots[slot] = chars
-            self._index_output_slot(slot, chars)
-            restored_chars += chars
-        self.retained_output_chars += restored_chars
+                self._output_slot_index = subtree
+        self.output_slots.update(snapshot)
+        self.retained_output_chars += sum(snapshot.values())
 
     def ensure_output_chars(self, added: int) -> None:
         if not self.enforce_output:

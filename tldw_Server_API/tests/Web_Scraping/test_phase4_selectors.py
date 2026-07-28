@@ -1437,6 +1437,91 @@ def test_output_slot_operations_do_not_iterate_the_global_mapping() -> None:
     assert tracked_slots[fresh_slot] == 1
 
 
+@pytest.mark.parametrize(
+    "runtime_state",
+    [
+        {"selector_evaluations": 1},
+        {"aggregate_matches": 1},
+        {"retained_output_chars": 1},
+        {"output_slots": {("schema_fields", "value"): 1}},
+        {"selection_observer": lambda *_args: None},
+        {"enforce_output": False},
+    ],
+)
+def test_schema_budget_constructor_rejects_runtime_state(
+    runtime_state: dict[str, Any],
+) -> None:
+    with pytest.raises(TypeError):
+        schema._SchemaBudget(schema._SchemaLimits(), **runtime_state)
+
+
+def test_output_slot_snapshot_is_immutable_and_prefix_cannot_be_rebound() -> None:
+    budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=10))
+    slot = ("schema_fields", "value")
+    budget.retain_output("aa", slot=slot)
+    snapshot = budget.take_output_prefix(slot)
+    mutable_snapshot: Any = snapshot
+
+    with pytest.raises(TypeError):
+        mutable_snapshot[slot] = 3
+    with pytest.raises(TypeError):
+        del mutable_snapshot[slot]
+    for method in ("clear", "pop", "popitem", "setdefault", "update"):
+        assert not hasattr(snapshot, method)
+    with pytest.raises(AttributeError):
+        mutable_snapshot._prefix = ("schema_fields", "other")
+
+    assert snapshot == {slot: 2}
+
+
+def test_output_slot_snapshot_wrong_prefix_fails_atomically() -> None:
+    budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=10))
+    prefix = ("schema_fields", "value")
+    other_prefix = ("schema_fields", "other")
+    budget.retain_output("aa", slot=prefix + ("leaf",))
+    budget.retain_output("b", slot=other_prefix)
+    snapshot = budget.take_output_prefix(prefix)
+    before_slots = dict(budget.output_slots)
+    before_total = budget.retained_output_chars
+    before_index = _output_slot_index_signature(budget)
+    snapshot_error = getattr(schema, "_OutputSlotSnapshotError", RuntimeError)
+
+    with pytest.raises(
+        snapshot_error,
+        match="output_slot_snapshot_prefix_mismatch",
+    ):
+        budget.restore_output_prefix(other_prefix, snapshot)
+
+    assert budget.output_slots == before_slots
+    assert budget.retained_output_chars == before_total
+    assert _output_slot_index_signature(budget) == before_index
+    budget.restore_output_prefix(prefix, snapshot)
+    _assert_output_slot_index_consistent(budget)
+
+
+def test_output_slot_snapshot_reuse_fails_atomically() -> None:
+    budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=10))
+    prefix = ("schema_fields", "value")
+    budget.retain_output("aa", slot=prefix + ("leaf",))
+    snapshot = budget.take_output_prefix(prefix)
+    budget.restore_output_prefix(prefix, snapshot)
+    before_slots = dict(budget.output_slots)
+    before_total = budget.retained_output_chars
+    before_index = _output_slot_index_signature(budget)
+    snapshot_error = getattr(schema, "_OutputSlotSnapshotError", RuntimeError)
+
+    with pytest.raises(
+        snapshot_error,
+        match="output_slot_snapshot_already_used",
+    ):
+        budget.restore_output_prefix(prefix, snapshot)
+
+    assert budget.output_slots == before_slots
+    assert budget.retained_output_chars == before_total
+    assert _output_slot_index_signature(budget) == before_index
+    _assert_output_slot_index_consistent(budget)
+
+
 def test_output_slot_rollback_reattaches_the_detached_subtree_index() -> None:
     budget = schema._SchemaBudget(schema._SchemaLimits(max_retained_output_chars=10))
     prefix = ("schema_fields", "value")
@@ -1445,10 +1530,13 @@ def test_output_slot_rollback_reattaches_the_detached_subtree_index() -> None:
     detached_index = _output_slot_index_node(budget, prefix)
 
     snapshot = budget.take_output_prefix(prefix)
-    assert snapshot._index_subtree is detached_index
+    assert snapshot._owns_detached_subtree
     budget.restore_output_prefix(prefix, snapshot)
 
     assert _output_slot_index_node(budget, prefix) is detached_index
+    assert not snapshot._owns_detached_subtree
+    with pytest.raises(AttributeError):
+        _ = snapshot._index_subtree
     _assert_output_slot_index_consistent(budget)
 
 
