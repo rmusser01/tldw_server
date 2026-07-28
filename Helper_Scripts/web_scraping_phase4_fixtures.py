@@ -814,9 +814,19 @@ def generate_fixtures(
             _write_fixture_set(staging, predecessor_commit, payloads)
             _validate_fixture_set(staging, predecessor_commit)
             _replace_output_directory(staging, output)
-        finally:
-            if staging.exists():
-                shutil.rmtree(staging)
+        except BaseException:
+            try:
+                if staging.exists():
+                    shutil.rmtree(staging)
+            except OSError:
+                pass
+            raise
+        else:
+            try:
+                if staging.exists():
+                    shutil.rmtree(staging)
+            except OSError:
+                raise RuntimeError("Fixture staging directory could not be cleaned up") from None
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
