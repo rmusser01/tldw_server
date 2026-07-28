@@ -279,7 +279,7 @@ def _resolve_output_path(output: Path, source_root: Path) -> Path:
             try:
                 resolved_output = candidate.resolve(strict=True)
             except FileNotFoundError:
-                if candidate.is_symlink() or candidate == candidate.parent:
+                if candidate.name == ".." or candidate.is_symlink() or candidate == candidate.parent:
                     raise ValueError from None
                 missing_parts.append(candidate.name)
                 candidate = candidate.parent

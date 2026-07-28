@@ -226,6 +226,40 @@ def test_unresolvable_output_symlink_is_rejected_before_payload_build(
     assert str(tmp_path) not in str(exc_info.value)
 
 
+@pytest.mark.parametrize(
+    "parent_parts",
+    [("..",), ("..", "..")],
+    ids=["effective-source", "effective-source-parent"],
+)
+def test_parent_traversal_through_missing_output_is_rejected_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    parent_parts: tuple[str, ...],
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    missing = source_root / "absent"
+    output = missing.joinpath(*parent_parts)
+    before_bytes = _snapshot_worktree_files(source_root)
+    before_status = _run_git(source_root, "status", "--porcelain=v1", "--untracked-files=all")
+    payload_calls = 0
+
+    def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
+        nonlocal payload_calls
+        payload_calls += 1
+        return _fixture_payloads("must-not-build")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _record_payload_build)
+
+    with pytest.raises(ValueError, match="^output path could not be resolved$") as exc_info:
+        generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    assert payload_calls == 0
+    assert not missing.exists()
+    assert _snapshot_worktree_files(source_root) == before_bytes
+    assert _run_git(source_root, "status", "--porcelain=v1", "--untracked-files=all") == before_status
+    assert str(source_root) not in str(exc_info.value)
+
+
 def test_output_resolution_preserves_parent_traversal_after_valid_symlink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
