@@ -53,6 +53,17 @@ def _report_staging_retained() -> None:
         pass
 
 
+def _report_backup_retained(backup: Path) -> None:
+    try:
+        print(
+            "warning: fixture output committed; backup cleanup failed; "
+            f"backup retained as {backup.name!r} for manual cleanup",
+            file=sys.stderr,
+        )
+    except BaseException:  # noqa: BLE001 - committed output must remain successful
+        pass
+
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -543,6 +554,9 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
         except OSError:
             _close_descriptor_quietly(descriptor)
             raise RuntimeError("Fixture publication lock could not be opened") from None
+        except BaseException:
+            _close_descriptor_quietly(descriptor)
+            raise
 
     root_descriptor: int | None = None
     lock_descriptor: int | None = None
@@ -662,14 +676,16 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
         _close_descriptor_quietly(descriptor)
         raise
 
+    body_error_active = False
     try:
         _acquire_file_lock(lock_file)
         try:
             yield
         except BaseException:
+            body_error_active = True
             try:
                 _release_file_lock(lock_file)
-            except OSError:
+            except BaseException:  # noqa: BLE001 - preserve the exact body exception
                 pass
             raise
         else:
@@ -678,10 +694,16 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
             except OSError:
                 raise RuntimeError("Fixture publication lock could not be released") from None
     except BaseException:
-        try:
-            lock_file.close()
-        except OSError:
-            pass
+        if body_error_active:
+            try:
+                lock_file.close()
+            except BaseException:  # noqa: BLE001 - preserve the exact body exception
+                pass
+        else:
+            try:
+                lock_file.close()
+            except OSError:
+                pass
         raise
     else:
         try:
@@ -711,6 +733,11 @@ def _replace_output_directory(
     else:
         staging_identity = expected_staging_identity
         _require_path_identity(staging, staging_identity, staging_error)
+    try:
+        if staging_identity[2] != stat.S_IFDIR or _is_link_like(staging):
+            raise RuntimeError(staging_error)
+    except (OSError, RuntimeError):
+        raise RuntimeError(staging_error) from None
     output_identity = _validate_existing_output(output)
     backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}") if output_identity is not None else None
     rename_started = False
@@ -807,20 +834,12 @@ def _replace_output_directory(
                     "Fixture output backup changed during cleanup",
                 )
             except RuntimeError:
-                print(
-                    "warning: fixture output committed; backup cleanup failed; "
-                    f"backup retained as {backup.name!r} for manual cleanup",
-                    file=sys.stderr,
-                )
+                _report_backup_retained(backup)
                 return
             try:
                 shutil.rmtree(backup)
             except OSError:
-                print(
-                    "warning: fixture output committed; backup cleanup failed; "
-                    f"backup retained as {backup.name!r} for manual cleanup",
-                    file=sys.stderr,
-                )
+                _report_backup_retained(backup)
 
 
 def _cleanup_staging_directory(
@@ -874,6 +893,9 @@ def generate_fixtures(
         except (OSError, RuntimeError):
             _report_staging_retained()
             raise RuntimeError(_STAGING_CLEANUP_ERROR) from None
+        except BaseException:
+            _report_staging_retained()
+            raise
         try:
             _write_fixture_set(staging, predecessor_commit, payloads)
             _validate_fixture_set(staging, predecessor_commit)

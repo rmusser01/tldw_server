@@ -847,6 +847,84 @@ def test_no_dirfd_fallback_rejects_preexisting_lock_identity_change(
     assert closed.value.errno == errno.EBADF
 
 
+def test_no_dirfd_fallback_closes_descriptor_on_direct_baseexception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DirectInspectionFailure(BaseException):
+        pass
+
+    lock_root = tmp_path / "locks"
+    lock_root.mkdir(mode=0o700)
+    lock_path = lock_root / "output.lock"
+    monkeypatch.setattr(generator, "fcntl", None)
+    real_open = generator.os.open
+    real_close = generator.os.close
+    real_fstat = generator.os.fstat
+    primary_message = "direct lock inspection failure"
+    primary_error = DirectInspectionFailure(primary_message)
+    opened_descriptors: list[int] = []
+    closed_descriptors: list[int] = []
+    primary_tracebacks_during_close: list[Any] = []
+
+    def _tracking_open(
+        path: os.PathLike[str] | str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        if Path(path) == lock_path:
+            opened_descriptors.append(descriptor)
+        return descriptor
+
+    def _fail_opened_descriptor_inspection(descriptor: int) -> os.stat_result:
+        if descriptor in opened_descriptors:
+            raise primary_error
+        return real_fstat(descriptor)
+
+    def _tracking_close(descriptor: int) -> None:
+        if descriptor in opened_descriptors:
+            closed_descriptors.append(descriptor)
+            primary_tracebacks_during_close.append(primary_error.__traceback__)
+        real_close(descriptor)
+
+    monkeypatch.setattr(generator.os, "open", _tracking_open)
+    monkeypatch.setattr(generator.os, "fstat", _fail_opened_descriptor_inspection)
+    monkeypatch.setattr(generator.os, "close", _tracking_close)
+
+    try:
+        with pytest.raises(DirectInspectionFailure, match=f"^{primary_message}$") as exc_info:
+            generator._open_lock_descriptor(lock_root, lock_path.name)
+
+        assert exc_info.value is primary_error
+        assert type(exc_info.value) is DirectInspectionFailure
+        assert str(exc_info.value) == primary_message
+        assert len(opened_descriptors) == 1
+        assert closed_descriptors == opened_descriptors
+        assert len(primary_tracebacks_during_close) == 1
+        final_traceback = exc_info.value.__traceback__
+        assert final_traceback is not None
+        assert final_traceback.tb_next is primary_tracebacks_during_close[0]
+        recorded_tail = primary_tracebacks_during_close[0]
+        while recorded_tail is not None and recorded_tail.tb_next is not None:
+            recorded_tail = recorded_tail.tb_next
+        final_tail = final_traceback
+        while final_tail.tb_next is not None:
+            final_tail = final_tail.tb_next
+        assert final_tail is recorded_tail
+        with pytest.raises(OSError) as closed:
+            real_fstat(opened_descriptors[0])
+        assert closed.value.errno == errno.EBADF
+    finally:
+        for descriptor in opened_descriptors:
+            try:
+                real_close(descriptor)
+            except OSError:
+                pass
+
+
 def test_no_dirfd_fallback_rejects_junction_like_lock_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1107,6 +1185,129 @@ def test_publication_lock_unlock_failure_preserves_exception_precedence_and_clos
     assert len(released_files) == 1
     assert released_files[0].closed
     assert "sensitive" not in str(exc_info.value)
+
+
+def test_publication_lock_direct_unlock_baseexception_preserves_exact_body_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrimaryPublicationFailure(BaseException):
+        pass
+
+    class DirectUnlockFailure(BaseException):
+        pass
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    primary_message = "primary publication failure"
+    primary_error = PrimaryPublicationFailure(primary_message)
+    unlock_error = DirectUnlockFailure("sensitive direct unlock failure")
+    primary_tracebacks_during_unlock: list[Any] = []
+    released_files: list[Any] = []
+
+    def _fail_unlock(lock_file: Any) -> None:
+        released_files.append(lock_file)
+        primary_tracebacks_during_unlock.append(primary_error.__traceback__)
+        raise unlock_error
+
+    monkeypatch.setattr(generator, "_release_file_lock", _fail_unlock)
+
+    with pytest.raises(PrimaryPublicationFailure, match=f"^{primary_message}$") as exc_info:
+        with generator._publication_lock(output, source_root):
+            raise primary_error
+
+    assert exc_info.value is primary_error
+    assert type(exc_info.value) is PrimaryPublicationFailure
+    assert str(exc_info.value) == primary_message
+    assert len(released_files) == 1
+    assert released_files[0].closed
+    assert len(primary_tracebacks_during_unlock) == 1
+    final_traceback = exc_info.value.__traceback__
+    assert final_traceback is not None
+    recorded_tail = primary_tracebacks_during_unlock[0]
+    assert recorded_tail is not None
+    assert recorded_tail.tb_next is final_traceback
+    while recorded_tail is not None and recorded_tail.tb_next is not None:
+        recorded_tail = recorded_tail.tb_next
+    assert final_traceback is recorded_tail
+
+
+def test_publication_lock_direct_close_baseexception_preserves_exact_body_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrimaryPublicationFailure(BaseException):
+        pass
+
+    class DirectCloseFailure(BaseException):
+        pass
+
+    class _DirectCloseFailingLockFile:
+        def __init__(self, lock_file: Any) -> None:
+            self._lock_file = lock_file
+            self.descriptor = lock_file.fileno()
+            self.close_calls = 0
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._lock_file, name)
+
+        @property
+        def closed(self) -> bool:
+            return self._lock_file.closed
+
+        def close(self) -> None:
+            self.close_calls += 1
+            if not self._lock_file.closed:
+                self._lock_file.close()
+            primary_tracebacks_during_close.append(primary_error.__traceback__)
+            raise close_error
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    primary_message = "primary publication failure"
+    primary_error = PrimaryPublicationFailure(primary_message)
+    close_error = DirectCloseFailure("sensitive direct close failure")
+    primary_tracebacks_during_close: list[Any] = []
+    lock_files: list[_DirectCloseFailingLockFile] = []
+    real_fdopen = generator.os.fdopen
+
+    def _direct_close_failing_fdopen(
+        descriptor: int,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _DirectCloseFailingLockFile:
+        lock_file = _DirectCloseFailingLockFile(real_fdopen(descriptor, *args, **kwargs))
+        lock_files.append(lock_file)
+        return lock_file
+
+    monkeypatch.setattr(generator.os, "fdopen", _direct_close_failing_fdopen)
+
+    with pytest.raises(PrimaryPublicationFailure, match=f"^{primary_message}$") as exc_info:
+        with generator._publication_lock(output, source_root):
+            raise primary_error
+
+    assert exc_info.value is primary_error
+    assert type(exc_info.value) is PrimaryPublicationFailure
+    assert str(exc_info.value) == primary_message
+    assert len(lock_files) == 1
+    assert lock_files[0].close_calls == 1
+    assert lock_files[0].closed
+    assert len(primary_tracebacks_during_close) == 1
+    final_traceback = exc_info.value.__traceback__
+    assert final_traceback is not None
+    recorded_tail = primary_tracebacks_during_close[0]
+    assert recorded_tail is not None
+    assert recorded_tail.tb_next is final_traceback
+    while recorded_tail is not None and recorded_tail.tb_next is not None:
+        recorded_tail = recorded_tail.tb_next
+    assert final_traceback is recorded_tail
+    with pytest.raises(OSError) as closed_descriptor:
+        os.fstat(lock_files[0].descriptor)
+    assert closed_descriptor.value.errno == errno.EBADF
 
 
 def test_publication_lock_close_failure_preserves_body_baseexception(
@@ -1823,6 +2024,84 @@ def test_staging_identity_failure_retains_staging_with_fixed_diagnostic(
     assert sensitive_marker not in diagnostic
 
 
+def test_direct_staging_identity_baseexception_retains_staging_and_primary_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class DirectStagingIdentityFailure(BaseException):
+        pass
+
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    monkeypatch.setattr(
+        generator,
+        "build_case_payloads",
+        lambda _source_root: _fixture_payloads("replacement"),
+    )
+    real_path_identity = generator._path_identity
+    real_mkdtemp = generator.tempfile.mkdtemp
+    report_staging_retained = generator._report_staging_retained
+    staging_paths: list[Path] = []
+    primary_message = "direct staging identity failure"
+    primary_error = DirectStagingIdentityFailure(primary_message)
+    primary_tracebacks_during_report: list[Any] = []
+
+    def _record_mkdtemp(*args: Any, **kwargs: Any) -> str:
+        staging = Path(real_mkdtemp(*args, **kwargs))
+        staging_paths.append(staging)
+        return str(staging)
+
+    def _fail_staging_identity(path: Path, error_message: str) -> tuple[int, int, int]:
+        if staging_paths and path == staging_paths[0]:
+            raise primary_error
+        return real_path_identity(path, error_message)
+
+    def _record_retention_report() -> None:
+        primary_tracebacks_during_report.append(primary_error.__traceback__)
+        report_staging_retained()
+
+    monkeypatch.setattr(generator.tempfile, "mkdtemp", _record_mkdtemp)
+    monkeypatch.setattr(generator, "_path_identity", _fail_staging_identity)
+    monkeypatch.setattr(generator, "_report_staging_retained", _record_retention_report)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(
+            DirectStagingIdentityFailure,
+            match=f"^{primary_message}$",
+        ) as exc_info:
+            generator.generate_fixtures(
+                source_commit,
+                output,
+                source_root=source_root,
+            )
+
+    assert exc_info.value is primary_error
+    assert type(exc_info.value) is DirectStagingIdentityFailure
+    assert str(exc_info.value) == primary_message
+    assert len(staging_paths) == 1
+    staging = staging_paths[0]
+    assert staging.is_dir()
+    assert len(primary_tracebacks_during_report) == 1
+    final_traceback = exc_info.value.__traceback__
+    assert final_traceback is not None
+    assert final_traceback.tb_next is primary_tracebacks_during_report[0]
+    recorded_tail = primary_tracebacks_during_report[0]
+    while recorded_tail is not None and recorded_tail.tb_next is not None:
+        recorded_tail = recorded_tail.tb_next
+    final_tail = final_traceback
+    while final_tail.tb_next is not None:
+        final_tail = final_tail.tb_next
+    assert final_tail is recorded_tail
+    diagnostic = capsys.readouterr().err
+    assert diagnostic == "warning: fixture staging directory retained for manual cleanup\n"
+    assert str(tmp_path) not in diagnostic
+    assert staging.name not in diagnostic
+    assert primary_message not in diagnostic
+
+
 def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2041,6 +2320,44 @@ def test_original_staging_cleanup_oserror_is_sanitized(
     assert str(tmp_path) not in str(exc_info.value)
     assert not output.exists()
     _assert_fixture_marker(staging_paths[0], "unpublished")
+
+
+@pytest.mark.parametrize("staging_kind", ["symlink", "junction-like"])
+def test_standalone_publication_rejects_link_like_staging_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    staging_kind: str,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    if staging_kind == "symlink":
+        fixture_root = tmp_path / "fixture-root"
+        _write_valid_fixture_set(fixture_root, "1" * 40, "staged")
+        _symlink_or_skip(staging, fixture_root, target_is_directory=True)
+    else:
+        fixture_root = staging
+        _write_valid_fixture_set(fixture_root, "1" * 40, "staged")
+        monkeypatch.setattr(
+            Path,
+            "is_junction",
+            lambda path: path == staging,
+            raising=False,
+        )
+    before_fixture_root = _snapshot_path(fixture_root)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture staging directory changed during publication$",
+    ) as exc_info:
+        generator._replace_output_directory(staging, output)
+
+    assert not output.exists()
+    assert _snapshot_path(fixture_root) == before_fixture_root
+    if staging_kind == "symlink":
+        assert staging.is_symlink()
+    else:
+        assert staging.is_dir()
+    assert str(tmp_path) not in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -2419,6 +2736,89 @@ def test_backup_substitution_before_cleanup_is_retained_with_diagnostic(
     assert "fixture output committed; backup cleanup failed" in diagnostic.lower()
     assert backup_path.name in diagnostic
     assert str(tmp_path) not in diagnostic
+
+
+def test_backup_identity_warning_write_failure_is_nonfatal_after_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DirectStderrFailure(BaseException):
+        pass
+
+    class _FailingStderr:
+        def __init__(self) -> None:
+            self.write_calls = 0
+
+        def write(self, _text: str) -> int:
+            self.write_calls += 1
+            raise DirectStderrFailure("sensitive stderr failure")
+
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    validated_backup = tmp_path / "validated-backup"
+    original_replace = Path.replace
+    backup_path: Path | None = None
+    failing_stderr = _FailingStderr()
+
+    def _commit_with_substituted_backup(path: Path, target: Path) -> Path:
+        nonlocal backup_path
+        result = original_replace(path, target)
+        if path == output:
+            backup_path = target
+        elif path == staging:
+            assert backup_path is not None
+            original_replace(backup_path, validated_backup)
+            _write_valid_fixture_set(backup_path, "3" * 40, "substituted-backup")
+        return result
+
+    monkeypatch.setattr(Path, "replace", _commit_with_substituted_backup)
+    monkeypatch.setattr(generator.sys, "stderr", failing_stderr)
+
+    generator._replace_output_directory(staging, output)
+
+    assert failing_stderr.write_calls == 1
+    assert backup_path is not None
+    _assert_fixture_marker(output, "new-output")
+    _assert_fixture_marker(backup_path, "substituted-backup")
+    _assert_fixture_marker(validated_backup, "old-output")
+
+
+def test_backup_cleanup_warning_write_failure_is_nonfatal_after_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DirectStderrFailure(BaseException):
+        pass
+
+    class _FailingStderr:
+        def __init__(self) -> None:
+            self.write_calls = 0
+
+        def write(self, _text: str) -> int:
+            self.write_calls += 1
+            raise DirectStderrFailure("sensitive stderr failure")
+
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    failing_stderr = _FailingStderr()
+
+    def _fail_backup_cleanup(_path: Path) -> None:
+        raise OSError("sensitive backup cleanup failure")
+
+    monkeypatch.setattr(generator.shutil, "rmtree", _fail_backup_cleanup)
+    monkeypatch.setattr(generator.sys, "stderr", failing_stderr)
+
+    generator._replace_output_directory(staging, output)
+
+    assert failing_stderr.write_calls == 1
+    _assert_fixture_marker(output, "new-output")
+    backups = list(tmp_path.glob(".fixtures.backup-*"))
+    assert len(backups) == 1
+    _assert_fixture_marker(backups[0], "old-output")
 
 
 def test_backup_cleanup_failure_keeps_committed_output_and_reports_diagnostic(
