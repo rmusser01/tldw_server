@@ -96,9 +96,29 @@ class _LyingHookMapping(_HookTrapMapping):
         return self._data.items()
 
 
-class _IterationTrapMapping(_HookTrapMapping):
-    def __iter__(self) -> Iterator[Any]:
-        return iter(self._data)
+class _ItemsSubstitutionMapping(_HookTrapMapping):
+    def __init__(self, data: dict[Any, Any], substitution: dict[Any, Any]) -> None:
+        super().__init__(data)
+        self._substitution = substitution
+        self.items_calls = 0
+
+    def items(self):
+        self.items_calls += 1
+        return self._substitution.items()
+
+
+class _ItemsSubstitutionDict(dict):
+    def __init__(self, data: dict[Any, Any], substitution: dict[Any, Any]) -> None:
+        super().__init__(data)
+        self._substitution = substitution
+        self.items_calls = 0
+
+    def items(self):
+        self.items_calls += 1
+        return self._substitution.items()
+
+
+class _ItemsIterationTrapMapping(_HookTrapMapping):
 
     def get(self, key: Any, default: Any = None) -> Any:
         return self._data.get(key, default)
@@ -122,6 +142,28 @@ class _ItemsUnpackingTrapMapping(_HookTrapMapping):
     def items(self):
         yield from self._data.items()
         yield ("malformed", "entry", "shape")
+
+
+class _CanonicalIterationTrapMapping(_HookTrapMapping):
+    def __iter__(self) -> Iterator[Any]:
+        yielded = False
+        for key in self._data:
+            if yielded:
+                raise RuntimeError("canonical iteration must fail closed")
+            yielded = True
+            yield key
+        raise RuntimeError("canonical iteration must fail closed")
+
+
+class _CanonicalLookupTrapMapping(_HookTrapMapping):
+    def __init__(self, data: dict[Any, Any], fail_key: Any) -> None:
+        super().__init__(data)
+        self._fail_key = fail_key
+
+    def __getitem__(self, key: Any) -> Any:
+        if key == self._fail_key:
+            raise RuntimeError("canonical lookup must fail closed")
+        return self._data[key]
 
 
 class _PairMapping(Mapping):
@@ -345,6 +387,100 @@ def test_exact_string_keys_work_alongside_hostile_config_keys():
     assert direct.extra_headers == {"X-Test": "7"}
 
 
+def test_overridden_items_cannot_substitute_canonical_mapping_values():
+    headers = _ItemsSubstitutionMapping(
+        {"X-Test": 7},
+        {"X-Test": "substituted"},
+    )
+    settings = _ItemsSubstitutionMapping(
+        {"title": {"selector": "h1"}},
+        {"title": {"selector": "script"}},
+    )
+    rule = _ItemsSubstitutionMapping(
+        {
+            "backend": "curl",
+            "respect_robots": True,
+            "extra_headers": headers,
+            "schema": settings,
+        },
+        {
+            "backend": "playwright",
+            "respect_robots": False,
+            "extra_headers": {"X-Test": "substituted"},
+            "schema": {"title": {"selector": "script"}},
+        },
+    )
+    domains = _ItemsSubstitutionMapping(
+        {"example.com": rule},
+        {
+            "example.com": {
+                "backend": "playwright",
+                "respect_robots": False,
+                "extra_headers": {"X-Test": "substituted"},
+                "schema": {"title": {"selector": "script"}},
+            }
+        },
+    )
+    rules = _ItemsSubstitutionMapping(
+        {"domains": domains},
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "playwright",
+                    "respect_robots": False,
+                    "extra_headers": {"X-Test": "substituted"},
+                    "schema": {"title": {"selector": "script"}},
+                }
+            }
+        },
+    )
+
+    cleaned = ScraperRouter.validate_rules(rules)
+    direct = ScraperRouter(rules).resolve("https://example.com/path")
+    validated = ScraperRouter(cleaned).resolve("https://example.com/path")
+
+    assert direct == validated
+    assert direct.backend == "curl"
+    assert direct.respect_robots is True
+    assert direct.extra_headers == {"X-Test": "7"}
+    assert direct.schema_rules == {"title": {"selector": "h1"}}
+    assert all(mapping.items_calls == 0 for mapping in (rules, domains, rule, headers, settings))
+
+
+def test_dict_subclass_items_override_cannot_substitute_canonical_values():
+    rule = _ItemsSubstitutionDict(
+        {"backend": "curl", "respect_robots": True},
+        {"backend": "playwright", "respect_robots": False},
+    )
+
+    direct, validated = _resolve_both(rule)
+
+    assert direct == validated
+    assert direct.backend == "curl"
+    assert direct.respect_robots is True
+    assert rule.items_calls == 0
+
+
+@pytest.mark.parametrize("mapping_type", [dict, UserDict], ids=["dict", "userdict"])
+def test_standard_mapping_types_preserve_canonical_values(mapping_type):
+    rule = mapping_type(
+        {
+            "backend": "curl",
+            "respect_robots": False,
+            "extra_headers": mapping_type({"X-Test": 7}),
+            "schema": mapping_type({"title": {"selector": "h1"}}),
+        }
+    )
+
+    direct, validated = _resolve_both(rule)
+
+    assert direct == validated
+    assert direct.backend == "curl"
+    assert direct.respect_robots is False
+    assert direct.extra_headers == {"X-Test": "7"}
+    assert direct.schema_rules == {"title": {"selector": "h1"}}
+
+
 def test_same_hash_domains_key_survives_pair_backed_mapping_without_hooks():
     bomb = _EqBomb("domains")
     rules = _PairMapping(
@@ -468,13 +604,57 @@ def test_lying_mapping_get_cannot_widen_snapshotted_rules():
 @pytest.mark.parametrize(
     "rules",
     [
-        _IterationTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
+        _ItemsIterationTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
         _ItemsAcquisitionTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
         _ItemsUnpackingTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
     ],
     ids=["items-iteration", "items-acquisition", "items-unpacking"],
 )
-def test_failed_items_snapshots_discard_partial_config_state(rules):
+def test_overridden_items_failures_do_not_replace_canonical_config_state(rules):
+    cleaned = ScraperRouter.validate_rules(rules)
+    direct = ScraperRouter(rules).resolve("https://example.com/path")
+    validated = ScraperRouter(cleaned).resolve("https://example.com/path")
+
+    assert direct == validated
+    assert direct.backend == "curl"
+
+
+@pytest.mark.parametrize(
+    "mixed",
+    [
+        _ItemsIterationTrapMapping({"X-Test": 7}),
+        _ItemsAcquisitionTrapMapping({"X-Test": 7}),
+        _ItemsUnpackingTrapMapping({"X-Test": 7}),
+    ],
+    ids=["items-iteration", "items-acquisition", "items-unpacking"],
+)
+def test_overridden_items_failures_do_not_replace_canonical_scalar_map_state(mixed):
+    direct, validated = _resolve_both({"extra_headers": mixed})
+
+    assert direct == validated
+    assert direct.extra_headers == {"X-Test": "7"}
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        _CanonicalIterationTrapMapping(
+            {
+                "domains": {"example.com": {"backend": "curl"}},
+                "ignored": True,
+            }
+        ),
+        _CanonicalLookupTrapMapping(
+            {
+                "domains": {"example.com": {"backend": "curl"}},
+                "failure": True,
+            },
+            "failure",
+        ),
+    ],
+    ids=["iteration", "lookup"],
+)
+def test_canonical_config_snapshot_failures_discard_partial_state(rules):
     assert ScraperRouter.validate_rules(rules) == {"domains": {}}
 
     plan = ScraperRouter(rules).resolve("https://example.com/path")
@@ -486,13 +666,12 @@ def test_failed_items_snapshots_discard_partial_config_state(rules):
 @pytest.mark.parametrize(
     "mixed",
     [
-        _IterationTrapMapping({"X-Test": 7}),
-        _ItemsAcquisitionTrapMapping({"X-Test": 7}),
-        _ItemsUnpackingTrapMapping({"X-Test": 7}),
+        _CanonicalIterationTrapMapping({"X-Test": 7, "X-Ignored": 8}),
+        _CanonicalLookupTrapMapping({"X-Test": 7, "X-Failure": 8}, "X-Failure"),
     ],
-    ids=["items-iteration", "items-acquisition", "items-unpacking"],
+    ids=["iteration", "lookup"],
 )
-def test_failed_items_snapshots_discard_partial_scalar_map_state(mixed):
+def test_canonical_scalar_map_snapshot_failures_discard_partial_state(mixed):
     direct, validated = _resolve_both({"extra_headers": mixed})
 
     assert direct == validated
@@ -707,7 +886,7 @@ def test_safe_builtin_robots_values_preserve_boolean_compatibility(value, expect
 
 def test_settings_aliases_fail_over_after_safe_mapping_snapshots():
     nested = UserDict({"selector": "h1"})
-    invalid_primary = _ItemsAcquisitionTrapMapping({"ignored": True})
+    invalid_primary = _CanonicalIterationTrapMapping({"ignored": True})
     valid_alias = _HookTrapMapping({"title": nested})
     rule = {
         "schema_rules": invalid_primary,

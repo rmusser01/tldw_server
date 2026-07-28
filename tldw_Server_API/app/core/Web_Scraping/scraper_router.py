@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -57,15 +57,33 @@ def _router_regex_limits(timeout_s: float) -> SafeRegexLimits:
     )
 
 
-def _snapshot_mapping_entries(value: Any) -> list[tuple[Any, Any]] | None:
+def _is_config_mapping_key(value: Any) -> bool:
+    return type(value) is str
+
+
+def _is_scalar_mapping_key(value: Any) -> bool:
+    return type(value) in {str, bool, int, float}
+
+
+def _snapshot_mapping_entries(
+    value: Any,
+    key_is_safe: Callable[[Any], bool],
+) -> list[tuple[Any, Any]] | None:
     if not isinstance(value, Mapping):
         return None
 
     entries: list[tuple[Any, Any]] = []
     try:
-        items = value.items()
-        for entry in items:
-            key, item = entry
+        if type(value) is dict:
+            for key, item in dict.items(value):
+                if key_is_safe(key):
+                    entries.append((key, item))
+            return entries
+
+        for key in iter(value):
+            if not key_is_safe(key):
+                continue
+            item = value[key]
             entries.append((key, item))
     except Exception:
         return None
@@ -73,10 +91,10 @@ def _snapshot_mapping_entries(value: Any) -> list[tuple[Any, Any]] | None:
 
 
 def _snapshot_config_mapping(value: Any) -> dict[str, Any] | None:
-    entries = _snapshot_mapping_entries(value)
+    entries = _snapshot_mapping_entries(value, _is_config_mapping_key)
     if entries is None:
         return None
-    return {key: item for key, item in entries if type(key) is str}
+    return dict(entries)
 
 
 def _normalize_backend(value: Any) -> str:
@@ -115,7 +133,7 @@ def _stringify_safe_scalar(value: Any) -> str | object:
 
 
 def _normalize_string_mapping(value: Any) -> dict[str, str]:
-    entries = _snapshot_mapping_entries(value)
+    entries = _snapshot_mapping_entries(value, _is_scalar_mapping_key)
     if entries is None:
         return {}
 
