@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess  # nosec B404
 import sys
 import tempfile
@@ -307,24 +308,145 @@ def _resolve_output_path(output: Path, source_root: Path) -> Path:
     return resolved_output
 
 
-def _validate_existing_output(output: Path) -> None:
-    if output.exists():
-        if not output.is_dir():
-            raise ValueError("existing output must be a directory")
-        _validate_fixture_set(output, predecessor_commit=None)
+def _validate_existing_output(output: Path) -> tuple[int, int, int] | None:
+    try:
+        metadata = os.stat(output, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise RuntimeError("Fixture output changed during validation") from None
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("existing output must be a directory")
+    identity = _metadata_identity(metadata)
+    if identity is None:
+        raise RuntimeError("Fixture output changed during validation")
+    _validate_fixture_set(output, predecessor_commit=None)
+    _require_path_identity(output, identity, "Fixture output changed during validation")
+    return identity
 
 
 def _lock_path_for_output(output: Path) -> Path:
     normalized_output = os.path.normcase(str(output.resolve()))
     identity = hashlib.sha256(normalized_output.encode("utf-8")).hexdigest()
-    lock_root = Path(tempfile.gettempdir()).resolve() / "tldw-phase4-fixture-locks"
+    namespace = "tldw-phase4-fixture-locks"
+    get_effective_uid = getattr(os, "geteuid", None)
+    if callable(get_effective_uid):
+        namespace = f"{namespace}-{get_effective_uid()}"
+    lock_root = Path(tempfile.gettempdir()).resolve() / namespace
     return lock_root / f"{identity}.lock"
+
+
+def _is_link_like(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    return bool(callable(is_junction) and is_junction())
+
+
+def _effective_uid() -> int | None:
+    get_effective_uid = getattr(os, "geteuid", None)
+    if not callable(get_effective_uid):
+        return None
+    return get_effective_uid()
+
+
+def _metadata_identity(metadata: os.stat_result) -> tuple[int, int, int] | None:
+    device = getattr(metadata, "st_dev", None)
+    inode = getattr(metadata, "st_ino", None)
+    if not isinstance(device, int) or not isinstance(inode, int) or inode == 0:
+        return None
+    return device, inode, stat.S_IFMT(metadata.st_mode)
+
+
+def _path_identity_or_none(path: Path, error_message: str) -> tuple[int, int, int] | None:
+    try:
+        metadata = os.stat(path, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise RuntimeError(error_message) from None
+    identity = _metadata_identity(metadata)
+    if identity is None:
+        raise RuntimeError(error_message)
+    return identity
+
+
+def _path_identity(path: Path, error_message: str) -> tuple[int, int, int]:
+    identity = _path_identity_or_none(path, error_message)
+    if identity is None:
+        raise RuntimeError(error_message)
+    return identity
+
+
+def _require_path_identity(
+    path: Path,
+    expected: tuple[int, int, int],
+    error_message: str,
+) -> None:
+    if _path_identity(path, error_message) != expected:
+        raise RuntimeError(error_message)
+
+
+def _require_path_absent(path: Path, error_message: str) -> None:
+    if _path_identity_or_none(path, error_message) is not None:
+        raise RuntimeError(error_message)
+
+
+def _restore_output_backup(
+    backup: Path,
+    output: Path,
+    parent_identity: tuple[int, int, int],
+    output_identity: tuple[int, int, int],
+) -> None:
+    recovery_error = "Fixture output rollback could not be completed safely; " "manual recovery is required"
+    try:
+        _require_path_identity(output.parent, parent_identity, recovery_error)
+        current_output = _path_identity_or_none(output, recovery_error)
+        current_backup = _path_identity_or_none(backup, recovery_error)
+        if current_output == output_identity and current_backup is None:
+            return
+        if current_output is not None or current_backup != output_identity:
+            raise RuntimeError(recovery_error)
+        backup.replace(output)
+        _require_path_identity(output, output_identity, recovery_error)
+        _require_path_absent(backup, recovery_error)
+    except (OSError, RuntimeError):
+        raise RuntimeError(recovery_error) from None
+
+
+def _valid_lock_root_metadata(metadata: os.stat_result) -> bool:
+    if not stat.S_ISDIR(metadata.st_mode):
+        return False
+    effective_uid = _effective_uid()
+    if effective_uid is not None and getattr(metadata, "st_uid", None) != effective_uid:
+        return False
+    return os.name != "posix" or stat.S_IMODE(metadata.st_mode) & 0o077 == 0
+
+
+def _valid_lock_file_metadata(metadata: os.stat_result) -> bool:
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        return False
+    effective_uid = _effective_uid()
+    if effective_uid is not None and getattr(metadata, "st_uid", None) != effective_uid:
+        return False
+    return os.name != "posix" or stat.S_IMODE(metadata.st_mode) == 0o600
+
+
+def _close_descriptor_quietly(descriptor: int | None) -> None:
+    if descriptor is None:
+        return
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
 
 
 def _prepare_lock_root(lock_root: Path, source_root: Path) -> Path:
     try:
+        if _is_link_like(lock_root):
+            raise OSError
         lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if lock_root.is_symlink() or not lock_root.is_dir():
+        if _is_link_like(lock_root) or not lock_root.is_dir():
             raise OSError
         resolved_lock_root = lock_root.resolve(strict=True)
     except (OSError, RuntimeError):
@@ -345,28 +467,129 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
     directory_flags |= getattr(os, "O_DIRECTORY", 0)
     directory_flags |= getattr(os, "O_NOFOLLOW", 0)
     use_directory_descriptor = (
-        fcntl is not None and os.open in os.supports_dir_fd and getattr(os, "O_DIRECTORY", 0) != 0
+        fcntl is not None
+        and os.open in os.supports_dir_fd
+        and os.stat in os.supports_dir_fd
+        and getattr(os, "O_DIRECTORY", 0) != 0
     )
     if not use_directory_descriptor:
+        lock_path = lock_root / lock_name
+        descriptor: int | None = None
         try:
-            return os.open(lock_root / lock_name, flags, 0o600)
+            if _is_link_like(lock_root):
+                raise RuntimeError("Fixture publication lock root is invalid")
+            root_before = os.stat(lock_root, follow_symlinks=False)
+            root_identity = _metadata_identity(root_before)
+            if not _valid_lock_root_metadata(root_before) or root_identity is None:
+                raise RuntimeError("Fixture publication lock root is invalid")
+
+            if _is_link_like(lock_path):
+                raise RuntimeError("Fixture publication lock file is invalid")
+            try:
+                file_before = os.stat(lock_path, follow_symlinks=False)
+            except FileNotFoundError:
+                file_before = None
+            file_before_identity = None
+            if file_before is not None:
+                file_before_identity = _metadata_identity(file_before)
+                if not _valid_lock_file_metadata(file_before) or file_before_identity is None:
+                    raise RuntimeError("Fixture publication lock file is invalid")
+
+            descriptor = os.open(lock_path, flags, 0o600)
+            opened_file = os.fstat(descriptor)
+            opened_identity = _metadata_identity(opened_file)
+            if not _valid_lock_file_metadata(opened_file) or opened_identity is None:
+                raise RuntimeError("Fixture publication lock file is invalid")
+            if file_before_identity is not None and opened_identity != file_before_identity:
+                raise RuntimeError("Fixture publication lock file is invalid")
+
+            root_after = os.stat(lock_root, follow_symlinks=False)
+            if (
+                _is_link_like(lock_root)
+                or not _valid_lock_root_metadata(root_after)
+                or _metadata_identity(root_after) != root_identity
+            ):
+                raise RuntimeError("Fixture publication lock root is invalid")
+            file_after = os.stat(lock_path, follow_symlinks=False)
+            if (
+                _is_link_like(lock_path)
+                or not _valid_lock_file_metadata(file_after)
+                or _metadata_identity(file_after) != opened_identity
+            ):
+                raise RuntimeError("Fixture publication lock file is invalid")
+            return descriptor
+        except RuntimeError:
+            _close_descriptor_quietly(descriptor)
+            raise
         except OSError:
+            _close_descriptor_quietly(descriptor)
             raise RuntimeError("Fixture publication lock could not be opened") from None
 
+    root_descriptor: int | None = None
+    lock_descriptor: int | None = None
     try:
         root_descriptor = os.open(lock_root, directory_flags)
     except OSError:
         raise RuntimeError("Fixture publication lock root is invalid") from None
     try:
         try:
-            return os.open(lock_name, flags, 0o600, dir_fd=root_descriptor)
+            root_metadata = os.fstat(root_descriptor)
+        except OSError:
+            raise RuntimeError("Fixture publication lock root is invalid") from None
+        if not _valid_lock_root_metadata(root_metadata):
+            raise RuntimeError("Fixture publication lock root is invalid")
+
+        try:
+            existing_lock = os.stat(
+                lock_name,
+                dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            existing_lock = None
+        except OSError:
+            raise RuntimeError("Fixture publication lock file is invalid") from None
+        existing_identity = None
+        if existing_lock is not None:
+            existing_identity = _metadata_identity(existing_lock)
+            if not _valid_lock_file_metadata(existing_lock) or existing_identity is None:
+                raise RuntimeError("Fixture publication lock file is invalid")
+
+        try:
+            lock_descriptor = os.open(lock_name, flags, 0o600, dir_fd=root_descriptor)
         except OSError:
             raise RuntimeError("Fixture publication lock could not be opened") from None
-    finally:
+
         try:
-            os.close(root_descriptor)
+            opened_lock = os.fstat(lock_descriptor)
         except OSError:
-            pass
+            raise RuntimeError("Fixture publication lock file is invalid") from None
+        opened_identity = _metadata_identity(opened_lock)
+        if not _valid_lock_file_metadata(opened_lock) or opened_identity is None:
+            raise RuntimeError("Fixture publication lock file is invalid")
+        if existing_identity is not None and opened_identity != existing_identity:
+            raise RuntimeError("Fixture publication lock file is invalid")
+        try:
+            current_lock = os.stat(
+                lock_name,
+                dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+        except OSError:
+            raise RuntimeError("Fixture publication lock file is invalid") from None
+        if not _valid_lock_file_metadata(current_lock) or _metadata_identity(current_lock) != opened_identity:
+            raise RuntimeError("Fixture publication lock file is invalid")
+    except BaseException:
+        _close_descriptor_quietly(lock_descriptor)
+        _close_descriptor_quietly(root_descriptor)
+        raise
+
+    try:
+        os.close(root_descriptor)
+    except OSError:
+        _close_descriptor_quietly(lock_descriptor)
+        raise RuntimeError("Fixture publication lock root could not be closed") from None
+    return lock_descriptor
 
 
 def _acquire_file_lock(lock_file: Any) -> None:
@@ -406,6 +629,7 @@ def _release_file_lock(lock_file: Any) -> None:
 
 @contextmanager
 def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
+    """Serialize cooperating local publishers; this is not a same-user privilege boundary."""
     lock_path = _lock_path_for_output(output)
     lock_root = _prepare_lock_root(lock_path.parent, source_root)
     descriptor = _open_lock_descriptor(lock_root, lock_path.name)
@@ -428,21 +652,117 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
 
 
 def _replace_output_directory(staging: Path, output: Path) -> None:
+    """Atomically publish with best-effort identity checks around destructive operations."""
     _validate_fixture_set(staging, predecessor_commit=None)
-    backup: Path | None = None
-    if output.exists():
-        _validate_existing_output(output)
-        backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}")
-        output.replace(backup)
-
+    parent_identity = _path_identity(
+        output.parent,
+        "Fixture output parent changed during publication",
+    )
+    staging_identity = _path_identity(
+        staging,
+        "Fixture staging directory changed during publication",
+    )
+    output_identity = _validate_existing_output(output)
+    backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}") if output_identity is not None else None
+    rename_started = False
     try:
+        if output_identity is not None and backup is not None:
+            _require_path_identity(
+                output.parent,
+                parent_identity,
+                "Fixture output parent changed during publication",
+            )
+            _require_path_identity(
+                output,
+                output_identity,
+                "Fixture output changed during publication",
+            )
+            _require_path_absent(
+                backup,
+                "Fixture output backup changed during publication",
+            )
+            rename_started = True
+            output.replace(backup)
+            _require_path_identity(
+                output.parent,
+                parent_identity,
+                "Fixture output parent changed during publication",
+            )
+            _require_path_absent(
+                output,
+                "Fixture output changed during publication",
+            )
+            _require_path_identity(
+                backup,
+                output_identity,
+                "Fixture output backup changed during publication",
+            )
+
+        _require_path_identity(
+            output.parent,
+            parent_identity,
+            "Fixture output parent changed during publication",
+        )
+        _require_path_identity(
+            staging,
+            staging_identity,
+            "Fixture staging directory changed during publication",
+        )
+        _require_path_absent(
+            output,
+            "Fixture output changed during publication",
+        )
+        if output_identity is not None and backup is not None:
+            _require_path_identity(
+                backup,
+                output_identity,
+                "Fixture output backup changed during publication",
+            )
         staging.replace(output)
+        _require_path_identity(
+            output.parent,
+            parent_identity,
+            "Fixture output parent changed during publication",
+        )
+        _require_path_identity(
+            output,
+            staging_identity,
+            "Fixture output changed during publication",
+        )
     except BaseException:
-        if backup is not None and backup.exists() and not output.exists():
-            backup.replace(output)
+        if rename_started and output_identity is not None and backup is not None:
+            _restore_output_backup(
+                backup,
+                output,
+                parent_identity,
+                output_identity,
+            )
         raise
     else:
-        if backup is not None:
+        if output_identity is not None and backup is not None:
+            try:
+                _require_path_identity(
+                    output.parent,
+                    parent_identity,
+                    "Fixture output parent changed during cleanup",
+                )
+                _require_path_identity(
+                    output,
+                    staging_identity,
+                    "Fixture output changed during cleanup",
+                )
+                _require_path_identity(
+                    backup,
+                    output_identity,
+                    "Fixture output backup changed during cleanup",
+                )
+            except RuntimeError:
+                print(
+                    "warning: fixture output committed; backup cleanup failed; "
+                    f"backup retained as {backup.name!r} for manual cleanup",
+                    file=sys.stderr,
+                )
+                return
             try:
                 shutil.rmtree(backup)
             except OSError:

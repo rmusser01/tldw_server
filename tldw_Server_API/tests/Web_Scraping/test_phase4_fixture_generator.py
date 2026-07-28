@@ -1,18 +1,42 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import multiprocessing
 import os
 import queue
+import stat
 import subprocess
 import tempfile
 import warnings
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 from Helper_Scripts import web_scraping_phase4_fixtures as generator
+
+
+def _symlink_or_skip(
+    link: Path,
+    target: Path,
+    *,
+    target_is_directory: bool,
+) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        unsupported_errnos = {
+            errno.EACCES,
+            errno.EPERM,
+            getattr(errno, "ENOSYS", -1),
+            getattr(errno, "ENOTSUP", -1),
+            getattr(errno, "EOPNOTSUPP", -1),
+        }
+        if exc.errno in unsupported_errnos or getattr(exc, "winerror", None) == 1314:
+            pytest.skip("symlink creation is unavailable in this environment")
+        raise
 
 
 def _fixture_payloads(marker: str) -> dict[str, dict[str, Any]]:
@@ -43,6 +67,29 @@ def _write_valid_fixture_set(output: Path, predecessor_commit: str, marker: str)
             "schema_version": 1,
         },
     )
+
+
+def _isolated_lock_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    output: Path,
+) -> Path:
+    temp_root = tmp_path / "lock-temp"
+    temp_root.mkdir()
+    monkeypatch.setattr(generator.tempfile, "gettempdir", lambda: str(temp_root))
+    return generator._lock_path_for_output(output)
+
+
+def _stat_with_uid(metadata: os.stat_result, uid: int) -> os.stat_result:
+    values = list(metadata)
+    values[4] = uid
+    return os.stat_result(values)
+
+
+def _stat_with_inode(metadata: os.stat_result, inode: int) -> os.stat_result:
+    values = list(metadata)
+    values[1] = inode
+    return os.stat_result(values)
 
 
 def _snapshot_path(path: Path) -> tuple[str, object]:
@@ -78,6 +125,7 @@ def _fixture_process_worker(
     release_builder: Any,
     result_queue: Any,
     failure_mode: str = "none",
+    lock_attempted: Any | None = None,
 ) -> None:
     def _build_payloads(_source_root: Path) -> dict[str, dict[str, Any]]:
         entered_builder.set()
@@ -88,6 +136,16 @@ def _fixture_process_worker(
         return _fixture_payloads(marker)
 
     generator.build_case_payloads = _build_payloads
+    if lock_attempted is not None:
+        real_publication_lock = generator._publication_lock
+
+        @contextmanager
+        def _signaling_publication_lock(output_path: Path, source_path: Path) -> Any:
+            lock_attempted.set()
+            with real_publication_lock(output_path, source_path):
+                yield
+
+        generator._publication_lock = _signaling_publication_lock
     started.set()
     try:
         generator.generate_fixtures(
@@ -172,7 +230,7 @@ def test_output_at_source_or_ancestor_is_rejected_before_payload_build(
     output = target
     if through_symlink:
         output = tmp_path / f"{relationship}-link"
-        output.symlink_to(target, target_is_directory=True)
+        _symlink_or_skip(output, target, target_is_directory=True)
     before_bytes = _snapshot_worktree_files(source_root)
     before_status = _run_git(source_root, "status", "--porcelain=v1", "--untracked-files=all")
 
@@ -203,9 +261,13 @@ def test_unresolvable_output_symlink_is_rejected_before_payload_build(
     source_root, source_commit = _create_clean_source_root(tmp_path)
     output_link = tmp_path / "output-link"
     if symlink_state == "self-loop":
-        output_link.symlink_to(output_link, target_is_directory=True)
+        _symlink_or_skip(output_link, output_link, target_is_directory=True)
     else:
-        output_link.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+        _symlink_or_skip(
+            output_link,
+            tmp_path / "missing-target",
+            target_is_directory=True,
+        )
     output = output_link / "fixtures" if symlink_state == "broken-component" else output_link
     original_link_target = os.readlink(output_link)
     payload_calls = 0
@@ -274,7 +336,7 @@ def test_output_resolution_preserves_parent_traversal_after_valid_symlink(
     alias_root = tmp_path / "aliases"
     alias_root.mkdir()
     child_alias = alias_root / "child-link"
-    child_alias.symlink_to(source_child, target_is_directory=True)
+    _symlink_or_skip(child_alias, source_child, target_is_directory=True)
     output = child_alias / ".." / "generated" / "fixtures"
     monkeypatch.setattr(generator, "build_case_payloads", lambda _source_root: _fixture_payloads("alias"))
 
@@ -410,7 +472,7 @@ def test_lock_path_is_a_stable_hash_of_the_resolved_output_outside_source(
     output = tmp_path / "fixtures"
     output.mkdir()
     output_link = tmp_path / "fixtures-link"
-    output_link.symlink_to(output, target_is_directory=True)
+    _symlink_or_skip(output_link, output, target_is_directory=True)
     expected_identity = hashlib.sha256(os.path.normcase(str(output.resolve())).encode("utf-8")).hexdigest()
 
     direct_lock = generator._lock_path_for_output(output)
@@ -418,7 +480,11 @@ def test_lock_path_is_a_stable_hash_of_the_resolved_output_outside_source(
 
     assert direct_lock == linked_lock
     assert direct_lock.name == f"{expected_identity}.lock"
-    assert direct_lock.parent == Path(tempfile.gettempdir()).resolve() / "tldw-phase4-fixture-locks"
+    effective_uid = os.geteuid() if hasattr(os, "geteuid") else None
+    namespace = "tldw-phase4-fixture-locks"
+    if effective_uid is not None:
+        namespace = f"{namespace}-{effective_uid}"
+    assert direct_lock.parent == Path(tempfile.gettempdir()).resolve() / namespace
     assert not direct_lock.is_relative_to(source_root)
 
 
@@ -434,7 +500,11 @@ def test_invalid_physical_lock_root_is_rejected_before_lock_file_or_payload(
     source_root, source_commit = _create_clean_source_root(tmp_path)
     temp_root = tmp_path / "lock-temp"
     temp_root.mkdir()
-    lock_root = temp_root / "tldw-phase4-fixture-locks"
+
+    if lock_root_state == "inside-source":
+        temp_root = source_root
+    monkeypatch.setattr(generator.tempfile, "gettempdir", lambda: str(temp_root))
+    lock_root = generator._lock_path_for_output(tmp_path / "fixtures").parent
     physical_lock_root = lock_root
 
     if lock_root_state == "symlink-into-source":
@@ -444,15 +514,9 @@ def test_invalid_physical_lock_root_is_rejected_before_lock_file_or_payload(
         _run_git(source_root, "add", "tracked-lock-root/tracked.txt")
         _run_git(source_root, "commit", "--quiet", "-m", "add tracked lock root")
         source_commit = _run_git(source_root, "rev-parse", "HEAD")
-        lock_root.symlink_to(physical_lock_root, target_is_directory=True)
+        _symlink_or_skip(lock_root, physical_lock_root, target_is_directory=True)
     elif lock_root_state == "non-directory":
         lock_root.write_text("sensitive lock root file\n", encoding="utf-8")
-    else:
-        temp_root = source_root
-        lock_root = source_root / "tldw-phase4-fixture-locks"
-        physical_lock_root = lock_root
-
-    monkeypatch.setattr(generator.tempfile, "gettempdir", lambda: str(temp_root))
     payload_calls = 0
 
     def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
@@ -475,6 +539,308 @@ def test_invalid_physical_lock_root_is_rejected_before_lock_file_or_payload(
     diagnostic = str(exc_info.value)
     assert str(source_root) not in diagnostic
     assert "sensitive" not in diagnostic
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX lock metadata policy")
+@pytest.mark.parametrize("unsafe_state", ["permissive-mode", "wrong-owner"])
+def test_unsafe_lock_root_metadata_is_rejected_before_payload_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_state: str,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    lock_path = _isolated_lock_path(tmp_path, monkeypatch, output)
+    lock_path.parent.mkdir(mode=0o700)
+    if unsafe_state == "permissive-mode":
+        lock_path.parent.chmod(0o755)
+    else:
+        real_fstat = generator.os.fstat
+
+        def _wrong_directory_owner(descriptor: int) -> os.stat_result:
+            metadata = real_fstat(descriptor)
+            if stat.S_ISDIR(metadata.st_mode):
+                return _stat_with_uid(metadata, metadata.st_uid + 1)
+            return metadata
+
+        monkeypatch.setattr(generator.os, "fstat", _wrong_directory_owner)
+
+    payload_calls = 0
+
+    def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
+        nonlocal payload_calls
+        payload_calls += 1
+        return _fixture_payloads("must-not-build")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _record_payload_build)
+
+    with pytest.raises(RuntimeError, match="^Fixture publication lock root is invalid$") as exc_info:
+        generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    assert payload_calls == 0
+    assert not lock_path.exists()
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX lock metadata policy")
+@pytest.mark.parametrize(
+    "unsafe_state",
+    ["permissive-mode", "wrong-owner", "multiple-links", "symlink"],
+)
+def test_unsafe_lock_file_metadata_is_rejected_before_payload_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_state: str,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    lock_path = _isolated_lock_path(tmp_path, monkeypatch, output)
+    lock_path.parent.mkdir(mode=0o700)
+    lock_target = lock_path.parent / "lock-target"
+    lock_target.write_bytes(b"")
+    lock_target.chmod(0o600)
+    if unsafe_state == "symlink":
+        _symlink_or_skip(lock_path, lock_target, target_is_directory=False)
+    else:
+        os.link(lock_target, lock_path)
+        if unsafe_state == "permissive-mode":
+            lock_path.chmod(0o644)
+        elif unsafe_state == "wrong-owner":
+            real_fstat = generator.os.fstat
+
+            def _wrong_file_owner(descriptor: int) -> os.stat_result:
+                metadata = real_fstat(descriptor)
+                if stat.S_ISREG(metadata.st_mode):
+                    return _stat_with_uid(metadata, metadata.st_uid + 1)
+                return metadata
+
+            monkeypatch.setattr(generator.os, "fstat", _wrong_file_owner)
+        elif unsafe_state != "multiple-links":
+            raise AssertionError(f"unexpected test state: {unsafe_state}")
+        if unsafe_state != "multiple-links":
+            lock_target.unlink()
+
+    before = _snapshot_path(lock_path.parent)
+    payload_calls = 0
+
+    def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
+        nonlocal payload_calls
+        payload_calls += 1
+        return _fixture_payloads("must-not-build")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _record_payload_build)
+
+    with pytest.raises(RuntimeError, match="^Fixture publication lock file is invalid$") as exc_info:
+        generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    assert payload_calls == 0
+    assert _snapshot_path(lock_path.parent) == before
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+def test_no_dirfd_fallback_rejects_lock_root_identity_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock_root = tmp_path / "locks"
+    lock_root.mkdir(mode=0o700)
+    monkeypatch.setattr(generator, "fcntl", None)
+    real_stat = generator.os.stat
+    root_stat_calls = 0
+
+    def _changing_stat(path: os.PathLike[str] | str, *args: Any, **kwargs: Any) -> os.stat_result:
+        nonlocal root_stat_calls
+        metadata = real_stat(path, *args, **kwargs)
+        if Path(path) == lock_root and kwargs.get("follow_symlinks") is False:
+            root_stat_calls += 1
+            if root_stat_calls > 1:
+                return _stat_with_inode(metadata, metadata.st_ino + 1)
+        return metadata
+
+    monkeypatch.setattr(generator.os, "stat", _changing_stat)
+
+    with pytest.raises(RuntimeError, match="^Fixture publication lock root is invalid$"):
+        generator._open_lock_descriptor(lock_root, "output.lock")
+
+
+def test_no_dirfd_fallback_rejects_preexisting_lock_identity_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock_root = tmp_path / "locks"
+    lock_root.mkdir(mode=0o700)
+    lock_path = lock_root / "output.lock"
+    lock_path.write_bytes(b"")
+    lock_path.chmod(0o600)
+    monkeypatch.setattr(generator, "fcntl", None)
+    real_open = generator.os.open
+    real_close = generator.os.close
+    real_stat = generator.os.stat
+    real_fstat = generator.os.fstat
+    lock_stat_calls = 0
+    opened_descriptor: int | None = None
+    returned_descriptor: int | None = None
+
+    def _tracking_open(
+        path: os.PathLike[str] | str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal opened_descriptor
+        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        if Path(path) == lock_path:
+            opened_descriptor = descriptor
+        return descriptor
+
+    def _changing_lock_stat(
+        path: os.PathLike[str] | str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> os.stat_result:
+        nonlocal lock_stat_calls
+        metadata = real_stat(path, *args, **kwargs)
+        if Path(path) == lock_path and kwargs.get("follow_symlinks") is False:
+            lock_stat_calls += 1
+            if lock_stat_calls > 1:
+                return _stat_with_inode(metadata, metadata.st_ino + 1)
+        return metadata
+
+    def _changed_opened_file(descriptor: int) -> os.stat_result:
+        metadata = real_fstat(descriptor)
+        if descriptor == opened_descriptor:
+            return _stat_with_inode(metadata, metadata.st_ino + 1)
+        return metadata
+
+    monkeypatch.setattr(generator.os, "open", _tracking_open)
+    monkeypatch.setattr(generator.os, "stat", _changing_lock_stat)
+    monkeypatch.setattr(generator.os, "fstat", _changed_opened_file)
+
+    try:
+        with pytest.raises(RuntimeError, match="^Fixture publication lock file is invalid$"):
+            returned_descriptor = generator._open_lock_descriptor(lock_root, lock_path.name)
+    finally:
+        if returned_descriptor is not None:
+            real_close(returned_descriptor)
+
+    assert opened_descriptor is not None
+    with pytest.raises(OSError) as closed:
+        real_fstat(opened_descriptor)
+    assert closed.value.errno == errno.EBADF
+
+
+def test_no_dirfd_fallback_rejects_junction_like_lock_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    lock_root = tmp_path / "locks"
+    monkeypatch.setattr(generator, "fcntl", None)
+    monkeypatch.setattr(
+        Path,
+        "is_junction",
+        lambda path: path == lock_root,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="^Fixture publication lock root is invalid$"):
+        generator._prepare_lock_root(lock_root, source_root)
+
+
+def test_fake_windows_locking_branch_remains_usable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    _isolated_lock_path(tmp_path, monkeypatch, tmp_path / "fixtures")
+
+    class _FakeMsvcrt:
+        LK_LOCK = 1
+        LK_UNLCK = 2
+
+        def __init__(self) -> None:
+            self.operations: list[int] = []
+
+        def locking(self, _descriptor: int, operation: int, _length: int) -> None:
+            self.operations.append(operation)
+
+    fake_msvcrt = _FakeMsvcrt()
+    monkeypatch.setattr(generator, "fcntl", None)
+    monkeypatch.setattr(generator, "msvcrt", fake_msvcrt)
+
+    with generator._publication_lock(tmp_path / "fixtures", source_root):
+        pass
+
+    assert fake_msvcrt.operations == [fake_msvcrt.LK_LOCK, fake_msvcrt.LK_UNLCK]
+
+
+@pytest.mark.skipif(
+    generator.fcntl is None or os.open not in os.supports_dir_fd,
+    reason="descriptor-relative POSIX lock opening is unavailable",
+)
+@pytest.mark.parametrize("lock_open_fails", [False, True], ids=["close-only", "primary-open-error"])
+def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lock_open_fails: bool,
+) -> None:
+    lock_root = tmp_path / "locks"
+    lock_root.mkdir(mode=0o700)
+    real_open = generator.os.open
+    real_close = generator.os.close
+    root_descriptor: int | None = None
+    lock_descriptor: int | None = None
+
+    def _controlled_open(
+        path: os.PathLike[str] | str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal root_descriptor, lock_descriptor
+        if dir_fd is not None and lock_open_fails:
+            raise OSError("sensitive lock open failure")
+        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        if dir_fd is None:
+            root_descriptor = descriptor
+        else:
+            lock_descriptor = descriptor
+        return descriptor
+
+    def _failing_root_close(descriptor: int) -> None:
+        real_close(descriptor)
+        if descriptor == root_descriptor:
+            raise OSError("sensitive root close failure")
+
+    monkeypatch.setattr(generator.os, "open", _controlled_open)
+    monkeypatch.setattr(
+        generator.os,
+        "supports_dir_fd",
+        {*generator.os.supports_dir_fd, _controlled_open},
+    )
+    monkeypatch.setattr(generator.os, "close", _failing_root_close)
+
+    expected = (
+        "Fixture publication lock could not be opened"
+        if lock_open_fails
+        else "Fixture publication lock root could not be closed"
+    )
+    with pytest.raises(RuntimeError, match=f"^{expected}$") as exc_info:
+        generator._open_lock_descriptor(lock_root, "output.lock")
+
+    assert root_descriptor is not None
+    with pytest.raises(OSError) as root_closed:
+        os.fstat(root_descriptor)
+    assert root_closed.value.errno == errno.EBADF
+    if lock_descriptor is not None:
+        with pytest.raises(OSError) as lock_closed:
+            os.fstat(lock_descriptor)
+        assert lock_closed.value.errno == errno.EBADF
+    assert "sensitive" not in str(exc_info.value)
 
 
 @pytest.mark.parametrize("body_raises", [True, False], ids=["primary-error", "unlock-only"])
@@ -521,6 +887,7 @@ def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: 
     first_entered = context.Event()
     first_release = context.Event()
     second_started = context.Event()
+    second_lock_attempted = context.Event()
     second_entered = context.Event()
     second_release = context.Event()
     second_release.set()
@@ -550,6 +917,7 @@ def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: 
             second_release,
             result_queue,
         ),
+        kwargs={"lock_attempted": second_lock_attempted},
     )
 
     first.start()
@@ -558,7 +926,10 @@ def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: 
         assert first_entered.wait(10)
         second.start()
         assert second_started.wait(10)
-        second_was_blocked = not second_entered.wait(2)
+        assert second_lock_attempted.wait(10)
+        assert not second_entered.wait(1)
+        first_release.set()
+        assert second_entered.wait(10)
     finally:
         first_release.set()
         second_release.set()
@@ -566,7 +937,6 @@ def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: 
         if second.pid is not None:
             _join_process(second)
 
-    assert second_was_blocked
     assert sorted(_queue_results(result_queue, 2)) == [
         ("first", "ok", "", ""),
         ("second", "ok", "", ""),
@@ -848,6 +1218,212 @@ def test_swap_failure_restores_old_output_and_propagates(
     assert _snapshot_path(output) == before
     assert json.loads((staging / "content.json").read_text(encoding="ascii"))["cases"] == [{"marker": "new-output"}]
     assert not list(tmp_path.glob(".fixtures.backup-*"))
+
+
+def test_post_rename_identity_check_failure_restores_old_output_and_propagates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    original_require_absent = generator._require_path_absent
+    injected = False
+
+    def _fail_once_after_output_rename(path: Path, error_message: str) -> None:
+        nonlocal injected
+        original_require_absent(path, error_message)
+        if path == output and not injected:
+            injected = True
+            raise RuntimeError("primary post-rename identity failure")
+
+    monkeypatch.setattr(generator, "_require_path_absent", _fail_once_after_output_rename)
+
+    with pytest.raises(RuntimeError, match="^primary post-rename identity failure$"):
+        generator._replace_output_directory(staging, output)
+
+    assert injected
+    _assert_fixture_marker(output, "old-output")
+    _assert_fixture_marker(staging, "new-output")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+
+
+def test_output_substitution_after_validation_is_not_replaced(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    validated_output = tmp_path / "validated-output"
+    original_validate = generator._validate_existing_output
+
+    def _substitute_after_validation(path: Path) -> object:
+        identity = original_validate(path)
+        path.replace(validated_output)
+        _write_valid_fixture_set(path, "3" * 40, "substituted-output")
+        return identity
+
+    monkeypatch.setattr(generator, "_validate_existing_output", _substitute_after_validation)
+
+    with pytest.raises(RuntimeError, match="^Fixture output changed during publication$"):
+        generator._replace_output_directory(staging, output)
+
+    _assert_fixture_marker(output, "substituted-output")
+    _assert_fixture_marker(validated_output, "old-output")
+    _assert_fixture_marker(staging, "new-output")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+
+
+def test_output_parent_substitution_after_validation_is_not_modified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publication_parent = tmp_path / "publication"
+    publication_parent.mkdir()
+    output = publication_parent / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    validated_parent = tmp_path / "validated-parent"
+    original_validate = generator._validate_existing_output
+
+    def _substitute_parent_after_validation(path: Path) -> object:
+        identity = original_validate(path)
+        publication_parent.replace(validated_parent)
+        publication_parent.mkdir()
+        _write_valid_fixture_set(output, "3" * 40, "substituted-output")
+        return identity
+
+    monkeypatch.setattr(generator, "_validate_existing_output", _substitute_parent_after_validation)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture output parent changed during publication$",
+    ):
+        generator._replace_output_directory(staging, output)
+
+    _assert_fixture_marker(output, "substituted-output")
+    _assert_fixture_marker(validated_parent / "fixtures", "old-output")
+    _assert_fixture_marker(staging, "new-output")
+    assert not list(publication_parent.glob(".fixtures.backup-*"))
+
+
+def test_backup_substitution_after_output_rename_is_retained(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    validated_backup = tmp_path / "validated-backup"
+    original_replace = Path.replace
+    backup_path: Path | None = None
+
+    def _substitute_backup(path: Path, target: Path) -> Path:
+        nonlocal backup_path
+        result = original_replace(path, target)
+        if path == output:
+            backup_path = target
+            original_replace(target, validated_backup)
+            _write_valid_fixture_set(target, "3" * 40, "substituted-backup")
+        return result
+
+    monkeypatch.setattr(Path, "replace", _substitute_backup)
+
+    with pytest.raises(
+        RuntimeError,
+        match=("^Fixture output rollback could not be completed safely; " "manual recovery is required$"),
+    ):
+        generator._replace_output_directory(staging, output)
+
+    assert backup_path is not None
+    assert not output.exists()
+    _assert_fixture_marker(backup_path, "substituted-backup")
+    _assert_fixture_marker(validated_backup, "old-output")
+    _assert_fixture_marker(staging, "new-output")
+
+
+def test_backup_substitution_before_rollback_is_not_restored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    validated_backup = tmp_path / "validated-backup"
+    original_replace = Path.replace
+    backup_path: Path | None = None
+
+    def _fail_with_substituted_backup(path: Path, target: Path) -> Path:
+        nonlocal backup_path
+        if path == output:
+            backup_path = target
+            return original_replace(path, target)
+        if path == staging:
+            assert backup_path is not None
+            original_replace(backup_path, validated_backup)
+            _write_valid_fixture_set(backup_path, "3" * 40, "substituted-backup")
+            raise OSError("sensitive staging failure")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", _fail_with_substituted_backup)
+
+    with pytest.raises(
+        RuntimeError,
+        match=("^Fixture output rollback could not be completed safely; " "manual recovery is required$"),
+    ) as exc_info:
+        generator._replace_output_directory(staging, output)
+
+    assert backup_path is not None
+    assert not output.exists()
+    _assert_fixture_marker(backup_path, "substituted-backup")
+    _assert_fixture_marker(validated_backup, "old-output")
+    _assert_fixture_marker(staging, "new-output")
+    assert "sensitive" not in str(exc_info.value)
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+def test_backup_substitution_before_cleanup_is_retained_with_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    validated_backup = tmp_path / "validated-backup"
+    original_replace = Path.replace
+    backup_path: Path | None = None
+
+    def _commit_with_substituted_backup(path: Path, target: Path) -> Path:
+        nonlocal backup_path
+        result = original_replace(path, target)
+        if path == output:
+            backup_path = target
+        elif path == staging:
+            assert backup_path is not None
+            original_replace(backup_path, validated_backup)
+            _write_valid_fixture_set(backup_path, "3" * 40, "substituted-backup")
+        return result
+
+    monkeypatch.setattr(Path, "replace", _commit_with_substituted_backup)
+
+    generator._replace_output_directory(staging, output)
+
+    assert backup_path is not None
+    _assert_fixture_marker(output, "new-output")
+    _assert_fixture_marker(backup_path, "substituted-backup")
+    _assert_fixture_marker(validated_backup, "old-output")
+    diagnostic = capsys.readouterr().err
+    assert "fixture output committed; backup cleanup failed" in diagnostic.lower()
+    assert backup_path.name in diagnostic
+    assert str(tmp_path) not in diagnostic
 
 
 def test_backup_cleanup_failure_keeps_committed_output_and_reports_diagnostic(
