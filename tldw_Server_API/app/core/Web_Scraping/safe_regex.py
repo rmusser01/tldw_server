@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import regex
 
@@ -23,6 +23,7 @@ _REGEX_ERRORS = (
     OverflowError,
     RecursionError,
 )
+_RegexDialect = Literal["stdlib", "regex"]
 
 
 class _RegexOutputTooLarge(Exception):
@@ -114,9 +115,16 @@ def _prepare_untrusted_pattern(
     value: str,
     flags: int,
     limits: SafeRegexLimits,
+    dialect: _RegexDialect,
 ) -> tuple[Any, float] | str:
     validated_limits = _validated_limits(limits)
-    if validated_limits is None or not isinstance(pattern, str) or not isinstance(value, str):
+    if (
+        validated_limits is None
+        or not isinstance(pattern, str)
+        or not isinstance(value, str)
+        or not isinstance(dialect, str)
+        or dialect not in {"stdlib", "regex"}
+    ):
         return "regex_invalid"
 
     max_pattern_chars, max_input_chars, timeout_s = validated_limits
@@ -127,10 +135,11 @@ def _prepare_untrusted_pattern(
     if normalized_flags is None:
         return "regex_invalid"
 
-    try:
-        re.compile(pattern, int(flags))
-    except _REGEX_ERRORS:
-        return "regex_invalid"
+    if dialect == "stdlib":
+        try:
+            re.compile(pattern, int(flags))
+        except _REGEX_ERRORS:
+            return "regex_invalid"
 
     try:
         compiled = _compile_pattern(pattern, normalized_flags)
@@ -145,9 +154,10 @@ def search_untrusted(
     *,
     flags: int = 0,
     limits: SafeRegexLimits = SafeRegexLimits(),
+    dialect: _RegexDialect = "stdlib",
 ) -> SafeRegexResult:
     """Search with fixed size and execution bounds, returning stable error codes."""
-    prepared = _prepare_untrusted_pattern(pattern, value, flags, limits)
+    prepared = _prepare_untrusted_pattern(pattern, value, flags, limits, dialect)
     if isinstance(prepared, str):
         return SafeRegexResult(matched=False, code=prepared)
     compiled, timeout_s = prepared
@@ -166,9 +176,16 @@ def _parse_replacement_template(
     pattern: str,
     repl: str,
     flags: int,
+    dialect: _RegexDialect,
 ) -> tuple[int, tuple[int, ...]] | None:
     try:
-        compiled = re.compile(pattern, int(flags))
+        if dialect == "stdlib":
+            compiled = re.compile(pattern, int(flags))
+        else:
+            normalized_flags = _normalize_flags(flags)
+            if normalized_flags is None:
+                return None
+            compiled = regex.compile(pattern, normalized_flags)
     except _REGEX_ERRORS:
         return None
 
@@ -255,6 +272,7 @@ def sub_untrusted(
     flags: int = 0,
     limits: SafeRegexLimits = SafeRegexLimits(),
     max_output_chars: int = _MAX_SUB_OUTPUT_CHARS,
+    dialect: _RegexDialect = "stdlib",
 ) -> SafeRegexSubResult:
     """Substitute globally with fixed execution, input, and output bounds."""
     if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int) or max_output_chars < 0:
@@ -264,11 +282,11 @@ def sub_untrusted(
         return SafeRegexSubResult(code="regex_invalid")
     if len(repl) > _MAX_REPLACEMENT_CHARS:
         return SafeRegexSubResult(code="regex_too_large")
-    prepared = _prepare_untrusted_pattern(pattern, value, flags, limits)
+    prepared = _prepare_untrusted_pattern(pattern, value, flags, limits, dialect)
     if isinstance(prepared, str):
         return SafeRegexSubResult(code=prepared)
     compiled, timeout_s = prepared
-    replacement_template = _parse_replacement_template(pattern, repl, flags)
+    replacement_template = _parse_replacement_template(pattern, repl, flags, dialect)
     if replacement_template is None:
         return SafeRegexSubResult(code="regex_invalid")
     literal_chars, references = replacement_template

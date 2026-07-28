@@ -272,6 +272,50 @@ def test_regex_fields_preserve_groups_and_regex_replace_is_global() -> None:
     assert result["schema_fields"]["slug"] == "bxnxnx"
 
 
+def test_regex_field_uses_regex_dialect_for_variable_length_lookbehind() -> None:
+    result = selectors.extract_schema_fields(
+        "<article><span>AB123</span></article>",
+        "https://example.com/post",
+        {
+            "fields": [
+                {
+                    "name": "identifier",
+                    "type": "regex",
+                    "selector": "//span",
+                    "pattern": r"(?<=\b[A-Z]{1,3})(\d+)",
+                    "group": 1,
+                }
+            ]
+        },
+    )
+
+    assert result["schema_fields"] == {"identifier": "123"}
+
+
+def test_regex_replace_uses_regex_dialect_with_bounded_group_expansion() -> None:
+    result = selectors.extract_schema_fields(
+        "<article><h1>AB123</h1></article>",
+        "https://example.com/post",
+        {
+            "fields": [
+                {
+                    "name": "identifier",
+                    "selector": "//h1",
+                    "transforms": [
+                        {
+                            "name": "regex_replace",
+                            "pattern": r"(?<=\b[A-Z]{1,3})(\d+)",
+                            "repl": r"[\1]",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert result["schema_fields"] == {"identifier": "AB[123]"}
+
+
 def test_invalid_and_oversized_regexes_preserve_existing_fallbacks() -> None:
     result = selectors.extract_schema_fields(
         "<article><h1>Original</h1><span>Value</span></article>",
@@ -515,15 +559,17 @@ def test_safe_computed_templates_preserve_normal_rendering(
     assert result["schema_fields"]["computed"] == expected
 
 
-def test_oversized_computed_template_has_a_stable_complexity_error() -> None:
+def test_injected_computed_template_limit_has_a_stable_complexity_error() -> None:
     code = "selector_too_complex:template_length>4096"
     rules = _computed_rules("x" * 4_097)
 
-    report = selectors.validate_selector_rules(rules)
+    limits = schema._SchemaLimits(max_template_length=4_096)
+    report = selectors.validate_selector_rules(rules, _limits=limits)
     result = selectors.extract_schema_fields(
         "<article><h1>Headline</h1></article>",
         "https://example.com/post",
         rules,
+        _limits=limits,
     )
 
     assert [entry["error"] for entry in report["errors"]] == [code]
@@ -534,7 +580,7 @@ def test_oversized_computed_template_has_a_stable_complexity_error() -> None:
     }
 
 
-def test_oversized_computed_render_has_a_stable_complexity_error() -> None:
+def test_injected_computed_render_limit_has_a_stable_complexity_error() -> None:
     code = "selector_too_complex:rendered_output>1000000"
     title = "x" * 500_001
 
@@ -542,6 +588,7 @@ def test_oversized_computed_render_has_a_stable_complexity_error() -> None:
         f"<article><h1>{title}</h1></article>",
         "https://example.com/post",
         _computed_rules("{title}{title}"),
+        _limits=schema._SchemaLimits(max_rendered_output_chars=1_000_000),
     )
 
     assert result == {
@@ -567,12 +614,12 @@ def _nested_rules(depth: int) -> dict[str, Any]:
     [
         (
             _nested_rules(33),
-            None,
+            {"max_depth": 32},
             "selector_too_complex:schema_depth>32",
         ),
         (
             {"fields": [{"name": f"field_{index}", "value": "x"} for index in range(257)]},
-            None,
+            {"max_total_fields": 256},
             "selector_too_complex:schema_fields>256",
         ),
         (
@@ -588,7 +635,7 @@ def test_schema_structure_and_evaluation_budgets_are_shared(
     limits: Any,
     code: str,
 ) -> None:
-    kwargs = {"_limits": schema._SchemaLimits(**limits)} if limits is not None else {}
+    kwargs = {"_limits": schema._SchemaLimits(**limits)}
 
     report = selectors.validate_selector_rules(
         rules,
@@ -614,11 +661,13 @@ def test_five_hundred_nested_fields_fail_before_python_recursion() -> None:
     code = "selector_too_complex:schema_depth>32"
     rules = _nested_rules(500)
 
-    report = selectors.validate_selector_rules(rules)
+    limits = schema._SchemaLimits(max_depth=32)
+    report = selectors.validate_selector_rules(rules, _limits=limits)
     result = selectors.extract_schema_fields(
         "<article><h1>Headline</h1></article>",
         "https://example.com/post",
         rules,
+        _limits=limits,
     )
 
     assert [entry["error"] for entry in report["errors"]] == [code]
@@ -971,7 +1020,7 @@ def test_table_shaped_compatibility_projection_is_charged_separately() -> None:
 
 
 @pytest.mark.parametrize("case", ["exact", "one-over"])
-def test_default_projection_budget_without_large_dom(
+def test_injected_projection_budget_without_large_dom(
     monkeypatch: pytest.MonkeyPatch,
     case: str,
 ) -> None:
@@ -984,6 +1033,7 @@ def test_default_projection_budget_without_large_dom(
         html_text,
         "https://example.com/post",
         {"fields": [{"name": "content", "type": "list", "selector": "//li"}]},
+        _limits=schema._SchemaLimits(max_retained_output_chars=1_000_000),
     )
 
     if case == "exact":
@@ -1081,19 +1131,111 @@ def test_fallback_validation_matches_extraction_evaluation_path(
         assert result["title"] == expected_title
 
 
-def test_schema_limit_defaults_are_explicit_and_conservative() -> None:
+def test_schema_limit_defaults_are_explicit_and_behavior_preserving() -> None:
     assert (
         schema._SchemaLimits(
-            max_depth=32,
-            max_total_fields=256,
-            max_selector_evaluations=512,
-            max_aggregate_matches=10_000,
-            max_retained_output_chars=1_000_000,
-            max_template_length=4_096,
-            max_rendered_output_chars=1_000_000,
+            max_depth=None,
+            max_total_fields=None,
+            max_selector_evaluations=None,
+            max_aggregate_matches=None,
+            max_retained_output_chars=None,
+            max_template_length=None,
+            max_rendered_output_chars=None,
         )
         == schema._DEFAULT_SCHEMA_LIMITS
     )
+
+
+def test_default_limits_preserve_depth_33_and_257_fields() -> None:
+    depth_rules = _nested_rules(33)
+    field_rules = {"fields": [{"name": f"field_{index}", "type": "computed", "value": "x"} for index in range(257)]}
+
+    depth_report = selectors.validate_selector_rules(depth_rules)
+    depth_result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        depth_rules,
+    )
+    field_report = selectors.validate_selector_rules(field_rules)
+    field_result = selectors.extract_schema_fields(
+        "<article></article>",
+        "https://example.com/post",
+        field_rules,
+    )
+
+    nested_value = depth_result["schema_fields"]
+    for _index in range(32):
+        nested_value = next(iter(nested_value.values()))
+    assert nested_value == {"leaf": "Headline"}
+    assert depth_report["errors"] == []
+    assert field_report["errors"] == []
+    assert len(field_result["schema_fields"]) == 257
+
+
+def test_default_limits_preserve_more_than_512_selector_evaluations() -> None:
+    rules = {"fields": [{"name": f"field_{index}", "selector": "//h1"} for index in range(513)]}
+    html_text = "<article><h1>Headline</h1></article>"
+
+    report = selectors.validate_selector_rules(rules, html_text=html_text)
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        rules,
+    )
+
+    assert report["errors"] == []
+    assert len(result["schema_fields"]) == 513
+
+
+def test_default_limits_preserve_more_than_10000_aggregate_matches() -> None:
+    match_count = 10_001
+    html_text = "<ul>" + ("<li>x</li>" * match_count) + "</ul>"
+
+    result = selectors.extract_schema_fields(
+        html_text,
+        "https://example.com/post",
+        {"fields": [{"name": "items", "type": "list", "selector": "//li"}]},
+    )
+
+    assert len(result["schema_fields"]["items"]) == match_count
+
+
+def test_default_limits_preserve_more_than_one_million_retained_chars() -> None:
+    value = "x" * 1_000_001
+
+    result = selectors.extract_schema_fields(
+        f"<article><h1>{value}</h1></article>",
+        "https://example.com/post",
+        {"fields": [{"name": "value", "selector": "//h1"}]},
+    )
+
+    assert result["schema_fields"]["value"] == value
+
+
+def test_default_limits_preserve_more_than_one_million_rendered_chars() -> None:
+    value = "x" * 500_001
+
+    result = selectors.extract_schema_fields(
+        f"<article><h1>{value}</h1></article>",
+        "https://example.com/post",
+        _computed_rules("{title}{title}"),
+    )
+
+    assert result["schema_fields"]["computed"] == value + value
+
+
+def test_default_limits_preserve_templates_longer_than_4096_chars() -> None:
+    template = "x" * 4_097
+
+    report = selectors.validate_selector_rules(_computed_rules(template))
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        _computed_rules(template),
+    )
+
+    assert report["errors"] == []
+    assert result["schema_fields"]["computed"] == template
 
 
 def test_validation_and_extraction_share_first_output_failure() -> None:
@@ -1825,30 +1967,34 @@ def _alternate_rules(depth: int) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("depth", [33, 1_500])
-def test_deep_alternates_return_stable_schema_depth_error(depth: int) -> None:
+def test_injected_depth_limit_handles_deep_alternates_iteratively(depth: int) -> None:
     rules = _alternate_rules(depth)
     code = "selector_too_complex:schema_depth>32"
+    limits = schema._SchemaLimits(max_depth=32)
 
-    report = selectors.validate_selector_rules(rules)
+    report = selectors.validate_selector_rules(rules, _limits=limits)
     result = selectors.extract_schema_fields(
         "<article><h1>Headline</h1></article>",
         "https://example.com/post",
         rules,
+        _limits=limits,
     )
 
     assert [entry["error"] for entry in report["errors"]] == [code]
     assert result["error"] == code
 
 
-def test_wide_alternates_share_schema_field_limit() -> None:
+def test_wide_alternates_share_injected_schema_field_limit() -> None:
     rules = {"alternates": [{"title_xpath": "//h1"} for _index in range(257)]}
     code = "selector_too_complex:schema_fields>256"
+    limits = schema._SchemaLimits(max_total_fields=256)
 
-    report = selectors.validate_selector_rules(rules)
+    report = selectors.validate_selector_rules(rules, _limits=limits)
     result = selectors.extract_schema_fields(
         "<article><h1>Headline</h1></article>",
         "https://example.com/post",
         rules,
+        _limits=limits,
     )
 
     assert [entry["error"] for entry in report["errors"]] == [code]

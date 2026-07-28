@@ -45,13 +45,13 @@ _SCHEMA_NONCRITICAL_EXCEPTIONS = (
 
 @dataclass(frozen=True, slots=True)
 class _SchemaLimits:
-    max_depth: int = 32
-    max_total_fields: int = 256
-    max_selector_evaluations: int = 512
-    max_aggregate_matches: int = 10_000
-    max_retained_output_chars: int = 1_000_000
-    max_template_length: int = 4_096
-    max_rendered_output_chars: int = 1_000_000
+    max_depth: int | None = None
+    max_total_fields: int | None = None
+    max_selector_evaluations: int | None = None
+    max_aggregate_matches: int | None = None
+    max_retained_output_chars: int | None = None
+    max_template_length: int | None = None
+    max_rendered_output_chars: int | None = None
 
 
 _DEFAULT_SCHEMA_LIMITS = _SchemaLimits()
@@ -173,34 +173,37 @@ class _SchemaBudget:
 
     def begin_selection(self) -> None:
         self.selector_evaluations += 1
-        if self.selector_evaluations > self.limits.max_selector_evaluations:
-            raise _SchemaBudgetExceeded(
-                "selector_too_complex:selector_evaluations>" f"{self.limits.max_selector_evaluations}"
-            )
+        limit = self.limits.max_selector_evaluations
+        if limit is not None and self.selector_evaluations > limit:
+            raise _SchemaBudgetExceeded("selector_too_complex:selector_evaluations>" f"{limit}")
 
     def retain_matches(self, count: int) -> None:
         self.aggregate_matches += max(0, count)
-        if self.aggregate_matches > self.limits.max_aggregate_matches:
-            raise _SchemaBudgetExceeded("selector_too_complex:selector_matches>" f"{self.limits.max_aggregate_matches}")
+        limit = self.limits.max_aggregate_matches
+        if limit is not None and self.aggregate_matches > limit:
+            raise _SchemaBudgetExceeded("selector_too_complex:selector_matches>" f"{limit}")
 
-    def remaining_match_capacity(self) -> int:
-        return max(0, self.limits.max_aggregate_matches - self.aggregate_matches)
+    def remaining_match_capacity(self) -> int | None:
+        limit = self.limits.max_aggregate_matches
+        return None if limit is None else max(0, limit - self.aggregate_matches)
 
     def remaining_output_chars(self, slot: tuple[Any, ...] | None = None) -> int | None:
-        if not self.enforce_output:
+        limit = self.limits.max_retained_output_chars
+        if not self.enforce_output or limit is None:
             return None
         replaced = self._indexed_subtree_chars(slot) if slot is not None else 0
-        return self.limits.max_retained_output_chars - self.retained_output_chars + replaced
+        return limit - self.retained_output_chars + replaced
 
     def retain_output(self, value: Any, *, slot: tuple[Any, ...] | None = None) -> None:
-        if not self.enforce_output:
+        limit = self.limits.max_retained_output_chars
+        if not self.enforce_output or limit is None:
             return
         available = self.remaining_output_chars(slot)
         added = _output_chars(value, stop_after=available)
         if available is not None and added > available:
             raise _schema_limit_error(
                 "retained_output_chars",
-                self.limits.max_retained_output_chars,
+                limit,
             )
         if slot is not None:
             self.take_output_prefix(slot)
@@ -264,12 +267,13 @@ class _SchemaBudget:
         self.retained_output_chars += sum(snapshot.values())
 
     def ensure_output_chars(self, added: int) -> None:
-        if not self.enforce_output:
+        limit = self.limits.max_retained_output_chars
+        if not self.enforce_output or limit is None:
             return
-        if self.retained_output_chars + added > self.limits.max_retained_output_chars:
+        if self.retained_output_chars + added > limit:
             raise _schema_limit_error(
                 "retained_output_chars",
-                self.limits.max_retained_output_chars,
+                limit,
             )
 
     def observe_selection(
@@ -515,9 +519,9 @@ def _preflight_schema_fields(
                 stack.pop()
                 continue
 
-            if depth > limits.max_depth:
+            if limits.max_depth is not None and depth > limits.max_depth:
                 raise _schema_limit_error("schema_depth", limits.max_depth)
-            if len(records) >= limits.max_total_fields:
+            if limits.max_total_fields is not None and len(records) >= limits.max_total_fields:
                 raise _schema_limit_error("schema_fields", limits.max_total_fields)
 
             name = str(field.get("name") or "").strip()
@@ -618,7 +622,13 @@ def _apply_single_transform(
             return value
         replacement = str(params.get("repl", ""))
         kwargs = {"max_output_chars": max_rendered_output_chars} if max_rendered_output_chars is not None else {}
-        result = sub_untrusted(pattern, replacement, value, **kwargs)
+        result = sub_untrusted(
+            pattern,
+            replacement,
+            value,
+            dialect="regex",
+            **kwargs,
+        )
         if (
             result.code == "regex_too_large"
             and max_rendered_output_chars is not None
@@ -725,7 +735,7 @@ def _parse_computed_template(
     template: str,
     limits: _SchemaLimits,
 ) -> tuple[list[tuple[str, str | None, str | None, str | None]] | None, str | None]:
-    if len(template) > limits.max_template_length:
+    if limits.max_template_length is not None and len(template) > limits.max_template_length:
         return None, (f"selector_too_complex:template_length>{limits.max_template_length}")
     try:
         parsed = list(_TEMPLATE_FORMATTER.parse(template))
@@ -886,11 +896,12 @@ def _select_nodes_with_budget_status(
     observation_spec: dict[str, Any] | None = None,
 ) -> tuple[list[Any], bool]:
     budget.begin_selection()
+    remaining_match_capacity = budget.remaining_match_capacity()
     matches, failed = _select_nodes_with_status(
         node,
         selector,
         context_sensitive=context_sensitive,
-        max_results=budget.remaining_match_capacity() + 1,
+        max_results=None if remaining_match_capacity is None else remaining_match_capacity + 1,
     )
     budget.retain_matches(len(matches))
     budget.observe_selection(observation_spec, matches, failed)
@@ -968,7 +979,7 @@ def _extract_regex_from_text(text: str, field: dict[str, Any]) -> str | None:
     if not isinstance(pattern, str) or not text:
         return None
     flags = re.IGNORECASE if field.get("ignore_case") is True else 0
-    result = search_untrusted(pattern, text, flags=flags)
+    result = search_untrusted(pattern, text, flags=flags, dialect="regex")
     if not result.matched or result.match is None:
         return None
     group = field.get("group")
@@ -1423,7 +1434,7 @@ def _preflight_rule_selectors(
     stack: list[tuple[dict[str, Any], str, int]] = [(rules, "", 0)]
     while stack:
         current, prefix, depth = stack.pop()
-        if depth > limits.max_depth:
+        if limits.max_depth is not None and depth > limits.max_depth:
             raise _schema_limit_error("schema_depth", limits.max_depth)
         for key in _SCHEMA_SELECTOR_KEYS:
             for expr in ensure_sequence(current.get(key)):
@@ -1441,7 +1452,7 @@ def _preflight_rule_selectors(
             if not isinstance(alternate, dict):
                 continue
             total_fields += 1
-            if total_fields > limits.max_total_fields:
+            if limits.max_total_fields is not None and total_fields > limits.max_total_fields:
                 raise _schema_limit_error("schema_fields", limits.max_total_fields)
             children.append(
                 (

@@ -399,6 +399,19 @@ def test_valid_no_match_has_no_failure_code() -> None:
     assert result == SafeRegexResult(matched=False)
 
 
+def test_regex_dialect_accepts_variable_length_lookbehind_while_default_rejects_it() -> None:
+    pattern = r"(?<=\b[A-Z]{1,3})(\d+)"
+
+    default_result = search_untrusted(pattern, "AB123")
+    regex_result = search_untrusted(pattern, "AB123", dialect="regex")
+
+    assert default_result == SafeRegexResult(matched=False, code="regex_invalid")
+    assert regex_result.matched is True
+    assert regex_result.code is None
+    assert regex_result.match is not None
+    assert regex_result.match.group(1) == "123"
+
+
 def test_sub_untrusted_preserves_global_group_replacement_semantics() -> None:
     result = sub_untrusted(
         r"(\w+),\s*(\w+)",
@@ -407,6 +420,17 @@ def test_sub_untrusted_preserves_global_group_replacement_semantics() -> None:
     )
 
     assert result == SafeRegexSubResult(value="Ada Lovelace; Grace Hopper")
+
+
+def test_regex_dialect_substitution_preserves_group_replacement_semantics() -> None:
+    result = sub_untrusted(
+        r"(?<=\b[A-Z]{1,3})(\d+)",
+        r"[\1]",
+        "AB123 CD4567",
+        dialect="regex",
+    )
+
+    assert result == SafeRegexSubResult(value="AB[123] CD[4567]")
 
 
 @pytest.mark.parametrize(
@@ -487,6 +511,44 @@ def test_sub_untrusted_uses_search_limits_and_stdlib_dialect(
     result = sub_untrusted(pattern, "replacement", value)
 
     assert result == SafeRegexSubResult(code=expected_code)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "value", "expected_code"),
+    [
+        ("a" * 4_097, "sample", "regex_too_large"),
+        ("a", "x" * 8_193, "regex_too_large"),
+        ("[", "sample", "regex_invalid"),
+    ],
+    ids=["pattern-size", "input-size", "invalid-syntax"],
+)
+def test_regex_dialect_preserves_size_and_sanitization_codes(
+    pattern: str,
+    value: str,
+    expected_code: str,
+) -> None:
+    result = search_untrusted(pattern, value, dialect="regex")
+
+    assert result == SafeRegexResult(matched=False, code=expected_code)
+
+
+def test_regex_dialect_preserves_timeout_bound_and_sanitization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compiled, _observed = _install_fake_compile(
+        monkeypatch,
+        error=TimeoutError("private regex dialect detail"),
+    )
+
+    result = search_untrusted(
+        r"(?<=\b[A-Z]{1,3})(\d+)",
+        "AB123",
+        dialect="regex",
+        limits=SafeRegexLimits(timeout_s=0.025),
+    )
+
+    assert compiled.calls == [("AB123", 0.025)]
+    assert result == SafeRegexResult(matched=False, code="regex_timeout")
 
 
 def test_sub_untrusted_passes_the_bounded_timeout_and_sanitizes_timeout(
@@ -583,8 +645,8 @@ def test_router_validation_discards_rule_when_all_configured_patterns_are_reject
     assert ScraperRouter(cleaned).resolve("https://example.com/article").backend == "auto"
 
 
-def test_router_validation_discards_rule_when_pattern_cap_prevents_a_survivor() -> None:
-    patterns = ["["] * scraper_router_module._MAX_URL_PATTERNS + [r"/article$"]
+def test_router_validation_checks_survivor_after_32_invalid_patterns() -> None:
+    patterns = ["["] * 32 + [r"/article$"]
 
     cleaned = ScraperRouter.validate_rules(
         {
@@ -597,10 +659,10 @@ def test_router_validation_discards_rule_when_pattern_cap_prevents_a_survivor() 
         }
     )
 
-    assert "example.com" not in cleaned["domains"]
+    assert cleaned["domains"]["example.com"]["url_patterns"] == [r"/article$"]
 
 
-def test_router_validation_discards_rule_when_budget_expires_before_a_survivor(
+def test_router_validation_checks_survivor_after_prior_pattern_search_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_router_budget_fakes(
@@ -620,8 +682,8 @@ def test_router_validation_discards_rule_when_budget_expires_before_a_survivor(
         }
     )
 
-    assert "example.com" not in cleaned["domains"]
-    assert [pattern for pattern, _timeout in calls] == ["rejected"]
+    assert cleaned["domains"]["example.com"]["url_patterns"] == ["survivor"]
+    assert calls == [("rejected", 0.100), ("survivor", 0.100)]
 
 
 def test_router_validation_preserves_explicit_empty_pattern_constraint() -> None:
@@ -671,7 +733,7 @@ def test_router_validation_discards_rule_with_non_list_pattern_constraint() -> N
     assert "example.com" not in cleaned["domains"]
 
 
-def test_router_validation_caps_configured_pattern_count(
+def test_router_validation_checks_every_configured_pattern(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_router_budget_fakes(monkeypatch, elapsed_per_search=0.0)
@@ -679,12 +741,11 @@ def test_router_validation_caps_configured_pattern_count(
 
     cleaned = ScraperRouter.validate_rules({"domains": {"example.com": {"url_patterns": patterns}}})
 
-    assert scraper_router_module._MAX_URL_PATTERNS == 32
-    assert cleaned["domains"]["example.com"]["url_patterns"] == patterns[:32]
-    assert [pattern for pattern, _timeout in calls] == patterns[:32]
+    assert cleaned["domains"]["example.com"]["url_patterns"] == patterns
+    assert [pattern for pattern, _timeout in calls] == patterns
 
 
-def test_router_validation_uses_one_shared_pattern_deadline(
+def test_router_validation_preserves_per_pattern_timeout_bounds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_router_budget_fakes(monkeypatch, elapsed_per_search=0.040)
@@ -692,9 +753,9 @@ def test_router_validation_uses_one_shared_pattern_deadline(
 
     cleaned = ScraperRouter.validate_rules({"domains": {"example.com": {"url_patterns": patterns}}})
 
-    assert cleaned["domains"]["example.com"]["url_patterns"] == patterns[:3]
-    assert [pattern for pattern, _timeout in calls] == patterns[:3]
-    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100, 0.060, 0.020])
+    assert cleaned["domains"]["example.com"]["url_patterns"] == patterns
+    assert [pattern for pattern, _timeout in calls] == patterns
+    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100] * 10)
 
 
 def test_router_validation_drops_legacy_incompatible_patterns() -> None:
@@ -709,6 +770,22 @@ def test_router_validation_drops_legacy_incompatible_patterns() -> None:
     )
 
     assert cleaned["domains"]["example.com"]["url_patterns"] == [r"/valid$"]
+
+
+def test_router_keeps_the_default_stdlib_dialect_for_variable_length_lookbehind() -> None:
+    pattern = r"(?<=https?://)example\.com"
+    cleaned = ScraperRouter.validate_rules(
+        {
+            "domains": {
+                "example.com": {
+                    "backend": "curl",
+                    "url_patterns": [pattern],
+                }
+            }
+        }
+    )
+
+    assert "example.com" not in cleaned["domains"]
 
 
 def test_router_validation_drops_recursive_pattern_without_raising() -> None:
@@ -760,7 +837,7 @@ def test_directly_constructed_router_recursive_pattern_fails_open() -> None:
     assert plan.backend == "auto"
 
 
-def test_direct_router_caps_pattern_count_before_late_match(
+def test_direct_router_applies_late_match_after_32_patterns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_router_budget_fakes(
@@ -783,11 +860,11 @@ def test_direct_router_caps_pattern_count_before_late_match(
 
     plan = router.resolve("https://example.com/article")
 
-    assert plan.backend == "auto"
-    assert [pattern for pattern, _timeout in calls] == patterns[:32]
+    assert plan.backend == "curl"
+    assert [pattern for pattern, _timeout in calls] == patterns
 
 
-def test_direct_router_uses_one_shared_pattern_deadline(
+def test_direct_router_preserves_per_pattern_timeout_bounds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_router_budget_fakes(monkeypatch, elapsed_per_search=0.040)
@@ -806,11 +883,11 @@ def test_direct_router_uses_one_shared_pattern_deadline(
     plan = router.resolve("https://example.com/article")
 
     assert plan.backend == "auto"
-    assert [pattern for pattern, _timeout in calls] == patterns[:3]
-    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100, 0.060, 0.020])
+    assert [pattern for pattern, _timeout in calls] == patterns
+    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100] * 10)
 
 
-def test_direct_router_applies_match_before_shared_deadline_expires(
+def test_direct_router_stops_after_match_with_per_pattern_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_router_budget_fakes(
@@ -833,7 +910,7 @@ def test_direct_router_applies_match_before_shared_deadline_expires(
 
     assert plan.backend == "curl"
     assert [pattern for pattern, _timeout in calls] == ["no-match", "match-now"]
-    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100, 0.060])
+    assert [timeout for _pattern, timeout in calls] == pytest.approx([0.100, 0.100])
 
 
 def test_direct_router_legacy_incompatible_patterns_fail_open() -> None:
@@ -941,6 +1018,20 @@ def test_generated_regex_invalid_pattern_uses_stable_code(
     _install_regex_llm_response(monkeypatch, {"pattern": "["})
 
     result = _generate_regex("sample")
+
+    assert result["success"] is False
+    assert result["error"] == "regex_invalid"
+
+
+def test_generated_regex_keeps_the_default_stdlib_dialect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_regex_llm_response(
+        monkeypatch,
+        {"pattern": r"(?<=\b[A-Z]{1,3})(\d+)", "group": 1},
+    )
+
+    result = _generate_regex("AB123")
 
     assert result["success"] is False
     assert result["error"] == "regex_invalid"
