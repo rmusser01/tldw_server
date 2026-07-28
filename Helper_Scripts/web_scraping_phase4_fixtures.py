@@ -730,6 +730,7 @@ def _replace_output_directory(
                 backup,
                 "Fixture output backup changed during publication",
             )
+            _require_path_identity(staging, staging_identity, staging_error)
             rename_started = True
             output.replace(backup)
             _require_path_identity(

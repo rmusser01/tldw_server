@@ -2150,6 +2150,71 @@ def test_swap_failure_restores_old_output_and_propagates(
     assert not list(tmp_path.glob(".fixtures.backup-*"))
 
 
+def test_staging_substitution_during_output_inspection_does_not_rename_old_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "fixtures"
+    old_marker = "old-output"
+    _write_valid_fixture_set(output, "1" * 40, old_marker)
+    before_output = _snapshot_path(output)
+    staging = tmp_path / "staging"
+    safe_marker = "validated-staging"
+    substitute_marker = "substituted-staging"
+    _write_valid_fixture_set(staging, "2" * 40, safe_marker)
+    parent_identity = generator._path_identity(output.parent, "identity failure")
+    staging_identity = generator._path_identity(staging, "identity failure")
+    validated_staging = tmp_path / "validated-staging"
+    original_validate = generator._validate_existing_output
+    original_replace = Path.replace
+    output_rename_targets: list[Path] = []
+
+    def _substitute_during_output_inspection(
+        path: Path,
+    ) -> tuple[int, int, int] | None:
+        identity = original_validate(path)
+        original_replace(staging, validated_staging)
+        _write_valid_fixture_set(staging, "3" * 40, substitute_marker)
+        return identity
+
+    def _record_output_rename(path: Path, target: Path) -> Path:
+        if path == output:
+            output_rename_targets.append(target)
+        return original_replace(path, target)
+
+    monkeypatch.setattr(
+        generator,
+        "_validate_existing_output",
+        _substitute_during_output_inspection,
+    )
+    monkeypatch.setattr(Path, "replace", _record_output_rename)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture staging directory changed during publication$",
+    ) as exc_info:
+        generator._replace_output_directory(
+            staging,
+            output,
+            expected_parent_identity=parent_identity,
+            expected_staging_identity=staging_identity,
+        )
+
+    assert output_rename_targets == []
+    assert _snapshot_path(output) == before_output
+    _assert_fixture_marker(output, old_marker)
+    _assert_fixture_marker(validated_staging, safe_marker)
+    _assert_fixture_marker(staging, substitute_marker)
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    diagnostic = str(exc_info.value)
+    assert str(tmp_path) not in diagnostic
+    assert old_marker not in diagnostic
+    assert safe_marker not in diagnostic
+    assert substitute_marker not in diagnostic
+    assert capsys.readouterr().err == ""
+
+
 def test_post_rename_identity_check_failure_restores_old_output_and_propagates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
