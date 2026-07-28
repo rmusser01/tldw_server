@@ -485,7 +485,7 @@ def _close_descriptor_quietly(descriptor: int | None) -> None:
         return
     try:
         os.close(descriptor)
-    except OSError:
+    except BaseException:  # noqa: BLE001 - cleanup must not replace an active failure
         pass
 
 
@@ -639,6 +639,9 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
     except OSError:
         _close_descriptor_quietly(lock_descriptor)
         raise RuntimeError("Fixture publication lock root could not be closed") from None
+    except BaseException:
+        _close_descriptor_quietly(lock_descriptor)
+        raise
     return lock_descriptor
 
 
@@ -690,13 +693,11 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
         _close_descriptor_quietly(descriptor)
         raise
 
-    body_error_active = False
     try:
         _acquire_file_lock(lock_file)
         try:
             yield
         except BaseException:
-            body_error_active = True
             try:
                 _release_file_lock(lock_file)
             except BaseException:  # noqa: BLE001 - preserve the exact body exception
@@ -708,16 +709,10 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
             except OSError:
                 raise RuntimeError("Fixture publication lock could not be released") from None
     except BaseException:
-        if body_error_active:
-            try:
-                lock_file.close()
-            except BaseException:  # noqa: BLE001 - preserve the exact body exception
-                pass
-        else:
-            try:
-                lock_file.close()
-            except OSError:
-                pass
+        try:
+            lock_file.close()
+        except BaseException:  # noqa: BLE001 - preserve the active lock failure
+            pass
         raise
     else:
         try:
