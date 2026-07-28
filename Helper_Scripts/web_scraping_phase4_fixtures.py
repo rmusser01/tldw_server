@@ -695,6 +695,7 @@ def _replace_output_directory(
     output: Path,
     *,
     expected_parent_identity: tuple[int, int, int] | None = None,
+    expected_staging_identity: tuple[int, int, int] | None = None,
 ) -> None:
     """Atomically publish with best-effort identity checks around destructive operations."""
     _validate_fixture_set(staging, predecessor_commit=None)
@@ -704,10 +705,12 @@ def _replace_output_directory(
     else:
         parent_identity = expected_parent_identity
         _require_path_identity(output.parent, parent_identity, publication_error)
-    staging_identity = _path_identity(
-        staging,
-        "Fixture staging directory changed during publication",
-    )
+    staging_error = "Fixture staging directory changed during publication"
+    if expected_staging_identity is None:
+        staging_identity = _path_identity(staging, staging_error)
+    else:
+        staging_identity = expected_staging_identity
+        _require_path_identity(staging, staging_identity, staging_error)
     output_identity = _validate_existing_output(output)
     backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}") if output_identity is not None else None
     rename_started = False
@@ -877,6 +880,7 @@ def generate_fixtures(
                 staging,
                 output,
                 expected_parent_identity=staging_parent_identity,
+                expected_staging_identity=staging_identity,
             )
         except BaseException:
             cleanup_failed = False

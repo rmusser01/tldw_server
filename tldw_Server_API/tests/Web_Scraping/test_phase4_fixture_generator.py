@@ -1697,6 +1697,74 @@ def test_parent_substitution_before_publication_does_not_publish_fixtures(
     assert retained_staging[0].name not in diagnostic
 
 
+def test_staging_substitution_before_publication_is_not_published(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    safe_marker = "validated-original"
+    substitute_marker = "untrusted-substitute"
+    substitute_commit = "f" * 40
+    monkeypatch.setattr(
+        generator,
+        "build_case_payloads",
+        lambda _source_root: _fixture_payloads(safe_marker),
+    )
+    replace_output_directory = generator._replace_output_directory
+    validated_original = tmp_path / "validated-original-staging"
+    substituted_staging: Path | None = None
+
+    def _substitute_staging_before_publication(
+        staging: Path,
+        target: Path,
+        **kwargs: Any,
+    ) -> None:
+        nonlocal substituted_staging
+        staging.replace(validated_original)
+        _write_valid_fixture_set(staging, substitute_commit, substitute_marker)
+        substituted_staging = staging
+        replace_output_directory(staging, target, **kwargs)
+
+    monkeypatch.setattr(
+        generator,
+        "_replace_output_directory",
+        _substitute_staging_before_publication,
+    )
+
+    publication_error: RuntimeError | None = None
+    try:
+        generator.generate_fixtures(
+            source_commit,
+            output,
+            source_root=source_root,
+        )
+    except RuntimeError as exc:
+        publication_error = exc
+
+    assert substituted_staging is not None
+    assert not output.exists()
+    assert publication_error is not None
+    assert str(publication_error) == "Fixture staging directory changed during publication"
+    assert str(tmp_path) not in str(publication_error)
+    _assert_fixture_marker(validated_original, safe_marker)
+    _assert_fixture_marker(substituted_staging, substitute_marker)
+    original_manifest = json.loads((validated_original / "manifest.json").read_text(encoding="ascii"))
+    substitute_manifest = json.loads((substituted_staging / "manifest.json").read_text(encoding="ascii"))
+    assert original_manifest["predecessor_commit"] == source_commit
+    assert substitute_manifest["predecessor_commit"] == substitute_commit
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    diagnostic = capsys.readouterr().err
+    assert diagnostic == "warning: fixture staging directory retained for manual cleanup\n"
+    assert str(tmp_path) not in diagnostic
+    assert validated_original.name not in diagnostic
+    assert substituted_staging.name not in diagnostic
+    assert safe_marker not in diagnostic
+    assert substitute_marker not in diagnostic
+
+
 def test_staging_identity_failure_retains_staging_with_fixed_diagnostic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1787,8 +1855,9 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
         _output: Path,
         *,
         expected_parent_identity: tuple[int, int, int] | None = None,
+        expected_staging_identity: tuple[int, int, int] | None = None,
     ) -> None:
-        del expected_parent_identity
+        del expected_parent_identity, expected_staging_identity
         raise primary_error
 
     def _fail_staging_cleanup(path: Path) -> None:
@@ -1869,11 +1938,13 @@ def test_recreated_staging_path_is_retained_after_atomic_publication(
         target: Path,
         *,
         expected_parent_identity: tuple[int, int, int] | None = None,
+        expected_staging_identity: tuple[int, int, int] | None = None,
     ) -> None:
         replace_output_directory(
             staging,
             target,
             expected_parent_identity=expected_parent_identity,
+            expected_staging_identity=expected_staging_identity,
         )
         staging.mkdir()
         (staging / "replacement.txt").write_text(replacement_marker, encoding="utf-8")
@@ -1936,8 +2007,9 @@ def test_original_staging_cleanup_oserror_is_sanitized(
         _target: Path,
         *,
         expected_parent_identity: tuple[int, int, int] | None = None,
+        expected_staging_identity: tuple[int, int, int] | None = None,
     ) -> None:
-        del expected_parent_identity
+        del expected_parent_identity, expected_staging_identity
         staging_paths.append(staging)
 
     def _fail_staging_cleanup(path: Path) -> None:
@@ -1971,10 +2043,13 @@ def test_original_staging_cleanup_oserror_is_sanitized(
     _assert_fixture_marker(staging_paths[0], "unpublished")
 
 
-@pytest.mark.parametrize("parent_state", ["missing", "mismatched-identity"])
-def test_malformed_staging_validation_precedes_parent_identity_checks(
+@pytest.mark.parametrize(
+    "identity_state",
+    ["missing-parent", "mismatched-parent", "mismatched-staging"],
+)
+def test_malformed_staging_validation_precedes_identity_checks(
     tmp_path: Path,
-    parent_state: str,
+    identity_state: str,
 ) -> None:
     staging = tmp_path / "staging"
     _write_valid_fixture_set(staging, "1" * 40, "staged")
@@ -1982,15 +2057,19 @@ def test_malformed_staging_validation_precedes_parent_identity_checks(
     before_staging = _snapshot_path(staging)
 
     replace_kwargs: dict[str, tuple[int, int, int]] = {}
-    if parent_state == "missing":
+    if identity_state == "missing-parent":
         output = tmp_path / "missing-parent" / "fixtures"
     else:
         output = tmp_path / "fixtures"
-        parent_identity = generator._path_identity(output.parent, "identity failure")
-        replace_kwargs["expected_parent_identity"] = (
-            parent_identity[0],
-            parent_identity[1],
-            parent_identity[2] + 1,
+        identity_path = output.parent if identity_state == "mismatched-parent" else staging
+        path_identity = generator._path_identity(identity_path, "identity failure")
+        identity_key = (
+            "expected_parent_identity" if identity_state == "mismatched-parent" else "expected_staging_identity"
+        )
+        replace_kwargs[identity_key] = (
+            path_identity[0],
+            path_identity[1],
+            path_identity[2] + 1,
         )
 
     with pytest.raises(
@@ -2001,7 +2080,7 @@ def test_malformed_staging_validation_precedes_parent_identity_checks(
 
     assert _snapshot_path(staging) == before_staging
     assert not output.exists()
-    if parent_state == "missing":
+    if identity_state == "missing-parent":
         assert not output.parent.exists()
     assert str(tmp_path) not in str(exc_info.value)
     assert "sensitive" not in str(exc_info.value)
