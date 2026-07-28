@@ -191,6 +191,65 @@ def test_output_at_source_or_ancestor_is_rejected_before_payload_build(
     assert _run_git(source_root, "status", "--porcelain=v1", "--untracked-files=all") == before_status
 
 
+@pytest.mark.parametrize(
+    "symlink_state",
+    ["broken-final", "broken-component", "self-loop"],
+)
+def test_unresolvable_output_symlink_is_rejected_before_payload_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    symlink_state: str,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output_link = tmp_path / "output-link"
+    if symlink_state == "self-loop":
+        output_link.symlink_to(output_link, target_is_directory=True)
+    else:
+        output_link.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+    output = output_link / "fixtures" if symlink_state == "broken-component" else output_link
+    original_link_target = os.readlink(output_link)
+    payload_calls = 0
+
+    def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
+        nonlocal payload_calls
+        payload_calls += 1
+        return _fixture_payloads("must-not-build")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _record_payload_build)
+
+    with pytest.raises(ValueError, match="^output path could not be resolved$") as exc_info:
+        generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    assert payload_calls == 0
+    assert output_link.is_symlink()
+    assert os.readlink(output_link) == original_link_target
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+def test_output_resolution_preserves_parent_traversal_after_valid_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, _source_commit = _create_clean_source_root(tmp_path)
+    source_child = source_root / "child"
+    source_child.mkdir()
+    (source_child / "tracked.txt").write_text("child\n", encoding="utf-8")
+    _run_git(source_root, "add", "child/tracked.txt")
+    _run_git(source_root, "commit", "--quiet", "-m", "add child")
+    source_commit = _run_git(source_root, "rev-parse", "HEAD")
+    alias_root = tmp_path / "aliases"
+    alias_root.mkdir()
+    child_alias = alias_root / "child-link"
+    child_alias.symlink_to(source_child, target_is_directory=True)
+    output = child_alias / ".." / "generated" / "fixtures"
+    monkeypatch.setattr(generator, "build_case_payloads", lambda _source_root: _fixture_payloads("alias"))
+
+    generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    _assert_fixture_marker(source_root / "generated" / "fixtures", "alias")
+    assert not (alias_root / "generated").exists()
+
+
 def test_output_child_inside_source_root_remains_supported(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -214,6 +273,7 @@ def test_output_child_inside_source_root_remains_supported(
         "malformed-json",
         "noncanonical-json",
         "invalid-category",
+        "invalid-case-entry",
         "invalid-manifest",
     ],
 )
@@ -247,6 +307,11 @@ def test_invalid_existing_output_is_rejected_unchanged_before_payload_build(
                 output / "content.json",
                 {"category": "selectors", "cases": [{"marker": "old"}]},
             )
+        elif invalid_kind == "invalid-case-entry":
+            _write_canonical_json(
+                output / "content.json",
+                {"category": "content", "cases": ["not-an-object"]},
+            )
         elif invalid_kind == "invalid-manifest":
             manifest = json.loads((output / "manifest.json").read_text(encoding="ascii"))
             manifest["unexpected"] = "sensitive manifest value"
@@ -265,6 +330,25 @@ def test_invalid_existing_output_is_rejected_unchanged_before_payload_build(
     diagnostic = str(exc_info.value)
     assert str(tmp_path) not in diagnostic
     assert "sensitive" not in diagnostic
+
+
+def test_empty_case_object_remains_a_valid_existing_fixture_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_canonical_json(
+        output / "content.json",
+        {"category": "content", "cases": [{}]},
+    )
+    monkeypatch.setattr(generator, "build_case_payloads", lambda _source_root: _fixture_payloads("new"))
+
+    generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    payload = json.loads((output / "content.json").read_text(encoding="ascii"))
+    assert payload["cases"] == [{"marker": "new"}]
 
 
 def test_valid_existing_fixture_with_different_predecessor_is_replaced(
@@ -302,6 +386,97 @@ def test_lock_path_is_a_stable_hash_of_the_resolved_output_outside_source(
     assert direct_lock.name == f"{expected_identity}.lock"
     assert direct_lock.parent == Path(tempfile.gettempdir()).resolve() / "tldw-phase4-fixture-locks"
     assert not direct_lock.is_relative_to(source_root)
+
+
+@pytest.mark.parametrize(
+    "lock_root_state",
+    ["symlink-into-source", "non-directory", "inside-source"],
+)
+def test_invalid_physical_lock_root_is_rejected_before_lock_file_or_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lock_root_state: str,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    temp_root = tmp_path / "lock-temp"
+    temp_root.mkdir()
+    lock_root = temp_root / "tldw-phase4-fixture-locks"
+    physical_lock_root = lock_root
+
+    if lock_root_state == "symlink-into-source":
+        physical_lock_root = source_root / "tracked-lock-root"
+        physical_lock_root.mkdir()
+        (physical_lock_root / "tracked.txt").write_text("tracked lock root\n", encoding="utf-8")
+        _run_git(source_root, "add", "tracked-lock-root/tracked.txt")
+        _run_git(source_root, "commit", "--quiet", "-m", "add tracked lock root")
+        source_commit = _run_git(source_root, "rev-parse", "HEAD")
+        lock_root.symlink_to(physical_lock_root, target_is_directory=True)
+    elif lock_root_state == "non-directory":
+        lock_root.write_text("sensitive lock root file\n", encoding="utf-8")
+    else:
+        temp_root = source_root
+        lock_root = source_root / "tldw-phase4-fixture-locks"
+        physical_lock_root = lock_root
+
+    monkeypatch.setattr(generator.tempfile, "gettempdir", lambda: str(temp_root))
+    payload_calls = 0
+
+    def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
+        nonlocal payload_calls
+        payload_calls += 1
+        return _fixture_payloads("must-not-build")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _record_payload_build)
+
+    with pytest.raises(RuntimeError, match="^Fixture publication lock root is invalid$") as exc_info:
+        generator.generate_fixtures(
+            source_commit,
+            tmp_path / "fixtures",
+            source_root=source_root,
+        )
+
+    assert payload_calls == 0
+    if physical_lock_root.is_dir():
+        assert not list(physical_lock_root.glob("*.lock"))
+    diagnostic = str(exc_info.value)
+    assert str(source_root) not in diagnostic
+    assert "sensitive" not in diagnostic
+
+
+@pytest.mark.parametrize("body_raises", [True, False], ids=["primary-error", "unlock-only"])
+def test_publication_lock_unlock_failure_preserves_exception_precedence_and_closes_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    body_raises: bool,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    temp_root = tmp_path / "lock-temp"
+    temp_root.mkdir()
+    monkeypatch.setattr(generator.tempfile, "gettempdir", lambda: str(temp_root))
+    released_files: list[Any] = []
+
+    def _failing_unlock(lock_file: Any) -> None:
+        released_files.append(lock_file)
+        raise OSError("sensitive unlock failure")
+
+    monkeypatch.setattr(generator, "_release_file_lock", _failing_unlock)
+
+    if body_raises:
+        with pytest.raises(RuntimeError, match="^primary publication failure$") as exc_info:
+            with generator._publication_lock(tmp_path / "fixtures", source_root):
+                raise RuntimeError("primary publication failure")
+    else:
+        with pytest.raises(
+            RuntimeError,
+            match="^Fixture publication lock could not be released$",
+        ) as exc_info:
+            with generator._publication_lock(tmp_path / "fixtures", source_root):
+                pass
+
+    assert len(released_files) == 1
+    assert released_files[0].closed
+    assert "sensitive" not in str(exc_info.value)
 
 
 def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: Path) -> None:

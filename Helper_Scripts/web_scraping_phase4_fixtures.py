@@ -267,12 +267,28 @@ def _validate_fixture_set(output: Path, predecessor_commit: str | None) -> None:
             raise RuntimeError(f"Fixture set category is invalid: {filename}")
         if type(payload["cases"]) is not list or not payload["cases"]:
             raise RuntimeError(f"Fixture set cases are invalid: {filename}")
+        if any(type(case) is not dict for case in payload["cases"]):
+            raise RuntimeError(f"Fixture set case entry is invalid: {filename}")
 
 
 def _resolve_output_path(output: Path, source_root: Path) -> Path:
     try:
-        resolved_output = output.resolve()
+        candidate = output if output.is_absolute() else Path.cwd() / output
+        missing_parts: list[str] = []
+        while True:
+            try:
+                resolved_output = candidate.resolve(strict=True)
+            except FileNotFoundError:
+                if candidate.is_symlink() or candidate == candidate.parent:
+                    raise ValueError from None
+                missing_parts.append(candidate.name)
+                candidate = candidate.parent
+            else:
+                resolved_output = resolved_output.joinpath(*reversed(missing_parts))
+                break
     except (OSError, RuntimeError):
+        raise ValueError("output path could not be resolved") from None
+    except ValueError:
         raise ValueError("output path could not be resolved") from None
 
     if source_root.is_relative_to(resolved_output):
@@ -303,6 +319,54 @@ def _lock_path_for_output(output: Path) -> Path:
     identity = hashlib.sha256(normalized_output.encode("utf-8")).hexdigest()
     lock_root = Path(tempfile.gettempdir()).resolve() / "tldw-phase4-fixture-locks"
     return lock_root / f"{identity}.lock"
+
+
+def _prepare_lock_root(lock_root: Path, source_root: Path) -> Path:
+    try:
+        lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if lock_root.is_symlink() or not lock_root.is_dir():
+            raise OSError
+        resolved_lock_root = lock_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise RuntimeError("Fixture publication lock root is invalid") from None
+
+    if resolved_lock_root.is_relative_to(source_root):
+        raise RuntimeError("Fixture publication lock root is invalid")
+    return resolved_lock_root
+
+
+def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
+    flags = os.O_CREAT | os.O_RDWR
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+
+    directory_flags = os.O_RDONLY
+    directory_flags |= getattr(os, "O_CLOEXEC", 0)
+    directory_flags |= getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    use_directory_descriptor = (
+        fcntl is not None and os.open in os.supports_dir_fd and getattr(os, "O_DIRECTORY", 0) != 0
+    )
+    if not use_directory_descriptor:
+        try:
+            return os.open(lock_root / lock_name, flags, 0o600)
+        except OSError:
+            raise RuntimeError("Fixture publication lock could not be opened") from None
+
+    try:
+        root_descriptor = os.open(lock_root, directory_flags)
+    except OSError:
+        raise RuntimeError("Fixture publication lock root is invalid") from None
+    try:
+        try:
+            return os.open(lock_name, flags, 0o600, dir_fd=root_descriptor)
+        except OSError:
+            raise RuntimeError("Fixture publication lock could not be opened") from None
+    finally:
+        try:
+            os.close(root_descriptor)
+        except OSError:
+            pass
 
 
 def _acquire_file_lock(lock_file: Any) -> None:
@@ -343,23 +407,24 @@ def _release_file_lock(lock_file: Any) -> None:
 @contextmanager
 def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
     lock_path = _lock_path_for_output(output)
-    if lock_path.is_relative_to(source_root):
-        raise RuntimeError("Fixture publication lock must be outside source-root")
-    try:
-        lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        flags = os.O_CREAT | os.O_RDWR
-        flags |= getattr(os, "O_CLOEXEC", 0)
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(lock_path, flags, 0o600)
-    except OSError:
-        raise RuntimeError("Fixture publication lock could not be opened") from None
+    lock_root = _prepare_lock_root(lock_path.parent, source_root)
+    descriptor = _open_lock_descriptor(lock_root, lock_path.name)
 
     with os.fdopen(descriptor, "r+b", buffering=0) as lock_file:
         _acquire_file_lock(lock_file)
         try:
             yield
-        finally:
-            _release_file_lock(lock_file)
+        except BaseException:
+            try:
+                _release_file_lock(lock_file)
+            except OSError:
+                pass
+            raise
+        else:
+            try:
+                _release_file_lock(lock_file)
+            except OSError:
+                raise RuntimeError("Fixture publication lock could not be released") from None
 
 
 def _replace_output_directory(staging: Path, output: Path) -> None:
