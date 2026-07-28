@@ -74,6 +74,7 @@ _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS = (
     DefusedXmlException,
 )
 
+
 def _in_test_mode() -> bool:
     return _is_test_mode()
 
@@ -88,6 +89,7 @@ async def _close_response(resp: Any) -> None:
     close = getattr(resp, "close", None)
     if callable(close):
         close()
+
 
 def _coerce_int(value: Any, default: int | None = None) -> int | None:
     if value is None:
