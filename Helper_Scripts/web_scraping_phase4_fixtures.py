@@ -362,7 +362,7 @@ def _effective_uid() -> int | None:
 def _metadata_identity(metadata: os.stat_result) -> tuple[int, int, int] | None:
     device = getattr(metadata, "st_dev", None)
     inode = getattr(metadata, "st_ino", None)
-    if not isinstance(device, int) or not isinstance(inode, int) or device == 0 or inode == 0:
+    if not isinstance(device, int) or not isinstance(inode, int) or inode == 0:
         return None
     return device, inode, stat.S_IFMT(metadata.st_mode)
 

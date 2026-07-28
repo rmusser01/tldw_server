@@ -102,6 +102,58 @@ def _stat_with_identity_value(
     return os.stat_result(values)
 
 
+def test_path_identity_accepts_zero_device_with_nonzero_inode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "identity"
+    path.write_bytes(b"")
+    real_stat = generator.os.stat
+    metadata = real_stat(path, follow_symlinks=False)
+
+    def _zero_device(
+        candidate: os.PathLike[str] | str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> os.stat_result:
+        result = real_stat(candidate, *args, **kwargs)
+        if Path(candidate) == path and kwargs.get("follow_symlinks") is False:
+            return _stat_with_identity_value(result, "st_dev", 0)
+        return result
+
+    monkeypatch.setattr(generator.os, "stat", _zero_device)
+
+    assert generator._path_identity(path, "identity changed") == (
+        0,
+        metadata.st_ino,
+        stat.S_IFMT(metadata.st_mode),
+    )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        pytest.param(SimpleNamespace(st_dev=1, st_ino=0, st_mode=stat.S_IFREG), id="zero-inode"),
+        pytest.param(SimpleNamespace(st_dev=1, st_mode=stat.S_IFREG), id="missing-inode"),
+        pytest.param(
+            SimpleNamespace(st_dev=1, st_ino="inode", st_mode=stat.S_IFREG),
+            id="non-integer-inode",
+        ),
+        pytest.param(SimpleNamespace(st_ino=1, st_mode=stat.S_IFREG), id="missing-device"),
+        pytest.param(
+            SimpleNamespace(st_dev="device", st_ino=1, st_mode=stat.S_IFREG),
+            id="non-integer-device",
+        ),
+    ],
+)
+def test_unavailable_metadata_identity_remains_fail_closed(metadata: Any) -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture filesystem does not provide stable identity$",
+    ):
+        generator._stable_metadata_identity(metadata)
+
+
 def _snapshot_path(path: Path) -> tuple[str, object]:
     if path.is_file():
         return "file", path.read_bytes()
@@ -1316,12 +1368,10 @@ def test_write_failure_leaves_existing_output_untouched(
 
 
 @pytest.mark.parametrize("identity_boundary", ["parent", "output"])
-@pytest.mark.parametrize("identity_field", ["st_ino", "st_dev"])
-def test_publication_rejects_unavailable_identity_with_dedicated_diagnostic(
+def test_publication_rejects_zero_inode_with_dedicated_diagnostic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     identity_boundary: str,
-    identity_field: str,
 ) -> None:
     output = tmp_path / "fixtures"
     _write_valid_fixture_set(output, "1" * 40, "old-output")
@@ -1339,7 +1389,7 @@ def test_publication_rejects_unavailable_identity_with_dedicated_diagnostic(
     ) -> os.stat_result:
         metadata = real_stat(path, *args, **kwargs)
         if Path(path) == target and kwargs.get("follow_symlinks") is False:
-            return _stat_with_identity_value(metadata, identity_field, 0)
+            return _stat_with_identity_value(metadata, "st_ino", 0)
         return metadata
 
     monkeypatch.setattr(generator.os, "stat", _zero_identity)
