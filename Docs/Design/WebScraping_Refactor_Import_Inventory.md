@@ -296,13 +296,15 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 | `tldw_Server_API/tests/WebScraping/test_scraper_router_llm_settings.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.ScraperRouter` |
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py` | 12 | `tldw_Server_API.app.core.Web_Scraping.scraper_router` |
 | `tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py` | 20 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.ScraperRouter` |
-| `tldw_Server_API/tests/Web_Scraping/test_router_validation.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.DEFAULT_HANDLER` |
-| `tldw_Server_API/tests/Web_Scraping/test_router_validation.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.ScraperRouter` |
-| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 5 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.DEFAULT_HANDLER` |
-| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 5 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.DEFAULT_HANDLER_ALLOWLIST` |
-| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 5 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.ScraperRouter` |
-| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 5 | `tldw_Server_API.app.core.Web_Scraping.scraper_router._match_domain_rule` |
-| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 5 | `tldw_Server_API.app.core.Web_Scraping.scraper_router._validate_handler` |
+| `tldw_Server_API/tests/Web_Scraping/test_router_validation.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router` |
+| `tldw_Server_API/tests/Web_Scraping/test_router_validation.py` | 9 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.DEFAULT_HANDLER` |
+| `tldw_Server_API/tests/Web_Scraping/test_router_validation.py` | 9 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.ScraperRouter` |
+| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 5 | `tldw_Server_API.app.core.Web_Scraping.scraper_router` |
+| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.DEFAULT_HANDLER` |
+| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.DEFAULT_HANDLER_ALLOWLIST` |
+| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router.ScraperRouter` |
+| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router._match_domain_rule` |
+| `tldw_Server_API/tests/Web_Scraping/test_scraper_router.py` | 7 | `tldw_Server_API.app.core.Web_Scraping.scraper_router._validate_handler` |
 
 ### ua_profiles
 
@@ -316,8 +318,8 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 | `tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py` | 45 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.pick_ua_profile` |
 | `tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py` | 83 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.build_browser_headers` |
 | `tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py` | 83 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.profile_to_impersonate` |
-| `tldw_Server_API/app/core/Web_Scraping/scraper_router.py` | 29 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.pick_ua_profile` |
-| `tldw_Server_API/app/core/Web_Scraping/scraper_router.py` | 29 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.profile_to_impersonate` |
+| `tldw_Server_API/app/core/Web_Scraping/scraper_router.py` | 28 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.pick_ua_profile` |
+| `tldw_Server_API/app/core/Web_Scraping/scraper_router.py` | 28 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.profile_to_impersonate` |
 | `tldw_Server_API/tests/Web_Scraping/test_ua_profiles.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.build_browser_headers` |
 | `tldw_Server_API/tests/Web_Scraping/test_ua_profiles.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.pick_ua_profile` |
 | `tldw_Server_API/tests/Web_Scraping/test_ua_profiles.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.ua_profiles.profile_to_impersonate` |
