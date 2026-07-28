@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import math
+import operator
+import queue
 import re
+import subprocess  # nosec B404
+import sys
+import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Literal
 
 import regex
@@ -14,6 +22,11 @@ _MAX_INPUT_CHARS = 1_000_000
 _MAX_REPLACEMENT_CHARS = 4_096
 _MAX_SUB_OUTPUT_CHARS = 1_000_000
 _MAX_TIMEOUT_S = 0.100
+_STDLIB_WORKER_STARTUP_TIMEOUT_S = 1.0
+_STDLIB_WORKER_REAP_TIMEOUT_S = 0.500
+_MAX_WORKER_HANDSHAKE_BYTES = 64
+_MAX_WORKER_REQUEST_BYTES = 12 * (_MAX_PATTERN_CHARS + _MAX_INPUT_CHARS) + 256
+_MAX_WORKER_RESPONSE_BYTES = 131_072
 _REGEX_ERRORS = (
     IndexError,
     re.error,
@@ -25,9 +38,119 @@ _REGEX_ERRORS = (
 )
 _RegexDialect = Literal["stdlib", "regex"]
 
+_STDLIB_WORKER_CODE = f"""
+import json
+import re
+import sys
+
+MAX_REQUEST_BYTES = {_MAX_WORKER_REQUEST_BYTES}
+MAX_RESPONSE_BYTES = {_MAX_WORKER_RESPONSE_BYTES}
+
+
+def emit(payload):
+    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\\n"
+    if len(encoded) > MAX_RESPONSE_BYTES:
+        encoded = b'{{"status":"invalid"}}\\n'
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.flush()
+
+
+emit({{"status": "ready"}})
+try:
+    raw_request = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1)
+    if (
+        not raw_request.endswith(b"\\n")
+        or len(raw_request) > MAX_REQUEST_BYTES
+    ):
+        raise ValueError
+    request = json.loads(raw_request)
+    if set(request) != {{"pattern", "value", "flags"}}:
+        raise ValueError
+    pattern = request["pattern"]
+    value = request["value"]
+    flags = request["flags"]
+    if (
+        not isinstance(pattern, str)
+        or not isinstance(value, str)
+        or isinstance(flags, bool)
+        or not isinstance(flags, int)
+    ):
+        raise ValueError
+    match = re.search(pattern, value, flags)
+    if match is None:
+        emit({{"status": "no_match"}})
+    else:
+        emit({{
+            "status": "match",
+            "spans": [match.span(index) for index in range(match.re.groups + 1)],
+        }})
+except BaseException:
+    emit({{"status": "invalid"}})
+"""
+
 
 class _RegexOutputTooLarge(Exception):
     pass
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _MatchSnapshot:
+    _value: str
+    _spans: tuple[tuple[int, int], ...]
+    _groupindex: Mapping[str, int]
+
+    def __repr__(self) -> str:
+        return "<safe regex match>"
+
+    def __bool__(self) -> bool:
+        return True
+
+    def _resolve_group(self, group: int | str) -> int:
+        if isinstance(group, str):
+            try:
+                return self._groupindex[group]
+            except KeyError:
+                raise IndexError("no such group") from None
+        try:
+            index = operator.index(group)
+        except TypeError:
+            raise IndexError("no such group") from None
+        if index < 0 or index >= len(self._spans):
+            raise IndexError("no such group")
+        return index
+
+    def _group_value(self, group: int | str) -> str | None:
+        start, end = self._spans[self._resolve_group(group)]
+        if start < 0:
+            return None
+        return self._value[start:end]
+
+    def group(self, *groups: int | str) -> Any:
+        if not groups:
+            return self._group_value(0)
+        values = tuple(self._group_value(group) for group in groups)
+        return values[0] if len(values) == 1 else values
+
+    def groups(self, default: Any = None) -> tuple[Any, ...]:
+        return tuple(
+            default if value is None else value
+            for value in (self._group_value(index) for index in range(1, len(self._spans)))
+        )
+
+    def groupdict(self, default: Any = None) -> dict[str, Any]:
+        return {
+            name: default if (value := self._group_value(index)) is None else value
+            for name, index in self._groupindex.items()
+        }
+
+    def span(self, group: int | str = 0) -> tuple[int, int]:
+        return self._spans[self._resolve_group(group)]
+
+    def start(self, group: int | str = 0) -> int:
+        return self.span(group)[0]
+
+    def end(self, group: int | str = 0) -> int:
+        return self.span(group)[1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,12 +233,239 @@ def _compile_pattern(pattern: str, flags: int) -> Any:
     return regex.compile(pattern, flags)
 
 
+def _stdlib_fast_path_is_compatible(pattern: str) -> bool:
+    if not pattern.isascii():
+        return False
+    if "[[" in pattern:
+        return False
+
+    index = 0
+    while index < len(pattern):
+        if pattern[index] != "\\":
+            index += 1
+            continue
+        if index + 1 >= len(pattern):
+            return True
+
+        escaped = pattern[index + 1]
+        if escaped == "\\":
+            index += 2
+            continue
+        if escaped == "N":
+            return False
+        if escaped in {"u", "U"}:
+            width = 4 if escaped == "u" else 8
+            digits = pattern[index + 2 : index + 2 + width]
+            if len(digits) == width and all(char in "0123456789abcdefABCDEF" for char in digits):
+                if int(digits, 16) > 0x7F:
+                    return False
+                index += width + 2
+                continue
+        if escaped == "x":
+            digits = pattern[index + 2 : index + 4]
+            if len(digits) == 2 and all(char in "0123456789abcdefABCDEF" for char in digits):
+                if int(digits, 16) > 0x7F:
+                    return False
+                index += 4
+                continue
+        if escaped in "01234567":
+            digits = escaped
+            offset = index + 2
+            while offset < len(pattern) and len(digits) < 3 and pattern[offset] in "01234567":
+                digits += pattern[offset]
+                offset += 1
+            if len(digits) == 3 and int(digits, 8) > 0x7F:
+                return False
+            index = offset
+            continue
+        index += 2
+    return True
+
+
+def _stdlib_search_needs_worker(pattern: str, value: str) -> bool:
+    return not value.isascii() or not _stdlib_fast_path_is_compatible(pattern)
+
+
+def _decode_worker_message(raw: bytes, max_bytes: int) -> dict[str, Any] | None:
+    if not raw or len(raw) > max_bytes or not raw.endswith(b"\n"):
+        return None
+    try:
+        message = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        return None
+    return message if isinstance(message, dict) else None
+
+
+def _read_worker_handshake(stdout: Any, result: queue.Queue[bytes]) -> None:
+    try:
+        line = stdout.readline(_MAX_WORKER_HANDSHAKE_BYTES + 1)
+    except (OSError, ValueError):
+        line = b""
+    result.put(line)
+
+
+def _close_worker_pipes(process: subprocess.Popen[bytes]) -> None:
+    for stream in (process.stdin, process.stdout):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except (OSError, ValueError):
+            pass
+
+
+def _terminate_and_reap_worker(
+    process: subprocess.Popen[bytes],
+    *,
+    startup_reader: threading.Thread | None = None,
+) -> None:
+    try:
+        if process.poll() is None:
+            process.kill()
+    except OSError:
+        pass
+
+    if startup_reader is not None:
+        startup_reader.join(_STDLIB_WORKER_REAP_TIMEOUT_S)
+
+    try:
+        process.communicate(timeout=_STDLIB_WORKER_REAP_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=_STDLIB_WORKER_REAP_TIMEOUT_S)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    except (OSError, ValueError):
+        try:
+            process.wait(timeout=_STDLIB_WORKER_REAP_TIMEOUT_S)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    finally:
+        _close_worker_pipes(process)
+
+
+def _validated_worker_spans(
+    raw_spans: Any,
+    *,
+    expected_count: int,
+    value_length: int,
+) -> tuple[tuple[int, int], ...] | None:
+    if not isinstance(raw_spans, list) or len(raw_spans) != expected_count:
+        return None
+
+    spans: list[tuple[int, int]] = []
+    for index, raw_span in enumerate(raw_spans):
+        if not isinstance(raw_span, list) or len(raw_span) != 2:
+            return None
+        start, end = raw_span
+        if isinstance(start, bool) or not isinstance(start, int) or isinstance(end, bool) or not isinstance(end, int):
+            return None
+        if (start, end) == (-1, -1) and index > 0:
+            spans.append((start, end))
+            continue
+        if start < 0 or end < start or end > value_length:
+            return None
+        spans.append((start, end))
+    return tuple(spans)
+
+
+def _search_stdlib_in_worker(
+    pattern: str,
+    value: str,
+    flags: int,
+    timeout_s: float,
+    stdlib_compiled: Any,
+) -> SafeRegexResult:
+    request = (
+        json.dumps(
+            {"flags": flags, "pattern": pattern, "value": value},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    if len(request) > _MAX_WORKER_REQUEST_BYTES:
+        return SafeRegexResult(matched=False, code="regex_too_large")
+
+    try:
+        # Untrusted values are sent only over the bounded stdin protocol.
+        process = subprocess.Popen(  # nosec B603
+            [sys.executable, "-I", "-S", "-u", "-c", _STDLIB_WORKER_CODE],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return SafeRegexResult(matched=False, code="regex_invalid")
+
+    if process.stdin is None or process.stdout is None:
+        _terminate_and_reap_worker(process)
+        return SafeRegexResult(matched=False, code="regex_invalid")
+
+    startup_result: queue.Queue[bytes] = queue.Queue(maxsize=1)
+    startup_reader = threading.Thread(
+        target=_read_worker_handshake,
+        args=(process.stdout, startup_result),
+        name="safe-regex-startup-reader",
+        daemon=True,
+    )
+    startup_reader.start()
+    try:
+        raw_ready = startup_result.get(timeout=_STDLIB_WORKER_STARTUP_TIMEOUT_S)
+    except queue.Empty:
+        _terminate_and_reap_worker(process, startup_reader=startup_reader)
+        return SafeRegexResult(matched=False, code="regex_timeout")
+
+    startup_reader.join(_STDLIB_WORKER_REAP_TIMEOUT_S)
+    ready = _decode_worker_message(raw_ready, _MAX_WORKER_HANDSHAKE_BYTES)
+    if startup_reader.is_alive() or ready != {"status": "ready"}:
+        _terminate_and_reap_worker(process, startup_reader=startup_reader)
+        return SafeRegexResult(matched=False, code="regex_invalid")
+
+    try:
+        raw_response, _stderr = process.communicate(input=request, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        _terminate_and_reap_worker(process)
+        return SafeRegexResult(matched=False, code="regex_timeout")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        _terminate_and_reap_worker(process)
+        return SafeRegexResult(matched=False, code="regex_invalid")
+
+    response = _decode_worker_message(raw_response, _MAX_WORKER_RESPONSE_BYTES)
+    if response == {"status": "no_match"}:
+        return SafeRegexResult(matched=False)
+    if response is None or set(response) != {"status", "spans"} or response.get("status") != "match":
+        return SafeRegexResult(matched=False, code="regex_invalid")
+
+    spans = _validated_worker_spans(
+        response["spans"],
+        expected_count=stdlib_compiled.groups + 1,
+        value_length=len(value),
+    )
+    if spans is None:
+        return SafeRegexResult(matched=False, code="regex_invalid")
+    match = _MatchSnapshot(
+        _value=value,
+        _spans=spans,
+        _groupindex=MappingProxyType(dict(stdlib_compiled.groupindex)),
+    )
+    return SafeRegexResult(matched=True, match=match)
+
+
 def _prepare_untrusted_pattern(
     pattern: str,
     value: str,
     flags: int,
     limits: SafeRegexLimits,
     dialect: _RegexDialect,
+    *,
+    defer_stdlib_search: bool = False,
 ) -> tuple[Any, float] | str:
     validated_limits = _validated_limits(limits)
     if (
@@ -135,14 +485,20 @@ def _prepare_untrusted_pattern(
     if normalized_flags is None:
         return "regex_invalid"
 
+    stdlib_compiled = None
     if dialect == "stdlib":
         try:
-            re.compile(pattern, int(flags))
+            stdlib_compiled = re.compile(pattern, int(flags))
         except _REGEX_ERRORS:
             return "regex_invalid"
+        if defer_stdlib_search and _stdlib_search_needs_worker(pattern, value):
+            return stdlib_compiled, timeout_s
 
     try:
-        compiled = _compile_pattern(pattern, normalized_flags)
+        engine_flags = normalized_flags
+        if dialect == "stdlib":
+            engine_flags |= int(regex.VERSION0)
+        compiled = _compile_pattern(pattern, engine_flags)
     except _REGEX_ERRORS:
         return "regex_invalid"
     return compiled, timeout_s
@@ -157,10 +513,20 @@ def search_untrusted(
     dialect: _RegexDialect = "stdlib",
 ) -> SafeRegexResult:
     """Search with fixed size and execution bounds, returning stable error codes."""
-    prepared = _prepare_untrusted_pattern(pattern, value, flags, limits, dialect)
+    prepared = _prepare_untrusted_pattern(
+        pattern,
+        value,
+        flags,
+        limits,
+        dialect,
+        defer_stdlib_search=True,
+    )
     if isinstance(prepared, str):
         return SafeRegexResult(matched=False, code=prepared)
     compiled, timeout_s = prepared
+
+    if dialect == "stdlib" and _stdlib_search_needs_worker(pattern, value):
+        return _search_stdlib_in_worker(pattern, value, int(flags), timeout_s, compiled)
 
     try:
         match = compiled.search(value, timeout=timeout_s)

@@ -1,6 +1,10 @@
 import json
 import logging
 import re
+import subprocess
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -134,6 +138,34 @@ def _generate_regex(html: str) -> dict[str, Any]:
         "https://example.com",
         llm_settings={"provider": "openai"},
     )
+
+
+def _assert_match_matches_stdlib(
+    result: SafeRegexResult,
+    expected: re.Match[str] | None,
+) -> None:
+    assert result.matched is (expected is not None)
+    assert result.code is None
+    if expected is None:
+        assert result.match is None
+        return
+
+    match = result.match
+    assert match is not None
+    assert bool(match) is True
+    selectors: list[int | str] = list(range(expected.re.groups + 1))
+    selectors.extend(expected.re.groupindex)
+    assert match.group() == expected.group()
+    assert match.group(*selectors) == expected.group(*selectors)
+    assert match.groups() == expected.groups()
+    assert match.groups("missing") == expected.groups("missing")
+    assert match.groupdict() == expected.groupdict()
+    assert match.groupdict("missing") == expected.groupdict("missing")
+    for selector in selectors:
+        assert match.group(selector) == expected.group(selector)
+        assert match.span(selector) == expected.span(selector)
+        assert match.start(selector) == expected.start(selector)
+        assert match.end(selector) == expected.end(selector)
 
 
 def test_safe_regex_defaults_are_exact() -> None:
@@ -306,7 +338,9 @@ def test_stdlib_regex_flags_are_normalized_for_regex_engine(
     result = search_untrusted("x", "sample", flags=flags)
 
     assert result.code is None
-    assert observed["flags"] == int(regex_engine.ASCII | regex_engine.IGNORECASE | regex_engine.MULTILINE)
+    assert observed["flags"] == int(
+        regex_engine.ASCII | regex_engine.IGNORECASE | regex_engine.MULTILINE | regex_engine.VERSION0
+    )
 
 
 @pytest.mark.parametrize("flags", ["i", True, re.DEBUG, 1 << 20, -1])
@@ -391,6 +425,323 @@ def test_match_result_preserves_groups_and_span() -> None:
     assert result.match is not None
     assert result.match.group(1) == "12345"
     assert result.match.span() == (0, 12)
+
+
+def test_ascii_stdlib_search_uses_explicit_regex_version0(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, Any] = {}
+    compiled = _FakeCompiled()
+
+    def _fake_regex_compile(pattern: str, flags: int) -> _FakeCompiled:
+        observed.update(pattern=pattern, flags=flags)
+        return compiled
+
+    monkeypatch.setattr(regex_engine, "compile", _fake_regex_compile)
+
+    result = search_untrusted(r"[a-z]+", "ASCII", flags=re.IGNORECASE, dialect="stdlib")
+
+    assert result == SafeRegexResult(matched=False)
+    assert observed == {
+        "pattern": r"[a-z]+",
+        "flags": int(regex_engine.IGNORECASE | regex_engine.VERSION0),
+    }
+    assert compiled.calls == [("ASCII", 0.100)]
+
+
+@pytest.mark.parametrize(
+    ("pattern", "flags"),
+    [
+        ("i", re.IGNORECASE),
+        ("I", re.IGNORECASE),
+        ("[a-z]", re.IGNORECASE),
+        ("[A-Z]", re.IGNORECASE),
+    ],
+    ids=["lower-literal", "upper-literal", "lower-class", "upper-class"],
+)
+@pytest.mark.parametrize("value", ["i", "I", "İ", "ı"], ids=["i", "I", "dotted-I", "dotless-i"])
+def test_stdlib_flag_ignorecase_matches_re_search(
+    pattern: str,
+    flags: int,
+    value: str,
+) -> None:
+    expected = re.search(pattern, value, flags)
+
+    result = search_untrusted(pattern, value, flags=flags, dialect="stdlib")
+
+    _assert_match_matches_stdlib(result, expected)
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["(?i)i", "(?i)I", "(?i)[a-z]", "(?i)[A-Z]"],
+    ids=["lower-literal", "upper-literal", "lower-class", "upper-class"],
+)
+@pytest.mark.parametrize("value", ["i", "I", "İ", "ı"], ids=["i", "I", "dotted-I", "dotless-i"])
+def test_stdlib_inline_ignorecase_matches_re_search(pattern: str, value: str) -> None:
+    expected = re.search(pattern, value)
+
+    result = search_untrusted(pattern, value, dialect="stdlib")
+
+    _assert_match_matches_stdlib(result, expected)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "value", "flags"),
+    [
+        (r"(?P<word>\w+)-(?P<digits>\d+)(?P<suffix>Ω)?", "prefix café-١٢٣ suffix", 0),
+        (r"(?P<literal>İ)(?P<tail>stanbul)", "xx İstanbul yy", 0),
+        (r"(?P<word>[^\W\d_]+)", "--élan--", 0),
+        (r"(?P<lead>i)(?P<tail>stanbul)", "xx İstanbul yy", re.IGNORECASE),
+    ],
+    ids=["unicode-classes", "unicode-literal", "unicode-letter-class", "unicode-casefold"],
+)
+def test_stdlib_unicode_match_accessors_match_re_search(
+    pattern: str,
+    value: str,
+    flags: int,
+) -> None:
+    expected = re.search(pattern, value, flags)
+
+    result = search_untrusted(pattern, value, flags=flags, dialect="stdlib")
+
+    _assert_match_matches_stdlib(result, expected)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "value"),
+    [
+        (r"\u0130", "I"),
+        (r"[\u0131]", "i"),
+        (r"\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}", "ı"),
+        (r"\N{LATIN SMALL LETTER DOTLESS I}", "İ"),
+    ],
+    ids=["unicode-escape", "class-unicode-escape", "named-dotted-I", "named-dotless-i"],
+)
+def test_stdlib_escaped_unicode_literals_match_re_search(pattern: str, value: str) -> None:
+    expected = re.search(pattern, value, re.IGNORECASE)
+
+    result = search_untrusted(pattern, value, flags=re.IGNORECASE, dialect="stdlib")
+
+    _assert_match_matches_stdlib(result, expected)
+
+
+def test_stdlib_lone_surrogate_literal_matches_re_search() -> None:
+    pattern = "\ud800"
+    value = "prefix\ud800suffix"
+    expected = re.search(pattern, value)
+
+    result = search_untrusted(pattern, value, dialect="stdlib")
+
+    _assert_match_matches_stdlib(result, expected)
+
+
+def test_stdlib_unicode_search_does_not_compile_with_regex_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unexpected_compile(_pattern: str, _flags: int) -> Any:
+        raise AssertionError("Unicode stdlib search must use the isolated worker")
+
+    monkeypatch.setattr(safe_regex_module, "_compile_pattern", _unexpected_compile)
+
+    result = search_untrusted(r"(?P<city>İstanbul)", "xx İstanbul yy", dialect="stdlib")
+
+    assert result.matched is True
+    assert result.code is None
+    assert result.match is not None
+    assert result.match.group("city") == "İstanbul"
+
+
+@pytest.mark.parametrize(
+    ("pattern", "value", "flags"),
+    [
+        (r"(?P<word>[A-Z]+)-(\d+)", "ref-123", re.IGNORECASE),
+        (r"(?i)(?P<word>[a-z]+)-(\d+)", "REF-123", 0),
+        (r"^(?P<word>\w+)$", "ASCII_123", re.ASCII),
+    ],
+    ids=["flag-ignorecase", "inline-ignorecase", "ascii-classes"],
+)
+def test_stdlib_ascii_controls_match_re_search(
+    pattern: str,
+    value: str,
+    flags: int,
+) -> None:
+    expected = re.search(pattern, value, flags)
+
+    result = search_untrusted(pattern, value, flags=flags, dialect="stdlib")
+
+    _assert_match_matches_stdlib(result, expected)
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [r"[[:alpha:]]", r"[[:digit:]]"],
+)
+def test_stdlib_ambiguous_ascii_sets_match_re_search(pattern: str) -> None:
+    value = "a1:[]"
+    expected = re.search(pattern, value)
+
+    result = search_untrusted(pattern, value, dialect="stdlib")
+
+    _assert_match_matches_stdlib(result, expected)
+
+
+def test_stdlib_worker_startup_does_not_consume_the_engine_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timeout_s = 0.025
+    startup_delay_s = 0.050
+    original_popen = subprocess.Popen
+
+    def _delayed_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        worker = original_popen(*args, **kwargs)
+        time.sleep(startup_delay_s)
+        return worker
+
+    monkeypatch.setattr(subprocess, "Popen", _delayed_popen)
+    started = time.monotonic()
+
+    result = search_untrusted(
+        r"(?P<city>İstanbul)",
+        "İstanbul",
+        limits=SafeRegexLimits(timeout_s=timeout_s),
+        dialect="stdlib",
+    )
+
+    elapsed = time.monotonic() - started
+    assert elapsed >= startup_delay_s
+    assert result.matched is True
+    assert result.code is None
+    assert result.match is not None
+    assert result.match.group("city") == "İstanbul"
+
+
+def test_stdlib_unicode_search_is_safe_under_concurrent_calls() -> None:
+    cases = [
+        ("i", "ı", re.IGNORECASE),
+        ("I", "İ", re.IGNORECASE),
+        ("(?i)[a-z]", "ı", 0),
+        ("(?i)[A-Z]", "İ", 0),
+    ]
+
+    with ThreadPoolExecutor(max_workers=len(cases)) as executor:
+        results = list(
+            executor.map(
+                lambda case: search_untrusted(
+                    case[0],
+                    case[1],
+                    flags=case[2],
+                    dialect="stdlib",
+                ),
+                cases,
+            )
+        )
+
+    for result, (pattern, value, flags) in zip(results, cases, strict=True):
+        _assert_match_matches_stdlib(result, re.search(pattern, value, flags))
+
+
+def test_stdlib_worker_receives_bounded_json_on_stdin_not_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret_pattern = r"(?P<secret>İstanbul-parent-pattern)"
+    secret_value = "prefix İstanbul-parent-pattern suffix"
+    requests: list[bytes] = []
+    launches: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    original_popen = subprocess.Popen
+
+    class _RecordingWorker:
+        def __init__(self, worker: subprocess.Popen[bytes]) -> None:
+            self._worker = worker
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._worker, name)
+
+        def communicate(self, *args: Any, **kwargs: Any) -> tuple[bytes, bytes]:
+            payload = kwargs.get("input", args[0] if args else None)
+            assert isinstance(payload, bytes)
+            requests.append(payload)
+            return self._worker.communicate(*args, **kwargs)
+
+    def _recording_popen(*args: Any, **kwargs: Any) -> _RecordingWorker:
+        launches.append((args, kwargs))
+        return _RecordingWorker(original_popen(*args, **kwargs))
+
+    monkeypatch.setattr(subprocess, "Popen", _recording_popen)
+
+    result = search_untrusted(secret_pattern, secret_value, dialect="stdlib")
+
+    assert result.matched is True
+    assert len(launches) == 1
+    args, kwargs = launches[0]
+    argv = args[0]
+    assert isinstance(argv, list)
+    assert all(secret_pattern not in argument for argument in argv)
+    assert all(secret_value not in argument for argument in argv)
+    assert kwargs["stdin"] is subprocess.PIPE
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.DEVNULL
+    assert len(requests) == 1
+    assert requests[0].endswith(b"\n")
+    assert json.loads(requests[0]) == {
+        "flags": 0,
+        "pattern": secret_pattern,
+        "value": secret_value,
+    }
+
+
+def test_catastrophic_stdlib_timeout_reaps_child_threads_and_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawned: list[subprocess.Popen[bytes]] = []
+    execution_timeouts: list[float] = []
+    original_popen = subprocess.Popen
+
+    class _RecordingWorker:
+        def __init__(self, worker: subprocess.Popen[bytes]) -> None:
+            self._worker = worker
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._worker, name)
+
+        def communicate(self, *args: Any, **kwargs: Any) -> tuple[bytes, bytes]:
+            timeout = kwargs.get("timeout")
+            if timeout is not None:
+                execution_timeouts.append(timeout)
+            return self._worker.communicate(*args, **kwargs)
+
+    def _recording_popen(*args: Any, **kwargs: Any) -> _RecordingWorker:
+        worker = _RecordingWorker(original_popen(*args, **kwargs))
+        spawned.append(worker)
+        return worker
+
+    monkeypatch.setattr(subprocess, "Popen", _recording_popen)
+    started = time.monotonic()
+
+    try:
+        result = search_untrusted(
+            r"(?:a|aa)+İ$",
+            "a" * 6_000 + "Ω",
+            limits=SafeRegexLimits(timeout_s=0.020),
+            dialect="stdlib",
+        )
+        elapsed = time.monotonic() - started
+
+        assert result == SafeRegexResult(matched=False, code="regex_timeout")
+        assert elapsed < 5.0
+        assert len(spawned) == 1
+        assert execution_timeouts[0] == 0.020
+        assert all(worker.returncode is not None for worker in spawned)
+        assert all(worker.stdin is not None and worker.stdin.closed for worker in spawned)
+        assert all(worker.stdout is not None and worker.stdout.closed for worker in spawned)
+        assert not any(
+            thread.name == "safe-regex-startup-reader" and thread.is_alive() for thread in threading.enumerate()
+        )
+    finally:
+        for worker in spawned:
+            if worker.returncode is None:
+                worker.kill()
+                worker.wait(timeout=1.0)
 
 
 def test_valid_no_match_has_no_failure_code() -> None:
