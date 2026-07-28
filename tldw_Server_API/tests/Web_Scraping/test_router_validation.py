@@ -28,6 +28,20 @@ class _IntegerSubclass(int):
     pass
 
 
+class _EqBomb:
+    def __init__(self, collision: str) -> None:
+        self._collision = collision
+
+    def __hash__(self) -> int:
+        return hash(self._collision)
+
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("hostile key equality must not run")
+
+    def __repr__(self) -> str:
+        return "<eqbomb-router-secret>"
+
+
 class _BackendStringTrap(str):
     def strip(self, chars=None):
         raise RuntimeError("caller-owned strip must not run")
@@ -193,6 +207,109 @@ def test_validate_rules_accepts_mapping_implementations():
             }
         }
     }
+
+
+def test_hostile_domains_key_is_ignored_at_top_level_without_equality():
+    rules = {
+        _EqBomb("domains"): {
+            "example.com": {"backend": "playwright"},
+        }
+    }
+
+    assert ScraperRouter.validate_rules(rules) == {"domains": {}}
+
+    plan = ScraperRouter(rules).resolve("https://example.com/path")
+
+    assert plan.backend == "auto"
+    assert "eqbomb-router-secret" not in repr(plan)
+
+
+def test_hostile_backend_key_is_ignored_in_direct_and_validated_rules():
+    rule = {
+        _EqBomb("backend"): "playwright",
+        "handler": DEFAULT_HANDLER,
+    }
+    rules = {"domains": {"example.com": rule}}
+
+    cleaned = ScraperRouter.validate_rules(rules)
+    direct = ScraperRouter(rules).resolve("https://example.com/path")
+    validated = ScraperRouter(cleaned).resolve("https://example.com/path")
+
+    assert direct == validated
+    assert direct.backend == "auto"
+    assert direct.handler == DEFAULT_HANDLER
+    assert all(type(key) is str for key in cleaned["domains"]["example.com"])
+
+
+def test_hostile_schema_rules_key_cannot_block_safe_settings_alias():
+    settings = {
+        _EqBomb("backend"): "eqbomb-router-secret",
+        "title": {"selector": "h1"},
+    }
+    rule = {
+        _EqBomb("schema_rules"): {"evil": True},
+        "backend": "curl",
+        "schema": settings,
+    }
+
+    direct, validated = _resolve_both(rule)
+
+    expected = {"title": {"selector": "h1"}}
+    assert direct == validated
+    assert direct.backend == "curl"
+    assert direct.schema_rules == expected
+    assert all(type(key) is str for key in direct.schema_rules)
+    assert "eqbomb-router-secret" not in repr(direct)
+
+
+def test_scalar_maps_reject_hostile_keys_without_repr_leakage():
+    mixed = UserDict(
+        {
+            _EqBomb("backend"): "eqbomb-router-secret",
+            "X-Test": 7,
+        }
+    )
+
+    direct, validated = _resolve_both(
+        {
+            "extra_headers": mixed,
+            "cookies": mixed,
+            "proxies": mixed,
+        }
+    )
+
+    assert direct == validated
+    assert direct.extra_headers == {"X-Test": "7"}
+    assert direct.cookies == {"X-Test": "7"}
+    assert direct.proxies == {"X-Test": "7"}
+    assert "eqbomb-router-secret" not in repr(direct)
+
+
+def test_exact_string_keys_work_alongside_hostile_config_keys():
+    rules = UserDict(
+        {
+            _EqBomb("backend"): "ignored",
+            "domains": UserDict(
+                {
+                    "example.com": UserDict(
+                        {
+                            _EqBomb("schema_rules"): {"evil": True},
+                            "backend": "curl",
+                            "extra_headers": {"X-Test": 7},
+                        }
+                    )
+                }
+            ),
+        }
+    )
+
+    cleaned = ScraperRouter.validate_rules(rules)
+    direct = ScraperRouter(rules).resolve("https://example.com/path")
+    validated = ScraperRouter(cleaned).resolve("https://example.com/path")
+
+    assert direct == validated
+    assert direct.backend == "curl"
+    assert direct.extra_headers == {"X-Test": "7"}
 
 
 def test_mapping_get_and_items_hooks_are_not_used_after_snapshot():

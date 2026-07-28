@@ -66,6 +66,13 @@ def _snapshot_mapping(value: Any) -> dict[Any, Any] | None:
         return None
 
 
+def _snapshot_config_mapping(value: Any) -> dict[str, Any] | None:
+    snapshot = _snapshot_mapping(value)
+    if snapshot is None:
+        return None
+    return {key: item for key, item in snapshot.items() if type(key) is str}
+
+
 def _normalize_backend(value: Any) -> str:
     if type(value) is not str:
         return "auto"
@@ -121,18 +128,18 @@ def _normalize_string_list(value: Any) -> list[str] | object:
     return [item for item in value if type(item) is str]
 
 
-def _normalize_object_mapping(value: Any) -> dict[Any, Any] | object:
-    snapshot = _snapshot_mapping(value)
+def _normalize_object_mapping(value: Any) -> dict[str, Any] | object:
+    snapshot = _snapshot_config_mapping(value)
     if snapshot is None:
         return _INVALID_VALUE
     return snapshot
 
 
 def _mapping_alias(
-    rule: dict[Any, Any],
+    rule: dict[str, Any],
     primary: str,
     alias: str,
-) -> dict[Any, Any] | None:
+) -> dict[str, Any] | None:
     for key in (primary, alias):
         normalized = _normalize_object_mapping(rule.get(key, _INVALID_VALUE))
         if normalized is not _INVALID_VALUE:
@@ -188,25 +195,25 @@ def _parse_domain(url: str) -> str:
 def _match_domain_rule(
     domain: str,
     rules: Any,
-) -> tuple[str, dict[Any, Any]] | None:
+) -> tuple[str, dict[str, Any]] | None:
     # 1) Exact
     if type(domain) is not str:
         return None
-    rules_snapshot = _snapshot_mapping(rules)
+    rules_snapshot = _snapshot_config_mapping(rules)
     if rules_snapshot is None:
         return None
-    dom_rules = _snapshot_mapping(rules_snapshot.get("domains"))
+    dom_rules = _snapshot_config_mapping(rules_snapshot.get("domains"))
     if dom_rules is None:
         return None
     for key, raw_rule in dom_rules.items():
         if type(key) is not str:
             continue
         if key == domain:
-            rule = _snapshot_mapping(raw_rule)
+            rule = _snapshot_config_mapping(raw_rule)
             return (domain, rule) if rule is not None else None
 
     # 2) Wildcard (*.example.com)
-    best_match: tuple[str, dict[Any, Any]] | None = None
+    best_match: tuple[str, dict[str, Any]] | None = None
     best_suffix_len = -1
     for key, raw_rule in dom_rules.items():
         if type(key) is not str or not key.startswith("*."):
@@ -214,7 +221,7 @@ def _match_domain_rule(
         suffix = key[1:]  # remove leading '*'
         if not domain.endswith(suffix) or len(suffix) <= best_suffix_len:
             continue
-        rule = _snapshot_mapping(raw_rule)
+        rule = _snapshot_config_mapping(raw_rule)
         if rule is not None:
             best_match = (key, rule)
             best_suffix_len = len(suffix)
@@ -235,7 +242,7 @@ class ScraperRouter:
         ua_mode: Any = "fixed",
         default_respect_robots: bool = True,
     ) -> None:
-        rules_snapshot = _snapshot_mapping(rules)
+        rules_snapshot = _snapshot_config_mapping(rules)
         self.rules = rules_snapshot if rules_snapshot is not None else {}
         self.allowlist = _normalize_handler_allowlist(handler_allowlist)
         self.ua_mode = ua_mode if type(ua_mode) is str else "fixed"
@@ -264,10 +271,10 @@ class ScraperRouter:
         - Normalize headers/cookies to string maps
         """
         out: dict[str, Any] = {"domains": {}}
-        data_snapshot = _snapshot_mapping(data)
+        data_snapshot = _snapshot_config_mapping(data)
         if data_snapshot is None:
             return out
-        domains = _snapshot_mapping(data_snapshot.get("domains"))
+        domains = _snapshot_config_mapping(data_snapshot.get("domains"))
         if domains is None:
             return out
 
@@ -297,7 +304,7 @@ class ScraperRouter:
             # minimal domain/wildcard sanity: must contain a dot or start with '*.'
             if not (dom.startswith("*.") or "." in dom):
                 continue
-            rule = _snapshot_mapping(raw_rule)
+            rule = _snapshot_config_mapping(raw_rule)
             if rule is None:
                 continue
 
