@@ -41,6 +41,7 @@ CASE_NAMES = (
     "metadata",
     "selectors",
 )
+_STABLE_IDENTITY_ERROR = "Fixture filesystem does not provide stable identity"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -317,9 +318,7 @@ def _validate_existing_output(output: Path) -> tuple[int, int, int] | None:
         raise RuntimeError("Fixture output changed during validation") from None
     if not stat.S_ISDIR(metadata.st_mode):
         raise ValueError("existing output must be a directory")
-    identity = _metadata_identity(metadata)
-    if identity is None:
-        raise RuntimeError("Fixture output changed during validation")
+    identity = _stable_metadata_identity(metadata)
     _validate_fixture_set(output, predecessor_commit=None)
     _require_path_identity(output, identity, "Fixture output changed during validation")
     return identity
@@ -337,7 +336,17 @@ def _lock_path_for_output(output: Path) -> Path:
 
 
 def _is_link_like(path: Path) -> bool:
-    if path.is_symlink():
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(metadata.st_mode):
+        return True
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    file_attributes = getattr(metadata, "st_file_attributes", 0)
+    if reparse_point and file_attributes & reparse_point:
+        return True
+    if getattr(metadata, "st_reparse_tag", 0):
         return True
     is_junction = getattr(path, "is_junction", None)
     return bool(callable(is_junction) and is_junction())
@@ -353,9 +362,16 @@ def _effective_uid() -> int | None:
 def _metadata_identity(metadata: os.stat_result) -> tuple[int, int, int] | None:
     device = getattr(metadata, "st_dev", None)
     inode = getattr(metadata, "st_ino", None)
-    if not isinstance(device, int) or not isinstance(inode, int) or inode == 0:
+    if not isinstance(device, int) or not isinstance(inode, int) or device == 0 or inode == 0:
         return None
     return device, inode, stat.S_IFMT(metadata.st_mode)
+
+
+def _stable_metadata_identity(metadata: os.stat_result) -> tuple[int, int, int]:
+    identity = _metadata_identity(metadata)
+    if identity is None:
+        raise RuntimeError(_STABLE_IDENTITY_ERROR)
+    return identity
 
 
 def _path_identity_or_none(path: Path, error_message: str) -> tuple[int, int, int] | None:
@@ -365,10 +381,7 @@ def _path_identity_or_none(path: Path, error_message: str) -> tuple[int, int, in
         return None
     except OSError:
         raise RuntimeError(error_message) from None
-    identity = _metadata_identity(metadata)
-    if identity is None:
-        raise RuntimeError(error_message)
-    return identity
+    return _stable_metadata_identity(metadata)
 
 
 def _path_identity(path: Path, error_message: str) -> tuple[int, int, int]:
@@ -479,9 +492,9 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
             if _is_link_like(lock_root):
                 raise RuntimeError("Fixture publication lock root is invalid")
             root_before = os.stat(lock_root, follow_symlinks=False)
-            root_identity = _metadata_identity(root_before)
-            if not _valid_lock_root_metadata(root_before) or root_identity is None:
+            if not _valid_lock_root_metadata(root_before):
                 raise RuntimeError("Fixture publication lock root is invalid")
+            root_identity = _stable_metadata_identity(root_before)
 
             if _is_link_like(lock_path):
                 raise RuntimeError("Fixture publication lock file is invalid")
@@ -491,31 +504,27 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
                 file_before = None
             file_before_identity = None
             if file_before is not None:
-                file_before_identity = _metadata_identity(file_before)
-                if not _valid_lock_file_metadata(file_before) or file_before_identity is None:
+                if not _valid_lock_file_metadata(file_before):
                     raise RuntimeError("Fixture publication lock file is invalid")
+                file_before_identity = _stable_metadata_identity(file_before)
 
             descriptor = os.open(lock_path, flags, 0o600)
             opened_file = os.fstat(descriptor)
-            opened_identity = _metadata_identity(opened_file)
-            if not _valid_lock_file_metadata(opened_file) or opened_identity is None:
+            if not _valid_lock_file_metadata(opened_file):
                 raise RuntimeError("Fixture publication lock file is invalid")
+            opened_identity = _stable_metadata_identity(opened_file)
             if file_before_identity is not None and opened_identity != file_before_identity:
                 raise RuntimeError("Fixture publication lock file is invalid")
 
             root_after = os.stat(lock_root, follow_symlinks=False)
-            if (
-                _is_link_like(lock_root)
-                or not _valid_lock_root_metadata(root_after)
-                or _metadata_identity(root_after) != root_identity
-            ):
+            if _is_link_like(lock_root) or not _valid_lock_root_metadata(root_after):
+                raise RuntimeError("Fixture publication lock root is invalid")
+            if _stable_metadata_identity(root_after) != root_identity:
                 raise RuntimeError("Fixture publication lock root is invalid")
             file_after = os.stat(lock_path, follow_symlinks=False)
-            if (
-                _is_link_like(lock_path)
-                or not _valid_lock_file_metadata(file_after)
-                or _metadata_identity(file_after) != opened_identity
-            ):
+            if _is_link_like(lock_path) or not _valid_lock_file_metadata(file_after):
+                raise RuntimeError("Fixture publication lock file is invalid")
+            if _stable_metadata_identity(file_after) != opened_identity:
                 raise RuntimeError("Fixture publication lock file is invalid")
             return descriptor
         except RuntimeError:
@@ -538,6 +547,7 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
             raise RuntimeError("Fixture publication lock root is invalid") from None
         if not _valid_lock_root_metadata(root_metadata):
             raise RuntimeError("Fixture publication lock root is invalid")
+        _stable_metadata_identity(root_metadata)
 
         try:
             existing_lock = os.stat(
@@ -551,9 +561,9 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
             raise RuntimeError("Fixture publication lock file is invalid") from None
         existing_identity = None
         if existing_lock is not None:
-            existing_identity = _metadata_identity(existing_lock)
-            if not _valid_lock_file_metadata(existing_lock) or existing_identity is None:
+            if not _valid_lock_file_metadata(existing_lock):
                 raise RuntimeError("Fixture publication lock file is invalid")
+            existing_identity = _stable_metadata_identity(existing_lock)
 
         try:
             lock_descriptor = os.open(lock_name, flags, 0o600, dir_fd=root_descriptor)
@@ -564,9 +574,9 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
             opened_lock = os.fstat(lock_descriptor)
         except OSError:
             raise RuntimeError("Fixture publication lock file is invalid") from None
-        opened_identity = _metadata_identity(opened_lock)
-        if not _valid_lock_file_metadata(opened_lock) or opened_identity is None:
+        if not _valid_lock_file_metadata(opened_lock):
             raise RuntimeError("Fixture publication lock file is invalid")
+        opened_identity = _stable_metadata_identity(opened_lock)
         if existing_identity is not None and opened_identity != existing_identity:
             raise RuntimeError("Fixture publication lock file is invalid")
         try:
@@ -577,7 +587,9 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
             )
         except OSError:
             raise RuntimeError("Fixture publication lock file is invalid") from None
-        if not _valid_lock_file_metadata(current_lock) or _metadata_identity(current_lock) != opened_identity:
+        if not _valid_lock_file_metadata(current_lock):
+            raise RuntimeError("Fixture publication lock file is invalid")
+        if _stable_metadata_identity(current_lock) != opened_identity:
             raise RuntimeError("Fixture publication lock file is invalid")
     except BaseException:
         _close_descriptor_quietly(lock_descriptor)

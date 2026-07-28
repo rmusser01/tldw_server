@@ -10,8 +10,8 @@ import stat
 import subprocess
 import tempfile
 import warnings
-from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -92,6 +92,16 @@ def _stat_with_inode(metadata: os.stat_result, inode: int) -> os.stat_result:
     return os.stat_result(values)
 
 
+def _stat_with_identity_value(
+    metadata: os.stat_result,
+    field: str,
+    value: int,
+) -> os.stat_result:
+    values = list(metadata)
+    values[{"st_ino": 1, "st_dev": 2}[field]] = value
+    return os.stat_result(values)
+
+
 def _snapshot_path(path: Path) -> tuple[str, object]:
     if path.is_file():
         return "file", path.read_bytes()
@@ -137,15 +147,13 @@ def _fixture_process_worker(
 
     generator.build_case_payloads = _build_payloads
     if lock_attempted is not None:
-        real_publication_lock = generator._publication_lock
+        real_acquire_file_lock = generator._acquire_file_lock
 
-        @contextmanager
-        def _signaling_publication_lock(output_path: Path, source_path: Path) -> Any:
+        def _signaling_acquire_file_lock(lock_file: Any) -> None:
             lock_attempted.set()
-            with real_publication_lock(output_path, source_path):
-                yield
+            real_acquire_file_lock(lock_file)
 
-        generator._publication_lock = _signaling_publication_lock
+        generator._acquire_file_lock = _signaling_acquire_file_lock
     started.set()
     try:
         generator.generate_fixtures(
@@ -749,6 +757,119 @@ def test_no_dirfd_fallback_rejects_junction_like_lock_root(
         generator._prepare_lock_root(lock_root, source_root)
 
 
+@pytest.mark.parametrize(
+    ("entry_state", "file_attributes", "reparse_tag", "expected"),
+    [
+        pytest.param("reparse-attribute", 0x400, 0, True, id="reparse-attribute"),
+        pytest.param("reparse-tag", 0, 0xA0000003, True, id="reparse-tag"),
+        pytest.param("regular", 0, 0, False, id="regular"),
+        pytest.param("missing", 0, 0, False, id="missing"),
+    ],
+)
+def test_link_like_detection_uses_reparse_metadata_without_is_junction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    entry_state: str,
+    file_attributes: int,
+    reparse_tag: int,
+    expected: bool,
+) -> None:
+    entry = tmp_path / "entry"
+    if entry_state != "missing":
+        entry.write_bytes(b"")
+    monkeypatch.delattr(Path, "is_junction", raising=False)
+    monkeypatch.setattr(
+        generator.stat,
+        "FILE_ATTRIBUTE_REPARSE_POINT",
+        0x400,
+        raising=False,
+    )
+    real_lstat = generator.os.lstat
+
+    def _reparse_lstat(path: os.PathLike[str] | str) -> Any:
+        if Path(path) == entry and entry_state != "missing":
+            return SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o600,
+                st_file_attributes=file_attributes,
+                st_reparse_tag=reparse_tag,
+            )
+        return real_lstat(path)
+
+    monkeypatch.setattr(generator.os, "lstat", _reparse_lstat)
+
+    assert generator._is_link_like(entry) is expected
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX lock metadata policy")
+@pytest.mark.parametrize("metadata_target", ["root", "file"])
+def test_lock_metadata_without_stable_identity_uses_dedicated_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata_target: str,
+) -> None:
+    lock_root = tmp_path / "locks"
+    lock_root.mkdir(mode=0o700)
+    real_fstat = generator.os.fstat
+
+    def _zero_inode(descriptor: int) -> os.stat_result:
+        metadata = real_fstat(descriptor)
+        if metadata_target == "root" and stat.S_ISDIR(metadata.st_mode):
+            return _stat_with_identity_value(metadata, "st_ino", 0)
+        if metadata_target == "file" and stat.S_ISREG(metadata.st_mode):
+            return _stat_with_identity_value(metadata, "st_ino", 0)
+        return metadata
+
+    monkeypatch.setattr(generator.os, "fstat", _zero_inode)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture filesystem does not provide stable identity$",
+    ) as exc_info:
+        generator._open_lock_descriptor(lock_root, "output.lock")
+
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("metadata_target", ["root", "file"])
+def test_no_dirfd_lock_metadata_without_stable_identity_uses_dedicated_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata_target: str,
+) -> None:
+    lock_root = tmp_path / "locks"
+    lock_root.mkdir(mode=0o700)
+    monkeypatch.setattr(generator, "fcntl", None)
+    real_stat = generator.os.stat
+    real_fstat = generator.os.fstat
+
+    def _zero_root_identity(
+        path: os.PathLike[str] | str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> os.stat_result:
+        metadata = real_stat(path, *args, **kwargs)
+        if metadata_target == "root" and Path(path) == lock_root:
+            return _stat_with_identity_value(metadata, "st_ino", 0)
+        return metadata
+
+    def _zero_file_identity(descriptor: int) -> os.stat_result:
+        metadata = real_fstat(descriptor)
+        if metadata_target == "file" and stat.S_ISREG(metadata.st_mode):
+            return _stat_with_identity_value(metadata, "st_ino", 0)
+        return metadata
+
+    monkeypatch.setattr(generator.os, "stat", _zero_root_identity)
+    monkeypatch.setattr(generator.os, "fstat", _zero_file_identity)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture filesystem does not provide stable identity$",
+    ) as exc_info:
+        generator._open_lock_descriptor(lock_root, "output.lock")
+
+    assert str(tmp_path) not in str(exc_info.value)
+
+
 def test_fake_windows_locking_branch_remains_usable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1192,6 +1313,46 @@ def test_write_failure_leaves_existing_output_untouched(
 
     after = {path.name: path.read_bytes() for path in output.iterdir()}
     assert after == before
+
+
+@pytest.mark.parametrize("identity_boundary", ["parent", "output"])
+@pytest.mark.parametrize("identity_field", ["st_ino", "st_dev"])
+def test_publication_rejects_unavailable_identity_with_dedicated_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    identity_boundary: str,
+    identity_field: str,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    before_output = _snapshot_path(output)
+    before_staging = _snapshot_path(staging)
+    target = output.parent if identity_boundary == "parent" else output
+    real_stat = generator.os.stat
+
+    def _zero_identity(
+        path: os.PathLike[str] | str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> os.stat_result:
+        metadata = real_stat(path, *args, **kwargs)
+        if Path(path) == target and kwargs.get("follow_symlinks") is False:
+            return _stat_with_identity_value(metadata, identity_field, 0)
+        return metadata
+
+    monkeypatch.setattr(generator.os, "stat", _zero_identity)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture filesystem does not provide stable identity$",
+    ) as exc_info:
+        generator._replace_output_directory(staging, output)
+
+    assert _snapshot_path(output) == before_output
+    assert _snapshot_path(staging) == before_staging
+    assert str(tmp_path) not in str(exc_info.value)
 
 
 def test_swap_failure_restores_old_output_and_propagates(
