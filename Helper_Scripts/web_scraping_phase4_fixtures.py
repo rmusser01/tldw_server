@@ -42,6 +42,7 @@ CASE_NAMES = (
     "selectors",
 )
 _STABLE_IDENTITY_ERROR = "Fixture filesystem does not provide stable identity"
+_STAGING_CLEANUP_ERROR = "Fixture staging directory could not be cleaned up"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -785,6 +786,23 @@ def _replace_output_directory(staging: Path, output: Path) -> None:
                 )
 
 
+def _cleanup_staging_directory(
+    staging: Path,
+    parent_identity: tuple[int, int, int],
+    staging_identity: tuple[int, int, int],
+) -> None:
+    try:
+        _require_path_identity(staging.parent, parent_identity, _STAGING_CLEANUP_ERROR)
+        current_identity = _path_identity_or_none(staging, _STAGING_CLEANUP_ERROR)
+        if current_identity is None:
+            return
+        if current_identity != staging_identity:
+            raise RuntimeError(_STAGING_CLEANUP_ERROR)
+        shutil.rmtree(staging)
+    except (OSError, RuntimeError):
+        raise RuntimeError(_STAGING_CLEANUP_ERROR) from None
+
+
 def generate_fixtures(
     predecessor_commit: str,
     output: Path,
@@ -811,22 +829,30 @@ def generate_fixtures(
             )
         )
         try:
+            staging_parent_identity = _path_identity(staging.parent, _STAGING_CLEANUP_ERROR)
+            staging_identity = _path_identity(staging, _STAGING_CLEANUP_ERROR)
+        except RuntimeError:
+            raise RuntimeError(_STAGING_CLEANUP_ERROR) from None
+        try:
             _write_fixture_set(staging, predecessor_commit, payloads)
             _validate_fixture_set(staging, predecessor_commit)
             _replace_output_directory(staging, output)
         except BaseException:
             try:
-                if staging.exists():
-                    shutil.rmtree(staging)
-            except OSError:
+                _cleanup_staging_directory(
+                    staging,
+                    staging_parent_identity,
+                    staging_identity,
+                )
+            except (OSError, RuntimeError):
                 pass
             raise
         else:
-            try:
-                if staging.exists():
-                    shutil.rmtree(staging)
-            except OSError:
-                raise RuntimeError("Fixture staging directory could not be cleaned up") from None
+            _cleanup_staging_directory(
+                staging,
+                staging_parent_identity,
+                staging_identity,
+            )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

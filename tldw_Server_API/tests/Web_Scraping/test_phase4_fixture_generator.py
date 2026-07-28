@@ -1428,7 +1428,7 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     assert sensitive_path not in formatted_diagnostic
 
 
-def test_staging_cleanup_only_failure_is_sanitized_after_atomic_publication(
+def test_recreated_staging_path_is_retained_after_atomic_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1443,20 +1443,78 @@ def test_staging_cleanup_only_failure_is_sanitized_after_atomic_publication(
     replace_output_directory = generator._replace_output_directory
     staging_paths: list[Path] = []
     cleanup_attempts: list[Path] = []
+    replacement_marker = "replacement staging object"
+    cleanup_detail = f"sensitive cleanup failure at {tmp_path}"
 
     def _publish_and_leave_staging(staging: Path, target: Path) -> None:
         replace_output_directory(staging, target)
         staging.mkdir()
+        (staging / "replacement.txt").write_text(replacement_marker, encoding="utf-8")
         staging_paths.append(staging)
 
-    def _fail_staging_cleanup(path: Path) -> None:
+    def _record_unexpected_staging_cleanup(path: Path) -> None:
         cleanup_attempts.append(path)
-        raise OSError(f"sensitive staging cleanup failure at {tmp_path}")
+        raise OSError(cleanup_detail)
 
     monkeypatch.setattr(
         generator,
         "_replace_output_directory",
         _publish_and_leave_staging,
+    )
+    monkeypatch.setattr(
+        generator.shutil,
+        "rmtree",
+        _record_unexpected_staging_cleanup,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture staging directory could not be cleaned up$",
+    ) as exc_info:
+        generator.generate_fixtures(
+            source_commit,
+            output,
+            source_root=source_root,
+        )
+
+    assert len(staging_paths) == 1
+    replacement = staging_paths[0]
+    assert (replacement / "replacement.txt").read_text(encoding="utf-8") == replacement_marker
+    assert cleanup_attempts == []
+    assert exc_info.value.__suppress_context__
+    assert str(exc_info.value) == "Fixture staging directory could not be cleaned up"
+    assert "sensitive" not in str(exc_info.value)
+    assert str(tmp_path) not in str(exc_info.value)
+    _assert_fixture_marker(output, "published")
+
+
+def test_original_staging_cleanup_oserror_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    monkeypatch.setattr(
+        generator,
+        "build_case_payloads",
+        lambda _source_root: _fixture_payloads("unpublished"),
+    )
+    staging_paths: list[Path] = []
+    cleanup_attempts: list[Path] = []
+    cleanup_detail = f"sensitive cleanup failure at {tmp_path}"
+
+    def _leave_original_staging(staging: Path, _target: Path) -> None:
+        staging_paths.append(staging)
+
+    def _fail_staging_cleanup(path: Path) -> None:
+        cleanup_attempts.append(path)
+        raise OSError(cleanup_detail)
+
+    monkeypatch.setattr(
+        generator,
+        "_replace_output_directory",
+        _leave_original_staging,
     )
     monkeypatch.setattr(generator.shutil, "rmtree", _fail_staging_cleanup)
 
@@ -1476,7 +1534,8 @@ def test_staging_cleanup_only_failure_is_sanitized_after_atomic_publication(
     assert str(exc_info.value) == "Fixture staging directory could not be cleaned up"
     assert "sensitive" not in str(exc_info.value)
     assert str(tmp_path) not in str(exc_info.value)
-    _assert_fixture_marker(output, "published")
+    assert not output.exists()
+    _assert_fixture_marker(staging_paths[0], "unpublished")
 
 
 @pytest.mark.parametrize("identity_boundary", ["parent", "output"])
