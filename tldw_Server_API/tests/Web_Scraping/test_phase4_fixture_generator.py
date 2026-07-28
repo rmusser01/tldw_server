@@ -1837,6 +1837,128 @@ def test_parent_identity_failure_happens_before_staging_creation(
     assert capsys.readouterr().err == ""
 
 
+@pytest.mark.parametrize("staging_kind", ["symlink", "junction-like"])
+def test_link_like_staging_substitution_before_identity_does_not_write_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    staging_kind: str,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    protected_marker = "protected-target-content"
+    target = tmp_path / "private-link-target"
+    _write_valid_fixture_set(target, "f" * 40, protected_marker)
+    target_before = _snapshot_path(target)
+    build_calls = 0
+
+    def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
+        nonlocal build_calls
+        build_calls += 1
+        return _fixture_payloads("must-not-write")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _record_payload_build)
+    real_mkdtemp = generator.tempfile.mkdtemp
+    real_stat = generator.os.stat
+    real_lstat = generator.os.lstat
+    real_rmtree = generator.shutil.rmtree
+    staging_paths: list[Path] = []
+    original_staging = tmp_path / "original-staging"
+
+    def _substitute_after_mkdtemp(*args: Any, **kwargs: Any) -> str:
+        staging = Path(real_mkdtemp(*args, **kwargs))
+        staging.replace(original_staging)
+        _symlink_or_skip(staging, target, target_is_directory=True)
+        staging_paths.append(staging)
+        return str(staging)
+
+    monkeypatch.setattr(generator.tempfile, "mkdtemp", _substitute_after_mkdtemp)
+
+    if staging_kind == "junction-like":
+
+        def _junction_stat(
+            path: os.PathLike[str] | str,
+            *args: Any,
+            **kwargs: Any,
+        ) -> os.stat_result:
+            if staging_paths and Path(path) == staging_paths[0] and kwargs.get("follow_symlinks") is False:
+                return real_stat(target, follow_symlinks=False)
+            return real_stat(path, *args, **kwargs)
+
+        def _junction_lstat(
+            path: os.PathLike[str] | str,
+            *args: Any,
+            **kwargs: Any,
+        ) -> os.stat_result:
+            if staging_paths and Path(path) == staging_paths[0]:
+                return real_lstat(target)
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(generator.os, "stat", _junction_stat)
+        monkeypatch.setattr(generator.os, "lstat", _junction_lstat)
+        monkeypatch.setattr(
+            Path,
+            "is_junction",
+            lambda path: bool(staging_paths and path == staging_paths[0]),
+            raising=False,
+        )
+
+    write_calls: list[Path] = []
+    write_fixture_set = generator._write_fixture_set
+
+    def _record_fixture_write(
+        staging: Path,
+        predecessor_commit: str,
+        payloads: dict[str, dict[str, Any]],
+    ) -> None:
+        write_calls.append(staging)
+        write_fixture_set(staging, predecessor_commit, payloads)
+
+    monkeypatch.setattr(generator, "_write_fixture_set", _record_fixture_write)
+    cleanup_calls: list[Path] = []
+
+    def _prevent_vulnerable_cleanup(path: Path, *args: Any, **kwargs: Any) -> None:
+        if staging_paths and path == staging_paths[0]:
+            cleanup_calls.append(path)
+            raise OSError(f"sensitive cleanup failure at {tmp_path}")
+        real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(generator.shutil, "rmtree", _prevent_vulnerable_cleanup)
+
+    publication_error: RuntimeError | None = None
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        try:
+            generator.generate_fixtures(
+                source_commit,
+                output,
+                source_root=source_root,
+            )
+        except RuntimeError as exc:
+            publication_error = exc
+
+    assert build_calls == 1
+    assert write_calls == []
+    assert cleanup_calls == []
+    assert publication_error is not None
+    assert str(publication_error) == "Fixture staging directory could not be cleaned up"
+    assert str(tmp_path) not in str(publication_error)
+    assert protected_marker not in str(publication_error)
+    assert len(staging_paths) == 1
+    staging = staging_paths[0]
+    assert stat.S_ISLNK(real_lstat(staging).st_mode)
+    assert original_staging.is_dir()
+    assert _snapshot_path(target) == target_before
+    assert not output.exists()
+    diagnostic = capsys.readouterr().err
+    assert diagnostic == "warning: fixture staging directory retained for manual cleanup\n"
+    assert str(tmp_path) not in diagnostic
+    assert staging.name not in diagnostic
+    assert target.name not in diagnostic
+    assert protected_marker not in diagnostic
+
+
 def test_parent_substitution_before_publication_does_not_publish_fixtures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -421,6 +421,20 @@ def _require_path_identity(
         raise RuntimeError(error_message)
 
 
+def _require_real_directory_identity(
+    path: Path,
+    expected: tuple[int, int, int],
+    error_message: str,
+) -> None:
+    try:
+        link_like = _is_link_like(path)
+    except (OSError, RuntimeError):
+        raise RuntimeError(error_message) from None
+    if expected[2] != stat.S_IFDIR or link_like:
+        raise RuntimeError(error_message)
+    _require_path_identity(path, expected, error_message)
+
+
 def _require_path_absent(path: Path, error_message: str) -> None:
     if _path_identity_or_none(path, error_message) is not None:
         raise RuntimeError(error_message)
@@ -733,11 +747,7 @@ def _replace_output_directory(
     else:
         staging_identity = expected_staging_identity
         _require_path_identity(staging, staging_identity, staging_error)
-    try:
-        if staging_identity[2] != stat.S_IFDIR or _is_link_like(staging):
-            raise RuntimeError(staging_error)
-    except (OSError, RuntimeError):
-        raise RuntimeError(staging_error) from None
+    _require_real_directory_identity(staging, staging_identity, staging_error)
     output_identity = _validate_existing_output(output)
     backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}") if output_identity is not None else None
     rename_started = False
@@ -890,6 +900,11 @@ def generate_fixtures(
         )
         try:
             staging_identity = _path_identity(staging, _STAGING_CLEANUP_ERROR)
+            _require_real_directory_identity(
+                staging,
+                staging_identity,
+                _STAGING_CLEANUP_ERROR,
+            )
         except (OSError, RuntimeError):
             _report_staging_retained()
             raise RuntimeError(_STAGING_CLEANUP_ERROR) from None
