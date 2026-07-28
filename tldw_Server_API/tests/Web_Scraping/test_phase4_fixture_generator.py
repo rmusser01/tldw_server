@@ -9,6 +9,7 @@ import queue
 import stat
 import subprocess
 import tempfile
+import traceback
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -1371,6 +1372,9 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class PrimaryFixturePublicationError(BaseException):
+        pass
+
     source_root, source_commit = _create_clean_source_root(tmp_path)
     output = tmp_path / "fixtures"
     _isolated_lock_path(tmp_path, monkeypatch, output)
@@ -1379,7 +1383,11 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
         "build_case_payloads",
         lambda _source_root: _fixture_payloads("replacement"),
     )
-    primary_error = RuntimeError("primary fixture publication failure")
+    primary_message = "primary fixture publication failure"
+    primary_error = PrimaryFixturePublicationError(primary_message)
+    sensitive_marker = "sensitive staging cleanup failure"
+    sensitive_path = str(tmp_path / "private-fixture-staging")
+    cleanup_detail = f"{sensitive_marker} at {sensitive_path}"
     cleanup_attempts: list[Path] = []
 
     def _fail_publication(_staging: Path, _output: Path) -> None:
@@ -1387,13 +1395,13 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
 
     def _fail_staging_cleanup(path: Path) -> None:
         cleanup_attempts.append(path)
-        raise OSError(f"sensitive staging cleanup failure at {tmp_path}")
+        raise OSError(cleanup_detail)
 
     monkeypatch.setattr(generator, "_replace_output_directory", _fail_publication)
     monkeypatch.setattr(generator.shutil, "rmtree", _fail_staging_cleanup)
 
     with pytest.raises(
-        RuntimeError,
+        PrimaryFixturePublicationError,
         match="^primary fixture publication failure$",
     ) as exc_info:
         generator.generate_fixtures(
@@ -1403,11 +1411,21 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
         )
 
     assert exc_info.value is primary_error
+    assert type(exc_info.value) is PrimaryFixturePublicationError
+    assert str(exc_info.value) == primary_message
     assert len(cleanup_attempts) == 1
     assert cleanup_attempts[0].parent == output.parent
     assert cleanup_attempts[0].name.startswith(f".{output.name}.staging-")
-    assert "sensitive" not in str(exc_info.value)
-    assert str(tmp_path) not in str(exc_info.value)
+    formatted_diagnostic = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+            chain=True,
+        )
+    )
+    assert sensitive_marker not in formatted_diagnostic
+    assert sensitive_path not in formatted_diagnostic
 
 
 def test_staging_cleanup_only_failure_is_sanitized_after_atomic_publication(
