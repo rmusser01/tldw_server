@@ -489,17 +489,39 @@ def _close_descriptor_quietly(descriptor: int | None) -> None:
         pass
 
 
-def _close_lock_file(lock_file: Any, descriptor: int) -> None:
+class _OwnedDescriptor:
+    def __init__(self, descriptor: int) -> None:
+        self._descriptor: int | None = descriptor
+
+    def fileno(self) -> int:
+        if self._descriptor is None:
+            raise RuntimeError("Descriptor ownership has already been released")
+        return self._descriptor
+
+    def detach(self) -> int:
+        descriptor = self.fileno()
+        self._descriptor = None
+        return descriptor
+
+    def close(self) -> None:
+        descriptor = self.detach()
+        # An ambiguous close result must not leave ownership armed for a retry.
+        os.close(descriptor)
+
+    def close_quietly(self) -> None:
+        try:
+            self.close()
+        except BaseException:  # noqa: BLE001 - cleanup must not replace an active failure
+            pass
+
+
+def _close_lock_file(lock_file: Any, descriptor_owner: _OwnedDescriptor) -> None:
     try:
         lock_file.close()
     except BaseException:  # noqa: BLE001 - preserve the file close failure
-        try:
-            lock_file_closed = lock_file.closed
-        except BaseException:  # noqa: BLE001 - preserve the file close failure
-            lock_file_closed = False
-        if not lock_file_closed:
-            _close_descriptor_quietly(descriptor)
+        descriptor_owner.close_quietly()
         raise
+    descriptor_owner.close()
 
 
 def _prepare_lock_root(lock_root: Path, source_root: Path) -> Path:
@@ -585,12 +607,12 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
             _close_descriptor_quietly(descriptor)
             raise
 
-    root_descriptor: int | None = None
-    lock_descriptor: int | None = None
     try:
-        root_descriptor = os.open(lock_root, directory_flags)
+        root_owner = _OwnedDescriptor(os.open(lock_root, directory_flags))
     except OSError:
         raise RuntimeError("Fixture publication lock root is invalid") from None
+    root_descriptor = root_owner.fileno()
+    lock_owner: _OwnedDescriptor | None = None
     try:
         try:
             root_metadata = os.fstat(root_descriptor)
@@ -617,9 +639,10 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
             existing_identity = _stable_metadata_identity(existing_lock)
 
         try:
-            lock_descriptor = os.open(lock_name, flags, 0o600, dir_fd=root_descriptor)
+            lock_owner = _OwnedDescriptor(os.open(lock_name, flags, 0o600, dir_fd=root_descriptor))
         except OSError:
             raise RuntimeError("Fixture publication lock could not be opened") from None
+        lock_descriptor = lock_owner.fileno()
 
         try:
             opened_lock = os.fstat(lock_descriptor)
@@ -643,21 +666,20 @@ def _open_lock_descriptor(lock_root: Path, lock_name: str) -> int:
         if _stable_metadata_identity(current_lock) != opened_identity:
             raise RuntimeError("Fixture publication lock file is invalid")
     except BaseException:
-        _close_descriptor_quietly(lock_descriptor)
-        _close_descriptor_quietly(root_descriptor)
+        if lock_owner is not None:
+            lock_owner.close_quietly()
+        root_owner.close_quietly()
         raise
 
     try:
-        os.close(root_descriptor)
+        root_owner.close()
     except OSError:
-        _close_descriptor_quietly(root_descriptor)
-        _close_descriptor_quietly(lock_descriptor)
+        lock_owner.close_quietly()
         raise RuntimeError("Fixture publication lock root could not be closed") from None
     except BaseException:
-        _close_descriptor_quietly(root_descriptor)
-        _close_descriptor_quietly(lock_descriptor)
+        lock_owner.close_quietly()
         raise
-    return lock_descriptor
+    return lock_owner.detach()
 
 
 def _acquire_file_lock(lock_file: Any) -> None:
@@ -704,12 +726,17 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
     """Serialize cooperating local publishers; this is not a same-user privilege boundary."""
     lock_path = _lock_path_for_output(output)
     lock_root = _prepare_lock_root(lock_path.parent, source_root)
-    descriptor = _open_lock_descriptor(lock_root, lock_path.name)
+    descriptor_owner = _OwnedDescriptor(_open_lock_descriptor(lock_root, lock_path.name))
 
     try:
-        lock_file = os.fdopen(descriptor, "r+b", buffering=0)
+        lock_file = os.fdopen(
+            descriptor_owner.fileno(),
+            "r+b",
+            buffering=0,
+            closefd=False,
+        )
     except BaseException:
-        _close_descriptor_quietly(descriptor)
+        descriptor_owner.close_quietly()
         raise
 
     try:
@@ -729,13 +756,13 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
                 raise RuntimeError("Fixture publication lock could not be released") from None
     except BaseException:
         try:
-            _close_lock_file(lock_file, descriptor)
+            _close_lock_file(lock_file, descriptor_owner)
         except BaseException:  # noqa: BLE001 - preserve the active lock failure
             pass
         raise
     else:
         try:
-            _close_lock_file(lock_file, descriptor)
+            _close_lock_file(lock_file, descriptor_owner)
         except OSError:
             raise RuntimeError("Fixture publication lock file could not be closed") from None
 
