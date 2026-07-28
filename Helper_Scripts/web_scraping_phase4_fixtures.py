@@ -647,7 +647,13 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
     lock_root = _prepare_lock_root(lock_path.parent, source_root)
     descriptor = _open_lock_descriptor(lock_root, lock_path.name)
 
-    with os.fdopen(descriptor, "r+b", buffering=0) as lock_file:
+    try:
+        lock_file = os.fdopen(descriptor, "r+b", buffering=0)
+    except BaseException:
+        _close_descriptor_quietly(descriptor)
+        raise
+
+    try:
         _acquire_file_lock(lock_file)
         try:
             yield
@@ -662,6 +668,17 @@ def _publication_lock(output: Path, source_root: Path) -> Iterator[None]:
                 _release_file_lock(lock_file)
             except OSError:
                 raise RuntimeError("Fixture publication lock could not be released") from None
+    except BaseException:
+        try:
+            lock_file.close()
+        except OSError:
+            pass
+        raise
+    else:
+        try:
+            lock_file.close()
+        except OSError:
+            raise RuntimeError("Fixture publication lock file could not be closed") from None
 
 
 def _replace_output_directory(staging: Path, output: Path) -> None:

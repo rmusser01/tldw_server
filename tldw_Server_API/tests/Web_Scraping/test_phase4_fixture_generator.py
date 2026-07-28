@@ -81,6 +81,62 @@ def _isolated_lock_path(
     return generator._lock_path_for_output(output)
 
 
+class _CloseFailingLockFile:
+    def __init__(self, lock_file: Any, close_detail: str) -> None:
+        self._lock_file = lock_file
+        self._close_detail = close_detail
+        self.descriptor = lock_file.fileno()
+        self.close_calls = 0
+        self.underlying_close_calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._lock_file, name)
+
+    def __enter__(self) -> _CloseFailingLockFile:
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _traceback: Any) -> None:
+        self.close()
+
+    @property
+    def closed(self) -> bool:
+        return self._lock_file.closed
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if not self._lock_file.closed:
+            self._lock_file.close()
+            self.underlying_close_calls += 1
+        raise OSError(self._close_detail)
+
+
+def _install_close_failing_fdopen(
+    monkeypatch: pytest.MonkeyPatch,
+    close_detail: str,
+) -> list[_CloseFailingLockFile]:
+    real_fdopen = generator.os.fdopen
+    lock_files: list[_CloseFailingLockFile] = []
+
+    def _close_failing_fdopen(descriptor: int, *args: Any, **kwargs: Any) -> _CloseFailingLockFile:
+        lock_file = _CloseFailingLockFile(real_fdopen(descriptor, *args, **kwargs), close_detail)
+        lock_files.append(lock_file)
+        return lock_file
+
+    monkeypatch.setattr(generator.os, "fdopen", _close_failing_fdopen)
+    return lock_files
+
+
+def _assert_lock_file_closed_once(lock_files: list[_CloseFailingLockFile]) -> None:
+    assert len(lock_files) == 1
+    lock_file = lock_files[0]
+    assert lock_file.close_calls == 1
+    assert lock_file.underlying_close_calls == 1
+    assert lock_file.closed
+    with pytest.raises(OSError) as closed_descriptor:
+        os.fstat(lock_file.descriptor)
+    assert closed_descriptor.value.errno == errno.EBADF
+
+
 def _stat_with_uid(metadata: os.stat_result, uid: int) -> os.stat_result:
     values = list(metadata)
     values[4] = uid
@@ -1051,6 +1107,166 @@ def test_publication_lock_unlock_failure_preserves_exception_precedence_and_clos
     assert len(released_files) == 1
     assert released_files[0].closed
     assert "sensitive" not in str(exc_info.value)
+
+
+def test_publication_lock_close_failure_preserves_body_baseexception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrimaryPublicationError(BaseException):
+        pass
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    primary_message = "primary publication failure"
+    primary_error = PrimaryPublicationError(primary_message)
+    sensitive_marker = "sensitive lock close failure"
+    sensitive_path = str(tmp_path / "private-lock-file")
+    close_detail = f"{sensitive_marker} at {sensitive_path}"
+    lock_files = _install_close_failing_fdopen(monkeypatch, close_detail)
+
+    with pytest.raises(
+        PrimaryPublicationError,
+        match="^primary publication failure$",
+    ) as exc_info:
+        with generator._publication_lock(output, source_root):
+            raise primary_error
+
+    assert exc_info.value is primary_error
+    assert type(exc_info.value) is PrimaryPublicationError
+    assert str(exc_info.value) == primary_message
+    formatted_diagnostic = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+            chain=True,
+        )
+    )
+    assert sensitive_marker not in formatted_diagnostic
+    assert sensitive_path not in formatted_diagnostic
+    _assert_lock_file_closed_once(lock_files)
+
+
+def test_publication_lock_close_failure_preserves_sanitized_unlock_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    sensitive_marker = "sensitive lock close failure"
+    sensitive_path = str(tmp_path / "private-lock-file")
+    close_detail = f"{sensitive_marker} at {sensitive_path}"
+    lock_files = _install_close_failing_fdopen(monkeypatch, close_detail)
+    release_calls = 0
+
+    def _fail_unlock(_lock_file: Any) -> None:
+        nonlocal release_calls
+        release_calls += 1
+        raise OSError("sensitive unlock failure")
+
+    monkeypatch.setattr(generator, "_release_file_lock", _fail_unlock)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture publication lock could not be released$",
+    ) as exc_info:
+        with generator._publication_lock(output, source_root):
+            pass
+
+    assert release_calls == 1
+    assert str(exc_info.value) == "Fixture publication lock could not be released"
+    formatted_diagnostic = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+            chain=True,
+        )
+    )
+    assert sensitive_marker not in formatted_diagnostic
+    assert sensitive_path not in formatted_diagnostic
+    _assert_lock_file_closed_once(lock_files)
+
+
+def test_publication_lock_standalone_close_failure_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    sensitive_marker = "sensitive lock close failure"
+    sensitive_path = str(tmp_path / "private-lock-file")
+    close_detail = f"{sensitive_marker} at {sensitive_path}"
+    lock_files = _install_close_failing_fdopen(monkeypatch, close_detail)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture publication lock file could not be closed$",
+    ) as exc_info:
+        with generator._publication_lock(output, source_root):
+            pass
+
+    assert exc_info.value.__suppress_context__
+    assert str(exc_info.value) == "Fixture publication lock file could not be closed"
+    formatted_diagnostic = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+            chain=True,
+        )
+    )
+    assert sensitive_marker not in formatted_diagnostic
+    assert sensitive_path not in formatted_diagnostic
+    _assert_lock_file_closed_once(lock_files)
+
+
+def test_publication_lock_fdopen_failure_closes_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _isolated_lock_path(tmp_path, monkeypatch, output)
+    open_lock_descriptor = generator._open_lock_descriptor
+    descriptors: list[int] = []
+    fdopen_error = OSError("sensitive fdopen failure")
+
+    def _record_lock_descriptor(lock_root: Path, lock_name: str) -> int:
+        descriptor = open_lock_descriptor(lock_root, lock_name)
+        descriptors.append(descriptor)
+        return descriptor
+
+    def _fail_fdopen(_descriptor: int, *_args: Any, **_kwargs: Any) -> Any:
+        raise fdopen_error
+
+    monkeypatch.setattr(generator, "_open_lock_descriptor", _record_lock_descriptor)
+    monkeypatch.setattr(generator.os, "fdopen", _fail_fdopen)
+
+    try:
+        with pytest.raises(OSError) as exc_info:
+            with generator._publication_lock(output, source_root):
+                pass
+
+        assert exc_info.value is fdopen_error
+        assert len(descriptors) == 1
+        with pytest.raises(OSError) as closed_descriptor:
+            os.fstat(descriptors[0])
+        assert closed_descriptor.value.errno == errno.EBADF
+    finally:
+        for descriptor in descriptors:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: Path) -> None:
