@@ -252,6 +252,40 @@ def test_article_pipeline_schema_validation_failure_is_sanitized_and_falls_back(
     _assert_safe_text(trace_entry)
 
 
+def test_article_pipeline_schema_validation_failure_is_not_retried(monkeypatch):
+    validation_calls = 0
+    retry_delays = []
+    retry_metrics = []
+
+    def fail_validation(*_args, **_kwargs):
+        nonlocal validation_calls
+        validation_calls += 1
+        raise RuntimeError(_LEAKY_ERROR)
+
+    def record_counter(metric_name, value=1, labels=None):
+        if metric_name == "extraction_retry_total":
+            retry_metrics.append((value, labels))
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "2")
+    monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "10")
+    monkeypatch.setenv("EXTRACTOR_RETRY_JITTER_MS", "0")
+    monkeypatch.setattr(article_extractor, "validate_selector_rules", fail_validation)
+    monkeypatch.setattr(article_extractor.time, "sleep", retry_delays.append)
+    monkeypatch.setattr(article_extractor, "increment_counter", record_counter)
+
+    result = article_extractor.extract_article_with_pipeline(
+        "<html><body><h1 data-no-retry>Title</h1></body></html>",
+        "https://example.com/schema-validation-no-retry",
+        strategy_order=["schema"],
+        schema_rules={"title_xpath": "//h1[@data-no-retry]"},
+    )
+
+    assert (validation_calls, retry_delays, retry_metrics) == (1, [], [])
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == "schema_error"
+    _assert_safe_text(trace_entry)
+
+
 def test_article_pipeline_handler_failure_sanitizes_trace_detail():
     def fail_handler(*_args, **_kwargs):
         raise RuntimeError(_LEAKY_ERROR)

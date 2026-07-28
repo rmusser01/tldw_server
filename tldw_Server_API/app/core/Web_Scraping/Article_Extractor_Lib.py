@@ -2538,17 +2538,19 @@ def extract_article_with_pipeline(
                     trace.append(_trace_entry(strategy, "success", "schema_cached"))
                     _record_strategy_metrics(strategy, "success", time.perf_counter() - start, cached)
                     return _finalize_result(cached, strategy=strategy)
-                validation, validation_exc, _attempts = _run_with_retries(
-                    lambda: validate_selector_rules(
+                try:
+                    validation = validate_selector_rules(
                         schema_rules,
                         html_text=html,
                         include_counts=True,
-                    ),
-                    strategy=strategy,
-                )
-                if validation_exc or validation is None:
+                    )
+                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as validation_exc:
                     reason = "schema_import_error" if isinstance(validation_exc, ImportError) else "schema_error"
                     trace.append(_trace_entry(strategy, "failed", reason))
+                    _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
+                    continue
+                if validation is None:
+                    trace.append(_trace_entry(strategy, "failed", "schema_error"))
                     _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
                     continue
                 errors = validation.get("errors") if isinstance(validation, dict) else None
