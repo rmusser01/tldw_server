@@ -2,27 +2,29 @@
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import re
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from string import Formatter
 from typing import Any
 from urllib.parse import urljoin
 
-from cssselect import SelectorError
-from lxml import html
-from lxml.cssselect import CSSSelector
-from lxml.etree import XPath, XPathError
+from lxml import etree, html
 from lxml.html import HtmlElement
 
 from ..safe_regex import search_untrusted, sub_untrusted
 from .engine import (
     _select_nodes_with_status,
-    _selector_safety_error,
-    coerce_value,
+    _selector_validation_error,
     ensure_sequence,
+)
+from .engine import (
+    coerce_value as _engine_coerce_value,
 )
 
 _SCHEMA_NONCRITICAL_EXCEPTIONS = (
@@ -67,6 +69,7 @@ class _SchemaBudget:
     selector_evaluations: int = 0
     aggregate_matches: int = 0
     retained_output_chars: int = 0
+    output_slots: dict[tuple[Any, ...], int] = dataclass_field(default_factory=dict)
     selection_observer: Callable[[dict[str, Any], Sequence[Any], bool], None] | None = None
     enforce_output: bool = True
 
@@ -82,17 +85,48 @@ class _SchemaBudget:
         if self.aggregate_matches > self.limits.max_aggregate_matches:
             raise _SchemaBudgetExceeded("selector_too_complex:selector_matches>" f"{self.limits.max_aggregate_matches}")
 
-    def remaining_output_chars(self) -> int | None:
+    def remaining_match_capacity(self) -> int:
+        return max(0, self.limits.max_aggregate_matches - self.aggregate_matches)
+
+    def remaining_output_chars(self, slot: tuple[Any, ...] | None = None) -> int | None:
         if not self.enforce_output:
             return None
-        return self.limits.max_retained_output_chars - self.retained_output_chars
+        replaced = self.output_slots.get(slot, 0) if slot is not None else 0
+        return self.limits.max_retained_output_chars - self.retained_output_chars + replaced
 
-    def retain_output(self, value: Any) -> None:
+    def retain_output(self, value: Any, *, slot: tuple[Any, ...] | None = None) -> None:
         if not self.enforce_output:
             return
-        added = _output_chars(value, stop_after=self.remaining_output_chars())
-        self.ensure_output_chars(added)
-        self.retained_output_chars += added
+        available = self.remaining_output_chars(slot)
+        added = _output_chars(value, stop_after=available)
+        if available is not None and added > available:
+            raise _schema_limit_error(
+                "retained_output_chars",
+                self.limits.max_retained_output_chars,
+            )
+        replaced = self.output_slots.get(slot, 0) if slot is not None else 0
+        self.retained_output_chars = self.retained_output_chars - replaced + added
+        if slot is not None:
+            self.output_slots[slot] = added
+
+    def take_output_prefix(
+        self,
+        prefix: tuple[Any, ...],
+    ) -> dict[tuple[Any, ...], int]:
+        replaced = {slot: chars for slot, chars in self.output_slots.items() if slot[: len(prefix)] == prefix}
+        for slot, chars in replaced.items():
+            self.retained_output_chars -= chars
+            del self.output_slots[slot]
+        return replaced
+
+    def restore_output_prefix(
+        self,
+        prefix: tuple[Any, ...],
+        snapshot: dict[tuple[Any, ...], int],
+    ) -> None:
+        self.take_output_prefix(prefix)
+        self.output_slots.update(snapshot)
+        self.retained_output_chars += sum(snapshot.values())
 
     def ensure_output_chars(self, added: int) -> None:
         if not self.enforce_output:
@@ -147,6 +181,97 @@ def _ensure_chars_within_limit(chars: int, limit: int | None, kind: str) -> None
         raise _schema_limit_error(kind, limit)
 
 
+@dataclass(frozen=True, slots=True)
+class _OutputBound:
+    max_chars: int | None
+    error_kind: str
+    error_limit: int | None
+
+
+_DEFAULT_OUTPUT_BOUND = _OutputBound(None, "retained_output_chars", None)
+_ACTIVE_OUTPUT_BOUND: ContextVar[_OutputBound | None] = ContextVar(
+    "selector_schema_output_bound",
+    default=None,
+)
+
+
+def _current_output_bound() -> _OutputBound:
+    return _ACTIVE_OUTPUT_BOUND.get() or _DEFAULT_OUTPUT_BOUND
+
+
+def _bound_error(bound: _OutputBound) -> _SchemaBudgetExceeded:
+    limit = bound.max_chars if bound.error_limit is None else bound.error_limit
+    return _schema_limit_error(bound.error_kind, 0 if limit is None else limit)
+
+
+@contextlib.contextmanager
+def _construction_output_bound(
+    max_chars: int | None,
+    error_kind: str,
+    error_limit: int | None,
+):
+    token = _ACTIVE_OUTPUT_BOUND.set(_OutputBound(max_chars, error_kind, error_limit))
+    try:
+        yield
+    finally:
+        _ACTIVE_OUTPUT_BOUND.reset(token)
+
+
+def _ensure_active_output(value: str) -> str:
+    bound = _current_output_bound()
+    if bound.max_chars is not None and len(value) > bound.max_chars:
+        raise _bound_error(bound)
+    return value
+
+
+def _bounded_element_text(node: HtmlElement) -> str | None:
+    bound = _current_output_bound()
+    pieces: list[str] = []
+    trailing_parts: list[str] = []
+    trailing_chars = 0
+    trailing_overflow = False
+    retained_chars = 0
+    started = False
+
+    for fragment in node.itertext():
+        text = str(fragment)
+        if not started:
+            text = text.lstrip()
+            if not text:
+                continue
+        body = text.rstrip()
+        trailing = text[len(body) :]
+        if body:
+            added = trailing_chars + len(body)
+            if trailing_overflow or (bound.max_chars is not None and retained_chars + added > bound.max_chars):
+                raise _bound_error(bound)
+            pieces.extend(trailing_parts)
+            pieces.append(body)
+            retained_chars += added
+            trailing_parts = []
+            trailing_chars = 0
+            trailing_overflow = False
+            started = True
+        if started and trailing:
+            trailing_chars += len(trailing)
+            remaining = None if bound.max_chars is None else bound.max_chars - retained_chars
+            if remaining is None or trailing_chars <= remaining:
+                trailing_parts.append(trailing)
+            else:
+                trailing_overflow = True
+
+    if not pieces:
+        return None
+    return "".join(pieces)
+
+
+def coerce_value(value: Any) -> str | None:
+    if isinstance(value, HtmlElement):
+        return _bounded_element_text(value)
+    coerced = _engine_coerce_value(value)
+    return _ensure_active_output(coerced) if coerced is not None else None
+
+
 def _bounded_join(
     values: Sequence[Any],
     join_with: str,
@@ -177,20 +302,7 @@ def _bounded_join(
 
 
 def _compile_only_selector_error(selector: str) -> str | None:
-    stripped = selector.strip()
-    safety_error = _selector_safety_error(stripped)
-    if safety_error:
-        return safety_error
-    try:
-        if stripped.startswith("css:"):
-            css_expr = stripped[4:].strip()
-            if css_expr:
-                CSSSelector(css_expr)
-        else:
-            XPath(stripped)
-    except _SCHEMA_NONCRITICAL_EXCEPTIONS + (XPathError, SelectorError):
-        return "selector_invalid"
-    return None
+    return _selector_validation_error(selector)
 
 
 def _normalize_selector_expr(
@@ -339,6 +451,7 @@ def _apply_single_transform(
     value: str,
     transform: Any,
     base_url: str,
+    max_rendered_output_chars: int | None,
 ) -> str | None:
     if value is None:
         return None
@@ -356,11 +469,32 @@ def _apply_single_transform(
         return value.upper()
     if name == "strip":
         return value.strip()
+    if name in {"prepend", "append"}:
+        addition = str(params.get("value", params.get("text", "")))
+        _ensure_chars_within_limit(
+            len(value) + len(addition),
+            max_rendered_output_chars,
+            "rendered_output",
+        )
+        return addition + value if name == "prepend" else value + addition
     if name == "regex_replace":
         pattern = params.get("pattern")
         if not isinstance(pattern, str):
             return value
-        result = sub_untrusted(pattern, str(params.get("repl", "")), value)
+        replacement = str(params.get("repl", ""))
+        kwargs = {"max_output_chars": max_rendered_output_chars} if max_rendered_output_chars is not None else {}
+        result = sub_untrusted(pattern, replacement, value, **kwargs)
+        if (
+            result.code == "regex_too_large"
+            and max_rendered_output_chars is not None
+            and len(pattern) <= 4_096
+            and len(replacement) <= 4_096
+            and len(value) <= 8_192
+        ):
+            raise _schema_limit_error(
+                "rendered_output",
+                max_rendered_output_chars,
+            )
         return result.value if result.code is None and result.value is not None else value
     if name == "urljoin":
         try:
@@ -415,7 +549,12 @@ def _apply_transforms(
         return value
     result: str | None = str(value)
     for transform in transform_list:
-        result = _apply_single_transform(result, transform, base_url)
+        result = _apply_single_transform(
+            result,
+            transform,
+            base_url,
+            max_rendered_output_chars,
+        )
         if result is None:
             break
         _ensure_chars_within_limit(
@@ -479,23 +618,27 @@ def _render_computed_template(
     template: str,
     context: dict[str, Any],
     limits: _SchemaLimits,
+    max_chars: int | None,
+    error_kind: str,
+    error_limit: int | None,
 ) -> tuple[str | None, str | None]:
     parsed, error = _parse_computed_template(template, limits)
     if error or parsed is None:
         return None, error
     pieces: list[str] = []
     rendered_chars = 0
+    public_limit = max_chars if error_limit is None else error_limit
     for literal, field_name, _format_spec, _conversion in parsed:
         rendered_chars += len(literal)
-        if rendered_chars > limits.max_rendered_output_chars:
-            return None, ("selector_too_complex:rendered_output>" f"{limits.max_rendered_output_chars}")
+        if max_chars is not None and rendered_chars > max_chars:
+            return None, f"selector_too_complex:{error_kind}>{public_limit}"
         pieces.append(literal)
         if field_name is None:
             continue
         value = str(context.get(field_name, ""))
         rendered_chars += len(value)
-        if rendered_chars > limits.max_rendered_output_chars:
-            return None, ("selector_too_complex:rendered_output>" f"{limits.max_rendered_output_chars}")
+        if max_chars is not None and rendered_chars > max_chars:
+            return None, f"selector_too_complex:{error_kind}>{public_limit}"
         pieces.append(value)
     return "".join(pieces), None
 
@@ -545,13 +688,46 @@ def _template_validation_errors(
 
 
 def _extract_text_from_node(node: Any) -> str | None:
+    if isinstance(node, HtmlElement):
+        return _bounded_element_text(node)
     return coerce_value(node)
+
+
+class _BoundedHtmlWriter:
+    def __init__(self, bound: _OutputBound) -> None:
+        self._bound = bound
+        self._decoder = codecs.getincrementaldecoder("utf-8")()
+        self._parts: list[str] = []
+        self._chars = 0
+
+    def _append(self, value: str) -> None:
+        if not value:
+            return
+        if self._bound.max_chars is not None and self._chars + len(value) > self._bound.max_chars:
+            raise _bound_error(self._bound)
+        self._chars += len(value)
+        self._parts.append(value)
+
+    def write(self, value: bytes) -> None:
+        self._append(self._decoder.decode(value))
+
+    def finish(self) -> str:
+        self._append(self._decoder.decode(b"", final=True))
+        return "".join(self._parts)
 
 
 def _extract_html_from_node(node: Any) -> str | None:
     if isinstance(node, HtmlElement):
         try:
-            return html.tostring(node, encoding="unicode")
+            writer = _BoundedHtmlWriter(_current_output_bound())
+            etree.ElementTree(node).write(
+                writer,
+                encoding="utf-8",
+                method="html",
+            )
+            return writer.finish()
+        except _SchemaBudgetExceeded:
+            raise
         except _SCHEMA_NONCRITICAL_EXCEPTIONS:
             return None
     return coerce_value(node)
@@ -562,7 +738,7 @@ def _extract_attribute_from_node(node: Any, attr: str | None) -> str | None:
         return None
     if isinstance(node, HtmlElement):
         value = node.get(attr)
-        return value.strip() if isinstance(value, str) and value.strip() else None
+        return _ensure_active_output(value.strip()) if isinstance(value, str) and value.strip() else None
     return None
 
 
@@ -579,6 +755,7 @@ def _select_nodes_with_budget_status(
         node,
         selector,
         context_sensitive=context_sensitive,
+        max_results=budget.remaining_match_capacity() + 1,
     )
     budget.retain_matches(len(matches))
     budget.observe_selection(observation_spec, matches, failed)
@@ -609,6 +786,7 @@ def _extract_value_with_budget(
     budget: _SchemaBudget,
     *,
     key: str,
+    slot: tuple[Any, ...],
     join: bool = False,
     join_with: str = " ",
 ) -> str | None:
@@ -627,18 +805,24 @@ def _extract_value_with_budget(
         )
         if not matches:
             continue
-        value = (
-            _bounded_join(
-                matches,
-                join_with,
-                budget.remaining_output_chars(),
-                coerce=coerce_value,
-                strip_result=True,
-                error_limit=budget.limits.max_retained_output_chars,
+        remaining = budget.remaining_output_chars(slot)
+        with _construction_output_bound(
+            remaining,
+            "retained_output_chars",
+            budget.limits.max_retained_output_chars,
+        ):
+            value = (
+                _bounded_join(
+                    matches,
+                    join_with,
+                    remaining,
+                    coerce=coerce_value,
+                    strip_result=True,
+                    error_limit=budget.limits.max_retained_output_chars,
+                )
+                if join
+                else coerce_value(matches[0])
             )
-            if join
-            else coerce_value(matches[0])
-        )
         if value:
             return value
     return None
@@ -764,45 +948,25 @@ def _extract_fields_from_node(
     base_url: str,
     budget: _SchemaBudget,
     context: dict[str, Any] | None = None,
-    retain_output: bool = True,
     path_prefix: str = "",
-    max_output_chars: int | None = None,
-    output_error_kind: str = "retained_output_chars",
-    output_error_limit: int | None = None,
+    slot_prefix: tuple[Any, ...] = ("schema_fields",),
 ) -> dict[str, Any]:
     extracted: dict[str, Any] = {}
     computed_fields: list[dict[str, Any]] = []
     ctx = dict(context or {})
-    local_output_chars = 0
 
-    def remaining_local_output() -> int | None:
-        if retain_output:
-            return budget.remaining_output_chars()
-        if max_output_chars is None:
-            return None
-        return max_output_chars - local_output_chars
-
-    def construction_bound(transforms: Any) -> tuple[int | None, str, int | None]:
+    def construction_bound(
+        slot: tuple[Any, ...],
+        transforms: Any,
+    ) -> tuple[int | None, str, int | None]:
         if transforms and budget.enforce_output:
             rendered_limit = budget.limits.max_rendered_output_chars
             return rendered_limit, "rendered_output", rendered_limit
-        public_limit = output_error_limit
-        if public_limit is None and output_error_kind == "retained_output_chars":
-            public_limit = budget.limits.max_retained_output_chars
-        return remaining_local_output(), output_error_kind, public_limit
-
-    def retain_constructed_value(value: Any) -> None:
-        nonlocal local_output_chars
-        if retain_output:
-            budget.retain_output(value)
-            return
-        added = _output_chars(value, stop_after=remaining_local_output())
-        if max_output_chars is not None and local_output_chars + added > max_output_chars:
-            raise _schema_limit_error(
-                output_error_kind,
-                max_output_chars if output_error_limit is None else output_error_limit,
-            )
-        local_output_chars += added
+        return (
+            budget.remaining_output_chars(slot),
+            "retained_output_chars",
+            budget.limits.max_retained_output_chars,
+        )
 
     for field in fields:
         name = str(field.get("name") or "").strip()
@@ -813,152 +977,162 @@ def _extract_fields_from_node(
         if field_type == "computed":
             computed_fields.append(field)
             continue
+        slot = slot_prefix + (name,)
         transforms = field.get("transforms")
-        field_limit, field_error_kind, field_error_limit = construction_bound(transforms)
+        nested_snapshot = budget.take_output_prefix(slot) if field_type in {"nested", "nested_list"} else None
+        field_limit, field_error_kind, field_error_limit = construction_bound(
+            slot,
+            transforms,
+        )
 
-        if field_type == "nested":
-            selector = _field_selector(field)
-            matches = (
-                _select_nodes_with_budget(
-                    node,
-                    selector,
-                    budget,
-                    context_sensitive=True,
-                    observation_spec={
-                        "key": path,
-                        "selector": selector,
-                        "allow_multiple": False,
-                        "expect_nonzero": True,
-                    },
-                )
-                if selector
-                else [node]
-            )
-            nested_fields = _normalize_field_definitions(field.get("fields") or {})
-            value = None
-            if matches and nested_fields:
-                value = _extract_fields_from_node(
-                    matches[0],
-                    nested_fields,
-                    base_url=base_url,
-                    budget=budget,
-                    context=ctx,
-                    retain_output=False,
-                    path_prefix=f"{path}.",
-                    max_output_chars=field_limit,
-                    output_error_kind=field_error_kind,
-                    output_error_limit=field_error_limit,
-                )
-        elif field_type == "nested_list":
-            selector = _field_selector(field)
-            matches = (
-                _select_nodes_with_budget(
-                    node,
-                    selector,
-                    budget,
-                    context_sensitive=True,
-                    observation_spec={
-                        "key": path,
-                        "selector": selector,
-                        "allow_multiple": True,
-                        "expect_nonzero": True,
-                    },
-                )
-                if selector
-                else []
-            )
-            nested_fields = _normalize_field_definitions(field.get("fields") or {})
-            value = None
-            if matches and nested_fields:
-                items: list[dict[str, Any]] = []
-                item_chars = 0
-                for match in matches:
-                    if not isinstance(match, HtmlElement):
-                        continue
-                    item = _extract_fields_from_node(
-                        match,
-                        nested_fields,
+        try:
+            with _construction_output_bound(
+                field_limit,
+                field_error_kind,
+                field_error_limit,
+            ):
+                if field_type == "nested":
+                    selector = _field_selector(field)
+                    matches = (
+                        _select_nodes_with_budget(
+                            node,
+                            selector,
+                            budget,
+                            context_sensitive=True,
+                            observation_spec={
+                                "key": path,
+                                "selector": selector,
+                                "allow_multiple": False,
+                                "expect_nonzero": True,
+                            },
+                        )
+                        if selector
+                        else [node]
+                    )
+                    nested_fields = _normalize_field_definitions(field.get("fields") or {})
+                    value = None
+                    if matches and nested_fields:
+                        value = _extract_fields_from_node(
+                            matches[0],
+                            nested_fields,
+                            base_url=base_url,
+                            budget=budget,
+                            context=ctx,
+                            path_prefix=f"{path}.",
+                            slot_prefix=slot,
+                        )
+                elif field_type == "nested_list":
+                    selector = _field_selector(field)
+                    matches = (
+                        _select_nodes_with_budget(
+                            node,
+                            selector,
+                            budget,
+                            context_sensitive=True,
+                            observation_spec={
+                                "key": path,
+                                "selector": selector,
+                                "allow_multiple": True,
+                                "expect_nonzero": True,
+                            },
+                        )
+                        if selector
+                        else []
+                    )
+                    nested_fields = _normalize_field_definitions(field.get("fields") or {})
+                    value = None
+                    if matches and nested_fields:
+                        items: list[dict[str, Any]] = []
+                        for match in matches:
+                            if not isinstance(match, HtmlElement):
+                                continue
+                            item = _extract_fields_from_node(
+                                match,
+                                nested_fields,
+                                base_url=base_url,
+                                budget=budget,
+                                context=ctx,
+                                path_prefix=f"{path}.",
+                                slot_prefix=slot + (len(items),),
+                            )
+                            if item:
+                                items.append(item)
+                        if items:
+                            value = items
+                elif field_type == "list":
+                    value = _extract_list_items(
+                        node,
+                        field,
                         base_url=base_url,
                         budget=budget,
                         context=ctx,
-                        retain_output=False,
-                        path_prefix=f"{path}.",
-                        max_output_chars=(None if field_limit is None else field_limit - item_chars),
+                        path=path,
+                        max_output_chars=field_limit,
                         output_error_kind=field_error_kind,
                         output_error_limit=field_error_limit,
                     )
-                    if item:
-                        item_chars += _output_chars(item)
-                        items.append(item)
-                if items:
-                    value = items
-        elif field_type == "list":
-            value = _extract_list_items(
-                node,
-                field,
-                base_url=base_url,
-                budget=budget,
-                context=ctx,
-                path=path,
-                max_output_chars=field_limit,
-                output_error_kind=field_error_kind,
-                output_error_limit=field_error_limit,
-            )
-        else:
-            selector = _field_selector(field)
-            matches = (
-                _select_nodes_with_budget(
-                    node,
-                    selector,
-                    budget,
-                    context_sensitive=True,
-                    observation_spec={
-                        "key": path,
-                        "selector": selector,
-                        "allow_multiple": False,
-                        "expect_nonzero": True,
-                    },
-                )
-                if selector
-                else []
-            )
-            if not matches:
-                value = None
-            elif field_type == "attribute":
-                attr = field.get("attribute") or field.get("attr")
-                value = _extract_attribute_from_node(
-                    matches[0],
-                    str(attr) if attr else None,
-                )
-            elif field_type == "html":
-                value = _extract_html_from_node(matches[0])
-            elif field_type == "regex":
-                base_text = _extract_text_from_node(matches[0]) or ""
-                value = _extract_regex_from_text(base_text, field)
-            else:
-                join_with = str(field.get("join_with") or " ")
-                value = (
-                    _bounded_join(
-                        matches,
-                        join_with,
-                        field_limit,
-                        coerce=coerce_value,
-                        strip_result=True,
-                        error_kind=field_error_kind,
-                        error_limit=field_error_limit,
+                else:
+                    selector = _field_selector(field)
+                    matches = (
+                        _select_nodes_with_budget(
+                            node,
+                            selector,
+                            budget,
+                            context_sensitive=True,
+                            observation_spec={
+                                "key": path,
+                                "selector": selector,
+                                "allow_multiple": False,
+                                "expect_nonzero": True,
+                            },
+                        )
+                        if selector
+                        else []
                     )
-                    if len(matches) > 1
-                    else _extract_text_from_node(matches[0])
-                )
+                    if not matches:
+                        value = None
+                    elif field_type == "attribute":
+                        attr = field.get("attribute") or field.get("attr")
+                        value = _extract_attribute_from_node(
+                            matches[0],
+                            str(attr) if attr else None,
+                        )
+                    elif field_type == "html":
+                        value = _extract_html_from_node(matches[0])
+                    elif field_type == "regex":
+                        base_text = _extract_text_from_node(matches[0]) or ""
+                        value = _extract_regex_from_text(base_text, field)
+                    else:
+                        join_with = str(field.get("join_with") or " ")
+                        value = (
+                            _bounded_join(
+                                matches,
+                                join_with,
+                                field_limit,
+                                coerce=coerce_value,
+                                strip_result=True,
+                                error_kind=field_error_kind,
+                                error_limit=field_error_limit,
+                            )
+                            if len(matches) > 1
+                            else _extract_text_from_node(matches[0])
+                        )
 
-        value = _apply_transforms(
-            value,
-            transforms,
-            base_url,
-            budget.limits.max_rendered_output_chars if budget.enforce_output else None,
-        )
+                value = _apply_transforms(
+                    value,
+                    transforms,
+                    base_url,
+                    budget.limits.max_rendered_output_chars if budget.enforce_output else None,
+                )
+        except _SchemaBudgetExceeded:
+            if nested_snapshot is not None:
+                budget.restore_output_prefix(slot, nested_snapshot)
+            raise
+        if nested_snapshot is not None and value is None:
+            budget.restore_output_prefix(slot, nested_snapshot)
         if value is not None:
-            retain_constructed_value(value)
+            if field_type not in {"nested", "nested_list"}:
+                budget.retain_output(value, slot=slot)
             extracted[name] = value
             ctx[name] = value
 
@@ -966,41 +1140,57 @@ def _extract_fields_from_node(
         name = str(field.get("name") or "").strip()
         if not name:
             continue
+        slot = slot_prefix + (name,)
         transforms = field.get("transforms")
-        field_limit, field_error_kind, field_error_limit = construction_bound(transforms)
-        value = None
+        field_limit, field_error_kind, field_error_limit = construction_bound(
+            slot,
+            transforms,
+        )
         if "template" in field and isinstance(field.get("template"), str):
-            value, template_error = _render_computed_template(
-                field["template"],
-                ctx,
-                budget.limits,
-            )
-            if template_error and template_error.startswith("selector_too_complex:"):
-                raise _SchemaBudgetExceeded(template_error)
-        else:
-            source = field.get("from")
-            if isinstance(source, list):
-                join_with = str(field.get("join_with") or " ")
-                value = _join_computed_sources(
-                    source,
+            field_limit = budget.limits.max_rendered_output_chars
+            field_error_kind = "rendered_output"
+            field_error_limit = budget.limits.max_rendered_output_chars
+        with _construction_output_bound(
+            field_limit,
+            field_error_kind,
+            field_error_limit,
+        ):
+            value = None
+            if "template" in field and isinstance(field.get("template"), str):
+                value, template_error = _render_computed_template(
+                    field["template"],
                     ctx,
-                    join_with,
+                    budget.limits,
                     field_limit,
                     field_error_kind,
                     field_error_limit,
                 )
-            elif isinstance(source, str):
-                value = ctx.get(source)
-            elif "value" in field:
-                value = field.get("value")
-        value = _apply_transforms(
-            value,
-            transforms,
-            base_url,
-            budget.limits.max_rendered_output_chars if budget.enforce_output else None,
-        )
+                if template_error and template_error.startswith("selector_too_complex:"):
+                    raise _SchemaBudgetExceeded(template_error)
+            else:
+                source = field.get("from")
+                if isinstance(source, list):
+                    join_with = str(field.get("join_with") or " ")
+                    value = _join_computed_sources(
+                        source,
+                        ctx,
+                        join_with,
+                        field_limit,
+                        field_error_kind,
+                        field_error_limit,
+                    )
+                elif isinstance(source, str):
+                    value = ctx.get(source)
+                elif "value" in field:
+                    value = field.get("value")
+            value = _apply_transforms(
+                value,
+                transforms,
+                base_url,
+                budget.limits.max_rendered_output_chars if budget.enforce_output else None,
+            )
         if value is not None:
-            retain_constructed_value(value)
+            budget.retain_output(value, slot=slot)
             extracted[name] = value
             ctx[name] = value
 
@@ -1087,23 +1277,45 @@ _PAGINATION_SELECTOR_KEYS = (
 )
 
 
-def _iter_rule_selectors(rules: dict[str, Any]) -> list[tuple[str, str]]:
+def _preflight_rule_selectors(
+    rules: dict[str, Any],
+    limits: _SchemaLimits,
+    *,
+    initial_fields: int = 0,
+) -> list[tuple[str, str]]:
     selectors: list[tuple[str, str]] = []
-    for key in _SCHEMA_SELECTOR_KEYS:
-        for expr in ensure_sequence(rules.get(key)):
-            selectors.append((key, expr))
-    pagination = rules.get("pagination")
-    if isinstance(pagination, dict):
-        for key in _PAGINATION_SELECTOR_KEYS:
-            for expr in ensure_sequence(pagination.get(key)):
-                selectors.append((f"pagination.{key}", expr))
-    alternates = rules.get("alternates")
-    if isinstance(alternates, list):
+    total_fields = initial_fields
+    stack: list[tuple[dict[str, Any], str, int]] = [(rules, "", 0)]
+    while stack:
+        current, prefix, depth = stack.pop()
+        if depth > limits.max_depth:
+            raise _schema_limit_error("schema_depth", limits.max_depth)
+        for key in _SCHEMA_SELECTOR_KEYS:
+            for expr in ensure_sequence(current.get(key)):
+                selectors.append((f"{prefix}{key}", expr))
+        pagination = current.get("pagination")
+        if isinstance(pagination, dict):
+            for key in _PAGINATION_SELECTOR_KEYS:
+                for expr in ensure_sequence(pagination.get(key)):
+                    selectors.append((f"{prefix}pagination.{key}", expr))
+        alternates = current.get("alternates")
+        if not isinstance(alternates, list):
+            continue
+        children: list[tuple[dict[str, Any], str, int]] = []
         for index, alternate in enumerate(alternates):
             if not isinstance(alternate, dict):
                 continue
-            for key, expr in _iter_rule_selectors(alternate):
-                selectors.append((f"alternates[{index}].{key}", expr))
+            total_fields += 1
+            if total_fields > limits.max_total_fields:
+                raise _schema_limit_error("schema_fields", limits.max_total_fields)
+            children.append(
+                (
+                    alternate,
+                    f"{prefix}alternates[{index}].",
+                    depth + 1,
+                )
+            )
+        stack.extend(reversed(children))
     return selectors
 
 
@@ -1185,7 +1397,6 @@ def _evaluate_validation_rules(
         matches,
         failed,
     )
-    budget.enforce_output = False
     result: dict[str, Any] = {"url": "", "extraction_successful": False}
     if is_dsl:
         _extract_dsl_schema_fields(
@@ -1230,21 +1441,24 @@ def validate_selector_rules(
     normalized_rules = rules or {}
     is_dsl = _is_schema_dsl(normalized_rules)
     records: list[_SchemaFieldRecord] = []
-    if is_dsl:
-        try:
+    try:
+        if is_dsl:
             records = _preflight_schema_fields(normalized_rules, limits)
-        except _SchemaBudgetExceeded as exc:
-            return _complexity_validation_result(
-                exc.code,
-                include_counts=include_counts,
-            )
+        rule_selectors = _preflight_rule_selectors(
+            normalized_rules,
+            limits,
+            initial_fields=len(records),
+        )
+    except _SchemaBudgetExceeded as exc:
+        return _complexity_validation_result(
+            exc.code,
+            include_counts=include_counts,
+        )
 
     errors = _template_validation_errors(records, limits)
     warnings: list[dict[str, Any]] = []
     selector_counts: dict[str, int] = {}
-    compile_specs: list[dict[str, Any]] = [
-        {"key": key, "selector": expr} for key, expr in _iter_rule_selectors(normalized_rules)
-    ]
+    compile_specs: list[dict[str, Any]] = [{"key": key, "selector": expr} for key, expr in rule_selectors]
     dsl_specs = _iter_schema_dsl_selector_specs(normalized_rules, records) if is_dsl else []
     compile_specs.extend(dsl_specs)
     invalid_selectors: set[tuple[Any, str]] = set()
@@ -1407,17 +1621,19 @@ def _extract_dsl_schema_fields(
             continue
         value = schema_fields.get(key)
         if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            root_slot = ("root", key)
             joined = _bounded_join(
                 value,
                 "\n",
-                budget.remaining_output_chars(),
+                budget.remaining_output_chars(root_slot),
                 coerce=lambda item: item.strip() or None,
                 error_limit=budget.limits.max_retained_output_chars,
             )
             projected = joined if joined else value
         else:
+            root_slot = ("root", key)
             projected = value
-        budget.retain_output(projected)
+        budget.retain_output(projected, slot=root_slot)
         result[key] = projected
 
     result["extraction_successful"] = any(_has_nonempty_value(value) for value in schema_fields.values())
@@ -1482,10 +1698,11 @@ def _extract_legacy_schema_fields(
         title_selectors,
         budget,
         key=title_key,
+        slot=("root", "title"),
         join=False,
     )
     if title:
-        budget.retain_output(title)
+        budget.retain_output(title, slot=("root", "title"))
         result["title"] = title
 
     summary_key, summary_selectors = _first_configured_rule(
@@ -1497,11 +1714,12 @@ def _extract_legacy_schema_fields(
         summary_selectors,
         budget,
         key=summary_key,
+        slot=("root", "summary"),
         join=True,
         join_with=summary_join,
     )
     if summary:
-        budget.retain_output(summary)
+        budget.retain_output(summary, slot=("root", "summary"))
         result["summary"] = summary
 
     content_key, content_selectors = _first_configured_rule(
@@ -1513,11 +1731,12 @@ def _extract_legacy_schema_fields(
         content_selectors,
         budget,
         key=content_key,
+        slot=("root", "content"),
         join=True,
         join_with=content_join,
     )
     if content:
-        budget.retain_output(content)
+        budget.retain_output(content, slot=("root", "content"))
         result["content"] = content
 
     author_key, author_selectors = _first_configured_rule(
@@ -1529,10 +1748,11 @@ def _extract_legacy_schema_fields(
         author_selectors,
         budget,
         key=author_key,
+        slot=("root", "author"),
         join=False,
     )
     if author:
-        budget.retain_output(author)
+        budget.retain_output(author, slot=("root", "author"))
         result["author"] = author
 
     published_key, published_selectors = _first_configured_rule(
@@ -1544,10 +1764,11 @@ def _extract_legacy_schema_fields(
         published_selectors,
         budget,
         key=published_key,
+        slot=("root", "published_raw"),
         join=False,
     )
     if published_raw:
-        budget.retain_output(published_raw)
+        budget.retain_output(published_raw, slot=("root", "published_raw"))
         result["published_raw"] = published_raw
         fmt = rules.get("published_format") or rules.get("date_format")
         parsed = normalize_datetime(
@@ -1555,7 +1776,7 @@ def _extract_legacy_schema_fields(
             fmt if isinstance(fmt, str) else None,
         )
         if parsed:
-            budget.retain_output(parsed)
+            budget.retain_output(parsed, slot=("root", "published"))
             result["published"] = parsed
 
     result["extraction_successful"] = bool(content or summary or title)
@@ -1582,6 +1803,11 @@ def extract_schema_fields(
     is_dsl = _is_schema_dsl(rules)
     try:
         records = _preflight_schema_fields(rules, limits) if is_dsl else []
+        _preflight_rule_selectors(
+            rules,
+            limits,
+            initial_fields=len(records),
+        )
         for entry in _template_validation_errors(records, limits):
             error = str(entry.get("error") or "")
             if error.startswith("selector_too_complex:"):

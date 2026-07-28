@@ -170,17 +170,10 @@ def _selector_validation_error(selector: str) -> str | None:
     safety_error = _selector_safety_error(stripped)
     if safety_error:
         return safety_error
-    if stripped.startswith("css:"):
-        css_expr = stripped[4:].strip()
-        if not css_expr:
-            return None
-        try:
-            _compile_css_selector(css_expr)
-        except _SELECTOR_NONCRITICAL_EXCEPTIONS:
-            return "selector_invalid"
+    if stripped.startswith("css:") and not stripped[4:].strip():
         return None
     try:
-        _compile_xpath_selector(stripped)
+        compile_selector(stripped, cache=False)
     except _SELECTOR_NONCRITICAL_EXCEPTIONS:
         return "selector_invalid"
     return None
@@ -244,11 +237,27 @@ def _compile_xpath_selector(expr: str) -> XPath:
     return compiled
 
 
+def compile_selector(selector: str, *, cache: bool = True) -> Any:
+    """Compile a normalized selector with an explicit cache policy."""
+    expr = selector.strip()
+    if expr.startswith("css:"):
+        css_expr = expr[4:].strip()
+        if cache:
+            return _compile_css_selector(css_expr)
+        from lxml.cssselect import CSSSelector
+
+        return CSSSelector(css_expr)
+    if cache:
+        return _compile_xpath_selector(expr)
+    return XPath(expr)
+
+
 def _select_nodes_with_status(
     node: HtmlElement,
     selector: str,
     *,
     context_sensitive: bool = False,
+    max_results: int | None = None,
 ) -> tuple[list[Any], bool]:
     """Select nodes and report sanitized compilation or evaluation failure."""
     expr = selector.strip()
@@ -263,19 +272,32 @@ def _select_nodes_with_status(
         if not css_expr:
             return [], False
         try:
-            return list(_compile_css_selector(css_expr)(node)), False
+            compiled_css = compile_selector(expr, cache=True)
+            if max_results is None:
+                return list(compiled_css(node)), False
+            bounded_xpath = XPath(f"({compiled_css.path})[position() <= {max(0, max_results)}]")
+            return list(bounded_xpath(node)), False
         except _SELECTOR_NONCRITICAL_EXCEPTIONS:
             logger.debug("CSS selector compilation or evaluation failed")
             return [], True
     if context_sensitive:
         expr = _contextualize_xpath(expr, node)
     try:
-        compiled_xpath = _compile_xpath_selector(expr)
+        compiled_xpath = compile_selector(expr, cache=True)
     except _SELECTOR_NONCRITICAL_EXCEPTIONS:
         logger.debug("XPath selector compilation failed")
         return [], True
     try:
-        result = compiled_xpath(node)
+        if max_results is None:
+            result = compiled_xpath(node)
+        else:
+            bounded_xpath = XPath(f"({expr})[position() <= {max(0, max_results)}]")
+            try:
+                result = bounded_xpath(node)
+            except XPathError:
+                # Predicates require a node-set. Preserve scalar XPath behavior
+                # by evaluating the already-compiled base expression directly.
+                result = compiled_xpath(node)
     except _SELECTOR_NONCRITICAL_EXCEPTIONS:
         logger.debug("XPath selector evaluation failed")
         return [], True

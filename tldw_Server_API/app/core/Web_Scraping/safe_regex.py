@@ -254,8 +254,12 @@ def sub_untrusted(
     *,
     flags: int = 0,
     limits: SafeRegexLimits = SafeRegexLimits(),
+    max_output_chars: int = _MAX_SUB_OUTPUT_CHARS,
 ) -> SafeRegexSubResult:
     """Substitute globally with fixed execution, input, and output bounds."""
+    if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int) or max_output_chars < 0:
+        return SafeRegexSubResult(code="regex_invalid")
+    output_limit = min(max_output_chars, _MAX_SUB_OUTPUT_CHARS)
     if not isinstance(repl, str):
         return SafeRegexSubResult(code="regex_invalid")
     if len(repl) > _MAX_REPLACEMENT_CHARS:
@@ -282,12 +286,12 @@ def sub_untrusted(
             if group_start >= 0:
                 referenced_chars += group_end - group_start
         expansion_chars = literal_chars + referenced_chars
-        if written + unmatched_chars + expansion_chars > _MAX_SUB_OUTPUT_CHARS:
+        if written + unmatched_chars + expansion_chars > output_limit:
             raise _RegexOutputTooLarge
 
         expanded = match.expand(repl)
         written += unmatched_chars + len(expanded)
-        if written > _MAX_SUB_OUTPUT_CHARS:
+        if written > output_limit:
             raise _RegexOutputTooLarge
         last_end = end
         return expanded
@@ -300,7 +304,7 @@ def sub_untrusted(
         return SafeRegexSubResult(code="regex_timeout")
     except _REGEX_ERRORS:
         return SafeRegexSubResult(code="regex_invalid")
-    if len(replaced) > _MAX_SUB_OUTPUT_CHARS:
+    if len(replaced) > output_limit:
         return SafeRegexSubResult(code="regex_too_large")
     return SafeRegexSubResult(value=replaced)
 

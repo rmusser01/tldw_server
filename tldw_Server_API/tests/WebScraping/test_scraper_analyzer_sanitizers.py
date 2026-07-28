@@ -214,6 +214,44 @@ def test_article_pipeline_schema_failure_sanitizes_trace_detail(monkeypatch):
     _assert_safe_text(trace_entry)
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_reason"),
+    [
+        (ImportError(_LEAKY_ERROR), "schema_import_error"),
+        (RuntimeError(_LEAKY_ERROR), "schema_error"),
+    ],
+    ids=["import", "generic"],
+)
+def test_article_pipeline_schema_validation_failure_is_sanitized_and_falls_back(
+    monkeypatch,
+    error,
+    expected_reason,
+):
+    def fail_validation(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(article_extractor, "validate_selector_rules", fail_validation)
+
+    result = article_extractor.extract_article_with_pipeline(
+        "<html><body><h1>Title</h1></body></html>",
+        "https://example.com/post",
+        strategy_order=["schema", "trafilatura"],
+        schema_rules={"title_xpath": "//h1"},
+        fallback_extractor=lambda *_args, **_kwargs: {
+            "url": "https://example.com/post",
+            "extraction_successful": True,
+            "title": "Fallback",
+            "content": "Body",
+        },
+    )
+
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == expected_reason
+    assert result["extraction_strategy"] == "trafilatura"
+    assert result["extraction_trace"][1]["status"] == "success"
+    _assert_safe_text(trace_entry)
+
+
 def test_article_pipeline_handler_failure_sanitizes_trace_detail():
     def fail_handler(*_args, **_kwargs):
         raise RuntimeError(_LEAKY_ERROR)

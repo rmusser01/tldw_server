@@ -448,6 +448,28 @@ def test_sub_untrusted_bounds_backreference_output_amplification() -> None:
     assert over_result == SafeRegexSubResult(code="regex_too_large")
 
 
+def test_sub_untrusted_honors_injected_output_cap_at_exact_boundary() -> None:
+    exact_result = sub_untrusted("x", "ab", "xx", max_output_chars=4)
+    over_result = sub_untrusted("x", "ab", "xx", max_output_chars=3)
+
+    assert exact_result == SafeRegexSubResult(value="abab")
+    assert over_result == SafeRegexSubResult(code="regex_too_large")
+
+
+def test_sub_untrusted_honors_injected_output_cap_for_backreferences() -> None:
+    exact_result = sub_untrusted(r"(a+)", r"\1\1", "aa", max_output_chars=4)
+    over_result = sub_untrusted(r"(a+)", r"\1\1", "aa", max_output_chars=3)
+
+    assert exact_result == SafeRegexSubResult(value="aaaa")
+    assert over_result == SafeRegexSubResult(code="regex_too_large")
+
+
+def test_sub_untrusted_default_output_cap_remains_one_million() -> None:
+    result = sub_untrusted("x", "a" * 4_000, "x" * 250)
+
+    assert result == SafeRegexSubResult(value="a" * 1_000_000)
+
+
 @pytest.mark.parametrize(
     ("pattern", "value", "expected_code"),
     [
