@@ -170,14 +170,10 @@ async def test_rate_limit_profiler_sanitizes_injected_probe_failures():
 
 
 def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypatch):
-    original_import = __import__
+    def fail_extract(*_args, **_kwargs):
+        raise ImportError(_LEAKY_ERROR)
 
-    def fail_fetchers_import(name, *args, **kwargs):
-        if name == "tldw_Server_API.app.core.Watchlists.fetchers":
-            raise ImportError(_LEAKY_ERROR)
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.__import__", fail_fetchers_import)
+    monkeypatch.setattr(article_extractor, "extract_schema_fields", fail_extract)
 
     result = article_extractor.extract_article_with_pipeline(
         "<html><body><h1>Title</h1></body></html>",
@@ -192,12 +188,10 @@ def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypat
 
 
 def test_article_pipeline_schema_failure_sanitizes_trace_detail(monkeypatch):
-    from tldw_Server_API.app.core.Watchlists import fetchers
-
     def fail_extract(*_args, **_kwargs):
         raise RuntimeError(_LEAKY_ERROR)
 
-    monkeypatch.setattr(fetchers, "extract_schema_fields", fail_extract)
+    monkeypatch.setattr(article_extractor, "extract_schema_fields", fail_extract)
 
     result = article_extractor.extract_article_with_pipeline(
         """

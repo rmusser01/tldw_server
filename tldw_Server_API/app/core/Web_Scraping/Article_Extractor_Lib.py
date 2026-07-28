@@ -2562,7 +2562,8 @@ def extract_article_with_pipeline(
                         strategy=strategy,
                     )
                 if exc or result is None:
-                    trace.append(_trace_entry(strategy, "failed", "schema_error"))
+                    reason = "schema_import_error" if isinstance(exc, ImportError) else "schema_error"
+                    trace.append(_trace_entry(strategy, "failed", reason))
                     _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
                     continue
                 if warning_detail:
