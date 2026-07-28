@@ -31,14 +31,18 @@ class _IntegerSubclass(int):
 class _EqBomb:
     def __init__(self, collision: str) -> None:
         self._collision = collision
+        self.eq_calls = 0
+        self.repr_calls = 0
 
     def __hash__(self) -> int:
         return hash(self._collision)
 
     def __eq__(self, other: object) -> bool:
+        self.eq_calls += 1
         raise RuntimeError("hostile key equality must not run")
 
     def __repr__(self) -> str:
+        self.repr_calls += 1
         return "<eqbomb-router-secret>"
 
 
@@ -77,7 +81,7 @@ class _HookTrapMapping(Mapping):
         raise RuntimeError("custom get must not run")
 
     def items(self):
-        raise RuntimeError("custom items must not run")
+        return self._data.items()
 
 
 class _LyingHookMapping(_HookTrapMapping):
@@ -89,26 +93,55 @@ class _LyingHookMapping(_HookTrapMapping):
         return self._lie.get(key, default)
 
     def items(self):
-        return self._lie.items()
+        return self._data.items()
 
 
 class _IterationTrapMapping(_HookTrapMapping):
     def __iter__(self) -> Iterator[Any]:
-        raise RuntimeError("custom iteration must fail closed")
+        return iter(self._data)
 
     def get(self, key: Any, default: Any = None) -> Any:
         return self._data.get(key, default)
 
     def items(self):
-        return self._data.items()
+        yielded = False
+        for item in self._data.items():
+            if yielded:
+                raise RuntimeError("custom items iteration must fail closed")
+            yielded = True
+            yield item
+        raise RuntimeError("custom items iteration must fail closed")
 
 
-class _ConversionTrapMapping(_IterationTrapMapping):
+class _ItemsAcquisitionTrapMapping(_HookTrapMapping):
+    def items(self):
+        raise RuntimeError("custom items acquisition must fail closed")
+
+
+class _ItemsUnpackingTrapMapping(_HookTrapMapping):
+    def items(self):
+        yield from self._data.items()
+        yield ("malformed", "entry", "shape")
+
+
+class _PairMapping(Mapping):
+    def __init__(self, pairs: list[tuple[Any, Any]]) -> None:
+        self._pairs = list(pairs)
+
+    def __getitem__(self, key: Any) -> Any:
+        for stored_key, value in self._pairs:
+            if key is stored_key:
+                return value
+        raise KeyError(key)
+
     def __iter__(self) -> Iterator[Any]:
-        return iter(self._data)
+        return (key for key, _value in self._pairs)
 
-    def keys(self):
-        raise RuntimeError("custom mapping conversion must fail closed")
+    def __len__(self) -> int:
+        return len(self._pairs)
+
+    def items(self):
+        return iter(self._pairs)
 
 
 class _RaisingPatternList(list):
@@ -312,7 +345,85 @@ def test_exact_string_keys_work_alongside_hostile_config_keys():
     assert direct.extra_headers == {"X-Test": "7"}
 
 
-def test_mapping_get_and_items_hooks_are_not_used_after_snapshot():
+def test_same_hash_domains_key_survives_pair_backed_mapping_without_hooks():
+    bomb = _EqBomb("domains")
+    rules = _PairMapping(
+        [
+            (bomb, {"example.com": {"backend": "playwright"}}),
+            ("domains", {"example.com": {"backend": "curl"}}),
+        ]
+    )
+
+    cleaned = ScraperRouter.validate_rules(rules)
+    direct = ScraperRouter(rules).resolve("https://example.com/path")
+    validated = ScraperRouter(cleaned).resolve("https://example.com/path")
+
+    assert direct == validated
+    assert direct.backend == "curl"
+    assert bomb.eq_calls == 0
+    assert bomb.repr_calls == 0
+
+
+def test_same_hash_backend_key_survives_direct_and_validated_rule_snapshots():
+    bomb = _EqBomb("backend")
+    rule = _PairMapping(
+        [
+            (bomb, "playwright"),
+            ("backend", "curl"),
+        ]
+    )
+
+    direct, validated = _resolve_both(rule)
+
+    assert direct == validated
+    assert direct.backend == "curl"
+    assert bomb.eq_calls == 0
+    assert bomb.repr_calls == 0
+
+
+def test_same_hash_header_key_survives_scalar_map_snapshot():
+    bomb = _EqBomb("X-Test")
+    mixed = _PairMapping(
+        [
+            (bomb, "eqbomb-router-secret"),
+            ("X-Test", 7),
+        ]
+    )
+
+    direct, validated = _resolve_both(
+        {
+            "extra_headers": mixed,
+            "cookies": mixed,
+            "proxies": mixed,
+        }
+    )
+
+    assert direct == validated
+    assert direct.extra_headers == {"X-Test": "7"}
+    assert direct.cookies == {"X-Test": "7"}
+    assert direct.proxies == {"X-Test": "7"}
+    assert bomb.eq_calls == 0
+    assert bomb.repr_calls == 0
+
+
+def test_same_hash_settings_key_survives_schema_mapping_snapshot():
+    bomb = _EqBomb("title")
+    settings = _PairMapping(
+        [
+            (bomb, {"selector": "script"}),
+            ("title", {"selector": "h1"}),
+        ]
+    )
+
+    direct, validated = _resolve_both({"schema": settings})
+
+    assert direct == validated
+    assert direct.schema_rules == {"title": {"selector": "h1"}}
+    assert bomb.eq_calls == 0
+    assert bomb.repr_calls == 0
+
+
+def test_mapping_get_hook_is_not_used_after_snapshot():
     rule = _HookTrapMapping({"backend": "curl", "extra_headers": {"X-Test": 1}})
     rules = _HookTrapMapping({"domains": _HookTrapMapping({"example.com": rule})})
 
@@ -325,7 +436,7 @@ def test_mapping_get_and_items_hooks_are_not_used_after_snapshot():
     assert direct.extra_headers == {"X-Test": "1"}
 
 
-def test_nested_mapping_items_hook_is_not_used_after_snapshot():
+def test_nested_mapping_items_are_snapshotted_once():
     rules = {"domains": {"example.com": _HookTrapMapping({"backend": "curl", "extra_headers": {"X-Test": 1}})}}
 
     cleaned = ScraperRouter.validate_rules(rules)
@@ -337,7 +448,7 @@ def test_nested_mapping_items_hook_is_not_used_after_snapshot():
     assert direct.extra_headers == {"X-Test": "1"}
 
 
-def test_lying_mapping_get_and_items_cannot_widen_snapshotted_rules():
+def test_lying_mapping_get_cannot_widen_snapshotted_rules():
     actual_rule = {"backend": "curl"}
     lying_rule = {"backend": "playwright", "handler": "math:sqrt"}
     rules = _LyingHookMapping(
@@ -358,17 +469,34 @@ def test_lying_mapping_get_and_items_cannot_widen_snapshotted_rules():
     "rules",
     [
         _IterationTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
-        _ConversionTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
+        _ItemsAcquisitionTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
+        _ItemsUnpackingTrapMapping({"domains": {"example.com": {"backend": "curl"}}}),
     ],
-    ids=["iteration", "dict-conversion"],
+    ids=["items-iteration", "items-acquisition", "items-unpacking"],
 )
-def test_failed_mapping_snapshots_return_empty_or_default(rules):
+def test_failed_items_snapshots_discard_partial_config_state(rules):
     assert ScraperRouter.validate_rules(rules) == {"domains": {}}
 
     plan = ScraperRouter(rules).resolve("https://example.com/path")
 
     assert plan.backend == "auto"
     assert plan.handler == DEFAULT_HANDLER
+
+
+@pytest.mark.parametrize(
+    "mixed",
+    [
+        _IterationTrapMapping({"X-Test": 7}),
+        _ItemsAcquisitionTrapMapping({"X-Test": 7}),
+        _ItemsUnpackingTrapMapping({"X-Test": 7}),
+    ],
+    ids=["items-iteration", "items-acquisition", "items-unpacking"],
+)
+def test_failed_items_snapshots_discard_partial_scalar_map_state(mixed):
+    direct, validated = _resolve_both({"extra_headers": mixed})
+
+    assert direct == validated
+    assert direct.extra_headers == {}
 
 
 @pytest.mark.parametrize(
@@ -579,7 +707,7 @@ def test_safe_builtin_robots_values_preserve_boolean_compatibility(value, expect
 
 def test_settings_aliases_fail_over_after_safe_mapping_snapshots():
     nested = UserDict({"selector": "h1"})
-    invalid_primary = _ConversionTrapMapping({"ignored": True})
+    invalid_primary = _ItemsAcquisitionTrapMapping({"ignored": True})
     valid_alias = _HookTrapMapping({"title": nested})
     rule = {
         "schema_rules": invalid_primary,

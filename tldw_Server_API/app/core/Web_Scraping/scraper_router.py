@@ -57,20 +57,26 @@ def _router_regex_limits(timeout_s: float) -> SafeRegexLimits:
     )
 
 
-def _snapshot_mapping(value: Any) -> dict[Any, Any] | None:
+def _snapshot_mapping_entries(value: Any) -> list[tuple[Any, Any]] | None:
     if not isinstance(value, Mapping):
         return None
+
+    entries: list[tuple[Any, Any]] = []
     try:
-        return dict(value)
+        items = value.items()
+        for entry in items:
+            key, item = entry
+            entries.append((key, item))
     except Exception:
         return None
+    return entries
 
 
 def _snapshot_config_mapping(value: Any) -> dict[str, Any] | None:
-    snapshot = _snapshot_mapping(value)
-    if snapshot is None:
+    entries = _snapshot_mapping_entries(value)
+    if entries is None:
         return None
-    return {key: item for key, item in snapshot.items() if type(key) is str}
+    return {key: item for key, item in entries if type(key) is str}
 
 
 def _normalize_backend(value: Any) -> str:
@@ -109,12 +115,12 @@ def _stringify_safe_scalar(value: Any) -> str | object:
 
 
 def _normalize_string_mapping(value: Any) -> dict[str, str]:
-    snapshot = _snapshot_mapping(value)
-    if snapshot is None:
+    entries = _snapshot_mapping_entries(value)
+    if entries is None:
         return {}
 
     normalized: dict[str, str] = {}
-    for key, item in snapshot.items():
+    for key, item in entries:
         normalized_key = _stringify_safe_scalar(key)
         normalized_item = _stringify_safe_scalar(item)
         if normalized_key is not _INVALID_VALUE and normalized_item is not _INVALID_VALUE:
