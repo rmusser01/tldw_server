@@ -60,6 +60,7 @@ class EmbeddingPreparationPipeline:
         batch_size: int | None,
         execution_path: Literal["legacy", "adapter"],
     ) -> None:
+        """Configure ordered preparation with policy and runtime dependencies."""
         self._count_tokens = count_tokens
         self._tokens_to_texts = tokens_to_texts
         self._settings_config = settings_config

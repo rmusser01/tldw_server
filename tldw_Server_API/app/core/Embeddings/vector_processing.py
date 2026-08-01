@@ -21,6 +21,7 @@ class EmbeddingVectorProcessor:
         *,
         record_dimension_adjustment: DimensionAdjustmentRecorder | None = None,
     ) -> None:
+        """Configure vector processing with optional adjustment recording."""
         self._record_dimension_adjustment = record_dimension_adjustment
 
     def validate_vector_count(
@@ -97,6 +98,7 @@ class EmbeddingVectorProcessor:
 
 
 def _canonical_vectors(vectors: list[list[float]]) -> list[list[float]]:
+    """Return a detached float-only copy of the supplied vectors."""
     return [[float(value) for value in vector] for vector in vectors]
 
 

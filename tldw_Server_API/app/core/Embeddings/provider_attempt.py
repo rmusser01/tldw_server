@@ -21,6 +21,7 @@ ProviderPreflight = Callable[[str, str], Awaitable[None]]
 
 
 async def _no_provider_preflight(provider: str, model: str) -> None:
+    """Accept a provider/model pair when no readiness check is configured."""
     del provider, model
 
 
@@ -28,21 +29,29 @@ class EmbeddingProviderReadinessCheck:
     """Run provider readiness checks without cache or execution side effects."""
 
     def __init__(self, provider_preflight: ProviderPreflight | None = None) -> None:
+        """Create a readiness check backed by an optional preflight callable."""
         self._provider_preflight = provider_preflight or _no_provider_preflight
 
     async def check(self, provider: str, model: str) -> None:
+        """Validate that the provider/model pair is ready for execution."""
         await self._provider_preflight(provider, model)
 
 
 class ProviderAttemptCache(Protocol):
+    """Cache boundary required by a single provider attempt."""
+
     async def get(self, key: str) -> list[float] | None:
+        """Return a cached provider-native vector, or ``None`` on a miss."""
         raise NotImplementedError
 
     async def set(self, key: str, value: list[float]) -> object:
+        """Store a validated provider-native vector under ``key``."""
         raise NotImplementedError
 
 
 class ProviderAttemptExecutor(Protocol):
+    """Provider execution boundary required by a single attempt."""
+
     async def create(
         self,
         texts: list[str],
@@ -51,11 +60,14 @@ class ProviderAttemptExecutor(Protocol):
         model: str,
         dimensions: int | None,
     ) -> list[list[float]] | EmbeddingExecutorOutput:
+        """Create embeddings for cache misses using one provider/model pair."""
         raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderAttemptSuccess:
+    """Successful provider attempt with ordered vectors and cache totals."""
+
     vectors: list[list[float]]
     provider: str
     model: str
@@ -66,6 +78,8 @@ class ProviderAttemptSuccess:
 
 @dataclass(frozen=True, slots=True)
 class ProviderCallFailure:
+    """Provider-domain failure that may be considered by fallback routing."""
+
     error: EmbeddingDomainError
 
 
@@ -81,6 +95,7 @@ class EmbeddingProviderAttempt:
         backend_identity_resolver: BackendIdentityResolver,
         vector_processor: EmbeddingVectorProcessor | None = None,
     ) -> None:
+        """Create an attempt runner with injected cache and execution boundaries."""
         self._cache_key_fn = cache_key_fn
         self._cache = cache
         self._executor = executor
@@ -94,6 +109,7 @@ class EmbeddingProviderAttempt:
         provider: str,
         model: str,
     ) -> ProviderAttemptSuccess | ProviderCallFailure:
+        """Execute one provider/model attempt while preserving input order."""
         plan = prepared.execution_plan
         read_identity = self._backend_identity_resolver(provider, model)
         results: list[list[float] | None] = []
@@ -191,6 +207,7 @@ class EmbeddingProviderAttempt:
 def _coerce_executor_output(
     output: list[list[float]] | EmbeddingExecutorOutput,
 ) -> tuple[list[list[float]], bool]:
+    """Normalize executor output to vectors plus adapter-origin metadata."""
     if isinstance(output, EmbeddingExecutorOutput):
         return output.vectors, output.embeddings_from_adapter
     return output, False

@@ -87,6 +87,8 @@ class EmbeddingExecutionPlan:
 
 @dataclass(frozen=True, slots=True)
 class PreparedEmbeddingRequest:
+    """Canonical request state produced by the ordered preparation pipeline."""
+
     normalized_input: NormalizedEmbeddingInput
     provider_intent: ProviderModelIntent
     policy_decision: EmbeddingPolicyDecision
@@ -98,12 +100,16 @@ class PreparedEmbeddingRequest:
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingExecutorOutput:
+    """Provider vectors and whether an adapter execution path produced them."""
+
     vectors: list[list[float]]
     embeddings_from_adapter: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingExecutionOutcome:
+    """Immutable successful outcome with validated vectors and attempt totals."""
+
     vectors: tuple[tuple[float, ...], ...]
     provider: str
     model: str
@@ -119,6 +125,7 @@ class EmbeddingExecutionOutcome:
     embeddings_from_adapter: bool = False
 
     def __post_init__(self) -> None:
+        """Canonicalize vectors and enforce cache, attempt, and fallback invariants."""
         invalid_vectors_message = "vectors must contain equally sized, non-empty vectors of finite numbers"
         try:
             vector_lists = [list(vector) for vector in self.vectors]
