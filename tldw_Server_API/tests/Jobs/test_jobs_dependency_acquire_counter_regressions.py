@@ -424,6 +424,27 @@ def _counter(manager: JobManager, *, domain: str, job_type: str) -> tuple[int, i
         conn.close()
 
 
+def _counter_row_count(manager: JobManager, *, domain: str, job_type: str) -> int:
+    conn = manager._connect()
+    try:
+        if manager.backend == "postgres":
+            with manager._pg_cursor(conn) as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS count FROM job_counters "
+                    "WHERE domain=%s AND queue='default' AND job_type=%s",
+                    (domain, job_type),
+                )
+                return int(cur.fetchone()["count"])
+        row = conn.execute(
+            "SELECT COUNT(*) FROM job_counters "
+            "WHERE domain=? AND queue='default' AND job_type=?",
+            (domain, job_type),
+        ).fetchone()
+        return int(row[0])
+    finally:
+        conn.close()
+
+
 def _delete_counter(manager: JobManager, *, domain: str, job_type: str) -> None:
     """Remove one aggregate row to exercise counter reconstruction paths."""
 
@@ -1102,24 +1123,19 @@ def test_concurrent_acquire_rechecks_max_inflight_inside_write_transaction(
     assert _counter(first, domain=domain, job_type="work") == (1, 0, 1)
 
 
-@pytest.mark.parametrize("backend", _BACKENDS)
 @pytest.mark.parametrize("idempotency_key", [None, "same"], ids=["plain", "idempotent"])
-def test_admission_counter_failure_rolls_back_job_and_created_event(
-    backend: str,
+def test_sqlite_admission_counter_failure_rolls_back_job_and_created_event(
     idempotency_key: str | None,
     request: pytest.FixtureRequest,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Enabled counters are part of the durable admission transaction."""
+    """SQLite admission rolls back when its transaction-critical counter fails."""
 
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
-    manager = _manager(backend, request=request, tmp_path=tmp_path, name="admission-counter")
-    domain = f"admission-counter-failure-{backend}"
-    if backend == "postgres":
-        import tldw_Server_API.app.core.Jobs.operations.postgres.admission as adapter
-    else:
-        import tldw_Server_API.app.core.Jobs.operations.sqlite.admission as adapter
+    manager = _manager("sqlite", request=request, tmp_path=tmp_path, name="admission-counter")
+    domain = "admission-counter-failure-sqlite"
+    import tldw_Server_API.app.core.Jobs.operations.sqlite.admission as adapter
 
     def fail_counter(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("forced admission counter failure")
@@ -1136,6 +1152,39 @@ def test_admission_counter_failure_rolls_back_job_and_created_event(
         )
 
     assert _job_and_event_counts(manager, domain=domain) == (0, 0)
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("idempotency_key", [None, "same"], ids=["plain", "idempotent"])
+def test_postgres_admission_counter_failure_keeps_job_and_created_event(
+    idempotency_key: str | None,
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PostgreSQL isolates its optional counter failure from durable admission."""
+
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    manager = _manager("postgres", request=request, tmp_path=tmp_path, name="admission-counter")
+    domain = "admission-counter-failure-postgres"
+    import tldw_Server_API.app.core.Jobs.operations.postgres.admission as adapter
+
+    def fail_counter(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("forced admission counter failure")
+
+    monkeypatch.setattr(adapter, "_bump_counters", fail_counter)
+    job = manager.create_job(
+        domain=domain,
+        queue="default",
+        job_type="work",
+        payload={},
+        owner_user_id="owner",
+        idempotency_key=idempotency_key,
+    )
+
+    assert job["domain"] == domain
+    assert _job_and_event_counts(manager, domain=domain) == (1, 1)
+    assert _counter_row_count(manager, domain=domain, job_type="work") == 0
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)

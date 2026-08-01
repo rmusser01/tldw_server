@@ -81,7 +81,7 @@ quota concurrency: 2 created, expected 1
 **Goal:** Characterize and move single-job renewal/release SQL only after acquisition is merged.
 **Success Criteria:** Both backends preserve enforcement, no-shorten renewal, progress, field clearing, counters, and post-commit effects; batch and terminal paths remain unchanged.
 **Tests:** Contract tests, shared renewal/release parity, direct operation tests, Jobs parity, Bandit, compile check.
-**Status:** In Progress
+**Status:** Complete
 
 ## File Structure
 
@@ -1477,9 +1477,11 @@ Expected: compile succeeds and Bandit reports no new findings.
 
 Execution evidence: final `compileall` succeeds. Bandit output at `/tmp/bandit_task_12969_3.json` contains zero findings and zero errors; its 79 skipped checks are pre-existing manager suppressions, while extracted lifecycle modules contain no suppressions. Ruff passes across every changed Python file after cleaning eight existing mechanical findings in touched files, and the directly affected 36-test contract/fault-injection check passes.
 
-- [ ] **Step 4: Open PR 3 and finalize tracking after merge**
+- [x] **Step 4: Open PR 3 and finalize tracking after merge**
 
-Confirm there are no schema-definition, batch, terminal, admission, or unrelated formatting changes; the only migration-module change is the reviewed table-specific `job_counters` insert grant required by counters-enabled RLS release. Commit plan/Backlog updates, open PR 3 against `dev`, request review, and include a requester-owned Change summary. Mark `TASK-12969.3` and parent `TASK-12969` Done only after the merge is visible on `origin/dev` and all evidence is recorded.
+Confirm there are no schema-definition, batch, terminal, admission, or unrelated formatting changes; the only migration-module change is the reviewed table-specific `job_counters` insert grant required by counters-enabled RLS release. Commit plan/Backlog updates, open PR 3 against `dev`, request review, and include a requester-owned Change summary. Mark `TASK-12969.3` Done only after the merge is visible on `origin/dev` and all evidence is recorded. Update parent `TASK-12969` only when its identity is unambiguous.
+
+Execution evidence: PR #2763 merged into `dev` as `616d6dd35d48849f22b320d34823bfcfecbc4b74` on 2026-07-26. The follow-up baseline reconciliation passed 110 focused admission tests and the complete 104-test neighboring matrix against SQLite and required real PostgreSQL with zero skips or deselections, closing the two stale admission-counter expectations that had been excluded before merge. `TASK-12969.3` is finalized with this evidence. The requester-owned Change summary placeholder was still present when PR #2763 merged, so that merge did not satisfy the repository's human-summary policy; this is recorded as a known process deviation rather than treated as compliant. Parent `TASK-12969` remains unchanged because four Backlog files claim that ID and the MCP cannot safely select the intended coordinator record.
 
 ---
 
