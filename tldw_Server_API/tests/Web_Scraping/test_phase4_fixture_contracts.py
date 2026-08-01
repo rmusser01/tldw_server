@@ -10,6 +10,7 @@ from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
 )
 
 _CHANGE_1_CONTRACT = "change_1_default_regex_non_terminal"
+_CHANGE_4_CONTRACT = "change_4_selector_regex_failure_returns_original"
 
 
 class _StringSubclass(str):
@@ -121,6 +122,36 @@ def _assert_change_1(actual: object, expected: object) -> None:
     )
 
 
+def _change_4_profiles() -> tuple[dict[str, object], dict[str, object]]:
+    actual = {
+        "outcome": "returned",
+        "value": {
+            "cache_stats": {
+                "selector_css_cache_size": 0,
+                "selector_xpath_cache_size": 2,
+            },
+            "result": {
+                "content": "AB123",
+                "extraction_successful": True,
+                "schema_fields": {"content": "AB123"},
+                "schema_name": "regex_fallback",
+                "url": "https://example.com/regex-fallback",
+            },
+        },
+    }
+    expected = {"outcome": "regex_error", "value": None}
+    return actual, expected
+
+
+def _assert_change_4(actual: object, expected: object) -> None:
+    assert_predecessor_behavior(
+        actual,
+        expected,
+        behavior_change=4,
+        difference_contract=_CHANGE_4_CONTRACT,
+    )
+
+
 def test_differential_helper_requires_a_tag_for_a_difference() -> None:
     with pytest.raises(AssertionError):
         assert_predecessor_behavior({"value": "current"}, {"value": "predecessor"})
@@ -205,6 +236,64 @@ def test_differential_helper_rejects_invalid_behavior_changes(behavior_change: o
             {"value": "predecessor"},
             behavior_change=behavior_change,  # type: ignore[arg-type]
         )
+
+
+def test_change_4_selector_regex_failure_contract_accepts_exact_transition() -> None:
+    actual, expected = _change_4_profiles()
+
+    _assert_change_4(actual, expected)
+
+
+def test_change_4_selector_regex_failure_contract_rejects_wrong_outcome() -> None:
+    actual, expected = _change_4_profiles()
+    actual["outcome"] = "regex_invalid"
+
+    with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_4(actual, expected)
+
+
+def test_change_4_selector_regex_failure_contract_rejects_cache_profile_mutation() -> None:
+    actual, expected = _change_4_profiles()
+    value = actual["value"]
+    assert isinstance(value, dict)
+    cache_stats = value["cache_stats"]
+    assert isinstance(cache_stats, dict)
+    cache_stats["selector_xpath_cache_size"] = 3
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_4(actual, expected)
+
+
+def test_change_4_selector_regex_failure_contract_rejects_bool_cache_mutation() -> None:
+    actual, expected = _change_4_profiles()
+    value = actual["value"]
+    assert isinstance(value, dict)
+    cache_stats = value["cache_stats"]
+    assert isinstance(cache_stats, dict)
+    cache_stats["selector_css_cache_size"] = False
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_4(actual, expected)
+
+
+def test_change_4_selector_regex_failure_contract_rejects_result_profile_mutation() -> None:
+    actual, expected = _change_4_profiles()
+    value = actual["value"]
+    assert isinstance(value, dict)
+    result = value["result"]
+    assert isinstance(result, dict)
+    result["content"] = "changed"
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_4(actual, expected)
+
+
+def test_change_4_selector_regex_failure_contract_rejects_uncovered_difference() -> None:
+    actual, expected = _change_4_profiles()
+    actual["detail"] = "raw engine text"
+
+    with pytest.raises(AssertionError, match="not covered"):
+        _assert_change_4(actual, expected)
 
 
 def test_change_1_contract_accepts_explicit_predecessor_equality_profile() -> None:

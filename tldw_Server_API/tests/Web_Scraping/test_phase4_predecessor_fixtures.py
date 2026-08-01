@@ -397,6 +397,10 @@ def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:
         ),
         "invalid_xpath_error": (7, "change_7_selector_invalid"),
         "policy_error_is_publicly_bounded": (7, "change_7_policy_error"),
+        "regex_replace_stdlib_invalid_lookbehind_fallback": (
+            4,
+            "change_4_selector_regex_failure_returns_original",
+        ),
     }
 
 
@@ -439,29 +443,80 @@ def test_metadata_envelopes_hashing_and_guards_match_predecessor() -> None:
 def test_selector_validation_and_extraction_match_predecessor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with monkeypatch.context() as environment:
-        _set_environment(environment, _FIXED_SELECTOR_ENV)
+    try:
+        with monkeypatch.context() as environment:
+            _set_environment(environment, _FIXED_SELECTOR_ENV)
+            fetchers.reload_selector_guardrails_from_env()
+            for case in _load_cases("selectors"):
+                fetchers.clear_selector_caches()
+                operation = case["operation"]
+                if operation == "validate":
+                    result = fetchers.validate_selector_rules(
+                        case["rules"],
+                        html_text=case.get("html"),
+                        include_counts=case.get("include_counts", False),
+                    )
+                elif operation == "extract_schema_fields":
+                    if case.get("capture_regex_error"):
+                        try:
+                            result = fetchers.extract_schema_fields(
+                                case["html"],
+                                case["base_url"],
+                                case["rules"],
+                            )
+                        except re.error:
+                            actual = {"outcome": "regex_error", "value": None}
+                        else:
+                            actual = {
+                                "outcome": "returned",
+                                "value": {
+                                    "cache_stats": fetchers.get_selector_cache_stats(),
+                                    "result": result,
+                                },
+                            }
+                        fetchers.clear_selector_caches()
+                        _assert_case(case, actual)
+                        continue
+                    result = fetchers.extract_schema_fields(case["html"], case["base_url"], case["rules"])
+                else:
+                    raise AssertionError(f"Unknown selector fixture operation: {operation}")
+                actual = {
+                    "cache_stats": fetchers.get_selector_cache_stats(),
+                    "result": result,
+                }
+                fetchers.clear_selector_caches()
+                _assert_case(case, actual)
+    finally:
         fetchers.reload_selector_guardrails_from_env()
-        for case in _load_cases("selectors"):
-            fetchers.clear_selector_caches()
-            operation = case["operation"]
-            if operation == "validate":
-                result = fetchers.validate_selector_rules(
-                    case["rules"],
-                    html_text=case.get("html"),
-                    include_counts=case.get("include_counts", False),
-                )
-            elif operation == "extract_schema_fields":
-                result = fetchers.extract_schema_fields(case["html"], case["base_url"], case["rules"])
-            else:
-                raise AssertionError(f"Unknown selector fixture operation: {operation}")
-            actual = {
-                "cache_stats": fetchers.get_selector_cache_stats(),
-                "result": result,
-            }
-            fetchers.clear_selector_caches()
-            _assert_case(case, actual)
-    fetchers.reload_selector_guardrails_from_env()
+
+
+def test_selector_replay_rejects_regression_to_escaped_regex_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_extract = fetchers.extract_schema_fields
+    original_reload = fetchers.reload_selector_guardrails_from_env
+    reload_calls = 0
+
+    def _track_reload() -> None:
+        nonlocal reload_calls
+        reload_calls += 1
+        original_reload()
+
+    def _raise_for_regex_failure_case(
+        html_text: str,
+        base_url: str,
+        rules: dict[str, Any],
+    ) -> dict[str, Any]:
+        if rules.get("name") == "regex_fallback":
+            raise re.error("private engine detail")
+        return original_extract(html_text, base_url, rules)
+
+    monkeypatch.setattr(fetchers, "reload_selector_guardrails_from_env", _track_reload)
+    monkeypatch.setattr(fetchers, "extract_schema_fields", _raise_for_regex_failure_case)
+
+    with pytest.raises(AssertionError, match="Predecessor case failed"):
+        test_selector_validation_and_extraction_match_predecessor(monkeypatch)
+    assert reload_calls == 2
 
 
 def test_extraction_replay_overrides_and_restores_regex_pii_mask(

@@ -116,6 +116,119 @@ def build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
         ),
         case(
             {
+                "base_url": "https://example.com/templates",
+                "html": "<html><body><article><h1>Caf&#233; Title</h1></article></body></html>",
+                "name": "computed_template_format_compatibility",
+                "operation": "extract_schema_fields",
+                "rules": {
+                    "baseFields": [
+                        {
+                            "name": "title",
+                            "selector": ".//h1",
+                            "type": "text",
+                        }
+                    ],
+                    "baseSelector": "//article",
+                    "fields": [
+                        {
+                            "name": "formatted",
+                            "template": (
+                                "repr={title!r}|str={title!s}|ascii={title!a}|"
+                                "first={title[0]}|left=[{title:20}]|"
+                                "right=[{title:>20}]|missing=[{missing}]"
+                            ),
+                            "type": "computed",
+                        }
+                    ],
+                    "name": "template_compatibility",
+                },
+            }
+        ),
+        case(
+            {
+                "html": "<html><body><h1>XPath title</h1><h2>CSS one</h2><h2>CSS two</h2></body></html>",
+                "include_counts": True,
+                "name": "validation_checks_both_title_aliases",
+                "operation": "validate",
+                "rules": {
+                    "title_selector": "css:h2",
+                    "title_xpath": "//h1",
+                },
+            }
+        ),
+        case(
+            {
+                "html": "<html><body><h1>Primary title</h1></body></html>",
+                "include_counts": True,
+                "name": "validation_preserves_missing_alternate_path",
+                "operation": "validate",
+                "rules": {
+                    "alternates": [
+                        {
+                            "content_xpath": "//div[@class='missing']",
+                        }
+                    ],
+                    "title_xpath": "//h1",
+                },
+            }
+        ),
+        case(
+            {
+                "base_url": "https://example.com/regex-fallback",
+                "behavior_change": 4,
+                "capture_regex_error": True,
+                "difference_contract": "change_4_selector_regex_failure_returns_original",
+                "html": "<html><body><article><p>AB123</p></article></body></html>",
+                "name": "regex_replace_stdlib_invalid_lookbehind_fallback",
+                "operation": "extract_schema_fields",
+                "rules": {
+                    "baseSelector": "//article",
+                    "fields": [
+                        {
+                            "name": "content",
+                            "selector": ".//p",
+                            "transforms": [
+                                {
+                                    "name": "regex_replace",
+                                    "pattern": "(?<=[A-Z]{1,3})(\\d+)",
+                                    "repl": "[\\1]",
+                                }
+                            ],
+                            "type": "text",
+                        }
+                    ],
+                    "name": "regex_fallback",
+                },
+            }
+        ),
+        case(
+            {
+                "base_url": "https://example.com/regex-unicode",
+                "html": "<html><body><article><p>e&#769;</p></article></body></html>",
+                "name": "regex_replace_stdlib_combining_mark_parity",
+                "operation": "extract_schema_fields",
+                "rules": {
+                    "baseSelector": "//article",
+                    "fields": [
+                        {
+                            "name": "content",
+                            "selector": ".//p",
+                            "transforms": [
+                                {
+                                    "name": "regex_replace",
+                                    "pattern": "\\w",
+                                    "repl": "X",
+                                }
+                            ],
+                            "type": "text",
+                        }
+                    ],
+                    "name": "regex_unicode",
+                },
+            }
+        ),
+        case(
+            {
                 "base_url": "https://example.com/article",
                 "html": (
                     "<html><body><main><h1>Legacy title</h1>"
@@ -142,6 +255,25 @@ def build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
                 html_text=fixture_case.get("html"),
                 include_counts=fixture_case["include_counts"],
             )
+        elif fixture_case.get("capture_regex_error"):
+            try:
+                result = fetchers.extract_schema_fields(
+                    fixture_case["html"],
+                    fixture_case["base_url"],
+                    fixture_case["rules"],
+                )
+            except fetchers.re.error:
+                fixture_case["expected"] = {"outcome": "regex_error", "value": None}
+            else:
+                fixture_case["expected"] = {
+                    "outcome": "returned",
+                    "value": {
+                        "cache_stats": fetchers.get_selector_cache_stats(),
+                        "result": result,
+                    },
+                }
+            fetchers.clear_selector_caches()
+            continue
         else:
             result = fetchers.extract_schema_fields(
                 fixture_case["html"],

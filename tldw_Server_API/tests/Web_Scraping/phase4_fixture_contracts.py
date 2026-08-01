@@ -37,8 +37,56 @@ def _changed_from_to(expected: str, actual: str) -> Callable[[Difference], bool]
     return lambda difference: (difference.expected == expected and difference.actual == actual)
 
 
+_CHANGE_4_PREDECESSOR_PROFILE = {"outcome": "regex_error", "value": None}
+_CHANGE_4_CURRENT_PROFILE = {
+    "outcome": "returned",
+    "value": {
+        "cache_stats": {
+            "selector_css_cache_size": 0,
+            "selector_xpath_cache_size": 2,
+        },
+        "result": {
+            "content": "AB123",
+            "extraction_successful": True,
+            "schema_fields": {"content": "AB123"},
+            "schema_name": "regex_fallback",
+            "url": "https://example.com/regex-fallback",
+        },
+    },
+}
+
+
+def _validate_change_4_selector_regex_failure_profile(actual: object, expected: object) -> None:
+    assert not collect_differences(
+        expected, _CHANGE_4_PREDECESSOR_PROFILE
+    ), "Change 4 selector regex failure predecessor profile must be the sanitized regex_error outcome"
+    assert not collect_differences(
+        actual, _CHANGE_4_CURRENT_PROFILE
+    ), "Change 4 selector regex failure current profile must return the original AB123 result and cache shape"
+
+
 DIFFERENCE_CONTRACTS = {
     "change_1_default_regex_non_terminal": CHANGE_1_CONTRACT,
+    "change_4_selector_regex_failure_returns_original": DifferenceContract(
+        behavior_change=4,
+        rules=(
+            DifferenceRule(
+                identifier="outcome",
+                path=("outcome",),
+                description="the escaped predecessor regex error becomes a safe returned result",
+                validator=_changed_from_to("regex_error", "returned"),
+                minimum_count=1,
+            ),
+            DifferenceRule(
+                identifier="value",
+                path=("value",),
+                description="the predecessor has no value and current returns one JSON object",
+                validator=lambda difference: difference.expected is None and type(difference.actual) is dict,
+                minimum_count=1,
+            ),
+        ),
+        profile_validator=_validate_change_4_selector_regex_failure_profile,
+    ),
     "change_7_policy_error": DifferenceContract(
         behavior_change=7,
         rules=(

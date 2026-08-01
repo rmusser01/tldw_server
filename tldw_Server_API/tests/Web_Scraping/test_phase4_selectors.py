@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -52,16 +53,31 @@ def test_selector_fixture_matches_predecessor_contract(case: dict[str, Any]) -> 
         )
     else:
         assert case["operation"] == "extract_schema_fields"
-        result = selectors.extract_schema_fields(
-            case["html"],
-            case["base_url"],
-            case["rules"],
-        )
+        try:
+            result = selectors.extract_schema_fields(
+                case["html"],
+                case["base_url"],
+                case["rules"],
+            )
+        except re.error:
+            if not case.get("capture_regex_error"):
+                raise
+            actual = {"outcome": "regex_error", "value": None}
+        else:
+            if case.get("capture_regex_error"):
+                actual = {
+                    "outcome": "returned",
+                    "value": {
+                        "cache_stats": selectors.get_selector_cache_stats(),
+                        "result": result,
+                    },
+                }
 
-    actual = {
-        "cache_stats": selectors.get_selector_cache_stats(),
-        "result": result,
-    }
+    if not case.get("capture_regex_error"):
+        actual = {
+            "cache_stats": selectors.get_selector_cache_stats(),
+            "result": result,
+        }
     assert_predecessor_behavior(
         actual,
         case["expected"],

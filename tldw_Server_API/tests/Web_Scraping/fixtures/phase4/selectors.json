@@ -190,6 +190,181 @@
       }
     },
     {
+      "base_url": "https://example.com/templates",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "extraction_successful": true,
+          "schema_fields": {
+            "formatted": "repr='Caf\u00e9 Title'|str=Caf\u00e9 Title|ascii='Caf\\xe9 Title'|first=C|left=[Caf\u00e9 Title          ]|right=[          Caf\u00e9 Title]|missing=[]",
+            "title": "Caf\u00e9 Title"
+          },
+          "schema_name": "template_compatibility",
+          "title": "Caf\u00e9 Title",
+          "url": "https://example.com/templates"
+        }
+      },
+      "html": "<html><body><article><h1>Caf&#233; Title</h1></article></body></html>",
+      "name": "computed_template_format_compatibility",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "baseFields": [
+          {
+            "name": "title",
+            "selector": ".//h1",
+            "type": "text"
+          }
+        ],
+        "baseSelector": "//article",
+        "fields": [
+          {
+            "name": "formatted",
+            "template": "repr={title!r}|str={title!s}|ascii={title!a}|first={title[0]}|left=[{title:20}]|right=[{title:>20}]|missing=[{missing}]",
+            "type": "computed"
+          }
+        ],
+        "name": "template_compatibility"
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 1,
+          "selector_xpath_cache_size": 1
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "title_selector": 2,
+            "title_xpath": 1
+          },
+          "warnings": [
+            {
+              "count": 2,
+              "key": "title_selector",
+              "selector": "css:h2",
+              "warning": "non_unique_selector"
+            }
+          ]
+        }
+      },
+      "html": "<html><body><h1>XPath title</h1><h2>CSS one</h2><h2>CSS two</h2></body></html>",
+      "include_counts": true,
+      "name": "validation_checks_both_title_aliases",
+      "operation": "validate",
+      "rules": {
+        "title_selector": "css:h2",
+        "title_xpath": "//h1"
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "alternates[0].content_xpath": 0,
+            "title_xpath": 1
+          },
+          "warnings": [
+            {
+              "key": "alternates[0].content_xpath",
+              "selector": "//div[@class='missing']",
+              "warning": "no_matches"
+            }
+          ]
+        }
+      },
+      "html": "<html><body><h1>Primary title</h1></body></html>",
+      "include_counts": true,
+      "name": "validation_preserves_missing_alternate_path",
+      "operation": "validate",
+      "rules": {
+        "alternates": [
+          {
+            "content_xpath": "//div[@class='missing']"
+          }
+        ],
+        "title_xpath": "//h1"
+      }
+    },
+    {
+      "base_url": "https://example.com/regex-fallback",
+      "behavior_change": 4,
+      "capture_regex_error": true,
+      "difference_contract": "change_4_selector_regex_failure_returns_original",
+      "expected": {
+        "outcome": "regex_error",
+        "value": null
+      },
+      "html": "<html><body><article><p>AB123</p></article></body></html>",
+      "name": "regex_replace_stdlib_invalid_lookbehind_fallback",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "baseSelector": "//article",
+        "fields": [
+          {
+            "name": "content",
+            "selector": ".//p",
+            "transforms": [
+              {
+                "name": "regex_replace",
+                "pattern": "(?<=[A-Z]{1,3})(\\d+)",
+                "repl": "[\\1]"
+              }
+            ],
+            "type": "text"
+          }
+        ],
+        "name": "regex_fallback"
+      }
+    },
+    {
+      "base_url": "https://example.com/regex-unicode",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "content": "X\u0301",
+          "extraction_successful": true,
+          "schema_fields": {
+            "content": "X\u0301"
+          },
+          "schema_name": "regex_unicode",
+          "url": "https://example.com/regex-unicode"
+        }
+      },
+      "html": "<html><body><article><p>e&#769;</p></article></body></html>",
+      "name": "regex_replace_stdlib_combining_mark_parity",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "baseSelector": "//article",
+        "fields": [
+          {
+            "name": "content",
+            "selector": ".//p",
+            "transforms": [
+              {
+                "name": "regex_replace",
+                "pattern": "\\w",
+                "repl": "X"
+              }
+            ],
+            "type": "text"
+          }
+        ],
+        "name": "regex_unicode"
+      }
+    },
+    {
       "base_url": "https://example.com/article",
       "expected": {
         "cache_stats": {
