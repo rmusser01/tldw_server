@@ -631,7 +631,6 @@ def _apply_single_transform(
             pattern,
             replacement,
             value,
-            dialect="regex",
             **kwargs,
         )
         if (

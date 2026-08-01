@@ -26,8 +26,10 @@ _MAX_TIMEOUT_S = 0.100
 _STDLIB_WORKER_STARTUP_TIMEOUT_S = 1.0
 _STDLIB_WORKER_REAP_TIMEOUT_S = 0.500
 _MAX_WORKER_HANDSHAKE_BYTES = 64
-_MAX_WORKER_REQUEST_BYTES = 12 * (_MAX_PATTERN_CHARS + _MAX_INPUT_CHARS) + 256
-_MAX_WORKER_RESPONSE_BYTES = 131_072
+_MAX_WORKER_REQUEST_BYTES = 12 * (_MAX_PATTERN_CHARS + _MAX_INPUT_CHARS + _MAX_REPLACEMENT_CHARS) + 512
+_MAX_WORKER_SEARCH_RESPONSE_BYTES = 131_072
+_MAX_WORKER_SUB_RESPONSE_BYTES = 12 * _MAX_SUB_OUTPUT_CHARS + 128
+_MAX_WORKER_RESPONSE_BYTES = max(_MAX_WORKER_SEARCH_RESPONSE_BYTES, _MAX_WORKER_SUB_RESPONSE_BYTES)
 _REGEX_ERRORS = (
     IndexError,
     re.error,
@@ -38,6 +40,7 @@ _REGEX_ERRORS = (
     RecursionError,
 )
 _RegexDialect = Literal["stdlib", "regex"]
+_STDLIB_LEGACY_NUMERIC_GROUP_IDS = sys.version_info < (3, 12)
 
 _STDLIB_WORKER_CODE = f"""
 import json
@@ -46,6 +49,15 @@ import sys
 
 MAX_REQUEST_BYTES = {_MAX_WORKER_REQUEST_BYTES}
 MAX_RESPONSE_BYTES = {_MAX_WORKER_RESPONSE_BYTES}
+MAX_PATTERN_CHARS = {_MAX_PATTERN_CHARS}
+MAX_INPUT_CHARS = {_MAX_INPUT_CHARS}
+MAX_REPLACEMENT_CHARS = {_MAX_REPLACEMENT_CHARS}
+MAX_SUB_OUTPUT_CHARS = {_MAX_SUB_OUTPUT_CHARS}
+SUPPORTED_FLAGS = {int(re.IGNORECASE | re.MULTILINE | re.DOTALL | re.UNICODE | re.VERBOSE | re.ASCII)}
+
+
+class OutputTooLarge(Exception):
+    pass
 
 
 def emit(payload):
@@ -65,7 +77,21 @@ try:
     ):
         raise ValueError
     request = json.loads(raw_request)
-    if set(request) != {{"pattern", "value", "flags"}}:
+    operation = request.get("operation", "search")
+    expected_keys = (
+        {{"pattern", "value", "flags"}}
+        if operation == "search"
+        else {{
+            "operation",
+            "pattern",
+            "repl",
+            "value",
+            "flags",
+            "legacy_numeric_group_ids",
+            "max_output_chars",
+        }}
+    )
+    if operation not in {{"search", "sub"}} or set(request) != expected_keys:
         raise ValueError
     pattern = request["pattern"]
     value = request["value"]
@@ -75,16 +101,158 @@ try:
         or not isinstance(value, str)
         or isinstance(flags, bool)
         or not isinstance(flags, int)
+        or flags < 0
+        or flags & ~SUPPORTED_FLAGS
+        or len(pattern) > MAX_PATTERN_CHARS
+        or len(value) > MAX_INPUT_CHARS
     ):
         raise ValueError
-    match = re.search(pattern, value, flags)
-    if match is None:
-        emit({{"status": "no_match"}})
+
+    if operation == "search":
+        match = re.search(pattern, value, flags)
+        if match is None:
+            emit({{"status": "no_match"}})
+        else:
+            emit({{
+                "status": "match",
+                "spans": [match.span(index) for index in range(match.re.groups + 1)],
+            }})
     else:
-        emit({{
-            "status": "match",
-            "spans": [match.span(index) for index in range(match.re.groups + 1)],
-        }})
+        repl = request["repl"]
+        legacy_numeric_group_ids = request["legacy_numeric_group_ids"]
+        max_output_chars = request["max_output_chars"]
+        if (
+            not isinstance(repl, str)
+            or len(repl) > MAX_REPLACEMENT_CHARS
+            or not isinstance(legacy_numeric_group_ids, bool)
+            or isinstance(max_output_chars, bool)
+            or not isinstance(max_output_chars, int)
+            or max_output_chars < 0
+            or max_output_chars > MAX_SUB_OUTPUT_CHARS
+        ):
+            raise ValueError
+
+        compiled = re.compile(pattern, flags)
+        group_count = compiled.groups
+        group_names = compiled.groupindex
+        literal_chars = 0
+        references = []
+        normalizations = []
+        index = 0
+        while index < len(repl):
+            if repl[index] != "\\\\":
+                literal_chars += 1
+                index += 1
+                continue
+            if index + 1 >= len(repl):
+                raise ValueError
+
+            escape_start = index
+            escaped = repl[index + 1]
+            index += 2
+            if escaped == "g":
+                if index >= len(repl) or repl[index] != "<":
+                    raise ValueError
+                closing = repl.find(">", index + 1)
+                if closing < 0:
+                    raise ValueError
+                reference = repl[index + 1 : closing]
+                index = closing + 1
+                numeric_reference = False
+                if legacy_numeric_group_ids:
+                    try:
+                        group_index = int(reference)
+                    except ValueError:
+                        pass
+                    else:
+                        if group_index < 0:
+                            raise ValueError
+                        numeric_reference = True
+                elif reference.isascii() and reference.isdecimal():
+                    group_index = int(reference)
+                    numeric_reference = True
+
+                if numeric_reference:
+                    if group_index > group_count:
+                        raise ValueError
+                    if not (reference.isascii() and reference.isdecimal()):
+                        normalizations.append(
+                            (escape_start, index, "\\\\g<" + str(group_index) + ">")
+                        )
+                elif reference.isidentifier() and reference in group_names:
+                    group_index = group_names[reference]
+                else:
+                    raise ValueError
+                references.append(group_index)
+                continue
+            if escaped == "0":
+                for _offset in range(2):
+                    if index < len(repl) and repl[index] in "01234567":
+                        index += 1
+                    else:
+                        break
+                literal_chars += 1
+                continue
+            if escaped in "123456789":
+                digits = escaped
+                if index < len(repl) and repl[index] in "0123456789":
+                    digits += repl[index]
+                    index += 1
+                    if (
+                        escaped in "01234567"
+                        and digits[1] in "01234567"
+                        and index < len(repl)
+                        and repl[index] in "01234567"
+                    ):
+                        digits += repl[index]
+                        index += 1
+                        if int(digits, 8) > 0o377:
+                            raise ValueError
+                        literal_chars += 1
+                        continue
+                group_index = int(digits)
+                if group_index > group_count:
+                    raise ValueError
+                references.append(group_index)
+                continue
+            if escaped in "abfnrtv\\\\":
+                literal_chars += 1
+                continue
+            if escaped.isascii() and escaped.isalpha():
+                raise ValueError
+            literal_chars += 2
+
+        written = 0
+        last_end = 0
+        execution_repl = repl
+        for start, end, normalized in reversed(normalizations):
+            execution_repl = execution_repl[:start] + normalized + execution_repl[end:]
+
+        def bounded_replacement(match):
+            global written, last_end
+            start, end = match.span()
+            unmatched_chars = max(0, start - last_end)
+            referenced_chars = 0
+            for group_index in references:
+                group_start, group_end = match.span(group_index)
+                if group_start >= 0:
+                    referenced_chars += group_end - group_start
+            if written + unmatched_chars + literal_chars + referenced_chars > max_output_chars:
+                raise OutputTooLarge
+
+            expanded = match.expand(execution_repl)
+            written += unmatched_chars + len(expanded)
+            if written > max_output_chars:
+                raise OutputTooLarge
+            last_end = end
+            return expanded
+
+        replaced = re.sub(pattern, bounded_replacement, value, flags=flags)
+        if len(replaced) > max_output_chars:
+            raise OutputTooLarge
+        emit({{"status": "sub", "value": replaced}})
+except OutputTooLarge:
+    emit({{"status": "too_large"}})
 except BaseException:
     emit({{"status": "invalid"}})
 """
@@ -187,11 +355,19 @@ for _stdlib_flag, _engine_flag in _FLAG_MAP:
     _SUPPORTED_STDLIB_FLAGS |= _stdlib_flag
 
 
-def _normalize_flags(flags: int) -> int | None:
+def _normalize_stdlib_flags(flags: int) -> int | None:
     if isinstance(flags, bool) or not isinstance(flags, int):
         return None
     raw_flags = int(flags)
     if raw_flags < 0 or raw_flags & ~_SUPPORTED_STDLIB_FLAGS:
+        return None
+
+    return raw_flags
+
+
+def _normalize_flags(flags: int) -> int | None:
+    raw_flags = _normalize_stdlib_flags(flags)
+    if raw_flags is None:
         return None
 
     normalized = 0
@@ -374,23 +550,25 @@ def _validated_worker_spans(
     return tuple(spans)
 
 
-def _search_stdlib_in_worker(
-    pattern: str,
-    value: str,
-    flags: int,
+def _run_stdlib_worker(
+    request_payload: dict[str, Any],
+    *,
     timeout_s: float,
-    stdlib_compiled: Any,
-) -> SafeRegexResult:
-    request = (
-        json.dumps(
-            {"flags": flags, "pattern": pattern, "value": value},
-            ensure_ascii=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        + b"\n"
-    )
+    max_response_bytes: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        request = (
+            json.dumps(
+                request_payload,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+    except (TypeError, ValueError, OverflowError, UnicodeEncodeError):
+        return None, "regex_invalid"
     if len(request) > _MAX_WORKER_REQUEST_BYTES:
-        return SafeRegexResult(matched=False, code="regex_too_large")
+        return None, "regex_too_large"
 
     try:
         # Untrusted values are sent only over the bounded stdin protocol.
@@ -403,11 +581,11 @@ def _search_stdlib_in_worker(
             creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
     except (OSError, ValueError, subprocess.SubprocessError):
-        return SafeRegexResult(matched=False, code="regex_invalid")
+        return None, "regex_invalid"
 
     if process.stdin is None or process.stdout is None:
         _terminate_and_reap_worker(process)
-        return SafeRegexResult(matched=False, code="regex_invalid")
+        return None, "regex_invalid"
 
     startup_result: queue.Queue[bytes] = queue.Queue(maxsize=1)
     startup_reader = threading.Thread(
@@ -421,27 +599,46 @@ def _search_stdlib_in_worker(
         raw_ready = startup_result.get(timeout=_STDLIB_WORKER_STARTUP_TIMEOUT_S)
     except queue.Empty:
         _terminate_and_reap_worker(process, startup_reader=startup_reader)
-        return SafeRegexResult(matched=False, code="regex_timeout")
+        return None, "regex_timeout"
 
     startup_reader.join(_STDLIB_WORKER_REAP_TIMEOUT_S)
     ready = _decode_worker_message(raw_ready, _MAX_WORKER_HANDSHAKE_BYTES)
     if startup_reader.is_alive() or ready != {"status": "ready"}:
         _terminate_and_reap_worker(process, startup_reader=startup_reader)
-        return SafeRegexResult(matched=False, code="regex_invalid")
+        return None, "regex_invalid"
 
     try:
         raw_response, _stderr = process.communicate(input=request, timeout=timeout_s)
     except subprocess.TimeoutExpired:
         _terminate_and_reap_worker(process)
-        return SafeRegexResult(matched=False, code="regex_timeout")
+        return None, "regex_timeout"
     except (OSError, ValueError, subprocess.SubprocessError):
         _terminate_and_reap_worker(process)
-        return SafeRegexResult(matched=False, code="regex_invalid")
+        return None, "regex_invalid"
 
-    response = _decode_worker_message(raw_response, _MAX_WORKER_RESPONSE_BYTES)
+    response = _decode_worker_message(raw_response, max_response_bytes)
+    if process.returncode != 0 or response is None:
+        return None, "regex_invalid"
+    return response, None
+
+
+def _search_stdlib_in_worker(
+    pattern: str,
+    value: str,
+    flags: int,
+    timeout_s: float,
+    stdlib_compiled: Any,
+) -> SafeRegexResult:
+    response, code = _run_stdlib_worker(
+        {"flags": flags, "pattern": pattern, "value": value},
+        timeout_s=timeout_s,
+        max_response_bytes=_MAX_WORKER_SEARCH_RESPONSE_BYTES,
+    )
+    if code is not None or response is None:
+        return SafeRegexResult(matched=False, code=code or "regex_invalid")
     if response == {"status": "no_match"}:
         return SafeRegexResult(matched=False)
-    if response is None or set(response) != {"status", "spans"} or response.get("status") != "match":
+    if set(response) != {"status", "spans"} or response.get("status") != "match":
         return SafeRegexResult(matched=False, code="regex_invalid")
 
     spans = _validated_worker_spans(
@@ -457,6 +654,60 @@ def _search_stdlib_in_worker(
         _groupindex=MappingProxyType(dict(stdlib_compiled.groupindex)),
     )
     return SafeRegexResult(matched=True, match=match)
+
+
+def _prepare_stdlib_substitution(
+    pattern: str,
+    value: str,
+    flags: int,
+    limits: SafeRegexLimits,
+) -> tuple[int, float] | str:
+    validated_limits = _validated_limits(limits)
+    if validated_limits is None or not isinstance(pattern, str) or not isinstance(value, str):
+        return "regex_invalid"
+
+    max_pattern_chars, max_input_chars, timeout_s = validated_limits
+    if len(pattern) > max_pattern_chars or len(value) > max_input_chars:
+        return "regex_too_large"
+
+    normalized_flags = _normalize_stdlib_flags(flags)
+    if normalized_flags is None:
+        return "regex_invalid"
+    return normalized_flags, timeout_s
+
+
+def _sub_stdlib_in_worker(
+    pattern: str,
+    repl: str,
+    value: str,
+    flags: int,
+    timeout_s: float,
+    output_limit: int,
+) -> SafeRegexSubResult:
+    response, code = _run_stdlib_worker(
+        {
+            "flags": flags,
+            "legacy_numeric_group_ids": _STDLIB_LEGACY_NUMERIC_GROUP_IDS,
+            "max_output_chars": output_limit,
+            "operation": "sub",
+            "pattern": pattern,
+            "repl": repl,
+            "value": value,
+        },
+        timeout_s=timeout_s,
+        max_response_bytes=_MAX_WORKER_SUB_RESPONSE_BYTES,
+    )
+    if code is not None or response is None:
+        return SafeRegexSubResult(code=code or "regex_invalid")
+    if response == {"status": "too_large"}:
+        return SafeRegexSubResult(code="regex_too_large")
+    if set(response) != {"status", "value"} or response.get("status") != "sub":
+        return SafeRegexSubResult(code="regex_invalid")
+
+    replaced = response.get("value")
+    if not isinstance(replaced, str) or len(replaced) > output_limit:
+        return SafeRegexSubResult(code="regex_invalid")
+    return SafeRegexSubResult(value=replaced)
 
 
 def _prepare_untrusted_pattern(
@@ -678,6 +929,21 @@ def sub_untrusted(
         return SafeRegexSubResult(code="regex_invalid")
     if len(repl) > _MAX_REPLACEMENT_CHARS:
         return SafeRegexSubResult(code="regex_too_large")
+
+    if dialect == "stdlib":
+        prepared_stdlib = _prepare_stdlib_substitution(pattern, value, flags, limits)
+        if isinstance(prepared_stdlib, str):
+            return SafeRegexSubResult(code=prepared_stdlib)
+        stdlib_flags, timeout_s = prepared_stdlib
+        return _sub_stdlib_in_worker(
+            pattern,
+            repl,
+            value,
+            stdlib_flags,
+            timeout_s,
+            output_limit,
+        )
+
     prepared = _prepare_untrusted_pattern(pattern, value, flags, limits, dialect)
     if isinstance(prepared, str):
         return SafeRegexSubResult(code=prepared)

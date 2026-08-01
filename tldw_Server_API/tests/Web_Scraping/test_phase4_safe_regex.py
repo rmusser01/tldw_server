@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -773,6 +774,86 @@ def test_sub_untrusted_preserves_global_group_replacement_semantics() -> None:
     assert result == SafeRegexSubResult(value="Ada Lovelace; Grace Hopper")
 
 
+def test_stdlib_substitution_rejects_variable_length_lookbehind() -> None:
+    result = sub_untrusted(
+        r"(?<=\b[A-Z]{1,3})(\d+)",
+        r"[\1]",
+        "AB123",
+    )
+
+    assert result == SafeRegexSubResult(code="regex_invalid")
+
+
+def test_stdlib_substitution_matches_re_for_unicode_word_characters() -> None:
+    value = "e\u0301"
+
+    result = sub_untrusted(r"\w", "X", value)
+
+    assert result == SafeRegexSubResult(value=re.sub(r"\w", "X", value))
+
+
+def test_stdlib_substitution_matches_named_group_replacement() -> None:
+    pattern = r"(?P<family>\w+),\s*(?P<given>\w+)"
+    replacement = r"\g<given> \g<family>"
+    value = "Lovelace, Ada; Hopper, Grace"
+
+    result = sub_untrusted(pattern, replacement, value)
+
+    assert result == SafeRegexSubResult(value=re.sub(pattern, replacement, value))
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [r"\g<+1>", r"\g< 1>", r"\g<١>", r"\g<-1>"],
+    ids=["plus", "space", "unicode-decimal", "negative"],
+)
+def test_stdlib_numeric_group_reference_grammar_matches_active_runtime(
+    replacement: str,
+) -> None:
+    try:
+        expected = SafeRegexSubResult(value=re.sub(r"(x)", replacement, "x"))
+    except re.error:
+        expected = SafeRegexSubResult(code="regex_invalid")
+
+    assert sub_untrusted(r"(x)", replacement, "x") == expected
+
+
+def test_legacy_numeric_group_reference_protocol_branch_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        safe_regex_module,
+        "_STDLIB_LEGACY_NUMERIC_GROUP_IDS",
+        True,
+        raising=False,
+    )
+
+    accepted = {
+        r"\g<+1>": "x",
+        r"\g< 1>": "x",
+        r"\g<١>": "x",
+    }
+    assert {replacement: sub_untrusted(r"(x)", replacement, "x") for replacement in accepted} == {
+        replacement: SafeRegexSubResult(value=value) for replacement, value in accepted.items()
+    }
+    assert sub_untrusted(r"(x)", r"\g<-1>", "x") == SafeRegexSubResult(code="regex_invalid")
+
+    exact = sub_untrusted(
+        r"(x+)",
+        r"\g<+1>\g<+1>",
+        "xx",
+        max_output_chars=4,
+    )
+    over = sub_untrusted(
+        r"(x+)",
+        r"\g<+1>\g<+1>",
+        "xx",
+        max_output_chars=3,
+    )
+    assert exact == SafeRegexSubResult(value="xxxx")
+    assert over == SafeRegexSubResult(code="regex_too_large")
+
+
 def test_regex_dialect_substitution_preserves_group_replacement_semantics() -> None:
     result = sub_untrusted(
         r"(?<=\b[A-Z]{1,3})(\d+)",
@@ -968,6 +1049,128 @@ def test_sub_untrusted_default_output_cap_remains_one_million() -> None:
     assert result == SafeRegexSubResult(value="a" * 1_000_000)
 
 
+def test_stdlib_substitution_worker_receives_bounded_request_on_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret_pattern = r"(?P<secret>x)"
+    secret_replacement = r"\g<secret>-private-replacement"
+    secret_value = "private-value-x"
+    requests: list[bytes] = []
+    launches: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    original_popen = subprocess.Popen
+
+    class _RecordingWorker:
+        def __init__(self, worker: subprocess.Popen[bytes]) -> None:
+            self._worker = worker
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._worker, name)
+
+        def communicate(self, *args: Any, **kwargs: Any) -> tuple[bytes, bytes]:
+            payload = kwargs.get("input", args[0] if args else None)
+            assert isinstance(payload, bytes)
+            requests.append(payload)
+            return self._worker.communicate(*args, **kwargs)
+
+    def _recording_popen(*args: Any, **kwargs: Any) -> _RecordingWorker:
+        launches.append((args, kwargs))
+        return _RecordingWorker(original_popen(*args, **kwargs))
+
+    monkeypatch.setattr(subprocess, "Popen", _recording_popen)
+
+    result = sub_untrusted(
+        secret_pattern,
+        secret_replacement,
+        secret_value,
+        flags=re.IGNORECASE,
+        max_output_chars=64,
+    )
+
+    assert result == SafeRegexSubResult(value="private-value-x-private-replacement")
+    assert len(launches) == 1
+    args, kwargs = launches[0]
+    argv = args[0]
+    assert isinstance(argv, list)
+    assert all(secret_pattern not in argument for argument in argv)
+    assert all(secret_replacement not in argument for argument in argv)
+    assert all(secret_value not in argument for argument in argv)
+    assert kwargs["stdin"] is subprocess.PIPE
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.DEVNULL
+    assert len(requests) == 1
+    assert requests[0].endswith(b"\n")
+    assert json.loads(requests[0]) == {
+        "flags": int(re.IGNORECASE),
+        "legacy_numeric_group_ids": sys.version_info < (3, 12),
+        "max_output_chars": 64,
+        "operation": "sub",
+        "pattern": secret_pattern,
+        "repl": secret_replacement,
+        "value": secret_value,
+    }
+
+
+def test_stdlib_substitution_rejects_request_over_worker_byte_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(safe_regex_module, "_MAX_WORKER_REQUEST_BYTES", 64)
+
+    result = sub_untrusted("x", "replacement", "x")
+
+    assert result == SafeRegexSubResult(code="regex_too_large")
+
+
+def test_catastrophic_stdlib_substitution_timeout_reaps_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawned: list[subprocess.Popen[bytes]] = []
+    execution_timeouts: list[float] = []
+    original_popen = subprocess.Popen
+
+    class _RecordingWorker:
+        def __init__(self, worker: subprocess.Popen[bytes]) -> None:
+            self._worker = worker
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._worker, name)
+
+        def communicate(self, *args: Any, **kwargs: Any) -> tuple[bytes, bytes]:
+            timeout = kwargs.get("timeout")
+            if timeout is not None:
+                execution_timeouts.append(timeout)
+            return self._worker.communicate(*args, **kwargs)
+
+    def _recording_popen(*args: Any, **kwargs: Any) -> _RecordingWorker:
+        worker = _RecordingWorker(original_popen(*args, **kwargs))
+        spawned.append(worker)
+        return worker
+
+    monkeypatch.setattr(subprocess, "Popen", _recording_popen)
+
+    try:
+        result = sub_untrusted(
+            r"(?:a|aa)+$",
+            "x",
+            "a" * 6_000 + "!",
+            limits=SafeRegexLimits(timeout_s=0.020),
+        )
+
+        assert result == SafeRegexSubResult(code="regex_timeout")
+        assert len(spawned) == 1
+        assert execution_timeouts[0] == 0.020
+        assert all(worker.returncode is not None for worker in spawned)
+        assert all(worker.stdin is not None and worker.stdin.closed for worker in spawned)
+        assert all(worker.stdout is not None and worker.stdout.closed for worker in spawned)
+        assert not any(
+            thread.name == "safe-regex-startup-reader" and thread.is_alive() for thread in threading.enumerate()
+        )
+    finally:
+        for worker in spawned:
+            if worker.returncode is None:
+                worker.kill()
+                worker.wait(timeout=1.0)
+
+
 @pytest.mark.parametrize(
     ("pattern", "value", "expected_code"),
     [
@@ -1025,7 +1228,7 @@ def test_regex_dialect_preserves_timeout_bound_and_sanitization(
     assert result == SafeRegexResult(matched=False, code="regex_timeout")
 
 
-def test_sub_untrusted_passes_the_bounded_timeout_and_sanitizes_timeout(
+def test_regex_dialect_substitution_passes_bounded_timeout_and_sanitizes_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     compiled = _FakeSubCompiled(error=TimeoutError("private engine detail"))
@@ -1035,6 +1238,7 @@ def test_sub_untrusted_passes_the_bounded_timeout_and_sanitizes_timeout(
         "x",
         "replacement",
         "sample",
+        dialect="regex",
         limits=SafeRegexLimits(timeout_s=0.025),
     )
 
@@ -1045,7 +1249,7 @@ def test_sub_untrusted_passes_the_bounded_timeout_and_sanitizes_timeout(
     assert result == SafeRegexSubResult(code="regex_timeout")
 
 
-def test_sub_untrusted_does_not_disclose_pattern_or_engine_error(
+def test_regex_dialect_substitution_does_not_disclose_pattern_or_engine_error(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
@@ -1056,13 +1260,32 @@ def test_sub_untrusted_does_not_disclose_pattern_or_engine_error(
     monkeypatch.setattr(safe_regex_module, "_compile_pattern", lambda *_args: compiled)
     caplog.set_level(logging.DEBUG)
 
-    result = sub_untrusted(secret_pattern, "replacement", "sample")
+    result = sub_untrusted(secret_pattern, "replacement", "sample", dialect="regex")
     captured = capsys.readouterr()
     disclosed = " ".join([repr(result), caplog.text, captured.out, captured.err])
 
     assert result == SafeRegexSubResult(code="regex_invalid")
     assert secret_pattern not in disclosed
     assert secret_error not in disclosed
+
+
+def test_stdlib_substitution_does_not_disclose_worker_inputs_or_error(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret_pattern = "private-pattern-("
+    secret_replacement = r"\g<private-replacement>"
+    secret_value = "private-input"
+    caplog.set_level(logging.DEBUG)
+
+    result = sub_untrusted(secret_pattern, secret_replacement, secret_value)
+    captured = capsys.readouterr()
+    disclosed = " ".join([repr(result), caplog.text, captured.out, captured.err])
+
+    assert result == SafeRegexSubResult(code="regex_invalid")
+    assert secret_pattern not in disclosed
+    assert secret_replacement not in disclosed
+    assert secret_value not in disclosed
 
 
 def test_raw_pattern_and_exception_are_not_returned_or_logged(

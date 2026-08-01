@@ -439,7 +439,7 @@ def test_regex_field_uses_regex_dialect_for_variable_length_lookbehind() -> None
     assert result["schema_fields"] == {"identifier": "123"}
 
 
-def test_regex_replace_uses_regex_dialect_with_bounded_group_expansion() -> None:
+def test_regex_replace_uses_stdlib_dialect_and_retains_value_for_invalid_pattern() -> None:
     result = selectors.extract_schema_fields(
         "<article><h1>AB123</h1></article>",
         "https://example.com/post",
@@ -460,7 +460,49 @@ def test_regex_replace_uses_regex_dialect_with_bounded_group_expansion() -> None
         },
     )
 
-    assert result["schema_fields"] == {"identifier": "AB[123]"}
+    assert result["schema_fields"] == {"identifier": "AB123"}
+
+
+def test_regex_replace_matches_stdlib_unicode_word_semantics() -> None:
+    result = selectors.extract_schema_fields(
+        "<article><h1>e&#769;</h1></article>",
+        "https://example.com/post",
+        {
+            "fields": [
+                {
+                    "name": "identifier",
+                    "selector": "//h1",
+                    "transforms": [{"name": "regex_replace", "pattern": r"\w", "repl": "X"}],
+                }
+            ]
+        },
+    )
+
+    assert result["schema_fields"] == {"identifier": "X\u0301"}
+
+
+def test_regex_replace_retains_original_value_for_invalid_replacement() -> None:
+    result = selectors.extract_schema_fields(
+        "<article><h1>Original</h1></article>",
+        "https://example.com/post",
+        {
+            "fields": [
+                {
+                    "name": "identifier",
+                    "selector": "//h1",
+                    "transforms": [
+                        {
+                            "name": "regex_replace",
+                            "pattern": r"(?P<value>Original)",
+                            "repl": r"\g<missing>",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert result["schema_fields"] == {"identifier": "Original"}
 
 
 def test_invalid_and_oversized_regexes_preserve_existing_fallbacks() -> None:
