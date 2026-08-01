@@ -10,26 +10,46 @@ import re
 import subprocess  # nosec B404
 import sys
 import threading
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
 
 import regex
 
-_MAX_PATTERN_CHARS = 4_096
-_MAX_INPUT_CHARS = 1_000_000
-_MAX_REPLACEMENT_CHARS = 4_096
-_MAX_SUB_OUTPUT_CHARS = 1_000_000
+from .safe_regex_worker import (
+    MAX_INPUT_CHARS as _MAX_INPUT_CHARS,
+)
+from .safe_regex_worker import (
+    MAX_PATTERN_CHARS as _MAX_PATTERN_CHARS,
+)
+from .safe_regex_worker import (
+    MAX_REPLACEMENT_CHARS as _MAX_REPLACEMENT_CHARS,
+)
+from .safe_regex_worker import (
+    MAX_REQUEST_BYTES as _MAX_WORKER_REQUEST_BYTES,
+)
+from .safe_regex_worker import (
+    MAX_SEARCH_RESPONSE_BYTES as _MAX_WORKER_SEARCH_RESPONSE_BYTES,
+)
+from .safe_regex_worker import (
+    MAX_SUB_OUTPUT_CHARS as _MAX_SUB_OUTPUT_CHARS,
+)
+from .safe_regex_worker import (
+    MAX_SUB_RESPONSE_BYTES as _MAX_WORKER_SUB_RESPONSE_BYTES,
+)
+from .safe_regex_worker import (
+    parse_replacement_template as _parse_replacement_components,
+)
+
 _MAX_TIMEOUT_S = 0.100
 _STDLIB_WORKER_STARTUP_TIMEOUT_S = 1.0
 _STDLIB_WORKER_REAP_TIMEOUT_S = 0.500
 _MAX_WORKER_HANDSHAKE_BYTES = 64
-_MAX_WORKER_REQUEST_BYTES = 12 * (_MAX_PATTERN_CHARS + _MAX_INPUT_CHARS + _MAX_REPLACEMENT_CHARS) + 512
-_MAX_WORKER_SEARCH_RESPONSE_BYTES = 131_072
-_MAX_WORKER_SUB_RESPONSE_BYTES = 12 * _MAX_SUB_OUTPUT_CHARS + 128
-_MAX_WORKER_RESPONSE_BYTES = max(_MAX_WORKER_SEARCH_RESPONSE_BYTES, _MAX_WORKER_SUB_RESPONSE_BYTES)
+_MAX_ACTIVE_STDLIB_WORKERS = 4
+_STDLIB_WORKER_PATH = Path(__file__).with_name("safe_regex_worker.py")
+_STDLIB_WORKER_SLOTS = threading.BoundedSemaphore(_MAX_ACTIVE_STDLIB_WORKERS)
 _REGEX_ERRORS = (
     IndexError,
     re.error,
@@ -41,221 +61,6 @@ _REGEX_ERRORS = (
 )
 _RegexDialect = Literal["stdlib", "regex"]
 _STDLIB_LEGACY_NUMERIC_GROUP_IDS = sys.version_info < (3, 12)
-
-_STDLIB_WORKER_CODE = f"""
-import json
-import re
-import sys
-
-MAX_REQUEST_BYTES = {_MAX_WORKER_REQUEST_BYTES}
-MAX_RESPONSE_BYTES = {_MAX_WORKER_RESPONSE_BYTES}
-MAX_PATTERN_CHARS = {_MAX_PATTERN_CHARS}
-MAX_INPUT_CHARS = {_MAX_INPUT_CHARS}
-MAX_REPLACEMENT_CHARS = {_MAX_REPLACEMENT_CHARS}
-MAX_SUB_OUTPUT_CHARS = {_MAX_SUB_OUTPUT_CHARS}
-SUPPORTED_FLAGS = {int(re.IGNORECASE | re.MULTILINE | re.DOTALL | re.UNICODE | re.VERBOSE | re.ASCII)}
-
-
-class OutputTooLarge(Exception):
-    pass
-
-
-def emit(payload):
-    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\\n"
-    if len(encoded) > MAX_RESPONSE_BYTES:
-        encoded = b'{{"status":"invalid"}}\\n'
-    sys.stdout.buffer.write(encoded)
-    sys.stdout.buffer.flush()
-
-
-emit({{"status": "ready"}})
-try:
-    raw_request = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1)
-    if (
-        not raw_request.endswith(b"\\n")
-        or len(raw_request) > MAX_REQUEST_BYTES
-    ):
-        raise ValueError
-    request = json.loads(raw_request)
-    operation = request.get("operation", "search")
-    expected_keys = (
-        {{"pattern", "value", "flags"}}
-        if operation == "search"
-        else {{
-            "operation",
-            "pattern",
-            "repl",
-            "value",
-            "flags",
-            "legacy_numeric_group_ids",
-            "max_output_chars",
-        }}
-    )
-    if operation not in {{"search", "sub"}} or set(request) != expected_keys:
-        raise ValueError
-    pattern = request["pattern"]
-    value = request["value"]
-    flags = request["flags"]
-    if (
-        not isinstance(pattern, str)
-        or not isinstance(value, str)
-        or isinstance(flags, bool)
-        or not isinstance(flags, int)
-        or flags < 0
-        or flags & ~SUPPORTED_FLAGS
-        or len(pattern) > MAX_PATTERN_CHARS
-        or len(value) > MAX_INPUT_CHARS
-    ):
-        raise ValueError
-
-    if operation == "search":
-        match = re.search(pattern, value, flags)
-        if match is None:
-            emit({{"status": "no_match"}})
-        else:
-            emit({{
-                "status": "match",
-                "spans": [match.span(index) for index in range(match.re.groups + 1)],
-            }})
-    else:
-        repl = request["repl"]
-        legacy_numeric_group_ids = request["legacy_numeric_group_ids"]
-        max_output_chars = request["max_output_chars"]
-        if (
-            not isinstance(repl, str)
-            or len(repl) > MAX_REPLACEMENT_CHARS
-            or not isinstance(legacy_numeric_group_ids, bool)
-            or isinstance(max_output_chars, bool)
-            or not isinstance(max_output_chars, int)
-            or max_output_chars < 0
-            or max_output_chars > MAX_SUB_OUTPUT_CHARS
-        ):
-            raise ValueError
-
-        compiled = re.compile(pattern, flags)
-        group_count = compiled.groups
-        group_names = compiled.groupindex
-        literal_chars = 0
-        references = []
-        normalizations = []
-        index = 0
-        while index < len(repl):
-            if repl[index] != "\\\\":
-                literal_chars += 1
-                index += 1
-                continue
-            if index + 1 >= len(repl):
-                raise ValueError
-
-            escape_start = index
-            escaped = repl[index + 1]
-            index += 2
-            if escaped == "g":
-                if index >= len(repl) or repl[index] != "<":
-                    raise ValueError
-                closing = repl.find(">", index + 1)
-                if closing < 0:
-                    raise ValueError
-                reference = repl[index + 1 : closing]
-                index = closing + 1
-                numeric_reference = False
-                if legacy_numeric_group_ids:
-                    try:
-                        group_index = int(reference)
-                    except ValueError:
-                        pass
-                    else:
-                        if group_index < 0:
-                            raise ValueError
-                        numeric_reference = True
-                elif reference.isascii() and reference.isdecimal():
-                    group_index = int(reference)
-                    numeric_reference = True
-
-                if numeric_reference:
-                    if group_index > group_count:
-                        raise ValueError
-                    if not (reference.isascii() and reference.isdecimal()):
-                        normalizations.append(
-                            (escape_start, index, "\\\\g<" + str(group_index) + ">")
-                        )
-                elif reference.isidentifier() and reference in group_names:
-                    group_index = group_names[reference]
-                else:
-                    raise ValueError
-                references.append(group_index)
-                continue
-            if escaped == "0":
-                for _offset in range(2):
-                    if index < len(repl) and repl[index] in "01234567":
-                        index += 1
-                    else:
-                        break
-                literal_chars += 1
-                continue
-            if escaped in "123456789":
-                digits = escaped
-                if index < len(repl) and repl[index] in "0123456789":
-                    digits += repl[index]
-                    index += 1
-                    if (
-                        escaped in "01234567"
-                        and digits[1] in "01234567"
-                        and index < len(repl)
-                        and repl[index] in "01234567"
-                    ):
-                        digits += repl[index]
-                        index += 1
-                        if int(digits, 8) > 0o377:
-                            raise ValueError
-                        literal_chars += 1
-                        continue
-                group_index = int(digits)
-                if group_index > group_count:
-                    raise ValueError
-                references.append(group_index)
-                continue
-            if escaped in "abfnrtv\\\\":
-                literal_chars += 1
-                continue
-            if escaped.isascii() and escaped.isalpha():
-                raise ValueError
-            literal_chars += 2
-
-        written = 0
-        last_end = 0
-        execution_repl = repl
-        for start, end, normalized in reversed(normalizations):
-            execution_repl = execution_repl[:start] + normalized + execution_repl[end:]
-
-        def bounded_replacement(match):
-            global written, last_end
-            start, end = match.span()
-            unmatched_chars = max(0, start - last_end)
-            referenced_chars = 0
-            for group_index in references:
-                group_start, group_end = match.span(group_index)
-                if group_start >= 0:
-                    referenced_chars += group_end - group_start
-            if written + unmatched_chars + literal_chars + referenced_chars > max_output_chars:
-                raise OutputTooLarge
-
-            expanded = match.expand(execution_repl)
-            written += unmatched_chars + len(expanded)
-            if written > max_output_chars:
-                raise OutputTooLarge
-            last_end = end
-            return expanded
-
-        replaced = re.sub(pattern, bounded_replacement, value, flags=flags)
-        if len(replaced) > max_output_chars:
-            raise OutputTooLarge
-        emit({{"status": "sub", "value": replaced}})
-except OutputTooLarge:
-    emit({{"status": "too_large"}})
-except BaseException:
-    emit({{"status": "invalid"}})
-"""
 
 
 class _RegexOutputTooLarge(Exception):
@@ -550,7 +355,7 @@ def _validated_worker_spans(
     return tuple(spans)
 
 
-def _run_stdlib_worker(
+def _run_admitted_stdlib_worker(
     request_payload: dict[str, Any],
     *,
     timeout_s: float,
@@ -573,7 +378,7 @@ def _run_stdlib_worker(
     try:
         # Untrusted values are sent only over the bounded stdin protocol.
         process = subprocess.Popen(  # nosec B603
-            [sys.executable, "-I", "-S", "-u", "-c", _STDLIB_WORKER_CODE],
+            [sys.executable, "-I", "-S", "-u", str(_STDLIB_WORKER_PATH)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -620,6 +425,24 @@ def _run_stdlib_worker(
     if process.returncode != 0 or response is None:
         return None, "regex_invalid"
     return response, None
+
+
+def _run_stdlib_worker(
+    request_payload: dict[str, Any],
+    *,
+    timeout_s: float,
+    max_response_bytes: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    if not _STDLIB_WORKER_SLOTS.acquire(timeout=timeout_s):
+        return None, "regex_timeout"
+    try:
+        return _run_admitted_stdlib_worker(
+            request_payload,
+            timeout_s=timeout_s,
+            max_response_bytes=max_response_bytes,
+        )
+    finally:
+        _STDLIB_WORKER_SLOTS.release()
 
 
 def _search_stdlib_in_worker(
@@ -807,108 +630,15 @@ def _parse_replacement_template(
     except _REGEX_ERRORS:
         return None
 
-    group_count = compiled.groups
-    group_names = compiled.groupindex
-    literal_chars = 0
-    references: list[int] = []
-    index = 0
-    while index < len(repl):
-        if repl[index] != "\\":
-            literal_chars += 1
-            index += 1
-            continue
-        if index + 1 >= len(repl):
-            return None
-
-        escaped = repl[index + 1]
-        index += 2
-        if escaped == "g":
-            if index >= len(repl) or repl[index] != "<":
-                return None
-            closing = repl.find(">", index + 1)
-            if closing < 0:
-                return None
-            reference = repl[index + 1 : closing]
-            index = closing + 1
-            if reference.isascii() and reference.isdecimal():
-                try:
-                    group_index = int(reference)
-                except ValueError:
-                    return None
-                if group_index > group_count:
-                    return None
-            elif reference.isidentifier() and reference in group_names:
-                group_index = group_names[reference]
-            else:
-                return None
-            references.append(group_index)
-            continue
-        if dialect == "regex" and escaped in {"x", "u", "U"}:
-            width = {"x": 2, "u": 4, "U": 8}[escaped]
-            digits = repl[index : index + width]
-            if len(digits) != width or any(char not in "0123456789abcdefABCDEF" for char in digits):
-                return None
-            try:
-                chr(int(digits, 16))
-            except ValueError:
-                return None
-            literal_chars += 1
-            index += width
-            continue
-        if dialect == "regex" and escaped == "N":
-            if index >= len(repl) or repl[index] != "{":
-                return None
-            closing = index + 1
-            while closing < len(repl) and repl[closing].isascii() and (repl[closing].isalpha() or repl[closing] == " "):
-                closing += 1
-            if closing >= len(repl) or repl[closing] != "}":
-                return None
-            try:
-                named_char = unicodedata.lookup(repl[index + 1 : closing])
-            except KeyError:
-                return None
-            if len(named_char) != 1:
-                return None
-            literal_chars += 1
-            index = closing + 1
-            continue
-        if escaped == "0":
-            for _offset in range(2):
-                if index < len(repl) and repl[index] in "01234567":
-                    index += 1
-                else:
-                    break
-            literal_chars += 1
-            continue
-        if escaped in "123456789":
-            digits = escaped
-            if index < len(repl) and repl[index] in "0123456789":
-                digits += repl[index]
-                index += 1
-                if (
-                    escaped in "01234567"
-                    and digits[1] in "01234567"
-                    and index < len(repl)
-                    and repl[index] in "01234567"
-                ):
-                    digits += repl[index]
-                    index += 1
-                    if int(digits, 8) > (0o777 if dialect == "regex" else 0o377):
-                        return None
-                    literal_chars += 1
-                    continue
-            group_index = int(digits)
-            if group_index > group_count:
-                return None
-            references.append(group_index)
-            continue
-        if escaped in "abfnrtv\\":
-            literal_chars += 1
-            continue
-        if escaped.isascii() and escaped.isalpha():
-            return None
-        literal_chars += 2
-    return literal_chars, tuple(references)
+    parsed = _parse_replacement_components(
+        repl,
+        group_count=compiled.groups,
+        group_names=compiled.groupindex,
+        dialect=dialect,
+    )
+    if parsed is None:
+        return None
+    return parsed.literal_chars, parsed.references
 
 
 def sub_untrusted(

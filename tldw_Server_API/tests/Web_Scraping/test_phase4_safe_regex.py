@@ -1,3 +1,4 @@
+import importlib
 import json
 import logging
 import re
@@ -6,6 +7,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -677,6 +679,8 @@ def test_stdlib_worker_receives_bounded_json_on_stdin_not_argv(
     args, kwargs = launches[0]
     argv = args[0]
     assert isinstance(argv, list)
+    assert "-c" not in argv
+    assert Path(argv[-1]).name == "safe_regex_worker.py"
     assert all(secret_pattern not in argument for argument in argv)
     assert all(secret_value not in argument for argument in argv)
     assert kwargs["stdin"] is subprocess.PIPE
@@ -689,6 +693,39 @@ def test_stdlib_worker_receives_bounded_json_on_stdin_not_argv(
         "pattern": secret_pattern,
         "value": secret_value,
     }
+
+
+def test_stdlib_worker_saturation_returns_timeout_without_spawning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slots = threading.BoundedSemaphore(1)
+    assert slots.acquire(blocking=False)
+    monkeypatch.setattr(safe_regex_module, "_STDLIB_WORKER_SLOTS", slots)
+
+    def _unexpected_spawn(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("saturated admission must not spawn a worker")
+
+    monkeypatch.setattr(subprocess, "Popen", _unexpected_spawn)
+    try:
+        response, code = safe_regex_module._run_stdlib_worker(
+            {"flags": 0, "pattern": "a", "value": "a"},
+            timeout_s=0.001,
+            max_response_bytes=64,
+        )
+    finally:
+        slots.release()
+
+    assert response is None
+    assert code == "regex_timeout"
+
+
+def test_stdlib_worker_module_owns_shared_replacement_parser() -> None:
+    worker_path = Path(safe_regex_module.__file__).with_name("safe_regex_worker.py")
+
+    assert worker_path.is_file()
+    worker_module = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.safe_regex_worker")
+    assert safe_regex_module._parse_replacement_components is worker_module.parse_replacement_template
+    assert not hasattr(safe_regex_module, "_STDLIB_WORKER_CODE")
 
 
 def test_catastrophic_stdlib_timeout_reaps_child_threads_and_resources(
