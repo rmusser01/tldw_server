@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
-
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
@@ -19,14 +20,17 @@ def insert_claims_monitoring_event(
     event_type: str,
     severity: str | None = None,
     payload_json: str | None = None,
-) -> None:
+) -> dict[str, Any]:
     now = self._get_current_utc_timestamp_str()
-    self.execute_query(
-        (
-            "INSERT INTO claims_monitoring_events "
-            "(user_id, event_type, severity, payload_json, created_at, delivered_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)"
-        ),
+    insert_sql = (
+        "INSERT INTO claims_monitoring_events "
+        "(user_id, event_type, severity, payload_json, created_at, delivered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    if self.backend_type == BackendType.POSTGRESQL:
+        insert_sql += " RETURNING id"
+    cursor = self.execute_query(
+        insert_sql,
         (
             str(user_id),
             str(event_type),
@@ -37,6 +41,22 @@ def insert_claims_monitoring_event(
         ),
         commit=True,
     )
+    if self.backend_type == BackendType.POSTGRESQL:
+        row = cursor.fetchone()
+        event_id = int(row["id"]) if row else 0
+    else:
+        event_id = int(getattr(cursor, "lastrowid", 0) or 0)
+    return get_claims_monitoring_event(self, event_id) if event_id else {}
+
+
+def get_claims_monitoring_event(self, event_id: int) -> dict[str, Any]:
+    """Return one Claims monitoring event row by ID."""
+    row = self.execute_query(
+        "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "
+        "FROM claims_monitoring_events WHERE id = ?",
+        (int(event_id),),
+    ).fetchone()
+    return dict(row) if row else {}
 
 
 def list_claims_monitoring_events(
@@ -116,6 +136,61 @@ def mark_claims_monitoring_events_delivered(self, ids: list[int]) -> int:
         return int(getattr(cursor, "rowcount", 0) or 0)
     except _MEDIA_NONCRITICAL_EXCEPTIONS:
         return 0
+
+
+def has_successful_claims_monitoring_event_delivery(
+    self,
+    *,
+    user_id: str,
+    event_id: int,
+    alert_id: int,
+    channel: str,
+    limit: int = 1000,
+) -> bool:
+    """Check whether a monitoring event already has a successful delivery."""
+    try:
+        event_id = int(event_id)
+        alert_id = int(alert_id)
+        limit = int(limit)
+    except _MEDIA_NONCRITICAL_EXCEPTIONS:
+        return False
+    if event_id <= 0 or alert_id <= 0:
+        return False
+    limit = max(1, min(5000, limit))
+    rows = self.execute_query(
+        (
+            "SELECT payload_json FROM claims_monitoring_events "
+            "WHERE user_id = ? AND event_type = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?"
+        ),
+        (str(user_id), "webhook_delivery", limit),
+    ).fetchall()
+    wanted_channel = str(channel)
+    for row in rows:
+        try:
+            raw_payload = row["payload_json"]
+        except _MEDIA_NONCRITICAL_EXCEPTIONS:
+            try:
+                raw_payload = row[0]
+            except _MEDIA_NONCRITICAL_EXCEPTIONS:
+                continue
+        try:
+            payload = json.loads(str(raw_payload or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        try:
+            if (
+                str(payload.get("status")) == "success"
+                and int(payload.get("event_id") or 0) == event_id
+                and int(payload.get("alert_id") or 0) == alert_id
+                and str(payload.get("channel") or "") == wanted_channel
+            ):
+                return True
+        except _MEDIA_NONCRITICAL_EXCEPTIONS:
+            continue
+    return False
 
 
 def get_latest_claims_monitoring_event_delivery(

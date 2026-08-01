@@ -2,31 +2,48 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext, suppress
-from datetime import timezone
-from email.utils import parsedate_to_datetime
 import json
 import logging
 import sqlite3
+from contextlib import contextmanager, nullcontext, suppress
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
-from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.sqlite_bootstrap import (
-    apply_sqlite_connection_pragmas,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
+    count_audio_presets,
+    create_audio_preset,
+    get_audio_preset,
+    list_audio_presets,
+    soft_delete_audio_preset,
+    update_audio_preset,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.backend_prepare_ops import (
+    _normalise_params,
+    _prepare_backend_many_statement,
+    _prepare_backend_statement,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.backend_resolution import (
+    _resolve_backend,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.backup_ops import (
+    _backup_non_sqlite_database,
+    backup_database,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops import (
     _ensure_sqlite_backend,
     initialize_db,
     initialize_media_database,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.backup_ops import (
-    _backup_non_sqlite_database,
-    backup_database,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.chatbook_scope_counts import (
+    count_chatbook_scope_category,
+    list_chatbook_scope_ids,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.backend_resolution import (
-    _resolve_backend,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_fts_ops import (
+    ensure_chunk_fts,
+    maybe_rebuild_chunk_fts_if_empty,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_ops import (
     add_media_chunks_in_batches,
@@ -39,9 +56,117 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_ops import (
     process_unvectorized_chunks,
     update_chunking_template,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.chatbook_scope_counts import (
-    count_chatbook_scope_category,
-    list_chatbook_scope_ids,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_analytics_export_ops import (
+    cleanup_claims_analytics_exports,
+    count_claims_analytics_exports,
+    create_claims_analytics_export,
+    get_claims_analytics_export,
+    list_claims_analytics_exports,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_aggregate_ops import (
+    get_claim_cluster_member_counts,
+    get_claim_clusters_by_ids,
+    update_claim_clusters_watchlist_counts,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_assignment_rebuild_ops import (
+    rebuild_claim_clusters_from_assignments,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_exact_rebuild_ops import (
+    rebuild_claim_clusters_exact,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_ops import (
+    add_claim_to_cluster,
+    create_claim_cluster,
+    create_claim_cluster_link,
+    delete_claim_cluster_link,
+    get_claim_cluster,
+    get_claim_cluster_link,
+    list_claim_cluster_links,
+    list_claim_cluster_members,
+    list_claim_clusters,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_fts_ops import (
+    rebuild_claims_fts,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_list_ops import (
+    list_claims,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_alert_ops import (
+    create_claims_monitoring_alert,
+    delete_claims_monitoring_alert,
+    get_claims_monitoring_alert,
+    list_claims_monitoring_alerts,
+    update_claims_monitoring_alert,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_config_ops import (
+    create_claims_monitoring_config,
+    delete_claims_monitoring_config,
+    delete_claims_monitoring_configs_by_user,
+    get_claims_monitoring_config,
+    list_claims_monitoring_configs,
+    list_claims_monitoring_user_ids,
+    update_claims_monitoring_config,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
+    get_claims_monitoring_event,
+    get_latest_claims_monitoring_event_delivery,
+    has_successful_claims_monitoring_event_delivery,
+    insert_claims_monitoring_event,
+    list_claims_monitoring_events,
+    list_undelivered_claims_monitoring_events,
+    mark_claims_monitoring_events_delivered,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_health_ops import (
+    get_claims_monitoring_health,
+    upsert_claims_monitoring_health,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_migration_ops import (
+    migrate_legacy_claims_monitoring_alerts,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_settings_ops import (
+    get_claims_monitoring_settings,
+    upsert_claims_monitoring_settings,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_notification_ops import (
+    get_claim_notification,
+    get_claim_notifications_by_ids,
+    get_latest_claim_notification,
+    insert_claim_notification,
+    list_claim_notifications,
+    mark_claim_notifications_delivered,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_read_ops import (
+    get_claim_with_media,
+    get_claims_by_media,
+    get_claims_by_uuid,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metrics_ops import (
+    count_claims_review_extractor_metrics_daily,
+    get_claims_review_extractor_metrics_daily,
+    get_claims_review_latency_stats,
+    list_claims_review_extractor_metrics_daily,
+    list_claims_review_user_ids,
+    upsert_claims_review_extractor_metrics_daily,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_read_ops import (
+    list_claim_review_history,
+    list_review_queue,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_rule_ops import (
+    create_claim_review_rule,
+    delete_claim_review_rule,
+    get_claim_review_rule,
+    list_claim_review_rules,
+    update_claim_review_rule,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_search_ops import (
+    search_claims,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_write_ops import (
+    soft_delete_claims_for_media,
+    update_claim,
+    update_claim_review,
+    upsert_claims,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.connection_lifecycle import (
     _dec_tx_depth,
@@ -56,132 +181,20 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.connection_lifecycl
     get_connection,
     release_context_connection,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.execution_ops import (
-    _execute_with_connection,
-    _executemany_with_connection,
-    _fetchall_with_connection,
-    _fetchone_with_connection,
-    execute_many,
-    execute_query,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.data_table_child_ops import (
+    get_data_table_counts,
+    insert_data_table_columns,
+    insert_data_table_rows,
+    insert_data_table_sources,
+    list_data_table_columns,
+    list_data_table_rows,
+    list_data_table_sources,
+    soft_delete_data_table_columns,
+    soft_delete_data_table_rows,
+    soft_delete_data_table_sources,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.fts_ops import (
-    _delete_fts_keyword,
-    _delete_fts_media,
-    _update_fts_keyword,
-    _update_fts_media,
-    sync_get_media_fts_values,
-    sync_refresh_fts_for_entity,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_fts_ops import (
-    ensure_chunk_fts,
-    maybe_rebuild_chunk_fts_if_empty,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.backend_prepare_ops import (
-    _normalise_params,
-    _prepare_backend_many_statement,
-    _prepare_backend_statement,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.sync_utility_ops import (
-    _generate_uuid,
-    _get_current_utc_timestamp_str,
-    _get_next_version,
-    _log_sync_event,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.scope_resolution_ops import (
-    _resolve_scope_ids,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.bootstrap import (
-    ensure_media_schema,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers import (
-    bootstrap_sqlite_schema,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.backends.postgres_helpers import (
-    bootstrap_postgres_schema,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migrations import (
-    get_postgres_migrations,
-    run_postgres_migrations,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.postgres_rls import (
-    _ensure_postgres_rls,
-    _postgres_policy_exists,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
-    apply_postgres_core_media_schema,
-    apply_sqlite_core_media_schema,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.sync_log_ops import (
-    delete_sync_log_entries,
-    delete_sync_log_entries_before,
-    get_sync_log_entries,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.structure_index_ops import (
-    _write_structure_index_records,
-    delete_document_structure_for_media,
-    write_document_structure_index,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_utility_ops import (
-    _append_case_insensitive_like,
-    _convert_sqlite_placeholders_to_postgres,
-    _keyword_order_expression,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_file_ops import (
-    get_media_file,
-    get_media_files,
-    has_original_file,
-    insert_media_file,
-    soft_delete_media_file,
-    soft_delete_media_files_for_media,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.visual_document_ops import (
-    insert_visual_document,
-    list_visual_documents_for_media,
-    soft_delete_visual_documents_for_media,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.tts_history_ops import (
-    _build_tts_history_filters,
-    count_tts_history,
-    create_tts_history_entry,
-    get_tts_history_entry,
-    list_tts_history,
-    list_tts_history_user_ids,
-    mark_tts_history_artifacts_deleted_for_file_id,
-    mark_tts_history_artifacts_deleted_for_output,
-    purge_tts_history_for_user,
-    soft_delete_tts_history_entry,
-    update_tts_history_favorite,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
-    count_audio_presets,
-    create_audio_preset,
-    get_audio_preset,
-    list_audio_presets,
-    soft_delete_audio_preset,
-    update_audio_preset,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_keyword_ops import (
-    create_document_version,
-    get_all_document_versions,
-    soft_delete_document_version,
-    soft_delete_keyword,
-    update_keywords_for_media,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.keyword_access_ops import (
-    add_keyword,
-    fetch_media_for_keywords,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_lifecycle_ops import (
-    get_media_visibility,
-    mark_as_trash,
-    restore_from_trash,
-    share_media,
-    soft_delete_media,
-    unshare_media,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_entrypoint_ops import (
-    run_add_media_with_keywords,
-    run_search_media_db,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.data_table_generation_ops import (
+    persist_data_table_generation,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.data_table_helper_ops import (
     _get_data_table_owner_client_id,
@@ -199,38 +212,26 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.data_table_metadata
     soft_delete_data_table,
     update_data_table,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.data_table_generation_ops import (
-    persist_data_table_generation,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.data_table_replace_ops import (
     replace_data_table_contents,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_search_ops import (
-    search_by_safe_metadata,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.synced_document_update_ops import (
-    apply_synced_document_content_update,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_item_update_ops import (
-    apply_media_item_update,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_keyword_ops import (
+    create_document_version,
+    get_all_document_versions,
+    soft_delete_document_version,
+    soft_delete_keyword,
+    update_keywords_for_media,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_version_rollback_ops import (
     rollback_to_version,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
-    MEDIA_NONCRITICAL_EXCEPTIONS,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_backfill_ops import (
+    run_email_legacy_backfill_batch,
+    run_email_legacy_backfill_worker,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_state_ops import (
-    _ensure_email_backfill_state_row,
-    _fetch_email_backfill_state_row,
-    _fetch_email_sync_state_row,
-    _resolve_email_sync_source_row_id,
-    _update_email_backfill_progress,
-    get_email_legacy_backfill_state,
-    get_email_sync_state,
-    mark_email_sync_run_failed,
-    mark_email_sync_run_started,
-    mark_email_sync_run_succeeded,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_graph_persistence_ops import (
+    _resolve_email_tenant_id,
+    upsert_email_message_graph,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_message_mutation_ops import (
     _normalize_email_label_values,
@@ -249,250 +250,133 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_retention_ops
     enforce_email_retention_policy,
     hard_delete_email_tenant_data,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_backfill_ops import (
-    run_email_legacy_backfill_batch,
-    run_email_legacy_backfill_worker,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_state_ops import (
+    _ensure_email_backfill_state_row,
+    _fetch_email_backfill_state_row,
+    _fetch_email_sync_state_row,
+    _resolve_email_sync_source_row_id,
+    _update_email_backfill_progress,
+    get_email_legacy_backfill_state,
+    get_email_sync_state,
+    mark_email_sync_run_failed,
+    mark_email_sync_run_started,
+    mark_email_sync_run_succeeded,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_graph_persistence_ops import (
-    _resolve_email_tenant_id,
-    upsert_email_message_graph,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.execution_ops import (
+    _execute_with_connection,
+    _executemany_with_connection,
+    _fetchall_with_connection,
+    _fetchone_with_connection,
+    execute_many,
+    execute_query,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_analytics_export_ops import (
-    cleanup_claims_analytics_exports,
-    count_claims_analytics_exports,
-    create_claims_analytics_export,
-    get_claims_analytics_export,
-    list_claims_analytics_exports,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.fts_ops import (
+    _delete_fts_keyword,
+    _delete_fts_media,
+    _update_fts_keyword,
+    _update_fts_media,
+    sync_get_media_fts_values,
+    sync_refresh_fts_for_entity,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_notification_ops import (
-    get_claim_notification,
-    get_claim_notifications_by_ids,
-    get_latest_claim_notification,
-    insert_claim_notification,
-    list_claim_notifications,
-    mark_claim_notifications_delivered,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.keyword_access_ops import (
+    add_keyword,
+    fetch_media_for_keywords,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_rule_ops import (
-    create_claim_review_rule,
-    delete_claim_review_rule,
-    get_claim_review_rule,
-    list_claim_review_rules,
-    update_claim_review_rule,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_entrypoint_ops import (
+    run_add_media_with_keywords,
+    run_search_media_db,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_read_ops import (
-    list_claim_review_history,
-    list_review_queue,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_file_ops import (
+    get_media_file,
+    get_media_files,
+    has_original_file,
+    insert_media_file,
+    soft_delete_media_file,
+    soft_delete_media_files_for_media,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_read_ops import (
-    get_claim_with_media,
-    get_claims_by_media,
-    get_claims_by_uuid,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_item_update_ops import (
+    apply_media_item_update,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_write_ops import (
-    soft_delete_claims_for_media,
-    update_claim,
-    update_claim_review,
-    upsert_claims,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_lifecycle_ops import (
+    get_media_visibility,
+    mark_as_trash,
+    restore_from_trash,
+    share_media,
+    soft_delete_media,
+    unshare_media,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_list_ops import (
-    list_claims,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_search_ops import (
-    search_claims,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metrics_ops import (
-    count_claims_review_extractor_metrics_daily,
-    get_claims_review_extractor_metrics_daily,
-    list_claims_review_extractor_metrics_daily,
-    list_claims_review_user_ids,
-    upsert_claims_review_extractor_metrics_daily,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_aggregate_ops import (
-    get_claim_cluster_member_counts,
-    get_claim_clusters_by_ids,
-    update_claim_clusters_watchlist_counts,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_ops import (
-    add_claim_to_cluster,
-    create_claim_cluster,
-    create_claim_cluster_link,
-    delete_claim_cluster_link,
-    get_claim_cluster,
-    get_claim_cluster_link,
-    list_claim_cluster_links,
-    list_claim_cluster_members,
-    list_claim_clusters,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_exact_rebuild_ops import (
-    rebuild_claim_clusters_exact,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_assignment_rebuild_ops import (
-    rebuild_claim_clusters_from_assignments,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_fts_ops import (
-    rebuild_claims_fts,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_settings_ops import (
-    get_claims_monitoring_settings,
-    upsert_claims_monitoring_settings,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_config_ops import (
-    create_claims_monitoring_config,
-    delete_claims_monitoring_config,
-    delete_claims_monitoring_configs_by_user,
-    get_claims_monitoring_config,
-    list_claims_monitoring_configs,
-    list_claims_monitoring_user_ids,
-    update_claims_monitoring_config,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_migration_ops import (
-    migrate_legacy_claims_monitoring_alerts,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_alert_ops import (
-    create_claims_monitoring_alert,
-    delete_claims_monitoring_alert,
-    get_claims_monitoring_alert,
-    list_claims_monitoring_alerts,
-    update_claims_monitoring_alert,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_health_ops import (
-    get_claims_monitoring_health,
-    upsert_claims_monitoring_health,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
-    get_latest_claims_monitoring_event_delivery,
-    insert_claims_monitoring_event,
-    list_claims_monitoring_events,
-    list_undelivered_claims_monitoring_events,
-    mark_claims_monitoring_events_delivered,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.data_table_child_ops import (
-    get_data_table_counts,
-    insert_data_table_columns,
-    insert_data_table_rows,
-    insert_data_table_sources,
-    list_data_table_columns,
-    list_data_table_rows,
-    list_data_table_sources,
-    soft_delete_data_table_columns,
-    soft_delete_data_table_rows,
-    soft_delete_data_table_sources,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
+    MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_ops import (
     fetch_all_keywords,
     get_distinct_media_types,
-    get_media_by_id,
     get_media_by_hash,
-    get_media_status_by_id,
+    get_media_by_id,
     get_media_by_title,
     get_media_by_url,
     get_media_by_uuid,
-    get_paginated_media_list,
+    get_media_status_by_id,
     get_paginated_files,
+    get_paginated_media_list,
     get_paginated_trash_list,
     has_unvectorized_chunks,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_collections import (
-    run_postgres_migrate_to_v12,
-    run_postgres_migrate_to_v13,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_utility_ops import (
+    _append_case_insensitive_like,
+    _convert_sqlite_placeholders_to_postgres,
+    _keyword_order_expression,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_early_schema import (
-    run_postgres_migrate_to_v5,
-    run_postgres_migrate_to_v6,
-    run_postgres_migrate_to_v7,
-    run_postgres_migrate_to_v8,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_search_ops import (
+    search_by_safe_metadata,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_visibility_owner import (
-    run_postgres_migrate_to_v9,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.scope_resolution_ops import (
+    _resolve_scope_ids,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims import (
-    run_postgres_migrate_to_v10,
-    run_postgres_migrate_to_v17,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_mediafiles import (
-    run_postgres_migrate_to_v11,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_data_tables import (
-    run_postgres_migrate_to_v14,
-    run_postgres_migrate_to_v15,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_source_hash import (
-    run_postgres_migrate_to_v16,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_sequence_sync import (
-    run_postgres_migrate_to_v18,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_fts_rls import (
-    run_postgres_migrate_to_v19,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_structure_visual_indexes import (
-    run_postgres_migrate_to_v21,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_email_schema import (
-    run_postgres_migrate_to_v22,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_transcript_run_history import (
-    run_postgres_migrate_to_v23,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_tts_history import (
-    run_postgres_migrate_to_v20,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_schema_version import (
-    update_schema_version_postgres,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_schema_version import (
-    get_db_version,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.fts_structures import (
-    ensure_fts_structures,
-    ensure_postgres_fts,
-    ensure_sqlite_fts,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.email_schema_structures import (
-    ensure_postgres_email_schema,
-    ensure_sqlite_email_schema,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_post_core_structures import (
-    ensure_sqlite_data_tables,
-    ensure_sqlite_source_hash_column,
-    ensure_sqlite_visibility_columns,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_claims_extensions import (
-    ensure_sqlite_claims_extensions,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_data_table_structures import (
-    ensure_postgres_columns,
-    ensure_postgres_data_tables,
-    ensure_postgres_data_tables_columns,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_tts_source_hash_structures import (
-    ensure_postgres_source_hash_column,
-    ensure_postgres_tts_history,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_audio_preset_structures import (
-    ensure_postgres_audio_presets,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_collection_structures import (
-    ensure_postgres_claims_extensions,
-    ensure_postgres_claims_tables,
-    ensure_postgres_collections_tables,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_sequence_maintenance import (
-    sync_postgres_sequences,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_sqlite_conversion import (
-    _convert_sqlite_sql_to_postgres_statements,
-    _transform_sqlite_statement_to_postgres,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.sqlite_bootstrap import (
+    apply_sqlite_connection_pragmas,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.state_ops import (
     mark_embeddings_error,
     update_media_reprocess_state,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.structure_index_ops import (
+    _write_structure_index_records,
+    delete_document_structure_for_media,
+    write_document_structure_index,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.sync_log_ops import (
+    delete_sync_log_entries,
+    delete_sync_log_entries_before,
+    get_sync_log_entries,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.sync_utility_ops import (
+    _generate_uuid,
+    _get_current_utc_timestamp_str,
+    _get_next_version,
+    _log_sync_event,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.synced_document_update_ops import (
+    apply_synced_document_content_update,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.template_structure_ops import (
     list_chunking_templates,
     lookup_section_by_heading,
     lookup_section_for_offset,
     seed_builtin_templates,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.tts_history_ops import (
+    _build_tts_history_filters,
+    count_tts_history,
+    create_tts_history_entry,
+    get_tts_history_entry,
+    list_tts_history,
+    list_tts_history_user_ids,
+    mark_tts_history_artifacts_deleted_for_file_id,
+    mark_tts_history_artifacts_deleted_for_output,
+    purge_tts_history_for_user,
+    soft_delete_tts_history_entry,
+    update_tts_history_favorite,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.unvectorized_chunk_reads import (
     get_unvectorized_anchor_index_for_offset,
@@ -502,6 +386,126 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.unvectorized_chunk_
     get_unvectorized_chunks_in_range,
     get_unvectorized_max_chunk_index,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.visual_document_ops import (
+    insert_visual_document,
+    list_visual_documents_for_media,
+    soft_delete_visual_documents_for_media,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.backends.postgres_helpers import (
+    bootstrap_postgres_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers import (
+    bootstrap_sqlite_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.bootstrap import (
+    ensure_media_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.email_schema_structures import (
+    ensure_postgres_email_schema,
+    ensure_sqlite_email_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
+    apply_postgres_core_media_schema,
+    apply_sqlite_core_media_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.postgres_rls import (
+    _ensure_postgres_rls,
+    _postgres_policy_exists,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.fts_structures import (
+    ensure_fts_structures,
+    ensure_postgres_fts,
+    ensure_sqlite_fts,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims import (
+    run_postgres_migrate_to_v10,
+    run_postgres_migrate_to_v17,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_collections import (
+    run_postgres_migrate_to_v12,
+    run_postgres_migrate_to_v13,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_data_tables import (
+    run_postgres_migrate_to_v14,
+    run_postgres_migrate_to_v15,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_early_schema import (
+    run_postgres_migrate_to_v5,
+    run_postgres_migrate_to_v6,
+    run_postgres_migrate_to_v7,
+    run_postgres_migrate_to_v8,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_email_schema import (
+    run_postgres_migrate_to_v22,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_fts_rls import (
+    run_postgres_migrate_to_v19,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_mediafiles import (
+    run_postgres_migrate_to_v11,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_sequence_sync import (
+    run_postgres_migrate_to_v18,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_source_hash import (
+    run_postgres_migrate_to_v16,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_structure_visual_indexes import (
+    run_postgres_migrate_to_v21,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_transcript_run_history import (
+    run_postgres_migrate_to_v23,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_tts_history import (
+    run_postgres_migrate_to_v20,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_visibility_owner import (
+    run_postgres_migrate_to_v9,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migrations import (
+    get_postgres_migrations,
+    run_postgres_migrations,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_audio_preset_structures import (
+    ensure_postgres_audio_presets,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_collection_structures import (
+    ensure_postgres_claims_extensions,
+    ensure_postgres_claims_tables,
+    ensure_postgres_collections_tables,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_data_table_structures import (
+    ensure_postgres_columns,
+    ensure_postgres_data_tables,
+    ensure_postgres_data_tables_columns,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_schema_version import (
+    update_schema_version_postgres,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_sequence_maintenance import (
+    sync_postgres_sequences,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_sqlite_conversion import (
+    _convert_sqlite_sql_to_postgres_statements,
+    _transform_sqlite_statement_to_postgres,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_tts_source_hash_structures import (
+    ensure_postgres_source_hash_column,
+    ensure_postgres_tts_history,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_claims_extensions import (
+    ensure_sqlite_claims_extensions,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_post_core_structures import (
+    ensure_sqlite_data_tables,
+    ensure_sqlite_source_hash_column,
+    ensure_sqlite_visibility_columns,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_schema_version import (
+    get_db_version,
+)
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed
+
 
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
@@ -2034,6 +2038,7 @@ MediaDatabase.count_claims_review_extractor_metrics_daily = (
     count_claims_review_extractor_metrics_daily
 )
 MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
+MediaDatabase.get_claims_review_latency_stats = get_claims_review_latency_stats
 MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids
 MediaDatabase.get_claim_cluster_member_counts = get_claim_cluster_member_counts
 MediaDatabase.update_claim_clusters_watchlist_counts = (
@@ -2075,6 +2080,7 @@ MediaDatabase.delete_claims_monitoring_alert = delete_claims_monitoring_alert
 MediaDatabase.get_claims_monitoring_health = get_claims_monitoring_health
 MediaDatabase.upsert_claims_monitoring_health = upsert_claims_monitoring_health
 MediaDatabase.insert_claims_monitoring_event = insert_claims_monitoring_event
+MediaDatabase.get_claims_monitoring_event = get_claims_monitoring_event
 MediaDatabase.list_claims_monitoring_events = list_claims_monitoring_events
 MediaDatabase.list_undelivered_claims_monitoring_events = (
     list_undelivered_claims_monitoring_events
@@ -2084,6 +2090,9 @@ MediaDatabase.mark_claims_monitoring_events_delivered = (
 )
 MediaDatabase.get_latest_claims_monitoring_event_delivery = (
     get_latest_claims_monitoring_event_delivery
+)
+MediaDatabase.has_successful_claims_monitoring_event_delivery = (
+    has_successful_claims_monitoring_event_delivery
 )
 MediaDatabase._resolve_email_sync_source_row_id = _resolve_email_sync_source_row_id
 MediaDatabase._fetch_email_sync_state_row = _fetch_email_sync_state_row

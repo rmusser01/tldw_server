@@ -15,6 +15,9 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
 def startup_worker_spec_providers() -> tuple[SpecProvider, ...]:
     """Return providers for every startup-managed worker spec."""
 
+    from tldw_Server_API.app.services.claims_jobs_worker import (
+        provide_claims_jobs_worker_specs,
+    )
     from tldw_Server_API.app.services.llm_usage_aggregator import (
         provide_llm_usage_aggregator_worker_specs,
     )
@@ -72,6 +75,7 @@ def startup_worker_spec_providers() -> tuple[SpecProvider, ...]:
         provide_notifications_abtest_worker_specs,
         provide_cleanup_worker_specs,
         provide_compactor_websub_worker_specs,
+        provide_claims_jobs_worker_specs,
         provide_claims_rebuild_worker_specs,
         provide_usage_aggregator_worker_specs,
         provide_llm_usage_aggregator_worker_specs,

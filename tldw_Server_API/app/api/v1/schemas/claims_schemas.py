@@ -675,6 +675,15 @@ class ClaimsAnalyticsRebuildHealth(BaseModel):
     stale: bool
 
 
+class ClaimsJobsReadOnlySummary(BaseModel):
+    """Read-only Claims Jobs status summary for dashboards."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    domain: str
+    counts: dict[str, int] = Field(default_factory=dict)
+
+
 class ClaimsAnalyticsDashboardResponse(BaseModel):
     """Dashboard-ready claims analytics payload."""
 
@@ -694,6 +703,7 @@ class ClaimsAnalyticsDashboardResponse(BaseModel):
     unsupported_ratios: ClaimsAnalyticsUnsupportedRatios
     provider_usage: list[ClaimsAnalyticsProviderUsage] = Field(default_factory=list)
     rebuild_health: ClaimsAnalyticsRebuildHealth | None = None
+    claims_jobs: ClaimsJobsReadOnlySummary | None = None
 
 
 # =============================================================================

@@ -4,17 +4,31 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
     MediaDatabase,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
+    get_claims_monitoring_event as helper_get_claims_monitoring_event,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     get_latest_claims_monitoring_event_delivery as helper_get_latest_claims_monitoring_event_delivery,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
+    has_successful_claims_monitoring_event_delivery as helper_has_successful_claims_monitoring_event_delivery,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     insert_claims_monitoring_event as helper_insert_claims_monitoring_event,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     list_claims_monitoring_events as helper_list_claims_monitoring_events,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     list_undelivered_claims_monitoring_events as helper_list_undelivered_claims_monitoring_events,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     mark_claims_monitoring_events_delivered as helper_mark_claims_monitoring_events_delivered,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -53,6 +67,95 @@ def test_insert_claims_monitoring_event_writes_null_delivered_at_and_rebinds_met
         assert row["delivered_at"] is None
     finally:
         db.close_connection()
+
+
+def test_insert_claims_monitoring_event_returns_inserted_row_and_gets_by_id(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-get.db")
+    try:
+        assert db.get_claims_monitoring_event.__func__ is helper_get_claims_monitoring_event
+
+        created = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            payload_json='{"alert_id":9}',
+        )
+
+        assert isinstance(created["id"], int)
+        loaded = db.get_claims_monitoring_event(int(created["id"]))
+        assert loaded["id"] == created["id"]
+        assert loaded["user_id"] == "1"
+        assert loaded["event_type"] == "unsupported_ratio"
+        assert loaded["severity"] == "warning"
+        assert loaded["payload_json"] == '{"alert_id":9}'
+        assert loaded["delivered_at"] is None
+    finally:
+        db.close_connection()
+
+
+def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_row() -> None:
+    loaded_row = {
+        "id": 17,
+        "user_id": "1",
+        "event_type": "unsupported_ratio",
+        "severity": "warning",
+        "payload_json": '{"alert_id":9}',
+        "created_at": "2026-03-22T00:00:01Z",
+        "delivered_at": None,
+    }
+    execute_calls: list[tuple[str, tuple[object, ...], bool]] = []
+
+    class _Cursor:
+        def __init__(self, row: dict[str, object]) -> None:
+            self._row = row
+
+        def fetchone(self) -> dict[str, object]:
+            return self._row
+
+    class _FakePostgresDB:
+        backend_type = BackendType.POSTGRESQL
+
+        def _get_current_utc_timestamp_str(self) -> str:
+            return "2026-03-22T00:00:01Z"
+
+        def execute_query(
+            self,
+            sql: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            commit: bool = False,
+        ) -> _Cursor:
+            execute_calls.append((sql, tuple(params or ()), commit))
+            if sql.startswith("INSERT INTO claims_monitoring_events"):
+                return _Cursor({"id": 17})
+            return _Cursor(loaded_row)
+
+    created = helper_insert_claims_monitoring_event(
+        _FakePostgresDB(),
+        user_id="1",
+        event_type="unsupported_ratio",
+        severity="warning",
+        payload_json='{"alert_id":9}',
+    )
+
+    assert created == loaded_row
+    assert execute_calls[0][0].endswith(" RETURNING id")
+    assert execute_calls[0][1] == (
+        "1",
+        "unsupported_ratio",
+        "warning",
+        '{"alert_id":9}',
+        "2026-03-22T00:00:01Z",
+        None,
+    )
+    assert execute_calls[0][2] is True
+    assert execute_calls[1][0].startswith(
+        "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "
+    )
+    assert execute_calls[1][1] == (17,)
+    assert execute_calls[1][2] is False
 
 
 def test_list_claims_monitoring_events_filters_and_preserves_created_at_order(
@@ -230,5 +333,50 @@ def test_get_latest_claims_monitoring_event_delivery_returns_none_and_supports_t
             user_id="1",
             event_type="unsupported_ratio",
         ) == "2026-03-22T12:00:00Z"
+    finally:
+        db.close_connection()
+
+
+def test_has_successful_claims_monitoring_event_delivery_checks_bounded_recent_events(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-dedupe.db")
+    try:
+        assert (
+            db.has_successful_claims_monitoring_event_delivery.__func__
+            is helper_has_successful_claims_monitoring_event_delivery
+        )
+
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="warning",
+            payload_json="{not-json",
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="warning",
+            payload_json='{"status":"failure","event_id":7,"alert_id":3,"channel":"webhook"}',
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="info",
+            payload_json='{"status":"success","event_id":7,"alert_id":3,"channel":"webhook"}',
+        )
+
+        assert db.has_successful_claims_monitoring_event_delivery(
+            user_id="1",
+            event_id=7,
+            alert_id=3,
+            channel="webhook",
+        ) is True
+        assert db.has_successful_claims_monitoring_event_delivery(
+            user_id="1",
+            event_id=7,
+            alert_id=3,
+            channel="slack",
+        ) is False
     finally:
         db.close_connection()

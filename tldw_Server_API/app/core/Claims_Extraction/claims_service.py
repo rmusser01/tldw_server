@@ -6,11 +6,9 @@ import html
 import io
 import json
 import math
-import random
 import socket
 import sqlite3
 import ssl
-import threading
 import time
 from contextlib import contextmanager, suppress
 from datetime import date, datetime, timedelta, timezone
@@ -29,18 +27,29 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Claims_Extraction import claims_jobs
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim_span
+from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
+    build_claims_alert_delivery_payload,
+    deliver_claims_alert_webhook,
+)
+from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
+    format_claims_alert_ratio as _format_ratio,
+)
+from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
+    normalize_claims_alert_channels as _normalize_channels,
+)
 from tldw_Server_API.app.core.Claims_Extraction.claims_clustering import rebuild_claim_clusters_embeddings
 from tldw_Server_API.app.core.Claims_Extraction.claims_embeddings import claim_embedding_id
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
     dispatch_claim_review_notifications,
     record_watchlist_cluster_notifications,
+    submit_claims_notification_delivery,
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 from tldw_Server_API.app.core.Claims_Extraction.monitoring import (
     record_claims_alert_email_delivery,
     record_claims_review_metrics,
-    record_claims_webhook_delivery,
 )
 from tldw_Server_API.app.core.Claims_Extraction.output_parser import coerce_llm_response_text
 from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
@@ -52,13 +61,20 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
 from tldw_Server_API.app.core.Setup import setup_manager
 
+try:
+    import psycopg as _psycopg
+except ImportError:
+    _CLAIMS_PG_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+else:
+    _CLAIMS_PG_EXCEPTIONS = (_psycopg.Error,)
+
 _CLAIMS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -82,7 +98,9 @@ _CLAIMS_NONCRITICAL_EXCEPTIONS = (
     HTTPException,
     EgressPolicyError,
     RetryExhaustedError,
-)
+) + _CLAIMS_PG_EXCEPTIONS
+
+_CLAIMS_REBUILD_ALL_IDEMPOTENCY_SCOPE_WINDOW_SEC = 300
 
 _ROLE_HIERARCHY = {
     "owner": 4,
@@ -325,23 +343,6 @@ def _parse_email_recipients(raw_value: str | None) -> list[str]:
     except _CLAIMS_NONCRITICAL_EXCEPTIONS:
         pass
     return [item.strip() for item in text.split(",") if item.strip()]
-
-
-def _normalize_channels(raw_value: Any | None) -> dict[str, bool]:
-    if isinstance(raw_value, dict):
-        data = raw_value
-    else:
-        data = {}
-        if raw_value:
-            try:
-                data = json.loads(str(raw_value))
-            except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-                data = {}
-    return {
-        "slack": bool(data.get("slack")),
-        "webhook": bool(data.get("webhook")),
-        "email": bool(data.get("email")),
-    }
 
 
 def _normalize_alert_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -590,23 +591,81 @@ def _fva_claims_analyze_call(
         return ""
 
 
-def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str) -> None:
+def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_id: str | None = None) -> None:
     """Best-effort enqueue of a claims rebuild task for a media item."""
+    if claims_jobs.claims_jobs_enabled():
+        if not owner_user_id:
+            logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id")
+        else:
+            try:
+                claims_jobs.enqueue_claims_rebuild_media(
+                    media_id=int(media_id),
+                    owner_user_id=str(owner_user_id),
+                )
+                return
+            except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("Claims rebuild Jobs enqueue failed; falling back to legacy queue: {}", exc)
     try:
         svc = get_claims_rebuild_service()
         svc.submit(media_id=int(media_id), db_path=str(db_path))
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        pass
+    except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Claims rebuild enqueue failed: {}", exc)
 
 
-def _format_ratio(value: float | None) -> str:
-    """Return a human-friendly ratio string for alert messages."""
-    if value is None:
-        return "n/a"
-    try:
-        return f"{float(value) * 100:.2f}%"
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        return "n/a"
+def _enqueue_or_dispatch_claim_review_notifications(
+    *,
+    db_path: str,
+    owner_user_id: str,
+    notification_ids: list[int],
+) -> None:
+    """Route review notification delivery through Jobs or the legacy dispatcher."""
+    if not notification_ids:
+        return
+    if claims_jobs.claims_jobs_enabled():
+        try:
+            claims_jobs.enqueue_claims_review_notification(
+                owner_user_id=str(owner_user_id),
+                notification_ids=notification_ids,
+            )
+            return
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Failed to enqueue claims review notification job; falling back to legacy dispatch: {}", exc)
+    dispatch_claim_review_notifications(
+        db_path=str(db_path),
+        owner_user_id=str(owner_user_id),
+        notification_ids=notification_ids,
+    )
+
+
+def _enqueue_or_dispatch_claim_alert_delivery(
+    *,
+    config_row: dict[str, Any],
+    event_id: int,
+    owner_user_id: str,
+    payload: dict[str, Any],
+    db_path: str,
+) -> bool:
+    """Queue alert delivery jobs or fall back to immediate legacy dispatch."""
+    if claims_jobs.claims_jobs_enabled():
+        try:
+            if (
+                _enqueue_claims_alert_delivery_jobs(
+                    config_row=config_row,
+                    event_id=event_id,
+                    owner_user_id=owner_user_id,
+                )
+                > 0
+            ):
+                return True
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Claims alert delivery Jobs enqueue failed; falling back to legacy dispatch: {}", exc)
+    _dispatch_claims_alert_notifications(
+        config_row=config_row,
+        payload=payload,
+        db_path=str(db_path),
+        user_id=str(owner_user_id),
+    )
+    return False
 
 
 def _build_alert_channels(
@@ -638,178 +697,6 @@ def _build_alert_channels(
         "email": bool(channels.get("email")),
     }
 
-
-def _classify_httpx_exception(exc: Exception, msg: str) -> str | None:
-    module = getattr(exc.__class__, "__module__", "")
-    if not module.startswith("httpx"):
-        return None
-    name = exc.__class__.__name__
-    if "Timeout" in name:
-        return "timeout"
-    if "Connect" in name:
-        if isinstance(getattr(exc, "__cause__", None), ssl.SSLError):
-            return "tls"
-        if isinstance(getattr(exc, "__cause__", None), socket.gaierror):
-            return "dns"
-        if "name or service not known" in msg or "dns" in msg:
-            return "dns"
-    return None
-
-
-def _classify_webhook_exception(exc: Exception) -> str:
-    if isinstance(exc, EgressPolicyError):
-        return "invalid_url"
-    if isinstance(exc, RetryExhaustedError):
-        return "timeout"
-    msg = str(exc).lower()
-    if "timeout" in msg:
-        return "timeout"
-    if isinstance(exc, ssl.SSLError) or "ssl" in msg or "tls" in msg:
-        return "tls"
-    if isinstance(exc, socket.gaierror) or "name or service not known" in msg:
-        return "dns"
-    httpx_class = _classify_httpx_exception(exc, msg)
-    if httpx_class:
-        return httpx_class
-    return "other"
-
-
-def _record_webhook_event(
-    *,
-    db_path: str,
-    user_id: str,
-    channel: str,
-    status: str,
-    attempt: int,
-    reason: str | None = None,
-    status_code: int | None = None,
-    alert_id: int | None = None,
-) -> None:
-    try:
-        with managed_media_database(
-            client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
-            db_path=db_path,
-            suppress_init_exceptions=_CLAIMS_NONCRITICAL_EXCEPTIONS,
-            suppress_close_exceptions=_CLAIMS_NONCRITICAL_EXCEPTIONS,
-        ) as db:
-            payload = {
-                "channel": channel,
-                "status": status,
-                "attempt": int(attempt),
-            }
-            if reason:
-                payload["reason"] = reason
-            if status_code is not None:
-                payload["status_code"] = int(status_code)
-            if alert_id is not None:
-                payload["alert_id"] = int(alert_id)
-            db.insert_claims_monitoring_event(
-                user_id=str(user_id),
-                event_type="webhook_delivery",
-                severity="info" if status == "success" else "warning",
-                payload_json=json.dumps(payload),
-            )
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        pass
-
-
-def _deliver_claims_alert_webhook(
-    *,
-    url: str,
-    payload: dict[str, Any],
-    channel: str,
-    db_path: str,
-    user_id: str,
-    alert_id: int | None = None,
-) -> None:
-    try:
-        from tldw_Server_API.app.core.http_client import RetryPolicy, create_client, fetch
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        return
-    backoff_schedule = [5, 15, 45, 120, 300]
-    max_attempts = 5
-    for attempt in range(1, max_attempts + 1):
-        if attempt > 1:
-            base_delay = backoff_schedule[min(attempt - 2, len(backoff_schedule) - 1)]
-            jitter = random.uniform(0.8, 1.2)  # nosec B311
-            time.sleep(max(0.0, base_delay * jitter))
-        start_ts = time.time()
-        try:
-            with create_client(timeout=5.0) as client:
-                response = fetch(
-                    method="POST",
-                    url=url,
-                    client=client,
-                    headers={"Content-Type": "application/json"},
-                    json=payload,
-                    timeout=5.0,
-                    retry=RetryPolicy(attempts=1, retry_on_unsafe=False),
-                )
-            status_code = int(getattr(response, "status_code", 0) or 0)
-            duration = time.time() - start_ts
-            if 200 <= status_code < 300:
-                logger.info(
-                    'Claims webhook delivered channel={} attempt={} status={}',
-                    channel,
-                    attempt,
-                    status_code,
-                )
-                record_claims_webhook_delivery(status="success", latency_s=duration)
-                _record_webhook_event(
-                    db_path=db_path,
-                    user_id=user_id,
-                    channel=channel,
-                    status="success",
-                    attempt=attempt,
-                    status_code=status_code,
-                    alert_id=alert_id,
-                )
-                return
-            if 400 <= status_code < 500:
-                reason = "http_4xx"
-            elif 500 <= status_code < 600:
-                reason = "http_5xx"
-            else:
-                reason = "other"
-            logger.warning(
-                'Claims webhook failed channel={} attempt={} status={} reason={}',
-                channel,
-                attempt,
-                status_code,
-                reason,
-            )
-            record_claims_webhook_delivery(status="failure", reason=reason, latency_s=duration)
-            _record_webhook_event(
-                db_path=db_path,
-                user_id=user_id,
-                channel=channel,
-                status="failure",
-                attempt=attempt,
-                reason=reason,
-                status_code=status_code,
-                alert_id=alert_id,
-            )
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-            reason = _classify_webhook_exception(exc)
-            duration = time.time() - start_ts
-            logger.warning(
-                'Claims webhook failed channel={} attempt={} reason={}',
-                channel,
-                attempt,
-                reason,
-            )
-            record_claims_webhook_delivery(status="failure", reason=reason, latency_s=duration)
-            _record_webhook_event(
-                db_path=db_path,
-                user_id=user_id,
-                channel=channel,
-                status="failure",
-                attempt=attempt,
-                reason=reason,
-                alert_id=alert_id,
-            )
-        if attempt >= max_attempts:
-            return
 
 def _claims_monitoring_system_user_id() -> int:
     try:
@@ -904,39 +791,55 @@ def _dispatch_claims_alert_notifications(
     webhook_url = config_row.get("webhook_url")
     alert_id = config_row.get("id")
     if channels.get("slack") and slack_url:
-        slack_payload = {
-            "text": (
-                "Claims alert: unsupported ratio "
-                f"{_format_ratio(payload.get('window_ratio'))} "
-                f"(threshold {_format_ratio(payload.get('threshold'))}, "
-                f"baseline {_format_ratio(payload.get('baseline_ratio'))})"
-            )
-        }
-        threading.Thread(
-            target=_deliver_claims_alert_webhook,
-            kwargs={
-                "url": str(slack_url),
-                "payload": slack_payload,
-                "channel": "slack",
-                "db_path": db_path,
-                "user_id": user_id,
-                "alert_id": alert_id,
-            },
-            daemon=True,
-        ).start()
+        submit_claims_notification_delivery(
+            deliver_claims_alert_webhook,
+            url=str(slack_url),
+            payload=build_claims_alert_delivery_payload(channel="slack", event_payload=payload),
+            channel="slack",
+            db_path=db_path,
+            user_id=user_id,
+            alert_id=alert_id,
+        )
     if channels.get("webhook") and webhook_url:
-        threading.Thread(
-            target=_deliver_claims_alert_webhook,
-            kwargs={
-                "url": str(webhook_url),
-                "payload": payload,
-                "channel": "webhook",
-                "db_path": db_path,
-                "user_id": user_id,
-                "alert_id": alert_id,
-            },
-            daemon=True,
-        ).start()
+        submit_claims_notification_delivery(
+            deliver_claims_alert_webhook,
+            url=str(webhook_url),
+            payload=build_claims_alert_delivery_payload(channel="webhook", event_payload=payload),
+            channel="webhook",
+            db_path=db_path,
+            user_id=user_id,
+            alert_id=alert_id,
+        )
+
+
+def _enqueue_claims_alert_delivery_jobs(
+    *,
+    config_row: dict[str, Any],
+    event_id: int,
+    owner_user_id: str,
+) -> int:
+    """Best-effort enqueue of alert delivery jobs for Jobs-owned Claims queues."""
+    channels = _normalize_channels(config_row.get("channels_json") or config_row.get("channels"))
+    try:
+        alert_id = int(config_row.get("id") or 0)
+    except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Failed to enqueue claims alert delivery job: {}", exc)
+        return 0
+    enqueued = 0
+    for channel in ("slack", "webhook"):
+        if not channels.get(channel):
+            continue
+        try:
+            claims_jobs.enqueue_claims_alert_delivery(
+                owner_user_id=str(owner_user_id),
+                event_id=int(event_id),
+                alert_id=alert_id,
+                channel=channel,
+            )
+            enqueued += 1
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Failed to enqueue claims alert delivery job: {}", exc)
+    return enqueued
 
 
 async def _send_claims_alert_email_digest(
@@ -1511,81 +1414,86 @@ def _fetch_claims_provider_usage(owner_user_id: str | None) -> list[dict[str, An
         return []
 
 
-def _build_review_latency_stats(db: MediaDatabase) -> dict[str, float | None]:
-    avg_latency_sec = None
+def _claims_analytics_tables(db: MediaDatabase) -> tuple[str, str, str]:
+    """Return backend-specific Claims analytics table names and placeholder."""
     if db.backend_type == BackendType.POSTGRESQL:
-        avg_row = db.execute_query(
-            "SELECT AVG(EXTRACT(EPOCH FROM (reviewed_at - created_at))) AS avg_sec "
-            "FROM claims WHERE reviewed_at IS NOT NULL AND deleted = 0"
-        ).fetchone()
-    else:
-        avg_row = db.execute_query(
-            "SELECT AVG((julianday(reviewed_at) - julianday(created_at)) * 86400.0) AS avg_sec "
-            "FROM Claims WHERE reviewed_at IS NOT NULL AND deleted = 0"
-        ).fetchone()
-    if avg_row:
-        try:
-            avg_latency_sec = float(avg_row[0]) if avg_row[0] is not None else None
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-            avg_latency_sec = None
-
-    total_rows = db.execute_query(
-        "SELECT COUNT(*) AS count FROM Claims WHERE reviewed_at IS NOT NULL AND deleted = 0"
-    ).fetchone()
-    total = int(total_rows[0]) if total_rows and total_rows[0] is not None else 0
-    p95_latency = None
-    if total > 0:
-        offset = max(0, int(math.ceil(total * 0.95)) - 1)
-        if db.backend_type == BackendType.POSTGRESQL:
-            latency_expr = "EXTRACT(EPOCH FROM (reviewed_at - created_at))"
-            sql = (
-                "SELECT "
-                + latency_expr
-                + " AS latency FROM claims "
-                "WHERE reviewed_at IS NOT NULL AND deleted = 0 "
-                f"ORDER BY {latency_expr} LIMIT 1 OFFSET %s"
-            )
-            row = db.execute_query(sql, (offset,)).fetchone()
-        else:
-            latency_expr = "(julianday(reviewed_at) - julianday(created_at)) * 86400.0"
-            sql = (
-                "SELECT "
-                + latency_expr
-                + " AS latency FROM Claims "
-                "WHERE reviewed_at IS NOT NULL AND deleted = 0 "
-                f"ORDER BY {latency_expr} LIMIT 1 OFFSET ?"
-            )
-            row = db.execute_query(sql, (offset,)).fetchone()
-        if row:
-            try:
-                p95_latency = float(row[0]) if row[0] is not None else None
-            except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-                p95_latency = None
-    return {
-        "avg_review_latency_sec": avg_latency_sec,
-        "p95_review_latency_sec": p95_latency,
-    }
+        return "claims", "media", "%s"
+    return "Claims", "Media", "?"
 
 
-def _build_review_throughput(db: MediaDatabase, window_days: int) -> dict[str, Any]:
+def _claims_owner_predicate(
+    owner_user_id: str | None,
+    *,
+    media_alias: str,
+    placeholder: str,
+) -> tuple[str, list[Any]]:
+    """Build an owner-scoping predicate for Claims analytics queries."""
+    if not owner_user_id:
+        return "", []
+    return f" AND COALESCE(CAST({media_alias}.owner_user_id AS TEXT), {media_alias}.client_id) = {placeholder}", [
+        str(owner_user_id)
+    ]
+
+
+def _claims_owner_join(
+    db: MediaDatabase,
+    owner_user_id: str | None,
+    *,
+    claims_alias: str = "c",
+    media_alias: str = "m",
+) -> tuple[str, str, list[Any]]:
+    """Build optional media joins and predicates for owner-scoped claim rows."""
+    if not owner_user_id:
+        return "", "", []
+    _claims_table, media_table, placeholder = _claims_analytics_tables(db)
+    predicate, params = _claims_owner_predicate(
+        owner_user_id,
+        media_alias=media_alias,
+        placeholder=placeholder,
+    )
+    return f" JOIN {media_table} {media_alias} ON {media_alias}.id = {claims_alias}.media_id", predicate, params
+
+
+def _build_review_latency_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[str, float | None]:
+    """Fetch owner-scoped review latency aggregate metrics."""
+    return db.get_claims_review_latency_stats(owner_user_id=owner_user_id)
+
+
+def _build_review_throughput(db: MediaDatabase, window_days: int, owner_user_id: str | None) -> dict[str, Any]:
+    """Build a daily count of review activity for the requested window."""
     window_days = max(1, int(window_days))
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=window_days - 1)
     since_dt = datetime.combine(start_date, datetime.min.time())
+    claims_table, media_table, placeholder = _claims_analytics_tables(db)
+    owner_predicate, owner_params = _claims_owner_predicate(
+        owner_user_id,
+        media_alias="m",
+        placeholder=placeholder,
+    )
+    owner_join = (
+        f" JOIN {claims_table} c ON c.id = l.claim_id JOIN {media_table} m ON m.id = c.media_id"
+        if owner_user_id
+        else ""
+    )
     if db.backend_type == BackendType.POSTGRESQL:
         sql = (
-            "SELECT DATE(created_at) AS day, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= %s "
+            "SELECT DATE(l.created_at) AS day, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= %s "
+            + owner_predicate
+            + " "
             "GROUP BY day ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt,)).fetchall()
+        rows = db.execute_query(sql, (since_dt, *owner_params)).fetchall()
     else:
         sql = (
-            "SELECT DATE(created_at) AS day, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= ? "
+            "SELECT DATE(l.created_at) AS day, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= ? "
+            + owner_predicate
+            + " "
             "GROUP BY day ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
+        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"), *owner_params)).fetchall()
 
     counts_by_day: dict[str, int] = {}
     for row in rows:
@@ -1606,26 +1514,42 @@ def _build_review_throughput(db: MediaDatabase, window_days: int) -> dict[str, A
     return {"window_days": window_days, "total": total, "daily": series}
 
 
-def _build_review_status_trends(db: MediaDatabase, window_days: int) -> dict[str, Any]:
+def _build_review_status_trends(db: MediaDatabase, window_days: int, owner_user_id: str | None) -> dict[str, Any]:
+    """Build daily review status transition counts for dashboard analytics."""
     window_days = max(1, int(window_days))
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=window_days - 1)
     since_dt = datetime.combine(start_date, datetime.min.time())
+    claims_table, media_table, placeholder = _claims_analytics_tables(db)
+    owner_predicate, owner_params = _claims_owner_predicate(
+        owner_user_id,
+        media_alias="m",
+        placeholder=placeholder,
+    )
+    owner_join = (
+        f" JOIN {claims_table} c ON c.id = l.claim_id JOIN {media_table} m ON m.id = c.media_id"
+        if owner_user_id
+        else ""
+    )
 
     if db.backend_type == BackendType.POSTGRESQL:
         sql = (
-            "SELECT DATE(created_at) AS day, new_status, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= %s "
+            "SELECT DATE(l.created_at) AS day, l.new_status, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= %s "
+            + owner_predicate
+            + " "
             "GROUP BY day, new_status ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt,)).fetchall()
+        rows = db.execute_query(sql, (since_dt, *owner_params)).fetchall()
     else:
         sql = (
-            "SELECT DATE(created_at) AS day, new_status, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= ? "
+            "SELECT DATE(l.created_at) AS day, l.new_status, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= ? "
+            + owner_predicate
+            + " "
             "GROUP BY day, new_status ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
+        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"), *owner_params)).fetchall()
 
     counts_by_day: dict[str, dict[str, int]] = {}
     for row in rows:
@@ -1654,9 +1578,19 @@ def _build_review_status_trends(db: MediaDatabase, window_days: int) -> dict[str
     return {"window_days": window_days, "daily": series}
 
 
-def _build_claims_per_media_stats(db: MediaDatabase) -> tuple[list[dict[str, int]], dict[str, float | None]]:
+def _build_claims_per_media_stats(
+    db: MediaDatabase,
+    owner_user_id: str | None,
+) -> tuple[list[dict[str, int]], dict[str, float | None]]:
+    """Return per-media claim counts and summary distribution metrics."""
+    claims_table, _media_table, _placeholder = _claims_analytics_tables(db)
+    owner_join, owner_predicate, owner_params = _claims_owner_join(db, owner_user_id)
     media_rows = db.execute_query(
-        "SELECT media_id, COUNT(*) AS count FROM Claims WHERE deleted = 0 GROUP BY media_id"
+        f"SELECT c.media_id, COUNT(*) AS count FROM {claims_table} c{owner_join} "  # nosec B608
+        "WHERE c.deleted = 0"
+        + owner_predicate
+        + " GROUP BY c.media_id",
+        tuple(owner_params),
     ).fetchall()
     media_counts = [{"media_id": int(r[0]), "count": int(r[1])} for r in media_rows if r]
     counts = [row["count"] for row in media_counts]
@@ -1668,10 +1602,11 @@ def _build_claims_per_media_stats(db: MediaDatabase) -> tuple[list[dict[str, int
 
 
 def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[str, Any]:
+    claims_table, media_table, placeholder = _claims_analytics_tables(db)
     conditions: list[str] = []
     params: list[Any] = []
     if owner_user_id:
-        conditions.append("c.user_id = ?")
+        conditions.append(f"c.user_id = {placeholder}")
         params.append(str(owner_user_id))
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -1697,8 +1632,12 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
     p95_member_count = _percentile_value(member_counts, 0.95) if member_counts else None
     max_member_count = max(member_counts) if member_counts else None
 
+    orphan_owner_join, orphan_owner_predicate, orphan_owner_params = _claims_owner_join(db, owner_user_id)
     orphan_row = db.execute_query(
-        "SELECT COUNT(*) AS count FROM Claims WHERE deleted = 0 AND claim_cluster_id IS NULL"
+        f"SELECT COUNT(*) AS count FROM {claims_table} c{orphan_owner_join} "  # nosec B608
+        "WHERE c.deleted = 0 AND c.claim_cluster_id IS NULL"
+        + orphan_owner_predicate,
+        tuple(orphan_owner_params),
     ).fetchone()
     orphan_claims = int(orphan_row[0]) if orphan_row and orphan_row[0] is not None else 0
 
@@ -1715,14 +1654,24 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
             }
         )
 
-    hotspot_conditions: list[str] = ["COALESCE(i.issue_count, 0) > 0"]
+    issue_owner_join = ""
+    issue_owner_predicate = ""
     hotspot_params: list[Any] = []
     if owner_user_id:
-        hotspot_conditions.append("c.user_id = ?")
+        issue_owner_join = f" JOIN {media_table} im ON im.id = ic.media_id"
+        issue_owner_predicate, issue_owner_params = _claims_owner_predicate(
+            owner_user_id,
+            media_alias="im",
+            placeholder=placeholder,
+        )
+        hotspot_params.extend(issue_owner_params)
+    hotspot_conditions: list[str] = ["COALESCE(i.issue_count, 0) > 0"]
+    if owner_user_id:
+        hotspot_conditions.append(f"c.user_id = {placeholder}")
         hotspot_params.append(str(owner_user_id))
     hotspot_where = f"WHERE {' AND '.join(hotspot_conditions)}" if hotspot_conditions else ""
     hotspot_sql_template = (
-        "SELECT c.id, c.canonical_claim_text, c.watchlist_count, c.updated_at, "
+        "SELECT c.id, c.canonical_claim_text, c.watchlist_count, c.updated_at, "  # nosec B608
         "COALESCE(m.member_count, 0) AS member_count, "
         "COALESCE(i.issue_count, 0) AS issue_count "
         "FROM claim_clusters c "
@@ -1730,9 +1679,11 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
         "FROM claim_cluster_membership GROUP BY cluster_id) m "
         "ON m.cluster_id = c.id "
         "LEFT JOIN (SELECT claim_cluster_id AS cluster_id, COUNT(*) AS issue_count "
-        "FROM Claims WHERE deleted = 0 AND claim_cluster_id IS NOT NULL "
-        "AND review_status IN ('flagged', 'rejected') "
-        "GROUP BY claim_cluster_id) i "
+        f"FROM {claims_table} ic{issue_owner_join} WHERE ic.deleted = 0 AND ic.claim_cluster_id IS NOT NULL "
+        "AND ic.review_status IN ('flagged', 'rejected') "
+        + issue_owner_predicate
+        + " "
+        "GROUP BY ic.claim_cluster_id) i "
         "ON i.cluster_id = c.id "
         "{hotspot_where} "
         "ORDER BY issue_count DESC, member_count DESC LIMIT 20"
@@ -1772,17 +1723,23 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
 
 
 def _build_claims_analytics(db: MediaDatabase, owner_user_id: str | None, window_days: int) -> dict[str, Any]:
+    claims_table, _media_table, _placeholder = _claims_analytics_tables(db)
+    owner_join, owner_predicate, owner_params = _claims_owner_join(db, owner_user_id)
     status_rows = db.execute_query(
-        "SELECT review_status, COUNT(*) AS count FROM Claims WHERE deleted = 0 GROUP BY review_status"
+        f"SELECT c.review_status, COUNT(*) AS count FROM {claims_table} c{owner_join} "  # nosec B608
+        "WHERE c.deleted = 0"
+        + owner_predicate
+        + " GROUP BY c.review_status",
+        tuple(owner_params),
     ).fetchall()
     status_counts = {str(r[0]): int(r[1]) for r in status_rows if r and r[0] is not None}
     total_claims = sum(status_counts.values())
     backlog = int(status_counts.get("pending", 0)) + int(status_counts.get("reassigned", 0))
 
-    latency_stats = _build_review_latency_stats(db)
-    top_media, media_stats = _build_claims_per_media_stats(db)
-    review_throughput = _build_review_throughput(db, window_days)
-    review_status_trends = _build_review_status_trends(db, window_days)
+    latency_stats = _build_review_latency_stats(db, owner_user_id)
+    top_media, media_stats = _build_claims_per_media_stats(db, owner_user_id)
+    review_throughput = _build_review_throughput(db, window_days, owner_user_id)
+    review_status_trends = _build_review_status_trends(db, window_days, owner_user_id)
     cluster_stats = _build_cluster_stats(db, owner_user_id)
 
     return {
@@ -2616,18 +2573,33 @@ def _evaluate_claims_alerts_for_user(
                 "window_sec": window_sec,
                 "baseline_sec": baseline_sec,
             }
-            db.insert_claims_monitoring_event(
+            event_row = db.insert_claims_monitoring_event(
                 user_id=str(target_user_id),
                 event_type="unsupported_ratio",
                 severity="warning",
                 payload_json=json.dumps(payload),
             )
-            _dispatch_claims_alert_notifications(
-                config_row=dict(cfg),
-                payload=payload,
-                db_path=db.db_path_str,
-                user_id=target_user_id,
-            )
+            event_row = event_row or {}
+            event_id = 0
+            try:
+                event_id = int(event_row.get("id") or 0)
+            except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("Claims alert delivery enqueue skipped: invalid event_id: {}", exc)
+            if event_id > 0:
+                _enqueue_or_dispatch_claim_alert_delivery(
+                    config_row=dict(cfg),
+                    event_id=event_id,
+                    owner_user_id=target_user_id,
+                    payload=payload,
+                    db_path=db.db_path_str,
+                )
+            else:
+                _dispatch_claims_alert_notifications(
+                    config_row=dict(cfg),
+                    payload=payload,
+                    db_path=db.db_path_str,
+                    user_id=target_user_id,
+                )
         results.append(
             {
                 "config_id": cfg.get("id"),
@@ -2859,10 +2831,15 @@ async def review_claim(
         except _CLAIMS_NONCRITICAL_EXCEPTIONS:
             latency_s = None
         record_claims_review_metrics(processed=1, latency_s=latency_s)
+        owner_user_id = _resolve_claim_owner_user_id(
+            claim_row,
+            int(user_id) if user_id is not None else int(current_user.id),
+        )
         if new_status in {"flagged", "reassigned"} and new_status != current_status:
             _enqueue_claim_rebuild_if_needed(
                 media_id=int(claim_row.get("media_id") or 0),
                 db_path=str(target_db.db_path_str),
+                owner_user_id=owner_user_id,
             )
         if corrected_text is not None:
             target_user_id = str(user_id) if user_id is not None else str(current_user.id)
@@ -2874,10 +2851,6 @@ async def review_claim(
                 new_text=str(corrected_text),
                 user_id=target_user_id,
             )
-        owner_user_id = _resolve_claim_owner_user_id(
-            claim_row,
-            int(user_id) if user_id is not None else int(current_user.id),
-        )
         if owner_user_id:
             try:
                 notif_payload = {
@@ -2905,7 +2878,7 @@ async def review_claim(
                 )
                 notif_id = created.get("id") if isinstance(created, dict) else None
                 if notif_id is not None:
-                    dispatch_claim_review_notifications(
+                    _enqueue_or_dispatch_claim_review_notifications(
                         db_path=str(target_db.db_path_str),
                         owner_user_id=str(owner_user_id),
                         notification_ids=[int(notif_id)],
@@ -2961,10 +2934,11 @@ def bulk_review_claims(
         owner_filter=False,
     ) as (target_db, _owner_filter):
         updated_ids: list[int] = []
+        updated_ids_by_owner: dict[str, list[int]] = {}
         conflicts: list[int] = []
         missing: list[int] = []
         invalid: list[int] = []
-        rebuild_media_ids: set[int] = set()
+        rebuild_media_owners: dict[int, str] = {}
         action_ip, action_user_agent = _extract_request_metadata(request)
         desired_status = str(payload.get("status")).lower()
         for cid in payload.get("claim_ids") or []:
@@ -2993,24 +2967,30 @@ def bulk_review_claims(
                 missing.append(int(cid))
             else:
                 updated_ids.append(int(cid))
+                owner_for_claim = _resolve_claim_owner_user_id(
+                    claim_row,
+                    int(user_id) if user_id is not None else int(current_user.id),
+                )
+                if owner_for_claim:
+                    updated_ids_by_owner.setdefault(str(owner_for_claim), []).append(int(cid))
                 if desired_status in {"flagged", "reassigned"} and desired_status != current_status:
                     with suppress(_CLAIMS_NONCRITICAL_EXCEPTIONS):
-                        rebuild_media_ids.add(int(claim_row.get("media_id") or 0))
+                        media_id = int(claim_row.get("media_id") or 0)
+                        if media_id > 0 and owner_for_claim:
+                            rebuild_media_owners[media_id] = str(owner_for_claim)
 
         if updated_ids:
             record_claims_review_metrics(processed=len(updated_ids))
-        if rebuild_media_ids:
-            for media_id in rebuild_media_ids:
-                if media_id > 0:
-                    _enqueue_claim_rebuild_if_needed(
-                        media_id=media_id,
-                        db_path=str(target_db.db_path_str),
-                    )
-        if updated_ids:
-            owner_user_id = str(user_id) if user_id is not None else str(current_user.id)
+        for media_id, owner_for_rebuild in rebuild_media_owners.items():
+            _enqueue_claim_rebuild_if_needed(
+                media_id=media_id,
+                db_path=str(target_db.db_path_str),
+                owner_user_id=owner_for_rebuild,
+            )
+        for owner_user_id, owner_updated_ids in updated_ids_by_owner.items():
             try:
                 notif_payload = {
-                    "claim_ids": updated_ids,
+                    "claim_ids": owner_updated_ids,
                     "status": desired_status,
                     "reviewer_id": payload.get("reviewer_id"),
                     "review_group": payload.get("review_group"),
@@ -3028,7 +3008,7 @@ def bulk_review_claims(
                 )
                 notif_id = created.get("id") if isinstance(created, dict) else None
                 if notif_id is not None:
-                    dispatch_claim_review_notifications(
+                    _enqueue_or_dispatch_claim_review_notifications(
                         db_path=str(target_db.db_path_str),
                         owner_user_id=str(owner_user_id),
                         notification_ids=[int(notif_id)],
@@ -3158,6 +3138,10 @@ def claims_dashboard_analytics(
         payload["rebuild_health"] = claims_rebuild_health(principal, summary=True)
     except _CLAIMS_NONCRITICAL_EXCEPTIONS:
         payload["rebuild_health"] = None
+    try:
+        payload["claims_jobs"] = claims_jobs.claims_jobs_summary(owner_user_id=owner_user_id)
+    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
+        payload["claims_jobs"] = None
     try:
         metrics_user_id = owner_user_id or str(settings.get("SINGLE_USER_FIXED_ID", "1"))
         today = datetime.utcnow().date()
@@ -4207,6 +4191,21 @@ def rebuild_claims(
     db: MediaDatabase,
     rebuild_service: Any = None,
 ) -> dict[str, Any]:
+    owner_user_id = (
+        str(user_id)
+        if user_id is not None and _legacy_user_has_platform_admin_claims(current_user)
+        else str(current_user.id)
+    )
+    if claims_jobs.claims_jobs_enabled():
+        try:
+            job = claims_jobs.enqueue_claims_rebuild_media(
+                media_id=int(media_id),
+                owner_user_id=owner_user_id,
+            )
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            raise HTTPException(status_code=503, detail="Claims rebuild job enqueue failed") from exc
+        return {"status": "accepted", "media_id": media_id, "job_id": str(job.get("id") or "")}
+
     if user_id is not None and _legacy_user_has_platform_admin_claims(current_user):
         db_path = get_user_media_db_path(int(user_id))
     else:
@@ -4214,6 +4213,14 @@ def rebuild_claims(
     svc = rebuild_service or get_claims_rebuild_service()
     svc.submit(media_id=media_id, db_path=db_path)
     return {"status": "accepted", "media_id": media_id}
+
+
+def _claims_rebuild_all_idempotency_scope(policy: str) -> str:
+    """Build a time-bucketed idempotency scope for bulk rebuild jobs."""
+    normalized_policy = str(policy or "missing").lower()
+    window_sec = max(1, int(_CLAIMS_REBUILD_ALL_IDEMPOTENCY_SCOPE_WINDOW_SEC))
+    bucket = int(time.time() // window_sec)
+    return f"rebuild_all:{normalized_policy}:{bucket}"
 
 
 def rebuild_all_media(
@@ -4224,8 +4231,12 @@ def rebuild_all_media(
     db: MediaDatabase,
     rebuild_service: Any = None,
 ) -> dict[str, Any]:
-    svc = rebuild_service or get_claims_rebuild_service()
     normalized_policy = str(policy or "missing").lower()
+    owner_user_id = (
+        str(user_id)
+        if user_id is not None and _legacy_user_has_platform_admin_claims(current_user)
+        else str(current_user.id)
+    )
 
     def _enqueue_for_db(query_db: Any, *, db_path: str) -> dict[str, Any]:
         mids = list_claims_rebuild_media_ids(
@@ -4233,6 +4244,22 @@ def rebuild_all_media(
             policy=normalized_policy,
             compare_media_last_modified=True,
         )
+        if claims_jobs.claims_jobs_enabled():
+            enqueued = 0
+            idempotency_scope = _claims_rebuild_all_idempotency_scope(normalized_policy)
+            try:
+                for mid in mids:
+                    claims_jobs.enqueue_claims_rebuild_media(
+                        media_id=int(mid),
+                        owner_user_id=owner_user_id,
+                        idempotency_scope=idempotency_scope,
+                    )
+                    enqueued += 1
+            except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                raise HTTPException(status_code=503, detail="Claims rebuild job enqueue failed") from exc
+            return {"status": "accepted", "enqueued": enqueued, "policy": normalized_policy}
+
+        svc = rebuild_service or get_claims_rebuild_service()
         for mid in mids:
             svc.submit(media_id=mid, db_path=db_path)
         return {
