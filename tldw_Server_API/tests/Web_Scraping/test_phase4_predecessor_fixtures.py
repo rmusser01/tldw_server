@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 
 from tldw_Server_API.app.core.Watchlists import fetchers
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
@@ -24,7 +25,6 @@ from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GENERATOR = REPO_ROOT / "Helper_Scripts" / "web_scraping_phase4_fixtures.py"
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "phase4"
-MANIFEST = FIXTURE_ROOT / "manifest.json"
 
 CASE_KEYS = {
     "article_orchestration_fakes",
@@ -55,22 +55,43 @@ _FIXED_SELECTOR_ENV = {
 }
 
 
+def _load_fixture_set(
+    fixture_root: Path = FIXTURE_ROOT,
+) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]], dict[str, bytes]]:
+    with fixture_generator.fixture_publication_reader(
+        fixture_root,
+        source_root=REPO_ROOT,
+    ) as locked_root:
+        manifest_path = locked_root / "manifest.json"
+        if not manifest_path.is_file():
+            raise FileNotFoundError(f"Missing phase 4 predecessor manifest: {manifest_path}")
+        manifest_raw = manifest_path.read_bytes()
+        manifest = json.loads(manifest_raw.decode("utf-8"))
+        cases: dict[str, list[dict[str, Any]]] = {}
+        raw_files = {"manifest.json": manifest_raw}
+        for category in sorted(CASE_KEYS):
+            case_path = locked_root / manifest["cases"][category]
+            if not case_path.is_file():
+                pytest.fail(f"Missing predecessor fixture: {case_path.name}")
+            raw = case_path.read_bytes()
+            payload = json.loads(raw.decode("utf-8"))
+            assert payload["category"] == category
+            assert isinstance(payload["cases"], list)
+            assert payload["cases"]
+            cases[category] = payload["cases"]
+            raw_files[case_path.name] = raw
+    return manifest, cases, raw_files
+
+
+_FIXTURE_MANIFEST, _FIXTURE_CASES, _FIXTURE_RAW_FILES = _load_fixture_set()
+
+
 def _load_manifest() -> dict[str, Any]:
-    if not MANIFEST.is_file():
-        raise FileNotFoundError(f"Missing phase 4 predecessor manifest: {MANIFEST}")
-    return json.loads(MANIFEST.read_text(encoding="utf-8"))
+    return _FIXTURE_MANIFEST
 
 
 def _load_cases(category: str) -> list[dict[str, Any]]:
-    manifest = _load_manifest()
-    case_path = FIXTURE_ROOT / manifest["cases"][category]
-    if not case_path.is_file():
-        pytest.fail(f"Missing predecessor fixture: {case_path.name}")
-    payload = json.loads(case_path.read_text(encoding="utf-8"))
-    assert payload["category"] == category
-    assert isinstance(payload["cases"], list)
-    assert payload["cases"]
-    return payload["cases"]
+    return _FIXTURE_CASES[category]
 
 
 def _assert_case(case: Mapping[str, Any], actual: object) -> None:
@@ -318,8 +339,7 @@ def test_phase4_fixture_generator_is_explicit_and_checked_in() -> None:
 
 
 def test_phase4_fixture_manifest_is_pinned() -> None:
-    assert MANIFEST.is_file(), f"Missing fixture manifest: {MANIFEST}"
-    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    manifest = _load_manifest()
 
     assert manifest["schema_version"] == 1
     assert manifest["predecessor_commit"] == PINNED_PREDECESSOR_COMMIT
@@ -330,14 +350,13 @@ def test_phase4_fixture_manifest_is_pinned() -> None:
 def test_phase4_fixture_json_is_canonical_and_complete() -> None:
     manifest = _load_manifest()
     expected_names = {"manifest.json", *manifest["cases"].values()}
-    assert {path.name for path in FIXTURE_ROOT.glob("*.json")} == expected_names
+    assert set(_FIXTURE_RAW_FILES) == expected_names
 
-    for path in sorted(FIXTURE_ROOT.glob("*.json")):
-        raw = path.read_bytes()
+    for name, raw in sorted(_FIXTURE_RAW_FILES.items()):
         decoded = raw.decode("ascii")
         payload = json.loads(decoded)
         canonical = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
-        assert decoded == canonical, path.name
+        assert decoded == canonical, name
 
 
 def test_article_orchestration_fixture_pins_enabled_preflight() -> None:
@@ -368,18 +387,15 @@ def test_article_orchestration_fixture_pins_enabled_preflight() -> None:
 
 
 def test_missing_manifest_is_a_hard_failure(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    missing_manifest = tmp_path / "manifest.json"
-    monkeypatch.setitem(globals(), "MANIFEST", missing_manifest)
-
     def _reject_skip(reason: str) -> None:
         pytest.fail(f"Missing immutable fixtures must fail, not skip: {reason}")
 
-    monkeypatch.setattr(pytest, "skip", _reject_skip)
-    with pytest.raises(FileNotFoundError, match="Missing phase 4 predecessor manifest"):
-        _load_manifest()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(pytest, "skip", _reject_skip)
+        with pytest.raises(FileNotFoundError, match="Missing phase 4 predecessor manifest"):
+            _load_fixture_set(tmp_path)
 
 
 def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:

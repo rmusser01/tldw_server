@@ -354,6 +354,86 @@ def _fixture_process_worker(
         result_queue.put((marker, "ok", "", ""))
 
 
+def _publication_gap_worker(
+    source_root: str,
+    output: str,
+    gap_open: Any,
+    release_gap: Any,
+    result_queue: Any,
+) -> None:
+    output_path = Path(output)
+    staging = output_path.parent / "reader-test-staging"
+    _write_valid_fixture_set(staging, "2" * 40, "published")
+    real_replace = Path.replace
+
+    def _pause_in_rename_gap(path: Path, target: Path) -> Path:
+        result = real_replace(path, target)
+        if path == output_path:
+            gap_open.set()
+            if not release_gap.wait(15):
+                raise TimeoutError("test publisher gap release timed out")
+        return result
+
+    Path.replace = _pause_in_rename_gap
+    try:
+        with generator._publication_lock(output_path, Path(source_root)):
+            generator._replace_output_directory(staging, output_path)
+    except BaseException as exc:  # noqa: BLE001 - report child-process failures
+        result_queue.put(("publisher", "error", type(exc).__name__, str(exc)))
+    else:
+        result_queue.put(("publisher", "ok", "", ""))
+
+
+def _cooperative_reader_worker(
+    source_root: str,
+    output: str,
+    attempted: Any,
+    entered: Any,
+    result_queue: Any,
+) -> None:
+    attempted.set()
+    try:
+        with generator.fixture_publication_reader(
+            Path(output),
+            source_root=Path(source_root),
+        ) as fixture_root:
+            entered.set()
+            manifest = json.loads((fixture_root / "manifest.json").read_text(encoding="ascii"))
+            markers = {
+                json.loads((fixture_root / filename).read_text(encoding="ascii"))["cases"][0]["marker"]
+                for filename in manifest["cases"].values()
+            }
+    except BaseException as exc:  # noqa: BLE001 - report child-process failures
+        result_queue.put(("reader", "error", type(exc).__name__, str(exc)))
+    else:
+        result_queue.put(("reader", "ok", "", ",".join(sorted(markers))))
+
+
+def _crash_after_backup_rename_worker(
+    source_root: str,
+    predecessor_commit: str,
+    output: str,
+    rename_completed: Any,
+) -> None:
+    output_path = Path(output)
+    real_replace = Path.replace
+
+    def _terminate_after_backup_rename(path: Path, target: Path) -> Path:
+        result = real_replace(path, target)
+        if path == output_path:
+            rename_completed.set()
+            os._exit(73)
+        return result
+
+    generator.build_case_payloads = lambda _source_root: _fixture_payloads("unpublished")
+    Path.replace = _terminate_after_backup_rename
+    generator.generate_fixtures(
+        predecessor_commit,
+        output_path,
+        source_root=Path(source_root),
+    )
+
+
 def _join_process(process: multiprocessing.Process, timeout: float = 20) -> None:
     process.join(timeout)
     if process.is_alive():
@@ -2435,6 +2515,139 @@ def test_same_output_lock_is_os_released_after_process_termination(tmp_path: Pat
     _assert_fixture_marker(output, "successor")
 
 
+def test_cooperative_reader_cannot_observe_two_rename_publication_gap(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "original")
+    context = multiprocessing.get_context("spawn")
+    gap_open = context.Event()
+    release_gap = context.Event()
+    reader_attempted = context.Event()
+    reader_entered = context.Event()
+    result_queue = context.Queue()
+    publisher = context.Process(
+        target=_publication_gap_worker,
+        args=(str(source_root), str(output), gap_open, release_gap, result_queue),
+    )
+    reader = context.Process(
+        target=_cooperative_reader_worker,
+        args=(
+            str(source_root),
+            str(output),
+            reader_attempted,
+            reader_entered,
+            result_queue,
+        ),
+    )
+
+    publisher.start()
+    try:
+        assert gap_open.wait(10)
+        assert not output.exists()
+        reader.start()
+        assert reader_attempted.wait(10)
+        assert not reader_entered.wait(1)
+        release_gap.set()
+        assert reader_entered.wait(10)
+    finally:
+        release_gap.set()
+        _join_process(publisher)
+        if reader.pid is not None:
+            _join_process(reader)
+
+    assert sorted(_queue_results(result_queue, 2)) == [
+        ("publisher", "ok", "", ""),
+        ("reader", "ok", "", "published"),
+    ]
+
+
+def test_crash_between_renames_is_recovered_before_payload_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "original")
+    context = multiprocessing.get_context("spawn")
+    rename_completed = context.Event()
+    crashed = context.Process(
+        target=_crash_after_backup_rename_worker,
+        args=(str(source_root), source_commit, str(output), rename_completed),
+    )
+
+    crashed.start()
+    assert rename_completed.wait(10)
+    _join_process(crashed)
+    assert crashed.exitcode == 73
+    assert not output.exists()
+    assert len(list(tmp_path.glob(".fixtures.backup-*"))) == 1
+    assert len(list(tmp_path.glob(".fixtures.publication-recovery.json"))) == 1
+
+    def _stop_after_recovery(_source_root: Path) -> dict[str, dict[str, Any]]:
+        raise RuntimeError("stop after recovery")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _stop_after_recovery)
+    with pytest.raises(RuntimeError, match="^stop after recovery$"):
+        generator.generate_fixtures(
+            source_commit,
+            output,
+            source_root=source_root,
+        )
+
+    _assert_fixture_marker(output, "original")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert not list(tmp_path.glob(".fixtures.publication-recovery.json"))
+
+
+def test_recovery_rejects_in_place_backup_mutation_without_deleting_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "original")
+    context = multiprocessing.get_context("spawn")
+    rename_completed = context.Event()
+    crashed = context.Process(
+        target=_crash_after_backup_rename_worker,
+        args=(str(source_root), source_commit, str(output), rename_completed),
+    )
+
+    crashed.start()
+    assert rename_completed.wait(10)
+    _join_process(crashed)
+    backup = next(tmp_path.glob(".fixtures.backup-*"))
+    recovery_record = tmp_path / ".fixtures.publication-recovery.json"
+    _write_canonical_json(backup / "content.json", _fixture_payloads("tampered")["content"])
+    before_backup = _snapshot_path(backup)
+    before_record = recovery_record.read_bytes()
+    build_calls = 0
+
+    def _record_payload_build(_source_root: Path) -> dict[str, dict[str, Any]]:
+        nonlocal build_calls
+        build_calls += 1
+        return _fixture_payloads("must-not-build")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _record_payload_build)
+    with pytest.raises(
+        RuntimeError,
+        match=("^Fixture publication recovery could not be completed safely; " "manual recovery is required$"),
+    ) as exc_info:
+        generator.generate_fixtures(
+            source_commit,
+            output,
+            source_root=source_root,
+        )
+
+    assert build_calls == 0
+    assert not output.exists()
+    assert _snapshot_path(backup) == before_backup
+    assert recovery_record.read_bytes() == before_record
+    assert str(tmp_path) not in str(exc_info.value)
+    assert "tampered" not in str(exc_info.value)
+
+
 def test_cli_rejects_source_root_at_a_different_commit(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -3044,7 +3257,7 @@ def test_staging_cleanup_failure_does_not_replace_primary_publication_error(
     assert sensitive_path not in diagnostic
 
 
-def test_recreated_staging_path_is_retained_after_atomic_publication(
+def test_recreated_staging_path_is_retained_after_cooperative_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3409,6 +3622,121 @@ def test_post_rename_identity_check_failure_restores_old_output_and_propagates(
     _assert_fixture_marker(output, "old-output")
     _assert_fixture_marker(staging, "new-output")
     assert not list(tmp_path.glob(".fixtures.backup-*"))
+
+
+def test_in_place_staging_mutation_after_validation_does_not_replace_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    before_output = _snapshot_path(output)
+    original_validate = generator._validate_existing_output
+
+    def _mutate_staging_after_validation(path: Path) -> object:
+        identity = original_validate(path)
+        _write_canonical_json(
+            staging / "content.json",
+            _fixture_payloads("tampered-sensitive-staging")["content"],
+        )
+        return identity
+
+    monkeypatch.setattr(
+        generator,
+        "_validate_existing_output",
+        _mutate_staging_after_validation,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture staging directory changed during publication$",
+    ) as exc_info:
+        generator._replace_output_directory(staging, output)
+
+    assert _snapshot_path(output) == before_output
+    _assert_fixture_marker(output, "old-output")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert str(tmp_path) not in str(exc_info.value)
+    assert "tampered-sensitive-staging" not in str(exc_info.value)
+
+
+def test_in_place_output_mutation_after_validation_aborts_before_first_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    original_validate = generator._validate_existing_output
+
+    def _mutate_output_after_validation(path: Path) -> object:
+        identity = original_validate(path)
+        _write_canonical_json(
+            output / "content.json",
+            _fixture_payloads("tampered-sensitive-output")["content"],
+        )
+        return identity
+
+    monkeypatch.setattr(
+        generator,
+        "_validate_existing_output",
+        _mutate_output_after_validation,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="^Fixture output changed during publication$",
+    ) as exc_info:
+        generator._replace_output_directory(staging, output)
+
+    _assert_fixture_marker(staging, "new-output")
+    assert json.loads((output / "content.json").read_text(encoding="ascii"))["cases"] == [
+        {"marker": "tampered-sensitive-output"}
+    ]
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert str(tmp_path) not in str(exc_info.value)
+    assert "tampered-sensitive-output" not in str(exc_info.value)
+
+
+def test_in_place_staging_mutation_after_publication_enters_manual_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    original_replace = Path.replace
+
+    def _mutate_after_staging_rename(path: Path, target: Path) -> Path:
+        result = original_replace(path, target)
+        if path == staging:
+            _write_canonical_json(
+                output / "content.json",
+                _fixture_payloads("tampered-sensitive-published")["content"],
+            )
+        return result
+
+    monkeypatch.setattr(Path, "replace", _mutate_after_staging_rename)
+
+    with pytest.raises(
+        RuntimeError,
+        match=("^Fixture output rollback could not be completed safely; " "manual recovery is required$"),
+    ) as exc_info:
+        generator._replace_output_directory(staging, output)
+
+    assert json.loads((output / "content.json").read_text(encoding="ascii"))["cases"] == [
+        {"marker": "tampered-sensitive-published"}
+    ]
+    backups = list(tmp_path.glob(".fixtures.backup-*"))
+    assert len(backups) == 1
+    _assert_fixture_marker(backups[0], "old-output")
+    assert len(list(tmp_path.glob(".fixtures.publication-recovery.json"))) == 1
+    assert str(tmp_path) not in str(exc_info.value)
+    assert "tampered-sensitive-published" not in str(exc_info.value)
 
 
 def test_output_substitution_after_validation_is_not_replaced(
