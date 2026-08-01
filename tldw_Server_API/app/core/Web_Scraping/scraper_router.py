@@ -46,7 +46,40 @@ def _is_config_mapping_key(value: Any) -> bool:
 
 
 def _is_scalar_mapping_key(value: Any) -> bool:
-    return type(value) in {str, bool, int, float}
+    return value is None or type(value) in {str, bool, int, float}
+
+
+def _is_ordinary_yaml_value(value: Any) -> bool:
+    pending = [value]
+    visited: set[int] = set()
+    while pending:
+        item = pending.pop()
+        item_type = type(item)
+        if item is None or item_type in {str, bool, float}:
+            continue
+        if item_type is int:
+            try:
+                str(item)
+            except (ValueError, OverflowError):
+                return False
+            continue
+        if item_type not in {list, dict}:
+            return False
+
+        item_id = id(item)
+        if item_id in visited:
+            continue
+        visited.add(item_id)
+        if item_type is list:
+            pending.extend(item)
+            continue
+
+        for key, nested in dict.items(item):
+            if not _is_scalar_mapping_key(key):
+                return False
+            pending.append(key)
+            pending.append(nested)
+    return True
 
 
 def _snapshot_mapping_entries(
@@ -82,43 +115,47 @@ def _snapshot_config_mapping(value: Any) -> dict[str, Any] | None:
 
 
 def _normalize_backend(value: Any) -> str:
-    if type(value) is not str:
+    normalized_value = _stringify_ordinary_yaml(value)
+    if normalized_value is _INVALID_VALUE:
         return "auto"
-    normalized = value.strip().lower()
+    normalized = normalized_value.strip().lower()
     return _BACKEND_LOOKUP.get(normalized, "auto")
 
 
-def _stringify_exact_scalar(value: Any) -> str | object:
-    if type(value) not in {bool, int, float}:
+def _stringify_ordinary_yaml(value: Any) -> str | object:
+    if not _is_ordinary_yaml_value(value):
         return _INVALID_VALUE
     try:
         return str(value)
-    except (ValueError, OverflowError):
+    except Exception:
         return _INVALID_VALUE
 
 
 def _normalize_scalar_string(
     value: Any,
-    *,
-    allow_none: bool = False,
-) -> str | None | object:
+) -> str | object:
     if value is None:
-        return None if allow_none else _INVALID_VALUE
-    if type(value) is str:
-        return value
-    return _stringify_exact_scalar(value)
+        return "None"
+    return _stringify_ordinary_yaml(value)
 
 
 def _normalize_bool(value: Any) -> bool | object:
-    if type(value) in {bool, int, float, str}:
+    if _is_ordinary_yaml_value(value):
         return bool(value)
     return _INVALID_VALUE
 
 
 def _stringify_safe_scalar(value: Any) -> str | object:
-    if type(value) is str:
-        return value
-    return _stringify_exact_scalar(value)
+    return _stringify_ordinary_yaml(value)
+
+
+def _stringify_custom_mapping_scalar(value: Any) -> str | object:
+    if type(value) not in {str, bool, int, float}:
+        return _INVALID_VALUE
+    try:
+        return str(value)
+    except (ValueError, OverflowError):
+        return _INVALID_VALUE
 
 
 def _normalize_string_mapping(value: Any) -> dict[str, str]:
@@ -127,12 +164,46 @@ def _normalize_string_mapping(value: Any) -> dict[str, str]:
         return {}
 
     normalized: dict[str, str] = {}
+    stringify = _stringify_safe_scalar if type(value) is dict else _stringify_custom_mapping_scalar
     for key, item in entries:
-        normalized_key = _stringify_safe_scalar(key)
-        normalized_item = _stringify_safe_scalar(item)
+        normalized_key = stringify(key)
+        normalized_item = stringify(item)
         if normalized_key is not _INVALID_VALUE and normalized_item is not _INVALID_VALUE:
             normalized[normalized_key] = normalized_item
     return normalized
+
+
+def _normalize_plan_mapping(value: Any) -> dict[Any, Any]:
+    if type(value) is list:
+        normalized: dict[Any, Any] = {}
+        for pair in value:
+            if type(pair) is not list or len(pair) != 2:
+                return {}
+            key, item = pair
+            if not _is_scalar_mapping_key(key) or not _is_ordinary_yaml_value(key) or not _is_ordinary_yaml_value(item):
+                return {}
+            normalized[key] = item
+        return normalized
+
+    entries = _snapshot_mapping_entries(value, _is_scalar_mapping_key)
+    if entries is None:
+        return {}
+    if type(value) is not dict:
+        return _normalize_string_mapping(value)
+
+    normalized: dict[Any, Any] = {}
+    for key, item in entries:
+        if _is_ordinary_yaml_value(key) and _is_ordinary_yaml_value(item):
+            normalized[key] = item
+    return normalized
+
+
+def _normalize_validated_proxies(value: Any) -> Any:
+    if type(value) is dict:
+        return _normalize_plan_mapping(value)
+    if isinstance(value, Mapping):
+        return _normalize_string_mapping(value)
+    return value if _is_ordinary_yaml_value(value) else {}
 
 
 def _normalize_string_list(value: Any) -> list[str] | object:
@@ -141,11 +212,41 @@ def _normalize_string_list(value: Any) -> list[str] | object:
     return [item for item in value if type(item) is str]
 
 
-def _normalize_object_mapping(value: Any) -> dict[str, Any] | object:
-    snapshot = _snapshot_config_mapping(value)
-    if snapshot is None:
+def _normalize_validated_string_list(value: Any) -> list[str] | object:
+    normalized = _normalize_string_list(value)
+    if normalized is not _INVALID_VALUE:
+        return normalized
+    if _is_ordinary_yaml_value(value):
+        return []
+    return _INVALID_VALUE
+
+
+def _normalize_object_mapping(value: Any) -> dict[Any, Any] | object:
+    entries = _snapshot_mapping_entries(value, _is_scalar_mapping_key)
+    if entries is None:
         return _INVALID_VALUE
-    return snapshot
+    return dict(entries)
+
+
+def _normalize_validated_object_mapping(value: Any) -> dict[Any, Any] | object:
+    normalized = _normalize_object_mapping(value)
+    if normalized is not _INVALID_VALUE:
+        return normalized
+    if _is_ordinary_yaml_value(value):
+        return {}
+    return _INVALID_VALUE
+
+
+def _validated_yaml_value(value: Any) -> Any:
+    return value if _is_ordinary_yaml_value(value) else _INVALID_VALUE
+
+
+def _resolve_backend(value: Any, default: str) -> str:
+    truthy = _normalize_bool(value)
+    if truthy is _INVALID_VALUE or not truthy:
+        return default
+    normalized = _stringify_ordinary_yaml(value)
+    return normalized if normalized is not _INVALID_VALUE else default
 
 
 def _mapping_alias(
@@ -329,13 +430,13 @@ class ScraperRouter:
                 if k == "backend":
                     cleaned[k] = _normalize_backend(v)
                 elif k == "handler":
-                    cleaned[k] = v if type(v) is str and len(v) > 0 else DEFAULT_HANDLER
-                elif k == "ua_profile":
-                    normalized = _normalize_scalar_string(v)
+                    normalized = _validated_yaml_value(v)
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized
-                elif k == "impersonate":
-                    normalized = _normalize_scalar_string(v, allow_none=True)
+                    else:
+                        cleaned[k] = DEFAULT_HANDLER
+                elif k in {"ua_profile", "impersonate"}:
+                    normalized = _validated_yaml_value(v)
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized
                 elif k == "url_patterns":
@@ -362,14 +463,16 @@ class ScraperRouter:
                         discard_rule = True
                         break
                     cleaned[k] = pats
-                elif k in ("extra_headers", "cookies", "proxies"):
+                elif k in ("extra_headers", "cookies"):
                     cleaned[k] = _normalize_string_mapping(v)
+                elif k == "proxies":
+                    cleaned[k] = _normalize_validated_proxies(v)
                 elif k == "respect_robots":
                     normalized = _normalize_bool(v)
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized
                 elif k == "strategy_order":
-                    normalized = _normalize_string_list(v)
+                    normalized = _normalize_validated_string_list(v)
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized
                 elif (
@@ -378,7 +481,7 @@ class ScraperRouter:
                     or k in {"regex_settings", "regex"}
                     or k in {"cluster_settings", "cluster"}
                 ):
-                    normalized = _normalize_object_mapping(v)
+                    normalized = _normalize_validated_object_mapping(v)
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized
                 else:
@@ -409,7 +512,7 @@ class ScraperRouter:
 
         _key, rule = match
         # Build from rule
-        backend = _normalize_backend(rule.get("backend", plan.backend))
+        backend = _resolve_backend(rule.get("backend", plan.backend), plan.backend)
         handler_raw = rule.get("handler", plan.handler)
         handler = _validate_handler(handler_raw, self.allowlist)
 
@@ -444,20 +547,17 @@ class ScraperRouter:
         if normalized_ua_profile is not _INVALID_VALUE:
             plan.ua_profile = normalized_ua_profile
 
-        normalized_impersonate = _normalize_scalar_string(
-            rule.get("impersonate", _INVALID_VALUE),
-            allow_none=True,
-        )
+        normalized_impersonate = _validated_yaml_value(rule.get("impersonate", _INVALID_VALUE))
         if normalized_impersonate is _INVALID_VALUE:
             plan.impersonate = profile_to_impersonate(plan.ua_profile)
         else:
             plan.impersonate = normalized_impersonate
 
-        plan.extra_headers = _normalize_string_mapping(rule.get("extra_headers"))
+        plan.extra_headers = _normalize_plan_mapping(rule.get("extra_headers"))
         # Cookies can be provided as simple name->value map
-        plan.cookies = _normalize_string_mapping(rule.get("cookies"))
+        plan.cookies = _normalize_plan_mapping(rule.get("cookies"))
         # Per-domain proxies
-        plan.proxies = _normalize_string_mapping(rule.get("proxies"))
+        plan.proxies = _normalize_plan_mapping(rule.get("proxies"))
         # Per-rule robots override
         if "respect_robots" in rule:
             normalized_robots = _normalize_bool(rule.get("respect_robots"))

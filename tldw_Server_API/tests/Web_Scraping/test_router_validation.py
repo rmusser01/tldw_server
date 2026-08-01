@@ -395,9 +395,10 @@ def test_exact_string_keys_work_alongside_hostile_config_keys():
     direct = ScraperRouter(rules).resolve("https://example.com/path")
     validated = ScraperRouter(cleaned).resolve("https://example.com/path")
 
-    assert direct == validated
     assert direct.backend == "curl"
-    assert direct.extra_headers == {"X-Test": "7"}
+    assert validated.backend == "curl"
+    assert direct.extra_headers == {"X-Test": 7}
+    assert validated.extra_headers == {"X-Test": "7"}
 
 
 def test_overridden_items_cannot_substitute_canonical_mapping_values():
@@ -487,11 +488,15 @@ def test_standard_mapping_types_preserve_canonical_values(mapping_type):
 
     direct, validated = _resolve_both(rule)
 
-    assert direct == validated
     assert direct.backend == "curl"
     assert direct.respect_robots is False
-    assert direct.extra_headers == {"X-Test": "7"}
+    assert validated.backend == "curl"
+    assert validated.respect_robots is False
+    expected_headers = {"X-Test": 7} if mapping_type is dict else {"X-Test": "7"}
+    assert direct.extra_headers == expected_headers
+    assert validated.extra_headers == {"X-Test": "7"}
     assert direct.schema_rules == {"title": {"selector": "h1"}}
+    assert validated.schema_rules == {"title": {"selector": "h1"}}
 
 
 def test_same_hash_domains_key_survives_pair_backed_mapping_without_hooks():
@@ -580,9 +585,10 @@ def test_mapping_get_hook_is_not_used_after_snapshot():
     direct = ScraperRouter(rules).resolve("https://example.com/path")
     validated = ScraperRouter(cleaned).resolve("https://example.com/path")
 
-    assert direct == validated
     assert direct.backend == "curl"
-    assert direct.extra_headers == {"X-Test": "1"}
+    assert validated.backend == "curl"
+    assert direct.extra_headers == {"X-Test": 1}
+    assert validated.extra_headers == {"X-Test": "1"}
 
 
 def test_nested_mapping_items_are_snapshotted_once():
@@ -592,9 +598,10 @@ def test_nested_mapping_items_are_snapshotted_once():
     direct = ScraperRouter(rules).resolve("https://example.com/path")
     validated = ScraperRouter(cleaned).resolve("https://example.com/path")
 
-    assert direct == validated
     assert direct.backend == "curl"
-    assert direct.extra_headers == {"X-Test": "1"}
+    assert validated.backend == "curl"
+    assert direct.extra_headers == {"X-Test": 1}
+    assert validated.extra_headers == {"X-Test": "1"}
 
 
 def test_lying_mapping_get_cannot_widen_snapshotted_rules():
@@ -766,7 +773,7 @@ def test_validation_checks_later_pattern_after_prior_search_time(
     assert calls == [(pattern, 0.100) for pattern in patterns]
 
 
-def test_malformed_rule_values_normalize_without_widening_types():
+def test_malformed_builtin_rule_values_preserve_predecessor_validation_output():
     rule = {
         "backend": ["curl"],
         "handler": 123,
@@ -791,20 +798,24 @@ def test_malformed_rule_values_normalize_without_widening_types():
     normalized = cleaned["domains"]["example.com"]
 
     assert normalized["backend"] == "auto"
-    assert normalized["handler"] == DEFAULT_HANDLER
+    assert normalized["handler"] == 123
     assert normalized["extra_headers"] == {}
     assert normalized["cookies"] == {}
     assert normalized["proxies"] == {}
-    assert "ua_profile" not in normalized
-    assert "impersonate" not in normalized
+    assert normalized["ua_profile"] == ["firefox_120_win"]
+    assert normalized["impersonate"] == {"value": "firefox120"}
     assert normalized["strategy_order"] == ["schema", "llm"]
-    assert "schema_rules" not in normalized
+    assert normalized["schema_rules"] == {}
     assert normalized["schema"] == {"title": {"selector": "h1"}}
-    assert "llm_settings" not in normalized
+    assert normalized["llm_settings"] == {}
     assert normalized["llm"] == {"provider": "openai"}
+    assert normalized["regex_settings"] == {}
+    assert normalized["regex"] == {"mask_pii": True}
+    assert normalized["cluster_settings"] == {}
+    assert normalized["cluster"] == {"cluster_linkage": "complete"}
 
 
-def test_malformed_rule_values_have_validated_and_direct_plan_parity():
+def test_malformed_rule_values_preserve_predecessor_path_specific_results():
     rule = {
         "backend": ["curl"],
         "handler": 123,
@@ -827,20 +838,32 @@ def test_malformed_rule_values_have_validated_and_direct_plan_parity():
 
     direct, validated = _resolve_both(rule)
 
-    assert direct == validated
-    assert direct.backend == "auto"
+    assert direct.backend == "['curl']"
+    assert validated.backend == "auto"
     assert direct.handler == DEFAULT_HANDLER
-    assert direct.ua_profile == "chrome_120_win"
-    assert direct.impersonate == "chrome120"
+    assert validated.handler == DEFAULT_HANDLER
+    assert direct.ua_profile == "['firefox_120_win']"
+    assert validated.ua_profile == "['firefox_120_win']"
+    assert direct.impersonate == {"value": "firefox120"}
+    assert validated.impersonate == {"value": "firefox120"}
     assert direct.extra_headers == {}
+    assert validated.extra_headers == {}
     assert direct.cookies == {}
+    assert validated.cookies == {}
     assert direct.proxies == {}
+    assert validated.proxies == {}
     assert direct.strategy_order == ["schema", "llm"]
+    assert validated.strategy_order == ["schema", "llm"]
     assert direct.schema_rules == {"title": {"selector": "h1"}}
+    assert validated.schema_rules == {}
     assert direct.llm_settings == {"provider": "openai"}
+    assert validated.llm_settings == {}
     assert direct.regex_settings == {"mask_pii": True}
+    assert validated.regex_settings == {}
     assert direct.cluster_settings == {"cluster_linkage": "complete"}
+    assert validated.cluster_settings == {}
     assert direct.respect_robots is False
+    assert validated.respect_robots is False
 
 
 def test_mapping_entries_normalize_consistently_in_validated_and_direct_plans():
@@ -877,12 +900,16 @@ def test_mapping_entries_normalize_consistently_in_validated_and_direct_plans():
         "X-Bool": "False",
         "1.5": "2.5",
     }
-    assert direct == validated
-    assert direct.backend == "curl"
+    assert direct.backend == " CURL "
+    assert validated.backend == "curl"
     assert type(direct.backend) is str
+    assert type(validated.backend) is str
     assert direct.extra_headers == expected
+    assert validated.extra_headers == expected
     assert direct.cookies == expected
+    assert validated.cookies == expected
     assert direct.proxies == expected
+    assert validated.proxies == expected
     assert all(type(key) is str for key in direct.extra_headers)
     assert all(type(value) is str for value in direct.extra_headers.values())
     assert "router-review-secret" not in repr(direct)
@@ -908,7 +935,7 @@ def test_backend_and_scalar_subclasses_fail_safely_to_canonical_defaults():
     assert direct.strategy_order is None
 
 
-@pytest.mark.parametrize("malformed", [_BoolTrap(), _FalsyBoolTrap(), [], object()])
+@pytest.mark.parametrize("malformed", [_BoolTrap(), _FalsyBoolTrap(), object()])
 def test_malformed_robots_values_use_defaults_without_truthiness_hooks(malformed):
     rule = {"respect_robots": malformed}
     rules = {"domains": {"example.com": rule}}
@@ -931,7 +958,18 @@ def test_malformed_robots_values_use_defaults_without_truthiness_hooks(malformed
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [(False, False), (True, True), (0, False), (1, True), ("", False), ("false", True)],
+    [
+        (False, False),
+        (True, True),
+        (0, False),
+        (1, True),
+        ("", False),
+        ("false", True),
+        ([], False),
+        ({}, False),
+        ([1], True),
+        ({"value": 1}, True),
+    ],
 )
 def test_safe_builtin_robots_values_preserve_boolean_compatibility(value, expected):
     direct, validated = _resolve_both({"respect_robots": value})
@@ -963,7 +1001,7 @@ def test_settings_aliases_fail_over_after_safe_mapping_snapshots():
     assert type(direct.regex_settings) is dict
 
 
-def test_valid_scalar_ua_values_have_validated_and_direct_plan_parity():
+def test_valid_scalar_ua_values_preserve_predecessor_path_specific_results():
     direct, validated = _resolve_both(
         {
             "backend": "PLAYWRIGHT",
@@ -973,11 +1011,14 @@ def test_valid_scalar_ua_values_have_validated_and_direct_plan_parity():
         }
     )
 
-    assert direct == validated
-    assert direct.backend == "playwright"
+    assert direct.backend == "PLAYWRIGHT"
+    assert validated.backend == "playwright"
     assert direct.handler == DEFAULT_HANDLER
+    assert validated.handler == DEFAULT_HANDLER
     assert direct.ua_profile == "123"
-    assert direct.impersonate == "456"
+    assert validated.ua_profile == "123"
+    assert direct.impersonate == 456
+    assert validated.impersonate == 456
 
 
 @pytest.mark.skipif(

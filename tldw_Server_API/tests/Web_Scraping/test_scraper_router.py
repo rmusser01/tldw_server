@@ -147,7 +147,7 @@ def test_direct_router_drops_only_digit_limited_scalar_values(bad_setting):
     else:
         assert plan.ua_profile == "firefox_120_win"
         assert plan.impersonate == "firefox120"
-    assert plan.extra_headers == {"X-Ordinary": "header-value", "X-Integer": "7"}
+    assert plan.extra_headers == {"X-Ordinary": "header-value", "X-Integer": 7}
     assert plan.cookies == {"session": "cookie-value"}
     assert plan.proxies == {"http": "http://proxy.local"}
 
