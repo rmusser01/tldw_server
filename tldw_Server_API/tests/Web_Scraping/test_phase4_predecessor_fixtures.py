@@ -31,6 +31,7 @@ CASE_KEYS = {
     "content",
     "extraction",
     "metadata",
+    "router",
     "selectors",
 }
 PINNED_PREDECESSOR_COMMIT = "c2a1695744032245acdb1cd115dd888586dc9623"

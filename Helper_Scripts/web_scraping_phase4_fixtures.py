@@ -40,6 +40,14 @@ CASE_NAMES = (
     "content",
     "extraction",
     "metadata",
+    "router",
+    "selectors",
+)
+_PRIOR_CASE_NAMES = (
+    "article_orchestration_fakes",
+    "content",
+    "extraction",
+    "metadata",
     "selectors",
 )
 _STABLE_IDENTITY_ERROR = "Fixture filesystem does not provide stable identity"
@@ -103,6 +111,7 @@ from Helper_Scripts.web_scraping_phase4.extraction import (  # noqa: E402
 from Helper_Scripts.web_scraping_phase4.orchestration import (  # noqa: E402
     build_article_cases,
 )
+from Helper_Scripts.web_scraping_phase4.router import build_router_cases  # noqa: E402
 from Helper_Scripts.web_scraping_phase4.selectors import (  # noqa: E402
     build_selector_cases,
 )
@@ -187,7 +196,7 @@ def _assert_production_modules_under(source_root: Path) -> None:
 
 
 @contextmanager
-def _predecessor_modules(source_root: Path) -> Iterator[tuple[Any, Any, Any, Any]]:
+def _predecessor_modules(source_root: Path) -> Iterator[tuple[Any, Any, Any, Any, Any]]:
     previous_modules = _remove_loaded_production_modules()
     previous_path = list(sys.path)
     sys.path.insert(0, str(source_root))
@@ -195,9 +204,10 @@ def _predecessor_modules(source_root: Path) -> Iterator[tuple[Any, Any, Any, Any
         from tldw_Server_API.app.core.Watchlists import fetchers
         from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
         from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
+        from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
         _assert_production_modules_under(source_root)
-        yield article, fetchers, FetchResponse, PolicyDecision
+        yield article, fetchers, FetchResponse, PolicyDecision, ScraperRouter
         _assert_production_modules_under(source_root)
     finally:
         _remove_loaded_production_modules()
@@ -207,7 +217,7 @@ def _predecessor_modules(source_root: Path) -> Iterator[tuple[Any, Any, Any, Any
 
 def build_case_payloads(source_root: Path) -> dict[str, dict[str, Any]]:
     with _predecessor_modules(source_root) as modules:
-        article, fetchers, FetchResponse, PolicyDecision = modules
+        article, fetchers, FetchResponse, PolicyDecision, ScraperRouter = modules
         try:
             with patch.dict(os.environ, FIXED_ENV, clear=False):
                 fetchers.reload_selector_guardrails_from_env()
@@ -227,6 +237,10 @@ def build_case_payloads(source_root: Path) -> dict[str, dict[str, Any]]:
                     "metadata": {
                         "category": "metadata",
                         "cases": build_metadata_cases(article),
+                    },
+                    "router": {
+                        "category": "router",
+                        "cases": build_router_cases(ScraperRouter),
                     },
                     "selectors": {
                         "category": "selectors",
@@ -264,8 +278,13 @@ def _invalid_json_constant(_value: str) -> None:
     raise ValueError("non-finite JSON value")
 
 
-def _validate_fixture_set(output: Path, predecessor_commit: str | None) -> _FixtureSetSnapshot:
-    case_files = {category: f"{category}.json" for category in CASE_NAMES}
+def _validate_fixture_set(
+    output: Path,
+    predecessor_commit: str | None,
+    *,
+    case_names: tuple[str, ...] = CASE_NAMES,
+) -> _FixtureSetSnapshot:
+    case_files = {category: f"{category}.json" for category in case_names}
     expected_names = {"manifest.json", *case_files.values()}
     try:
         directory_before = os.stat(output, follow_symlinks=False)
@@ -396,7 +415,17 @@ def _validate_existing_output(output: Path) -> _FixtureSetSnapshot | None:
     if not stat.S_ISDIR(metadata.st_mode):
         raise ValueError("existing output must be a directory")
     identity = _stable_metadata_identity(metadata)
-    snapshot = _validate_fixture_set(output, predecessor_commit=None)
+    try:
+        snapshot = _validate_fixture_set(output, predecessor_commit=None)
+    except RuntimeError as current_error:
+        try:
+            snapshot = _validate_fixture_set(
+                output,
+                predecessor_commit=None,
+                case_names=_PRIOR_CASE_NAMES,
+            )
+        except RuntimeError:
+            raise current_error from None
     if snapshot.directory_identity != identity:
         raise RuntimeError("Fixture output changed during validation")
     _require_path_identity(output, identity, "Fixture output changed during validation")
@@ -498,8 +527,14 @@ def _require_path_absent(path: Path, error_message: str) -> None:
         raise RuntimeError(error_message)
 
 
-def _capture_fixture_set_snapshot(output: Path, error_message: str) -> _FixtureSetSnapshot:
-    expected_names = {"manifest.json", *(f"{category}.json" for category in CASE_NAMES)}
+def _capture_fixture_set_snapshot(
+    output: Path,
+    error_message: str,
+    *,
+    expected_names: set[str] | None = None,
+) -> _FixtureSetSnapshot:
+    if expected_names is None:
+        expected_names = {"manifest.json", *(f"{category}.json" for category in CASE_NAMES)}
     try:
         directory_identity = _path_identity(output, error_message)
         entries = list(output.iterdir())
@@ -539,7 +574,15 @@ def _require_fixture_set_snapshot(
     expected: _FixtureSetSnapshot,
     error_message: str,
 ) -> None:
-    if _capture_fixture_set_snapshot(output, error_message) != expected:
+    expected_names = {file.name for file in expected.files}
+    if (
+        _capture_fixture_set_snapshot(
+            output,
+            error_message,
+            expected_names=expected_names,
+        )
+        != expected
+    ):
         raise RuntimeError(error_message)
 
 

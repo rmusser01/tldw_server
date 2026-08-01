@@ -18,6 +18,46 @@ from typing import Any
 import pytest
 from Helper_Scripts import web_scraping_phase4_fixtures as generator
 
+PHASE4_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "phase4"
+ROUTER_PARITY_TEST = Path(__file__).parent / "test_router_yaml_predecessor_parity.py"
+
+
+def test_router_category_is_registered_with_an_explicit_builder() -> None:
+    assert generator.CASE_NAMES == (
+        "article_orchestration_fakes",
+        "content",
+        "extraction",
+        "metadata",
+        "router",
+        "selectors",
+    )
+    assert callable(generator.build_router_cases)
+
+
+def test_checked_fixture_manifest_includes_router_category() -> None:
+    manifest = json.loads((PHASE4_FIXTURE_ROOT / "manifest.json").read_text(encoding="ascii"))
+
+    assert manifest["cases"]["router"] == "router.json"
+    assert {path.name for path in PHASE4_FIXTURE_ROOT.iterdir()} == {
+        "article_orchestration_fakes.json",
+        "content.json",
+        "extraction.json",
+        "manifest.json",
+        "metadata.json",
+        "router.json",
+        "selectors.json",
+    }
+
+
+def test_router_fixture_replay_is_self_contained() -> None:
+    source = ROUTER_PARITY_TEST.read_text(encoding="utf-8")
+
+    assert "import subprocess" not in source
+    assert "/private/tmp" not in source
+    assert "TLDW_PHASE4_PREDECESSOR_ROOT" not in source
+    assert "pytest.skip" not in source
+    assert "_capture_predecessor" not in source
+
 
 def _symlink_or_skip(
     link: Path,
@@ -55,9 +95,15 @@ def _write_canonical_json(path: Path, payload: object) -> None:
     path.write_text(encoded, encoding="ascii", newline="\n")
 
 
-def _write_valid_fixture_set(output: Path, predecessor_commit: str, marker: str) -> None:
+def _write_valid_fixture_set(
+    output: Path,
+    predecessor_commit: str,
+    marker: str,
+    *,
+    categories: tuple[str, ...] = generator.CASE_NAMES,
+) -> None:
     output.mkdir()
-    case_files = {category: f"{category}.json" for category in generator.CASE_NAMES}
+    case_files = {category: f"{category}.json" for category in categories}
     for category, filename in case_files.items():
         _write_canonical_json(output / filename, _fixture_payloads(marker)[category])
     _write_canonical_json(
@@ -656,6 +702,32 @@ def test_output_child_inside_source_root_remains_supported(
     generator.generate_fixtures(source_commit, output, source_root=source_root)
 
     assert json.loads((output / "content.json").read_text(encoding="ascii"))["cases"] == [{"marker": "child"}]
+
+
+def test_generation_replaces_canonical_prior_category_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    prior_categories = (
+        "article_orchestration_fakes",
+        "content",
+        "extraction",
+        "metadata",
+        "selectors",
+    )
+    _write_valid_fixture_set(
+        output,
+        "1" * 40,
+        "prior",
+        categories=prior_categories,
+    )
+    monkeypatch.setattr(generator, "build_case_payloads", lambda _source_root: _fixture_payloads("current"))
+
+    generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    _assert_fixture_marker(output, "current")
 
 
 @pytest.mark.parametrize(
