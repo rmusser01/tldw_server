@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from enum import Enum
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +13,7 @@ from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
 
 _CHANGE_1_CONTRACT = "change_1_default_regex_non_terminal"
 _CHANGE_4_CONTRACT = "change_4_selector_regex_failure_returns_original"
+_SELECTOR_FIXTURE = Path(__file__).parent / "fixtures" / "phase4" / "selectors.json"
 
 
 class _StringSubclass(str):
@@ -150,6 +153,18 @@ def _assert_change_4(actual: object, expected: object) -> None:
         behavior_change=4,
         difference_contract=_CHANGE_4_CONTRACT,
     )
+
+
+def test_selector_fixture_pins_format_map_and_unknown_transform_parity() -> None:
+    payload = json.loads(_SELECTOR_FIXTURE.read_text(encoding="ascii"))
+    cases = {fixture_case["name"]: fixture_case for fixture_case in payload["cases"]}
+
+    assert cases["computed_template_mapping_and_attribute_compatibility"]["expected"]["result"]["schema_fields"] == {
+        "author": {"name": "Ada"},
+        "byline": "By Ada|type=<class 'str'>",
+        "title": "Headline",
+    }
+    assert cases["unknown_prepend_append_transform_noops"]["expected"]["result"]["schema_fields"] == {"value": "x"}
 
 
 def test_differential_helper_requires_a_tag_for_a_difference() -> None:

@@ -146,6 +146,60 @@ def build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
         ),
         case(
             {
+                "base_url": "https://example.com/templates/mapping",
+                "html": (
+                    "<html><body><article><h1>Headline</h1>" '<span class="author">Ada</span></article></body></html>'
+                ),
+                "name": "computed_template_mapping_and_attribute_compatibility",
+                "operation": "extract_schema_fields",
+                "rules": {
+                    "fields": [
+                        {
+                            "name": "title",
+                            "selector": "//h1",
+                            "type": "text",
+                        },
+                        {
+                            "fields": [
+                                {
+                                    "name": "name",
+                                    "selector": "//span[@class='author']",
+                                }
+                            ],
+                            "name": "author",
+                            "type": "nested",
+                        },
+                        {
+                            "name": "byline",
+                            "template": "By {author[name]}|type={title.__class__}",
+                            "type": "computed",
+                        },
+                    ]
+                },
+            }
+        ),
+        case(
+            {
+                "base_url": "https://example.com/transforms",
+                "html": "<html><body><article><h1>x</h1></article></body></html>",
+                "name": "unknown_prepend_append_transform_noops",
+                "operation": "extract_schema_fields",
+                "rules": {
+                    "fields": [
+                        {
+                            "name": "value",
+                            "selector": "//h1",
+                            "transforms": [
+                                {"name": "prepend", "value": "a"},
+                                {"name": "append", "value": "b"},
+                            ],
+                        }
+                    ]
+                },
+            }
+        ),
+        case(
+            {
                 "html": "<html><body><h1>XPath title</h1><h2>CSS one</h2><h2>CSS two</h2></body></html>",
                 "include_counts": True,
                 "name": "validation_checks_both_title_aliases",

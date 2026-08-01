@@ -230,6 +230,94 @@
       }
     },
     {
+      "base_url": "https://example.com/templates/mapping",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "author": {
+            "name": "Ada"
+          },
+          "extraction_successful": true,
+          "schema_fields": {
+            "author": {
+              "name": "Ada"
+            },
+            "byline": "By Ada|type=<class 'str'>",
+            "title": "Headline"
+          },
+          "title": "Headline",
+          "url": "https://example.com/templates/mapping"
+        }
+      },
+      "html": "<html><body><article><h1>Headline</h1><span class=\"author\">Ada</span></article></body></html>",
+      "name": "computed_template_mapping_and_attribute_compatibility",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "fields": [
+          {
+            "name": "title",
+            "selector": "//h1",
+            "type": "text"
+          },
+          {
+            "fields": [
+              {
+                "name": "name",
+                "selector": "//span[@class='author']"
+              }
+            ],
+            "name": "author",
+            "type": "nested"
+          },
+          {
+            "name": "byline",
+            "template": "By {author[name]}|type={title.__class__}",
+            "type": "computed"
+          }
+        ]
+      }
+    },
+    {
+      "base_url": "https://example.com/transforms",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 1
+        },
+        "result": {
+          "extraction_successful": true,
+          "schema_fields": {
+            "value": "x"
+          },
+          "url": "https://example.com/transforms"
+        }
+      },
+      "html": "<html><body><article><h1>x</h1></article></body></html>",
+      "name": "unknown_prepend_append_transform_noops",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "fields": [
+          {
+            "name": "value",
+            "selector": "//h1",
+            "transforms": [
+              {
+                "name": "prepend",
+                "value": "a"
+              },
+              {
+                "name": "append",
+                "value": "b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "expected": {
         "cache_stats": {
           "selector_css_cache_size": 1,
