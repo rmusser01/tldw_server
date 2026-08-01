@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import signal
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -667,6 +670,104 @@ def test_selector_cache_operations_are_thread_safe() -> None:
     stats = selectors.get_selector_cache_stats()
     assert stats["selector_xpath_cache_size"] <= caches._SELECTOR_CACHE_MAX
     assert stats["selector_css_cache_size"] <= caches._SELECTOR_CACHE_MAX
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork support")
+def test_selector_cache_state_is_reset_in_forked_child_while_lock_is_held() -> None:
+    if not hasattr(os, "register_at_fork"):
+        pytest.skip("requires os.register_at_fork support")
+
+    engine.compile_selector("//article")
+    engine.compile_selector("css:article")
+    parent_xpath_cache = caches._XPATH_SELECTOR_CACHE
+    parent_css_cache = caches._CSS_SELECTOR_CACHE
+    parent_stats = selectors.get_selector_cache_stats()
+    child_pid: int | None = None
+
+    try:
+        with caches._SELECTOR_CACHE_LOCK:
+            child_pid = os.fork()
+            if child_pid == 0:
+                try:
+                    engine.compile_selector("//main")
+                    child_stats = selectors.get_selector_cache_stats()
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    os._exit(1)
+                os._exit(
+                    0
+                    if child_stats
+                    == {
+                        "selector_xpath_cache_size": 1,
+                        "selector_css_cache_size": 0,
+                    }
+                    else 2
+                )
+
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            completed_pid, status = os.waitpid(child_pid, os.WNOHANG)
+            if completed_pid == child_pid:
+                break
+            time.sleep(0.01)
+        else:
+            os.kill(child_pid, signal.SIGKILL)
+            os.waitpid(child_pid, 0)
+            pytest.fail("forked child deadlocked while accessing selector caches")
+
+        assert os.WIFEXITED(status)
+        assert os.WEXITSTATUS(status) == 0
+        assert caches._XPATH_SELECTOR_CACHE is parent_xpath_cache
+        assert caches._CSS_SELECTOR_CACHE is parent_css_cache
+        assert selectors.get_selector_cache_stats() == parent_stats
+    finally:
+        if child_pid is not None:
+            try:
+                os.waitpid(child_pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+
+
+def test_selector_cache_access_resets_state_after_pid_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine.compile_selector("//article")
+    engine.compile_selector("css:article")
+    original_lock = caches._SELECTOR_CACHE_LOCK
+    original_xpath_cache = caches._XPATH_SELECTOR_CACHE
+    original_css_cache = caches._CSS_SELECTOR_CACHE
+    current_pid = os.getpid()
+
+    monkeypatch.setattr(caches.os, "getpid", lambda: current_pid + 1)
+
+    assert selectors.get_selector_cache_stats() == {
+        "selector_xpath_cache_size": 0,
+        "selector_css_cache_size": 0,
+    }
+    assert caches._SELECTOR_CACHE_LOCK is not original_lock
+    assert caches._XPATH_SELECTOR_CACHE is original_xpath_cache
+    assert caches._CSS_SELECTOR_CACHE is original_css_cache
+
+
+def test_selector_cache_pid_guard_resets_held_inherited_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine.compile_selector("//article")
+    engine.compile_selector("css:article")
+    inherited_lock = caches._SELECTOR_CACHE_LOCK
+    current_pid = os.getpid()
+
+    inherited_lock.acquire()
+    try:
+        monkeypatch.setattr(caches.os, "getpid", lambda: current_pid + 1)
+        caches._ensure_selector_cache_process()
+    finally:
+        inherited_lock.release()
+
+    assert caches._SELECTOR_CACHE_LOCK is not inherited_lock
+    assert selectors.get_selector_cache_stats() == {
+        "selector_xpath_cache_size": 0,
+        "selector_css_cache_size": 0,
+    }
 
 
 def test_generic_css_validation_and_extraction_share_the_compiler() -> None:

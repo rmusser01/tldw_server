@@ -14,7 +14,7 @@ ARTICLE_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" /
 
 EXPECTED_IMPORTS = {
     "__init__.py": {".caches", ".schema"},
-    "caches.py": {"__future__", "collections", "threading", "typing"},
+    "caches.py": {"__future__", "collections", "os", "threading", "typing"},
     "engine.py": {
         ".caches",
         "__future__",
