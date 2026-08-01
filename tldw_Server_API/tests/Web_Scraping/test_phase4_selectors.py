@@ -521,6 +521,32 @@ def test_regex_replace_retains_original_value_for_invalid_replacement() -> None:
     assert result["schema_fields"] == {"identifier": "Original"}
 
 
+def test_regex_replace_retains_original_value_when_replacement_coercion_fails() -> None:
+    oversized_integer = 10**5_000
+
+    result = selectors.extract_schema_fields(
+        "<article><h1>Original</h1></article>",
+        "https://example.com/post",
+        {
+            "fields": [
+                {
+                    "name": "identifier",
+                    "selector": "//h1",
+                    "transforms": [
+                        {
+                            "name": "regex_replace",
+                            "pattern": "Original",
+                            "repl": oversized_integer,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert result["schema_fields"] == {"identifier": "Original"}
+
+
 def test_invalid_and_oversized_regexes_preserve_existing_fallbacks() -> None:
     result = selectors.extract_schema_fields(
         "<article><h1>Original</h1><span>Value</span></article>",
@@ -719,11 +745,6 @@ def _computed_rules(template: str) -> dict[str, Any]:
     "template",
     [
         "{title",
-        "{title:5000000}",
-        "{title.__class__}",
-        "{title[-1]}",
-        "{title[first]}",
-        "{title:{title}}",
         "{title!q}",
     ],
 )
@@ -742,6 +763,28 @@ def test_invalid_computed_templates_validate_and_extract_fail_soft(template: str
 
 
 @pytest.mark.parametrize(
+    "template",
+    [
+        "{title[-1]}",
+        "{title[first]}",
+        "{title:{title}}",
+    ],
+)
+def test_context_incompatible_computed_templates_validate_then_extract_fail_soft(template: str) -> None:
+    rules = _computed_rules(template)
+
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
+        "<article><h1>Headline</h1></article>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert report["errors"] == []
+    assert result["schema_fields"] == {"title": "Headline"}
+
+
+@pytest.mark.parametrize(
     ("template", "expected"),
     [
         ("{title!r}", "'Headline'"),
@@ -750,6 +793,7 @@ def test_invalid_computed_templates_validate_and_extract_fail_soft(template: str
         ("{title:>10}", "  Headline"),
         ("{title!s}", "Headline"),
         ("{title!a}", "'Headline'"),
+        ("{title.__class__}", "<class 'str'>"),
     ],
 )
 def test_computed_templates_preserve_bounded_predecessor_formatting(
@@ -777,64 +821,75 @@ def test_computed_templates_preserve_bounded_predecessor_formatting(
 @pytest.mark.parametrize(
     ("format_spec", "expected_length"),
     [
-        (">65536", 65_536),
-        (".65536", len("Headline")),
+        (">65537", 65_537),
+        (".65537", len("Headline")),
     ],
     ids=["width", "precision"],
 )
-def test_computed_template_format_components_have_an_explicit_hard_boundary(
+def test_default_limits_preserve_predecessor_computed_format_widths(
     format_spec: str,
     expected_length: int,
 ) -> None:
-    exact_width = 65_536
-    exact_rules = _computed_rules(f"{{title:{format_spec}}}")
-    one_over_spec = format_spec.replace(str(exact_width), str(exact_width + 1))
-    one_over_rules = _computed_rules(f"{{title:{one_over_spec}}}")
+    predecessor_width = 65_537
+    rules = _computed_rules(f"{{title:{format_spec}}}")
 
-    exact_report = selectors.validate_selector_rules(exact_rules)
-    exact_result = selectors.extract_schema_fields(
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
         "<article><h1>Headline</h1></article>",
         "https://example.com/post",
-        exact_rules,
-    )
-    one_over_report = selectors.validate_selector_rules(one_over_rules)
-    one_over_result = selectors.extract_schema_fields(
-        "<article><h1>Headline</h1></article>",
-        "https://example.com/post",
-        one_over_rules,
+        rules,
     )
 
-    assert exact_report["errors"] == []
-    assert len(exact_result["schema_fields"]["computed"]) == expected_length
-    assert [entry["error"] for entry in one_over_report["errors"]] == ["selector_invalid"]
-    assert one_over_result["schema_fields"] == {"title": "Headline"}
+    assert str(predecessor_width) in format_spec
+    assert report["errors"] == []
+    assert len(result["schema_fields"]["computed"]) == expected_length
 
 
-def test_computed_template_total_output_has_an_explicit_hard_boundary() -> None:
-    exact_chars = 1_048_576
+def test_default_limits_preserve_predecessor_computed_output_size() -> None:
+    predecessor_chars = 1_048_577
 
-    exact, exact_error = schema._render_computed_template(
+    rendered, error = schema._render_computed_template(
         "{title}",
-        {"title": "x" * exact_chars},
-        schema._SchemaLimits(),
-        None,
-        "rendered_output",
-        None,
-    )
-    one_over, one_over_error = schema._render_computed_template(
-        "{title}",
-        {"title": "x" * (exact_chars + 1)},
+        {"title": "x" * predecessor_chars},
         schema._SchemaLimits(),
         None,
         "rendered_output",
         None,
     )
 
-    assert exact is not None
-    assert len(exact) == exact_chars
-    assert exact_error is None
-    assert one_over is None
-    assert one_over_error == "selector_invalid"
+    assert rendered is not None
+    assert len(rendered) == predecessor_chars
+    assert error is None
+
+
+def test_computed_templates_preserve_predecessor_mapping_fields() -> None:
+    rules = {
+        "fields": [
+            {
+                "name": "author",
+                "type": "nested",
+                "fields": [{"name": "name", "selector": "//span"}],
+            },
+            {
+                "name": "byline",
+                "type": "computed",
+                "template": "By {author[name]}",
+            },
+        ]
+    }
+
+    report = selectors.validate_selector_rules(rules)
+    result = selectors.extract_schema_fields(
+        "<article><span>Ada</span></article>",
+        "https://example.com/post",
+        rules,
+    )
+
+    assert report["errors"] == []
+    assert result["schema_fields"] == {
+        "author": {"name": "Ada"},
+        "byline": "By Ada",
+    }
 
 
 @pytest.mark.parametrize(
@@ -2221,7 +2276,7 @@ def test_regex_transform_receives_active_rendered_output_cap(
     assert observed_caps == [1]
 
 
-def test_prepend_and_append_transforms_preflight_known_expansion() -> None:
+def test_unknown_prepend_and_append_transforms_remain_predecessor_noops() -> None:
     rules = {
         "fields": [
             {
@@ -2235,21 +2290,14 @@ def test_prepend_and_append_transforms_preflight_known_expansion() -> None:
         ]
     }
 
-    exact = selectors.extract_schema_fields(
+    result = selectors.extract_schema_fields(
         "<article><h1>x</h1></article>",
         "https://example.com/post",
         rules,
-        _limits=schema._SchemaLimits(max_rendered_output_chars=3),
-    )
-    one_over = selectors.extract_schema_fields(
-        "<article><h1>x</h1></article>",
-        "https://example.com/post",
-        rules,
-        _limits=schema._SchemaLimits(max_rendered_output_chars=2),
+        _limits=schema._SchemaLimits(max_rendered_output_chars=1),
     )
 
-    assert exact["schema_fields"] == {"value": "axb"}
-    assert one_over["error"] == "selector_too_complex:rendered_output>2"
+    assert result["schema_fields"] == {"value": "x"}
 
 
 def test_compile_only_selector_path_does_not_mutate_runtime_caches() -> None:

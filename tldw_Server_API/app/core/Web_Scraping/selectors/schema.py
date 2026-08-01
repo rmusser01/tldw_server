@@ -613,19 +613,14 @@ def _apply_single_transform(
         return value.upper()
     if name == "strip":
         return value.strip()
-    if name in {"prepend", "append"}:
-        addition = str(params.get("value", params.get("text", "")))
-        _ensure_chars_within_limit(
-            len(value) + len(addition),
-            max_rendered_output_chars,
-            "rendered_output",
-        )
-        return addition + value if name == "prepend" else value + addition
     if name == "regex_replace":
         pattern = params.get("pattern")
         if not isinstance(pattern, str):
             return value
-        replacement = str(params.get("repl", ""))
+        try:
+            replacement = str(params.get("repl", ""))
+        except _SCHEMA_NONCRITICAL_EXCEPTIONS:
+            return value
         kwargs = {"max_output_chars": max_rendered_output_chars} if max_rendered_output_chars is not None else {}
         result = sub_untrusted(
             pattern,
@@ -715,29 +710,11 @@ def _apply_transforms(
 
 
 _TEMPLATE_FORMATTER = Formatter()
-_COMPUTED_FIELD_RE = re.compile(r"(?P<root>[A-Za-z_]\w*)(?P<indices>(?:\[\d+\])*)\Z")
-_COMPUTED_INDEX_RE = re.compile(r"\[(\d+)\]")
-_COMPUTED_STRING_FORMAT_RE = re.compile(r"(?:(?:[^{}][<^>])|[<^>])?(?P<width>\d+)?(?:\.(?P<precision>\d+))?s?\Z")
-_MAX_COMPUTED_FORMAT_WIDTH = 65_536
-_MAX_COMPUTED_TEMPLATE_OUTPUT_CHARS = 1_048_576
 
 
-def _replacement_field_tokens(template: str) -> list[str] | None:
-    tokens: list[str] = []
-    index = 0
-    while index < len(template):
-        if template.startswith("{{", index) or template.startswith("}}", index):
-            index += 2
-            continue
-        if template[index] != "{":
-            index += 1
-            continue
-        end = template.find("}", index + 1)
-        if end < 0 or "{" in template[index + 1 : end]:
-            return None
-        tokens.append(template[index + 1 : end])
-        index = end + 1
-    return tokens
+class _SafeTemplateContext(dict[str, Any]):
+    def __missing__(self, key: str) -> str:
+        return ""
 
 
 def _parse_computed_template(
@@ -750,122 +727,12 @@ def _parse_computed_template(
         parsed = list(_TEMPLATE_FORMATTER.parse(template))
     except ValueError:
         return None, "selector_invalid"
-    tokens = _replacement_field_tokens(template)
-    field_parts = [part for part in parsed if part[1] is not None]
-    if tokens is None or len(tokens) != len(field_parts):
-        return None, "selector_invalid"
-    for _token, (_literal, field_name, format_spec, conversion) in zip(tokens, field_parts, strict=True):
-        field_match = _COMPUTED_FIELD_RE.fullmatch(field_name or "")
-        if field_match is None:
+    for _literal, field_name, _format_spec, conversion in parsed:
+        if field_name == "":
             return None, "selector_invalid"
         if conversion not in {None, "s", "r", "a"}:
             return None, "selector_invalid"
-        format_match = _COMPUTED_STRING_FORMAT_RE.fullmatch(format_spec)
-        if format_match is None:
-            return None, "selector_invalid"
-        for component in (format_match.group("width"), format_match.group("precision")):
-            if component is not None and not _format_component_within_limit(component):
-                return None, "selector_invalid"
     return parsed, None
-
-
-def _format_component_within_limit(component: str) -> bool:
-    normalized = component.lstrip("0") or "0"
-    maximum = str(_MAX_COMPUTED_FORMAT_WIDTH)
-    if len(normalized) != len(maximum):
-        return len(normalized) < len(maximum)
-    return normalized <= maximum
-
-
-def _resolve_computed_field(
-    field_name: str,
-    context: Mapping[str, Any],
-) -> tuple[Any, bool]:
-    match = _COMPUTED_FIELD_RE.fullmatch(field_name)
-    if match is None:
-        return None, False
-    root = match.group("root")
-    value = context.get(root, "")
-    for index_text in _COMPUTED_INDEX_RE.findall(match.group("indices")):
-        index = int(index_text)
-        if type(value) in {str, list, tuple}:
-            if index >= len(value):
-                return None, False
-            value = value[index]
-            continue
-        if type(value) is dict and index in value:
-            value = value[index]
-            continue
-        return None, False
-    return value, True
-
-
-def _format_computed_field(
-    value: Any,
-    format_spec: str,
-    conversion: str | None,
-) -> tuple[str | None, bool]:
-    if conversion == "s":
-        rendered = str(value)
-    elif conversion == "r":
-        rendered = repr(value)
-    elif conversion == "a":
-        rendered = ascii(value)
-    else:
-        rendered = str(value)
-    try:
-        return format(rendered, format_spec), True
-    except (TypeError, ValueError):
-        return None, False
-
-
-def _rendered_template_error(
-    rendered_chars: int,
-    max_chars: int | None,
-    error_kind: str,
-    public_limit: int | None,
-) -> str | None:
-    if rendered_chars > _MAX_COMPUTED_TEMPLATE_OUTPUT_CHARS:
-        return "selector_invalid"
-    if max_chars is not None and rendered_chars > max_chars:
-        return f"selector_too_complex:{error_kind}>{public_limit}"
-    return None
-
-
-def _append_computed_piece(
-    pieces: list[str],
-    piece: str,
-    rendered_chars: int,
-    max_chars: int | None,
-    error_kind: str,
-    public_limit: int | None,
-) -> tuple[int, str | None]:
-    rendered_chars += len(piece)
-    error = _rendered_template_error(
-        rendered_chars,
-        max_chars,
-        error_kind,
-        public_limit,
-    )
-    if error:
-        return rendered_chars, error
-    pieces.append(piece)
-    return rendered_chars, None
-
-
-def _computed_template_piece(
-    field_name: str,
-    format_spec: str,
-    conversion: str | None,
-    context: Mapping[str, Any],
-) -> tuple[str | None, str | None]:
-    value, resolved = _resolve_computed_field(field_name, context)
-    if not resolved:
-        return None, "selector_invalid"
-    rendered, formatted = _format_computed_field(value, format_spec, conversion)
-    if not formatted:
-        return None, "selector_invalid"
-    return rendered, None
 
 
 def _render_computed_template(
@@ -879,41 +746,14 @@ def _render_computed_template(
     parsed, error = _parse_computed_template(template, limits)
     if error or parsed is None:
         return None, error
-    pieces: list[str] = []
-    rendered_chars = 0
-    public_limit = max_chars if error_limit is None else error_limit
-    for literal, field_name, format_spec, conversion in parsed:
-        rendered_chars, error = _append_computed_piece(
-            pieces,
-            literal,
-            rendered_chars,
-            max_chars,
-            error_kind,
-            public_limit,
-        )
-        if error:
-            return None, error
-        if field_name is None:
-            continue
-        value, error = _computed_template_piece(
-            field_name,
-            format_spec,
-            conversion,
-            context,
-        )
-        if error or value is None:
-            return None, error
-        rendered_chars, error = _append_computed_piece(
-            pieces,
-            value,
-            rendered_chars,
-            max_chars,
-            error_kind,
-            public_limit,
-        )
-        if error:
-            return None, error
-    return "".join(pieces), None
+    try:
+        rendered = template.format_map(_SafeTemplateContext(context))
+    except _SCHEMA_NONCRITICAL_EXCEPTIONS:
+        return None, "selector_invalid"
+    if max_chars is not None and len(rendered) > max_chars:
+        public_limit = max_chars if error_limit is None else error_limit
+        return None, f"selector_too_complex:{error_kind}>{public_limit}"
+    return rendered, None
 
 
 def _join_computed_sources(
