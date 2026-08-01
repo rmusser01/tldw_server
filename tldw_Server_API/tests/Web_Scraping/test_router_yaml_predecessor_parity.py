@@ -27,6 +27,52 @@ _PLAN_FIELDS = (
     "regex_settings",
     "cluster_settings",
 )
+_PREDECESSOR_ERROR_CASE_PATHS = frozenset(
+    {
+        ("handler-scalar", "direct"),
+        ("handler-scalar", "validated"),
+        ("handler-list", "direct"),
+        ("handler-list", "validated"),
+        ("handler-mapping", "direct"),
+        ("handler-mapping", "validated"),
+        ("extra_headers-null", "direct"),
+        ("extra_headers-string", "direct"),
+        ("extra_headers-scalar", "direct"),
+        ("extra_headers-list", "direct"),
+        ("cookies-null", "direct"),
+        ("cookies-string", "direct"),
+        ("cookies-scalar", "direct"),
+        ("cookies-list", "direct"),
+        ("proxies-null", "direct"),
+        ("proxies-null", "validated"),
+        ("proxies-string", "direct"),
+        ("proxies-string", "validated"),
+        ("proxies-scalar", "direct"),
+        ("proxies-scalar", "validated"),
+        ("proxies-list", "direct"),
+        ("proxies-list", "validated"),
+    }
+)
+_EXPECTED_FAIL_SAFE_RESULT = {
+    "status": "ok",
+    "value": {
+        "backend": "auto",
+        "cluster_settings": None,
+        "cookies": {},
+        "domain": "example.com",
+        "extra_headers": {},
+        "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+        "impersonate": "chrome120",
+        "llm_settings": None,
+        "proxies": {},
+        "regex_settings": None,
+        "respect_robots": True,
+        "schema_rules": None,
+        "strategy_order": None,
+        "ua_profile": "chrome_120_win",
+        "url": "https://example.com/path",
+    },
+}
 
 
 def _load_router_cases() -> list[dict[str, Any]]:
@@ -87,9 +133,34 @@ def test_current_router_remains_fail_safe_where_checked_predecessor_raised() -> 
         for path in ("validation", "direct", "validated")
         if case["expected"][path]["status"] == "error"
     ]
+    actual_pairs = frozenset((case["name"], path) for case, path in predecessor_errors)
 
-    assert predecessor_errors
-    assert all(_capture_current(case, path)["status"] == "ok" for case, path in predecessor_errors)
+    assert len(predecessor_errors) == 22
+    assert len(actual_pairs) == 22
+    assert actual_pairs == _PREDECESSOR_ERROR_CASE_PATHS, {
+        "missing": sorted(_PREDECESSOR_ERROR_CASE_PATHS - actual_pairs),
+        "unexpected": sorted(actual_pairs - _PREDECESSOR_ERROR_CASE_PATHS),
+    }
+
+    mismatches = [
+        (case["name"], path)
+        for case, path in predecessor_errors
+        if _capture_current(case, path) != _EXPECTED_FAIL_SAFE_RESULT
+    ]
+    assert mismatches == []
+
+
+def test_predecessor_error_contract_rejects_arbitrary_ok_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        globals(),
+        "_capture_current",
+        lambda _case, _path: {"status": "ok", "value": {"tampered": True}},
+    )
+
+    with pytest.raises(AssertionError):
+        test_current_router_remains_fail_safe_where_checked_predecessor_raised()
 
 
 def test_router_fixture_has_strict_contract_and_complete_field_coverage() -> None:
