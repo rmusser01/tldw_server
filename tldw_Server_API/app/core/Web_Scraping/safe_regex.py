@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import operator
+import os
 import queue
 import re
 import subprocess  # nosec B404
@@ -46,10 +47,11 @@ from .safe_regex_worker import (
 _MAX_TIMEOUT_S = 0.100
 _STDLIB_WORKER_STARTUP_TIMEOUT_S = 1.0
 _STDLIB_WORKER_REAP_TIMEOUT_S = 0.500
-_MAX_WORKER_HANDSHAKE_BYTES = 64
+_MAX_WORKER_HANDSHAKE_BYTES = 128
 _MAX_ACTIVE_STDLIB_WORKERS = 4
 _STDLIB_WORKER_PATH = Path(__file__).with_name("safe_regex_worker.py")
 _STDLIB_WORKER_SLOTS = threading.BoundedSemaphore(_MAX_ACTIVE_STDLIB_WORKERS)
+_STDLIB_WORKER_SLOTS_PID = os.getpid()
 _REGEX_ERRORS = (
     IndexError,
     re.error,
@@ -61,6 +63,31 @@ _REGEX_ERRORS = (
 )
 _RegexDialect = Literal["stdlib", "regex"]
 _STDLIB_LEGACY_NUMERIC_GROUP_IDS = sys.version_info < (3, 12)
+
+
+def _reset_stdlib_worker_admission() -> None:
+    global _STDLIB_WORKER_SLOTS, _STDLIB_WORKER_SLOTS_PID
+    _STDLIB_WORKER_SLOTS = threading.BoundedSemaphore(_MAX_ACTIVE_STDLIB_WORKERS)
+    _STDLIB_WORKER_SLOTS_PID = os.getpid()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_stdlib_worker_admission)
+
+
+def _worker_resource_posture_is_acceptable(resource_limits: Any) -> bool:
+    if not isinstance(resource_limits, dict) or set(resource_limits) != {
+        "address_space",
+        "cpu",
+    }:
+        return False
+    if not all(isinstance(value, bool) for value in resource_limits.values()):
+        return False
+    if os.name != "posix":
+        return True
+    if not resource_limits["cpu"]:
+        return False
+    return sys.platform == "darwin" or resource_limits["address_space"]
 
 
 class _RegexOutputTooLarge(Exception):
@@ -408,7 +435,13 @@ def _run_admitted_stdlib_worker(
 
     startup_reader.join(_STDLIB_WORKER_REAP_TIMEOUT_S)
     ready = _decode_worker_message(raw_ready, _MAX_WORKER_HANDSHAKE_BYTES)
-    if startup_reader.is_alive() or ready != {"status": "ready"}:
+    if (
+        startup_reader.is_alive()
+        or not isinstance(ready, dict)
+        or set(ready) != {"resource_limits", "status"}
+        or ready.get("status") != "ready"
+        or not _worker_resource_posture_is_acceptable(ready.get("resource_limits"))
+    ):
         _terminate_and_reap_worker(process, startup_reader=startup_reader)
         return None, "regex_invalid"
 
@@ -433,7 +466,10 @@ def _run_stdlib_worker(
     timeout_s: float,
     max_response_bytes: int,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    if not _STDLIB_WORKER_SLOTS.acquire(timeout=timeout_s):
+    if os.getpid() != _STDLIB_WORKER_SLOTS_PID:
+        _reset_stdlib_worker_admission()
+    slots = _STDLIB_WORKER_SLOTS
+    if not slots.acquire(timeout=timeout_s):
         return None, "regex_timeout"
     try:
         return _run_admitted_stdlib_worker(
@@ -442,7 +478,7 @@ def _run_stdlib_worker(
             max_response_bytes=max_response_bytes,
         )
     finally:
-        _STDLIB_WORKER_SLOTS.release()
+        slots.release()
 
 
 def _search_stdlib_in_worker(

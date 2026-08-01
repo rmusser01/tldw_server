@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -23,6 +24,7 @@ MAX_WORKER_CPU_SECONDS = 1
 SUPPORTED_FLAGS = int(re.IGNORECASE | re.MULTILINE | re.DOTALL | re.UNICODE | re.VERBOSE | re.ASCII)
 
 _RegexDialect = Literal["stdlib", "regex"]
+_RESOURCE_LIMIT_ERROR = "worker resource limits could not be applied"
 
 
 class _OutputTooLarge(Exception):
@@ -170,30 +172,41 @@ def parse_replacement_template(
     )
 
 
-def _apply_resource_limits() -> None:
+def _apply_resource_limits() -> dict[str, bool]:
+    applied = {"address_space": False, "cpu": False}
+    if os.name != "posix":
+        return applied
     try:
         import resource
     except ImportError:
-        return
+        raise RuntimeError(_RESOURCE_LIMIT_ERROR) from None
 
     limits = (
-        (getattr(resource, "RLIMIT_AS", None), MAX_WORKER_ADDRESS_SPACE_BYTES),
-        (getattr(resource, "RLIMIT_CPU", None), MAX_WORKER_CPU_SECONDS),
+        ("address_space", getattr(resource, "RLIMIT_AS", None), MAX_WORKER_ADDRESS_SPACE_BYTES),
+        ("cpu", getattr(resource, "RLIMIT_CPU", None), MAX_WORKER_CPU_SECONDS),
     )
-    for resource_id, desired_soft in limits:
+    for name, resource_id, desired_soft in limits:
         if resource_id is None:
-            continue
+            if name == "address_space" and sys.platform == "darwin":
+                continue
+            raise RuntimeError(_RESOURCE_LIMIT_ERROR)
         try:
             current_soft, current_hard = resource.getrlimit(resource_id)
             infinity = getattr(resource, "RLIM_INFINITY", -1)
             hard_allows = current_hard == infinity or current_hard >= desired_soft
             if not hard_allows:
                 desired_soft = current_hard
-            if current_soft != infinity and current_soft <= desired_soft:
+            if current_soft == infinity or current_soft > desired_soft:
+                resource.setrlimit(resource_id, (desired_soft, current_hard))
+            verified_soft, _verified_hard = resource.getrlimit(resource_id)
+            if verified_soft == infinity or verified_soft > desired_soft:
+                raise RuntimeError(_RESOURCE_LIMIT_ERROR)
+        except (OSError, ValueError, RuntimeError):
+            if name == "address_space" and sys.platform == "darwin":
                 continue
-            resource.setrlimit(resource_id, (desired_soft, current_hard))
-        except (OSError, ValueError):
-            continue
+            raise RuntimeError(_RESOURCE_LIMIT_ERROR) from None
+        applied[name] = True
+    return applied
 
 
 def _emit(payload: dict[str, object]) -> None:
@@ -324,8 +337,8 @@ def _run_substitution(request: dict[str, object]) -> None:
 
 
 def main() -> int:
-    _apply_resource_limits()
-    _emit({"status": "ready"})
+    resource_limits = _apply_resource_limits()
+    _emit({"status": "ready", "resource_limits": resource_limits})
     try:
         request = _validated_request()
         if request.get("operation", "search") == "search":

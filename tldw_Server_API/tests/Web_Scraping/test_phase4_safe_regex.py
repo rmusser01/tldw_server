@@ -1,6 +1,7 @@
 import importlib
 import json
 import logging
+import multiprocessing
 import re
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import regex as regex_engine
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
 from tldw_Server_API.app.core.Web_Scraping import safe_regex as safe_regex_module
+from tldw_Server_API.app.core.Web_Scraping import safe_regex_worker as safe_regex_worker_module
 from tldw_Server_API.app.core.Web_Scraping import scraper_router as scraper_router_module
 from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
     SafeRegexLimits,
@@ -32,6 +34,15 @@ _LEGACY_INCOMPATIBLE_PATTERNS = (
     r"(?|example|never)",
     r"(?P<host>example)(?P<host>\.com)",
 )
+
+
+def _count_inherited_stdlib_worker_slots(result_queue: Any) -> None:
+    acquired = 0
+    while safe_regex_module._STDLIB_WORKER_SLOTS.acquire(blocking=False):
+        acquired += 1
+    for _ in range(acquired):
+        safe_regex_module._STDLIB_WORKER_SLOTS.release()
+    result_queue.put(acquired)
 
 
 class _FakeCompiled:
@@ -717,6 +728,131 @@ def test_stdlib_worker_saturation_returns_timeout_without_spawning(
 
     assert response is None
     assert code == "regex_timeout"
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(),
+    reason="fork inheritance is unavailable on this platform",
+)
+@pytest.mark.parametrize("held_permits", [1, 4])
+def test_forked_child_resets_inherited_stdlib_worker_admission(held_permits: int) -> None:
+    acquired = 0
+    context = multiprocessing.get_context("fork")
+    result_queue = context.Queue()
+    try:
+        for _ in range(held_permits):
+            assert safe_regex_module._STDLIB_WORKER_SLOTS.acquire(blocking=False)
+            acquired += 1
+
+        child = context.Process(
+            target=_count_inherited_stdlib_worker_slots,
+            args=(result_queue,),
+        )
+        child.start()
+        child.join(5)
+
+        assert child.exitcode == 0
+        assert result_queue.get(timeout=1) == safe_regex_module._MAX_ACTIVE_STDLIB_WORKERS
+    finally:
+        for _ in range(acquired):
+            safe_regex_module._STDLIB_WORKER_SLOTS.release()
+        result_queue.close()
+        result_queue.join_thread()
+
+
+def test_posix_worker_resource_limit_failure_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resource = pytest.importorskip("resource")
+    monkeypatch.setattr(safe_regex_worker_module.os, "name", "posix")
+    monkeypatch.setattr(
+        resource,
+        "getrlimit",
+        lambda _resource_id: (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
+    )
+
+    def _fail_limit(*_args: Any, **_kwargs: Any) -> None:
+        raise OSError("injected resource-limit failure")
+
+    monkeypatch.setattr(resource, "setrlimit", _fail_limit)
+
+    with pytest.raises(RuntimeError, match="worker resource limits could not be applied"):
+        safe_regex_worker_module._apply_resource_limits()
+
+
+def test_darwin_worker_reports_unavailable_address_space_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resource = pytest.importorskip("resource")
+    applied: list[int] = []
+    effective_limits: dict[int, tuple[int, int]] = {}
+    monkeypatch.setattr(safe_regex_worker_module.os, "name", "posix")
+    monkeypatch.setattr(safe_regex_worker_module.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        resource,
+        "getrlimit",
+        lambda resource_id: effective_limits.get(
+            resource_id,
+            (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
+        ),
+    )
+
+    def _apply_limit(resource_id: int, limits: tuple[int, int]) -> None:
+        applied.append(resource_id)
+        if resource_id == resource.RLIMIT_AS:
+            raise ValueError("current limit exceeds maximum limit")
+        effective_limits[resource_id] = limits
+
+    monkeypatch.setattr(resource, "setrlimit", _apply_limit)
+
+    assert safe_regex_worker_module._apply_resource_limits() == {
+        "address_space": False,
+        "cpu": True,
+    }
+    assert applied == [resource.RLIMIT_AS, resource.RLIMIT_CPU]
+
+
+def test_worker_readiness_reports_reduced_platform_resource_posture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list[dict[str, object]] = []
+    resource_limits = {"address_space": False, "cpu": False}
+    monkeypatch.setattr(
+        safe_regex_worker_module,
+        "_apply_resource_limits",
+        lambda: resource_limits,
+    )
+    monkeypatch.setattr(safe_regex_worker_module, "_emit", emitted.append)
+    monkeypatch.setattr(
+        safe_regex_worker_module,
+        "_validated_request",
+        lambda: {"operation": "search"},
+    )
+    monkeypatch.setattr(safe_regex_worker_module, "_run_search", lambda _request: None)
+
+    assert safe_regex_worker_module.main() == 0
+    assert emitted == [{"status": "ready", "resource_limits": resource_limits}]
+
+
+@pytest.mark.parametrize(
+    ("platform", "resource_limits", "expected"),
+    [
+        ("linux", {"address_space": True, "cpu": True}, True),
+        ("linux", {"address_space": False, "cpu": True}, False),
+        ("darwin", {"address_space": False, "cpu": True}, True),
+        ("darwin", {"address_space": True, "cpu": False}, False),
+    ],
+)
+def test_parent_validates_posix_worker_resource_posture(
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    resource_limits: dict[str, bool],
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(safe_regex_module.os, "name", "posix")
+    monkeypatch.setattr(safe_regex_module.sys, "platform", platform)
+
+    assert safe_regex_module._worker_resource_posture_is_acceptable(resource_limits) is expected
 
 
 def test_stdlib_worker_module_owns_shared_replacement_parser() -> None:
