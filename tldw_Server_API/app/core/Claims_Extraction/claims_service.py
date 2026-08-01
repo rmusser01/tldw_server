@@ -618,6 +618,7 @@ def _enqueue_or_dispatch_claim_review_notifications(
     owner_user_id: str,
     notification_ids: list[int],
 ) -> None:
+    """Route review notification delivery through Jobs or the legacy dispatcher."""
     if not notification_ids:
         return
     if claims_jobs.claims_jobs_enabled():
@@ -644,6 +645,7 @@ def _enqueue_or_dispatch_claim_alert_delivery(
     payload: dict[str, Any],
     db_path: str,
 ) -> bool:
+    """Queue alert delivery jobs or fall back to immediate legacy dispatch."""
     if claims_jobs.claims_jobs_enabled():
         try:
             if (
@@ -1413,6 +1415,7 @@ def _fetch_claims_provider_usage(owner_user_id: str | None) -> list[dict[str, An
 
 
 def _claims_analytics_tables(db: MediaDatabase) -> tuple[str, str, str]:
+    """Return backend-specific Claims analytics table names and placeholder."""
     if db.backend_type == BackendType.POSTGRESQL:
         return "claims", "media", "%s"
     return "Claims", "Media", "?"
@@ -1424,6 +1427,7 @@ def _claims_owner_predicate(
     media_alias: str,
     placeholder: str,
 ) -> tuple[str, list[Any]]:
+    """Build an owner-scoping predicate for Claims analytics queries."""
     if not owner_user_id:
         return "", []
     return f" AND COALESCE(CAST({media_alias}.owner_user_id AS TEXT), {media_alias}.client_id) = {placeholder}", [
@@ -1438,6 +1442,7 @@ def _claims_owner_join(
     claims_alias: str = "c",
     media_alias: str = "m",
 ) -> tuple[str, str, list[Any]]:
+    """Build optional media joins and predicates for owner-scoped claim rows."""
     if not owner_user_id:
         return "", "", []
     _claims_table, media_table, placeholder = _claims_analytics_tables(db)
@@ -1450,10 +1455,12 @@ def _claims_owner_join(
 
 
 def _build_review_latency_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[str, float | None]:
+    """Fetch owner-scoped review latency aggregate metrics."""
     return db.get_claims_review_latency_stats(owner_user_id=owner_user_id)
 
 
 def _build_review_throughput(db: MediaDatabase, window_days: int, owner_user_id: str | None) -> dict[str, Any]:
+    """Build a daily count of review activity for the requested window."""
     window_days = max(1, int(window_days))
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=window_days - 1)
@@ -1508,6 +1515,7 @@ def _build_review_throughput(db: MediaDatabase, window_days: int, owner_user_id:
 
 
 def _build_review_status_trends(db: MediaDatabase, window_days: int, owner_user_id: str | None) -> dict[str, Any]:
+    """Build daily review status transition counts for dashboard analytics."""
     window_days = max(1, int(window_days))
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=window_days - 1)
@@ -1574,6 +1582,7 @@ def _build_claims_per_media_stats(
     db: MediaDatabase,
     owner_user_id: str | None,
 ) -> tuple[list[dict[str, int]], dict[str, float | None]]:
+    """Return per-media claim counts and summary distribution metrics."""
     claims_table, _media_table, _placeholder = _claims_analytics_tables(db)
     owner_join, owner_predicate, owner_params = _claims_owner_join(db, owner_user_id)
     media_rows = db.execute_query(
@@ -4207,6 +4216,7 @@ def rebuild_claims(
 
 
 def _claims_rebuild_all_idempotency_scope(policy: str) -> str:
+    """Build a time-bucketed idempotency scope for bulk rebuild jobs."""
     normalized_policy = str(policy or "missing").lower()
     window_sec = max(1, int(_CLAIMS_REBUILD_ALL_IDEMPOTENCY_SCOPE_WINDOW_SEC))
     bucket = int(time.time() // window_sec)

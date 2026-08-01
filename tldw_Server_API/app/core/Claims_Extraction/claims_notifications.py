@@ -55,11 +55,13 @@ _CLAIMS_WEBHOOK_EXCEPTIONS = (
 
 
 def submit_claims_notification_delivery(fn, *args, **kwargs) -> bool:
+    """Start a bounded background delivery callback for legacy notifications."""
     if not _notification_slots.acquire(blocking=False):
         logger.warning("Claims notification dispatch queue is full")
         return False
 
     def _run() -> None:
+        """Release the delivery slot after the callback completes."""
         try:
             fn(*args, **kwargs)
         finally:
@@ -387,6 +389,7 @@ def _build_review_email_bodies(notifications: list[dict[str, Any]]) -> tuple[str
 
 
 def _normalize_notification_ids(notification_ids: list[int]) -> list[int]:
+    """Return sorted positive notification IDs with duplicates removed."""
     normalized: set[int] = set()
     for raw_id in notification_ids:
         if isinstance(raw_id, bool):
@@ -407,6 +410,7 @@ def deliver_claim_review_notifications_now(
     notification_ids: list[int],
     initialize: bool = False,
 ) -> dict[str, Any]:
+    """Deliver stored review notifications synchronously for a Jobs worker."""
     normalized_ids = _normalize_notification_ids(notification_ids)
     if not normalized_ids:
         return {"outcome": "skipped", "reason": "no_notification_ids", "notification_ids": []}

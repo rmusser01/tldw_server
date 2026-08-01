@@ -50,6 +50,7 @@ def insert_claims_monitoring_event(
 
 
 def get_claims_monitoring_event(self, event_id: int) -> dict[str, Any]:
+    """Return one Claims monitoring event row by ID."""
     row = self.execute_query(
         "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "
         "FROM claims_monitoring_events WHERE id = ?",
@@ -146,6 +147,7 @@ def has_successful_claims_monitoring_event_delivery(
     channel: str,
     limit: int = 1000,
 ) -> bool:
+    """Check whether a monitoring event already has a successful delivery."""
     try:
         event_id = int(event_id)
         alert_id = int(alert_id)

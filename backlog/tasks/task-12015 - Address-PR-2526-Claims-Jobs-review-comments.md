@@ -10,16 +10,22 @@ labels:
 references:
 - https://github.com/rmusser01/tldw_server/pull/2526
 - TASK-9937
-updated_date: 2026-07-27 15:48
+updated_date: 2026-08-01 17:27
 modified_files:
 - backlog/tasks/task-12015 - Address-PR-2526-Claims-Jobs-review-comments.md
 - tldw_Server_API/app/core/Claims_Extraction/claims_alert_delivery.py
 - tldw_Server_API/app/core/Claims_Extraction/claims_job_contracts.py
 - tldw_Server_API/app/core/Claims_Extraction/claims_job_handlers.py
 - tldw_Server_API/app/core/Claims_Extraction/claims_jobs.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_notifications.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_rebuild_service.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_service.py
 - tldw_Server_API/app/core/Claims_Extraction/fva_pipeline.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/claims_monitoring_event_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/claims_review_metrics_ops.py
 - tldw_Server_API/app/services/claims_jobs_worker.py
 - tldw_Server_API/tests/Claims/test_claims_rebuild_stale_policy.py
+- tldw_Server_API/tests/Claims/test_ingestion_claims_sql.py
 - tldw_Server_API/tests/Claims_Extraction/test_fva_pipeline.py
 ---
 
@@ -57,12 +63,15 @@ Post-rebase verification after git rebase origin/dev: branch is 0 behind and 40 
 2026-07-23 completion: rebased PR #2526 on current origin/dev (branch now 0 behind / 42 ahead of origin/dev before this final commit), verified current PR feedback. Qodo's latest summary reports its findings resolved; the remaining actionable CodeRabbit comment was a docstring-coverage warning. Added concise docstrings to the PR-added Claims Jobs modules and lifecycle worker so those modules measure 100% documented by AST, fixed a rebased fva_pipeline import-order/unused-import lint finding, and updated a stale rebuild fallback test to assert the legacy fallback required by prior review feedback. Verification after final edits: Ruff on all changed Python files passed; py_compile on all changed Python files passed; git diff --check passed; Bandit on changed application files wrote /tmp/bandit_claims_pr2526_20260723.json with empty results and exited 0; focused Claims/Jobs/FVA/worker pytest slice passed with 139 passed.
 2026-07-27 follow-up: rebased PR #2526 onto latest origin/dev, re-fetched unresolved GitHub review threads, and verified the remaining CodeRabbit threads against rebased code. The alert telemetry, 4xx fast-fail, all-channel notification delivery, alert Jobs enqueue-count routing, review persistence readback, and deterministic worker queue assertions were already present after the prior follow-ups. Tightened the remaining FVA test gap by tracking histogram/counter calls through one parent mock and asserting adjudication histograms are emitted before final duration/processed metrics, with no wasted-falsification counter on the anti-context path.
 2026-07-27 verification: focused Claims/Jobs/FVA/worker pytest slice passed with 132 passed, 441 warnings; Ruff on changed Python files passed; py_compile on changed Python files passed; git diff --check passed; Bandit on changed application scope wrote /tmp/bandit_claims_pr2526_20260727.json with empty results.
+2026-08-01 follow-up: re-checked PR #2526 after refreshing dev. The branch is already based on origin/dev 616d6dd35d48849f22b320d34823bfcfecbc4b74, and GitHub reports zero unresolved review threads. Verified the remaining CodeRabbit docstring warning against newly added app symbols; coverage was below the 80% threshold, so added focused docstrings to the missing PR-added functions without behavior changes. Focused docstring scan now reports 63/63 documented (100%).
+2026-08-01 verification: initial focused pytest slice exposed two stale ingestion notification tests that still forbade legacy dispatch on Jobs enqueue failure. Root cause was test drift from the review-approved fallback behavior; updated the tests to assert the fallback dispatcher is called with the normalized DB path while the claims write still commits. Final focused verification passed: 153 passed, 483 warnings. Ruff on changed Python files passed; py_compile on changed app files passed; git diff --check passed; Bandit JSON /tmp/bandit_claims_pr2526_20260801.json reported 0 results and 0 errors.
+2026-08-01 post-rebase: dev advanced while the follow-up commit was being prepared. Rebased the PR branch cleanly onto origin/dev f02872b0b85a22b96029085e7d4fd909d5882ed4. Post-rebase verification passed: Ruff on changed Python files passed; py_compile on changed app files passed; git diff --check passed; focused added-symbol docstring scan reported 79/79 documented (100%); Bandit JSON /tmp/bandit_claims_pr2526_20260801_post_rebase.json reported 0 results and 0 errors; focused Claims/Jobs/FVA/worker pytest slice passed with 153 passed, 483 warnings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2526 onto current origin/dev again and addressed the remaining PR feedback/check issues. Qodo now reports the prior review findings as resolved. The remaining CodeRabbit issue was docstring coverage, so the PR-added Claims Jobs modules and worker now have concise docstrings on all functions/classes in those modules. The rebase also exposed a stale test expectation around missing Jobs owner fallback; the test now asserts the intended legacy rebuild fallback instead of dropped work. Final local verification: Ruff and py_compile passed on all changed Python files, git diff --check passed, Bandit returned empty results for changed application files, and the focused Claims/Jobs/FVA/worker pytest slice passed with 139 tests.
+Rechecked PR #2526 against current dev and current GitHub feedback. The branch is now rebased on origin/dev f02872b0b85a22b96029085e7d4fd909d5882ed4, and GitHub reported zero unresolved review threads before the final push. Addressed the remaining validated CodeRabbit docstring warning by adding focused docstrings to PR-added app symbols, bringing the focused added-symbol scan to 100% after rebase. Updated two stale ingestion notification tests to assert the intended legacy fallback when Jobs enqueue fails. Final local verification after rebase: Ruff passed, py_compile passed, git diff --check passed, Bandit returned 0 findings, and the focused Claims/Jobs/FVA/worker pytest slice passed with 153 tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

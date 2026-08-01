@@ -14,6 +14,7 @@ _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITIC
 
 
 def _claims_review_tables(self) -> tuple[str, str, str]:
+    """Return backend-specific Claims review metric table names."""
     if self.backend_type == BackendType.POSTGRESQL:
         return "claims", "media", "%s"
     return "Claims", "Media", "?"
@@ -23,6 +24,7 @@ def _claims_review_owner_join(
     self,
     owner_user_id: str | None,
 ) -> tuple[str, str, list[Any]]:
+    """Build optional owner scoping SQL for review metric queries."""
     if not owner_user_id:
         return "", "", []
     _claims_table, media_table, placeholder = _claims_review_tables(self)
@@ -38,6 +40,7 @@ def get_claims_review_latency_stats(
     *,
     owner_user_id: str | None = None,
 ) -> dict[str, float | None]:
+    """Compute review latency aggregates for completed Claims reviews."""
     claims_table, _media_table, placeholder = _claims_review_tables(self)
     owner_join, owner_predicate, owner_params = _claims_review_owner_join(self, owner_user_id)
     if self.backend_type == BackendType.POSTGRESQL:

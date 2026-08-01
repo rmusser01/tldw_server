@@ -164,10 +164,11 @@ def test_store_claims_review_assignment_job_sqlite_enqueue_failure_does_not_roll
         "record_review_assignment_notifications",
         lambda **_kwargs: [101],
     )
+    legacy_dispatch_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         claims_notifications,
         "dispatch_claim_review_notifications",
-        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy dispatch should not run")),
+        lambda **kwargs: legacy_dispatch_calls.append(kwargs),
     )
 
     try:
@@ -190,6 +191,13 @@ def test_store_claims_review_assignment_job_sqlite_enqueue_failure_does_not_roll
 
     assert inserted == 1
     assert len(rows) == 1
+    assert legacy_dispatch_calls == [
+        {
+            "db_path": str(db.db_path_str),
+            "owner_user_id": "1",
+            "notification_ids": [101],
+        }
+    ]
 
 
 def test_store_claims_review_assignment_job_pg_enqueue_failure_does_not_rollback(monkeypatch):
@@ -216,10 +224,11 @@ def test_store_claims_review_assignment_job_pg_enqueue_failure_does_not_rollback
         "record_review_assignment_notifications",
         lambda **_kwargs: [101],
     )
+    legacy_dispatch_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         claims_notifications,
         "dispatch_claim_review_notifications",
-        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy dispatch should not run")),
+        lambda **kwargs: legacy_dispatch_calls.append(kwargs),
     )
 
     try:
@@ -242,3 +251,10 @@ def test_store_claims_review_assignment_job_pg_enqueue_failure_does_not_rollback
 
     assert inserted == 1
     assert len(rows) == 1
+    assert legacy_dispatch_calls == [
+        {
+            "db_path": str(db.db_path_str),
+            "owner_user_id": "1",
+            "notification_ids": [101],
+        }
+    ]

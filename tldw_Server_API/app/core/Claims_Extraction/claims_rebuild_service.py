@@ -68,6 +68,7 @@ def _format_timestamp(ts: float | None) -> str | None:
 
 
 def rebuild_claims_for_media(*, db_path: str, media_id: int) -> dict[str, Any]:
+    """Rebuild persisted claims for one media item and return an outcome summary."""
     media_id = int(media_id)
     with managed_media_database(
         client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
