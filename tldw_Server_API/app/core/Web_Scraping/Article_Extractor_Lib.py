@@ -3043,8 +3043,7 @@ async def scrape_article(
                     # Navigate to the URL
                     await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
 
-
-                   # If stealth is enabled, give the page extra time to finish loading/spawning content
+                    # If stealth is enabled, give the page extra time to finish loading/spawning content
                     if stealth_enabled:
                         # Try to get from config, fallback to hardcoded default
                         try:
