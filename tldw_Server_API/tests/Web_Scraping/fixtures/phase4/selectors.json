@@ -383,6 +383,78 @@
       }
     },
     {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 1
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "fields.headline": 1
+          },
+          "warnings": []
+        }
+      },
+      "html": "<html><body><article><h1>Headline</h1><ul><li>One</li><li>Two</li></ul></article></body></html>",
+      "include_counts": true,
+      "name": "validation_dsl_item_selector_is_compile_only",
+      "operation": "validate",
+      "rules": {
+        "fields": [
+          {
+            "itemSelector": ".//li",
+            "name": "headline",
+            "selector": "//h1",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "fields.article": 1,
+            "fields.article.heading": 2
+          },
+          "warnings": [
+            {
+              "count": 2,
+              "key": "fields.article.heading",
+              "selector": ".//h2",
+              "warning": "non_unique_selector"
+            }
+          ]
+        }
+      },
+      "html": "<html><body><article class=\"primary\"><h2>Primary</h2></article><article class=\"secondary\"><h2>Secondary</h2></article></body></html>",
+      "include_counts": true,
+      "name": "validation_dsl_nested_selector_uses_root_document",
+      "operation": "validate",
+      "rules": {
+        "fields": [
+          {
+            "fields": [
+              {
+                "name": "heading",
+                "selector": ".//h2",
+                "type": "text"
+              }
+            ],
+            "name": "article",
+            "selector": "//article[@class='primary']",
+            "type": "nested"
+          }
+        ]
+      }
+    },
+    {
       "base_url": "https://example.com/regex-fallback",
       "behavior_change": 4,
       "capture_regex_error": true,

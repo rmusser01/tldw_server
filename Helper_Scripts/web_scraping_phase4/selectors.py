@@ -228,6 +228,53 @@ def build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
         ),
         case(
             {
+                "html": (
+                    "<html><body><article><h1>Headline</h1>" "<ul><li>One</li><li>Two</li></ul></article></body></html>"
+                ),
+                "include_counts": True,
+                "name": "validation_dsl_item_selector_is_compile_only",
+                "operation": "validate",
+                "rules": {
+                    "fields": [
+                        {
+                            "itemSelector": ".//li",
+                            "name": "headline",
+                            "selector": "//h1",
+                            "type": "text",
+                        }
+                    ]
+                },
+            }
+        ),
+        case(
+            {
+                "html": (
+                    '<html><body><article class="primary"><h2>Primary</h2></article>'
+                    '<article class="secondary"><h2>Secondary</h2></article></body></html>'
+                ),
+                "include_counts": True,
+                "name": "validation_dsl_nested_selector_uses_root_document",
+                "operation": "validate",
+                "rules": {
+                    "fields": [
+                        {
+                            "fields": [
+                                {
+                                    "name": "heading",
+                                    "selector": ".//h2",
+                                    "type": "text",
+                                }
+                            ],
+                            "name": "article",
+                            "selector": "//article[@class='primary']",
+                            "type": "nested",
+                        }
+                    ]
+                },
+            }
+        ),
+        case(
+            {
                 "base_url": "https://example.com/regex-fallback",
                 "behavior_change": 4,
                 "capture_regex_error": True,

@@ -1498,7 +1498,7 @@ def _iter_schema_dsl_selector_specs(
                     "selector": item_selector,
                     "allow_multiple": True,
                     "expect_nonzero": False,
-                    "check_html": True,
+                    "check_html": False,
                 }
             )
     return specs
@@ -1555,11 +1555,9 @@ def _record_validation_selection(
 
 
 def _evaluate_validation_rules(
-    rules: dict[str, Any],
     document: HtmlElement,
     budget: _SchemaBudget,
     *,
-    is_dsl: bool,
     configured_specs: Sequence[dict[str, Any]],
     invalid_selectors: set[tuple[Any, str]],
 ) -> list[dict[str, Any]]:
@@ -1571,25 +1569,9 @@ def _evaluate_validation_rules(
         matches,
         failed,
     )
-    result: dict[str, Any] = {"url": "", "extraction_successful": False}
-    if is_dsl:
-        _extract_dsl_schema_fields(
-            document,
-            "",
-            rules,
-            result,
-            budget,
-        )
-    else:
-        _extract_legacy_schema_fields(
-            document,
-            rules,
-            result,
-            budget,
-        )
     for spec in configured_specs:
         identity = _validation_spec_identity(spec)
-        if identity in observations or identity in invalid_selectors or not spec.get("check_html", True):
+        if identity in invalid_selectors or not spec.get("check_html", True):
             continue
         selector = identity[1]
         if not selector:
@@ -1677,10 +1659,8 @@ def validate_selector_rules(
         budget = _SchemaBudget(limits)
         try:
             observations = _evaluate_validation_rules(
-                normalized_rules,
                 document,
                 budget,
-                is_dsl=is_dsl,
                 configured_specs=compile_specs,
                 invalid_selectors=invalid_selectors,
             )

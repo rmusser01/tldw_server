@@ -218,7 +218,6 @@ def test_validation_reports_pagination_and_supplemental_dsl_selectors() -> None:
         "warnings": [],
         "selector_counts": {
             "fields.title": 1,
-            "fields.title.item_selector": 1,
         },
     }
 
@@ -1134,7 +1133,7 @@ def test_five_hundred_nested_fields_fail_before_python_recursion() -> None:
 
 
 @pytest.mark.parametrize(
-    ("rules", "html_text", "max_evaluations"),
+    ("rules", "html_text", "max_evaluations", "validation_fails"),
     [
         (
             {
@@ -1149,6 +1148,7 @@ def test_five_hundred_nested_fields_fail_before_python_recursion() -> None:
             },
             "<section><span>one</span></section>",
             1,
+            True,
         ),
         (
             {
@@ -1163,6 +1163,7 @@ def test_five_hundred_nested_fields_fail_before_python_recursion() -> None:
             },
             "<main><section><span>one</span></section><section><span>two</span></section></main>",
             2,
+            False,
         ),
         (
             {
@@ -1177,14 +1178,16 @@ def test_five_hundred_nested_fields_fail_before_python_recursion() -> None:
             },
             "<ul><li>one</li><li>two</li></ul>",
             1,
+            False,
         ),
     ],
     ids=["nested", "nested-list", "list-item-selector"],
 )
-def test_nested_paths_count_every_selector_evaluation(
+def test_validation_uses_root_document_without_replaying_nested_extraction(
     rules: dict[str, Any],
     html_text: str,
     max_evaluations: int,
+    validation_fails: bool,
 ) -> None:
     limits = schema._SchemaLimits(max_selector_evaluations=max_evaluations)
     code = f"selector_too_complex:selector_evaluations>{max_evaluations}"
@@ -1201,7 +1204,7 @@ def test_nested_paths_count_every_selector_evaluation(
         _limits=limits,
     )
 
-    assert [entry["error"] for entry in report["errors"]] == [code]
+    assert [entry["error"] for entry in report["errors"]] == ([code] if validation_fails else [])
     assert result["error"] == code
 
 
@@ -1705,7 +1708,7 @@ def test_default_limits_preserve_templates_longer_than_4096_chars() -> None:
     assert result["schema_fields"]["computed"] == template
 
 
-def test_validation_and_extraction_share_first_output_failure() -> None:
+def test_validation_uses_selection_budget_without_extraction_output_work() -> None:
     rules = {
         "fields": [
             {"name": "first", "selector": "//h1"},
@@ -1717,7 +1720,8 @@ def test_validation_and_extraction_share_first_output_failure() -> None:
         max_selector_evaluations=1,
         max_retained_output_chars=1,
     )
-    code = "selector_too_complex:retained_output_chars>1"
+    validation_code = "selector_too_complex:selector_evaluations>1"
+    extraction_code = "selector_too_complex:retained_output_chars>1"
 
     report = selectors.validate_selector_rules(rules, html_text=html_text, _limits=limits)
     result = selectors.extract_schema_fields(
@@ -1727,8 +1731,8 @@ def test_validation_and_extraction_share_first_output_failure() -> None:
         _limits=limits,
     )
 
-    assert [entry["error"] for entry in report["errors"]] == [code]
-    assert result["error"] == code
+    assert [entry["error"] for entry in report["errors"]] == [validation_code]
+    assert result["error"] == extraction_code
 
 
 def test_validation_and_extraction_share_success_path() -> None:
@@ -1889,7 +1893,7 @@ def test_shape_changing_slot_replacement_boundaries(rules: dict[str, Any]) -> No
         expected = {"value": {"leaf": "bb"}}
     assert exact_report["errors"] == []
     assert exact_result["schema_fields"] == expected
-    assert [entry["error"] for entry in one_over_report["errors"]] == [one_over_code]
+    assert one_over_report["errors"] == []
     assert one_over_result["error"] == one_over_code
 
 
@@ -1933,7 +1937,7 @@ def test_slot_subtree_replacement_preserves_exact_prefix_siblings() -> None:
     code = "selector_too_complex:retained_output_chars>2"
     assert exact_report["errors"] == []
     assert exact_result["schema_fields"] == {"value": "cc", "value2": "b"}
-    assert [entry["error"] for entry in one_over_report["errors"]] == [code]
+    assert one_over_report["errors"] == []
     assert one_over_result["error"] == code
 
 
