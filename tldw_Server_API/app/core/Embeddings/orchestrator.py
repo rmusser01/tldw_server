@@ -7,28 +7,27 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from tldw_Server_API.app.core.Embeddings.embedding_policy import (
-    adjust_dimensions,
-    enforce_embedding_policy,
     map_model_for_provider,
 )
-from tldw_Server_API.app.core.Embeddings.input_normalizer import normalize_embedding_input
-from tldw_Server_API.app.core.Embeddings.provider_resolution import (
-    ProviderGuesser,
-    resolve_provider_model,
+from tldw_Server_API.app.core.Embeddings.preparation import (
+    BackendIdentityResolver,
+    EmbeddingPreparationPipeline,
+    TokenCounter,
+    TokenDecoder,
 )
+from tldw_Server_API.app.core.Embeddings.provider_resolution import ProviderGuesser
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
     EmbeddingExecutionError,
-    EmbeddingExecutionPlan,
     EmbeddingExecutionResult,
-    EmbeddingPolicyDecision,
+    EmbeddingExecutorOutput,
     EmbeddingProviderError,
     EmbeddingRequestContext,
-    NormalizedEmbeddingInput,
-    ProviderModelIntent,
+    PreparedEmbeddingRequest,
 )
-from tldw_Server_API.app.core.Embeddings.vector_validation import (
-    validated_embedding_vectors,
+from tldw_Server_API.app.core.Embeddings.vector_processing import (
+    DimensionAdjustmentRecorder,
+    EmbeddingVectorProcessor,
 )
 
 
@@ -65,28 +64,7 @@ class EmbeddingAdapterExecutor(Protocol):
 
 
 CacheKeyFn = Callable[[str, str, str, int | None, str | None], str]
-TokenCounter = Callable[[str, str], int]
-TokenDecoder = Callable[[list[int] | list[list[int]], str], object]
-BackendIdentityResolver = Callable[[str, str], str | None]
-DimensionAdjustmentRecorder = Callable[[str, str, str], None]
 ProviderPreflight = Callable[[str, str], Awaitable[None]]
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedEmbeddingRequest:
-    normalized_input: NormalizedEmbeddingInput
-    provider_intent: ProviderModelIntent
-    policy_decision: EmbeddingPolicyDecision
-    execution_plan: EmbeddingExecutionPlan
-    effective_dimension_policy: str
-    prompt_tokens: int
-    total_tokens: int
-
-
-@dataclass(frozen=True, slots=True)
-class EmbeddingExecutorOutput:
-    vectors: list[list[float]]
-    embeddings_from_adapter: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,82 +110,37 @@ class EmbeddingRequestOrchestrator:
         batch_size: int | None = None,
         execution_path: Literal["legacy", "adapter"] = "legacy",
     ) -> None:
-        self._count_tokens = count_tokens
-        self._tokens_to_texts = tokens_to_texts
         self._cache_key_fn = cache_key_fn
         self._cache = cache
         self._executor = executor
-        self._settings_config = settings_config
-        self._max_tokens = max_tokens
-        self._implemented_providers = implemented_providers
-        self._allowed_providers = allowed_providers
-        self._allowed_models = allowed_models
-        self._enforce_policy = enforce_policy
-        self._allow_fallback_with_header = allow_fallback_with_header
-        self._settings_fallback_chain = settings_fallback_chain
         self._settings_fallback_model_map = settings_fallback_model_map
-        self._dimension_policy = dimension_policy
-        self._require_model = require_model
-        self._guess_provider = guess_provider
         self._backend_identity_resolver = backend_identity_resolver or _no_backend_identity
-        self._record_dimension_adjustment = record_dimension_adjustment
         self._provider_preflight = provider_preflight or _no_provider_preflight
-        self._cache_namespace = cache_namespace
-        self._batch_size = batch_size
-        self._execution_path = execution_path
+        self._vector_processor = EmbeddingVectorProcessor(record_dimension_adjustment=record_dimension_adjustment)
+        self._preparation_pipeline = EmbeddingPreparationPipeline(
+            count_tokens=count_tokens,
+            tokens_to_texts=tokens_to_texts,
+            settings_config=settings_config,
+            max_tokens=max_tokens,
+            implemented_providers=implemented_providers,
+            allowed_providers=allowed_providers,
+            allowed_models=allowed_models,
+            enforce_policy=enforce_policy,
+            allow_fallback_with_header=allow_fallback_with_header,
+            settings_fallback_chain=settings_fallback_chain,
+            settings_fallback_model_map=settings_fallback_model_map,
+            dimension_policy=dimension_policy,
+            require_model=require_model,
+            guess_provider=guess_provider,
+            backend_identity_resolver=self._backend_identity_resolver,
+            cache_namespace=cache_namespace,
+            batch_size=batch_size,
+            execution_path=execution_path,
+        )
 
     def prepare(self, raw_input: Any, context: EmbeddingRequestContext) -> PreparedEmbeddingRequest:
         """Normalize, resolve, validate, and plan an embedding request."""
-        intent = resolve_provider_model(
-            context.model_field,
-            context.provider_header,
-            settings_config=self._settings_config,
-            require_model=self._require_model,
-            guess_provider=self._guess_provider,
-        )
-        normalized_input = normalize_embedding_input(
-            raw_input,
-            model=intent.model,
-            max_tokens=self._max_tokens,
-            count_tokens=self._count_tokens,
-            tokens_to_texts=self._tokens_to_texts,
-        )
-        decision = enforce_embedding_policy(
-            intent,
-            context,
-            allowed_providers=self._allowed_providers,
-            allowed_models=self._allowed_models,
-            implemented_providers=self._implemented_providers,
-            enforce_policy=self._enforce_policy,
-            allow_fallback_with_header=self._allow_fallback_with_header,
-            settings_fallback_chain=self._settings_fallback_chain,
-            settings_fallback_model_map=self._settings_fallback_model_map,
-        )
-        effective_dimension_policy = self._effective_dimension_policy(context.encoding_format, decision.dimensions)
-        execution_plan = EmbeddingExecutionPlan(
-            provider=decision.provider,
-            model=decision.model,
-            dimensions=decision.dimensions,
-            backend_identity=self._backend_identity_resolver(decision.provider, decision.model),
-            fallback_chain=list(decision.fallback_chain),
-            cache_namespace=self._cache_namespace,
-            batch_size=self._batch_size,
-            execution_path=self._execution_path,
-            observability_tags={
-                "provider": decision.provider,
-                "model": decision.model,
-                "fallback_allowed": decision.fallback_allowed,
-            },
-        )
-        return PreparedEmbeddingRequest(
-            normalized_input=normalized_input,
-            provider_intent=intent,
-            policy_decision=decision,
-            execution_plan=execution_plan,
-            effective_dimension_policy=effective_dimension_policy,
-            prompt_tokens=normalized_input.total_tokens,
-            total_tokens=normalized_input.total_tokens,
-        )
+        return self._preparation_pipeline.prepare(raw_input, context)
 
     async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionResult:
         """Execute a prepared request through cache and provider executor."""
@@ -242,19 +175,15 @@ class EmbeddingRequestOrchestrator:
         for index, text in enumerate(prepared.normalized_input.texts):
             key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, primary_backend_identity)
             cached = await self._cache.get(key)
-            validated_cached = (
-                validated_embedding_vectors([cached], expected=1)
-                if cached is not None
-                else None
-            )
-            if validated_cached is not None:
+            cached_vector = self._vector_processor.validate_cached_vector(cached)
+            if cached_vector is not None:
                 results.append(
-                    self._postprocess_cached_vector(
-                        validated_cached[0],
-                        plan.provider,
-                        plan.model,
-                        plan.dimensions,
-                        prepared.effective_dimension_policy,
+                    self._vector_processor.process_cached_vector(
+                        cached_vector,
+                        provider=plan.provider,
+                        model=plan.model,
+                        dimensions=plan.dimensions,
+                        dimension_policy=prepared.effective_dimension_policy,
                     )
                 )
                 continue
@@ -296,7 +225,7 @@ class EmbeddingRequestOrchestrator:
             cache_hits = len(results)
             cache_misses = 0
 
-        vectors = self._validate_vector_count(
+        vectors = self._vector_processor.validate_vector_count(
             results,
             expected=len(prepared.normalized_input.texts),
             provider=actual_provider,
@@ -364,19 +293,19 @@ class EmbeddingRequestOrchestrator:
                     raise
                 continue
 
-            vectors = self._validate_vector_count(
+            vectors = self._vector_processor.validate_vector_count(
                 vectors,
                 expected=len(miss_texts),
                 provider=provider,
                 model=model,
             )
-            cache_vectors = [_canonical_vector(vector) for vector in vectors]
-            canonical_vectors = self._postprocess_vectors(
+            cache_vectors = vectors
+            canonical_vectors = self._vector_processor.process_vectors(
                 cache_vectors,
-                provider,
-                model,
-                plan.dimensions,
-                prepared.effective_dimension_policy,
+                provider=provider,
+                model=model,
+                dimensions=plan.dimensions,
+                dimension_policy=prepared.effective_dimension_policy,
             )
             return _ProviderExecution(
                 vectors=canonical_vectors,
@@ -414,19 +343,15 @@ class EmbeddingRequestOrchestrator:
         for index, text in enumerate(prepared.normalized_input.texts):
             key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
             cached = await self._cache.get(key)
-            validated_cached = (
-                validated_embedding_vectors([cached], expected=1)
-                if cached is not None
-                else None
-            )
-            if validated_cached is not None:
+            cached_vector = self._vector_processor.validate_cached_vector(cached)
+            if cached_vector is not None:
                 results.append(
-                    self._postprocess_cached_vector(
-                        validated_cached[0],
-                        provider,
-                        model,
-                        plan.dimensions,
-                        prepared.effective_dimension_policy,
+                    self._vector_processor.process_cached_vector(
+                        cached_vector,
+                        provider=provider,
+                        model=model,
+                        dimensions=plan.dimensions,
+                        dimension_policy=prepared.effective_dimension_policy,
                     )
                 )
                 continue
@@ -444,20 +369,21 @@ class EmbeddingRequestOrchestrator:
                 dimensions=plan.dimensions,
             )
             vectors, embeddings_from_adapter = _coerce_executor_output(output)
-            vectors = self._validate_vector_count(
+            vectors = self._vector_processor.validate_vector_count(
                 vectors,
                 expected=len(miss_texts),
                 provider=provider,
                 model=model,
             )
-            cache_vectors = [_canonical_vector(vector) for vector in vectors]
-            canonical_vectors = self._postprocess_vectors(
+            cache_vectors = vectors
+            canonical_vectors = self._vector_processor.process_vectors(
                 cache_vectors,
-                provider,
-                model,
-                plan.dimensions,
-                prepared.effective_dimension_policy,
+                provider=provider,
+                model=model,
+                dimensions=plan.dimensions,
+                dimension_policy=prepared.effective_dimension_policy,
             )
+            write_backend_identity = self._backend_identity_resolver(provider, model)
             for index, text, vector, cache_vector in zip(
                 miss_indices,
                 miss_texts,
@@ -466,10 +392,16 @@ class EmbeddingRequestOrchestrator:
             ):
                 results[index] = vector
                 if not embeddings_from_adapter:
-                    key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
+                    key = self._cache_key(
+                        text,
+                        provider,
+                        model,
+                        plan.dimensions,
+                        write_backend_identity,
+                    )
                     pending_cache_writes.append((key, cache_vector))
 
-        vectors = self._validate_vector_count(
+        vectors = self._vector_processor.validate_vector_count(
             results,
             expected=len(prepared.normalized_input.texts),
             provider=provider,
@@ -508,18 +440,18 @@ class EmbeddingRequestOrchestrator:
         vectors, embeddings_from_adapter = _coerce_executor_output(output)
         if not embeddings_from_adapter:
             return None
-        vectors = self._validate_vector_count(
+        vectors = self._vector_processor.validate_vector_count(
             vectors,
             expected=len(prepared.normalized_input.texts),
             provider=plan.provider,
             model=plan.model,
         )
-        canonical_vectors = self._postprocess_vectors(
+        canonical_vectors = self._vector_processor.process_vectors(
             vectors,
-            plan.provider,
-            plan.model,
-            plan.dimensions,
-            prepared.effective_dimension_policy,
+            provider=plan.provider,
+            model=plan.model,
+            dimensions=plan.dimensions,
+            dimension_policy=prepared.effective_dimension_policy,
         )
         return _ProviderExecution(
             vectors=canonical_vectors,
@@ -529,67 +461,6 @@ class EmbeddingRequestOrchestrator:
             complete_response=True,
             embeddings_from_adapter=True,
         )
-
-    def _postprocess_vectors(
-        self,
-        vectors: list[list[float]],
-        provider: str,
-        model: str,
-        dimensions: int | None,
-        dimension_policy: str,
-    ) -> list[list[float]]:
-        canonical = [_canonical_vector(vector) for vector in vectors]
-        if dimensions is None:
-            return canonical
-        adjusted = adjust_dimensions(
-            canonical,
-            dimensions,
-            provider,
-            model,
-            dimension_policy=dimension_policy,
-            record_adjustment=self._record_dimension_adjustment,
-        )
-        return [_canonical_vector(vector) for vector in adjusted]
-
-    def _postprocess_cached_vector(
-        self,
-        vector: list[float],
-        provider: str,
-        model: str,
-        dimensions: int | None,
-        dimension_policy: str,
-    ) -> list[float]:
-        return self._postprocess_vectors(
-            [_canonical_vector(vector)],
-            provider,
-            model,
-            dimensions,
-            dimension_policy,
-        )[0]
-
-    @staticmethod
-    def _validate_vector_count(
-        vectors: object,
-        *,
-        expected: int,
-        provider: str,
-        model: str,
-    ) -> list[list[float]]:
-        validated = validated_embedding_vectors(vectors, expected=expected)
-        if validated is None:
-            count: int | str = len(vectors) if isinstance(vectors, list) else "invalid"
-            message = (
-                f"Embedding provider returned {count} embeddings, expected {expected}"
-                if count != expected
-                else "Embedding provider returned malformed embedding vectors"
-            )
-            raise EmbeddingProviderError(
-                "provider_malformed_response",
-                message,
-                provider=provider,
-                model=model,
-            )
-        return validated
 
     def _cache_key(
         self,
@@ -615,26 +486,6 @@ class EmbeddingRequestOrchestrator:
         if dimensions is not None:
             headers["X-Embeddings-Dimensions-Policy"] = dimension_policy
         return headers
-
-    def _effective_dimension_policy(self, encoding_format: str | None, dimensions: int | None) -> str:
-        if dimensions is not None and encoding_format == "base64":
-            return "reduce"
-        return self._dimension_policy
-
-
-def _canonical_vector(vector: object) -> list[float]:
-    if not isinstance(vector, (list, tuple)):
-        raise EmbeddingProviderError(
-            "provider_malformed_response",
-            "Embedding provider returned a malformed vector",
-        )
-    try:
-        return [float(item) for item in vector]
-    except (TypeError, ValueError) as exc:
-        raise EmbeddingProviderError(
-            "provider_malformed_response",
-            "Embedding provider returned a malformed vector",
-        ) from exc
 
 
 def _coerce_executor_output(

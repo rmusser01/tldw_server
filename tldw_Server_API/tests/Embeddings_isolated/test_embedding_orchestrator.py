@@ -4,17 +4,22 @@ import asyncio
 
 import pytest
 
+import tldw_Server_API.app.core.Embeddings.preparation as preparation_module
 from tldw_Server_API.app.core.Embeddings import orchestrator as orchestrator_module
 from tldw_Server_API.app.core.Embeddings.orchestrator import (
     EmbeddingExecutionResult,
     EmbeddingExecutorOutput,
     EmbeddingRequestOrchestrator,
 )
+from tldw_Server_API.app.core.Embeddings.orchestrator import (
+    PreparedEmbeddingRequest as OrchestratorPreparedEmbeddingRequest,
+)
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingExecutionError,
     EmbeddingProviderError,
     EmbeddingRateLimitError,
     EmbeddingRequestContext,
+    PreparedEmbeddingRequest,
 )
 
 
@@ -217,9 +222,9 @@ def test_prepare_normalizes_input_and_returns_token_totals_without_execution():
 @pytest.mark.unit
 def test_prepare_orders_intent_normalization_policy_and_plan_identity(monkeypatch):
     calls: list[str] = []
-    real_resolve_provider_model = orchestrator_module.resolve_provider_model
-    real_normalize_embedding_input = orchestrator_module.normalize_embedding_input
-    real_enforce_embedding_policy = orchestrator_module.enforce_embedding_policy
+    real_resolve_provider_model = preparation_module.resolve_provider_model
+    real_normalize_embedding_input = preparation_module.normalize_embedding_input
+    real_enforce_embedding_policy = preparation_module.enforce_embedding_policy
 
     def resolve_provider_model_probe(*args, **kwargs):
         calls.append("resolve_intent")
@@ -238,17 +243,17 @@ def test_prepare_orders_intent_normalization_policy_and_plan_identity(monkeypatc
         return f"{provider}:{model}:backend"
 
     monkeypatch.setattr(
-        orchestrator_module,
+        preparation_module,
         "resolve_provider_model",
         resolve_provider_model_probe,
     )
     monkeypatch.setattr(
-        orchestrator_module,
+        preparation_module,
         "normalize_embedding_input",
         normalize_embedding_input_probe,
     )
     monkeypatch.setattr(
-        orchestrator_module,
+        preparation_module,
         "enforce_embedding_policy",
         enforce_embedding_policy_probe,
     )
@@ -264,6 +269,118 @@ def test_prepare_orders_intent_normalization_policy_and_plan_identity(monkeypatc
         "resolve_policy",
         "plan_identity",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("use_default_backend_identity", [False, True])
+def test_prepare_delegates_to_one_pipeline_without_phase_sink(
+    monkeypatch,
+    use_default_backend_identity,
+):
+    prepared_sentinel = object()
+    created: list[dict[str, object]] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    pipeline_values = {
+        name: object()
+        for name in (
+            "count_tokens",
+            "tokens_to_texts",
+            "settings_config",
+            "max_tokens",
+            "implemented_providers",
+            "allowed_providers",
+            "allowed_models",
+            "enforce_policy",
+            "allow_fallback_with_header",
+            "settings_fallback_chain",
+            "settings_fallback_model_map",
+            "dimension_policy",
+            "require_model",
+            "guess_provider",
+            "backend_identity_resolver",
+            "cache_namespace",
+            "batch_size",
+            "execution_path",
+        )
+    }
+
+    def default_backend_identity(provider: str, model: str) -> None:
+        del provider, model
+        return None
+
+    class RecordingPreparationPipeline:
+        def __init__(self, **kwargs: object) -> None:
+            created.append(kwargs)
+
+        def prepare(self, *args: object, **kwargs: object) -> object:
+            calls.append((args, kwargs))
+            return prepared_sentinel
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "EmbeddingPreparationPipeline",
+        RecordingPreparationPipeline,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_no_backend_identity",
+        default_backend_identity,
+    )
+    requested_backend_identity = (
+        None
+        if use_default_backend_identity
+        else pipeline_values["backend_identity_resolver"]
+    )
+    expected_pipeline_values = {
+        **pipeline_values,
+        "backend_identity_resolver": (
+            default_backend_identity
+            if use_default_backend_identity
+            else pipeline_values["backend_identity_resolver"]
+        ),
+    }
+    orchestrator = EmbeddingRequestOrchestrator(
+        count_tokens=pipeline_values["count_tokens"],
+        tokens_to_texts=pipeline_values["tokens_to_texts"],
+        cache_key_fn=_cache_key,
+        cache=RecordingCache(),
+        executor=RecordingExecutor(),
+        settings_config=pipeline_values["settings_config"],
+        max_tokens=pipeline_values["max_tokens"],
+        implemented_providers=pipeline_values["implemented_providers"],
+        allowed_providers=pipeline_values["allowed_providers"],
+        allowed_models=pipeline_values["allowed_models"],
+        enforce_policy=pipeline_values["enforce_policy"],
+        allow_fallback_with_header=pipeline_values["allow_fallback_with_header"],
+        settings_fallback_chain=pipeline_values["settings_fallback_chain"],
+        settings_fallback_model_map=pipeline_values[
+            "settings_fallback_model_map"
+        ],
+        dimension_policy=pipeline_values["dimension_policy"],
+        require_model=pipeline_values["require_model"],
+        guess_provider=pipeline_values["guess_provider"],
+        backend_identity_resolver=requested_backend_identity,
+        cache_namespace=pipeline_values["cache_namespace"],
+        batch_size=pipeline_values["batch_size"],
+        execution_path=pipeline_values["execution_path"],
+    )
+    raw_input = object()
+    context = _context()
+
+    assert orchestrator.prepare(raw_input, context) is prepared_sentinel
+    assert orchestrator.prepare(raw_input, context) is prepared_sentinel
+    assert len(created) == 1
+    assert created[0].keys() == expected_pipeline_values.keys()
+    assert all(
+        created[0][name] is expected_value
+        for name, expected_value in expected_pipeline_values.items()
+    )
+    assert calls == [((raw_input, context), {}), ((raw_input, context), {})]
+
+
+@pytest.mark.unit
+def test_orchestrator_reexports_prepared_embedding_request_contract():
+    assert OrchestratorPreparedEmbeddingRequest is PreparedEmbeddingRequest
 
 
 @pytest.mark.unit
@@ -1589,6 +1706,155 @@ async def test_malformed_cached_vector_becomes_miss_and_is_replaced(
     ]
     assert cache.set_calls == [(cache_key, [0.25, 0.75])]
     assert cache.values[cache_key] == [0.25, 0.75]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_malformed_fallback_cached_vector_becomes_miss_and_is_replaced():
+    fallback_model = "sentence-transformers/all-MiniLM-L6-v2"
+    fallback_cache_key = (
+        f"replace fallback|huggingface|{fallback_model}|"
+        f"huggingface:{fallback_model}:backend"
+    )
+    cache = RecordingCache(
+        {fallback_cache_key: [True, 0.0]}  # type: ignore[dict-item]
+    )
+    primary_error = EmbeddingProviderError(
+        "provider_unavailable",
+        "openai unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    executor = RecordingExecutor(
+        failures={"openai": primary_error},
+        provider_vectors={"huggingface": [[0.25, 0.75]]},
+    )
+    identity_calls: list[tuple[str, str]] = []
+
+    def backend_identity_resolver(provider: str, model: str) -> str:
+        identity_calls.append((provider, model))
+        return f"{provider}:{model}:backend"
+
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=backend_identity_resolver,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": fallback_model,
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "replace fallback",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.vectors == [[0.25, 0.75]]
+    assert result.provider == "huggingface"
+    assert result.model == fallback_model
+    assert result.fallback_from == "openai"
+    assert result.cache_hits == 0
+    assert result.cache_misses == 1
+    assert cache.get_keys == [
+        "replace fallback|openai|text-embedding-3-small|"
+        "openai:text-embedding-3-small:backend",
+        fallback_cache_key,
+    ]
+    assert executor.calls == [
+        {
+            "texts": ["replace fallback"],
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": None,
+        },
+        {
+            "texts": ["replace fallback"],
+            "provider": "huggingface",
+            "model": fallback_model,
+            "dimensions": None,
+        },
+    ]
+    assert cache.set_calls == [(fallback_cache_key, [0.25, 0.75])]
+    assert cache.values[fallback_cache_key] == [0.25, 0.75]
+    assert identity_calls == [
+        ("openai", "text-embedding-3-small"),
+        ("openai", "text-embedding-3-small"),
+        ("huggingface", fallback_model),
+        ("huggingface", fallback_model),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fallback_writeback_re_resolves_backend_identity_after_provider_execution():
+    fallback_model = "sentence-transformers/all-MiniLM-L6-v2"
+    primary_error = EmbeddingProviderError(
+        "provider_unavailable",
+        "openai unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    cache = RecordingCache()
+    executor = RecordingExecutor(
+        failures={"openai": primary_error},
+        provider_vectors={"huggingface": [[0.25, 0.75]]},
+    )
+    identity_calls: list[tuple[str, str]] = []
+
+    def backend_identity_resolver(provider: str, model: str) -> str:
+        identity_calls.append((provider, model))
+        if provider == "huggingface":
+            fallback_identity_count = sum(
+                1 for call in identity_calls if call == (provider, model)
+            )
+            suffix = "read" if fallback_identity_count == 1 else "write"
+            return f"{provider}:{model}:{suffix}"
+        return f"{provider}:{model}:identity"
+
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        backend_identity_resolver=backend_identity_resolver,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": fallback_model,
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "identity correction",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.provider == "huggingface"
+    assert cache.get_keys == [
+        "identity correction|openai|text-embedding-3-small|"
+        "openai:text-embedding-3-small:identity",
+        f"identity correction|huggingface|{fallback_model}|"
+        f"huggingface:{fallback_model}:read",
+    ]
+    assert cache.set_calls == [
+        (
+            f"identity correction|huggingface|{fallback_model}|"
+            f"huggingface:{fallback_model}:write",
+            [0.25, 0.75],
+        )
+    ]
+    assert identity_calls == [
+        ("openai", "text-embedding-3-small"),
+        ("openai", "text-embedding-3-small"),
+        ("huggingface", fallback_model),
+        ("huggingface", fallback_model),
+    ]
 
 
 @pytest.mark.unit

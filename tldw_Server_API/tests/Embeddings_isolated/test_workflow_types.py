@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
 
 from tldw_Server_API.app.core import exceptions as core_exceptions
@@ -33,6 +35,22 @@ def test_workflow_trace_error_uses_central_exception_contract():
         "EmbeddingWorkflowTraceError",
         None,
     )
+
+
+def test_workflow_phase_and_status_literals_keep_completion_distinct():
+    phases = get_args(workflow_types.EmbeddingWorkflowPhase)
+    statuses = set(get_args(workflow_types.EmbeddingWorkflowStatus))
+
+    assert phases[:5] == (
+        "created",
+        "resolving_intent",
+        "normalizing",
+        "resolving_policy",
+        "planning",
+    )
+    assert "completed" not in phases
+    assert "completed" in statuses
+    assert "resolving_intent" in workflow_types.SAFE_METADATA_ENUM_VALUES["phase"]
 
 
 def test_workflow_context_generates_id_without_retaining_request_or_user_identifiers():
@@ -134,6 +152,22 @@ def test_safe_workflow_metadata_allows_token_count_fields():
         "prompt_tokens": 3,
         "runner_mode": "inline",
         "execution_path": "legacy",
+    }
+
+
+def test_safe_workflow_metadata_allows_attempt_counters_and_legacy_header_count():
+    metadata = safe_workflow_metadata(
+        {
+            "attempt_count": 2,
+            "fallback_attempt_count": 1,
+            "response_header_count": 3,
+        }
+    )
+
+    assert metadata == {
+        "attempt_count": 2,
+        "fallback_attempt_count": 1,
+        "response_header_count": 3,
     }
 
 
@@ -240,6 +274,38 @@ def test_event_rejects_unsafe_metadata_on_construction():
         )
 
 
+def test_workflow_completed_event_accepts_finalizing_completed_contract():
+    event = EmbeddingWorkflowEvent(
+        event_type="workflow_completed",
+        workflow_id=WORKFLOW_ID,
+        phase="finalizing",
+        status="completed",
+    )
+
+    assert event.phase == "finalizing"
+    assert event.status == "completed"
+
+
+def test_workflow_completed_event_rejects_wrong_phase():
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        EmbeddingWorkflowEvent(
+            event_type="workflow_completed",
+            workflow_id=WORKFLOW_ID,
+            phase="executing",
+            status="completed",
+        )
+
+
+def test_workflow_completed_event_rejects_wrong_status():
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        EmbeddingWorkflowEvent(
+            event_type="workflow_completed",
+            workflow_id=WORKFLOW_ID,
+            phase="finalizing",
+            status="running",
+        )
+
+
 def test_in_memory_collector_preserves_event_order_and_fails_closed_at_bound():
     collector = EmbeddingInMemoryWorkflowTraceCollector(max_events=2)
 
@@ -268,6 +334,7 @@ def test_in_memory_collector_preserves_event_order_and_fails_closed_at_bound():
             EmbeddingWorkflowEvent(
                 event_type="workflow_completed",
                 workflow_id=WORKFLOW_ID,
+                phase="finalizing",
                 status="completed",
             )
         )
