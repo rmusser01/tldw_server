@@ -1,6 +1,6 @@
 # Embeddings Workflow Stage 2: Concrete API Steps Design
 
-**Status:** Approved design; written-spec review pending
+**Status:** Approved design; written-spec review complete
 
 **Parent task:** `TASK-12973`
 
