@@ -547,20 +547,35 @@ def _restore_output_backup(
     backup: Path,
     output: Path,
     parent_identity: tuple[int, int, int],
-    output_identity: tuple[int, int, int],
+    output_snapshot: _FixtureSetSnapshot,
 ) -> None:
     recovery_error = "Fixture output rollback could not be completed safely; " "manual recovery is required"
+    output_identity = output_snapshot.directory_identity
     try:
         _require_path_identity(output.parent, parent_identity, recovery_error)
         current_output = _path_identity_or_none(output, recovery_error)
         current_backup = _path_identity_or_none(backup, recovery_error)
         if current_output == output_identity and current_backup is None:
+            _require_fixture_set_snapshot(output, output_snapshot, recovery_error)
             return
         if current_output is not None or current_backup != output_identity:
             raise RuntimeError(recovery_error)
+        _require_real_directory_identity(backup, output_identity, recovery_error)
+        _require_fixture_set_snapshot(backup, output_snapshot, recovery_error)
         backup.replace(output)
-        _require_path_identity(output, output_identity, recovery_error)
-        _require_path_absent(backup, recovery_error)
+        try:
+            _require_fixture_set_snapshot(output, output_snapshot, recovery_error)
+            _require_path_absent(backup, recovery_error)
+        except (OSError, RuntimeError):
+            try:
+                _require_path_identity(output, output_identity, recovery_error)
+                _require_path_absent(backup, recovery_error)
+                output.replace(backup)
+                _require_path_absent(output, recovery_error)
+                _require_path_identity(backup, output_identity, recovery_error)
+            except (OSError, RuntimeError):
+                pass
+            raise RuntimeError(recovery_error) from None
     except (OSError, RuntimeError):
         raise RuntimeError(recovery_error) from None
 
@@ -671,6 +686,7 @@ def _fsync_directory(
         if os.name != "posix" or exc.errno in unsupported:
             return
         raise RuntimeError(error_message) from None
+    descriptor_owner = _OwnedDescriptor(descriptor)
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISDIR(metadata.st_mode) or _stable_metadata_identity(metadata) != expected_identity:
@@ -680,9 +696,15 @@ def _fsync_directory(
         except OSError as exc:
             if exc.errno not in unsupported:
                 raise RuntimeError(error_message) from None
-    finally:
+    except (OSError, RuntimeError):
+        descriptor_owner.close_quietly()
+        raise RuntimeError(error_message) from None
+    except BaseException:
+        descriptor_owner.close_quietly()
+        raise
+    else:
         try:
-            os.close(descriptor)
+            descriptor_owner.close()
         except OSError:
             raise RuntimeError(error_message) from None
     _require_path_identity(directory, expected_identity, error_message)
@@ -690,9 +712,12 @@ def _fsync_directory(
 
 def _read_recovery_file(path: Path) -> tuple[tuple[int, int, int], bytes]:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor: int | None = None
     try:
         descriptor = os.open(path, flags)
+    except OSError:
+        raise RuntimeError(_RECOVERY_ERROR) from None
+    descriptor_owner = _OwnedDescriptor(descriptor)
+    try:
         metadata_before = os.fstat(descriptor)
         if not _valid_lock_file_metadata(metadata_before) or metadata_before.st_size > 131_072:
             raise RuntimeError(_RECOVERY_ERROR)
@@ -708,13 +733,16 @@ def _read_recovery_file(path: Path) -> tuple[tuple[int, int, int], bytes]:
         if _stable_metadata_identity(metadata_after) != identity or metadata_after.st_size != len(raw):
             raise RuntimeError(_RECOVERY_ERROR)
     except (OSError, RuntimeError):
+        descriptor_owner.close_quietly()
         raise RuntimeError(_RECOVERY_ERROR) from None
-    finally:
-        if descriptor is not None:
-            try:
-                os.close(descriptor)
-            except OSError:
-                raise RuntimeError(_RECOVERY_ERROR) from None
+    except BaseException:
+        descriptor_owner.close_quietly()
+        raise
+    else:
+        try:
+            descriptor_owner.close()
+        except OSError:
+            raise RuntimeError(_RECOVERY_ERROR) from None
     _require_path_identity(path, identity, _RECOVERY_ERROR)
     return identity, raw
 
@@ -736,10 +764,13 @@ def _write_recovery_record(
     raw = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor: int | None = None
     try:
         _require_path_identity(output.parent, parent_identity, _RECOVERY_ERROR)
         descriptor = os.open(path, flags, 0o600)
+    except (OSError, RuntimeError):
+        raise RuntimeError(_RECOVERY_ERROR) from None
+    descriptor_owner = _OwnedDescriptor(descriptor)
+    try:
         offset = 0
         while offset < len(raw):
             written = os.write(descriptor, raw[offset:])
@@ -752,13 +783,16 @@ def _write_recovery_record(
         record_identity = _stable_metadata_identity(metadata)
         os.fsync(descriptor)
     except (OSError, RuntimeError):
+        descriptor_owner.close_quietly()
         raise RuntimeError(_RECOVERY_ERROR) from None
-    finally:
-        if descriptor is not None:
-            try:
-                os.close(descriptor)
-            except OSError:
-                raise RuntimeError(_RECOVERY_ERROR) from None
+    except BaseException:
+        descriptor_owner.close_quietly()
+        raise
+    else:
+        try:
+            descriptor_owner.close()
+        except OSError:
+            raise RuntimeError(_RECOVERY_ERROR) from None
 
     _require_path_identity(path, record_identity, _RECOVERY_ERROR)
     read_identity, read_raw = _read_recovery_file(path)
@@ -793,7 +827,11 @@ def _load_recovery_record(output: Path) -> _RecoveryRecord | None:
             "schema_version",
         }:
             raise ValueError
-        if payload["schema_version"] != 1 or payload["output_name"] != output.name:
+        if (
+            type(payload["schema_version"]) is not int
+            or payload["schema_version"] != 1
+            or payload["output_name"] != output.name
+        ):
             raise ValueError
         backup_name = payload["backup_name"]
         if (
@@ -836,7 +874,14 @@ def _recover_interrupted_publication(output: Path) -> None:
         return
     try:
         _require_path_identity(output.parent, record.parent_identity, _RECOVERY_ERROR)
-        _require_path_absent(output, _RECOVERY_ERROR)
+        output_identity = _path_identity_or_none(output, _RECOVERY_ERROR)
+        backup_identity = _path_identity_or_none(record.backup, _RECOVERY_ERROR)
+        if output_identity == record.output_snapshot.directory_identity and backup_identity is None:
+            _require_fixture_set_snapshot(output, record.output_snapshot, _RECOVERY_ERROR)
+            _clear_recovery_record(record)
+            return
+        if output_identity is not None or backup_identity != record.output_snapshot.directory_identity:
+            raise RuntimeError(_RECOVERY_ERROR)
         _require_real_directory_identity(
             record.backup,
             record.output_snapshot.directory_identity,
@@ -1211,6 +1256,27 @@ def _replace_output_directory(
                 parent_identity,
                 output_snapshot,
             )
+            _require_path_identity(
+                output.parent,
+                parent_identity,
+                "Fixture output parent changed during publication",
+            )
+            _require_path_absent(
+                backup,
+                "Fixture output backup changed during publication",
+            )
+            _require_path_identity(staging, staging_identity, staging_error)
+            _require_fixture_set_snapshot(staging, staging_snapshot, staging_error)
+            _require_path_identity(
+                output,
+                output_identity,
+                "Fixture output changed during publication",
+            )
+            _require_fixture_set_snapshot(
+                output,
+                output_snapshot,
+                "Fixture output changed during publication",
+            )
             rename_started = True
             output.replace(backup)
             _require_path_identity(
@@ -1233,12 +1299,6 @@ def _replace_output_directory(
             parent_identity,
             "Fixture output parent changed during publication",
         )
-        _require_path_identity(
-            staging,
-            staging_identity,
-            "Fixture staging directory changed during publication",
-        )
-        _require_fixture_set_snapshot(staging, staging_snapshot, staging_error)
         _require_path_absent(
             output,
             "Fixture output changed during publication",
@@ -1254,6 +1314,12 @@ def _replace_output_directory(
                 output_snapshot,
                 "Fixture output backup changed during publication",
             )
+        _require_path_identity(
+            staging,
+            staging_identity,
+            "Fixture staging directory changed during publication",
+        )
+        _require_fixture_set_snapshot(staging, staging_snapshot, staging_error)
         staging.replace(output)
         staging_rename_completed = True
         _require_path_identity(
@@ -1279,10 +1345,15 @@ def _replace_output_directory(
                 backup,
                 output,
                 parent_identity,
-                output_identity,
+                output_snapshot,
             )
             if recovery_record is not None:
                 _clear_recovery_record(recovery_record)
+        elif recovery_record is not None:
+            try:
+                _clear_recovery_record(recovery_record)
+            except (OSError, RuntimeError):
+                raise RuntimeError(_RECOVERY_ERROR) from None
         elif staging_rename_completed:
             raise RuntimeError(_RECOVERY_ERROR) from None
         raise

@@ -434,6 +434,30 @@ def _crash_after_backup_rename_worker(
     )
 
 
+def _crash_after_recovery_record_worker(
+    source_root: str,
+    predecessor_commit: str,
+    output: str,
+    record_durable: Any,
+) -> None:
+    output_path = Path(output)
+    real_write_recovery_record = generator._write_recovery_record
+
+    def _terminate_after_recovery_record(*args: Any, **kwargs: Any) -> Any:
+        record = real_write_recovery_record(*args, **kwargs)
+        record_durable.set()
+        os._exit(74)
+        return record
+
+    generator.build_case_payloads = lambda _source_root: _fixture_payloads("unpublished")
+    generator._write_recovery_record = _terminate_after_recovery_record
+    generator.generate_fixtures(
+        predecessor_commit,
+        output_path,
+        source_root=Path(source_root),
+    )
+
+
 def _join_process(process: multiprocessing.Process, timeout: float = 20) -> None:
     process.join(timeout)
     if process.is_alive():
@@ -2648,6 +2672,216 @@ def test_recovery_rejects_in_place_backup_mutation_without_deleting_evidence(
     assert "tampered" not in str(exc_info.value)
 
 
+def test_crash_after_durable_record_before_first_rename_recovers_as_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "original")
+    context = multiprocessing.get_context("spawn")
+    record_durable = context.Event()
+    crashed = context.Process(
+        target=_crash_after_recovery_record_worker,
+        args=(str(source_root), source_commit, str(output), record_durable),
+    )
+
+    crashed.start()
+    assert record_durable.wait(10)
+    _join_process(crashed)
+    assert crashed.exitcode == 74
+    _assert_fixture_marker(output, "original")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert len(list(tmp_path.glob(".fixtures.publication-recovery.json"))) == 1
+
+    def _stop_after_recovery(_source_root: Path) -> dict[str, dict[str, Any]]:
+        raise RuntimeError("stop after no-op recovery")
+
+    monkeypatch.setattr(generator, "build_case_payloads", _stop_after_recovery)
+    with pytest.raises(RuntimeError, match="^stop after no-op recovery$"):
+        generator.generate_fixtures(
+            source_commit,
+            output,
+            source_root=source_root,
+        )
+
+    _assert_fixture_marker(output, "original")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert not list(tmp_path.glob(".fixtures.publication-recovery.json"))
+
+
+def test_recovery_record_rejects_boolean_schema_version(tmp_path: Path) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "original")
+    output_snapshot = generator._capture_fixture_set_snapshot(output, "snapshot failed")
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = tmp_path / f".fixtures.backup-{'a' * 32}"
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        output_snapshot,
+    )
+    payload = json.loads(record.path.read_text(encoding="ascii"))
+    payload["schema_version"] = True
+    _write_canonical_json(record.path, payload)
+    before = record.path.read_bytes()
+
+    with pytest.raises(
+        RuntimeError,
+        match=generator._RECOVERY_ERROR,
+    ):
+        generator._load_recovery_record(output)
+
+    assert record.path.read_bytes() == before
+    _assert_fixture_marker(output, "original")
+    assert not backup.exists()
+
+
+def test_recovery_write_preserves_body_baseexception_over_close_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrimaryWriteFailure(BaseException):
+        pass
+
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "original")
+    output_snapshot = generator._capture_fixture_set_snapshot(output, "snapshot failed")
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    recovery_path = tmp_path / ".fixtures.publication-recovery.json"
+    real_open = generator.os.open
+    real_close = generator.os.close
+    real_write = generator.os.write
+    descriptors: list[int] = []
+    primary = PrimaryWriteFailure("primary write failure")
+
+    def _record_open(path: Any, *args: Any, **kwargs: Any) -> int:
+        descriptor = real_open(path, *args, **kwargs)
+        if Path(path) == recovery_path:
+            descriptors.append(descriptor)
+        return descriptor
+
+    def _fail_write(descriptor: int, data: bytes) -> int:
+        if descriptor in descriptors:
+            raise primary
+        return real_write(descriptor, data)
+
+    def _fail_close(descriptor: int) -> None:
+        if descriptor in descriptors:
+            raise OSError("secondary close failure")
+        real_close(descriptor)
+
+    monkeypatch.setattr(generator.os, "open", _record_open)
+    monkeypatch.setattr(generator.os, "write", _fail_write)
+    monkeypatch.setattr(generator.os, "close", _fail_close)
+    try:
+        with pytest.raises(PrimaryWriteFailure) as exc_info:
+            generator._write_recovery_record(
+                output,
+                tmp_path / f".fixtures.backup-{'b' * 32}",
+                parent_identity,
+                output_snapshot,
+            )
+        assert exc_info.value is primary
+    finally:
+        for descriptor in descriptors:
+            try:
+                real_close(descriptor)
+            except OSError:
+                pass
+
+
+def test_recovery_read_preserves_body_baseexception_over_close_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrimaryReadFailure(BaseException):
+        pass
+
+    recovery_path = tmp_path / "recovery.json"
+    recovery_path.write_bytes(b"{}\n")
+    recovery_path.chmod(0o600)
+    real_open = generator.os.open
+    real_close = generator.os.close
+    descriptors: list[int] = []
+    primary = PrimaryReadFailure("primary read failure")
+
+    def _record_open(path: Any, *args: Any, **kwargs: Any) -> int:
+        descriptor = real_open(path, *args, **kwargs)
+        if Path(path) == recovery_path:
+            descriptors.append(descriptor)
+        return descriptor
+
+    def _fail_read(descriptor: int, _size: int) -> bytes:
+        if descriptor in descriptors:
+            raise primary
+        raise AssertionError("unexpected descriptor")
+
+    def _fail_close(descriptor: int) -> None:
+        if descriptor in descriptors:
+            raise OSError("secondary close failure")
+        real_close(descriptor)
+
+    monkeypatch.setattr(generator.os, "open", _record_open)
+    monkeypatch.setattr(generator.os, "read", _fail_read)
+    monkeypatch.setattr(generator.os, "close", _fail_close)
+    try:
+        with pytest.raises(PrimaryReadFailure) as exc_info:
+            generator._read_recovery_file(recovery_path)
+        assert exc_info.value is primary
+    finally:
+        for descriptor in descriptors:
+            try:
+                real_close(descriptor)
+            except OSError:
+                pass
+
+
+def test_recovery_directory_fsync_preserves_body_baseexception_over_close_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrimaryFsyncFailure(BaseException):
+        pass
+
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    real_open = generator.os.open
+    real_close = generator.os.close
+    descriptors: list[int] = []
+    primary = PrimaryFsyncFailure("primary fsync failure")
+
+    def _record_open(path: Any, *args: Any, **kwargs: Any) -> int:
+        descriptor = real_open(path, *args, **kwargs)
+        if Path(path) == tmp_path:
+            descriptors.append(descriptor)
+        return descriptor
+
+    def _fail_fsync(descriptor: int) -> None:
+        if descriptor in descriptors:
+            raise primary
+        raise AssertionError("unexpected descriptor")
+
+    def _fail_close(descriptor: int) -> None:
+        if descriptor in descriptors:
+            raise OSError("secondary close failure")
+        real_close(descriptor)
+
+    monkeypatch.setattr(generator.os, "open", _record_open)
+    monkeypatch.setattr(generator.os, "fsync", _fail_fsync)
+    monkeypatch.setattr(generator.os, "close", _fail_close)
+    try:
+        with pytest.raises(PrimaryFsyncFailure) as exc_info:
+            generator._fsync_directory(tmp_path, parent_identity, generator._RECOVERY_ERROR)
+        assert exc_info.value is primary
+    finally:
+        for descriptor in descriptors:
+            try:
+                real_close(descriptor)
+            except OSError:
+                pass
+
+
 def test_cli_rejects_source_root_at_a_different_commit(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -3699,6 +3933,174 @@ def test_in_place_output_mutation_after_validation_aborts_before_first_rename(
     assert not list(tmp_path.glob(".fixtures.backup-*"))
     assert str(tmp_path) not in str(exc_info.value)
     assert "tampered-sensitive-output" not in str(exc_info.value)
+
+
+def test_output_mutation_after_durable_record_aborts_before_first_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    original_write_recovery_record = generator._write_recovery_record
+    original_replace = Path.replace
+    output_rename_calls = 0
+
+    def _mutate_after_durable_record(*args: Any, **kwargs: Any) -> Any:
+        record = original_write_recovery_record(*args, **kwargs)
+        _write_canonical_json(
+            output / "content.json",
+            _fixture_payloads("tampered-after-journal")["content"],
+        )
+        return record
+
+    def _record_output_rename(path: Path, target: Path) -> Path:
+        nonlocal output_rename_calls
+        if path == output:
+            output_rename_calls += 1
+        return original_replace(path, target)
+
+    monkeypatch.setattr(generator, "_write_recovery_record", _mutate_after_durable_record)
+    monkeypatch.setattr(Path, "replace", _record_output_rename)
+
+    with pytest.raises(RuntimeError, match="^Fixture output changed during publication$"):
+        generator._replace_output_directory(staging, output)
+
+    assert output_rename_calls == 0
+    assert json.loads((output / "content.json").read_text(encoding="ascii"))["cases"] == [
+        {"marker": "tampered-after-journal"}
+    ]
+    _assert_fixture_marker(staging, "new-output")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert not list(tmp_path.glob(".fixtures.publication-recovery.json"))
+
+
+def test_staging_mutation_during_final_backup_scan_aborts_before_second_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    original_require_snapshot = generator._require_fixture_set_snapshot
+    original_replace = Path.replace
+    staging_rename_calls = 0
+    mutated = False
+
+    def _mutate_during_backup_scan(path: Path, expected: Any, error_message: str) -> None:
+        nonlocal mutated
+        original_require_snapshot(path, expected, error_message)
+        if ".backup-" in path.name and not mutated:
+            mutated = True
+            _write_canonical_json(
+                staging / "content.json",
+                _fixture_payloads("tampered-before-second-rename")["content"],
+            )
+
+    def _record_staging_rename(path: Path, target: Path) -> Path:
+        nonlocal staging_rename_calls
+        if path == staging:
+            staging_rename_calls += 1
+        return original_replace(path, target)
+
+    monkeypatch.setattr(generator, "_require_fixture_set_snapshot", _mutate_during_backup_scan)
+    monkeypatch.setattr(Path, "replace", _record_staging_rename)
+
+    with pytest.raises(RuntimeError, match="^Fixture staging directory changed during publication$"):
+        generator._replace_output_directory(staging, output)
+
+    assert mutated
+    assert staging_rename_calls == 0
+    _assert_fixture_marker(output, "old-output")
+    assert json.loads((staging / "content.json").read_text(encoding="ascii"))["cases"] == [
+        {"marker": "tampered-before-second-rename"}
+    ]
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert not list(tmp_path.glob(".fixtures.publication-recovery.json"))
+
+
+def test_live_rollback_rejects_mutated_backup_and_retains_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    original_replace = Path.replace
+    backup: Path | None = None
+
+    def _mutate_backup_after_first_rename(path: Path, target: Path) -> Path:
+        nonlocal backup
+        result = original_replace(path, target)
+        if path == output:
+            backup = target
+            _write_canonical_json(
+                target / "content.json",
+                _fixture_payloads("tampered-live-backup")["content"],
+            )
+        return result
+
+    monkeypatch.setattr(Path, "replace", _mutate_backup_after_first_rename)
+
+    with pytest.raises(
+        RuntimeError,
+        match=("^Fixture output rollback could not be completed safely; " "manual recovery is required$"),
+    ):
+        generator._replace_output_directory(staging, output)
+
+    assert backup is not None
+    assert not output.exists()
+    assert json.loads((backup / "content.json").read_text(encoding="ascii"))["cases"] == [
+        {"marker": "tampered-live-backup"}
+    ]
+    _assert_fixture_marker(staging, "new-output")
+    assert len(list(tmp_path.glob(".fixtures.publication-recovery.json"))) == 1
+
+
+def test_live_rollback_revalidates_restored_output_and_retains_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    _write_valid_fixture_set(output, "1" * 40, "old-output")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(staging, "2" * 40, "new-output")
+    original_replace = Path.replace
+    backup: Path | None = None
+
+    def _fail_publication_then_mutate_restore(path: Path, target: Path) -> Path:
+        nonlocal backup
+        if path == output:
+            backup = target
+            return original_replace(path, target)
+        if path == staging:
+            raise OSError("injected second rename failure")
+        result = original_replace(path, target)
+        if backup is not None and path == backup and target == output:
+            _write_canonical_json(
+                output / "content.json",
+                _fixture_payloads("tampered-restored-output")["content"],
+            )
+        return result
+
+    monkeypatch.setattr(Path, "replace", _fail_publication_then_mutate_restore)
+
+    with pytest.raises(
+        RuntimeError,
+        match=("^Fixture output rollback could not be completed safely; " "manual recovery is required$"),
+    ):
+        generator._replace_output_directory(staging, output)
+
+    assert backup is not None
+    assert not output.exists()
+    assert json.loads((backup / "content.json").read_text(encoding="ascii"))["cases"] == [
+        {"marker": "tampered-restored-output"}
+    ]
+    _assert_fixture_marker(staging, "new-output")
+    assert len(list(tmp_path.glob(".fixtures.publication-recovery.json"))) == 1
 
 
 def test_in_place_staging_mutation_after_publication_enters_manual_recovery(
