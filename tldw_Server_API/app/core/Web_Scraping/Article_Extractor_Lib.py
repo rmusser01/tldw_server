@@ -2130,9 +2130,10 @@ def generate_regex_pattern_from_llm(
     group = obj.get("group")
     group_idx = int(group) if isinstance(group, int) else None
 
+    sample_too_large = len(html_text) > 1_000_000
     safe_result = search_untrusted(
         pattern,
-        html_text,
+        "" if sample_too_large else html_text,
         flags=flags,
         limits=SafeRegexLimits(
             max_pattern_chars=4_096,
@@ -2144,14 +2145,17 @@ def generate_regex_pattern_from_llm(
         result["error"] = safe_result.code
         return result
 
-    match = safe_result.match
-    if match:
-        try:
-            matched_value = match.group(group_idx) if group_idx is not None else match.group(0)
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-            matched_value = match.group(0)
-        result["sample_match"] = matched_value
-        result["sample_span"] = [match.start(), match.end()]
+    if sample_too_large:
+        result["sample_status"] = "skipped_input_too_large"
+    else:
+        match = safe_result.match
+        if match:
+            try:
+                matched_value = match.group(group_idx) if group_idx is not None else match.group(0)
+            except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
+                matched_value = match.group(0)
+            result["sample_match"] = matched_value
+            result["sample_span"] = [match.start(), match.end()]
 
     result["pattern"] = pattern
     if obj.get("flags") is not None:

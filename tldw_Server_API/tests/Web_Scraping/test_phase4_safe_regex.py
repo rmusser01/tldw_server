@@ -1792,19 +1792,78 @@ def test_generated_regex_oversized_pattern_uses_stable_code(
     assert result["error"] == "regex_too_large"
 
 
-def test_generated_regex_enforces_exact_sample_boundary(
+def test_generated_regex_preserves_exact_sample_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_regex_llm_response(monkeypatch, {"pattern": "a$"})
 
     exact_result = _generate_regex("a" * 1_000_000)
-    over_result = _generate_regex("a" * 1_000_001)
 
     assert exact_result["success"] is True
     assert exact_result["sample_match"] == "a"
     assert exact_result["sample_span"] == [999_999, 1_000_000]
-    assert over_result["success"] is False
-    assert over_result["error"] == "regex_too_large"
+
+
+def test_generated_regex_skips_one_over_sample_without_searching_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample = "a" * 1_000_001
+    _install_regex_llm_response(
+        monkeypatch,
+        {"pattern": "(a)$", "flags": "i", "group": 1},
+    )
+    searched_values: list[str] = []
+    original_search = ael.search_untrusted
+
+    def _recording_search(pattern: str, value: str, **kwargs: Any) -> SafeRegexResult:
+        searched_values.append(value)
+        return original_search(pattern, value, **kwargs)
+
+    monkeypatch.setattr(ael, "search_untrusted", _recording_search)
+
+    result = _generate_regex(sample)
+
+    assert result["success"] is True
+    assert result["pattern"] == "(a)$"
+    assert result["flags"] == "i"
+    assert result["group"] == 1
+    assert result["sample_status"] == "skipped_input_too_large"
+    assert "sample_match" not in result
+    assert "sample_span" not in result
+    assert "error" not in result
+    assert searched_values == [""]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        ({"pattern": "["}, "regex_invalid"),
+        ({"pattern": "a" * 4_097}, "regex_too_large"),
+    ],
+    ids=["invalid-pattern", "oversized-pattern"],
+)
+def test_generated_regex_one_over_sample_still_rejects_invalid_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+    expected_error: str,
+) -> None:
+    sample = "a" * 1_000_001
+    _install_regex_llm_response(monkeypatch, payload)
+    searched_values: list[str] = []
+    original_search = ael.search_untrusted
+
+    def _recording_search(pattern: str, value: str, **kwargs: Any) -> SafeRegexResult:
+        searched_values.append(value)
+        return original_search(pattern, value, **kwargs)
+
+    monkeypatch.setattr(ael, "search_untrusted", _recording_search)
+
+    result = _generate_regex(sample)
+
+    assert result["success"] is False
+    assert result["error"] == expected_error
+    assert "sample_status" not in result
+    assert searched_values == [""]
 
 
 def test_generated_regex_timeout_uses_stable_code(
