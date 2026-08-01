@@ -844,7 +844,8 @@ def test_lock_path_is_a_stable_hash_of_the_resolved_output_outside_source(
     output.mkdir()
     output_link = tmp_path / "fixtures-link"
     _symlink_or_skip(output_link, output, target_is_directory=True)
-    expected_identity = hashlib.sha256(os.path.normcase(str(output.resolve())).encode("utf-8")).hexdigest()
+    normalized_output = os.path.normcase(str(output.resolve())).casefold()
+    expected_identity = hashlib.sha256(normalized_output.encode("utf-8")).hexdigest()
 
     direct_lock = generator._lock_path_for_output(output)
     linked_lock = generator._lock_path_for_output(output_link)
@@ -857,6 +858,19 @@ def test_lock_path_is_a_stable_hash_of_the_resolved_output_outside_source(
         namespace = f"{namespace}-{effective_uid}"
     assert direct_lock.parent == Path(tempfile.gettempdir()).resolve() / namespace
     assert not direct_lock.is_relative_to(source_root)
+
+
+def test_lock_path_casefolds_resolved_output_aliases(tmp_path: Path) -> None:
+    lower_output = tmp_path / "fixtures"
+    upper_output = tmp_path / "FIXTURES"
+    normalized_output = os.path.normcase(str(lower_output.resolve())).casefold()
+    expected_identity = hashlib.sha256(normalized_output.encode("utf-8")).hexdigest()
+
+    lower_lock = generator._lock_path_for_output(lower_output)
+    upper_lock = generator._lock_path_for_output(upper_output)
+
+    assert lower_lock == upper_lock
+    assert lower_lock.name == f"{expected_identity}.lock"
 
 
 @pytest.mark.parametrize(
@@ -2658,6 +2672,344 @@ def test_cooperative_reader_cannot_observe_two_rename_publication_gap(tmp_path: 
     ]
 
 
+def test_recovery_journal_is_validated_and_closed_before_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = tmp_path / f".fixtures.backup-{'a' * 32}"
+    canonical = tmp_path / ".fixtures.publication-recovery.json"
+    real_open = generator.os.open
+    real_close = generator.os.close
+    real_fsync = generator.os.fsync
+    real_read_recovery_file = generator._read_recovery_file
+    real_replace = Path.replace
+    real_fsync_directory = generator._fsync_directory
+    writer_descriptor: int | None = None
+    writer_fsynced = False
+    writer_closed = False
+    temp_validated = False
+    atomic_replace_seen = False
+    parent_fsynced_after_replace = False
+
+    def _track_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        nonlocal writer_descriptor
+        descriptor = real_open(path, flags, *args, **kwargs)
+        candidate = Path(path)
+        if candidate.parent == tmp_path and candidate.name.startswith(f"{canonical.name}.tmp-"):
+            if flags & os.O_WRONLY:
+                writer_descriptor = descriptor
+        return descriptor
+
+    def _track_fsync(descriptor: int) -> None:
+        nonlocal writer_fsynced
+        if descriptor == writer_descriptor:
+            writer_fsynced = True
+        real_fsync(descriptor)
+
+    def _track_close(descriptor: int) -> None:
+        nonlocal writer_closed
+        real_close(descriptor)
+        if descriptor == writer_descriptor:
+            writer_closed = True
+
+    def _track_read_recovery_file(path: Path) -> tuple[tuple[int, int, int], bytes]:
+        nonlocal temp_validated
+        if path != canonical:
+            temp_validated = True
+        return real_read_recovery_file(path)
+
+    def _track_replace(path: Path, target: Path) -> Path:
+        nonlocal atomic_replace_seen
+        if target == canonical:
+            assert path.parent == canonical.parent
+            assert path.name.startswith(f"{canonical.name}.tmp-")
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+            assert writer_fsynced
+            assert writer_closed
+            assert temp_validated
+            atomic_replace_seen = True
+        return real_replace(path, target)
+
+    def _track_fsync_directory(
+        directory: Path,
+        expected_identity: tuple[int, int, int],
+        error_message: str,
+    ) -> None:
+        nonlocal parent_fsynced_after_replace
+        if directory == tmp_path and canonical.exists():
+            parent_fsynced_after_replace = True
+        real_fsync_directory(directory, expected_identity, error_message)
+
+    monkeypatch.setattr(generator.os, "open", _track_open)
+    monkeypatch.setattr(generator.os, "fsync", _track_fsync)
+    monkeypatch.setattr(generator.os, "close", _track_close)
+    monkeypatch.setattr(generator, "_read_recovery_file", _track_read_recovery_file)
+    monkeypatch.setattr(Path, "replace", _track_replace)
+    monkeypatch.setattr(generator, "_fsync_directory", _track_fsync_directory)
+
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        old_snapshot,
+        new_snapshot,
+    )
+
+    assert record.path == canonical
+    assert atomic_replace_seen
+    assert parent_fsynced_after_replace
+    assert not list(tmp_path.glob(f"{canonical.name}.tmp-*"))
+    payload = json.loads(canonical.read_text(encoding="ascii"))
+    assert set(payload) == {
+        "backup_name",
+        "output_name",
+        "output_snapshot",
+        "parent_identity",
+        "schema_version",
+        "staged_snapshot",
+    }
+    assert type(payload["schema_version"]) is int
+    assert payload["schema_version"] == 2
+
+
+def test_torn_recovery_journal_write_leaves_no_canonical_or_temp_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = tmp_path / f".fixtures.backup-{'b' * 32}"
+    canonical = tmp_path / ".fixtures.publication-recovery.json"
+    real_open = generator.os.open
+    real_write = generator.os.write
+    recovery_descriptors: set[int] = set()
+
+    def _track_open(path: Any, *args: Any, **kwargs: Any) -> int:
+        descriptor = real_open(path, *args, **kwargs)
+        candidate = Path(path)
+        if candidate.parent == tmp_path and ".publication-recovery.json" in candidate.name:
+            recovery_descriptors.add(descriptor)
+        return descriptor
+
+    def _write_prefix_then_fail(descriptor: int, data: bytes) -> int:
+        if descriptor in recovery_descriptors:
+            real_write(descriptor, data[:17])
+            raise OSError("sensitive torn write")
+        return real_write(descriptor, data)
+
+    monkeypatch.setattr(generator.os, "open", _track_open)
+    monkeypatch.setattr(generator.os, "write", _write_prefix_then_fail)
+
+    with pytest.raises(RuntimeError, match=generator._RECOVERY_ERROR) as exc_info:
+        generator._write_recovery_record(
+            output,
+            backup,
+            parent_identity,
+            old_snapshot,
+            new_snapshot,
+        )
+
+    assert not canonical.exists()
+    assert not list(tmp_path.glob(f"{canonical.name}.tmp-*"))
+    assert "sensitive" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_marker"),
+    [
+        pytest.param("old-output-no-backup", "old", id="old-output-no-backup"),
+        pytest.param("no-output-old-backup", "old", id="no-output-old-backup"),
+        pytest.param("new-output-old-backup", "new", id="new-output-old-backup"),
+        pytest.param("new-output-no-backup", "new", id="new-output-no-backup"),
+    ],
+)
+def test_recovery_accepts_exact_content_bound_publication_states(
+    tmp_path: Path,
+    state: str,
+    expected_marker: str,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = tmp_path / f".fixtures.backup-{'c' * 32}"
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        old_snapshot,
+        new_snapshot,
+    )
+
+    if state != "old-output-no-backup":
+        output.replace(backup)
+    if state.startswith("new-output"):
+        staging.replace(output)
+    if state == "new-output-no-backup":
+        generator.shutil.rmtree(backup)
+
+    generator._recover_interrupted_publication(output)
+
+    _assert_fixture_marker(output, expected_marker)
+    assert not backup.exists()
+    assert not record.path.exists()
+
+
+def test_recovery_rejects_ambiguous_old_output_and_unvalidated_backup(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = tmp_path / f".fixtures.backup-{'d' * 32}"
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        old_snapshot,
+        new_snapshot,
+    )
+    _write_valid_fixture_set(backup, "3" * 40, "ambiguous")
+    before_output = _snapshot_path(output)
+    before_backup = _snapshot_path(backup)
+    before_record = record.path.read_bytes()
+
+    with pytest.raises(RuntimeError, match=generator._RECOVERY_ERROR):
+        generator._recover_interrupted_publication(output)
+
+    assert _snapshot_path(output) == before_output
+    assert _snapshot_path(backup) == before_backup
+    assert record.path.read_bytes() == before_record
+
+
+def test_prior_five_category_upgrade_journal_recovers_between_renames(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(
+        output,
+        "1" * 40,
+        "old-five",
+        categories=generator._PRIOR_CASE_NAMES,
+    )
+    _write_valid_fixture_set(staging, "2" * 40, "new-six")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = tmp_path / f".fixtures.backup-{'e' * 32}"
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        old_snapshot,
+        new_snapshot,
+    )
+    output.replace(backup)
+
+    loaded = generator._load_recovery_record(output)
+    assert loaded is not None
+    assert loaded.output_snapshot == old_snapshot
+    assert loaded.staged_snapshot == new_snapshot
+    generator._recover_interrupted_publication(output)
+
+    assert {path.name for path in output.iterdir()} == {
+        "manifest.json",
+        *(f"{category}.json" for category in generator._PRIOR_CASE_NAMES),
+    }
+    assert json.loads((output / "content.json").read_text(encoding="ascii"))["cases"] == [{"marker": "old-five"}]
+    assert not backup.exists()
+    assert not record.path.exists()
+
+
+def test_successful_publication_removes_validated_backup_before_journal_clear(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    real_clear_recovery_record = generator._clear_recovery_record
+    clear_seen = False
+
+    def _clear_after_backup_cleanup(record: Any) -> None:
+        nonlocal clear_seen
+        _assert_fixture_marker(output, "new")
+        assert not record.backup.exists()
+        clear_seen = True
+        real_clear_recovery_record(record)
+
+    monkeypatch.setattr(generator, "_clear_recovery_record", _clear_after_backup_cleanup)
+
+    generator._replace_output_directory(staging, output)
+
+    assert clear_seen
+    _assert_fixture_marker(output, "new")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert not list(tmp_path.glob(".fixtures.publication-recovery.json"))
+
+
+def test_rollback_journal_cleanup_failure_does_not_mask_active_baseexception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrimaryPublicationFailure(BaseException):
+        pass
+
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    real_replace = Path.replace
+    primary = PrimaryPublicationFailure("primary publication failure")
+
+    def _publish_then_fail(path: Path, target: Path) -> Path:
+        result = real_replace(path, target)
+        if path == staging and target == output:
+            raise primary
+        return result
+
+    def _fail_journal_clear(_record: Any) -> None:
+        raise RuntimeError("secondary journal clear failure")
+
+    monkeypatch.setattr(Path, "replace", _publish_then_fail)
+    monkeypatch.setattr(generator, "_clear_recovery_record", _fail_journal_clear)
+
+    with pytest.raises(PrimaryPublicationFailure) as exc_info:
+        generator._replace_output_directory(staging, output)
+
+    assert exc_info.value is primary
+    _assert_fixture_marker(output, "old")
+    _assert_fixture_marker(staging, "new")
+    assert not list(tmp_path.glob(".fixtures.backup-*"))
+    assert len(list(tmp_path.glob(".fixtures.publication-recovery.json"))) == 1
+
+
 def test_crash_between_renames_is_recovered_before_payload_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2784,8 +3136,11 @@ def test_crash_after_durable_record_before_first_rename_recovers_as_noop(
 
 def test_recovery_record_rejects_boolean_schema_version(tmp_path: Path) -> None:
     output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
     _write_valid_fixture_set(output, "1" * 40, "original")
+    _write_valid_fixture_set(staging, "2" * 40, "staged")
     output_snapshot = generator._capture_fixture_set_snapshot(output, "snapshot failed")
+    staged_snapshot = generator._capture_fixture_set_snapshot(staging, "snapshot failed")
     parent_identity = generator._path_identity(tmp_path, "parent changed")
     backup = tmp_path / f".fixtures.backup-{'a' * 32}"
     record = generator._write_recovery_record(
@@ -2793,6 +3148,7 @@ def test_recovery_record_rejects_boolean_schema_version(tmp_path: Path) -> None:
         backup,
         parent_identity,
         output_snapshot,
+        staged_snapshot,
     )
     payload = json.loads(record.path.read_text(encoding="ascii"))
     payload["schema_version"] = True
@@ -2810,6 +3166,34 @@ def test_recovery_record_rejects_boolean_schema_version(tmp_path: Path) -> None:
     assert not backup.exists()
 
 
+def test_recovery_record_rejects_unvalidated_backup_path(tmp_path: Path) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "original")
+    _write_valid_fixture_set(staging, "2" * 40, "staged")
+    output_snapshot = generator._capture_fixture_set_snapshot(output, "snapshot failed")
+    staged_snapshot = generator._capture_fixture_set_snapshot(staging, "snapshot failed")
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = tmp_path / f".fixtures.backup-{'f' * 32}"
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        output_snapshot,
+        staged_snapshot,
+    )
+    payload = json.loads(record.path.read_text(encoding="ascii"))
+    payload["backup_name"] = "../unvalidated-backup"
+    _write_canonical_json(record.path, payload)
+    before = record.path.read_bytes()
+
+    with pytest.raises(RuntimeError, match=generator._RECOVERY_ERROR):
+        generator._load_recovery_record(output)
+
+    assert record.path.read_bytes() == before
+    _assert_fixture_marker(output, "original")
+
+
 def test_recovery_write_preserves_body_baseexception_over_close_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2818,8 +3202,11 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
         pass
 
     output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
     _write_valid_fixture_set(output, "1" * 40, "original")
+    _write_valid_fixture_set(staging, "2" * 40, "staged")
     output_snapshot = generator._capture_fixture_set_snapshot(output, "snapshot failed")
+    staged_snapshot = generator._capture_fixture_set_snapshot(staging, "snapshot failed")
     parent_identity = generator._path_identity(tmp_path, "parent changed")
     recovery_path = tmp_path / ".fixtures.publication-recovery.json"
     real_open = generator.os.open
@@ -2830,7 +3217,7 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
 
     def _record_open(path: Any, *args: Any, **kwargs: Any) -> int:
         descriptor = real_open(path, *args, **kwargs)
-        if Path(path) == recovery_path:
+        if Path(path).parent == tmp_path and Path(path).name.startswith(f"{recovery_path.name}.tmp-"):
             descriptors.append(descriptor)
         return descriptor
 
@@ -2854,6 +3241,7 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
                 tmp_path / f".fixtures.backup-{'b' * 32}",
                 parent_identity,
                 output_snapshot,
+                staged_snapshot,
             )
         assert exc_info.value is primary
     finally:
@@ -2862,6 +3250,8 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
                 real_close(descriptor)
             except OSError:
                 pass
+    assert not recovery_path.exists()
+    assert not list(tmp_path.glob(f"{recovery_path.name}.tmp-*"))
 
 
 def test_recovery_read_preserves_body_baseexception_over_close_failure(

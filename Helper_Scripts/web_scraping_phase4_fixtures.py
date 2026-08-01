@@ -54,6 +54,7 @@ _STABLE_IDENTITY_ERROR = "Fixture filesystem does not provide stable identity"
 _STAGING_CLEANUP_ERROR = "Fixture staging directory could not be cleaned up"
 _STAGING_RETAINED_DIAGNOSTIC = "warning: fixture staging directory retained for manual cleanup"
 _RECOVERY_ERROR = "Fixture publication recovery could not be completed safely; manual recovery is required"
+_RECOVERY_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ class _RecoveryRecord:
     parent_identity: tuple[int, int, int]
     backup: Path
     output_snapshot: _FixtureSetSnapshot
+    staged_snapshot: _FixtureSetSnapshot
 
 
 def _report_staging_retained() -> None:
@@ -433,7 +435,7 @@ def _validate_existing_output(output: Path) -> _FixtureSetSnapshot | None:
 
 
 def _lock_path_for_output(output: Path) -> Path:
-    normalized_output = os.path.normcase(str(output.resolve()))
+    normalized_output = os.path.normcase(str(output.resolve())).casefold()
     identity = hashlib.sha256(normalized_output.encode("utf-8")).hexdigest()
     namespace = "tldw-phase4-fixture-locks"
     get_effective_uid = getattr(os, "geteuid", None)
@@ -591,6 +593,9 @@ def _restore_output_backup(
     output: Path,
     parent_identity: tuple[int, int, int],
     output_snapshot: _FixtureSetSnapshot,
+    *,
+    staging: Path,
+    staged_snapshot: _FixtureSetSnapshot,
 ) -> None:
     recovery_error = "Fixture output rollback could not be completed safely; " "manual recovery is required"
     output_identity = output_snapshot.directory_identity
@@ -601,6 +606,21 @@ def _restore_output_backup(
         if current_output == output_identity and current_backup is None:
             _require_fixture_set_snapshot(output, output_snapshot, recovery_error)
             return
+        if current_output == staged_snapshot.directory_identity and current_backup == output_identity:
+            _require_real_directory_identity(
+                output,
+                staged_snapshot.directory_identity,
+                recovery_error,
+            )
+            _require_fixture_set_snapshot(output, staged_snapshot, recovery_error)
+            _require_real_directory_identity(backup, output_identity, recovery_error)
+            _require_fixture_set_snapshot(backup, output_snapshot, recovery_error)
+            _require_path_absent(staging, recovery_error)
+            output.replace(staging)
+            _require_path_absent(output, recovery_error)
+            _require_fixture_set_snapshot(staging, staged_snapshot, recovery_error)
+            current_output = None
+            current_backup = _path_identity_or_none(backup, recovery_error)
         if current_output is not None or current_backup != output_identity:
             raise RuntimeError(recovery_error)
         _require_real_directory_identity(backup, output_identity, recovery_error)
@@ -700,8 +720,12 @@ def _snapshot_from_json(value: object) -> _FixtureSetSnapshot:
             )
         )
 
-    expected_names = sorted({"manifest.json", *(f"{category}.json" for category in CASE_NAMES)})
-    if [file.name for file in files] != expected_names:
+    snapshot_names = [file.name for file in files]
+    allowed_names = {
+        tuple(sorted({"manifest.json", *(f"{category}.json" for category in categories)}))
+        for categories in (CASE_NAMES, _PRIOR_CASE_NAMES)
+    }
+    if tuple(snapshot_names) not in allowed_names:
         raise ValueError
     return _FixtureSetSnapshot(
         directory_identity=directory_identity,
@@ -790,65 +814,148 @@ def _read_recovery_file(path: Path) -> tuple[tuple[int, int, int], bytes]:
     return identity, raw
 
 
+def _parse_recovery_payload(
+    raw: bytes,
+    output: Path,
+) -> tuple[str, tuple[int, int, int], _FixtureSetSnapshot, _FixtureSetSnapshot]:
+    payload = json.loads(raw.decode("ascii"), parse_constant=_invalid_json_constant)
+    canonical = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
+    if raw != canonical or type(payload) is not dict:
+        raise ValueError
+    if set(payload) != {
+        "backup_name",
+        "output_name",
+        "output_snapshot",
+        "parent_identity",
+        "schema_version",
+        "staged_snapshot",
+    }:
+        raise ValueError
+    if (
+        type(payload["schema_version"]) is not int
+        or payload["schema_version"] != _RECOVERY_SCHEMA_VERSION
+        or type(payload["output_name"]) is not str
+        or payload["output_name"] != output.name
+    ):
+        raise ValueError
+    backup_name = payload["backup_name"]
+    if (
+        type(backup_name) is not str
+        or re.fullmatch(rf"\.{re.escape(output.name)}\.backup-[0-9a-f]{{32}}", backup_name) is None
+    ):
+        raise ValueError
+    parent_identity = _identity_from_json(payload["parent_identity"])
+    if parent_identity[2] != stat.S_IFDIR:
+        raise ValueError
+    output_snapshot = _snapshot_from_json(payload["output_snapshot"])
+    staged_snapshot = _snapshot_from_json(payload["staged_snapshot"])
+    if output_snapshot.directory_identity == staged_snapshot.directory_identity:
+        raise ValueError
+    return backup_name, parent_identity, output_snapshot, staged_snapshot
+
+
+def _cleanup_recovery_temp(
+    path: Path,
+    expected_identity: tuple[int, int, int] | None,
+) -> None:
+    if expected_identity is None:
+        return
+    try:
+        if _path_identity_or_none(path, _RECOVERY_ERROR) == expected_identity:
+            path.unlink()
+    except BaseException:  # noqa: BLE001 - cleanup must not replace the active failure
+        pass
+
+
 def _write_recovery_record(
     output: Path,
     backup: Path,
     parent_identity: tuple[int, int, int],
     output_snapshot: _FixtureSetSnapshot,
+    staged_snapshot: _FixtureSetSnapshot,
 ) -> _RecoveryRecord:
     path = _recovery_path_for_output(output)
+    temporary_path = path.with_name(f"{path.name}.tmp-{uuid.uuid4().hex}")
     payload = {
         "backup_name": backup.name,
         "output_name": output.name,
         "output_snapshot": _snapshot_to_json(output_snapshot),
         "parent_identity": _identity_to_json(parent_identity),
-        "schema_version": 1,
+        "schema_version": _RECOVERY_SCHEMA_VERSION,
+        "staged_snapshot": _snapshot_to_json(staged_snapshot),
     }
     raw = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    temporary_identity: tuple[int, int, int] | None = None
+    published = False
     try:
         _require_path_identity(output.parent, parent_identity, _RECOVERY_ERROR)
-        descriptor = os.open(path, flags, 0o600)
-    except (OSError, RuntimeError):
-        raise RuntimeError(_RECOVERY_ERROR) from None
-    descriptor_owner = _OwnedDescriptor(descriptor)
-    try:
-        offset = 0
-        while offset < len(raw):
-            written = os.write(descriptor, raw[offset:])
-            if written <= 0:
-                raise OSError
-            offset += written
-        metadata = os.fstat(descriptor)
-        if not _valid_lock_file_metadata(metadata):
+        _require_path_absent(path, _RECOVERY_ERROR)
+        descriptor_owner = _OwnedDescriptor(os.open(temporary_path, flags, 0o600))
+        descriptor = descriptor_owner.fileno()
+        try:
+            metadata_before = os.fstat(descriptor)
+            if not _valid_lock_file_metadata(metadata_before):
+                raise RuntimeError(_RECOVERY_ERROR)
+            temporary_identity = _stable_metadata_identity(metadata_before)
+            offset = 0
+            while offset < len(raw):
+                written = os.write(descriptor, raw[offset:])
+                if written <= 0:
+                    raise OSError
+                offset += written
+            metadata_after = os.fstat(descriptor)
+            if (
+                not _valid_lock_file_metadata(metadata_after)
+                or _stable_metadata_identity(metadata_after) != temporary_identity
+                or metadata_after.st_size != len(raw)
+            ):
+                raise RuntimeError(_RECOVERY_ERROR)
+            os.fsync(descriptor)
+        except (OSError, RuntimeError):
+            descriptor_owner.close_quietly()
+            raise RuntimeError(_RECOVERY_ERROR) from None
+        except BaseException:
+            descriptor_owner.close_quietly()
+            raise
+        else:
+            descriptor_owner.close()
+
+        if temporary_identity is None:
             raise RuntimeError(_RECOVERY_ERROR)
-        record_identity = _stable_metadata_identity(metadata)
-        os.fsync(descriptor)
-    except (OSError, RuntimeError):
-        descriptor_owner.close_quietly()
+        _require_path_identity(temporary_path, temporary_identity, _RECOVERY_ERROR)
+        read_identity, read_raw = _read_recovery_file(temporary_path)
+        if read_identity != temporary_identity or read_raw != raw:
+            raise RuntimeError(_RECOVERY_ERROR)
+        parsed = _parse_recovery_payload(read_raw, output)
+        if parsed != (backup.name, parent_identity, output_snapshot, staged_snapshot):
+            raise RuntimeError(_RECOVERY_ERROR)
+        _require_path_identity(output.parent, parent_identity, _RECOVERY_ERROR)
+        _require_path_absent(path, _RECOVERY_ERROR)
+        temporary_path.replace(path)
+        published = True
+        _require_path_identity(path, temporary_identity, _RECOVERY_ERROR)
+        canonical_identity, canonical_raw = _read_recovery_file(path)
+        if canonical_identity != temporary_identity or canonical_raw != raw:
+            raise RuntimeError(_RECOVERY_ERROR)
+        _fsync_directory(output.parent, parent_identity, _RECOVERY_ERROR)
+    except (OSError, UnicodeError, ValueError, RuntimeError):
+        if not published:
+            _cleanup_recovery_temp(temporary_path, temporary_identity)
         raise RuntimeError(_RECOVERY_ERROR) from None
     except BaseException:
-        descriptor_owner.close_quietly()
+        if not published:
+            _cleanup_recovery_temp(temporary_path, temporary_identity)
         raise
-    else:
-        try:
-            descriptor_owner.close()
-        except OSError:
-            raise RuntimeError(_RECOVERY_ERROR) from None
-
-    _require_path_identity(path, record_identity, _RECOVERY_ERROR)
-    read_identity, read_raw = _read_recovery_file(path)
-    if read_identity != record_identity or read_raw != raw:
-        raise RuntimeError(_RECOVERY_ERROR)
-    _fsync_directory(output.parent, parent_identity, _RECOVERY_ERROR)
     return _RecoveryRecord(
         path=path,
-        identity=record_identity,
+        identity=temporary_identity,
         raw=raw,
         parent_identity=parent_identity,
         backup=backup,
         output_snapshot=output_snapshot,
+        staged_snapshot=staged_snapshot,
     )
 
 
@@ -858,34 +965,10 @@ def _load_recovery_record(output: Path) -> _RecoveryRecord | None:
         return None
     try:
         record_identity, raw = _read_recovery_file(path)
-        payload = json.loads(raw.decode("ascii"), parse_constant=_invalid_json_constant)
-        canonical = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
-        if raw != canonical or type(payload) is not dict:
-            raise ValueError
-        if set(payload) != {
-            "backup_name",
-            "output_name",
-            "output_snapshot",
-            "parent_identity",
-            "schema_version",
-        }:
-            raise ValueError
-        if (
-            type(payload["schema_version"]) is not int
-            or payload["schema_version"] != 1
-            or payload["output_name"] != output.name
-        ):
-            raise ValueError
-        backup_name = payload["backup_name"]
-        if (
-            type(backup_name) is not str
-            or re.fullmatch(rf"\.{re.escape(output.name)}\.backup-[0-9a-f]{{32}}", backup_name) is None
-        ):
-            raise ValueError
-        parent_identity = _identity_from_json(payload["parent_identity"])
-        if parent_identity[2] != stat.S_IFDIR:
-            raise ValueError
-        output_snapshot = _snapshot_from_json(payload["output_snapshot"])
+        backup_name, parent_identity, output_snapshot, staged_snapshot = _parse_recovery_payload(
+            raw,
+            output,
+        )
     except (OSError, UnicodeError, ValueError, RuntimeError):
         raise RuntimeError(_RECOVERY_ERROR) from None
     return _RecoveryRecord(
@@ -895,6 +978,7 @@ def _load_recovery_record(output: Path) -> _RecoveryRecord | None:
         parent_identity=parent_identity,
         backup=output.parent / backup_name,
         output_snapshot=output_snapshot,
+        staged_snapshot=staged_snapshot,
     )
 
 
@@ -919,22 +1003,38 @@ def _recover_interrupted_publication(output: Path) -> None:
         _require_path_identity(output.parent, record.parent_identity, _RECOVERY_ERROR)
         output_identity = _path_identity_or_none(output, _RECOVERY_ERROR)
         backup_identity = _path_identity_or_none(record.backup, _RECOVERY_ERROR)
-        if output_identity == record.output_snapshot.directory_identity and backup_identity is None:
+        old_identity = record.output_snapshot.directory_identity
+        new_identity = record.staged_snapshot.directory_identity
+        if output_identity == old_identity and backup_identity is None:
             _require_fixture_set_snapshot(output, record.output_snapshot, _RECOVERY_ERROR)
             _clear_recovery_record(record)
             return
-        if output_identity is not None or backup_identity != record.output_snapshot.directory_identity:
-            raise RuntimeError(_RECOVERY_ERROR)
-        _require_real_directory_identity(
-            record.backup,
-            record.output_snapshot.directory_identity,
-            _RECOVERY_ERROR,
-        )
-        _require_fixture_set_snapshot(record.backup, record.output_snapshot, _RECOVERY_ERROR)
-        record.backup.replace(output)
-        _require_fixture_set_snapshot(output, record.output_snapshot, _RECOVERY_ERROR)
-        _require_path_absent(record.backup, _RECOVERY_ERROR)
-        _clear_recovery_record(record)
+        if output_identity is None and backup_identity == old_identity:
+            _require_real_directory_identity(record.backup, old_identity, _RECOVERY_ERROR)
+            _require_fixture_set_snapshot(record.backup, record.output_snapshot, _RECOVERY_ERROR)
+            record.backup.replace(output)
+            _require_fixture_set_snapshot(output, record.output_snapshot, _RECOVERY_ERROR)
+            _require_path_absent(record.backup, _RECOVERY_ERROR)
+            _fsync_directory(output.parent, record.parent_identity, _RECOVERY_ERROR)
+            _clear_recovery_record(record)
+            return
+        if output_identity == new_identity and backup_identity == old_identity:
+            _require_real_directory_identity(output, new_identity, _RECOVERY_ERROR)
+            _require_fixture_set_snapshot(output, record.staged_snapshot, _RECOVERY_ERROR)
+            _require_real_directory_identity(record.backup, old_identity, _RECOVERY_ERROR)
+            _require_fixture_set_snapshot(record.backup, record.output_snapshot, _RECOVERY_ERROR)
+            shutil.rmtree(record.backup)
+            _require_path_absent(record.backup, _RECOVERY_ERROR)
+            _require_fixture_set_snapshot(output, record.staged_snapshot, _RECOVERY_ERROR)
+            _fsync_directory(output.parent, record.parent_identity, _RECOVERY_ERROR)
+            _clear_recovery_record(record)
+            return
+        if output_identity == new_identity and backup_identity is None:
+            _require_real_directory_identity(output, new_identity, _RECOVERY_ERROR)
+            _require_fixture_set_snapshot(output, record.staged_snapshot, _RECOVERY_ERROR)
+            _clear_recovery_record(record)
+            return
+        raise RuntimeError(_RECOVERY_ERROR)
     except (OSError, RuntimeError):
         raise RuntimeError(_RECOVERY_ERROR) from None
 
@@ -1298,6 +1398,7 @@ def _replace_output_directory(
                 backup,
                 parent_identity,
                 output_snapshot,
+                staging_snapshot,
             )
             _require_path_identity(
                 output.parent,
@@ -1380,25 +1481,30 @@ def _replace_output_directory(
             staging_snapshot,
             "Fixture output changed during publication",
         )
-        if recovery_record is not None:
-            _clear_recovery_record(recovery_record)
-    except BaseException:
-        if rename_started and output_identity is not None and backup is not None:
-            _restore_output_backup(
-                backup,
-                output,
-                parent_identity,
-                output_snapshot,
-            )
-            if recovery_record is not None:
-                _clear_recovery_record(recovery_record)
-        elif recovery_record is not None:
-            try:
-                _clear_recovery_record(recovery_record)
-            except (OSError, RuntimeError):
+    except BaseException as active_error:
+        try:
+            if rename_started and output_identity is not None and backup is not None:
+                _restore_output_backup(
+                    backup,
+                    output,
+                    parent_identity,
+                    output_snapshot,
+                    staging=staging,
+                    staged_snapshot=staging_snapshot,
+                )
+                if recovery_record is not None:
+                    _clear_recovery_record(recovery_record)
+            elif recovery_record is not None:
+                try:
+                    _clear_recovery_record(recovery_record)
+                except (OSError, RuntimeError):
+                    raise RuntimeError(_RECOVERY_ERROR) from None
+            elif staging_rename_completed:
                 raise RuntimeError(_RECOVERY_ERROR) from None
-        elif staging_rename_completed:
-            raise RuntimeError(_RECOVERY_ERROR) from None
+        except BaseException:
+            if not isinstance(active_error, Exception):
+                raise active_error from None
+            raise
         raise
     else:
         if output_identity is not None and backup is not None:
@@ -1418,13 +1524,45 @@ def _replace_output_directory(
                     output_identity,
                     "Fixture output backup changed during cleanup",
                 )
-            except RuntimeError:
+                _require_fixture_set_snapshot(
+                    output,
+                    staging_snapshot,
+                    "Fixture output changed during cleanup",
+                )
+                _require_fixture_set_snapshot(
+                    backup,
+                    output_snapshot,
+                    "Fixture output backup changed during cleanup",
+                )
+                _fsync_directory(
+                    output.parent,
+                    parent_identity,
+                    "Fixture output parent changed during cleanup",
+                )
+            except (OSError, RuntimeError):
                 _report_backup_retained(backup)
                 return
             try:
                 shutil.rmtree(backup)
-            except OSError:
+                _require_path_absent(
+                    backup,
+                    "Fixture output backup changed during cleanup",
+                )
+                _require_fixture_set_snapshot(
+                    output,
+                    staging_snapshot,
+                    "Fixture output changed during cleanup",
+                )
+                _fsync_directory(
+                    output.parent,
+                    parent_identity,
+                    "Fixture output parent changed during cleanup",
+                )
+            except (OSError, RuntimeError):
                 _report_backup_retained(backup)
+                return
+            if recovery_record is not None:
+                _clear_recovery_record(recovery_record)
 
 
 def _cleanup_staging_directory(
