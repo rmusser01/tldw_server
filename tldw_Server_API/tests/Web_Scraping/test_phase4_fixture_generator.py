@@ -10,6 +10,7 @@ import stat
 import subprocess
 import tempfile
 import traceback
+import unicodedata
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -80,6 +81,36 @@ def _symlink_or_skip(
         raise
 
 
+def _native_samefile_aliases_or_skip(
+    tmp_path: Path,
+    alias_kind: str,
+) -> tuple[Path, Path]:
+    if alias_kind == "case":
+        output = tmp_path / "fixtures"
+        alias = tmp_path / "FIXTURES"
+    elif alias_kind == "unicode":
+        output = tmp_path / "Cafe\u0301"
+        alias = tmp_path / "Caf\u00e9"
+    else:  # pragma: no cover - test helper misuse
+        raise AssertionError(f"unknown alias kind: {alias_kind}")
+
+    output.mkdir()
+    try:
+        aliases_same_file = alias.exists() and os.path.samefile(output, alias)
+    except OSError:
+        aliases_same_file = False
+    finally:
+        output.rmdir()
+    if not aliases_same_file:
+        pytest.skip(f"native {alias_kind} same-file aliases are unavailable")
+    return output, alias
+
+
+def _publication_backup_path(output: Path, suffix: str) -> Path:
+    component = Path(generator._publication_key(output)).name
+    return output.parent / f".{component}.backup-{suffix}"
+
+
 def _fixture_payloads(marker: str) -> dict[str, dict[str, Any]]:
     return {
         category: {
@@ -134,11 +165,13 @@ class _CloseFailingLockFile:
         close_detail: str,
         *,
         close_underlying_before_error: bool = True,
+        descriptor_owner: Any | None = None,
     ) -> None:
         self._lock_file = lock_file
         self._close_detail = close_detail
         self._close_underlying_before_error = close_underlying_before_error
         self.descriptor = lock_file.fileno()
+        self.descriptor_owner = descriptor_owner
         self.close_calls = 0
         self.underlying_close_calls = 0
 
@@ -163,6 +196,44 @@ class _CloseFailingLockFile:
         raise OSError(self._close_detail)
 
 
+def _install_tracking_owned_descriptors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[Any]:
+    real_owned_descriptor = generator._OwnedDescriptor
+    owners: list[Any] = []
+
+    class _TrackingOwnedDescriptor(real_owned_descriptor):
+        def __init__(self, descriptor: int) -> None:
+            super().__init__(descriptor)
+            self.initial_descriptor = descriptor
+            self.close_calls = 0
+            self.detach_calls = 0
+            owners.append(self)
+
+        def detach(self) -> int:
+            self.detach_calls += 1
+            return super().detach()
+
+        def close(self) -> None:
+            self.close_calls += 1
+            super().close()
+
+    monkeypatch.setattr(generator, "_OwnedDescriptor", _TrackingOwnedDescriptor)
+    return owners
+
+
+def _active_descriptor_owner(owners: list[Any], descriptor: int) -> Any:
+    for owner in reversed(owners):
+        if owner.initial_descriptor != descriptor:
+            continue
+        try:
+            owner.fileno()
+        except RuntimeError:
+            continue
+        return owner
+    raise AssertionError("lock descriptor owner was not found")
+
+
 def _install_close_failing_fdopen(
     monkeypatch: pytest.MonkeyPatch,
     close_detail: str,
@@ -170,6 +241,7 @@ def _install_close_failing_fdopen(
     close_underlying_before_error: bool = True,
 ) -> list[_CloseFailingLockFile]:
     real_fdopen = generator.os.fdopen
+    descriptor_owners = _install_tracking_owned_descriptors(monkeypatch)
     lock_files: list[_CloseFailingLockFile] = []
 
     def _close_failing_fdopen(descriptor: int, *args: Any, **kwargs: Any) -> _CloseFailingLockFile:
@@ -177,6 +249,7 @@ def _install_close_failing_fdopen(
             real_fdopen(descriptor, *args, **kwargs),
             close_detail,
             close_underlying_before_error=close_underlying_before_error,
+            descriptor_owner=_active_descriptor_owner(descriptor_owners, descriptor),
         )
         lock_files.append(lock_file)
         return lock_file
@@ -194,6 +267,7 @@ class _DirectCloseFailingLockFile:
         primary_tracebacks: list[Any],
         *,
         close_underlying_before_error: bool = True,
+        descriptor_owner: Any | None = None,
     ) -> None:
         self._lock_file = lock_file
         self._close_error = close_error
@@ -201,6 +275,7 @@ class _DirectCloseFailingLockFile:
         self._primary_tracebacks = primary_tracebacks
         self._close_underlying_before_error = close_underlying_before_error
         self.descriptor = lock_file.fileno()
+        self.descriptor_owner = descriptor_owner
         self.close_calls = 0
         self.underlying_close_calls = 0
 
@@ -229,6 +304,7 @@ def _install_direct_close_failing_fdopen(
     close_underlying_before_error: bool = True,
 ) -> list[_DirectCloseFailingLockFile]:
     real_fdopen = generator.os.fdopen
+    descriptor_owners = _install_tracking_owned_descriptors(monkeypatch)
     lock_files: list[_DirectCloseFailingLockFile] = []
 
     def _direct_close_failing_fdopen(
@@ -242,6 +318,7 @@ def _install_direct_close_failing_fdopen(
             primary_error,
             primary_tracebacks,
             close_underlying_before_error=close_underlying_before_error,
+            descriptor_owner=_active_descriptor_owner(descriptor_owners, descriptor),
         )
         lock_files.append(lock_file)
         return lock_file
@@ -256,9 +333,37 @@ def _assert_lock_file_closed_once(lock_files: list[_CloseFailingLockFile]) -> No
     assert lock_file.close_calls == 1
     assert lock_file.underlying_close_calls == 1
     assert lock_file.closed
-    with pytest.raises(OSError) as closed_descriptor:
-        os.fstat(lock_file.descriptor)
-    assert closed_descriptor.value.errno == errno.EBADF
+    descriptor_owner = lock_file.descriptor_owner
+    assert descriptor_owner is not None
+    assert descriptor_owner.close_calls == 1
+    assert descriptor_owner.detach_calls == 1
+    with pytest.raises(RuntimeError, match="^Descriptor ownership has already been released$"):
+        descriptor_owner.fileno()
+
+
+def test_lock_close_assertion_is_independent_of_descriptor_number_reuse(tmp_path: Path) -> None:
+    descriptor = os.open(tmp_path / "closed-lock", os.O_CREAT | os.O_RDWR, 0o600)
+    lock_file = _CloseFailingLockFile(os.fdopen(descriptor, "r+b", buffering=0), "close failed")
+    with pytest.raises(OSError, match="^close failed$"):
+        lock_file.close()
+
+    def _released_fileno() -> int:
+        raise RuntimeError("Descriptor ownership has already been released")
+
+    lock_file.descriptor_owner = SimpleNamespace(
+        close_calls=1,
+        detach_calls=1,
+        fileno=_released_fileno,
+    )
+
+    replacement = os.open(tmp_path / "replacement", os.O_CREAT | os.O_RDWR, 0o600)
+    if replacement != descriptor:
+        os.dup2(replacement, descriptor)
+        os.close(replacement)
+    try:
+        _assert_lock_file_closed_once([lock_file])
+    finally:
+        os.close(descriptor)
 
 
 def _stat_with_uid(metadata: os.stat_result, uid: int) -> os.stat_result:
@@ -871,6 +976,35 @@ def test_lock_path_casefolds_resolved_output_aliases(tmp_path: Path) -> None:
 
     assert lower_lock == upper_lock
     assert lower_lock.name == f"{expected_identity}.lock"
+
+
+@pytest.mark.parametrize(
+    ("first_name", "second_name"),
+    [
+        pytest.param("fixtures", "FIXTURES", id="case"),
+        pytest.param("Cafe\u0301", "Caf\u00e9", id="unicode-normalization"),
+    ],
+)
+def test_publication_key_normalizes_case_and_unicode_aliases(
+    tmp_path: Path,
+    first_name: str,
+    second_name: str,
+) -> None:
+    first_output = tmp_path / first_name
+    second_output = tmp_path / second_name
+    expected_key = unicodedata.normalize(
+        "NFC",
+        os.path.normcase(str(first_output.resolve())).casefold(),
+    )
+
+    assert generator._publication_key(first_output) == expected_key
+    assert generator._publication_key(second_output) == expected_key
+    assert generator._lock_path_for_output(first_output) == generator._lock_path_for_output(second_output)
+    assert generator._recovery_path_for_output(first_output) == generator._recovery_path_for_output(second_output)
+    assert _publication_backup_path(first_output, "a" * 32) == _publication_backup_path(
+        second_output,
+        "a" * 32,
+    )
 
 
 @pytest.mark.parametrize(
@@ -2453,6 +2587,78 @@ def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: 
     _assert_fixture_marker(output, "second")
 
 
+@pytest.mark.parametrize("alias_kind", ["case", "unicode"])
+def test_native_samefile_output_aliases_serialize_publishers(
+    tmp_path: Path,
+    alias_kind: str,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output, alias = _native_samefile_aliases_or_skip(tmp_path, alias_kind)
+    _write_valid_fixture_set(output, "0" * 40, "original")
+    assert os.path.samefile(output, alias)
+
+    context = multiprocessing.get_context("spawn")
+    first_started = context.Event()
+    first_entered = context.Event()
+    first_release = context.Event()
+    second_started = context.Event()
+    second_lock_attempted = context.Event()
+    second_entered = context.Event()
+    second_release = context.Event()
+    second_release.set()
+    result_queue = context.Queue()
+    first = context.Process(
+        target=_fixture_process_worker,
+        args=(
+            str(source_root),
+            source_commit,
+            str(output),
+            "first-alias",
+            first_started,
+            first_entered,
+            first_release,
+            result_queue,
+        ),
+    )
+    second = context.Process(
+        target=_fixture_process_worker,
+        args=(
+            str(source_root),
+            source_commit,
+            str(alias),
+            "second-alias",
+            second_started,
+            second_entered,
+            second_release,
+            result_queue,
+        ),
+        kwargs={"lock_attempted": second_lock_attempted},
+    )
+
+    first.start()
+    try:
+        assert first_started.wait(10)
+        assert first_entered.wait(10)
+        second.start()
+        assert second_started.wait(10)
+        assert second_lock_attempted.wait(10)
+        assert not second_entered.wait(1)
+        first_release.set()
+        assert second_entered.wait(10)
+    finally:
+        first_release.set()
+        second_release.set()
+        _join_process(first)
+        if second.pid is not None:
+            _join_process(second)
+
+    assert sorted(_queue_results(result_queue, 2)) == [
+        ("first-alias", "ok", "", ""),
+        ("second-alias", "ok", "", ""),
+    ]
+    _assert_fixture_marker(alias, "second-alias")
+
+
 def test_different_output_processes_do_not_share_a_global_lock(tmp_path: Path) -> None:
     source_root, source_commit = _create_clean_source_root(tmp_path)
     context = multiprocessing.get_context("spawn")
@@ -2770,14 +2976,15 @@ def test_recovery_journal_is_validated_and_closed_before_atomic_publication(
     payload = json.loads(canonical.read_text(encoding="ascii"))
     assert set(payload) == {
         "backup_name",
-        "output_name",
         "output_snapshot",
         "parent_identity",
+        "publication_identity",
         "schema_version",
         "staged_snapshot",
     }
     assert type(payload["schema_version"]) is int
     assert payload["schema_version"] == 2
+    assert payload["publication_identity"] == generator._publication_key(output)
 
 
 def test_torn_recovery_journal_write_leaves_no_canonical_or_temp_artifact(
@@ -2873,6 +3080,107 @@ def test_recovery_accepts_exact_content_bound_publication_states(
     assert not record.path.exists()
 
 
+@pytest.mark.parametrize("alias_kind", ["case", "unicode"])
+@pytest.mark.parametrize(
+    ("state", "expected_marker"),
+    [
+        pytest.param("old-output-no-backup", "old", id="old-output-no-backup"),
+        pytest.param("no-output-old-backup", "old", id="no-output-old-backup"),
+        pytest.param("new-output-old-backup", "new", id="new-output-old-backup"),
+        pytest.param("new-output-no-backup", "new", id="new-output-no-backup"),
+    ],
+)
+def test_recovery_accepts_all_exact_states_through_native_samefile_alias(
+    tmp_path: Path,
+    alias_kind: str,
+    state: str,
+    expected_marker: str,
+) -> None:
+    output, alias = _native_samefile_aliases_or_skip(tmp_path, alias_kind)
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = _publication_backup_path(output, "c" * 32)
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        old_snapshot,
+        new_snapshot,
+    )
+    assert record.path == generator._recovery_path_for_output(alias)
+
+    if state != "old-output-no-backup":
+        output.replace(backup)
+    if state.startswith("new-output"):
+        staging.replace(output)
+    if state == "new-output-no-backup":
+        generator.shutil.rmtree(backup)
+
+    loaded = generator._load_recovery_record(alias)
+    assert loaded is not None
+    assert loaded.backup == backup
+    generator._recover_interrupted_publication(alias)
+
+    _assert_fixture_marker(alias, expected_marker)
+    assert not backup.exists()
+    assert not record.path.exists()
+
+
+def test_recovery_record_rejects_mismatched_publication_identity_through_alias(
+    tmp_path: Path,
+) -> None:
+    output, alias = _native_samefile_aliases_or_skip(tmp_path, "case")
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = _publication_backup_path(output, "d" * 32)
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        old_snapshot,
+        new_snapshot,
+    )
+    payload = json.loads(record.path.read_text(encoding="ascii"))
+    payload["publication_identity"] = generator._publication_key(tmp_path / "other-output")
+    _write_canonical_json(record.path, payload)
+    before = record.path.read_bytes()
+
+    with pytest.raises(RuntimeError, match=generator._RECOVERY_ERROR):
+        generator._load_recovery_record(alias)
+
+    assert record.path.read_bytes() == before
+    _assert_fixture_marker(alias, "old")
+    assert not backup.exists()
+
+
+def test_recovery_journal_identity_resolution_failure_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sensitive_detail = f"sensitive publication path at {tmp_path}"
+
+    def _fail_publication_key(_output: Path) -> str:
+        raise OSError(sensitive_detail)
+
+    monkeypatch.setattr(generator, "_publication_key", _fail_publication_key)
+
+    with pytest.raises(RuntimeError, match=f"^{generator._RECOVERY_ERROR}$") as exc_info:
+        generator._load_recovery_record(tmp_path / "fixtures")
+
+    assert sensitive_detail not in str(exc_info.value)
+    assert exc_info.value.__suppress_context__
+
+
 def test_recovery_rejects_ambiguous_old_output_and_unvalidated_backup(
     tmp_path: Path,
 ) -> None:
@@ -2942,6 +3250,49 @@ def test_prior_five_category_upgrade_journal_recovers_between_renames(
         *(f"{category}.json" for category in generator._PRIOR_CASE_NAMES),
     }
     assert json.loads((output / "content.json").read_text(encoding="ascii"))["cases"] == [{"marker": "old-five"}]
+    assert not backup.exists()
+    assert not record.path.exists()
+
+
+@pytest.mark.parametrize("alias_kind", ["case", "unicode"])
+def test_prior_five_category_upgrade_journal_recovers_through_samefile_alias(
+    tmp_path: Path,
+    alias_kind: str,
+) -> None:
+    output, alias = _native_samefile_aliases_or_skip(tmp_path, alias_kind)
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(
+        output,
+        "1" * 40,
+        "old-five",
+        categories=generator._PRIOR_CASE_NAMES,
+    )
+    _write_valid_fixture_set(staging, "2" * 40, "new-six")
+    old_snapshot = generator._validate_existing_output(output)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+    assert old_snapshot is not None
+    parent_identity = generator._path_identity(tmp_path, "parent changed")
+    backup = _publication_backup_path(output, "e" * 32)
+    record = generator._write_recovery_record(
+        output,
+        backup,
+        parent_identity,
+        old_snapshot,
+        new_snapshot,
+    )
+    output.replace(backup)
+
+    loaded = generator._load_recovery_record(alias)
+    assert loaded is not None
+    assert loaded.output_snapshot == old_snapshot
+    assert loaded.staged_snapshot == new_snapshot
+    generator._recover_interrupted_publication(alias)
+
+    assert {path.name for path in alias.iterdir()} == {
+        "manifest.json",
+        *(f"{category}.json" for category in generator._PRIOR_CASE_NAMES),
+    }
+    assert json.loads((alias / "content.json").read_text(encoding="ascii"))["cases"] == [{"marker": "old-five"}]
     assert not backup.exists()
     assert not record.path.exists()
 
@@ -3166,7 +3517,17 @@ def test_recovery_record_rejects_boolean_schema_version(tmp_path: Path) -> None:
     assert not backup.exists()
 
 
-def test_recovery_record_rejects_unvalidated_backup_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "backup_name",
+    [
+        pytest.param("../unvalidated-backup", id="traversal"),
+        pytest.param(f".other-output.backup-{'f' * 32}", id="arbitrary-sibling"),
+    ],
+)
+def test_recovery_record_rejects_unvalidated_backup_path(
+    tmp_path: Path,
+    backup_name: str,
+) -> None:
     output = tmp_path / "fixtures"
     staging = tmp_path / "staging"
     _write_valid_fixture_set(output, "1" * 40, "original")
@@ -3183,7 +3544,7 @@ def test_recovery_record_rejects_unvalidated_backup_path(tmp_path: Path) -> None
         staged_snapshot,
     )
     payload = json.loads(record.path.read_text(encoding="ascii"))
-    payload["backup_name"] = "../unvalidated-backup"
+    payload["backup_name"] = backup_name
     _write_canonical_json(record.path, payload)
     before = record.path.read_bytes()
 

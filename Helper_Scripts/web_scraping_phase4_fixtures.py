@@ -15,6 +15,7 @@ import stat
 import subprocess  # nosec B404
 import sys
 import tempfile
+import unicodedata
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -434,9 +435,17 @@ def _validate_existing_output(output: Path) -> _FixtureSetSnapshot | None:
     return snapshot
 
 
-def _lock_path_for_output(output: Path) -> Path:
+def _publication_key(output: Path) -> str:
     normalized_output = os.path.normcase(str(output.resolve())).casefold()
-    identity = hashlib.sha256(normalized_output.encode("utf-8")).hexdigest()
+    return unicodedata.normalize("NFC", normalized_output)
+
+
+def _publication_component(publication_key: str) -> str:
+    return Path(publication_key).name
+
+
+def _lock_path_for_output(output: Path) -> Path:
+    identity = hashlib.sha256(_publication_key(output).encode("utf-8")).hexdigest()
     namespace = "tldw-phase4-fixture-locks"
     get_effective_uid = getattr(os, "geteuid", None)
     if callable(get_effective_uid):
@@ -662,7 +671,8 @@ def _valid_lock_file_metadata(metadata: os.stat_result) -> bool:
 
 
 def _recovery_path_for_output(output: Path) -> Path:
-    return output.with_name(f".{output.name}.publication-recovery.json")
+    publication_key = _publication_key(output)
+    return output.with_name(f".{_publication_component(publication_key)}.publication-recovery.json")
 
 
 def _identity_to_json(identity: tuple[int, int, int]) -> list[int]:
@@ -824,24 +834,30 @@ def _parse_recovery_payload(
         raise ValueError
     if set(payload) != {
         "backup_name",
-        "output_name",
         "output_snapshot",
         "parent_identity",
+        "publication_identity",
         "schema_version",
         "staged_snapshot",
     }:
         raise ValueError
+    publication_identity = _publication_key(output)
     if (
         type(payload["schema_version"]) is not int
         or payload["schema_version"] != _RECOVERY_SCHEMA_VERSION
-        or type(payload["output_name"]) is not str
-        or payload["output_name"] != output.name
+        or type(payload["publication_identity"]) is not str
+        or payload["publication_identity"] != publication_identity
     ):
         raise ValueError
     backup_name = payload["backup_name"]
+    publication_component = _publication_component(publication_identity)
     if (
         type(backup_name) is not str
-        or re.fullmatch(rf"\.{re.escape(output.name)}\.backup-[0-9a-f]{{32}}", backup_name) is None
+        or re.fullmatch(
+            rf"\.{re.escape(publication_component)}\.backup-[0-9a-f]{{32}}",
+            backup_name,
+        )
+        is None
     ):
         raise ValueError
     parent_identity = _identity_from_json(payload["parent_identity"])
@@ -874,13 +890,19 @@ def _write_recovery_record(
     output_snapshot: _FixtureSetSnapshot,
     staged_snapshot: _FixtureSetSnapshot,
 ) -> _RecoveryRecord:
-    path = _recovery_path_for_output(output)
-    temporary_path = path.with_name(f"{path.name}.tmp-{uuid.uuid4().hex}")
+    try:
+        publication_identity = _publication_key(output)
+        path = output.with_name(f".{_publication_component(publication_identity)}.publication-recovery.json")
+        temporary_path = path.with_name(f"{path.name}.tmp-{uuid.uuid4().hex}")
+        if backup.parent != output.parent:
+            raise RuntimeError(_RECOVERY_ERROR)
+    except (OSError, UnicodeError, ValueError, RuntimeError):
+        raise RuntimeError(_RECOVERY_ERROR) from None
     payload = {
         "backup_name": backup.name,
-        "output_name": output.name,
         "output_snapshot": _snapshot_to_json(output_snapshot),
         "parent_identity": _identity_to_json(parent_identity),
+        "publication_identity": publication_identity,
         "schema_version": _RECOVERY_SCHEMA_VERSION,
         "staged_snapshot": _snapshot_to_json(staged_snapshot),
     }
@@ -960,10 +982,10 @@ def _write_recovery_record(
 
 
 def _load_recovery_record(output: Path) -> _RecoveryRecord | None:
-    path = _recovery_path_for_output(output)
-    if _path_identity_or_none(path, _RECOVERY_ERROR) is None:
-        return None
     try:
+        path = _recovery_path_for_output(output)
+        if _path_identity_or_none(path, _RECOVERY_ERROR) is None:
+            return None
         record_identity, raw = _read_recovery_file(path)
         backup_name, parent_identity, output_snapshot, staged_snapshot = _parse_recovery_payload(
             raw,
@@ -1366,7 +1388,11 @@ def _replace_output_directory(
     _require_real_directory_identity(staging, staging_identity, staging_error)
     output_snapshot = _validate_existing_output(output)
     output_identity = output_snapshot.directory_identity if output_snapshot is not None else None
-    backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}") if output_snapshot is not None else None
+    backup = (
+        output.with_name(f".{_publication_component(_publication_key(output))}.backup-{uuid.uuid4().hex}")
+        if output_snapshot is not None
+        else None
+    )
     recovery_record: _RecoveryRecord | None = None
     rename_started = False
     staging_rename_completed = False
