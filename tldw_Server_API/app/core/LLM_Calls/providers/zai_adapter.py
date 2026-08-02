@@ -42,6 +42,7 @@ def _zai_request(
     maxp: float | None = None,
     streaming: bool | None = False,
     max_tokens: int | None = None,
+    n: int | None = None,
     tools: list[dict[str, Any]] | None = None,
     do_sample: bool | None = None,
     request_id: str | None = None,
@@ -96,6 +97,8 @@ def _zai_request(
         payload["top_p"] = current_top_p
     if current_max_tokens is not None:
         payload["max_tokens"] = current_max_tokens
+    if n is not None:
+        payload["n"] = n
     if do_sample is not None:
         payload["do_sample"] = do_sample
     if tools is not None:
@@ -123,7 +126,9 @@ def _zai_request(
         if current_streaming:
             logging.debug("Z.AI: Posting request (streaming)")
             from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-            session = _chat_calls.create_session_with_retries(total=1)
+            session = _chat_calls.create_session_with_retries(
+                total=_safe_cast(zai_config.get("api_retries"), int, 1)
+            )
             response = None
             try:
                 response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=effective_timeout)
@@ -184,7 +189,9 @@ def _zai_request(
 
         logging.debug("Z.AI: Posting request (non-streaming)")
         from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-        session = _chat_calls.create_session_with_retries(total=1)
+        session = _chat_calls.create_session_with_retries(
+            total=_safe_cast(zai_config.get("api_retries"), int, 1)
+        )
         try:
             response = session.post(api_url, headers=headers, json=payload, timeout=effective_timeout)
             logging.debug(f"Z.AI: Full API response status: {response.status_code}")
@@ -241,6 +248,7 @@ class ZaiAdapter(ChatProvider):
             "maxp": request.get("top_p"),
             "streaming": stream_flag,
             "max_tokens": request.get("max_tokens"),
+            "n": request.get("n"),
             "tools": request.get("tools"),
             "do_sample": request.get("do_sample"),
             "request_id": request.get("request_id"),

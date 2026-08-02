@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Provider capability registry for chat adapters.
 
@@ -7,15 +5,276 @@ Defines the allowlist of supported request fields per provider, plus alias
 normalization and blocked field enforcement used by adapters.
 """
 
+from __future__ import annotations
+
+import copy
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
-from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provider_number
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_provider_number,
+    custom_openai_section_name,
+)
 
 SCHEMA_VERSION = 1
 _VALIDATION_METRICS_REGISTERED = False
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCallPolicy:
+    """Optional immutable constraints for one provider call.
+
+    All fields default to ``None`` (or ``False`` for privacy-safe errors), so
+    callers that do not supply a policy retain existing adapter behavior.
+    """
+
+    max_transport_attempts: int | None = None
+    allow_streaming: bool | None = None
+    allow_tools: bool | None = None
+    allow_stop: bool | None = None
+    allow_response_format: bool | None = None
+    candidate_count: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    privacy_safe_errors: bool = False
+
+    def __post_init__(self) -> None:
+        if (
+            self.max_transport_attempts is not None
+            and (
+                isinstance(self.max_transport_attempts, bool)
+                or self.max_transport_attempts < 1
+            )
+        ):
+            raise ValueError("max_transport_attempts must be at least 1")
+        if self.allow_streaming is not None and not isinstance(
+            self.allow_streaming, bool
+        ):
+            raise TypeError("allow_streaming must be a boolean or None")
+        if self.allow_tools is not None and not isinstance(self.allow_tools, bool):
+            raise TypeError("allow_tools must be a boolean or None")
+        if self.allow_stop is not None and not isinstance(self.allow_stop, bool):
+            raise TypeError("allow_stop must be a boolean or None")
+        if self.allow_response_format is not None and not isinstance(
+            self.allow_response_format, bool
+        ):
+            raise TypeError("allow_response_format must be a boolean or None")
+        if (
+            self.candidate_count is not None
+            and (
+                isinstance(self.candidate_count, bool)
+                or self.candidate_count < 1
+            )
+        ):
+            raise ValueError("candidate_count must be at least 1")
+        if self.temperature is not None and (
+            isinstance(self.temperature, bool)
+            or not math.isfinite(float(self.temperature))
+            or not 0 <= float(self.temperature) <= 2
+        ):
+            raise ValueError("temperature must be finite and between 0 and 2")
+        if self.top_p is not None and (
+            isinstance(self.top_p, bool)
+            or not math.isfinite(float(self.top_p))
+            or not 0 <= float(self.top_p) <= 1
+        ):
+            raise ValueError("top_p must be finite and between 0 and 1")
+        if not isinstance(self.privacy_safe_errors, bool):
+            raise TypeError("privacy_safe_errors must be a boolean")
+
+
+_PROVIDER_CONFIG_SECTIONS: dict[str, tuple[str, ...]] = {
+    "openai": ("openai_api",),
+    "anthropic": ("anthropic_api",),
+    "cohere": ("cohere_api",),
+    "deepseek": ("deepseek_api",),
+    "google": ("google_api",),
+    "groq": ("groq_api",),
+    "huggingface": ("huggingface_api",),
+    "mistral": ("mistral_api",),
+    "moonshot": ("moonshot_api",),
+    "openrouter": ("openrouter_api",),
+    "qwen": ("qwen_api",),
+    "zai": ("zai_api",),
+    "local-llm": ("local_llm",),
+    "llama.cpp": ("llama_api",),
+    "kobold": ("kobold_api",),
+    "ooba": ("ooba_api",),
+    "tabbyapi": ("tabby_api",),
+    "vllm": ("vllm_api",),
+    "ollama": ("ollama_api",),
+    "aphrodite": ("aphrodite_api",),
+    "novita": ("novita_api",),
+    "poe": ("poe_api",),
+    "together": ("together_api",),
+}
+
+_RETRY_CONFIG_SECTIONS = frozenset(
+    {
+        "openai_api",
+        "cohere_api",
+        "moonshot_api",
+        "zai_api",
+        "local_llm",
+        "llama_api",
+        "kobold_api",
+        "ooba_api",
+        "tabby_api",
+        "vllm_api",
+        "ollama_api",
+        "aphrodite_api",
+    }
+)
+
+_TOOL_CONTROL_KEYS = frozenset(
+    {"tools", "tool_choice", "functions", "function_call"}
+)
+_STOP_CONTROL_KEYS = frozenset({"stop", "stop_sequence", "stop_sequences"})
+_RESPONSE_FORMAT_CONTROL_KEYS = frozenset({"response_format", "format"})
+
+
+def _provider_config_sections(provider_key: str) -> tuple[str, ...]:
+    custom_number = custom_openai_provider_number(provider_key)
+    if custom_number is not None:
+        return (custom_openai_section_name(custom_number),)
+    return _PROVIDER_CONFIG_SECTIONS.get(provider_key, ())
+
+
+def _copy_policy_app_config(
+    provider_key: str,
+    app_config: Any,
+    policy: ProviderCallPolicy,
+) -> dict[str, Any]:
+    if app_config is None:
+        copied: dict[str, Any] = {}
+    elif isinstance(app_config, Mapping):
+        copied = copy.deepcopy(dict(app_config))
+    else:
+        _raise_nested_error(provider_key, "app_config", "must be an object")
+
+    if policy.max_transport_attempts is not None:
+        copied["api_retries"] = policy.max_transport_attempts - 1
+    if policy.allow_tools is False:
+        for key in _TOOL_CONTROL_KEYS:
+            if key in copied:
+                copied[key] = None
+    if policy.allow_stop is False:
+        for key in _STOP_CONTROL_KEYS:
+            if key in copied:
+                copied[key] = None
+    if policy.allow_response_format is False:
+        for key in _RESPONSE_FORMAT_CONTROL_KEYS:
+            if key in copied:
+                copied[key] = None
+
+    for section in _provider_config_sections(provider_key):
+        provider_config = copied.get(section)
+        if provider_config is None:
+            provider_config = {}
+            copied[section] = provider_config
+        if isinstance(provider_config, dict):
+            if (
+                policy.max_transport_attempts is not None
+                and section in _RETRY_CONFIG_SECTIONS
+            ):
+                provider_config["api_retries"] = policy.max_transport_attempts - 1
+            if policy.allow_tools is False:
+                for key in _TOOL_CONTROL_KEYS:
+                    provider_config[key] = None
+            if policy.allow_stop is False:
+                for key in _STOP_CONTROL_KEYS:
+                    provider_config[key] = None
+            if policy.allow_response_format is False:
+                for key in _RESPONSE_FORMAT_CONTROL_KEYS:
+                    provider_config[key] = None
+
+    # Keep an otherwise-empty explicit config truthy so adapters do not fall
+    # back to mutable global chat configuration for a constrained call.
+    copied["__tldw_provider_call_policy__"] = True
+    return copied
+
+
+def _copy_policy_extra_body(
+    provider_key: str,
+    extra_body: Any,
+    policy: ProviderCallPolicy,
+) -> dict[str, Any] | None:
+    if extra_body is None:
+        return None
+    if not isinstance(extra_body, Mapping):
+        _raise_nested_error(provider_key, "extra_body", "must be an object")
+    copied = copy.deepcopy(dict(extra_body))
+    reserved: set[str] = set()
+    if policy.max_transport_attempts is not None:
+        reserved.update({"api_retries", "max_retries", "retry", "retries"})
+    if policy.allow_streaming is not None:
+        reserved.update({"stream", "streaming"})
+    if policy.allow_tools is False:
+        reserved.update(_TOOL_CONTROL_KEYS)
+    if policy.allow_stop is False:
+        reserved.update(_STOP_CONTROL_KEYS)
+    if policy.allow_response_format is False:
+        reserved.update(_RESPONSE_FORMAT_CONTROL_KEYS)
+    if policy.candidate_count is not None:
+        reserved.update({"n", "num_generations", "num_return_sequences"})
+    if policy.temperature is not None:
+        reserved.update({"temperature", "temp"})
+    if policy.top_p is not None:
+        reserved.update({"top_p", "p", "maxp", "topp"})
+    for key in reserved:
+        copied.pop(key, None)
+    return copied
+
+
+def apply_provider_call_policy(
+    provider: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a copied payload with an explicitly supplied policy enforced."""
+
+    provider_key = _normalize_provider(provider)
+    effective = dict(payload or {})
+    policy = effective.get("call_policy")
+    if policy is None:
+        return effective
+    if not isinstance(policy, ProviderCallPolicy):
+        _raise_nested_error(
+            provider_key,
+            "call_policy",
+            "must be an immutable ProviderCallPolicy",
+        )
+
+    effective["app_config"] = _copy_policy_app_config(
+        provider_key,
+        effective.get("app_config"),
+        policy,
+    )
+    effective["extra_body"] = _copy_policy_extra_body(
+        provider_key,
+        effective.get("extra_body"),
+        policy,
+    )
+    if policy.allow_streaming is not None:
+        effective["stream"] = policy.allow_streaming
+    if policy.allow_tools is False:
+        effective["tools"] = None
+        effective["tool_choice"] = None
+    if policy.allow_stop is False:
+        effective["stop"] = None
+    if policy.allow_response_format is False:
+        effective["response_format"] = None
+    if policy.candidate_count is not None:
+        effective["n"] = policy.candidate_count
+        if provider_key == "cohere":
+            effective["num_generations"] = policy.candidate_count
+    if policy.temperature is not None:
+        effective["temperature"] = float(policy.temperature)
+    if policy.top_p is not None:
+        effective["top_p"] = float(policy.top_p)
+    return effective
 
 
 def _ensure_validation_metrics() -> None:
@@ -89,6 +348,7 @@ BASE_FIELDS: set[str] = {
     "custom_prompt_arg",
     "extra_headers",
     "extra_body",
+    "call_policy",
     "billing_prompt_cache_intent",
     "inference_prefix_cache_intent",
 }
@@ -288,6 +548,7 @@ def validate_payload(provider: str, payload: Mapping[str, Any]) -> dict[str, Any
     """
     provider_key = _normalize_provider(provider)
     normalized = normalize_payload(provider_key, payload)
+    normalized = apply_provider_call_policy(provider_key, normalized)
     tool_choice_present = "tool_choice" in normalized
     tool_choice_value = normalized.get("tool_choice")
     filtered = {k: v for k, v in normalized.items() if v is not None}
@@ -334,11 +595,13 @@ def validate_payload(provider: str, payload: Mapping[str, Any]) -> dict[str, Any
 
 __all__ = [
     "SCHEMA_VERSION",
+    "ProviderCallPolicy",
     "BASE_FIELDS",
     "PROVIDER_EXTENSIONS",
     "ALIASES",
     "BLOCKED_FIELDS",
     "get_allowed_fields",
+    "apply_provider_call_policy",
     "normalize_payload",
     "validate_payload",
 ]

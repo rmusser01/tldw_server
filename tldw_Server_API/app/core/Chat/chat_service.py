@@ -132,6 +132,11 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+    privacy_safe_chat_error,
+    provider_error_privacy_scope,
+)
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
@@ -2459,6 +2464,16 @@ async def _map_async_stream_egress_errors(
         raise _map_provider_egress_error(provider, exc) from exc
 
 
+def _privacy_safe_provider_errors_enabled(request: dict[str, Any]) -> bool:
+    """Return whether this opt-in call requires metadata-only provider errors."""
+
+    call_policy = request.get("call_policy")
+    return bool(
+        isinstance(call_policy, ProviderCallPolicy)
+        and call_policy.privacy_safe_errors
+    )
+
+
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
@@ -2468,15 +2483,21 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     _attach_internal_http_hooks(adapter, request, internal)
     timeout = internal.get("timeout")
     timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
+    privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
     try:
-        if request.get("stream"):
-            return _map_sync_stream_egress_errors(
-                provider,
-                adapter.stream(request, **timeout_kwargs),
-            )
-        return adapter.chat(request, **timeout_kwargs)
+        with provider_error_privacy_scope(privacy_safe_errors):
+            if request.get("stream"):
+                return _map_sync_stream_egress_errors(
+                    provider,
+                    adapter.stream(request, **timeout_kwargs),
+                )
+            return adapter.chat(request, **timeout_kwargs)
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc
+    except Exception as exc:
+        if privacy_safe_errors:
+            raise privacy_safe_chat_error(provider, exc) from None
+        raise
 
 
 async def perform_chat_api_call_async(**kwargs: Any) -> Any:
@@ -2488,31 +2509,33 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     _attach_internal_http_hooks(adapter, request, internal)
     timeout = internal.get("timeout")
     timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
+    privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
 
     try:
-        if request.get("stream"):
-            try:
-                stream_iter = adapter.astream(request, **timeout_kwargs)
-                if inspect.isawaitable(stream_iter):
-                    stream_iter = await stream_iter
-                return _map_async_stream_egress_errors(provider, stream_iter)
-            except NotImplementedError:
-                stream_iter = adapter.stream(request, **timeout_kwargs)
-                return _map_async_stream_egress_errors(
-                    provider,
-                    wrap_sync_stream(stream_iter),
-                )
+        with provider_error_privacy_scope(privacy_safe_errors):
+            if request.get("stream"):
+                try:
+                    stream_iter = adapter.astream(request, **timeout_kwargs)
+                    if inspect.isawaitable(stream_iter):
+                        stream_iter = await stream_iter
+                    return _map_async_stream_egress_errors(provider, stream_iter)
+                except NotImplementedError:
+                    stream_iter = adapter.stream(request, **timeout_kwargs)
+                    return _map_async_stream_egress_errors(
+                        provider,
+                        wrap_sync_stream(stream_iter),
+                    )
 
-        if getattr(adapter, "async_chat_is_native", None) is True:
-            try:
-                return await adapter.achat(request, **timeout_kwargs)
-            except NotImplementedError:
-                pass
-        return await await_bounded_sync_call(
-            partial(adapter.chat, request, **timeout_kwargs),
-            pool=SYNC_ADAPTER_CALL_POOL,
-            exhaustion_message="Provider adapter capacity is exhausted",
-        )
+            if getattr(adapter, "async_chat_is_native", None) is True:
+                try:
+                    return await adapter.achat(request, **timeout_kwargs)
+                except NotImplementedError:
+                    pass
+            return await await_bounded_sync_call(
+                partial(adapter.chat, request, **timeout_kwargs),
+                pool=SYNC_ADAPTER_CALL_POOL,
+                exhaustion_message="Provider adapter capacity is exhausted",
+            )
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc
     except DaemonCapacityError:
@@ -2526,6 +2549,10 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
         raise_detached_error(
             sanitized_provider_stream_exception(provider_cancel)
         )
+    except Exception as exc:
+        if privacy_safe_errors:
+            raise privacy_safe_chat_error(provider, exc) from None
+        raise
 
 
 def merge_api_keys_for_provider(

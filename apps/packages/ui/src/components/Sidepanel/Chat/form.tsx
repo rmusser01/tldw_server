@@ -52,6 +52,7 @@ import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import {
   COMPOSER_CONSTANTS,
@@ -72,6 +73,8 @@ import { KnowledgePanel } from "@/components/Knowledge"
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
 import { ConnectionStatusIndicator } from "@/components/Sidepanel/Chat/ConnectionStatusIndicator"
 import { ControlRow } from "@/components/Sidepanel/Chat/ControlRow"
+import { SidepanelComposerControlArea } from "@/components/Sidepanel/Chat/SidepanelComposerControlArea"
+import { PromptAssistComposerAction } from "@/components/Chat/composer/PromptAssistComposerAction"
 import { ContextChips } from "@/components/Sidepanel/Chat/ContextChips"
 import { SlashCommandMenu } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 import { MentionsMenu, type MentionMenuItem } from "@/components/Sidepanel/Chat/MentionsMenu"
@@ -113,6 +116,7 @@ import {
 } from "@/utils/quick-ingest-open"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
 import { shallow } from "zustand/shallow"
 import { Button } from "@/components/Common/Button"
 import { generateID } from "@/db/dexie/helpers"
@@ -164,6 +168,10 @@ import {
   prepareChatDocumentAttachmentsForSend,
   withDefaultDocumentDecision
 } from "@/services/chat-document-processing"
+import {
+  isChatSubmitSuccess,
+  normalizeChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
 
 type Props = {
   dropedFile: File | undefined
@@ -300,6 +308,13 @@ export const SidepanelForm = ({
   const voiceChatMessages = useVoiceChatMessages()
   const { config: canonicalConnectionConfig, loading: canonicalConnectionLoading } =
     useCanonicalConnectionConfig()
+  const promptAssistBackendKey = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading]
+  )
   const [ttsProvider] = useStorage("ttsProvider", "browser")
   const [tldwTtsModel] = useStorage("tldwTtsModel", "kokoro")
   const [tldwTtsVoice] = useStorage("tldwTtsVoice", "af_heart")
@@ -340,10 +355,19 @@ export const SidepanelForm = ({
   const storageKey = draftKey || STORAGE_KEYS.SIDEPANEL_CHAT_DRAFT
   // Shared primitive: form state + draft persistence.
   // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
-  // Sidepanel intentionally keeps its own local `textAreaFocus` below (plain
-  // .focus() without the mobile blur heuristic) to preserve exact behavior —
-  // adopt the primitive's `textAreaFocus` in a follow-up if desired.
-  const { form, draftSaved, clearDraft } = useComposerText({
+  // Sidepanel keeps its existing local `textAreaFocus` below for legacy flows.
+  // Prompt assist alone uses the shared helper's mobile keyboard guard.
+  const {
+    form,
+    messageRevision,
+    promptAssistMutation,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    promptAssistSavedAttemptId,
+    textAreaFocus: promptAssistReturnFocus,
+    draftSaved,
+    clearDraft
+  } = useComposerText({
     draftKey: storageKey,
     textareaRef,
     isProMode
@@ -772,6 +796,9 @@ export const SidepanelForm = ({
     setQueuedMessages,
     serverChatId
   } = useMessage()
+  const currentChatApiProvider = useStoreChatModelSettings(
+    (state) => state.apiProvider
+  )
   const serverChatAssistantKind = useStoreMessageOption(
     (state) => state.serverChatAssistantKind
   )
@@ -1932,6 +1959,7 @@ export const SidepanelForm = ({
         : preparedDocumentAttachments.contextFiles
       }
 
+      let promptAssistAttemptId: number | null = null
       await submitDispatch(
       {
         image: intent.isImageCommand ? "" : image,
@@ -1953,10 +1981,16 @@ export const SidepanelForm = ({
       },
       {
         beforeSend: () => {
-          form.reset()
+          promptAssistAttemptId = beginPromptAssistReset()
           textAreaFocus()
         },
-        afterSend: () => {
+        afterSend: (result) => {
+          if (
+            promptAssistAttemptId !== null &&
+            isChatSubmitSuccess(normalizeChatSubmitResult(result))
+          ) {
+            markPromptAssistAttemptSaved(promptAssistAttemptId)
+          }
           clearDraft()
           clearSelectedDocuments()
           setContextFiles([])
@@ -2641,8 +2675,9 @@ export const SidepanelForm = ({
 
   const handleQueueEnqueueSuccess = React.useCallback(
     (isStreamingAtEnqueue: boolean) => {
+      const promptAssistAttemptId = beginPromptAssistReset()
+      markPromptAssistAttemptSaved(promptAssistAttemptId)
       clearDraft()
-      form.reset()
       clearSelectedDocuments()
       setContextFiles([])
       setKnowledgeMentionActive(false)
@@ -2661,9 +2696,10 @@ export const SidepanelForm = ({
       })
     },
     [
+      beginPromptAssistReset,
       clearDraft,
       clearSelectedDocuments,
-      form,
+      markPromptAssistAttemptSaved,
       notification,
       setContextFiles,
       setKnowledgeMentionActive,
@@ -3327,18 +3363,57 @@ export const SidepanelForm = ({
                         </div>
                       </Tooltip>
                       <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-between gap-1.5">
+                      <SidepanelComposerControlArea
+                        promptAssistAction={
+                          <PromptAssistComposerAction
+                            form={form}
+                            messageRevision={messageRevision}
+                            promptAssistMutation={promptAssistMutation}
+                            promptAssistSavedAttemptId={
+                              promptAssistSavedAttemptId
+                            }
+                            modelSelection={selectedModel?.trim()
+                              ? {
+                                  selected_model: selectedModel,
+                                  provider_hint:
+                                    currentChatApiProvider ?? undefined
+                                }
+                              : null}
+                            promptAssistContextKey={serverChatId
+                              ? `server:${serverChatId}`
+                              : historyId
+                                ? `local:${historyId}`
+                                : "local:sidepanel-draft"}
+                            promptAssistBackendKey={promptAssistBackendKey}
+                            sending={isSending || streaming}
+                            surfaceOpen
+                            narrow
+                            onSelectModel={() => setOpenModelSettings(true)}
+                            onReturnFocus={promptAssistReturnFocus}
+                          />
+                        }>
                       {isProMode ? (
                         <>
                           {/* Control Row - contains Prompt, Model, RAG, and More tools */}
                           {wrapComposerProfile(
                             "sidepanel-control-row",
                             <ControlRow
+                              selectedModel={selectedModel}
+                              currentProvider={currentChatApiProvider}
                               selectedSystemPrompt={selectedSystemPrompt}
                               setSelectedSystemPrompt={setSelectedSystemPrompt}
                               setSelectedQuickPrompt={setSelectedQuickPrompt}
                               selectedCharacterId={selectedCharacterId}
                               setSelectedCharacterId={setSelectedCharacterId}
                               serverChatId={serverChatId}
+                              promptAssistContextKey={
+                                serverChatId
+                                  ? `server:${serverChatId}`
+                                  : historyId
+                                    ? `local:${historyId}`
+                                    : "local:sidepanel-draft"
+                              }
+                              promptAssistBackendKey={promptAssistBackendKey}
                               conversationContextComposition={
                                 conversationContextComposition.composition
                               }
@@ -3915,6 +3990,7 @@ export const SidepanelForm = ({
                           </div>
                         </>
                       )}
+                      </SidepanelComposerControlArea>
                         </div>
                         </div>
                       )

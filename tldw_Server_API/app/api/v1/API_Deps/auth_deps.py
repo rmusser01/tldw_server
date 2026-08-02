@@ -3,12 +3,13 @@
 #
 import asyncio
 import inspect
+import math
 import os
 import re
 import threading
 import time
-from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, Any, Callable, Optional
 from weakref import WeakKeyDictionary
@@ -44,27 +45,35 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, get_password_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
+from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter, get_rate_limiter
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import (
     get_settings,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    authenticate_api_key_user,
-    get_single_user_instance,
-    get_request_user,
-    resolve_user_id_for_request as resolve_user_id_for_request,
     User as User,
+)
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+    authenticate_api_key_user,
+    get_request_user,
+    get_single_user_instance,
     verify_jwt_and_fetch_user,
+)
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+    resolve_user_id_for_request as resolve_user_id_for_request,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.External_Sources.connectors_service import get_policy
 from tldw_Server_API.app.core.External_Sources.policy import get_default_policy_from_env
-from tldw_Server_API.app.core.MCP_unified.monitoring import metrics
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
     is_production_like_env as _is_production_like_env,
 )
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
@@ -104,7 +113,22 @@ _SENSITIVE_USER_KEY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _AUTH_DEPS_RG_DIAGNOSTICS_ONLY_LOGGED: set[str] = set()
-_AUTH_DEPS_FALLBACK_RATE_WINDOWS: dict[tuple[str, str], deque[float]] = {}
+
+
+@dataclass(slots=True)
+class _FallbackRateBucket:
+    tokens: float
+    last_refill: float
+    limit: int
+    burst: int
+    window_seconds: float
+
+
+_AUTH_DEPS_FALLBACK_RATE_WINDOWS: dict[
+    tuple[str, str], _FallbackRateBucket
+] = {}
+# Bound process-local fallback state without evicting active quota buckets.
+_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY = 10_000
 _AUTH_DEPS_FALLBACK_RATE_WINDOWS_LOCK = threading.Lock()
 
 
@@ -1769,29 +1793,67 @@ def _consume_auth_deps_fallback_rate_token(
     dependency: str,
     identifier: str,
     limit: int,
+    burst: int | None = None,
     window_seconds: float,
 ) -> tuple[bool, int]:
-    """Consume one token from an in-process fallback fixed-window limiter."""
-    safe_limit = max(1, int(limit))
+    """Consume one token from an in-process fallback token bucket."""
+    safe_limit = int(limit)
+    safe_burst = safe_limit if burst is None else int(burst)
     safe_window = max(1.0, float(window_seconds))
     now = time.monotonic()
-    cutoff = now - safe_window
     key = (dependency, identifier)
 
     with _AUTH_DEPS_FALLBACK_RATE_WINDOWS_LOCK:
+        stale_keys = []
+        for candidate_key, candidate in _AUTH_DEPS_FALLBACK_RATE_WINDOWS.items():
+            refill_rate = candidate.limit / candidate.window_seconds
+            seconds_to_full = (
+                max(0.0, candidate.burst - candidate.tokens) / refill_rate
+            )
+            if now - candidate.last_refill >= seconds_to_full:
+                stale_keys.append(candidate_key)
+        for stale_key in stale_keys:
+            _AUTH_DEPS_FALLBACK_RATE_WINDOWS.pop(stale_key, None)
+
+        if safe_limit <= 0 or safe_burst <= 0:
+            return False, int(math.ceil(safe_window))
+
         bucket = _AUTH_DEPS_FALLBACK_RATE_WINDOWS.get(key)
-        if bucket is None:
-            bucket = deque()
+        if (
+            bucket is None
+            and len(_AUTH_DEPS_FALLBACK_RATE_WINDOWS)
+            >= _AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY
+        ):
+            return False, int(math.ceil(safe_window))
+        if (
+            bucket is None
+            or bucket.limit != safe_limit
+            or bucket.burst != safe_burst
+            or bucket.window_seconds != safe_window
+        ):
+            bucket = _FallbackRateBucket(
+                tokens=float(safe_burst),
+                last_refill=now,
+                limit=safe_limit,
+                burst=safe_burst,
+                window_seconds=safe_window,
+            )
             _AUTH_DEPS_FALLBACK_RATE_WINDOWS[key] = bucket
+        else:
+            elapsed = max(0.0, now - bucket.last_refill)
+            bucket.tokens = min(
+                float(safe_burst),
+                bucket.tokens + elapsed * safe_limit / safe_window,
+            )
+            bucket.last_refill = now
 
-        while bucket and bucket[0] <= cutoff:
-            bucket.popleft()
-
-        if len(bucket) >= safe_limit:
-            retry_after = int(max(1.0, (bucket[0] + safe_window) - now))
+        if bucket.tokens < 1.0:
+            retry_after = math.ceil(
+                (1.0 - bucket.tokens) * safe_window / safe_limit
+            )
             return False, retry_after
 
-        bucket.append(now)
+        bucket.tokens -= 1.0
         return True, 0
 
 
@@ -1895,26 +1957,40 @@ async def check_auth_rate_limit(request: Request, rate_limiter=None) -> None:
 
 
 # ---------------------------------------------------------------------------------
-# RBAC resource-aware rate limit (stub - logs selected limits, no enforcement yet)
+# RBAC resource-aware rate limit
+
+
+def _catalog_rate_limit_for_resource(resource: str) -> tuple[int, int] | None:
+    """Resolve the resource's configured catalog rate class."""
+
+    catalog = load_catalog()
+    scope_entry = next((entry for entry in catalog.scopes if entry.id == resource), None)
+    if scope_entry is None:
+        return None
+    rate_class = next(
+        (
+            entry
+            for entry in catalog.rate_limit_classes
+            if entry.id == scope_entry.rate_limit_class
+        ),
+        None,
+    )
+    if rate_class is None:
+        return None
+    return int(rate_class.requests_per_min), int(rate_class.burst)
 
 async def enforce_rbac_rate_limit(
     request: Request,
     resource: str,
     db_pool: DatabasePool = Depends(get_db_pool)
 ):
-    """
-    Resource-aware rate limit selector (stub).
+    """Enforce the strictest catalog, user, or role per-minute limit."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        return
 
-    Reads the strictest configured limit for the current user from rbac_user_rate_limits
-    and rbac_role_rate_limits. Currently logs selected limits without enforcing.
-    """
+    candidates: list[tuple[int | None, int | None]] = []
     try:
-        user_id = getattr(request.state, 'user_id', None)
-        if not user_id:
-            # Unknown user context; skip
-            return
-
-        # User-level limit
         user_limit = None
         role_limit = None
 
@@ -1961,8 +2037,6 @@ async def enforce_rbac_rate_limit(
                 )
                 role_limit = await c2.fetchone()
 
-        # Choose strictest (lowest) effective limits
-        candidates = []
         if user_limit:
             lp = user_limit[0] if not isinstance(user_limit, dict) else user_limit.get('limit_per_min')
             bp = user_limit[1] if not isinstance(user_limit, dict) else user_limit.get('burst')
@@ -1972,24 +2046,68 @@ async def enforce_rbac_rate_limit(
             bp = role_limit[1] if not isinstance(role_limit, dict) else role_limit.get('burst')
             candidates.append((lp, bp))
 
-        if candidates:
-            limit_per_min = min([c[0] for c in candidates if c[0] is not None]) if any(c[0] for c in candidates) else None
-            burst = min([c[1] for c in candidates if c[1] is not None]) if any(c[1] for c in candidates) else None
-            logger.debug(
-                "RBAC rate-limit selected for user {}, resource {}: rpm={}, burst={}",
-                user_id,
-                resource,
-                limit_per_min,
-                burst,
-            )
-        else:
-            logger.debug("RBAC rate-limit: no configured limits for user {}, resource {}", user_id, resource)
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("RBAC rate-limit selection failed: error_type={}", type(e).__name__)
 
+    try:
+        catalog_limit = _catalog_rate_limit_for_resource(resource)
+    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "RBAC rate-limit catalog lookup failed: error_type={}",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiting temporarily unavailable",
+        ) from exc
+    if catalog_limit is not None:
+        candidates.append(catalog_limit)
+
+    per_minute_values = [
+        int(limit)
+        for limit, _burst in candidates
+        if limit is not None
+    ]
+    if not per_minute_values:
+        logger.debug("RBAC rate-limit: no configured limit")
+        return
+
+    burst_values = [
+        int(burst)
+        for _limit, burst in candidates
+        if burst is not None
+    ]
+    limit_per_min = min(per_minute_values)
+    burst = min(burst_values) if burst_values else limit_per_min
+    identifier = _auth_deps_rate_limit_identifier(request, resource)
+    try:
+        allowed, retry_after = _consume_auth_deps_fallback_rate_token(
+            dependency=f"rbac_rate_limit:{resource}",
+            identifier=identifier,
+            limit=limit_per_min,
+            burst=burst,
+            window_seconds=60.0,
+        )
+    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "RBAC rate-limit enforcement failed: error_type={}",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiting temporarily unavailable",
+        ) from exc
+
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded for resource: {resource}",
+            headers={"Retry-After": str(retry_after)},
+        )
+
 
 def rbac_rate_limit(resource: str):
-    """Factory returning a dependency that logs selected RBAC limits for the given resource."""
+    """Factory returning an enforcing RBAC resource-rate dependency."""
     async def _dep(request: Request, db_pool: DatabasePool = Depends(get_db_pool)):
         await enforce_rbac_rate_limit(request, resource, db_pool)
     try:
@@ -2041,6 +2159,109 @@ def _vk_usage_check_and_increment(key: object, limit: int) -> bool:
         return True
 
 
+async def _consume_token_quota_plan(
+    plan: Mapping[str, Any],
+    *,
+    db_pool: DatabasePool,
+) -> None:
+    """Consume one previously validated JWT or API-key quota unit."""
+
+    quota_kind = str(plan.get("kind") or "")
+    identifier = str(plan.get("identifier") or "")
+    counter_type = str(plan.get("counter_type") or "")
+    limit = plan.get("limit")
+    if not quota_kind or not identifier or not counter_type or not isinstance(limit, int):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Token quota validation is unavailable",
+        )
+
+    try:
+        if quota_kind == "jwt":
+            from tldw_Server_API.app.core.AuthNZ.quotas import (
+                increment_and_check_jwt_quota,
+            )
+
+            allowed, _count = await increment_and_check_jwt_quota(
+                db_pool=db_pool,
+                jti=identifier,
+                counter_type=counter_type,
+                limit=limit,
+            )
+            fallback_key = (f"jwt:{identifier}", counter_type)
+        elif quota_kind == "api_key":
+            from tldw_Server_API.app.core.AuthNZ.quotas import (
+                increment_and_check_api_key_quota,
+            )
+
+            allowed, _count = await increment_and_check_api_key_quota(
+                db_pool=db_pool,
+                api_key_id=int(identifier),
+                counter_type=counter_type,
+                limit=limit,
+            )
+            fallback_key = (f"apikey:{identifier}", counter_type)
+        else:
+            raise ValueError("unsupported deferred quota kind")
+    except HTTPException:
+        raise
+    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        fallback_key = (
+            f"{quota_kind}:{identifier}",
+            counter_type,
+        )
+        if not _vk_usage_check_and_increment(fallback_key, limit):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: token quota exceeded",
+            ) from exc
+        return
+
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: token quota exceeded",
+        )
+
+
+async def consume_deferred_token_quota(
+    request: Request,
+    db_pool: DatabasePool = Depends(get_db_pool),
+) -> None:
+    """Debit a quota plan recorded by ``require_token_scope`` exactly once."""
+
+    if getattr(request.state, "_auth_deferred_token_quota_consumed", False):
+        return
+    plan = getattr(request.state, "_auth_deferred_token_quota", None)
+    if plan is None:
+        return
+    await _consume_token_quota_plan(plan, db_pool=db_pool)
+    request.state._auth_deferred_token_quota_consumed = True
+
+
+async def _consume_or_defer_token_quota(
+    request: Request,
+    *,
+    db_pool: DatabasePool,
+    kind: str,
+    identifier: str,
+    counter_type: str,
+    limit: int,
+    defer_count: bool,
+) -> None:
+    plan = {
+        "kind": kind,
+        "identifier": identifier,
+        "counter_type": counter_type,
+        "limit": limit,
+    }
+    if defer_count:
+        request.state._auth_deferred_token_quota = plan
+        request.state._auth_deferred_token_quota_consumed = False
+        return
+    await _consume_token_quota_plan(plan, db_pool=db_pool)
+
+
 def require_token_scope(
     scope: str,
     *,
@@ -2051,6 +2272,7 @@ def require_token_scope(
     allow_admin_bypass: bool = True,
     endpoint_id: Optional[str] = None,
     count_as: Optional[str] = None,
+    defer_count: bool = False,
 ):
     """
     Create a dependency that enforces a scoped JWT ("virtual key").
@@ -2064,6 +2286,8 @@ def require_token_scope(
       API keys are accepted via `X-API-KEY` or Authorization bearer (non-JWT).
     - If `allow_admin_bypass=True`, admin users skip this enforcement.
     - If the bearer token is not a JWT, enforce API key constraints using that token.
+    - If ``defer_count`` is true, validate quota metadata now and let the caller
+      debit it later with ``consume_deferred_token_quota``.
     """
     async def _checker(
         request: Request,
@@ -2249,19 +2473,24 @@ def require_token_scope(
                             max_calls = payload.get("max_calls")
                         if isinstance(max_calls, int) and max_calls >= 0:
                             try:
-                                from tldw_Server_API.app.core.AuthNZ.quotas import increment_and_check_jwt_quota
-                                allowed, _cnt = await increment_and_check_jwt_quota(
+                                await _consume_or_defer_token_quota(
+                                    request,
                                     db_pool=db_pool,
-                                    jti=str(jti),
+                                    kind="jwt",
+                                    identifier=str(jti),
                                     counter_type=str(count_as),
                                     limit=int(max_calls),
+                                    defer_count=defer_count,
                                 )
-                                if not allowed:
-                                    raise HTTPException(status_code=403, detail="Forbidden: token quota exceeded")
                             except HTTPException:
                                 raise
                             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as err:
                                 # Defensive: fall back to process-local counters if quota backend fails.
+                                if defer_count:
+                                    raise HTTPException(
+                                        status_code=503,
+                                        detail="Token quota validation is unavailable",
+                                    ) from err
                                 if not _vk_usage_check_and_increment(key, int(max_calls)):
                                     raise HTTPException(
                                         status_code=403,
@@ -2464,19 +2693,24 @@ def require_token_scope(
                                 quota = meta.get("max_calls")
                             if isinstance(quota, int) and quota >= 0:
                                 try:
-                                    from tldw_Server_API.app.core.AuthNZ.quotas import increment_and_check_api_key_quota
-                                    allowed, _cnt = await increment_and_check_api_key_quota(
+                                    await _consume_or_defer_token_quota(
+                                        request,
                                         db_pool=db_pool,
-                                        api_key_id=int(key_id),
+                                        kind="api_key",
+                                        identifier=str(key_id),
                                         counter_type=str(count_as),
                                         limit=int(quota),
+                                        defer_count=defer_count,
                                     )
-                                    if not allowed:
-                                        raise HTTPException(status_code=403, detail="Forbidden: API key quota exceeded")
                                 except HTTPException:
                                     raise
                                 except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as err:
                                     # Defensive: fall back to process-local counters if quota backend fails.
+                                    if defer_count:
+                                        raise HTTPException(
+                                            status_code=503,
+                                            detail="Token quota validation is unavailable",
+                                        ) from err
                                     key = (f"apikey:{key_id}", str(count_as))
                                     if not _vk_usage_check_and_increment(key, int(quota)):
                                         raise HTTPException(
@@ -2499,6 +2733,7 @@ def require_token_scope(
     try:
         _checker._tldw_endpoint_id = endpoint_id
         _checker._tldw_count_as = count_as
+        _checker._tldw_defer_count = defer_count
         _checker._tldw_scope_name = scope
         _checker._tldw_token_scope = True
         _checker._tldw_token_scope_required = str(scope)

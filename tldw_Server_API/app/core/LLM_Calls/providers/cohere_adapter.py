@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     is_http_status_error,
     is_network_error,
     log_provider_failure,
+    log_provider_failure_metadata,
+    privacy_safe_chat_error,
+    provider_errors_are_privacy_safe,
     raise_chat_error_from_http,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
@@ -253,7 +256,9 @@ def _cohere_request(
     logging.debug("Cohere request endpoint resolved")
 
     from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-    session = _chat_calls.create_session_with_retries(total=1)
+    session = _chat_calls.create_session_with_retries(
+        total=_safe_cast(cohere_config.get("api_retries"), int, 1)
+    )
 
     try:
         if streaming:
@@ -417,6 +422,9 @@ def _cohere_request(
         )
         raise_detached_error(ChatBadRequestError(provider="cohere"))
     except Exception as e:
+        if provider_errors_are_privacy_safe():
+            log_provider_failure_metadata("cohere", e)
+            raise privacy_safe_chat_error("cohere", e) from None
         if is_http_status_error(e):
             raise_chat_error_from_http("cohere", e)
         if is_network_error(e):

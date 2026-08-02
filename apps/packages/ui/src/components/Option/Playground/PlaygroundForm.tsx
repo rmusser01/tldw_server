@@ -732,6 +732,13 @@ export const PlaygroundForm = ({
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
   } = useCanonicalConnectionConfig();
+  const promptAssistBackendKey = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading],
+  );
   const [ttsProvider] = useStorage("ttsProvider", "browser");
   const [tldwTtsModel] = useStorage("tldwTtsModel", "kokoro");
   const [tldwTtsVoice] = useStorage("tldwTtsVoice", "af_heart");
@@ -1887,6 +1894,11 @@ export const PlaygroundForm = ({
   });
   const {
     form,
+    messageRevision,
+    promptAssistMutation,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    promptAssistSavedAttemptId,
     typing,
     setMessageValue,
     restoreMessageValue,
@@ -2098,10 +2110,17 @@ export const PlaygroundForm = ({
   }, [updateChatModelSetting]);
   const setSelectedSystemPromptForComposer = React.useCallback(
     (id: string | undefined) => {
+      if (id === selectedSystemPrompt) return;
       clearBehaviorTemplateIdentity();
+      updateChatModelSetting("systemPrompt", undefined);
       setSelectedSystemPrompt(id);
     },
-    [clearBehaviorTemplateIdentity, setSelectedSystemPrompt],
+    [
+      clearBehaviorTemplateIdentity,
+      selectedSystemPrompt,
+      setSelectedSystemPrompt,
+      updateChatModelSetting,
+    ],
   );
   const setSelectedQuickPromptForComposer = React.useCallback(
     (prompt: string | undefined) => {
@@ -3052,6 +3071,10 @@ export const PlaygroundForm = ({
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
+    onEnqueueSuccess: () => {
+      const attemptId = beginPromptAssistReset();
+      markPromptAssistAttemptSaved(attemptId);
+    },
     notificationApi,
     t,
   });
@@ -3151,6 +3174,8 @@ export const PlaygroundForm = ({
 
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
     form,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
     webSearch,
@@ -5960,6 +5985,9 @@ export const PlaygroundForm = ({
                                 onDictationToggle={handleDictationToggle}
                                 onTemplateSelect={handleTemplateSelect}
                                 selectedModel={selectedModel}
+                                currentProvider={
+                                  currentChatModelSettings.apiProvider
+                                }
                                 resolvedProviderKey={resolvedProviderKey}
                                 messages={messages}
                                 selectedDocumentsCount={
@@ -5967,6 +5995,36 @@ export const PlaygroundForm = ({
                                 }
                                 uploadedFilesCount={uploadedFiles.length}
                                 serverChatId={serverChatId}
+                                promptAssistContextKey={
+                                  serverChatId
+                                    ? `server:${serverChatId}`
+                                    : historyId
+                                      ? `local:${historyId}`
+                                      : "local:playground-draft"
+                                }
+                                promptAssistBackendKey={promptAssistBackendKey}
+                                promptAssistComposer={{
+                                  form,
+                                  messageRevision,
+                                  promptAssistMutation,
+                                  promptAssistSavedAttemptId,
+                                  modelSelection: selectedModel?.trim()
+                                    ? {
+                                        selected_model: selectedModel,
+                                        provider_hint:
+                                          currentChatModelSettings.apiProvider,
+                                      }
+                                    : null,
+                                  promptAssistContextKey: serverChatId
+                                    ? `server:${serverChatId}`
+                                    : historyId
+                                      ? `local:${historyId}`
+                                      : "local:playground-draft",
+                                  promptAssistBackendKey,
+                                  sending: isSending,
+                                  surfaceOpen: true,
+                                  onReturnFocus: textAreaFocus,
+                                }}
                                 showServerPersistenceHint={
                                   showServerPersistenceHint
                                 }

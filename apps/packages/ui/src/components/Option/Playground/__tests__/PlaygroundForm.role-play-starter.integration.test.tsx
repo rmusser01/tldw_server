@@ -60,6 +60,10 @@ const selectedCharacterState = vi.hoisted(() => ({
   value: null as any,
   setSelectedCharacter: vi.fn(async (_next: unknown) => undefined)
 }))
+const chatModelSettingsState = vi.hoisted(() => ({
+  systemPrompt: "",
+  updateSetting: vi.fn()
+}))
 
 const createMessageOptionState = () => ({
   onSubmit: onSubmitMock,
@@ -395,7 +399,8 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
-  useNavigate: () => vi.fn()
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/playground", search: "", hash: "" })
 }))
 
 vi.mock("@/context/demo-mode", () => ({
@@ -452,7 +457,7 @@ vi.mock("@/store/option", () => ({
 vi.mock("@/store/model", () => ({
   useStoreChatModelSettings: (selector?: (state: any) => unknown) => {
     const state = {
-      systemPrompt: "",
+      systemPrompt: chatModelSettingsState.systemPrompt,
       setSystemPrompt: vi.fn(),
       temperature: 0.7,
       numPredict: 512,
@@ -470,7 +475,7 @@ vi.mock("@/store/model", () => ({
       extraBody: "",
       jsonMode: false,
       numCtx: 8192,
-      updateSetting: vi.fn(),
+      updateSetting: chatModelSettingsState.updateSetting,
       updateSettings: vi.fn(),
       setActiveSettingsScope: vi.fn(),
       updateScopedSetting: vi.fn(),
@@ -674,18 +679,30 @@ vi.mock("../ComposerToolbar", () => ({
     modelSelectButton,
     researchLaunchButton,
     toolsButton,
-    sendControl
+    sendControl,
+    setSelectedSystemPrompt
   }: {
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
     sendControl?: React.ReactNode
+    setSelectedSystemPrompt?: (id: string | undefined) => void
   }) => (
     <div data-testid="composer-toolbar">
       {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
       {sendControl}
+      <button
+        type="button"
+        onClick={() => setSelectedSystemPrompt?.("prompt-1")}>
+        Reselect system prompt
+      </button>
+      <button
+        type="button"
+        onClick={() => setSelectedSystemPrompt?.("prompt-2")}>
+        Change system prompt
+      </button>
     </div>
   )
 }))
@@ -983,6 +1000,8 @@ beforeEach(() => {
   selectedAssistantMock.setSelectedAssistant.mockClear()
   selectedCharacterState.value = null
   selectedCharacterState.setSelectedCharacter.mockClear()
+  chatModelSettingsState.systemPrompt = ""
+  chatModelSettingsState.updateSetting.mockClear()
   playgroundFormMessageOptionState.value = createMessageOptionState()
   playgroundFormConnectionState.phase = "connected"
   playgroundFormConnectionState.isConnected = true
@@ -1008,6 +1027,28 @@ const renderRolePlayStarterHarness = () =>
   )
 
 describe("PlaygroundForm role-play starter", () => {
+  it("clears a custom override only when the selected system template identity changes", async () => {
+    const user = userEvent.setup()
+    playgroundFormMessageOptionState.value = {
+      ...createMessageOptionState(),
+      selectedSystemPrompt: "prompt-1"
+    }
+    chatModelSettingsState.systemPrompt = "Conversation override"
+
+    render(<PlaygroundForm droppedFiles={[]} />)
+
+    await user.click(screen.getByRole("button", { name: "Reselect system prompt" }))
+
+    expect(chatModelSettingsState.updateSetting).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "Change system prompt" }))
+
+    expect(chatModelSettingsState.updateSetting.mock.calls).toEqual([
+      ["systemPromptTemplateId", undefined],
+      ["systemPrompt", undefined]
+    ])
+  })
+
   it("does not crash role-play state derivation when document context is null", () => {
     playgroundFormMessageOptionState.value = {
       ...createMessageOptionState(),

@@ -14,7 +14,10 @@ import {
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { ModelSelect } from "@/components/Common/ModelSelect"
+import {
+  ModelSelect,
+  type ModelSelectHandle
+} from "@/components/Common/ModelSelect"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { FeatureHint, useFeatureHintSeen } from "@/components/Common/FeatureHint"
 import { McpToolSelector } from "@/components/Common/McpToolSelector"
@@ -39,6 +42,13 @@ import {
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
 import type { ToolChoice } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import { normalizeModelSettingsScope } from "@/store/model-settings-scope"
+import {
+  getModelId,
+  getModelProvider
+} from "@/hooks/playground/modelSelectorUtils"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { ConversationContextComposition } from "@/types/conversation-context"
 import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
@@ -46,6 +56,8 @@ import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepan
 
 interface ControlRowProps {
   // Prompt selection
+  selectedModel?: string | null
+  currentProvider?: string | null
   selectedSystemPrompt: string | undefined
   setSelectedSystemPrompt: (promptId: string | undefined) => void
   setSelectedQuickPrompt: (prompt: string | undefined) => void
@@ -54,6 +66,8 @@ interface ControlRowProps {
   setSelectedCharacterId: (id: string | null) => void
   // Conversation context
   serverChatId?: string | null
+  promptAssistContextKey?: string
+  promptAssistBackendKey?: string | null
   conversationContextComposition?: ConversationContextComposition | null
   conversationContextStatus?: ConversationContextCompositionStatus
   conversationContextSaveSelection?: (
@@ -90,12 +104,16 @@ interface ControlRowProps {
 }
 
 const ControlRowBase: React.FC<ControlRowProps> = ({
+  selectedModel,
+  currentProvider,
   selectedSystemPrompt,
   setSelectedSystemPrompt,
   setSelectedQuickPrompt,
   selectedCharacterId,
   setSelectedCharacterId,
   serverChatId,
+  promptAssistContextKey,
+  promptAssistBackendKey,
   conversationContextComposition,
   conversationContextStatus = "idle",
   conversationContextSaveSelection,
@@ -126,10 +144,15 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const continueInWebUIPendingRef = React.useRef(false)
   const [continueInWebUIPending, setContinueInWebUIPending] =
     React.useState(false)
-  const [systemPromptOverride, setSystemPromptOverride] = React.useState<
-    string | undefined
-  >(undefined)
+  const updateScopedChatModelSetting = useStoreChatModelSettings(
+    (state) => state.updateScopedSetting
+  )
+  const setActiveChatModelSettingsScope = useStoreChatModelSettings(
+    (state) => state.setActiveSettingsScope
+  )
+  const previousSelectedSystemPromptRef = React.useRef(selectedSystemPrompt)
   const moreBtnRef = React.useRef<HTMLButtonElement>(null)
+  const modelSelectRef = React.useRef<ModelSelectHandle | null>(null)
   const fullAppHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
   const [activePlaylistDetail, setActivePlaylistDetail] =
@@ -238,15 +261,55 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     [setToolModules]
   )
 
-  const [selectedModel] = useStorage<string | null>("selectedModel", null)
   const { data: chatModels } = useQuery({
     queryKey: ["mcp-small-models"],
     queryFn: () => fetchChatModels({ returnEmpty: true })
   })
+  const selectedModelSelection = React.useMemo(
+    () => parseProviderQualifiedModelSelection(selectedModel),
+    [selectedModel]
+  )
+  const selectedModelId = React.useMemo(
+    () => getModelId({ model: selectedModelSelection.modelId }),
+    [selectedModelSelection.modelId]
+  )
+  const explicitProvider = React.useMemo(() => {
+    const provider = getModelProvider({ provider: currentProvider })
+    return provider === "other" || provider === "unknown" ? null : provider
+  }, [currentProvider])
+  const qualifiedProvider = selectedModelSelection.provider ?? null
+  const matchingModelMetadata = React.useMemo(() => {
+    if (!selectedModelId || !Array.isArray(chatModels)) return []
+    return chatModels.filter((model) => getModelId(model) === selectedModelId)
+  }, [chatModels, selectedModelId])
+  const catalogProvider = React.useMemo(() => {
+    const providers = new Set(
+      matchingModelMetadata
+        .map((model) => getModelProvider(model))
+        .filter((provider) => provider !== "other" && provider !== "unknown")
+    )
+    return providers.size === 1 ? Array.from(providers)[0] : null
+  }, [matchingModelMetadata])
+  const resolvedProvider =
+    qualifiedProvider ?? explicitProvider ?? catalogProvider
+  const selectedModelSettingsScope = React.useMemo(
+    () => normalizeModelSettingsScope(resolvedProvider, selectedModelId),
+    [resolvedProvider, selectedModelId]
+  )
   const selectedModelMeta = React.useMemo(() => {
-    if (!selectedModel || !Array.isArray(chatModels)) return null
-    return chatModels.find((model) => model.model === selectedModel) || null
-  }, [chatModels, selectedModel])
+    if (matchingModelMetadata.length === 0) return null
+    if (!resolvedProvider) return matchingModelMetadata[0] ?? null
+    return (
+      matchingModelMetadata.find(
+        (model) => getModelProvider(model) === resolvedProvider
+      ) ?? null
+    )
+  }, [matchingModelMetadata, resolvedProvider])
+  const systemPromptOverride = useStoreChatModelSettings((state) =>
+    selectedModelSettingsScope
+      ? state.getEffectiveSettings(selectedModelSettingsScope).systemPrompt
+      : undefined
+  )
   const modelCapabilities = React.useMemo(() => {
     const caps = selectedModelMeta?.details?.capabilities
     return Array.isArray(caps) ? caps.map((cap) => String(cap).toLowerCase()) : []
@@ -282,9 +345,42 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const knowledgeHintSeen = useFeatureHintSeen("knowledge-search")
   const moreToolsHintSeen = useFeatureHintSeen("more-tools")
 
+  const openSidepanelModelSelector = React.useCallback(() => {
+    modelSelectRef.current?.openAndFocus()
+  }, [])
+
   React.useEffect(() => {
-    setSystemPromptOverride(undefined)
-  }, [selectedSystemPrompt])
+    setActiveChatModelSettingsScope(selectedModelSettingsScope)
+  }, [selectedModelSettingsScope, setActiveChatModelSettingsScope])
+
+  React.useEffect(() => {
+    if (previousSelectedSystemPromptRef.current !== selectedSystemPrompt) {
+      if (selectedModelSettingsScope) {
+        updateScopedChatModelSetting(
+          selectedModelSettingsScope,
+          "systemPrompt",
+          undefined
+        )
+      }
+      previousSelectedSystemPromptRef.current = selectedSystemPrompt
+    }
+  }, [
+    selectedModelSettingsScope,
+    selectedSystemPrompt,
+    updateScopedChatModelSetting
+  ])
+
+  const setScopedSystemPrompt = React.useCallback(
+    (value: string | undefined) => {
+      if (!selectedModelSettingsScope) return
+      updateScopedChatModelSetting(
+        selectedModelSettingsScope,
+        "systemPrompt",
+        value
+      )
+    },
+    [selectedModelSettingsScope, updateScopedChatModelSetting]
+  )
 
   const playlistImportEnabled =
     Boolean(isConnected) && Boolean(capabilities?.hasMediaPlaylistPreflight)
@@ -1032,12 +1128,23 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           selectedSystemPrompt={selectedSystemPrompt}
           systemPrompt={systemPromptOverride}
           setSelectedSystemPrompt={setSelectedSystemPrompt}
-          setSystemPrompt={setSystemPromptOverride}
+          setSystemPrompt={setScopedSystemPrompt}
           setSelectedQuickPrompt={setSelectedQuickPrompt}
+          selectedModel={selectedModel}
+          currentProvider={resolvedProvider}
+          promptAssistContextKey={
+            promptAssistContextKey ?? serverChatId ?? "sidepanel-draft"
+          }
+          promptAssistBackendKey={promptAssistBackendKey}
+          onSelectModel={openSidepanelModelSelector}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"
         />
-        <ModelSelect iconClassName="size-4" showSelectedName />
+        <ModelSelect
+          ref={modelSelectRef}
+          iconClassName="size-4"
+          showSelectedName
+        />
         <ConversationContextPopover
           chatId={serverChatId}
           selectedCharacterId={selectedCharacterId}
