@@ -78,6 +78,7 @@ class _RecoveryRecord:
     identity: tuple[int, int, int]
     raw: bytes
     parent_identity: tuple[int, int, int]
+    output_name: str
     backup: Path
     output_snapshot: _FixtureSetSnapshot
     staged_snapshot: _FixtureSetSnapshot
@@ -442,6 +443,20 @@ def _publication_key(output: Path) -> str:
 
 def _publication_component(publication_key: str) -> str:
     return Path(publication_key).name
+
+
+def _normalized_output_component(component: object) -> str:
+    if (
+        type(component) is not str
+        or component in {"", ".", ".."}
+        or "/" in component
+        or "\\" in component
+        or "\0" in component
+        or Path(component).name != component
+    ):
+        raise ValueError
+    normalized_component = os.path.normcase(component).casefold()
+    return unicodedata.normalize("NFC", normalized_component)
 
 
 def _lock_path_for_output(output: Path) -> Path:
@@ -827,13 +842,14 @@ def _read_recovery_file(path: Path) -> tuple[tuple[int, int, int], bytes]:
 def _parse_recovery_payload(
     raw: bytes,
     output: Path,
-) -> tuple[str, tuple[int, int, int], _FixtureSetSnapshot, _FixtureSetSnapshot]:
+) -> tuple[str, str, tuple[int, int, int], _FixtureSetSnapshot, _FixtureSetSnapshot]:
     payload = json.loads(raw.decode("ascii"), parse_constant=_invalid_json_constant)
     canonical = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
     if raw != canonical or type(payload) is not dict:
         raise ValueError
     if set(payload) != {
         "backup_name",
+        "output_name",
         "output_snapshot",
         "parent_identity",
         "publication_identity",
@@ -849,12 +865,15 @@ def _parse_recovery_payload(
         or payload["publication_identity"] != publication_identity
     ):
         raise ValueError
+    output_name = payload["output_name"]
     backup_name = payload["backup_name"]
     publication_component = _publication_component(publication_identity)
     if (
-        type(backup_name) is not str
+        _normalized_output_component(output_name) != publication_component
+        or type(backup_name) is not str
+        or Path(backup_name).name != backup_name
         or re.fullmatch(
-            rf"\.{re.escape(publication_component)}\.backup-[0-9a-f]{{32}}",
+            rf"\.{re.escape(output_name)}\.backup-[0-9a-f]{{32}}",
             backup_name,
         )
         is None
@@ -867,7 +886,7 @@ def _parse_recovery_payload(
     staged_snapshot = _snapshot_from_json(payload["staged_snapshot"])
     if output_snapshot.directory_identity == staged_snapshot.directory_identity:
         raise ValueError
-    return backup_name, parent_identity, output_snapshot, staged_snapshot
+    return output_name, backup_name, parent_identity, output_snapshot, staged_snapshot
 
 
 def _cleanup_recovery_temp(
@@ -894,12 +913,22 @@ def _write_recovery_record(
         publication_identity = _publication_key(output)
         path = output.with_name(f".{_publication_component(publication_identity)}.publication-recovery.json")
         temporary_path = path.with_name(f"{path.name}.tmp-{uuid.uuid4().hex}")
-        if backup.parent != output.parent:
+        output_name = output.name
+        if (
+            backup.parent != output.parent
+            or _normalized_output_component(output_name) != _publication_component(publication_identity)
+            or re.fullmatch(
+                rf"\.{re.escape(output_name)}\.backup-[0-9a-f]{{32}}",
+                backup.name,
+            )
+            is None
+        ):
             raise RuntimeError(_RECOVERY_ERROR)
     except (OSError, UnicodeError, ValueError, RuntimeError):
         raise RuntimeError(_RECOVERY_ERROR) from None
     payload = {
         "backup_name": backup.name,
+        "output_name": output_name,
         "output_snapshot": _snapshot_to_json(output_snapshot),
         "parent_identity": _identity_to_json(parent_identity),
         "publication_identity": publication_identity,
@@ -951,7 +980,7 @@ def _write_recovery_record(
         if read_identity != temporary_identity or read_raw != raw:
             raise RuntimeError(_RECOVERY_ERROR)
         parsed = _parse_recovery_payload(read_raw, output)
-        if parsed != (backup.name, parent_identity, output_snapshot, staged_snapshot):
+        if parsed != (output_name, backup.name, parent_identity, output_snapshot, staged_snapshot):
             raise RuntimeError(_RECOVERY_ERROR)
         _require_path_identity(output.parent, parent_identity, _RECOVERY_ERROR)
         _require_path_absent(path, _RECOVERY_ERROR)
@@ -975,6 +1004,7 @@ def _write_recovery_record(
         identity=temporary_identity,
         raw=raw,
         parent_identity=parent_identity,
+        output_name=output_name,
         backup=backup,
         output_snapshot=output_snapshot,
         staged_snapshot=staged_snapshot,
@@ -987,7 +1017,7 @@ def _load_recovery_record(output: Path) -> _RecoveryRecord | None:
         if _path_identity_or_none(path, _RECOVERY_ERROR) is None:
             return None
         record_identity, raw = _read_recovery_file(path)
-        backup_name, parent_identity, output_snapshot, staged_snapshot = _parse_recovery_payload(
+        output_name, backup_name, parent_identity, output_snapshot, staged_snapshot = _parse_recovery_payload(
             raw,
             output,
         )
@@ -998,6 +1028,7 @@ def _load_recovery_record(output: Path) -> _RecoveryRecord | None:
         identity=record_identity,
         raw=raw,
         parent_identity=parent_identity,
+        output_name=output_name,
         backup=output.parent / backup_name,
         output_snapshot=output_snapshot,
         staged_snapshot=staged_snapshot,
@@ -1017,6 +1048,35 @@ def _clear_recovery_record(record: _RecoveryRecord) -> None:
     _fsync_directory(record.path.parent, record.parent_identity, _RECOVERY_ERROR)
 
 
+def _require_recovery_target_alias(
+    output: Path,
+    record: _RecoveryRecord,
+    output_identity: tuple[int, int, int] | None,
+    backup_identity: tuple[int, int, int] | None,
+) -> None:
+    if output.name == record.output_name:
+        return
+
+    if output_identity is not None:
+        recorded_output = output.parent / record.output_name
+        if _path_identity_or_none(recorded_output, _RECOVERY_ERROR) != output_identity or not os.path.samefile(
+            output, recorded_output
+        ):
+            raise RuntimeError(_RECOVERY_ERROR)
+        return
+
+    if backup_identity is not None:
+        backup_suffix = record.backup.name[-32:]
+        alias_backup = output.with_name(f".{output.name}.backup-{backup_suffix}")
+        if _path_identity_or_none(alias_backup, _RECOVERY_ERROR) != backup_identity or not os.path.samefile(
+            record.backup, alias_backup
+        ):
+            raise RuntimeError(_RECOVERY_ERROR)
+        return
+
+    raise RuntimeError(_RECOVERY_ERROR)
+
+
 def _recover_interrupted_publication(output: Path) -> None:
     record = _load_recovery_record(output)
     if record is None:
@@ -1025,6 +1085,7 @@ def _recover_interrupted_publication(output: Path) -> None:
         _require_path_identity(output.parent, record.parent_identity, _RECOVERY_ERROR)
         output_identity = _path_identity_or_none(output, _RECOVERY_ERROR)
         backup_identity = _path_identity_or_none(record.backup, _RECOVERY_ERROR)
+        _require_recovery_target_alias(output, record, output_identity, backup_identity)
         old_identity = record.output_snapshot.directory_identity
         new_identity = record.staged_snapshot.directory_identity
         if output_identity == old_identity and backup_identity is None:
@@ -1057,7 +1118,7 @@ def _recover_interrupted_publication(output: Path) -> None:
             _clear_recovery_record(record)
             return
         raise RuntimeError(_RECOVERY_ERROR)
-    except (OSError, RuntimeError):
+    except (OSError, UnicodeError, RuntimeError):
         raise RuntimeError(_RECOVERY_ERROR) from None
 
 
@@ -1388,11 +1449,7 @@ def _replace_output_directory(
     _require_real_directory_identity(staging, staging_identity, staging_error)
     output_snapshot = _validate_existing_output(output)
     output_identity = output_snapshot.directory_identity if output_snapshot is not None else None
-    backup = (
-        output.with_name(f".{_publication_component(_publication_key(output))}.backup-{uuid.uuid4().hex}")
-        if output_snapshot is not None
-        else None
-    )
+    backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}") if output_snapshot is not None else None
     recovery_record: _RecoveryRecord | None = None
     rename_started = False
     staging_rename_completed = False
