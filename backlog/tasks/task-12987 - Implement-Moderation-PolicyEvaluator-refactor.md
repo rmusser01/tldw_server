@@ -13,6 +13,9 @@ priority: medium
 references:
 - tldw_Server_API/app/core/Moderation/moderation_service.py
 - tldw_Server_API/app/core/Moderation/policy_compiler.py
+- f15365c7bbbcd212733551e5f56d2ed6486fffe2
+- f42a88d0ec9953db6a3f96a33dab080643b98b49
+- https://github.com/rmusser01/tldw_server/pull/2770
 documentation:
 - Docs/superpowers/specs/2026-07-20-moderation-policy-evaluator-refactor-design.md
 - Docs/superpowers/plans/2026-07-23-moderation-policy-evaluator-refactor-implementation-plan.md
@@ -27,7 +30,7 @@ modified_files:
 - tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py
 - tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py
 - backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md
-updated_date: 2026-07-26 06:07
+updated_date: 2026-08-02 02:23
 ---
 
 ## Description
@@ -69,6 +72,7 @@ Task 6 review found one cleanup defect: artifact deletion could raise before the
 Task 6 second re-review found that cleanup failure could still mask an existing test-body failure. Test-only commit `9d3071a7fd` tracks successful body completion so cleanup errors fail an otherwise successful test but are suppressed when a body failure is already active; dependency override removal remains unconditional. Focused real-service Chat passed 1/1 and full Chat passed 16/16; Ruff, test-only Bandit, and diff checks passed. Final Task 6 re-review is pending.
 Final Task 6 re-review is APPROVED with no findings. The reviewer verified unconditional override removal, cleanup failures surfacing after successful bodies, original body failures remaining primary when cleanup also fails, no swallowed body exceptions, intact real-service Chat/Workflow boundary assertions, and tests/tracking-only scope. Task 6 is complete; Task 7 final verification, scope audit, current-dev mergeability, and whole-branch review are starting.
 Task 7 final verification completed on 2026-07-25. Compilation passed for all seven touched Python files. Black check passed for the four new evaluator/test files. Ruff passed on all touched files, with only the pre-documented existing Workflow-file ignores I001 and F401. Test gates passed: 275/275 Moderation unit tests; 97/97 endpoint and Guardian tests; 16/16 Chat moderation tests; 12/12 selected Workflow moderation tests with 45 deselected; and 1/1 STT redaction regression. Bandit scanned 3,282 production Moderation LOC with zero findings, zero skips, and zero nosec suppressions. git diff --check passed; the worktree was clean; production scope is exactly moderation_service.py plus policy_evaluator.py, with no endpoint or schema changes. Fresh origin/dev remained 0f3983788c413e0d17ffe7eabe8cff4a9f6ae723; git merge-tree --write-tree HEAD origin/dev succeeded with tree 75316096ac5bbeed623b9ffd15d3ee54e8c227e4. The final independent whole-branch review on gpt-5.6-sol xhigh reported no Critical, Important, or Minor findings and judged the branch ready to merge pending process gates. No broad repository-wide suite was run because the approved plan specifies focused structural-refactor gates; residual risks remain the documented existing borrowed-policy concurrent mutation exposure, deferred regex/ReDoS hardening, and selective rather than exhaustive real-caller coverage.
+PR preparation rerun on 2026-08-01 after origin/dev advanced to f15365c7bbbcd212733551e5f56d2ed6486fffe2. The exact reviewed Moderation commit series was transplanted to codex/moderation-policy-evaluator-refactor-dev with the obsolete shared .superpowers/sdd/progress.md scratch change excluded. Verified code head f42a88d0ec9953db6a3f96a33dab080643b98b49 has exactly 12 approved changed files and no endpoint/schema/SDD-scratch changes. Fresh gates passed: py_compile for seven touched Python files; Black for four new files; Ruff for touched files with only the documented existing Workflow I001/F401 ignores; 275 Moderation unit tests; 97 endpoint/Guardian tests; 16 Chat moderation tests; 12 Workflow moderation tests with 45 deselected; 1 STT redaction test; Bandit 3,282 LOC with 0 findings, 0 skips, and 0 nosec; git diff --check passed. Draft PR: https://github.com/rmusser01/tldw_server/pull/2770. The requester-authored Change summary remains pending, so the PR must remain draft and is not merge-ready.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
