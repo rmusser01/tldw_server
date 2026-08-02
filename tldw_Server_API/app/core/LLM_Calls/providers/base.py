@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Base interfaces and helpers for LLM provider adapters.
 
@@ -12,6 +10,8 @@ Adapters implement a unified ChatProvider interface and are responsible for:
 Adapters should return OpenAI-compatible chat completion JSON for non-streaming
 and yield OpenAI-compatible SSE lines for streaming.
 """
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
@@ -165,7 +165,14 @@ class ChatProvider(ABC):
             get_http_status_from_exception,
             is_http_status_error,
             log_provider_failure,
+            log_provider_failure_metadata,
+            privacy_safe_chat_error,
+            provider_errors_are_privacy_safe,
         )
+
+        if provider_errors_are_privacy_safe():
+            log_provider_failure_metadata(self.name, exc, phase="normalization")
+            return privacy_safe_chat_error(self.name, exc)
 
         if is_http_status_error(exc):
             status = get_http_status_from_exception(exc)

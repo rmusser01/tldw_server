@@ -144,6 +144,13 @@ jobs:
         working-directory: apps
         run: bun install
 
+      - name: Install PortAudio build dependencies
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+
       - name: Setup Python for auth lifecycle
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         uses: ./.github/actions/setup-python-deps
@@ -245,6 +252,13 @@ jobs:
         if: needs.changes.outputs.admin_ui_changed == 'true'
         working-directory: admin-ui
         run: bunx playwright install --with-deps chromium
+
+      - name: Install PortAudio build dependencies
+        if: needs.changes.outputs.admin_ui_changed == 'true'
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
 
       - name: Setup Python and server dependencies
         if: needs.changes.outputs.admin_ui_changed == 'true'

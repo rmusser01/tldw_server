@@ -3,11 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from typer.testing import CliRunner
-
 from tldw_Server_API.cli.wizard.cli import _mcp_tools_url, app
+from tldw_Server_API.tests.wizard.cli_runner import CliRunner
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
-
 
 runner = CliRunner()
 

@@ -84,6 +84,76 @@ def test_chat_endpoint_routes_auto_before_provider_normalization(
 
 
 @pytest.mark.integration
+def test_chat_endpoint_returns_503_when_auto_router_has_candidates_but_no_decision(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+):
+    request_data = ChatCompletionRequest(
+        model="auto",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Route this")],
+    )
+
+    with (
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.route_model",
+            return_value=None,
+        ),
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={
+                "providers": [
+                    {
+                        "name": "openai",
+                        "models_info": [
+                            {
+                                "name": "gpt-test",
+                                "tool_support": True,
+                                "quality_rank": 1,
+                            }
+                        ],
+                    }
+                ],
+                "default_provider": "openai",
+            },
+        ),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["detail"]["error_code"] == "auto_routing_failed"
+    assert response.json()["detail"]["routing"]["candidate_count"] == 1
+
+
+@pytest.mark.integration
+def test_chat_endpoint_returns_400_when_auto_router_has_no_candidates(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+):
+    request_data = ChatCompletionRequest(
+        model="auto",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Route this")],
+    )
+
+    with (
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.route_model",
+            return_value=None,
+        ),
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={"providers": [], "default_provider": "openai"},
+        ),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["detail"]["error_code"] == "auto_routing_no_candidates"
+    assert response.json()["detail"]["routing"]["candidate_count"] == 0
+
+
+@pytest.mark.integration
 def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_mode(
     authenticated_client,
     mock_chacha_db,

@@ -742,7 +742,9 @@ test.describe('Watchlists playground smoke', () => {
 
     await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible()
     await expectWatchlistsDestination(page, 'Overview')
-    await expect(page.getByText('At-a-glance watchlist health')).toBeVisible()
+    await expect(
+      watchlistsContentShell(page).getByTestId('watchlists-overview-alert-health-summary')
+    ).toBeVisible()
 
     await navigateWatchlistsDestination(page, 'Feeds')
     await expect(page.getByText('Tech Daily')).toBeVisible()
@@ -1293,7 +1295,7 @@ test.describe('Watchlists playground smoke', () => {
     await context.close()
   })
 
-  test('overview quick setup callout drives first tab transition', async () => {
+  test('overview canonical briefing entry opens the setup flow', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
     const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
@@ -1302,9 +1304,6 @@ test.describe('Watchlists playground smoke', () => {
 
     await context.addInitScript(() => {
       ;(window as any).__watchlistsStubbed = true
-      try {
-        localStorage.setItem('watchlists:quickSetup:autoshown:v1', '1')
-      } catch {}
 
       const paginate = (list, page, size) => {
         const current = page || 1
@@ -1357,26 +1356,26 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await expect(page.getByText('Add feeds to this Watchlist')).toBeVisible()
-    await expect(page.getByText('Create a monitor')).toBeVisible()
-    await expect(page.getByText('Review results')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Latest briefing' })).toBeVisible()
+    await expect(page.getByText('System healthy')).toBeVisible()
+    await expect(page.getByText('Add initial collection')).toHaveCount(0)
 
-    const autoQuickSetupDialog = page.getByRole('dialog', { name: 'Add initial collection' })
-    await autoQuickSetupDialog.waitFor({ state: 'visible', timeout: 1_000 }).catch(() => {})
-    if (await isVisibleLocator(autoQuickSetupDialog)) {
-      await autoQuickSetupDialog.getByRole('button', { name: 'Cancel' }).click()
-      await expect(autoQuickSetupDialog).toBeHidden()
-    }
+    const setupTrigger = page.getByRole('button', { name: 'Test now' })
+    await expect(setupTrigger).toBeVisible()
+    await setupTrigger.click()
 
-    const addFirstFeedButton = page.getByRole('button', { name: 'Add first feed' })
-    await expect(addFirstFeedButton).toBeVisible()
-    await addFirstFeedButton.click()
-    await expectWatchlistsDestination(page, 'Feeds')
+    const setupDialog = page.getByRole('dialog', { name: 'Set up briefing' })
+    await expect(setupDialog).toBeVisible()
+    await expect(setupDialog.getByLabel('Use existing sources')).toBeChecked()
+    await expect(page.getByRole('dialog', { name: 'Add initial collection' })).toHaveCount(0)
+    await setupDialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(setupDialog).toBeHidden()
+    await expect(setupTrigger).toBeFocused()
 
     await context.close()
   })
 
-  test('guided quick setup creates feed and monitor in three steps', async () => {
+  test('canonical briefing setup creates and activates a feed and monitor', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
     const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
@@ -1385,12 +1384,10 @@ test.describe('Watchlists playground smoke', () => {
 
     await context.addInitScript(() => {
       ;(window as any).__watchlistsStubbed = true
-      try {
-        localStorage.setItem('watchlists:quickSetup:autoshown:v1', '1')
-      } catch {}
       ;(window as any).__watchlistsQuickSetup = {
         sourceBody: null,
         jobBody: null,
+        jobUpdates: [],
         run: null
       }
 
@@ -1470,6 +1467,15 @@ test.describe('Watchlists playground smoke', () => {
           return created
         }
 
+        const jobMatch = pathname.match(/^\/api\/v1\/watchlists\/jobs\/(\d+)$/)
+        if (jobMatch && method === 'PATCH') {
+          ;(window as any).__watchlistsQuickSetup.jobUpdates.push(body)
+          const job = jobs.find((item) => item.id === Number(jobMatch[1]))
+          if (!job) return null
+          Object.assign(job, body, { updated_at: now() })
+          return job
+        }
+
         const runTriggerMatch = pathname.match(/^\/api\/v1\/watchlists\/jobs\/(\d+)\/run$/)
         if (runTriggerMatch && method === 'POST') {
           const run = {
@@ -1544,34 +1550,31 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    const dialog = page.getByRole('dialog', { name: 'Add initial collection' })
-    await dialog.waitFor({ state: 'visible', timeout: 1_000 }).catch(() => {})
-    if (!(await isVisibleLocator(dialog))) {
-      const guidedSetupButton = page.getByTestId('watchlists-overview-cta-guided-setup')
-      await expect(guidedSetupButton).toBeVisible()
-      await guidedSetupButton.click()
-    }
-
+    await page.getByRole('button', { name: 'Test now' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Set up briefing' })
     await expect(dialog).toBeVisible()
-    await dialog.getByPlaceholder('e.g., Daily Tech Feed').fill('Guided Feed')
-    await dialog.getByPlaceholder('https://example.com/feed.xml').fill('https://example.com/guided.xml')
-    await dialog.getByRole('button', { name: 'Next' }).click()
+    await dialog.getByLabel('Add a new source').check()
+    await dialog.getByLabel('Source name').fill('Guided Feed')
+    await dialog.getByLabel('Source URL').fill('https://example.com/guided.xml')
+    await dialog.getByRole('button', { name: 'Next: Cadence' }).click()
+    await dialog.getByLabel('Monitor name').fill('Guided Monitor')
+    await dialog.getByRole('button', { name: 'Next: Briefing' }).click()
+    await dialog.getByRole('switch', { name: 'Audio' }).click()
+    await dialog.getByRole('button', { name: 'Next: Delivery' }).click()
+    await dialog.getByRole('button', { name: 'Next: Test' }).click()
+    await dialog.getByRole('button', { name: 'Activate schedule' }).click()
 
-    await expect(dialog.getByPlaceholder('e.g., Morning Brief')).toBeVisible()
-    await dialog.getByPlaceholder('e.g., Morning Brief').fill('Guided Monitor')
-    await dialog.getByRole('button', { name: 'Next' }).click()
-    const createCollectionButton = dialog.getByRole('button', { name: /Create collection/ })
-    await expect(createCollectionButton).toBeVisible()
-    await createCollectionButton.click()
-
-    await expectWatchlistsDestination(page, 'Activity')
+    await expect(dialog).toBeHidden()
+    await expectWatchlistsDestination(page, 'Overview')
 
     const quickSetupState = await page.evaluate(() => (window as any).__watchlistsQuickSetup)
     expect(quickSetupState.sourceBody?.name).toBe('Guided Feed')
     expect(quickSetupState.sourceBody?.url).toBe('https://example.com/guided.xml')
     expect(quickSetupState.jobBody?.name).toBe('Guided Monitor')
     expect(quickSetupState.jobBody?.scope?.sources).toEqual([501])
-    expect(quickSetupState.run?.job_id).toBe(601)
+    expect(quickSetupState.jobBody?.active).toBe(false)
+    expect(quickSetupState.jobUpdates).toEqual([{ active: true }])
+    expect(quickSetupState.run).toBeNull()
 
     await context.close()
   })

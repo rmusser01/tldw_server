@@ -1,6 +1,10 @@
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { Button as TldwButton } from "@/components/Common/Button"
 import { PromptSelect } from "@/components/Common/PromptSelect"
+import {
+  PromptAssistComposerAction,
+  type PromptAssistComposerActionProps
+} from "@/components/Chat/composer/PromptAssistComposerAction"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide"
 import { Modal, Tooltip } from "antd"
@@ -31,6 +35,7 @@ import {
   SystemPromptTemplatesModal,
   SystemPromptTemplatesButton
 } from "./playground-features"
+import { openModelSelector } from "./playground-cockpit-actions"
 
 export type ComposerToolbarProps = {
   isProMode: boolean
@@ -55,7 +60,7 @@ export type ComposerToolbarProps = {
   // Prompt select
   selectedSystemPrompt: string | undefined
   systemPrompt: string | undefined
-  setSystemPrompt: (prompt: string) => void
+  setSystemPrompt: (prompt: string | undefined) => void
   setSelectedSystemPrompt: (id: string | undefined) => void
   setSelectedQuickPrompt: (prompt: string | undefined) => void
   // Ephemeral toggle
@@ -88,6 +93,7 @@ export type ComposerToolbarProps = {
   onTemplateSelect: (template: PromptTemplate) => void
   // Pro-only: cost estimation
   selectedModel: string | null
+  currentProvider?: string | null
   resolvedProviderKey: string
   messages: any[]
   // Pro-only: context counts
@@ -95,6 +101,12 @@ export type ComposerToolbarProps = {
   uploadedFilesCount: number
   // Persistence hints
   serverChatId: string | null
+  promptAssistContextKey?: string
+  promptAssistBackendKey?: string | null
+  promptAssistComposer?: Omit<
+    PromptAssistComposerActionProps,
+    "narrow" | "onSelectModel"
+  >
   showServerPersistenceHint: boolean
   onDismissServerPersistenceHint: () => void
   onFocusConnectionCard: () => void
@@ -170,11 +182,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     onDictationToggle,
     onTemplateSelect,
     selectedModel,
+    currentProvider,
     resolvedProviderKey,
     messages,
     selectedDocumentsCount,
     uploadedFilesCount,
     serverChatId,
+    promptAssistContextKey,
+    promptAssistBackendKey,
+    promptAssistComposer,
     showServerPersistenceHint,
     onDismissServerPersistenceHint,
     onFocusConnectionCard,
@@ -183,6 +199,17 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   } = props
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
+  const promptAssistComposerAction = promptAssistComposer ? (
+    <PromptAssistComposerAction
+      {...promptAssistComposer}
+      narrow={isMobile}
+      onSelectModel={() =>
+        openModelSelector({
+          returnFocusSelector: "[aria-label='Improve prompt']"
+        })
+      }
+    />
+  ) : null
 
   const ephemeralDisabled = privateChatLocked || isFireFoxPrivateMode
   const [advancedControlsOpen, setAdvancedControlsOpen] = useStorage(
@@ -515,12 +542,28 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         setSystemPrompt={setSystemPrompt}
         setSelectedSystemPrompt={setSelectedSystemPrompt}
         setSelectedQuickPrompt={setSelectedQuickPrompt}
+        selectedModel={selectedModel}
+        currentProvider={currentProvider}
+        promptAssistContextKey={
+          promptAssistContextKey ?? serverChatId ?? "playground-draft"
+        }
+        promptAssistBackendKey={promptAssistBackendKey}
+        onSelectModel={() =>
+          openModelSelector({
+            returnFocusSelector: "[data-testid='chat-prompt-select']"
+          })
+        }
         iconClassName="h-4 w-4"
         className="text-text-muted hover:text-text"
       />
     ),
     [
       selectedSystemPrompt,
+      selectedModel,
+      currentProvider,
+      promptAssistContextKey,
+      promptAssistBackendKey,
+      serverChatId,
       setSelectedQuickPrompt,
       setSelectedSystemPrompt,
       setSystemPrompt,
@@ -1086,6 +1129,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         className="generation-style-modal">
         <ParameterPresetsDropdown onChange={() => setGenerationStyleOpen(false)} />
       </Modal>
+      {promptAssistComposerAction}
       {optionsExpanded ? (
         <>
           {isMobile

@@ -166,7 +166,7 @@ def _moonshot_request(
         payload["max_tokens"] = final_max_tokens
     if frequency_penalty is not None:
         payload["frequency_penalty"] = frequency_penalty
-    if final_n is not None and final_n != 1:
+    if final_n is not None:
         payload["n"] = final_n
     if presence_penalty is not None:
         payload["presence_penalty"] = presence_penalty
@@ -202,7 +202,9 @@ def _moonshot_request(
         if final_streaming:
             logging.debug("Moonshot: Posting request (streaming)")
             from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-            session = _chat_calls.create_session_with_retries(total=1)
+            session = _chat_calls.create_session_with_retries(
+                total=_safe_cast(moonshot_config.get("api_retries"), int, 1)
+            )
             response = None
             try:
                 response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=effective_timeout)
@@ -227,7 +229,9 @@ def _moonshot_request(
 
         logging.debug("Moonshot: Posting request (non-streaming)")
         from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-        session = _chat_calls.create_session_with_retries(total=1)
+        session = _chat_calls.create_session_with_retries(
+            total=_safe_cast(moonshot_config.get("api_retries"), int, 1)
+        )
         try:
             response = session.post(api_url, headers=headers, json=payload, timeout=effective_timeout)
             logging.debug(f"Moonshot: Full API response status: {response.status_code}")

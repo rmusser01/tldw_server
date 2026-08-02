@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest"
 import { ComposerToolbar } from "../ComposerToolbar"
 
 const assistantSelectMock = vi.hoisted(() => vi.fn())
+const promptSelectMock = vi.hoisted(() => vi.fn())
+const promptAssistComposerMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -29,7 +31,10 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/components/Common/PromptSelect", () => ({
-  PromptSelect: () => <div data-testid="prompt-select" />
+  PromptSelect: (props: unknown) => {
+    promptSelectMock(props)
+    return <div data-testid="prompt-select" />
+  }
 }))
 
 vi.mock("@/components/Common/AssistantSelect", () => ({
@@ -38,6 +43,13 @@ vi.mock("@/components/Common/AssistantSelect", () => ({
     return (
       <div data-testid="character-select" data-variant={props.variant ?? ""} />
     )
+  }
+}))
+
+vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({
+  PromptAssistComposerAction: (props: unknown) => {
+    promptAssistComposerMock(props)
+    return <button type="button" aria-label="Improve prompt" />
   }
 }))
 
@@ -114,6 +126,7 @@ const createProps = (
   onDictationToggle: vi.fn(),
   onTemplateSelect: vi.fn(),
   selectedModel: null,
+  currentProvider: "openai",
   resolvedProviderKey: "openai",
   messages: [],
   selectedDocumentsCount: 0,
@@ -135,6 +148,85 @@ const createProps = (
 })
 
 describe("ComposerToolbar web search", () => {
+  it.each([
+    { label: "legacy casual", isProMode: false, isMobile: false, optionsExpanded: true },
+    { label: "desktop pro", isProMode: true, isMobile: false, optionsExpanded: true },
+    { label: "mobile", isProMode: false, isMobile: true, optionsExpanded: true },
+    { label: "collapsed mobile", isProMode: false, isMobile: true, optionsExpanded: false }
+  ])("renders one composer prompt action for $label", (layout) => {
+    const promptAssistComposer = {
+      form: {
+        values: { message: "User draft", image: "" },
+        setFieldValue: vi.fn()
+      },
+      messageRevision: 7,
+      modelSelection: {
+        selected_model: "gpt-5-mini",
+        provider_hint: "openai"
+      },
+      promptAssistContextKey: "local:history-42",
+      promptAssistBackendKey: "backend-a",
+      sending: false,
+      surfaceOpen: true,
+      onReturnFocus: vi.fn()
+    }
+
+    render(
+      <ComposerToolbar
+        {...createProps({
+          isProMode: layout.isProMode,
+          isMobile: layout.isMobile,
+          optionsExpanded: layout.optionsExpanded,
+          promptAssistComposer
+        } as any)}
+      />
+    )
+
+    expect(screen.getAllByRole("button", { name: "Improve prompt" })).toHaveLength(1)
+    expect(promptAssistComposerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...promptAssistComposer,
+        narrow: layout.isMobile,
+        onSelectModel: expect.any(Function)
+      })
+    )
+  })
+
+  it("passes the active chat route to system prompt assist", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          selectedModel: "gpt-5-mini",
+          currentProvider: "custom-openai",
+          serverChatId: null,
+          promptAssistContextKey: "local:history-42"
+        })}
+      />
+    )
+
+    expect(promptSelectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedModel: "gpt-5-mini",
+        currentProvider: "custom-openai",
+        promptAssistContextKey: "local:history-42"
+      })
+    )
+  })
+
+  it("hands prompt model recovery to the existing Playground selector", () => {
+    const openListener = vi.fn()
+    window.addEventListener("tldw:open-model-selector", openListener)
+    render(<ComposerToolbar {...createProps()} />)
+
+    const promptProps = promptSelectMock.mock.calls.at(-1)?.[0] as {
+      onSelectModel?: () => void
+    }
+    promptProps.onSelectModel?.()
+
+    expect(openListener).toHaveBeenCalledTimes(1)
+    window.removeEventListener("tldw:open-model-selector", openListener)
+  })
+
   it("owns the dropdown assistant selector used by chat starter events", () => {
     render(<ComposerToolbar {...createProps()} />)
 

@@ -1,5 +1,7 @@
-from datetime import timezone
 import io
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timezone
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
@@ -48,6 +50,16 @@ class _DummyRequest:
         self.method = "GET"
         self.url = SimpleNamespace(path="/test")
         self.headers: dict[str, str] = {}
+
+
+class _NoRbacOverridePool:
+    pool = object()
+
+    async def fetchone(self, *_args, **_kwargs):
+        return None
+
+    async def fetchall(self, *_args, **_kwargs):
+        return []
 
 
 class _LockingTxnCM:
@@ -586,6 +598,325 @@ async def test_check_auth_rate_limit_enforces_fallback_limiter_when_rg_enabled_w
     with pytest.raises(HTTPException) as exc_info:
         await auth_deps.check_auth_rate_limit(request=request, rate_limiter=_StubLimiter())
     assert exc_info.value.status_code == 429
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog_limit", [(0, 3), (3, 0)])
+async def test_rbac_rate_limit_zero_rpm_or_burst_denies_without_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_limit: tuple[int, int],
+) -> None:
+    request = _DummyRequest()
+    request.state.user_id = 41
+    request.state.auth = AuthContext(
+        principal=AuthPrincipal(kind="user", user_id=41, subject="user:41"),
+    )
+    monkeypatch.setattr(
+        auth_deps,
+        "_catalog_rate_limit_for_resource",
+        lambda _resource: catalog_limit,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    with pytest.raises(HTTPException) as captured:
+        await auth_deps.enforce_rbac_rate_limit(
+            request,
+            "prompts.improve",
+            _NoRbacOverridePool(),
+        )
+
+    assert captured.value.status_code == 429
+    assert auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS == {}
+
+
+def test_fallback_rate_bucket_honors_burst_above_rpm_and_principal_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    first_user = [
+        auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:1:prompts.improve",
+            limit=2,
+            burst=4,
+            window_seconds=60.0,
+        )[0]
+        for _ in range(5)
+    ]
+    second_user = auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:user:2:prompts.improve",
+        limit=2,
+        burst=4,
+        window_seconds=60.0,
+    )[0]
+
+    assert first_user == [True, True, True, True, False]
+    assert second_user is True
+
+
+def test_fallback_rate_bucket_honors_burst_below_rpm_and_partial_refill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [200.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+    def consume() -> bool:
+        return auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:3:prompts.improve",
+            limit=4,
+            burst=2,
+            window_seconds=60.0,
+        )[0]
+
+    assert [consume(), consume(), consume()] == [True, True, False]
+    now[0] += 15.0
+    assert [consume(), consume()] == [True, False]
+
+
+def test_fallback_rate_bucket_refills_across_full_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [300.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+    def consume() -> bool:
+        return auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:4:prompts.improve",
+            limit=2,
+            burst=2,
+            window_seconds=60.0,
+        )[0]
+
+    assert [consume(), consume(), consume()] == [True, True, False]
+    now[0] += 60.0
+    assert [consume(), consume(), consume()] == [True, True, False]
+
+
+def test_fallback_rate_bucket_keeps_partial_refill_when_burst_exceeds_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [350.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    def consume() -> bool:
+        return auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:burst-refill",
+            limit=2,
+            burst=4,
+            window_seconds=60.0,
+        )[0]
+
+    assert [consume() for _ in range(5)] == [True, True, True, True, False]
+    now[0] += 60.0
+
+    assert [consume() for _ in range(3)] == [True, True, False]
+
+
+def test_fallback_rate_bucket_prunes_refill_complete_inactive_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [400.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:stale:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+    now[0] += 61.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:active:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+
+    assert list(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == [
+        (
+            "rbac_rate_limit:prompts.improve",
+            "principal:active:prompts.improve",
+        )
+    ]
+
+
+def test_fallback_rate_bucket_prunes_by_inactivity_not_refill_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1_000.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:inactive:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+    now[0] += 50.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:recent:prompts.improve",
+        limit=4,
+        burst=2,
+        window_seconds=60.0,
+    )
+    now[0] += 16.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:trigger:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+
+    keys = set(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS)
+    assert (
+        "rbac_rate_limit:prompts.improve",
+        "principal:inactive:prompts.improve",
+    ) not in keys
+    assert (
+        "rbac_rate_limit:prompts.improve",
+        "principal:recent:prompts.improve",
+    ) in keys
+
+
+def _consume_capacity_test_token(identifier: str) -> tuple[bool, int]:
+    return auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier=identifier,
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+
+
+def test_fallback_rate_bucket_capacity_caps_many_active_distinct_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 500.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        3,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    allowed = [
+        _consume_capacity_test_token(f"principal:active:{index}")[0]
+        for index in range(5)
+    ]
+
+    assert allowed == [True, True, True, False, False]
+
+
+def test_fallback_rate_bucket_capacity_denies_unseen_key_without_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 600.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        2,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+    _consume_capacity_test_token("principal:known:1")
+    _consume_capacity_test_token("principal:known:2")
+    before = dict(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS)
+
+    allowed, retry_after = _consume_capacity_test_token("principal:unseen")
+
+    assert allowed is False
+    assert retry_after == 60
+    assert before == auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS
+
+
+def test_fallback_rate_bucket_capacity_preserves_known_key_quota_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 700.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        1,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    results = [
+        _consume_capacity_test_token("principal:known")[0],
+        _consume_capacity_test_token("principal:unseen")[0],
+        _consume_capacity_test_token("principal:known")[0],
+    ]
+
+    assert results == [True, False, False]
+    assert list(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == [
+        ("rbac_rate_limit:prompts.improve", "principal:known")
+    ]
+
+
+def test_fallback_rate_bucket_capacity_prunes_then_admits_new_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [800.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        1,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    first = _consume_capacity_test_token("principal:old")[0]
+    blocked = _consume_capacity_test_token("principal:new")[0]
+    now[0] += 61.0
+    admitted = _consume_capacity_test_token("principal:new")[0]
+
+    assert [first, blocked, admitted] == [True, False, True]
+    assert list(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == [
+        ("rbac_rate_limit:prompts.improve", "principal:new")
+    ]
+
+
+def test_fallback_rate_bucket_capacity_never_exceeded_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capacity = 4
+    attempts = 12
+    start = Barrier(attempts)
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 900.0)
+    monkeypatch.setattr(
+        auth_deps,
+        "_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY",
+        capacity,
+        raising=False,
+    )
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    def consume(index: int) -> bool:
+        start.wait(timeout=5.0)
+        return _consume_capacity_test_token(f"principal:concurrent:{index}")[0]
+
+    with ThreadPoolExecutor(max_workers=attempts) as pool:
+        allowed = list(pool.map(consume, range(attempts)))
+
+    assert sum(allowed) == capacity
+    assert len(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS) == capacity
 
 
 @pytest.mark.asyncio
