@@ -446,11 +446,11 @@ def _publication_component(publication_key: str) -> str:
 
 
 def _normalized_output_component(component: object) -> str:
+    path_separators = tuple(separator for separator in (os.sep, os.altsep) if separator is not None)
     if (
         type(component) is not str
         or component in {"", ".", ".."}
-        or "/" in component
-        or "\\" in component
+        or any(separator in component for separator in path_separators)
         or "\0" in component
         or Path(component).name != component
     ):

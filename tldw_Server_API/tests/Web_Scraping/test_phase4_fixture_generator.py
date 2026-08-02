@@ -834,6 +834,25 @@ def test_generation_replaces_canonical_prior_category_set(
     _assert_fixture_marker(output, "current")
 
 
+@pytest.mark.skipif(os.sep != "/", reason="backslash is a path separator on this platform")
+def test_existing_output_with_posix_backslash_name_can_be_republished(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, source_commit = _create_clean_source_root(tmp_path)
+    output = tmp_path / "fixture\\set"
+    monkeypatch.setattr(generator, "build_case_payloads", lambda _source_root: _fixture_payloads("first"))
+
+    generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    _assert_fixture_marker(output, "first")
+    monkeypatch.setattr(generator, "build_case_payloads", lambda _source_root: _fixture_payloads("second"))
+
+    generator.generate_fixtures(source_commit, output, source_root=source_root)
+
+    _assert_fixture_marker(output, "second")
+
+
 @pytest.mark.parametrize(
     "invalid_kind",
     [
@@ -1730,10 +1749,12 @@ def test_root_close_after_release_cannot_close_reused_descriptor(
         dir_fd: int | None = None,
     ) -> int:
         nonlocal root_descriptor, lock_descriptor
+        is_root_open = dir_fd is None and os.fspath(path) == os.fspath(lock_root)
+        is_lock_open = dir_fd == root_descriptor and os.fspath(path) == "output.lock"
         descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
-        if dir_fd is None:
+        if is_root_open:
             root_descriptor = descriptor
-        else:
+        elif is_lock_open:
             lock_descriptor = descriptor
         return descriptor
 
@@ -1844,10 +1865,12 @@ def test_direct_root_close_baseexception_closes_lock_and_preserves_root_error(
         dir_fd: int | None = None,
     ) -> int:
         nonlocal root_descriptor, lock_descriptor
+        is_root_open = dir_fd is None and os.fspath(path) == os.fspath(lock_root)
+        is_lock_open = dir_fd == root_descriptor and os.fspath(path) == "output.lock"
         descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
-        if dir_fd is None:
+        if is_root_open:
             root_descriptor = descriptor
-        else:
+        elif is_lock_open:
             lock_descriptor = descriptor
         return descriptor
 
