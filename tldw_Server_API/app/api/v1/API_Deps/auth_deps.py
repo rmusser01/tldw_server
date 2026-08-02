@@ -1806,7 +1806,12 @@ def _consume_auth_deps_fallback_rate_token(
     with _AUTH_DEPS_FALLBACK_RATE_WINDOWS_LOCK:
         stale_keys = []
         for candidate_key, candidate in _AUTH_DEPS_FALLBACK_RATE_WINDOWS.items():
-            if now - candidate.last_refill >= candidate.window_seconds:
+            refill_rate = candidate.limit / candidate.window_seconds
+            seconds_to_full = (
+                max(0.0, candidate.burst - candidate.tokens) / refill_rate
+            )
+            stale_after = max(candidate.window_seconds, seconds_to_full)
+            if now - candidate.last_refill >= stale_after:
                 stale_keys.append(candidate_key)
         for stale_key in stale_keys:
             _AUTH_DEPS_FALLBACK_RATE_WINDOWS.pop(stale_key, None)

@@ -698,6 +698,28 @@ def test_fallback_rate_bucket_refills_across_full_window(
     assert [consume(), consume(), consume()] == [True, True, False]
 
 
+def test_fallback_rate_bucket_keeps_partial_refill_when_burst_exceeds_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [350.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    def consume() -> bool:
+        return auth_deps._consume_auth_deps_fallback_rate_token(
+            dependency="rbac_rate_limit:prompts.improve",
+            identifier="principal:user:burst-refill",
+            limit=2,
+            burst=4,
+            window_seconds=60.0,
+        )[0]
+
+    assert [consume() for _ in range(5)] == [True, True, True, True, False]
+    now[0] += 60.0
+
+    assert [consume() for _ in range(3)] == [True, True, False]
+
+
 def test_fallback_rate_bucket_prunes_refill_complete_inactive_entries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
