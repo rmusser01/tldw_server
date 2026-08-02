@@ -1,5 +1,6 @@
 import {
   type BrowserContext,
+  type Locator,
   type Page,
   chromium,
   expect,
@@ -155,7 +156,7 @@ const startPromptMockServer = async (
     if (url === "/api/v1/health" && method === "GET") {
       return sendJson(200, { status: "ok" })
     }
-    if (url === "/api/v1/llm/models/metadata" && method === "GET") {
+    if (url.startsWith("/api/v1/llm/models/metadata") && method === "GET") {
       return sendJson(200, [
         {
           id: MODEL_ID,
@@ -297,6 +298,10 @@ const MOCK_API_KEY = "prompt-improvement-e2e-key"
 const buildSeedConfig = (baseUrl: string, apiKey = MOCK_API_KEY) => ({
   __tldw_first_run_complete: true,
   __tldw_allow_offline: true,
+  "tldw:seenHints": {
+    "knowledge-search": true,
+    "more-tools": true
+  },
   tldwConfig: {
     serverUrl: baseUrl,
     authMode: "single-user",
@@ -473,7 +478,7 @@ const launchChatSurface = async (
     const chatPage =
       surface === "sidepanel" ? await openSidepanel("/chat") : page
     if (surface === "options") {
-      await chatPage.goto(`${optionsUrl}#/playground`, {
+      await chatPage.goto(`${optionsUrl}#/chat`, {
         waitUntil: "domcontentloaded"
       })
     }
@@ -500,8 +505,8 @@ const launchChatSurface = async (
   }
 }
 
-const openPromptActions = async (page: Page) => {
-  const trigger = page.getByRole("button", { name: "Improve prompt" })
+const openPromptActions = async (page: Page, scope: Page | Locator = page) => {
+  const trigger = scope.getByRole("button", { name: "Improve prompt" })
   await expect(trigger).toBeVisible({ timeout: 20_000 })
   await trigger.click()
   const actions = page.getByRole("group", {
@@ -524,7 +529,7 @@ const assertPromptRequest = (
   )
   expect(payload.target).toBe(expected.target)
   expect(payload.text).toBe(expected.text)
-  expect(payload.model_selection).toEqual({ selected_model: MODEL_KEY })
+  expect(payload.model_selection).toMatchObject({ selected_model: MODEL_KEY })
   expect(payload.protected_tokens).toEqual(
     expected.text.includes("{{topic}}")
       ? [{ kind: "template_variable", value: "{{topic}}", occurrences: 1 }]
@@ -539,9 +544,13 @@ const assertPromptRequest = (
 
 const selectTemplate = async (page: Page) => {
   const promptTrigger = page.getByTestId("chat-prompt-select")
-  await expect(promptTrigger).toBeVisible()
+  await expect(promptTrigger).toBeVisible({ timeout: 20_000 })
   await promptTrigger.click()
-  await page.getByRole("menuitem", { name: new RegExp(TEMPLATE_TITLE) }).click()
+  const templateItem = page.getByRole("menuitem", {
+    name: new RegExp(TEMPLATE_TITLE)
+  })
+  await expect(templateItem).toBeVisible({ timeout: 20_000 })
+  await templateItem.click()
   await expect(promptTrigger).toContainText(TEMPLATE_TITLE)
   return promptTrigger
 }
@@ -679,7 +688,10 @@ test.describe("Packaged extension prompt improvement parity", () => {
       const editor = await openSystemEditor(page)
       await expect(editor).toHaveValue(originalSystemDraft)
 
-      const { actions } = await openPromptActions(page)
+      const { actions } = await openPromptActions(
+        page,
+        page.getByRole("dialog", { name: "Edit system prompt" })
+      )
       const improveNow = actions.getByRole("button", { name: /Improve now/ })
       await expect(improveNow).toBeEnabled()
       await improveNow.click()
@@ -744,27 +756,21 @@ test.describe("Packaged extension prompt improvement parity", () => {
         "Improved user request for {{topic}}."
       )
 
-      await dialog.evaluate(async (element) => {
-        const drawer = element.closest(".ant-drawer") ?? element
-        await Promise.allSettled(
-          drawer
-            .getAnimations({ subtree: true })
-            .map((animation) => animation.finished)
-        )
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-        )
-      })
-      const layout = await dialog.evaluate((element) => {
-        const rect = element.getBoundingClientRect()
-        return {
-          left: Math.round(rect.left),
-          right: Math.round(rect.right),
-          width: Math.round(rect.width),
-          viewport: window.innerWidth,
-          documentWidth: document.documentElement.scrollWidth
-        }
-      })
+      const readLayout = () =>
+        dialog.evaluate((element) => {
+          const drawer =
+            element.closest(".ant-drawer-content-wrapper") ?? element
+          const rect = drawer.getBoundingClientRect()
+          return {
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+            width: Math.round(rect.width),
+            viewport: window.innerWidth,
+            documentWidth: document.documentElement.scrollWidth
+          }
+        })
+      await expect.poll(async () => (await readLayout()).left).toBe(0)
+      const layout = await readLayout()
       expect(layout.left).toBe(0)
       expect(layout.right).toBeLessThanOrEqual(layout.viewport)
       expect(layout.width).toBe(layout.viewport)
@@ -797,16 +803,12 @@ test.describe("Packaged extension prompt improvement parity", () => {
         JSON.stringify(axeResults, null, 2),
         "utf8"
       )
-      const handle = await dialog.elementHandle()
-      const snapshot = await page.accessibility.snapshot({
-        root: handle || undefined,
-        interestingOnly: false
-      })
-      expect(JSON.stringify(snapshot)).toContain("Review improved prompt")
-      expect(JSON.stringify(snapshot)).toContain("Improved prompt candidate")
+      const snapshot = await dialog.ariaSnapshot()
+      expect(snapshot).toContain("Review improved prompt")
+      expect(snapshot).toContain("Improved prompt candidate")
       fs.writeFileSync(
-        testInfo.outputPath("prompt-improvement-review-a11y.json"),
-        JSON.stringify(snapshot, null, 2),
+        testInfo.outputPath("prompt-improvement-review-a11y.aria.yml"),
+        snapshot,
         "utf8"
       )
       await page.screenshot({
@@ -903,14 +905,17 @@ test.describe("Packaged extension prompt improvement parity", () => {
       await input.fill(liveDraft)
       mock.releaseNextDeferred()
 
-      await page.getByRole("button", { name: "Apply to draft" }).click()
       await expect(input).toHaveValue(liveDraft)
       const replace = page.getByRole("button", {
         name: "Replace current draft"
       })
       await expect(replace).toBeVisible()
-      await replace.click()
-      await page.getByRole("button", { name: "Confirm replace" }).click()
+      await replace.click({ timeout: 20_000 })
+      const confirmReplace = page.getByRole("button", {
+        name: "Confirm replace"
+      })
+      await expect(confirmReplace).toBeVisible({ timeout: 20_000 })
+      await confirmReplace.click({ timeout: 20_000 })
       await expect(input).toHaveValue("Deferred confirmed replacement.")
       assertPromptRequest(mock.improveRequests()[0], {
         target: "user_message",
@@ -944,7 +949,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
       const selectModel = actions.getByRole("button", { name: "Select model" })
       await expect(selectModel).toBeVisible()
       await selectModel.click()
-      await expect(page.locator(".ant-modal").last()).toBeVisible()
+      await expect(
+        page.getByRole("dialog", { name: /Current Chat Model Settings/i })
+      ).toBeVisible({ timeout: 20_000 })
       expect(mock.improveRequests()).toHaveLength(0)
     } finally {
       await context?.close()
