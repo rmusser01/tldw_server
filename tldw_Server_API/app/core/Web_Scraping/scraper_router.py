@@ -174,16 +174,8 @@ def _normalize_string_mapping(value: Any) -> dict[str, str]:
 
 
 def _normalize_plan_mapping(value: Any) -> dict[Any, Any]:
-    if type(value) is list:
-        normalized: dict[Any, Any] = {}
-        for pair in value:
-            if type(pair) is not list or len(pair) != 2:
-                return {}
-            key, item = pair
-            if not _is_scalar_mapping_key(key) or not _is_ordinary_yaml_value(key) or not _is_ordinary_yaml_value(item):
-                return {}
-            normalized[key] = item
-        return normalized
+    if _is_ordinary_yaml_value(value):
+        return dict(value)
 
     entries = _snapshot_mapping_entries(value, _is_scalar_mapping_key)
     if entries is None:
@@ -293,7 +285,9 @@ class ScrapePlan:
 
 
 def _validate_handler(handler: Any, allowlist: Any) -> str:
-    if type(handler) is not str or len(handler) == 0:
+    if not _is_ordinary_yaml_value(handler):
+        return DEFAULT_HANDLER
+    if not handler:
         return DEFAULT_HANDLER
     for prefix in _normalize_handler_allowlist(allowlist):
         if handler.startswith(prefix):
@@ -553,11 +547,11 @@ class ScraperRouter:
         else:
             plan.impersonate = normalized_impersonate
 
-        plan.extra_headers = _normalize_plan_mapping(rule.get("extra_headers"))
+        plan.extra_headers = _normalize_plan_mapping(rule.get("extra_headers", {}))
         # Cookies can be provided as simple name->value map
-        plan.cookies = _normalize_plan_mapping(rule.get("cookies"))
+        plan.cookies = _normalize_plan_mapping(rule.get("cookies", {}))
         # Per-domain proxies
-        plan.proxies = _normalize_plan_mapping(rule.get("proxies"))
+        plan.proxies = _normalize_plan_mapping(rule.get("proxies", {}))
         # Per-rule robots override
         if "respect_robots" in rule:
             normalized_robots = _normalize_bool(rule.get("respect_robots"))

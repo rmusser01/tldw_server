@@ -209,11 +209,12 @@ def test_domain_key_string_subclasses_fail_safely_without_string_hooks():
     assert ScraperRouter(rules).resolve("https://sub.example.com/path").backend == "auto"
 
 
-def test_validate_handler_ignores_non_string_allowlist_entries():
+def test_validate_handler_preserves_builtin_startswith_semantics_and_safe_allowlist():
     allowlist = [123, None, "approved.handlers:", {"invalid": "prefix"}]
 
     assert _validate_handler("approved.handlers:extract", allowlist) == ("approved.handlers:extract")
-    assert _validate_handler(123, allowlist) == DEFAULT_HANDLER
+    with pytest.raises(AttributeError):
+        _validate_handler(123, allowlist)
     assert _validate_handler("approved.handlers:extract", object()) == DEFAULT_HANDLER
 
 

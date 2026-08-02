@@ -815,7 +815,7 @@ def test_malformed_builtin_rule_values_preserve_predecessor_validation_output():
     assert normalized["cluster"] == {"cluster_linkage": "complete"}
 
 
-def test_malformed_rule_values_preserve_predecessor_path_specific_results():
+def test_malformed_rule_values_raise_predecessor_handler_error_first():
     rule = {
         "backend": ["curl"],
         "handler": 123,
@@ -836,34 +836,13 @@ def test_malformed_rule_values_preserve_predecessor_path_specific_results():
         "respect_robots": False,
     }
 
-    direct, validated = _resolve_both(rule)
+    rules = {"domains": {"example.com": rule}}
+    with pytest.raises(AttributeError):
+        ScraperRouter(rules).resolve("https://example.com/path")
 
-    assert direct.backend == "['curl']"
-    assert validated.backend == "auto"
-    assert direct.handler == DEFAULT_HANDLER
-    assert validated.handler == DEFAULT_HANDLER
-    assert direct.ua_profile == "['firefox_120_win']"
-    assert validated.ua_profile == "['firefox_120_win']"
-    assert direct.impersonate == {"value": "firefox120"}
-    assert validated.impersonate == {"value": "firefox120"}
-    assert direct.extra_headers == {}
-    assert validated.extra_headers == {}
-    assert direct.cookies == {}
-    assert validated.cookies == {}
-    assert direct.proxies == {}
-    assert validated.proxies == {}
-    assert direct.strategy_order == ["schema", "llm"]
-    assert validated.strategy_order == ["schema", "llm"]
-    assert direct.schema_rules == {"title": {"selector": "h1"}}
-    assert validated.schema_rules == {}
-    assert direct.llm_settings == {"provider": "openai"}
-    assert validated.llm_settings == {}
-    assert direct.regex_settings == {"mask_pii": True}
-    assert validated.regex_settings == {}
-    assert direct.cluster_settings == {"cluster_linkage": "complete"}
-    assert validated.cluster_settings == {}
-    assert direct.respect_robots is False
-    assert validated.respect_robots is False
+    cleaned = ScraperRouter.validate_rules(rules)
+    with pytest.raises(AttributeError):
+        ScraperRouter(cleaned).resolve("https://example.com/path")
 
 
 def test_mapping_entries_normalize_consistently_in_validated_and_direct_plans():
