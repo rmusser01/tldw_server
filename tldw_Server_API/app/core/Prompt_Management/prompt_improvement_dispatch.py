@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_api_key,
 )
+from tldw_Server_API.app.core.exceptions import PromptImprovementDispatchError
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     list_registered_providers,
@@ -54,19 +55,6 @@ _REFUSAL_FINISH_REASONS = frozenset(
     {"content_filter", "refusal", "safety", "blocked"}
 )
 
-_PUBLIC_MESSAGES = {
-    "missing_model": "Select an active chat model and try again.",
-    "unsupported_model": "The selected chat model is not available.",
-    "provider_not_configured": "The active provider is not configured for this request.",
-    "provider_rate_limited": "The active provider is temporarily rate limited.",
-    "provider_timeout": "The active provider timed out.",
-    "provider_unavailable": "The active provider is temporarily unavailable.",
-    "model_refusal": "The active model did not provide an improvement candidate.",
-    "invalid_model_output": "The active model returned an unusable response.",
-    "internal_error": "The prompt improvement request could not be completed.",
-}
-
-
 @dataclass(frozen=True)
 class PromptImprovementDispatchResult:
     """Normalized provider text and the concrete route that produced it."""
@@ -75,25 +63,6 @@ class PromptImprovementDispatchResult:
     provider: str
     model: str
     display_name: str
-
-
-class PromptImprovementDispatchError(RuntimeError):
-    """Sanitized infrastructure failure for endpoint error mapping."""
-
-    def __init__(
-        self,
-        code: str,
-        *,
-        internal_detail: object | None = None,
-        retryable: bool = False,
-        retry_after_seconds: int | None = None,
-    ) -> None:
-        del internal_detail
-        public_message = _PUBLIC_MESSAGES.get(code, _PUBLIC_MESSAGES["internal_error"])
-        super().__init__(public_message)
-        self.code = code if code in _PUBLIC_MESSAGES else "internal_error"
-        self.retryable = bool(retryable)
-        self.retry_after_seconds = _bounded_retry_after(retry_after_seconds)
 
 
 async def dispatch_prompt_improvement(

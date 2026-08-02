@@ -19,6 +19,64 @@ else:
     DEFAULT_VALIDATION_STATUS = status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
+_PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
+    "missing_model": "Select an active chat model and try again.",
+    "unsupported_model": "The selected chat model is not available.",
+    "provider_not_configured": "The active provider is not configured for this request.",
+    "provider_rate_limited": "The active provider is temporarily rate limited.",
+    "provider_timeout": "The active provider timed out.",
+    "provider_unavailable": "The active provider is temporarily unavailable.",
+    "model_refusal": "The active model did not provide an improvement candidate.",
+    "invalid_model_output": "The active model returned an unusable response.",
+    "internal_error": "The prompt improvement request could not be completed.",
+}
+_MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
+
+
+class PromptImprovementError(RuntimeError):
+    """Stable domain failure suitable for endpoint error mapping."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class PromptImprovementDispatchError(RuntimeError):
+    """Sanitized infrastructure failure for endpoint error mapping."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        internal_detail: object | None = None,
+        retryable: bool = False,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        del internal_detail
+        public_message = _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES.get(
+            code,
+            _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES["internal_error"],
+        )
+        super().__init__(public_message)
+        self.code = (
+            code
+            if code in _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES
+            else "internal_error"
+        )
+        self.retryable = bool(retryable)
+        try:
+            retry_after = int(retry_after_seconds)
+        except (TypeError, ValueError):
+            retry_after = None
+        if retry_after is not None and retry_after < 0:
+            retry_after = None
+        self.retry_after_seconds = (
+            min(retry_after, _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS)
+            if retry_after is not None
+            else None
+        )
+
+
 class VideoProcessingError(Exception):
     """Raised when video processing fails."""
 

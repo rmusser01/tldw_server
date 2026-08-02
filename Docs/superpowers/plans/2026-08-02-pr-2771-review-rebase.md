@@ -12,19 +12,19 @@
 **Goal**: Rebase the clean PR branch onto the latest `origin/dev` and establish the post-rebase review/CI baseline.
 **Success Criteria**: Rebase completes without losing PR changes or staging the two unrelated watchlist templates; changed-file and conflict audits are clean.
 **Tests**: `git status --short`, `git diff --check`, merge-base/ancestry checks, current PR check inventory.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Review Findings with TDD
 **Goal**: Adjudicate all seven Qodo findings against current code and fix every valid issue with minimal changes.
 **Success Criteria**: The limiter uses true inactivity semantics; capabilities follow the project rate-limit convention; Python docstrings/types/exceptions meet policy; tests use accepted markers and deterministic assertions; extension E2E cannot silently skip required CI coverage.
 **Tests**: Focused RED/GREEN tests for each behavioral change plus static checks for documentation, typing, markers, and skip policy.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: Repair Post-Rebase CI Regressions
 **Goal**: Reproduce and fix only failures that remain attributable to PR #2771 after rebasing.
 **Success Criteria**: Shard coverage, wizard coverage, backend-required, frontend-required, and extension E2E root failures either pass or are proven unrelated/current-base failures with evidence.
 **Tests**: Local equivalents of failing GitHub Actions steps and focused regression suites.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 4: Full Verification and Review Closure
 **Goal**: Run proportional backend/frontend/security verification, commit, push with force-with-lease, and close review feedback with evidence.

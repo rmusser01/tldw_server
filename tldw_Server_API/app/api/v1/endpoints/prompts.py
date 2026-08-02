@@ -1,3 +1,5 @@
+"""Prompt management and prompt-improvement API endpoints."""
+
 # tldw_Server_API/app/api/v1/endpoints/prompts.py
 #
 #
@@ -27,6 +29,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     enforce_rbac_rate_limit,
     get_auth_principal,
     get_request_user,
+    rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
@@ -690,6 +693,10 @@ async def _run_prompt_improvement_post_validation_gates(
     response_model=schemas.PromptCapabilitiesResponse,
     summary="Discover prompt feature capabilities",
     tags=["prompts"],
+    dependencies=[
+        Depends(get_auth_principal),
+        Depends(rbac_rate_limit("prompts.capabilities")),
+    ],
 )
 async def get_prompt_capabilities() -> schemas.PromptCapabilitiesResponse:
     """Return fail-closed Track A/Track B flags and centralized limits."""

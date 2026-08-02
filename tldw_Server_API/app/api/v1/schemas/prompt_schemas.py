@@ -1,3 +1,5 @@
+"""Request and response schemas for prompt management APIs."""
+
 # tldw_Server_API/app/api/v1/schemas/prompts_schemas.py
 #
 # Imports
@@ -176,7 +178,7 @@ class PromptImproveResponse(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_status_candidate_pair(self):
+    def validate_status_candidate_pair(self) -> "PromptImproveResponse":
         """Keep no-change and replacement results unambiguous."""
 
         if self.status == "improved" and (

@@ -19,7 +19,6 @@ import {
 import { launchWithExtension } from "./utils/extension"
 import { resolveExtensionHeadlessMode } from "./utils/extension-common"
 import { grantHostPermission } from "./utils/permissions"
-import { requireRealServerConfig } from "./utils/real-server"
 
 const EXT_PATH = path.resolve(
   process.env.TLDW_E2E_EXTENSION_PATH || ".output/chrome-mv3"
@@ -49,11 +48,6 @@ const REQUEST_KEYS = [
   "target",
   "text"
 ]
-const STRICT_RUNTIME = ["1", "true", "yes"].includes(
-  String(process.env.TLDW_E2E_PROMPT_IMPROVEMENT_STRICT || "").toLowerCase()
-)
-const EXPECTED_RUNTIME_ABSENCE =
-  /^Error: Could not determine extension id from \[no extension targets\]$/
 const AXE_SOURCE_PATH = [
   path.resolve("../packages/ui/node_modules/axe-core/axe.min.js"),
   path.resolve("packages/ui/node_modules/axe-core/axe.min.js"),
@@ -562,18 +556,17 @@ const openSystemEditor = async (page: Page) => {
 }
 
 const requirePromptImprovementRealServerConfig = () => {
-  if (
-    STRICT_RUNTIME &&
-    (!process.env.TLDW_E2E_SERVER_URL || !process.env.TLDW_E2E_API_KEY)
-  ) {
+  const serverUrl = String(process.env.TLDW_E2E_SERVER_URL || "")
+    .trim()
+    .replace(/\/$/, "")
+  const apiKey = String(process.env.TLDW_E2E_API_KEY || "").trim()
+  if (!serverUrl || !apiKey) {
     throw new Error(
-      "Strict prompt-improvement E2E requires TLDW_E2E_SERVER_URL and TLDW_E2E_API_KEY; skips are not allowed."
+      "Prompt-improvement E2E requires TLDW_E2E_SERVER_URL and TLDW_E2E_API_KEY."
     )
   }
-  return requireRealServerConfig(test)
+  return { serverUrl, apiKey }
 }
-
-let runtimeAbsenceReason: string | null = null
 
 const probePackagedRuntime = async () => {
   const profileDir = fs.mkdtempSync(
@@ -642,29 +635,29 @@ test("real-server harness uses the configured API key for fetch and extension st
   )
 })
 
+test("real-server harness fails closed when required configuration is missing", () => {
+  const previousServerUrl = process.env.TLDW_E2E_SERVER_URL
+  const previousApiKey = process.env.TLDW_E2E_API_KEY
+  try {
+    delete process.env.TLDW_E2E_SERVER_URL
+    delete process.env.TLDW_E2E_API_KEY
+    expect(requirePromptImprovementRealServerConfig).toThrow(
+      "Prompt-improvement E2E requires TLDW_E2E_SERVER_URL and TLDW_E2E_API_KEY."
+    )
+  } finally {
+    if (previousServerUrl === undefined) delete process.env.TLDW_E2E_SERVER_URL
+    else process.env.TLDW_E2E_SERVER_URL = previousServerUrl
+    if (previousApiKey === undefined) delete process.env.TLDW_E2E_API_KEY
+    else process.env.TLDW_E2E_API_KEY = previousApiKey
+  }
+})
+
 test.describe("Packaged extension prompt improvement parity", () => {
   test.describe.configure({ mode: "serial" })
 
   test.beforeAll(async () => {
     test.setTimeout(90_000)
-    try {
-      await probePackagedRuntime()
-    } catch (error) {
-      const rendered = String(error)
-      if (STRICT_RUNTIME || !EXPECTED_RUNTIME_ABSENCE.test(rendered)) {
-        throw error
-      }
-      runtimeAbsenceReason =
-        `Packaged MV3 runtime unavailable: ${rendered}. ` +
-        "Set TLDW_E2E_PROMPT_IMPROVEMENT_STRICT=1 to fail instead of skip."
-      console.warn(
-        `[prompt-improvement-e2e:runtime-gate] ${runtimeAbsenceReason}`
-      )
-    }
-  })
-
-  test.beforeEach(() => {
-    test.skip(Boolean(runtimeAbsenceReason), runtimeAbsenceReason || "")
+    await probePackagedRuntime()
   })
 
   test("sidepanel improves a selected system template and restores the exact draft with Undo", async () => {

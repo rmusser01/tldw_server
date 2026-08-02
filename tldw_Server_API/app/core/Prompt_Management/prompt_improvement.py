@@ -14,6 +14,8 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from tldw_Server_API.app.core.exceptions import PromptImprovementError
+
 META_PROMPT_VERSION = "prompt-improvement-v1"
 MAX_REWRITE_ANALYSIS_CHARS = 4_000
 
@@ -156,14 +158,6 @@ class _ParsedImprovement:
     findings: tuple[PromptImproveFinding, ...]
     target: str | None
     unstructured: bool = False
-
-
-class PromptImprovementError(RuntimeError):
-    """Stable domain failure suitable for later endpoint error mapping."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 PromptImprovementGenerator = Callable[[list[dict[str, str]]], Awaitable[str]]

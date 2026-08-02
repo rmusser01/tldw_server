@@ -729,6 +729,48 @@ def test_fallback_rate_bucket_prunes_refill_complete_inactive_entries(
     ]
 
 
+def test_fallback_rate_bucket_prunes_by_inactivity_not_refill_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1_000.0]
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: now[0])
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:inactive:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+    now[0] += 50.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:recent:prompts.improve",
+        limit=4,
+        burst=2,
+        window_seconds=60.0,
+    )
+    now[0] += 16.0
+    auth_deps._consume_auth_deps_fallback_rate_token(
+        dependency="rbac_rate_limit:prompts.improve",
+        identifier="principal:trigger:prompts.improve",
+        limit=1,
+        burst=1,
+        window_seconds=60.0,
+    )
+
+    keys = set(auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS)
+    assert (
+        "rbac_rate_limit:prompts.improve",
+        "principal:inactive:prompts.improve",
+    ) not in keys
+    assert (
+        "rbac_rate_limit:prompts.improve",
+        "principal:recent:prompts.improve",
+    ) in keys
+
+
 def _consume_capacity_test_token(identifier: str) -> tuple[bool, int]:
     return auth_deps._consume_auth_deps_fallback_rate_token(
         dependency="rbac_rate_limit:prompts.improve",
@@ -778,7 +820,7 @@ def test_fallback_rate_bucket_capacity_denies_unseen_key_without_allocation(
 
     assert allowed is False
     assert retry_after == 60
-    assert auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS == before
+    assert before == auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS
 
 
 def test_fallback_rate_bucket_capacity_preserves_known_key_quota_state(

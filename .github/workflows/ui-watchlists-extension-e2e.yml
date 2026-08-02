@@ -7,10 +7,17 @@ on:
       - dev
     paths:
       - "apps/extension/tests/e2e/watchlists.spec.ts"
+      - "apps/extension/tests/e2e/prompt-improvement.spec.ts"
       - "apps/extension/tests/e2e/utils/**"
       - "apps/extension/package.json"
       - "apps/extension/playwright.config.ts"
+      - "apps/packages/ui/src/components/Chat/composer/**"
+      - "apps/packages/ui/src/components/Common/PromptAssist/**"
+      - "apps/packages/ui/src/components/Option/Playground/**"
+      - "apps/packages/ui/src/components/Sidepanel/Chat/**"
       - "apps/packages/ui/src/components/Option/Watchlists/**"
+      - "apps/packages/ui/src/services/prompt-improvement.ts"
+      - "apps/packages/ui/src/services/prompts-api.ts"
       - "apps/packages/ui/src/services/watchlists.ts"
       - "apps/packages/ui/src/types/watchlists.ts"
       - "apps/bun.lock"
@@ -23,10 +30,17 @@ on:
       - main
     paths:
       - "apps/extension/tests/e2e/watchlists.spec.ts"
+      - "apps/extension/tests/e2e/prompt-improvement.spec.ts"
       - "apps/extension/tests/e2e/utils/**"
       - "apps/extension/package.json"
       - "apps/extension/playwright.config.ts"
+      - "apps/packages/ui/src/components/Chat/composer/**"
+      - "apps/packages/ui/src/components/Common/PromptAssist/**"
+      - "apps/packages/ui/src/components/Option/Playground/**"
+      - "apps/packages/ui/src/components/Sidepanel/Chat/**"
       - "apps/packages/ui/src/components/Option/Watchlists/**"
+      - "apps/packages/ui/src/services/prompt-improvement.ts"
+      - "apps/packages/ui/src/services/prompts-api.ts"
       - "apps/packages/ui/src/services/watchlists.ts"
       - "apps/packages/ui/src/types/watchlists.ts"
       - "apps/bun.lock"
@@ -56,7 +70,7 @@ jobs:
       statuses: read
 
   watchlists-extension-e2e:
-    name: Watchlists Extension E2E (No Skips)
+    name: Watchlists + Prompt Improvement Extension E2E (No Skips)
     needs: admission
     if: >-
       always() && !cancelled() &&
@@ -120,7 +134,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-portaudio: 'true'
+          install-portaudio: "true"
 
       - name: Setup Python and server dependencies
         uses: ./.github/actions/setup-python-deps
@@ -153,6 +167,18 @@ jobs:
           mkdir -p test-results
           if [ -f .watchlists-e2e-report.json ]; then
             cp .watchlists-e2e-report.json test-results/watchlists-e2e-report.json
+          fi
+          exit "$status"
+
+      - name: Run prompt improvement extension Playwright spec (strict no-skip gate)
+        working-directory: apps/extension
+        run: |
+          set +e
+          xvfb-run -a bun run test:e2e:prompt-improvement:strict
+          status=$?
+          mkdir -p test-results
+          if [ -f .prompt-improvement-e2e-report.json ]; then
+            cp .prompt-improvement-e2e-report.json test-results/prompt-improvement-e2e-report.json
           fi
           exit "$status"
 

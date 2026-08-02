@@ -44,6 +44,22 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/prompts-improve
+  - id: prompts.capabilities
+    description: Discover prompt feature capabilities and configured request limits.
+    resource_tags:
+      - prompts
+      - discovery
+    sensitivity_tier: low
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+      - user
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/prompts-capabilities
   - id: rag.search
     description: Execute RAG searches across organization knowledge bases.
     resource_tags:

@@ -995,6 +995,27 @@ def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_dis
     }
 
 
+def test_prompt_capabilities_catalog_scope_is_standard_for_ordinary_roles():
+    from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
+
+    scope = next(
+        entry for entry in load_catalog().scopes if entry.id == "prompts.capabilities"
+    )
+
+    assert scope.rate_limit_class == "standard"
+    assert scope.default_roles == ["admin", "analyst", "developer", "user"]
+
+
+def test_prompt_capabilities_endpoint_requires_real_authentication():
+    app = FastAPI()
+    app.include_router(prompts.router, prefix="/api/v1/prompts")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/prompts/capabilities")
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
 def test_prompt_improvement_endpoint_requires_real_authentication():
     app = FastAPI()
     app.include_router(prompts.router, prefix="/api/v1/prompts")
@@ -1021,6 +1042,74 @@ class _EmptyPool:
     @asynccontextmanager
     async def acquire(self):
         yield _EmptyConnection()
+
+
+def test_prompt_capabilities_catalog_rate_limit_returns_429(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog
+
+    catalog = PrivilegeCatalog.model_validate(
+        {
+            "version": "capabilities-rate-test-1",
+            "updated_at": "2026-08-02T00:00:00Z",
+            "scopes": [
+                {
+                    "id": "prompts.capabilities",
+                    "description": "Discover prompt capabilities.",
+                    "resource_tags": ["prompts"],
+                    "sensitivity_tier": "low",
+                    "rate_limit_class": "standard",
+                    "default_roles": ["user"],
+                    "feature_flag_id": None,
+                    "ownership_predicates": [],
+                    "doc_url": None,
+                }
+            ],
+            "feature_flags": [],
+            "rate_limit_classes": [
+                {
+                    "id": "standard",
+                    "requests_per_min": 1,
+                    "burst": 1,
+                    "notes": "Focused integration limit",
+                }
+            ],
+            "ownership_predicates": [],
+        }
+    )
+    monkeypatch.setattr(auth_deps, "load_catalog", lambda: catalog, raising=False)
+    auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
+    pool = _EmptyPool()
+
+    app = FastAPI()
+    app.include_router(prompts.router, prefix="/api/v1/prompts")
+
+    async def principal(request: Request) -> AuthPrincipal:
+        value = AuthPrincipal(
+            kind="user",
+            user_id=11,
+            username="user-11",
+            subject="user:11",
+            roles=["user"],
+        )
+        request.state.user_id = value.user_id
+        request.state.auth = AuthContext(principal=value)
+        return value
+
+    async def get_pool():
+        return pool
+
+    app.dependency_overrides[get_auth_principal] = principal
+    app.dependency_overrides[auth_deps.get_db_pool] = get_pool
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        first = client.get("/api/v1/prompts/capabilities")
+        limited = client.get("/api/v1/prompts/capabilities")
+
+    assert first.status_code == status.HTTP_200_OK, first.text
+    assert limited.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert limited.json()["detail"] == (
+        "Rate limit exceeded for resource: prompts.capabilities"
+    )
 
 
 def test_prompt_improvement_catalog_rate_limit_is_per_user(monkeypatch):
