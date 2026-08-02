@@ -226,7 +226,7 @@ authorization headers.
 
 **Files:** No production file edits.
 
-- [ ] **Step 1: Start from current `origin/dev`**
+- [x] **Step 1: Start from current `origin/dev`**
 
 ```bash
 git fetch origin
@@ -237,13 +237,13 @@ git status --short --branch
 Expected: rebase succeeds and the worktree is clean. If the approved design or
 plan conflicts, preserve its approved contracts and rerun focused design checks.
 
-- [ ] **Step 2: Create the Phase 4A Backlog child task**
+- [x] **Step 2: Create the Phase 4A Backlog child task**
 
 Use Backlog MCP `task_create` with parent/reference `TASK-12989`, title
 `Phase 4A shared Web_Scraping leaves`, status `In Progress`, and modified files
 from the Phase 4A file map.
 
-- [ ] **Step 3: Run the predecessor baseline**
+- [x] **Step 3: Run the predecessor baseline**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -266,7 +266,7 @@ Expected: all selected predecessor tests pass. Record exact counts in the 4A tas
 - Create: `tldw_Server_API/tests/Web_Scraping/fixtures/phase4/*.json`
 - Create: `tldw_Server_API/tests/Web_Scraping/test_phase4_predecessor_fixtures.py`
 
-- [ ] **Step 1: Write the failing manifest test**
+- [x] **Step 1: Write the failing manifest test**
 
 ```python
 def test_phase4_fixture_manifest_is_pinned() -> None:
@@ -282,7 +282,7 @@ def test_phase4_fixture_manifest_is_pinned() -> None:
     }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 python -m pytest -q tldw_Server_API/tests/Web_Scraping/test_phase4_predecessor_fixtures.py
@@ -290,7 +290,7 @@ python -m pytest -q tldw_Server_API/tests/Web_Scraping/test_phase4_predecessor_f
 
 Expected: fail because the manifest and generator do not exist.
 
-- [ ] **Step 3: Implement explicit fixture generation**
+- [x] **Step 3: Implement explicit fixture generation**
 
 The helper must require both `--predecessor-commit` and `--output`; it must never
 run during normal tests. Build deterministic local cases, normalize timestamps,
@@ -317,7 +317,7 @@ The differential helper accepts `behavior_change: int | None`, rejects values
 outside `range(1, 12)`, and requires every expected difference to name exactly
 one of the eleven approved behavior changes.
 
-- [ ] **Step 4: Generate and review fixtures**
+- [x] **Step 4: Generate and review fixtures**
 
 ```bash
 BASE_COMMIT="$(git rev-parse HEAD)"
@@ -330,7 +330,7 @@ python -m pytest -q tldw_Server_API/tests/Web_Scraping/test_phase4_predecessor_f
 
 Expected: generator exits 0, manifest records the full predecessor commit, and tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Helper_Scripts/web_scraping_phase4_fixtures.py \
@@ -348,7 +348,7 @@ git commit -m "test(web-scraping): pin phase 4 predecessor fixtures"
 - Modify: `tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py`
 - Create: `tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py`
 
-- [ ] **Step 1: Write failing bounded-regex tests**
+- [x] **Step 1: Write failing bounded-regex tests**
 
 Cover invalid patterns, 4,096-character pattern limit, 8,192-character router
 input limit, 1,000,000-character generated sample limit, 100ms timeout, flag
@@ -366,7 +366,7 @@ def test_router_pattern_timeout_is_a_non_match() -> None:
     assert result.matched is False
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 python -m pytest -q tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py
@@ -374,7 +374,7 @@ python -m pytest -q tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py
 
 Expected: import failure for `safe_regex`.
 
-- [ ] **Step 3: Implement the leaf API**
+- [x] **Step 3: Implement the leaf API**
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -402,14 +402,14 @@ Use the installed `regex` package timeout. Map compile failure to `regex_invalid
 oversize to `regex_too_large`, and timeout to `regex_timeout`; never include the
 pattern or raw exception in the result or log.
 
-- [ ] **Step 4: Replace only untrusted/configured regex uses**
+- [x] **Step 4: Replace only untrusted/configured regex uses**
 
 Route `ScraperRouter` configured patterns and generated-regex sample validation
 through `safe_regex`. Keep trusted built-in PII and boilerplate catalogs compiled
 with stdlib `re`. Selector transforms and field patterns are integrated in Task 4,
 after the neutral selector package exists.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 python -m pytest -q \
@@ -435,7 +435,7 @@ Expected: all focused tests pass.
 - Modify: `tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py`
 - Create: `tldw_Server_API/tests/Web_Scraping/test_phase4_content.py`
 
-- [ ] **Step 1: Bind formatting and metadata behavior**
+- [x] **Step 1: Bind formatting and metadata behavior**
 
 Add fixture-driven tests for paragraph formatting, canonical envelopes, the
 64-level nesting guard, malformed pass-through, body-only hashing, and direct
@@ -447,7 +447,7 @@ def test_legacy_content_exports_are_canonical() -> None:
     assert legacy.ContentMetadataHandler is content.ContentMetadataHandler
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 python -m pytest -q tldw_Server_API/tests/Web_Scraping/test_phase4_content.py
@@ -455,7 +455,7 @@ python -m pytest -q tldw_Server_API/tests/Web_Scraping/test_phase4_content.py
 
 Expected: canonical content package is missing.
 
-- [ ] **Step 3: Move one implementation and re-export it**
+- [x] **Step 3: Move one implementation and re-export it**
 
 ```python
 # content/__init__.py
@@ -468,7 +468,7 @@ __all__ = ["ContentMetadataHandler", "convert_html_to_markdown"]
 Move the existing behavior without prose, whitespace, marker, timestamp-format,
 or hash changes. Replace the legacy bodies with imports from `content`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 python -m pytest -q \
@@ -494,7 +494,7 @@ git commit -m "refactor(web-scraping): extract neutral content helpers"
 - Create: `tldw_Server_API/tests/Web_Scraping/test_phase4_selectors.py`
 - Modify: `tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py`
 
-- [ ] **Step 1: Add differential and architecture tests**
+- [x] **Step 1: Add differential and architecture tests**
 
 Bind the selector DSL, errors/warnings/counts, XPath/CSS fast paths, transforms,
 bounded regex failures, bounded LRU stats/clear, thread safety, endpoint behavior,
@@ -511,7 +511,7 @@ def test_watchlists_selector_exports_are_canonical() -> None:
 The AST guard must reject imports from `selectors` to Watchlists, extraction,
 orchestration, enhanced scraping, WebSearch, or `Article_Extractor_Lib`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 python -m pytest -q \
@@ -521,7 +521,7 @@ python -m pytest -q \
 
 Expected: canonical selector package is missing.
 
-- [ ] **Step 3: Move caches, engine, and schema facade**
+- [x] **Step 3: Move caches, engine, and schema facade**
 
 ```python
 # selectors/__init__.py
@@ -542,13 +542,13 @@ validation, and transforms. Return `selector_invalid` instead of raw parser or
 evaluation messages while preserving `selector_too_complex:*` codes. Route
 `regex_replace` transforms and regex field extraction through `safe_regex`.
 
-- [ ] **Step 4: Replace Watchlists bodies with direct imports**
+- [x] **Step 4: Replace Watchlists bodies with direct imports**
 
 Keep private Watchlists-only fetch/network helpers in `fetchers.py`. Move only
 the shared selector responsibility and update endpoint imports to the canonical
 facade where no compatibility behavior is needed.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 python -m pytest -q \
@@ -570,7 +570,7 @@ git commit -m "refactor(web-scraping): extract shared selector engine"
 
 **Files:** Phase 4A files and its Backlog child task.
 
-- [ ] **Step 1: Run Phase 4A gates**
+- [x] **Step 1: Run Phase 4A gates**
 
 ```bash
 python -m compileall -q \
