@@ -742,7 +742,9 @@ test.describe('Watchlists playground smoke', () => {
 
     await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible()
     await expectWatchlistsDestination(page, 'Overview')
-    await expect(page.getByText('At-a-glance watchlist health')).toBeVisible()
+    await expect(
+      watchlistsContentShell(page).getByTestId('watchlists-overview-alert-health-summary')
+    ).toBeVisible()
 
     await navigateWatchlistsDestination(page, 'Feeds')
     await expect(page.getByText('Tech Daily')).toBeVisible()

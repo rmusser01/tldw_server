@@ -24,13 +24,13 @@
 **Goal**: Reproduce and fix only failures that remain attributable to PR #2771 after rebasing.
 **Success Criteria**: Shard coverage, wizard coverage, backend-required, frontend-required, and extension E2E root failures either pass or are proven unrelated/current-base failures with evidence.
 **Tests**: Local equivalents of failing GitHub Actions steps and focused regression suites.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Full Verification and Review Closure
-**Goal**: Run proportional backend/frontend/security verification, commit, push with force-with-lease, and close review feedback with evidence.
+**Goal**: Run proportional backend/frontend/security verification, commit, push normally because the rebase was a no-op, and close review feedback with evidence.
 **Success Criteria**: Scoped tests/build/lint/type checks/Bandit/diff checks pass; the inline thread is replied to and resolved; all top-level findings receive an evidence-backed disposition; fresh required checks pass.
 **Tests**: Focused pytest/Vitest/Playwright suites, WebUI and extension builds, Ruff/ESLint/Prettier/mypy as applicable, Bandit on touched production Python, `git diff --check`, GitHub required checks.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 5: Policy Gate and Merge
 **Goal**: Confirm the requester-authored Change summary and merge PR #2771 into `dev`.
