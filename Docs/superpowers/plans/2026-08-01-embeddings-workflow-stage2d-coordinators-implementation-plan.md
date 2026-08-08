@@ -1,12 +1,14 @@
 # Embeddings Workflow Stage 2D Coordinators Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkboxes for tracking.
 
 **Goal:** Replace the Embeddings orchestrator's production execution routing with explicit adapter, fallback, and execution coordinators while preserving all existing behavior except the approved source-aware fallback correction.
 
 **Architecture:** Add one focused `execution_coordinator.py` module alongside the Stage 2C provider-attempt boundary. The adapter component owns only preferred-adapter invocation and validation, the fallback component owns ordered candidate traversal and provider-failure policy, and the execution coordinator owns sequencing plus canonical outcome assembly. `EmbeddingRequestOrchestrator.execute()` delegates to the coordinator and the existing legacy result mapper; its superseded private methods remain temporarily for Stage 2E removal so this PR stays reviewable and rollback-friendly.
 
 **Tech Stack:** Python 3.14, frozen dataclasses, structural protocols, async/await, pytest with pytest-asyncio, Ruff, compileall, Bandit.
+
+**Status:** Complete 2026-08-08. Tasks 1-5 and final verification are complete. The approved temporary compatibility-facade duplication remains until Stage 2E, which owns runner integration and cleanup.
 
 ## Global Constraints
 
@@ -35,7 +37,7 @@
 - Consumes: `PreparedEmbeddingRequest`, `EmbeddingExecutorOutput`, and `EmbeddingVectorProcessor`.
 - Produces: `AdapterAttemptResult(attempted: bool, success: ProviderAttemptSuccess | None)` and `EmbeddingAdapterAttempt.execute(prepared) -> AdapterAttemptResult`.
 
-- [ ] **Step 1: Add explicit coordinator test scaffolding**
+- [x] **Step 1: Add explicit coordinator test scaffolding**
 
 Build prepared requests directly from the frozen Stage 2B contracts so tests do not depend on the compatibility orchestrator:
 
@@ -124,7 +126,7 @@ class RecordingExecutor:
 
 Later tasks extend this file with `RecordingReadiness`, `RecordingProviderAttempt`, and `RecordingFallbackCoordinator`; each exposes a `calls` list and returns or raises the exact configured result object.
 
-- [ ] **Step 2: Write adapter ordering and result tests**
+- [x] **Step 2: Write adapter ordering and result tests**
 
 Add focused tests that instantiate `EmbeddingAdapterAttempt` directly:
 
@@ -178,7 +180,7 @@ async def test_adapter_attempt_validates_and_processes_success():
 
 Also assert that an adapter exception is the exact exception re-raised and that `EmbeddingExecutorOutput(..., embeddings_from_adapter=False)` is an attempted decline.
 
-- [ ] **Step 3: Run adapter tests and verify RED**
+- [x] **Step 3: Run adapter tests and verify RED**
 
 Run:
 
@@ -188,7 +190,7 @@ Run:
 
 Expected: collection fails because `execution_coordinator.py` and its adapter contracts do not exist.
 
-- [ ] **Step 4: Implement the minimal adapter boundary**
+- [x] **Step 4: Implement the minimal adapter boundary**
 
 Accept the existing provider executor object and discover its optional adapter capability dynamically, matching the compatibility orchestrator. Add the frozen result DTO:
 
@@ -212,11 +214,11 @@ Implement `EmbeddingAdapterAttempt.execute()` so it:
 5. Returns a `ProviderAttemptSuccess` with compatibility cache counts on success.
 6. Does not catch exceptions.
 
-- [ ] **Step 5: Run adapter tests and verify GREEN**
+- [x] **Step 5: Run adapter tests and verify GREEN**
 
 Run the Step 3 command. Expected: all adapter-selected tests pass.
 
-- [ ] **Step 6: Commit the adapter boundary**
+- [x] **Step 6: Commit the adapter boundary**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/execution_coordinator.py tldw_Server_API/tests/Embeddings_isolated/test_execution_coordinator.py
@@ -233,7 +235,7 @@ git commit -m "refactor(embeddings): extract adapter attempt boundary"
 - Consumes: `EmbeddingProviderReadinessCheck.check(provider, model)`, `EmbeddingProviderAttempt.execute(prepared, provider=..., model=...)`, and the primary `ProviderCallFailure`.
 - Produces: `FallbackExecutionSuccess(success: ProviderAttemptSuccess, attempt_count: int)` and `EmbeddingFallbackCoordinator.execute(prepared, primary_failure) -> FallbackExecutionSuccess`.
 
-- [ ] **Step 1: Write failing fallback traversal tests**
+- [x] **Step 1: Write failing fallback traversal tests**
 
 Add the provider-result helpers and recording fakes used by fallback tests:
 
@@ -362,7 +364,7 @@ Add separate tests proving:
 - a fallback success always receives the complete prepared request;
 - backend identity, key, cache, validation, postprocessing, and writeback errors escaping `EmbeddingProviderAttempt` are not caught and do not advance to another candidate.
 
-- [ ] **Step 2: Run fallback tests and verify RED**
+- [x] **Step 2: Run fallback tests and verify RED**
 
 Run:
 
@@ -372,7 +374,7 @@ Run:
 
 Expected: failures because the fallback coordinator contracts are absent.
 
-- [ ] **Step 3: Implement policy helpers and fallback traversal**
+- [x] **Step 3: Implement policy helpers and fallback traversal**
 
 Copy the existing eligibility constants and behavior into the new module without changing values. Retain the orchestrator's private copies until Stage 2E removes its superseded private execution branches:
 
@@ -444,11 +446,11 @@ if not _is_fallback_eligible(error):
 
 Do not wrap the provider-attempt call in a broad `EmbeddingDomainError` catch. This is the approved Stage 2D source-routing correction.
 
-- [ ] **Step 4: Run fallback tests and verify GREEN**
+- [x] **Step 4: Run fallback tests and verify GREEN**
 
 Run the Step 2 command. Expected: all fallback-selected tests pass.
 
-- [ ] **Step 5: Commit the fallback coordinator**
+- [x] **Step 5: Commit the fallback coordinator**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/execution_coordinator.py tldw_Server_API/tests/Embeddings_isolated/test_execution_coordinator.py
@@ -465,7 +467,7 @@ git commit -m "refactor(embeddings): extract fallback coordinator"
 - Consumes: `EmbeddingAdapterAttempt`, `EmbeddingProviderReadinessCheck`, `EmbeddingProviderAttempt`, `EmbeddingFallbackCoordinator`, and `assemble_embedding_execution_outcome`.
 - Produces: `EmbeddingExecutionCoordinator.execute(prepared) -> EmbeddingExecutionOutcome`.
 
-- [ ] **Step 1: Write failing execution-order and counter tests**
+- [x] **Step 1: Write failing execution-order and counter tests**
 
 Add execution-level adapter and fallback fakes plus a single constructor helper:
 
@@ -581,7 +583,7 @@ async def test_eligible_primary_provider_failure_uses_complete_request_fallback(
 
 Also cover adapter success, full primary cache hit, non-retryable primary failure, fallback-disabled primary failure, and successful primary execution. Assert exact `cache_hits`, `cache_misses`, provider/model, adapter flag, and vector order in every resulting outcome.
 
-- [ ] **Step 2: Run execution tests and verify RED**
+- [x] **Step 2: Run execution tests and verify RED**
 
 Run:
 
@@ -591,7 +593,7 @@ Run:
 
 Expected: failures because `EmbeddingExecutionCoordinator` does not exist.
 
-- [ ] **Step 3: Implement execution sequencing**
+- [x] **Step 3: Implement execution sequencing**
 
 Implement the coordinator in this exact order:
 
@@ -640,7 +642,7 @@ return self._assemble(
 
 Use `assemble_embedding_execution_outcome()` for all three success paths. Do not create HTTP headers in this module.
 
-- [ ] **Step 4: Run the full coordinator test file and verify GREEN**
+- [x] **Step 4: Run the full coordinator test file and verify GREEN**
 
 Run:
 
@@ -650,7 +652,7 @@ Run:
 
 Expected: all coordinator tests pass.
 
-- [ ] **Step 5: Commit the execution coordinator**
+- [x] **Step 5: Commit the execution coordinator**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/execution_coordinator.py tldw_Server_API/tests/Embeddings_isolated/test_execution_coordinator.py
@@ -668,7 +670,7 @@ git commit -m "refactor(embeddings): extract execution coordinator"
 - Consumes: `EmbeddingExecutionCoordinator.execute(prepared) -> EmbeddingExecutionOutcome` and `map_outcome_to_legacy_execution_result(outcome) -> EmbeddingExecutionResult`.
 - Produces: unchanged `EmbeddingRequestOrchestrator.execute(prepared) -> EmbeddingExecutionResult` public behavior, with approved source-aware fallback routing.
 
-- [ ] **Step 1: Rewrite the Stage 2D guardrail as the new expected behavior**
+- [x] **Step 1: Rewrite the Stage 2D guardrail as the new expected behavior**
 
 Change `test_current_fallback_wide_domain_catch_advances_after_infrastructure_failure` into a source-routing regression that expects the exact fallback infrastructure error to propagate and prevents later fallback candidates:
 
@@ -690,7 +692,7 @@ async def test_fallback_non_provider_failure_propagates_without_advancing(bounda
 
 Add an endpoint parity correction case that asserts the workflow-enabled path now propagates fallback cache/identity failures rather than silently activating another provider. Do not modify unchanged parity scenarios.
 
-- [ ] **Step 2: Run production-routing tests and verify RED**
+- [x] **Step 2: Run production-routing tests and verify RED**
 
 Run:
 
@@ -700,7 +702,7 @@ Run:
 
 Expected: the orchestrator regression fails because the old broad fallback catch still advances; the parity suite otherwise remains green.
 
-- [ ] **Step 3: Construct and delegate to the coordinator**
+- [x] **Step 3: Construct and delegate to the coordinator**
 
 In `EmbeddingRequestOrchestrator.__init__`, build one shared vector processor, readiness check, provider attempt, adapter attempt, fallback coordinator, and execution coordinator from the existing injected dependencies. Keep constructor arguments unchanged.
 
@@ -715,7 +717,7 @@ async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutio
 
 Leave `_execute_misses`, `_execute_coherent_fallback`, `_execute_adapter`, `_cache_key`, `_response_headers`, and their compatibility helpers in place for Stage 2E removal. They must be unreachable from the public `execute()` path after this step.
 
-- [ ] **Step 4: Run focused orchestrator and parity tests**
+- [x] **Step 4: Run focused orchestrator and parity tests**
 
 Run:
 
@@ -725,7 +727,7 @@ Run:
 
 Expected: all selected tests pass. The only approved assertion change is source-aware fallback failure routing.
 
-- [ ] **Step 5: Commit production delegation**
+- [x] **Step 5: Commit production delegation**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py
@@ -746,7 +748,7 @@ git commit -m "refactor(embeddings): route execution through coordinators"
 - Consumes: completed Stage 2D production and test changes.
 - Produces: verified, reviewable Stage 2D branch with authoritative Backlog evidence.
 
-- [ ] **Step 1: Run the focused Stage 2D regression suite**
+- [x] **Step 1: Run the focused Stage 2D regression suite**
 
 Run:
 
@@ -756,7 +758,7 @@ Run:
 
 Expected: all selected tests pass.
 
-- [ ] **Step 2: Run static and security checks**
+- [x] **Step 2: Run static and security checks**
 
 Run:
 
@@ -768,7 +770,7 @@ Run:
 
 Expected: Ruff and compileall exit zero; Bandit reports zero findings in touched production code.
 
-- [ ] **Step 3: Run diff and scope review**
+- [x] **Step 3: Run diff and scope review**
 
 Run:
 
@@ -780,7 +782,7 @@ git status --short
 
 Confirm the diff contains only the Stage 2D coordinator, focused tests, orchestrator delegation, approved source-routing assertion change, spec status correction, implementation plan, and Backlog updates.
 
-- [ ] **Step 4: Finalize Backlog.md through the CLI**
+- [x] **Step 4: Finalize Backlog.md through the official Backlog workflow**
 
 Use `backlog task edit 12973.4` to:
 
@@ -791,7 +793,7 @@ Use `backlog task edit 12973.4` to:
 5. Add a final summary that explains both the source-aware routing correction and why Stage 2E retains endpoint/runner integration ownership.
 6. Set status to `Done` only after all verification succeeds.
 
-- [ ] **Step 5: Commit final documentation and tracking**
+- [x] **Step 5: Commit final documentation and tracking**
 
 ```bash
 git add Docs/superpowers/specs/2026-07-18-embeddings-workflow-stage2-concrete-api-steps-design.md Docs/superpowers/plans/2026-08-01-embeddings-workflow-stage2d-coordinators-implementation-plan.md "backlog/tasks/task-12973.4 - Extract-Embeddings-fallback-and-execution-coordinators.md"
