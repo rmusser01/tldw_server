@@ -63,3 +63,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-029](029-tldw-frontend-static-pypi-bundle.md) | Proposed | Allow a guarded static `tldw-frontend` export in `tldw-server` PyPI releases while forbidding source, cache, standalone, model, database, and admin UI artifacts. |
 | [ADR-030](030-configured-local-llm-egress-policy.md) | Accepted | Allow only an exact server-configured local LLM origin through scoped checked egress without weakening global SSRF defaults. |
 | [ADR-031](031-notes-capability-sync-domains.md) | Accepted | Use versioned Sync v2 domains for mutable Notes capabilities, with lossless core-note payloads and base-aware restore intent. |
+| [ADR-032](032-mcp-unified-multi-revision-stdio-protocol.md) | Accepted | Provide a strict multi-revision stdio engine while preserving the legacy one-message API and application-owned data boundary. |

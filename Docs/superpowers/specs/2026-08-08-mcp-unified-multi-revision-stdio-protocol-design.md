@@ -3,7 +3,7 @@
 Date: 2026-08-08
 Status: Approved design; implementation planning intentionally deferred
 Backlog: TASK-13008
-ADR: `backlog/decisions/001-mcp-unified-multi-revision-stdio-protocol.md`
+ADR: `Docs/ADR/032-mcp-unified-multi-revision-stdio-protocol.md`
 Downstream consumer: `rmusser01/tldw_chatbook` TASK-2512
 
 ## 1. Summary
@@ -87,7 +87,7 @@ version-specific behavior. Dispatch code must not scatter date comparisons.
 
 | Revision | Era | Lifecycle | Batches | Projection highlights |
 | --- | --- | --- | --- | --- |
-| `2026-07-28` | modern | Per-request `_meta`; no initialize session | rejected | `resultType`; server identity metadata; cache hints; full JSON Schema 2020-12; arbitrary JSON `structuredContent`; missing resource is `-32602` |
+| `2026-07-28` | modern | Per-request `_meta`; no initialize session | rejected | required `resultType`; server identity metadata; cache hints; JSON Schema 2020-12 dialect with MCP object-rooted tool schemas; arbitrary JSON `structuredContent`; missing resource is `-32602` |
 | `2025-11-25` | legacy | `initialize` then operation | rejected | icons/titles; JSON Schema 2020-12 default; structured tool output object; optional Tasks not advertised |
 | `2025-06-18` | legacy | `initialize` then operation | rejected | titles, resource links, and structured tool output object |
 | `2025-03-26` | legacy | standalone `initialize` then operation | receive required after initialization | legacy schemas and batch response rules |
@@ -139,8 +139,10 @@ not interpret application content as instructions.
 Existing `create_gateway_app`, `create_gateway_router`, and shared FastAPI
 dispatch paths stay legacy-compatible. They do not begin accepting modern
 per-request requests in this effort. The existing one-message helper behavior
-remains available through compatibility wrappers, pinned to the current
-legacy profile unless a caller explicitly opts into the new connection API.
+and defaults remain available through `GatewayStdioServer`; it does not
+silently acquire lifecycle state or strict long-lived semantics. The new
+`GatewayProtocolStdioServer` and `serve_stdio` entrypoint own the strict
+connection engine.
 
 `modules/list` and `modules/health` remain package-specific legacy aliases.
 They are not advertised or served as modern MCP core methods.
@@ -151,11 +153,19 @@ The additive public surface is:
 
 ```python
 from mcp_unified.gateway import (
+    GatewayApplicationError,
+    GatewayAsyncByteReader,
+    GatewayAsyncByteWriter,
     GatewayCancellationToken,
+    GatewayInvalidApplicationResult,
     GatewayLimits,
     GatewayProtocolConnection,
     GatewayProtocolProfile,
+    GatewayProtocolStdioServer,
     GatewayRequestContext,
+    GatewayResourceNotFound,
+    GatewayResourceTemplateRuntime,
+    GatewayResultTooLarge,
     GatewayRuntime,
     GatewayStdioServer,
     GatewayToolExecutionError,
@@ -199,30 +209,116 @@ Reserved protocol metadata is constructed authoritatively by the gateway.
 Caller/runtime metadata cannot replace the negotiated version, era, request
 identity, client capabilities, or transport identity.
 
-### 7.3 `GatewayRuntime`
+### 7.3 Runtime protocols
 
-Existing async signatures and dictionary results remain valid. Add only the
-optional method:
+Existing `GatewayRuntime` async signatures and dictionary results remain valid.
+Resource-template listing is additive through a separate runtime extension,
+not a new statically mandatory `GatewayRuntime` member:
 
 ```python
-async def list_resource_templates(
-    self,
-    context: GatewayRequestContext,
-) -> list[dict[str, Any]]: ...
+@runtime_checkable
+class GatewayResourceTemplateRuntime(Protocol):
+    """Optional extension detected only when the method is callable."""
+
+    async def list_resource_templates(
+        self,
+        context: GatewayRequestContext,
+    ) -> list[dict[str, Any]]: ...
 ```
 
-Capability advertisement derives from callable runtime methods. A runtime may
-return an empty catalog; emptiness is not an unavailable server.
+The gateway uses callable `getattr` detection and validates returned
+descriptors. Absence means the optional template-listing capability is not
+advertised. A runtime may return an empty catalog; emptiness is not an
+unavailable server.
 
-### 7.4 `serve_stdio`
+### 7.4 Strict and compatibility stdio surfaces
 
-`serve_stdio(runtime, *, input_stream=None, output_stream=None, limits=...,
-metadata=None)` owns the long-lived reader, in-flight tasks, serialized writer,
-cancellation, EOF handling, and exit status. Omitted streams use the process's
-binary stdin/stdout; injectable streams make the API embeddable and testable
-without replacing globals. `GatewayStdioServer` delegates to the same
-connection engine. `handle_stdio_line(...)` remains for compatibility and
-deterministic unit tests but is not the recommended long-running server API.
+`GatewayStdioServer` and `handle_stdio_line(...)` retain their historical
+independent-message behavior and compatibility defaults. They are not the
+recommended long-running server API and do not delegate to a stateful lifecycle
+engine.
+
+`GatewayProtocolStdioServer` owns the strict long-lived connection mechanics and
+backs this coroutine:
+
+```python
+async def serve_stdio(
+    runtime: GatewayRuntime,
+    *,
+    input_stream: GatewayAsyncByteReader | None = None,
+    output_stream: GatewayAsyncByteWriter | None = None,
+    limits: GatewayLimits = GatewayLimits(),
+    metadata: Mapping[str, Any] | None = None,
+) -> int: ...
+```
+
+The reader supplies `async readline() -> bytes`. The writer supplies
+`write(bytes) -> None` and `async drain() -> None`; text streams are rejected at
+startup. Omitted streams use process binary stdin/stdout without replacing or
+closing the global objects. Injected streams are caller-owned and are flushed
+but never closed by the gateway.
+
+The coroutine returns `0` after clean EOF or protocol shutdown and `1` after a
+fatal transport/internal server failure. Invalid local construction raises
+before reading input. Individual protocol/application errors remain JSON-RPC
+responses and do not change the process exit status. If the serving task is
+cancelled, it cancels tracked work, performs the bounded graceful-shutdown
+sequence, and re-raises `asyncio.CancelledError`. A module entrypoint maps the
+returned integer to its process exit code.
+
+### 7.5 Cancellation, limits, and safe application errors
+
+One `GatewayCancellationToken` instance is created per request and passed in
+that request's context. Its public thread-safe API is:
+
+- `cancel(reason: str | None = None) -> bool`, returning whether state changed;
+- read-only `cancelled: bool` and bounded `reason: str | None`;
+- `is_cancelled() -> bool` and `raise_if_cancelled() -> None`; and
+- `async wait() -> None`.
+
+Cancellation reasons are diagnostic classifications, not payloads, and are
+never logged raw. The same token instance is used by dispatch, runtime work,
+and the writer race check.
+
+`GatewayLimits` is a frozen dataclass with these initial public fields and
+defaults:
+
+| Field | Type | Default | Accepted range |
+| --- | --- | --- | --- |
+| `max_input_line_bytes` | `int` | `1_048_576` | `1..16_777_216` |
+| `max_output_line_bytes` | `int` | `1_048_576` | `1..16_777_216` |
+| `max_in_flight` | `int` | `16` | `1..1_024` |
+| `max_catalog_page_size` | `int` | `100` | `1..1_000` |
+| `max_requests_per_minute` | `int` | `600` | `1..60_000` |
+| `request_burst` | `int` | `32` | `1..10_000` and no greater than `max_requests_per_minute` |
+| `max_schema_bytes` | `int` | `262_144` | `1..4_194_304` |
+| `max_schema_depth` | `int` | `32` | `1..128` |
+| `max_schema_subschemas` | `int` | `1_024` | `1..10_000` |
+| `max_schema_refs` | `int` | `256` | `1..4_096` |
+| `max_schema_pattern_chars` | `int` | `4_096` | `1..65_536` |
+| `graceful_shutdown_timeout_seconds` | `float` | `5.0` | finite and `(0, 60]` |
+
+Integer fields reject booleans and values outside their accepted ranges.
+Construction fails before serving; values are never silently clamped.
+
+`GatewayApplicationError` is the common safe runtime exception. It exposes
+only bounded `public_message`, stable `reason_code`, and stable `kind` fields;
+the underlying exception is never attached to protocol data. Public subclasses
+are `GatewayToolExecutionError`, `GatewayResourceNotFound`,
+`GatewayResultTooLarge`, and `GatewayInvalidApplicationResult`. Section 14
+defines their wire projection.
+
+The base constructor is
+`GatewayApplicationError(public_message, *, reason_code, kind="application")`.
+`public_message` must be a non-empty string of at most 512 Unicode code points;
+`reason_code` must match `[a-z][a-z0-9_]{0,63}`; and `kind` is one of
+`application`, `tool`, `resource`, or `prompt`. Subclasses fix their applicable
+kind and default reason code. `GatewayResourceNotFound` and
+`GatewayInvalidApplicationResult` use fixed generic public messages.
+`GatewayResultTooLarge` additionally accepts a positive `limit_bytes` and does
+not expose the actual private result size. Invalid error construction fails
+locally and is projected as a generic internal failure, never as attacker-
+controlled error data.
 
 ## 8. Lifecycle and Version Negotiation
 
@@ -235,19 +331,24 @@ Every request must include:
 
 `clientInfo` is accepted but optional. Required metadata missing or malformed
 returns `-32602`. Unsupported modern versions return `-32022` with only safe
-`requested` and `supported` fields. The `supported` array names modern
-per-request revisions only, preventing a client from retrying a legacy revision
-with modern metadata instead of initializing.
+`requested` and `supported` fields. The `supported` array names all five
+revisions the server supports, newest first, as required by the current
+versioning contract.
 
-The server implements `server/discover`. Discovery advertises only versions
-that use the modern per-request wire contract, currently `2026-07-28`. It
-returns deterministic capabilities, `resultType: "complete"`, conservative
-cache hints, and server identity in reserved result metadata.
+The server implements `server/discover`. Its `supportedVersions` likewise
+advertises all five revisions. The client filters that array through its own
+modern-profile table before retrying on the same process; a legacy entry is
+never retried with modern metadata. Selecting any legacy revision requires a
+fresh process and `initialize`. Discovery returns deterministic capabilities,
+`resultType: "complete"`, conservative cache hints, and server identity in
+reserved result metadata.
 
 Every successful modern result includes `resultType`. Complete application
-results use `"complete"`. The runtime does not generate `"input_required"` in
-this scope. Server identity is injected into result `_meta` after runtime
-execution so application data cannot forge it.
+results use `"complete"`. In legacy profiles an absent discriminator means
+complete. Any present unknown or unadvertised value is invalid rather than
+retained as additive metadata. The runtime and stdio server do not generate
+`"input_required"` in this scope. Server identity is injected into result
+`_meta` after runtime execution so application data cannot forge it.
 
 ### 8.2 Legacy initialization
 
@@ -273,8 +374,12 @@ Downstream clients probing stdio classify responses as follows:
 1. `DiscoverResult`: modern; choose a mutually supported modern revision.
 2. Recognized modern error such as `-32022`: modern; retry a mutually supported
    modern revision or fail. Do not initialize as legacy.
-3. Any other error or a bounded timeout: legacy; close the disposable probe
-   process, start a fresh process, and initialize.
+3. A well-formed non-modern JSON-RPC method/protocol error, or timeout/EOF
+   before the peer emits any invalid bytes: legacy candidate; close the
+   disposable probe process, start a fresh process, and initialize.
+4. Malformed JSON/envelopes, a response-ID mismatch, trailing/extra protocol
+   bytes, or EOF after invalid bytes: fail closed. Do not reinterpret a broken
+   or hostile peer as legacy.
 
 The fresh process prevents an unknown legacy implementation from retaining
 ambiguous pre-initialize state. Probe timeout and shutdown escalation are
@@ -283,6 +388,8 @@ configurable.
 ## 9. JSON-RPC and Batching
 
 - MCP request IDs are strings or integers. `null` and booleans are rejected.
+  The in-flight/cancellation map uses typed keys, so integer `1` and string
+  `"1"` remain distinct; duplicate active IDs of the same type are rejected.
 - Notifications omit `id` and never receive a response.
 - Empty or whitespace-only stdio lines are ignored.
 - Each non-empty line contains exactly one JSON value and no embedded newline.
@@ -374,6 +481,13 @@ The validator:
   length before validation
 - validates within the request input/output byte ceilings
 
+Dialect support does not loosen MCP descriptor shapes: every tool
+`inputSchema`, and every declared `outputSchema`, is a valid JSON object schema
+with an object root where the selected MCP profile requires it. A modern tool
+without an `outputSchema` may still return any JSON value as
+`structuredContent`; profile projection does not pretend that arbitrary-root
+schemas are valid tool descriptors.
+
 Schema-validation errors return bounded public messages without echoing the
 arguments, schema, content, pattern, or exception representation.
 
@@ -383,16 +497,9 @@ The long-lived server uses one reader loop, one serialized writer, and a
 bounded map of in-flight request tasks. Reading continues while async work is
 running so cancellation can be observed.
 
-Default package limits are documented and configurable. The implementation
-plan may lower them after characterization but may not remove a category:
-
-- maximum input line: 1 MiB
-- maximum serialized output line: 1 MiB
-- maximum in-flight requests: 16
-- maximum catalog page size: 100
-- maximum requests per minute: 600 with bounded burst
-- bounded schema complexity and stderr/log message size
-- bounded graceful shutdown and client probe timeouts
+Default package limits are the exact `GatewayLimits` fields in section 7.5.
+The implementation plan may propose a versioned API change after
+characterization but may not silently change a default or remove a category.
 
 Crossing a limit produces a safe explicit error when a response is possible.
 The gateway never silently truncates a tool result, resource, prompt, or JSON
@@ -419,10 +526,9 @@ The protocol layer distinguishes:
   `isError: true`
 - unexpected internal failures: safe generic internal errors
 
-`GatewayToolExecutionError` carries a safe public message and optional stable
-reason code. It does not expose the original exception. Application handlers
-must stop converting raw `str(exc)` values into successful `{error: ...}`
-payloads.
+All typed application errors carry only the safe public fields defined in
+section 7.5. Application handlers must stop converting raw `str(exc)` values
+into successful `{error: ...}` payloads.
 
 Version-specific error projection includes:
 
@@ -430,7 +536,21 @@ Version-specific error projection includes:
 - modern unsupported version: `-32022` with `requested` and `supported`
 - modern missing resource: `-32602`
 - legacy missing resource: `-32002` where required for compatibility
+- `GatewayResultTooLarge`: application-defined `-33001` with stable
+  `result_too_large` data
+- other safe non-tool application failures: application-defined `-33002`
+- invalid application results and unexpected failures: generic `-32603`
 - no undefined modern use of reserved `-32020..-32099` codes
+
+`GatewayToolExecutionError` is projected as a successful `tools/call` envelope
+whose result has `isError: true` and a bounded safe text content block; it does
+not include `structuredContent` unless a future explicit error schema is
+designed. Malformed calls and unknown tool names remain protocol errors.
+`GatewayResourceNotFound` uses the profile-specific missing-resource code.
+`GatewayInvalidApplicationResult` is never exposed verbatim and maps to the
+generic internal error. Error `data` is an allowlist of stable `reason_code`,
+`kind`, and safe limit metadata; no payload, schema, URI, path, SQL, actual
+private result size, or exception representation is included.
 
 Existing legacy `GatewayPolicyDenied -> -32001` behavior may remain in the
 legacy FastAPI compatibility path. The strict modern path uses standard errors
@@ -474,9 +594,13 @@ The corresponding downstream boundary is specified in the
 Tests cover every revision for:
 
 - initialization/discovery and version mismatch
+- discovery and `-32022` advertise all five revisions while modern retry
+  filters to mutually supported modern profiles
 - capability and descriptor projection
-- result projection and server metadata
+- required modern `resultType`, legacy absent-means-complete behavior, rejection
+  of unknown values, and no generated `input_required`
 - missing/invalid/null request IDs
+- typed request-ID distinction, duplicate active IDs, and cancellation lookup
 - notifications and notification suppression
 - tools/resources/templates/prompts happy paths and errors
 - empty catalogs
@@ -497,12 +621,15 @@ Tests cover every revision for:
 ### 16.3 Stdio subprocess behavior
 
 - one valid message per stdout line and no non-protocol stdout
+- the server never writes server-to-client JSON-RPC requests
 - concurrent request reading and serialized output
 - cancellation before start, during async work, and at the writer race
 - no output after cancellation
 - EOF and graceful/forced shutdown behavior
 - input/output/in-flight/rate/schema limits
 - payload-free diagnostics
+- strict `GatewayProtocolStdioServer` lifecycle behavior and unchanged
+  independent-message `GatewayStdioServer`/`handle_stdio_line` behavior
 
 ### 16.4 Interoperability
 
@@ -520,6 +647,10 @@ transport conformance.
 
 - existing FastAPI/WebSocket gateway regression suite
 - old `handle_stdio_line` compatibility tests
+- public signatures/defaults/validation for cancellation tokens, limits,
+  application errors, strict stdio streams, ownership, and exit semantics
+- optional resource-template extension detection with an unmodified core
+  `GatewayRuntime` implementation
 - package import-boundary tests
 - Python 3.10 through the supported upper CI version
 - wheel and sdist build, metadata, contents, and fresh-environment installs
@@ -571,6 +702,8 @@ rollback or data migration is required.
 | Large content deadlocks or corrupts stdout | Bounded line/output, explicit error, continuous stderr draining, no truncation |
 | Cache metadata leaks user-specific catalogs | `ttlMs: 0`, `cacheScope: private`, authorization remains independent |
 | Old and modern fields are mixed | Projection tests assert required presence and forbidden absence per revision |
+| Public helper silently changes lifecycle semantics | Preserve `GatewayStdioServer`; put strict behavior in `GatewayProtocolStdioServer` |
+| Discovery advertises legacy versions that a client retries as modern | Advertise the complete required set, then filter retries through the client's modern profile table |
 | Release automation publishes the wrong artifact | Build from merged commit, immutable artifact handoff, PyPI availability/hash checks |
 
 ## 19. Alternatives Considered
@@ -608,7 +741,7 @@ boundary open.
 ADR required: **yes**
 
 ADR path:
-`backlog/decisions/001-mcp-unified-multi-revision-stdio-protocol.md`
+`Docs/ADR/032-mcp-unified-multi-revision-stdio-protocol.md`
 
 Reason: the change establishes a public protocol/runtime API, dependency and
 release boundary, cross-version service contract, and security/privacy policy.

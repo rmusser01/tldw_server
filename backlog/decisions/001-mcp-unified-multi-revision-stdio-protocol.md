@@ -1,9 +1,10 @@
 # ADR-001: MCP Unified Multi-Revision Stdio Protocol Boundary
 
-Status: Accepted
+Status: Superseded by ADR-032
 Date: 2026-08-08
 Related Task: [TASK-13008](../tasks/task-13008%20-%20Design-MCP-Unified-multi-revision-stdio-protocol-compatibility.md)
 Supersedes: N/A
+Superseded by: [ADR-032](../../Docs/ADR/032-mcp-unified-multi-revision-stdio-protocol.md)
 
 ## Decision
 
