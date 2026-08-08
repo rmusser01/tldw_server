@@ -12,7 +12,9 @@ satisfies every invariant (an independent oracle, so a dropped guard fails).
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, settings as hyp_settings, strategies as st
+from hypothesis import given
+from hypothesis import settings as hyp_settings
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
@@ -63,9 +65,7 @@ def _admission_is_consistent(
         return False
     if outcome is OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is None:
         return False
-    if outcome is not OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is not None:
-        return False
-    return True
+    return not (outcome is not OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is not None)
 
 
 def _lifecycle_is_consistent(
@@ -84,9 +84,7 @@ def _lifecycle_is_consistent(
             return False
     if outcome is OperationOutcome.NO_TRANSITION and no_transition_reason is None:
         return False
-    if outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None:
-        return False
-    return True
+    return not (outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None)
 
 
 class TestAdmissionResultContract:
