@@ -18,7 +18,6 @@
 import asyncio
 import builtins
 import hashlib
-import ipaddress
 import json
 import math
 import os
@@ -69,6 +68,8 @@ from tldw_Server_API.app.core.Web_Scraping.content import (
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import RateLimiter
 from tldw_Server_API.app.core.Web_Scraping.extraction import (
     clear_extraction_caches,
+    extract_jsonld_entities,
+    extract_regex_entities,
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction import (
     get_extraction_cache_stats as _get_extraction_cache_stats,
@@ -452,49 +453,6 @@ _STRATEGY_ALIASES = {
     "clustering": "cluster",
 }
 _KNOWN_STRATEGIES = set(DEFAULT_EXTRACTION_STRATEGY_ORDER)
-_MAX_REGEX_TOTAL_MATCHES = 200
-_MAX_REGEX_MATCHES_PER_LABEL = {
-    "number": 50,
-}
-_PII_LABELS = {"email", "phone", "credit_card"}
-_JSONLD_PRIMARY_TYPES = {
-    "newsarticle",
-    "article",
-    "blogposting",
-    "report",
-    "techarticle",
-    "medicalscholarlyarticle",
-    "analysisnewsarticle",
-    "opinionnewsarticle",
-    "reviewnewsarticle",
-    "scholarlyarticle",
-}
-_JSONLD_SECONDARY_TYPES = {
-    "webpage",
-    "webcontent",
-    "creativework",
-    "blog",
-}
-_REGEX_CATALOG: list[tuple[str, re.Pattern[str]]] = [
-    ("email", re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b")),
-    ("phone", re.compile(r"\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b")),
-    ("phone", re.compile(r"\b\+?\d[\d\s().-]{7,}\d\b")),
-    ("url", re.compile(r"\bhttps?://[^\s<>\"]+")),
-    ("ipv4", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
-    ("ipv6", re.compile(r"\b(?:[A-Fa-f0-9]{0,4}:){2,7}[A-Fa-f0-9]{0,4}\b")),
-    ("uuid", re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b")),
-    ("currency", re.compile(r"[$€£¥]\s?\d+(?:,\d{3})*(?:\.\d{2})?")),
-    ("percentage", re.compile(r"\b\d+(?:\.\d+)?%")),
-    ("number", re.compile(r"\b\d+(?:\.\d+)?\b")),
-    ("datetime", re.compile(r"\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\b")),
-    ("postal_us", re.compile(r"\b\d{5}(?:-\d{4})?\b")),
-    ("postal_uk", re.compile(r"\b[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}\b", re.IGNORECASE)),
-    ("hex_color", re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b")),
-    ("social_handle", re.compile(r"(?<!\w)@[A-Za-z0-9_]{1,30}\b")),
-    ("mac", re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")),
-    ("iban", re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", re.IGNORECASE)),
-    ("credit_card", re.compile(r"\b(?:\d[ -]*?){13,19}\b")),
-]
 _CLUSTER_EMBED_DIM = 128
 _CLUSTER_PREFILTER_THRESHOLD = 0.2
 _CLUSTER_SIM_THRESHOLD = 0.4
@@ -669,11 +627,6 @@ def _extract_with_trafilatura(html: str, url: str) -> dict[str, Any]:
     return result
 
 
-def _regex_pii_mask_enabled() -> bool:
-    flag = os.getenv("REGEX_PII_MASK", "")
-    return _is_truthy(str(flag).strip())
-
-
 def _env_int(name: str) -> Optional[int]:
     raw = os.getenv(name, "").strip()
     if not raw:
@@ -741,127 +694,6 @@ def _strategy_throttle(strategy: str) -> Any:
         yield
     finally:
         sem.release()
-
-
-def _mask_pii_value(label: str, value: str) -> str:
-    if label == "email":
-        if "@" not in value:
-            return "***"
-        local, domain = value.split("@", 1)
-        masked_local = "*" * len(local) if len(local) <= 2 else f"{local[0]}***{local[-1]}"
-        return f"{masked_local}@{domain}"
-    if label == "phone":
-        digits = re.sub(r"\D", "", value)
-        if len(digits) <= 4:
-            return "*" * len(digits)
-        return f"{'*' * (len(digits) - 4)}{digits[-4:]}"
-    if label == "credit_card":
-        digits = re.sub(r"\D", "", value)
-        if len(digits) <= 4:
-            return "*" * len(digits)
-        return f"{'*' * (len(digits) - 4)}{digits[-4:]}"
-    return value
-
-
-def _luhn_check(number: str) -> bool:
-    digits = [int(d) for d in number if d.isdigit()]
-    if len(digits) < 12 or len(digits) > 19:
-        return False
-    checksum = 0
-    parity = len(digits) % 2
-    for idx, digit in enumerate(digits):
-        if idx % 2 == parity:
-            digit *= 2
-            if digit > 9:
-                digit -= 9
-        checksum += digit
-    return checksum % 10 == 0
-
-
-def extract_regex_entities(
-    html_text: str,
-    url: str,
-    *,
-    mask_pii: Optional[bool] = None,
-) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "url": url,
-        "title": "N/A",
-        "author": "N/A",
-        "content": "",
-        "date": "N/A",
-        "extraction_successful": False,
-        "regex_matches": [],
-    }
-    if not html_text:
-        return result
-
-    soup = BeautifulSoup(html_text, "html.parser")
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    title_tag = soup.find("title")
-    title = title_tag.get_text(strip=True) if title_tag else None
-    if title:
-        result["title"] = title
-    text = soup.get_text(" ", strip=True)
-    result["content"] = text
-    if not text:
-        return result
-
-    if mask_pii is None:
-        mask_pii = _regex_pii_mask_enabled()
-
-    matches: list[dict[str, Any]] = []
-    seen_spans: set[tuple[str, int, int]] = set()
-    occupied: list[tuple[int, int]] = []
-    total_count = 0
-    per_label_counts: dict[str, int] = {}
-
-    for label, pattern in _REGEX_CATALOG:
-        per_label_limit = _MAX_REGEX_MATCHES_PER_LABEL.get(label, _MAX_REGEX_TOTAL_MATCHES)
-        count = per_label_counts.get(label, 0)
-        if count >= per_label_limit:
-            continue
-        for match in pattern.finditer(text):
-            if total_count >= _MAX_REGEX_TOTAL_MATCHES or count >= per_label_limit:
-                break
-            start, end = match.span()
-            if any(start < span_end and end > span_start for span_start, span_end in occupied):
-                if label == "number":
-                    continue
-            value = match.group(0)
-            if label == "social_handle" and "." in value:
-                continue
-            if label in {"ipv4", "ipv6"}:
-                try:
-                    ipaddress.ip_address(value)
-                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-                    continue
-            if label == "credit_card" and not _luhn_check(value):
-                continue
-            if (label, start, end) in seen_spans:
-                continue
-            seen_spans.add((label, start, end))
-            occupied.append((start, end))
-            if mask_pii and label in _PII_LABELS:
-                value = _mask_pii_value(label, value)
-            matches.append(
-                {
-                    "url": url,
-                    "label": label,
-                    "value": value,
-                    "span": [start, end],
-                }
-            )
-            count += 1
-            total_count += 1
-        per_label_counts[label] = count
-        if total_count >= _MAX_REGEX_TOTAL_MATCHES:
-            break
-
-    result["regex_matches"] = matches
-    result["extraction_successful"] = bool(matches)
-    return result
 
 
 def _jsonld_type_tokens(value: Any) -> list[str]:
@@ -1058,117 +890,6 @@ def _extract_microdata_items(soup: BeautifulSoup) -> list[dict[str, Any]]:
             item["@id"] = item_id
         items.append(item)
     return items
-
-
-def extract_jsonld_entities(html_text: str, url: str) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "url": url,
-        "title": "N/A",
-        "author": "N/A",
-        "content": "",
-        "date": "N/A",
-        "extraction_successful": False,
-    }
-    if not html_text:
-        return result
-    soup = BeautifulSoup(html_text, "html.parser")
-    nodes: list[dict[str, Any]] = []
-    errors: list[str] = []
-
-    scripts = soup.find_all("script", attrs={"type": re.compile(r"ld\+json", re.IGNORECASE)})
-    for script in scripts:
-        payload = script.string or script.get_text()
-        if not payload:
-            continue
-        payload = payload.strip()
-        if not payload:
-            continue
-        try:
-            objects = _decode_all_json(payload)
-            if not objects:
-                objects = [json.loads(payload)]
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-            errors.append(f"jsonld_parse_failed: {exc}")
-            continue
-        for obj in objects:
-            nodes.extend(_collect_jsonld_nodes(obj))
-
-    nodes.extend(_extract_microdata_items(soup))
-
-    if not nodes:
-        if errors:
-            result["jsonld_error"] = "; ".join(errors[:3])
-        return result
-
-    id_map: dict[str, dict[str, Any]] = {}
-    for node in nodes:
-        node_id = node.get("@id")
-        if isinstance(node_id, str):
-            id_map[node_id] = node
-
-    expanded_nodes = list(nodes)
-    for node in nodes:
-        for ref_key in ("mainEntity", "mainEntityOfPage"):
-            expanded_nodes.extend(_resolve_jsonld_refs(node.get(ref_key), id_map))
-
-    seen_ids: set[int] = set()
-    unique_nodes: list[dict[str, Any]] = []
-    for node in expanded_nodes:
-        node_id = id(node)
-        if node_id in seen_ids:
-            continue
-        seen_ids.add(node_id)
-        unique_nodes.append(node)
-
-    best_node: Optional[dict[str, Any]] = None
-    best_score: tuple[int, int] = (-1, -1)
-    for node in unique_nodes:
-        score = _jsonld_score_candidate(node)
-        if score > best_score:
-            best_score = score
-            best_node = node
-
-    if not best_node:
-        return result
-
-    result["jsonld_types"] = sorted(_jsonld_type_set(best_node))
-
-    title = _jsonld_join_text(
-        best_node.get("headline") or best_node.get("name") or best_node.get("title"),
-        " ",
-    )
-    if title:
-        result["title"] = title
-
-    author = _jsonld_extract_author(best_node)
-    if author:
-        result["author"] = author
-
-    date_val = (
-        _jsonld_join_text(best_node.get("datePublished"), " ")
-        or _jsonld_join_text(best_node.get("dateCreated"), " ")
-        or _jsonld_join_text(best_node.get("dateModified"), " ")
-    )
-    if date_val:
-        result["date"] = date_val
-
-    summary = (
-        _jsonld_join_text(best_node.get("description"), " ")
-        or _jsonld_join_text(best_node.get("abstract"), " ")
-        or _jsonld_join_text(best_node.get("summary"), " ")
-    )
-    if summary:
-        result["summary"] = summary
-
-    content = _jsonld_join_text(best_node.get("articleBody"), "\n\n") or _jsonld_join_text(
-        best_node.get("text"),
-        "\n\n",
-    )
-    if content:
-        result["content"] = content
-
-    result["extraction_successful"] = _jsonld_has_body(result)
-    return result
 
 
 def _tokenize_cluster_text(text: str) -> list[str]:

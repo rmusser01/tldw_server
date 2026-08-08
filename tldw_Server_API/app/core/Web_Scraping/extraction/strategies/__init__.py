@@ -1,3 +1,6 @@
-"""Extraction strategy namespace; strategy implementations move in later tasks."""
+"""Canonical extraction strategy implementations."""
 
-__all__: list[str] = []
+from .jsonld import extract_jsonld_entities
+from .regex import extract_regex_entities
+
+__all__ = ["extract_jsonld_entities", "extract_regex_entities"]

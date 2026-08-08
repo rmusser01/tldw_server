@@ -25,9 +25,16 @@ def test_extraction_facade_has_the_phase4b_public_contract() -> None:
         "build_default_dependencies",
         "clear_extraction_caches",
         "get_extraction_cache_stats",
+        "extract_jsonld_entities",
+        "extract_regex_entities",
     ]
     assert legacy.clear_extraction_caches is extraction.clear_extraction_caches
     assert legacy.get_extraction_cache_stats is extraction.get_extraction_cache_stats
+
+
+def test_legacy_jsonld_and_regex_exports_are_canonical() -> None:
+    assert legacy.extract_jsonld_entities is extraction.extract_jsonld_entities
+    assert legacy.extract_regex_entities is extraction.extract_regex_entities
 
 
 def test_extraction_package_does_not_import_the_legacy_wrapper() -> None:
