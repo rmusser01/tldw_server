@@ -1,7 +1,8 @@
 # ADR-032: MCP Unified Multi-Revision Stdio Protocol
 
-**Status:** Accepted
+**Status:** Superseded by ADR-033
 **Date:** 2026-08-08
+**Superseded by:** [ADR-033](033-mcp-unified-stdio-contract-hardening.md)
 **Backfilled from:** `backlog/decisions/001-mcp-unified-multi-revision-stdio-protocol.md`
 **Decision owner:** MCP Unified protocol design review
 **Related task:** [TASK-13008](../../backlog/tasks/task-13008%20-%20Design-MCP-Unified-multi-revision-stdio-protocol-compatibility.md)

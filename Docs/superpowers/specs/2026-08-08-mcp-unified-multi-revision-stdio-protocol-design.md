@@ -3,7 +3,7 @@
 Date: 2026-08-08
 Status: Approved design; implementation planning intentionally deferred
 Backlog: TASK-13008
-ADR: `Docs/ADR/032-mcp-unified-multi-revision-stdio-protocol.md`
+ADR: `Docs/ADR/033-mcp-unified-stdio-contract-hardening.md`
 Downstream consumer: `rmusser01/tldw_chatbook` TASK-2512
 
 ## 1. Summary
@@ -38,8 +38,9 @@ legacy FastMCP-based standalone server without copying protocol machinery.
 - Preserve initialization-based legacy sessions and restrict batching to
   `2025-03-26` after standalone initialization.
 - Support tools, resources, resource templates, and prompts.
-- Keep runtime method signatures and dictionary return values compatible where
-  possible.
+- Keep existing dictionary-returning runtimes structurally compatible while
+  widening the strict core runtime to support every JSON value allowed by the
+  current protocol.
 - Validate protocol envelopes, JSON Schemas, tool inputs, and structured tool
   outputs at the gateway boundary.
 - Bound input, output, concurrency, schema complexity, request rate, stderr
@@ -87,7 +88,7 @@ version-specific behavior. Dispatch code must not scatter date comparisons.
 
 | Revision | Era | Lifecycle | Batches | Projection highlights |
 | --- | --- | --- | --- | --- |
-| `2026-07-28` | modern | Per-request `_meta`; no initialize session | rejected | required `resultType`; server identity metadata; cache hints; JSON Schema 2020-12 dialect with MCP object-rooted tool schemas; arbitrary JSON `structuredContent`; missing resource is `-32602` |
+| `2026-07-28` | modern | Per-request `_meta`; no initialize session | rejected | required `resultType`; server identity metadata; cache hints; JSON Schema 2020-12 dialect with object-rooted `inputSchema` and arbitrary-root `outputSchema`; arbitrary JSON `structuredContent`; missing resource is `-32602` |
 | `2025-11-25` | legacy | `initialize` then operation | rejected | icons/titles; JSON Schema 2020-12 default; structured tool output object; optional Tasks not advertised |
 | `2025-06-18` | legacy | `initialize` then operation | rejected | titles, resource links, and structured tool output object |
 | `2025-03-26` | legacy | standalone `initialize` then operation | receive required after initialization | legacy schemas and batch response rules |
@@ -124,7 +125,7 @@ separate breaking-change decision and release note.
 
 ### 6.2 Runtime-owned application layer
 
-An injected `GatewayRuntime` owns:
+An injected `GatewayCoreRuntime` owns:
 
 - visible tool/resource/template/prompt catalogs
 - tool execution and resource/prompt reads
@@ -157,6 +158,7 @@ from mcp_unified.gateway import (
     GatewayAsyncByteReader,
     GatewayAsyncByteWriter,
     GatewayCancellationToken,
+    GatewayCoreRuntime,
     GatewayInvalidApplicationResult,
     GatewayLimits,
     GatewayProtocolConnection,
@@ -169,6 +171,7 @@ from mcp_unified.gateway import (
     GatewayRuntime,
     GatewayStdioServer,
     GatewayToolExecutionError,
+    GatewayJSONValue,
     serve_stdio,
 )
 ```
@@ -195,7 +198,14 @@ request metadata.
 
 ### 7.2 `GatewayRequestContext`
 
-Keep existing fields and add optional fields with compatibility defaults:
+The existing `request_id` field is widened from `str` to `str | int`. This is a
+source-compatible annotation widening for current callers and is required to
+preserve MCP identity: integer `1` and string `"1"` must remain distinct through
+runtime dispatch, cancellation, audit correlation, and response echo. Boolean
+and null IDs are rejected before context construction.
+
+Keep the other existing fields and add optional fields with compatibility
+defaults:
 
 ```python
 protocol_version: str | None = None
@@ -211,9 +221,66 @@ identity, client capabilities, or transport identity.
 
 ### 7.3 Runtime protocols
 
-Existing `GatewayRuntime` async signatures and dictionary results remain valid.
-Resource-template listing is additive through a separate runtime extension,
-not a new statically mandatory `GatewayRuntime` member:
+The package exposes a recursive JSON type alias:
+
+```python
+GatewayJSONScalar: TypeAlias = Union[None, bool, int, float, str]
+GatewayJSONValue: TypeAlias = Union[
+    GatewayJSONScalar,
+    list["GatewayJSONValue"],
+    dict[str, "GatewayJSONValue"],
+]
+```
+
+Finite numbers and string-keyed mappings are enforced at runtime. The new
+strict server accepts a narrow `GatewayCoreRuntime` containing only the MCP core
+tool/resource/prompt methods plus `name` and `version`. Its `call_tool` result is
+`GatewayJSONValue`; existing implementations that return `dict[str, Any]`
+remain structurally compatible because their return type is narrower.
+
+```python
+@runtime_checkable
+class GatewayCoreRuntime(Protocol):
+    name: str
+    version: str
+
+    async def list_tools(
+        self, context: GatewayRequestContext
+    ) -> list[dict[str, Any]]: ...
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: GatewayRequestContext,
+    ) -> GatewayJSONValue: ...
+
+    async def list_resources(
+        self, context: GatewayRequestContext
+    ) -> list[dict[str, Any]]: ...
+
+    async def read_resource(
+        self, uri: str, context: GatewayRequestContext
+    ) -> dict[str, Any]: ...
+
+    async def list_prompts(
+        self, context: GatewayRequestContext
+    ) -> list[dict[str, Any]]: ...
+
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: GatewayRequestContext,
+    ) -> dict[str, Any]: ...
+```
+
+The existing `GatewayRuntime` remains public and unchanged for legacy gateway
+callers, including its package-specific `list_modules` and
+`get_modules_health` methods. Strict stdio does not require downstream
+consumers to implement those unrelated aliases. Resource-template listing is
+additive through a separate runtime extension, not a statically mandatory core
+member:
 
 ```python
 @runtime_checkable
@@ -243,7 +310,7 @@ backs this coroutine:
 
 ```python
 async def serve_stdio(
-    runtime: GatewayRuntime,
+    runtime: GatewayCoreRuntime,
     *,
     input_stream: GatewayAsyncByteReader | None = None,
     output_stream: GatewayAsyncByteWriter | None = None,
@@ -287,8 +354,13 @@ defaults:
 | --- | --- | --- | --- |
 | `max_input_line_bytes` | `int` | `1_048_576` | `1..16_777_216` |
 | `max_output_line_bytes` | `int` | `1_048_576` | `1..16_777_216` |
+| `max_result_bytes` | `int` | `786_432` | `1..16_777_216` and no greater than `max_output_line_bytes` |
+| `max_json_depth` | `int` | `64` | `1..256` |
 | `max_in_flight` | `int` | `16` | `1..1_024` |
+| `default_catalog_page_size` | `int` | `50` | `1..1_000` and no greater than `max_catalog_page_size` |
 | `max_catalog_page_size` | `int` | `100` | `1..1_000` |
+| `max_catalog_items` | `int` | `10_000` | `1..100_000` and no less than `max_catalog_page_size` |
+| `max_batch_items` | `int` | `100` | `1..1_000` |
 | `max_requests_per_minute` | `int` | `600` | `1..60_000` |
 | `request_burst` | `int` | `32` | `1..10_000` and no greater than `max_requests_per_minute` |
 | `max_schema_bytes` | `int` | `262_144` | `1..4_194_304` |
@@ -296,10 +368,21 @@ defaults:
 | `max_schema_subschemas` | `int` | `1_024` | `1..10_000` |
 | `max_schema_refs` | `int` | `256` | `1..4_096` |
 | `max_schema_pattern_chars` | `int` | `4_096` | `1..65_536` |
+| `max_schema_validation_processes` | `int` | `4` | `1..32` |
+| `schema_validation_timeout_seconds` | `float` | `1.0` | finite and `(0, 10]` |
 | `graceful_shutdown_timeout_seconds` | `float` | `5.0` | finite and `(0, 60]` |
 
 Integer fields reject booleans and values outside their accepted ranges.
-Construction fails before serving; values are never silently clamped.
+Cross-field relationships in the table are validated. Construction fails
+before serving; values are never silently clamped. `max_json_depth` applies to
+decoded requests, runtime results, and metadata; `max_schema_depth` separately
+applies to schema structure. `max_result_bytes` is checked before envelope
+projection, while `max_output_line_bytes` includes the final JSON-RPC envelope
+and delimiter. `max_batch_items` is enforced before creating element tasks, and
+`max_catalog_items` is enforced before sorting, hashing, or paginating a runtime
+catalog. `default_catalog_page_size` is the fixed initial page size because MCP
+list requests do not carry a page-size parameter; every continuation cursor
+binds that configured value.
 
 `GatewayApplicationError` is the common safe runtime exception. It exposes
 only bounded `public_message`, stable `reason_code`, and stable `kind` fields;
@@ -415,12 +498,18 @@ Capabilities are standard MCP objects such as `{"tools": {}}`; the existing
 non-standard `{"available": true}` shape is not emitted by the strict stdio
 connection. Existing HTTP compatibility wrappers remain unchanged.
 
-List methods are deterministically ordered and paginated. The gateway accepts
-an opaque cursor bound to the method, protocol profile, and next offset. A
-cursor is size-bounded and cannot be used across methods. The default and
-maximum page sizes are explicit `GatewayLimits` values. MCP catalog pages do
-not invent a total-count field; exact totals are an application tool contract,
-not an MCP list-protocol requirement.
+List methods reject duplicate normalized descriptor identities, sort by the
+profile-projected stable identity (`name` for tools/prompts and normalized URI
+for resources/templates), and paginate only after enforcing
+`max_catalog_items`. The gateway accepts an authenticated opaque cursor bound
+to the method, protocol profile, next offset, configured
+`default_catalog_page_size`, and a fingerprint of the normalized projected
+catalog. A cursor is size-bounded, cannot be used
+across methods, and fails with a stable invalid-cursor error if the catalog
+changes between pages; it never silently skips or duplicates entries. The
+default and maximum page sizes are explicit `GatewayLimits` values. MCP catalog
+pages do not invent a total-count field; exact totals are an application tool
+contract, not an MCP list-protocol requirement.
 
 For `2026-07-28`, the gateway injects these conservative hints into
 `server/discover`, list results, and resource reads:
@@ -443,6 +532,11 @@ the selected profile.
 - Resource URIs are validated and bounded; raw URI values are not logged.
 - `2025-06-18` and `2025-11-25` structured tool content remains an object.
 - `2026-07-28` structured content may be any JSON value.
+- A current tool may declare an arbitrary-root `outputSchema`. For a legacy
+  profile whose tool schema/result grammar cannot represent that root, the
+  gateway validates against the declared schema, omits `outputSchema` and
+  `structuredContent` from the legacy projection, and retains the deterministic
+  JSON text content block. It does not invent an application wrapper.
 - When structured content is returned, a backward-compatible text content
   representation is retained where the profile recommends it.
 - If an output schema exists, structured output must conform or the gateway
@@ -459,9 +553,11 @@ responsible for any rendering policy.
 
 ## 12. JSON Schema Validation
 
-The package adds a direct dependency on a maintained validator supporting JSON
-Schema 2020-12. Protocol validation cannot depend on an undeclared transitive
-dependency.
+The package adds the direct dependency `jsonschema>=4.23,<5`, whose public
+`Draft202012Validator` supports JSON Schema 2020-12. Protocol validation cannot
+depend on an undeclared transitive dependency. The compatible-major ceiling is
+part of the public package/release decision and is verified from both wheel and
+sdist installs.
 
 Validation occurs at these boundaries:
 
@@ -480,13 +576,32 @@ The validator:
 - bounds schema bytes, depth, total subschemas, reference count, and pattern
   length before validation
 - validates within the request input/output byte ceilings
+- sends only the bounded schema and instance JSON to a fresh spawned validation
+  worker process; at most `max_schema_validation_processes` run concurrently
+- terminates, force-kills if necessary, and reaps the validation worker when
+  `schema_validation_timeout_seconds` expires, then returns the stable safe
+  `schema_validation_timeout` failure
+- joins and reaps the worker on every other exit path: successful verdict,
+  validation failure, abnormal child exit, request cancellation, and server
+  shutdown. The concurrency permit is released only after reaping completes
 
-Dialect support does not loosen MCP descriptor shapes: every tool
-`inputSchema`, and every declared `outputSchema`, is a valid JSON object schema
-with an object root where the selected MCP profile requires it. A modern tool
-without an `outputSchema` may still return any JSON value as
-`structuredContent`; profile projection does not pretend that arbitrary-root
-schemas are valid tool descriptors.
+The parent performs only bounded structural preflight before spawning. Schema
+compilation, format/pattern evaluation, and instance validation all occur in
+the disposable worker, so a short catastrophic-backtracking regex cannot pin
+the long-lived stdio process. The child has no network `$ref` resolver, returns
+only a bounded verdict, and is never reused after timeout or abnormal exit.
+Queue admission remains bounded by the process limit and request cancellation;
+cancelled requests discard the verdict and reap their worker. Shutdown rejects
+new validation work, terminates any live validation children with the same
+bounded terminate/kill escalation, reaps them, and then releases their permits.
+
+Dialect support does not loosen MCP descriptor shapes. Every tool
+`inputSchema` is a valid object schema with an object root. A `2026-07-28`
+`outputSchema` may describe any JSON root. Legacy profiles retain their dated
+object-root restriction and use the text-only compatibility projection in
+section 11 when a current arbitrary-root schema cannot be represented. A
+modern tool without an `outputSchema` may return any JSON value as
+`structuredContent`.
 
 Schema-validation errors return bounded public messages without echoing the
 arguments, schema, content, pattern, or exception representation.
@@ -515,6 +630,14 @@ EOF closes input, cancels queued/cooperative work, shuts down the writer, and
 exits promptly when possible. Python threads cannot be forcibly killed; hosts
 must keep sync work bounded, and clients retain close/terminate/kill escalation
 for a process that does not exit within its grace period.
+
+Omitted process streams use a portable binary adapter. On event loops that do
+not support asynchronous pipe registration for process stdin/stdout, including
+affected Windows configurations, the adapter performs bounded blocking reads
+and writes in dedicated threads while retaining the same cancellation, byte,
+and shutdown limits. Supported-platform CI exercises the native POSIX path and
+the Windows-compatible fallback; `Operating System :: OS Independent` is not
+claimed solely from mocked POSIX pipes.
 
 ## 14. Errors, Logging, and Privacy
 
@@ -545,7 +668,17 @@ Version-specific error projection includes:
 `GatewayToolExecutionError` is projected as a successful `tools/call` envelope
 whose result has `isError: true` and a bounded safe text content block; it does
 not include `structuredContent` unless a future explicit error schema is
-designed. Malformed calls and unknown tool names remain protocol errors.
+designed. Its stable classification is carried in result metadata under the
+valid package-owned key `io.github.rmusser01.mcp-unified/error`:
+
+```json
+{"reasonCode": "not_implemented", "kind": "tool"}
+```
+
+The gateway owns and overwrites that key; runtimes cannot forge it. The value is
+bounded to the validated `reason_code` and `kind` fields and contains no
+application payload. Malformed calls and unknown tool names remain protocol
+errors.
 `GatewayResourceNotFound` uses the profile-specific missing-resource code.
 `GatewayInvalidApplicationResult` is never exposed verbatim and maps to the
 generic internal error. Error `data` is an allowlist of stable `reason_code`,
@@ -575,9 +708,13 @@ Before publication, upstream tests include a synthetic consumer shaped like
 `tldw_chatbook` without importing that repository. It must prove:
 
 - explicit descriptor registries can supply tools/resources/templates/prompts
-- a runtime with empty capabilities is valid
+- a runtime with empty catalogs is valid even though core capabilities remain
+  protocol-advertised
 - `serve_stdio` can run from an embedded module entrypoint
 - `GatewayRequestContext` additions are optional for existing runtimes
+- integer and string request IDs remain type-distinct inside the runtime
+- arbitrary current JSON tool results and legacy text-only projection work
+- strict stdio accepts `GatewayCoreRuntime` without legacy module methods
 - an application can choose serialized tool execution (`max_in_flight=1`)
 - typed execution errors, pagination, cancellation, and limits cross the public
   API without private imports
@@ -604,8 +741,9 @@ Tests cover every revision for:
 - notifications and notification suppression
 - tools/resources/templates/prompts happy paths and errors
 - empty catalogs
-- pagination and invalid/repeated/cross-method cursors
-- structured output and schema validation
+- pagination plus stale/repeated/cross-method cursor rejection and catalog
+  fingerprint changes
+- object and array/scalar/null structured output plus schema validation
 - resource-not-found error changes
 - modern cache hints and legacy field absence
 - reserved metadata authority
@@ -626,7 +764,11 @@ Tests cover every revision for:
 - cancellation before start, during async work, and at the writer race
 - no output after cancellation
 - EOF and graceful/forced shutdown behavior
-- input/output/in-flight/rate/schema limits
+- input/output/result/JSON-depth/in-flight/rate/catalog/page/batch/schema limits
+- schema-validation process saturation, timeout, cancellation, abnormal exit,
+  normal-completion/abnormal-exit reaping, shutdown with live children, and an
+  adversarial catastrophic-backtracking pattern while the server remains
+  responsive
 - payload-free diagnostics
 - strict `GatewayProtocolStdioServer` lifecycle behavior and unchanged
   independent-message `GatewayStdioServer`/`handle_stdio_line` behavior
@@ -653,6 +795,7 @@ transport conformance.
   `GatewayRuntime` implementation
 - package import-boundary tests
 - Python 3.10 through the supported upper CI version
+- POSIX native-pipe and Windows-compatible binary-stream execution
 - wheel and sdist build, metadata, contents, and fresh-environment installs
 - base and documented extra installation smokes
 - API/signature tests against the installed artifact, not the source tree
@@ -697,13 +840,15 @@ rollback or data migration is required.
 | Legacy changes leak into existing HTTP routes | Explicit legacy compatibility wrapper and FastAPI/WebSocket regression suite |
 | Version logic drifts across methods | One immutable protocol profile table and complete profile-vector tests |
 | PyPI release exposes a missing consumer API | Installed-artifact synthetic consumer contract before publication |
-| Schema validation enables SSRF or CPU exhaustion | No external `$ref`; bounded schema size/depth/subschemas/patterns |
+| Schema validation enables SSRF or CPU exhaustion | Direct bounded `jsonschema` dependency; no external `$ref`; bounded schema structure plus disposable validation processes with exact concurrency/time limits |
 | Cancellation races emit a late result | Cancellation state rechecked under serialized writer immediately before output |
 | Large content deadlocks or corrupts stdout | Bounded line/output, explicit error, continuous stderr draining, no truncation |
 | Cache metadata leaks user-specific catalogs | `ttlMs: 0`, `cacheScope: private`, authorization remains independent |
 | Old and modern fields are mixed | Projection tests assert required presence and forbidden absence per revision |
 | Public helper silently changes lifecycle semantics | Preserve `GatewayStdioServer`; put strict behavior in `GatewayProtocolStdioServer` |
 | Discovery advertises legacy versions that a client retries as modern | Advertise the complete required set, then filter retries through the client's modern profile table |
+| A moving catalog skips or duplicates paginated descriptors | Stable identities, duplicate rejection, catalog fingerprints, and stale-cursor failure |
+| A Windows event loop cannot register binary stdio pipes | Portable bounded thread-backed adapter and supported-platform CI |
 | Release automation publishes the wrong artifact | Build from merged commit, immutable artifact handoff, PyPI availability/hash checks |
 
 ## 19. Alternatives Considered
@@ -741,7 +886,7 @@ boundary open.
 ADR required: **yes**
 
 ADR path:
-`Docs/ADR/032-mcp-unified-multi-revision-stdio-protocol.md`
+`Docs/ADR/033-mcp-unified-stdio-contract-hardening.md` (supersedes ADR-032)
 
 Reason: the change establishes a public protocol/runtime API, dependency and
 release boundary, cross-version service contract, and security/privacy policy.
