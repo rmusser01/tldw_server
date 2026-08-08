@@ -1,4 +1,7 @@
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
+    cluster as cluster_strategy,
+)
 
 
 def test_cluster_hierarchical_prefers_largest_cluster(monkeypatch):
@@ -14,7 +17,7 @@ def test_cluster_hierarchical_prefers_largest_cluster(monkeypatch):
         assert linkage == "single"
         return [0, 0, 1]
 
-    monkeypatch.setattr(ael, "_cluster_assignments_hierarchical", fake_assignments)
+    monkeypatch.setattr(cluster_strategy, "_cluster_assignments_hierarchical", fake_assignments)
 
     result = ael.extract_cluster_entities(
         html,

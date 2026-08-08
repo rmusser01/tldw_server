@@ -19,7 +19,6 @@ import asyncio
 import builtins
 import hashlib
 import json
-import math
 import os
 import random
 import re
@@ -68,17 +67,12 @@ from tldw_Server_API.app.core.Web_Scraping.content import (
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import RateLimiter
 from tldw_Server_API.app.core.Web_Scraping.extraction import (
     clear_extraction_caches,
+    extract_cluster_entities,
     extract_jsonld_entities,
     extract_regex_entities,
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction import (
     get_extraction_cache_stats as _get_extraction_cache_stats,
-)
-from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
-    _cluster_cache_get as _canonical_cluster_cache_get,
-)
-from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
-    _cluster_cache_put as _canonical_cluster_cache_put,
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
     _schema_cache_get as _canonical_schema_cache_get,
@@ -453,21 +447,6 @@ _STRATEGY_ALIASES = {
     "clustering": "cluster",
 }
 _KNOWN_STRATEGIES = set(DEFAULT_EXTRACTION_STRATEGY_ORDER)
-_CLUSTER_EMBED_DIM = 128
-_CLUSTER_PREFILTER_THRESHOLD = 0.2
-_CLUSTER_SIM_THRESHOLD = 0.4
-_CLUSTER_MIN_BLOCK_CHARS = 40
-_CLUSTER_MIN_WORDS = 8
-_CLUSTER_MAX_BLOCKS = 60
-_CLUSTER_LINKAGE = "average"
-_CLUSTER_TAG_TOP_K = 3
-_DEFAULT_CLUSTER_TAG_KEYWORDS: dict[str, list[str]] = {
-    "marketing": ["subscribe", "newsletter", "promotion", "marketing"],
-    "commerce": ["price", "pricing", "cost", "$"],
-    "product": ["feature", "release", "roadmap", "product"],
-    "research": ["study", "research", "paper", "dataset"],
-    "security": ["security", "encrypt", "token", "oauth"],
-}
 def _schema_cache_key(html_text: str, url: str, schema_rules: dict[str, Any]) -> str:
     html_hash = hashlib.sha1(
         html_text.encode("utf-8", errors="ignore"),
@@ -491,17 +470,6 @@ def _schema_cache_get(key: str) -> Optional[dict[str, Any]]:
 def _schema_cache_put(key: str, value: dict[str, Any]) -> None:
     _canonical_schema_cache_put(key, value)
 
-
-def _cluster_cache_get(key: str) -> Optional[list[float]]:
-    def _record_cache_metric(*args: Any, **kwargs: Any) -> None:
-        with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-            increment_counter(*args, **kwargs)
-
-    return _canonical_cluster_cache_get(key, increment_counter=_record_cache_metric)
-
-
-def _cluster_cache_put(key: str, value: list[float]) -> None:
-    _canonical_cluster_cache_put(key, value)
 
 
 def _normalize_strategy_order(
@@ -637,15 +605,6 @@ def _env_int(name: str) -> Optional[int]:
         return None
 
 
-def _env_float(name: str) -> Optional[float]:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
 
 def _regex_mask_override(settings: Optional[dict[str, Any]]) -> Optional[bool]:
     if not isinstance(settings, dict):
@@ -695,364 +654,6 @@ def _strategy_throttle(strategy: str) -> Any:
     finally:
         sem.release()
 
-
-def _tokenize_cluster_text(text: str) -> list[str]:
-    return re.findall(r"\b[\w'-]+\b", text.lower())
-
-
-def _cluster_word_count(text: str) -> int:
-    return len(_tokenize_cluster_text(text))
-
-
-def _normalize_vector(vec: list[float]) -> list[float]:
-    if not vec:
-        return vec
-    norm = math.sqrt(sum(val * val for val in vec))
-    if norm <= 0.0:
-        return vec
-    return [val / norm for val in vec]
-
-
-def _hash_embedding(text: str, dims: int) -> list[float]:
-    tokens = _tokenize_cluster_text(text)
-    if not tokens:
-        return [0.0] * dims
-    vec = [0.0] * dims
-    for token in tokens:
-        token_hash = hashlib.md5(
-            token.encode("utf-8", errors="ignore"),
-            usedforsecurity=False
-        ).hexdigest()
-        idx = int(token_hash, 16) % dims
-        vec[idx] += 1.0
-    return _normalize_vector(vec)
-
-
-def _cluster_embedding(text: str, dims: int) -> list[float]:
-    key = hashlib.sha1(
-        text.encode("utf-8", errors="ignore"),
-        usedforsecurity=False
-    ).hexdigest()
-    cached = _cluster_cache_get(key)
-    if cached is not None:
-        return cached
-    vec = _hash_embedding(text, dims)
-    _cluster_cache_put(key, vec)
-    return vec
-
-
-def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-    if not vec_a or not vec_b:
-        return 0.0
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    return float(dot)
-
-
-def _extract_cluster_blocks(
-    html_text: str,
-    *,
-    min_block_chars: int,
-    min_word_count: int,
-    max_blocks: int,
-) -> list[str]:
-    if not html_text:
-        return []
-    soup = BeautifulSoup(html_text, "html.parser")
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
-    blocks = [tag.get_text(" ", strip=True) for tag in soup.find_all(["p", "li"])]
-    if not blocks:
-        raw_text = soup.get_text("\n", strip=True)
-        blocks = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    filtered = [
-        block
-        for block in blocks
-        if len(block) >= min_block_chars and _cluster_word_count(block) >= min_word_count
-    ]
-    if not filtered and blocks:
-        filtered = [max(blocks, key=len)]
-    if len(filtered) > max_blocks:
-        indexed = list(enumerate(filtered))
-        top = sorted(indexed, key=lambda item: len(item[1]), reverse=True)[:max_blocks]
-        keep_indexes = {idx for idx, _value in top}
-        filtered = [block for idx, block in indexed if idx in keep_indexes]
-    return filtered
-
-
-def _extract_cluster_title(html_text: str) -> Optional[str]:
-    if not html_text:
-        return None
-    soup = BeautifulSoup(html_text, "html.parser")
-    title_tag = soup.find("title")
-    if not title_tag:
-        return None
-    title = title_tag.get_text(strip=True)
-    return title or None
-
-
-def _cluster_assignments_hierarchical(
-    vectors: list[list[float]],
-    *,
-    similarity_threshold: float,
-    linkage: str,
-) -> Optional[list[int]]:
-    if not vectors:
-        return None
-    if len(vectors) == 1:
-        return [0]
-    try:
-        from sklearn.cluster import AgglomerativeClustering  # type: ignore
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        return None
-    distance_threshold = max(0.0, 1.0 - similarity_threshold)
-    size = len(vectors)
-    distances = [[0.0 for _ in range(size)] for _ in range(size)]
-    for i in range(size):
-        for j in range(i + 1, size):
-            sim = _cosine_similarity(vectors[i], vectors[j])
-            dist = max(0.0, 1.0 - sim)
-            distances[i][j] = dist
-            distances[j][i] = dist
-    try:
-        clusterer = AgglomerativeClustering(
-            n_clusters=None,
-            metric="precomputed",
-            linkage=linkage,
-            distance_threshold=distance_threshold,
-        )
-    except TypeError:
-        clusterer = AgglomerativeClustering(
-            n_clusters=None,
-            affinity="precomputed",
-            linkage=linkage,
-            distance_threshold=distance_threshold,
-        )
-    labels = clusterer.fit_predict(distances)
-    return [int(label) for label in labels]
-
-
-def _build_clusters_from_assignments(
-    assignments: list[int],
-    items: list[tuple[int, str, list[float], float]],
-) -> list[dict[str, Any]]:
-    clusters: dict[int, dict[str, Any]] = {}
-    for label, item in zip(assignments, items):
-        idx, block, vec, sim_to_doc = item
-        cluster = clusters.get(label)
-        if cluster is None:
-            cluster = {
-                "members": [],
-                "sum_vec": [0.0 for _ in vec],
-                "centroid": [0.0 for _ in vec],
-                "total_chars": 0,
-            }
-            clusters[label] = cluster
-        cluster["members"].append((idx, block, sim_to_doc))
-        cluster["sum_vec"] = [a + b for a, b in zip(cluster["sum_vec"], vec)]
-        cluster["total_chars"] += len(block)
-    for cluster in clusters.values():
-        cluster["centroid"] = _normalize_vector(cluster["sum_vec"])
-    return list(clusters.values())
-
-
-def _cluster_blocks_greedy(
-    items: list[tuple[int, str, list[float], float]],
-    *,
-    cluster_threshold: float,
-) -> list[dict[str, Any]]:
-    clusters: list[dict[str, Any]] = []
-    for idx, block, vec, sim_to_doc in items:
-        best_idx = None
-        best_sim = -1.0
-        for c_idx, cluster in enumerate(clusters):
-            sim = _cosine_similarity(vec, cluster["centroid"])
-            if sim > best_sim:
-                best_sim = sim
-                best_idx = c_idx
-        if best_idx is None or best_sim < cluster_threshold:
-            clusters.append(
-                {
-                    "members": [(idx, block, sim_to_doc)],
-                    "sum_vec": list(vec),
-                    "centroid": list(vec),
-                    "total_chars": len(block),
-                }
-            )
-            continue
-        cluster = clusters[best_idx]
-        cluster["members"].append((idx, block, sim_to_doc))
-        cluster["sum_vec"] = [a + b for a, b in zip(cluster["sum_vec"], vec)]
-        cluster["centroid"] = _normalize_vector(cluster["sum_vec"])
-        cluster["total_chars"] += len(block)
-    return clusters
-
-
-def _tag_cluster_text(
-    text: str,
-    *,
-    tag_keywords: dict[str, list[str]],
-    top_k: int,
-) -> tuple[list[str], dict[str, int]]:
-    if top_k <= 0 or not text:
-        return [], {}
-    text_lower = text.lower()
-    scores: dict[str, int] = {}
-    for tag, keywords in tag_keywords.items():
-        if not keywords:
-            continue
-        score = 0
-        for keyword in keywords:
-            if not keyword:
-                continue
-            score += text_lower.count(str(keyword).lower())
-        if score > 0:
-            scores[tag] = score
-    if not scores:
-        return [], {}
-    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
-    tags = [tag for tag, _score in ranked[:top_k]]
-    return tags, scores
-
-
-def extract_cluster_entities(
-    html_text: str,
-    url: str,
-    *,
-    cluster_settings: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "url": url,
-        "title": "N/A",
-        "author": "N/A",
-        "content": "",
-        "date": "N/A",
-        "extraction_successful": False,
-        "cluster_blocks": [],
-        "cluster_block_count": 0,
-    }
-    if not html_text:
-        result["cluster_error"] = "cluster_empty_html"
-        return result
-
-    settings = dict(cluster_settings or {})
-    env_similarity = _env_float("SIM_THRESHOLD")
-    env_min_words = _env_int("WORD_COUNT_THRESHOLD")
-    env_linkage = os.getenv("CLUSTER_LINKAGE", "").strip().lower()
-    min_block_chars = int(settings.get("min_block_chars", _CLUSTER_MIN_BLOCK_CHARS))
-    min_word_count = int(
-        settings.get("min_word_count")
-        or settings.get("min_words")
-        or settings.get("word_count_threshold")
-        or (env_min_words if env_min_words is not None else _CLUSTER_MIN_WORDS)
-    )
-    max_blocks = int(settings.get("max_blocks", _CLUSTER_MAX_BLOCKS))
-    prefilter_threshold = float(settings.get("prefilter_threshold", _CLUSTER_PREFILTER_THRESHOLD))
-    cluster_threshold = float(
-        settings.get("cluster_threshold")
-        or settings.get("similarity_threshold")
-        or (env_similarity if env_similarity is not None else _CLUSTER_SIM_THRESHOLD)
-    )
-    embed_dims = int(settings.get("embed_dims", _CLUSTER_EMBED_DIM))
-    method = str(settings.get("method") or settings.get("cluster_method") or "greedy").strip().lower()
-    linkage = str(
-        settings.get("linkage")
-        or settings.get("cluster_linkage")
-        or (env_linkage if env_linkage else _CLUSTER_LINKAGE)
-    ).strip().lower()
-    tag_top_k = int(settings.get("tag_top_k", _CLUSTER_TAG_TOP_K))
-    tag_keywords = settings.get("tag_keywords") or _DEFAULT_CLUSTER_TAG_KEYWORDS
-    if not isinstance(tag_keywords, dict):
-        tag_keywords = _DEFAULT_CLUSTER_TAG_KEYWORDS
-
-    with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-        increment_counter("extraction_cluster_total", labels={"status": "started"})
-
-    blocks = _extract_cluster_blocks(
-        html_text,
-        min_block_chars=min_block_chars,
-        min_word_count=min_word_count,
-        max_blocks=max_blocks,
-    )
-    if not blocks:
-        result["cluster_error"] = "cluster_no_blocks"
-        with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-            increment_counter("extraction_cluster_total", labels={"status": "no_blocks"})
-        return result
-
-    doc_vec = _cluster_embedding(" ".join(blocks), embed_dims)
-    scored_blocks: list[tuple[int, str, list[float], float]] = []
-    for idx, block in enumerate(blocks):
-        vec = _cluster_embedding(block, embed_dims)
-        sim = _cosine_similarity(vec, doc_vec)
-        scored_blocks.append((idx, block, vec, sim))
-
-    kept = [item for item in scored_blocks if item[3] >= prefilter_threshold]
-    if not kept:
-        kept = sorted(scored_blocks, key=lambda item: item[3], reverse=True)[: min(2, len(scored_blocks))]
-
-    clusters: list[dict[str, Any]] = []
-    cluster_method = method
-    if method == "hierarchical":
-        assignments = _cluster_assignments_hierarchical(
-            [item[2] for item in kept],
-            similarity_threshold=cluster_threshold,
-            linkage=linkage,
-        )
-        if assignments and len(assignments) == len(kept):
-            clusters = _build_clusters_from_assignments(assignments, kept)
-        else:
-            cluster_method = "greedy_fallback"
-            clusters = _cluster_blocks_greedy(kept, cluster_threshold=cluster_threshold)
-    else:
-        cluster_method = "greedy"
-        clusters = _cluster_blocks_greedy(kept, cluster_threshold=cluster_threshold)
-
-    if not clusters:
-        result["cluster_error"] = "cluster_no_clusters"
-        with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-            increment_counter("extraction_cluster_total", labels={"status": "no_clusters"})
-        return result
-
-    def _cluster_score(cluster: dict[str, Any]) -> tuple[int, int]:
-        return (int(cluster.get("total_chars", 0)), len(cluster.get("members", [])))
-
-    best_cluster = max(clusters, key=_cluster_score)
-    ordered_members = sorted(best_cluster["members"], key=lambda item: item[0])
-    content_blocks = [block for _idx, block, _sim in ordered_members if block]
-    content = "\n\n".join(content_blocks).strip()
-
-    if not content:
-        result["cluster_error"] = "cluster_empty_content"
-        with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-            increment_counter("extraction_cluster_total", labels={"status": "empty"})
-        return result
-
-    title = _extract_cluster_title(html_text)
-    if title:
-        result["title"] = title
-    result["content"] = content
-    result["cluster_blocks"] = content_blocks
-    result["cluster_block_count"] = len(content_blocks)
-    result["cluster_prefiltered_count"] = len(kept)
-    result["cluster_total_blocks"] = len(blocks)
-    result["cluster_cluster_count"] = len(clusters)
-    result["cluster_method"] = cluster_method
-    if method == "hierarchical":
-        result["cluster_linkage"] = linkage
-    result["cluster_similarity_threshold"] = cluster_threshold
-    result["cluster_word_threshold"] = min_word_count
-    tags, tag_scores = _tag_cluster_text(
-        content,
-        tag_keywords=tag_keywords,
-        top_k=tag_top_k,
-    )
-    if tags:
-        result["cluster_tags"] = tags
-        result["cluster_tag_scores"] = tag_scores
-    result["extraction_successful"] = True
-    with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-        increment_counter("extraction_cluster_total", labels={"status": "success"})
-    return result
 
 
 def _coerce_positive_int(value: Any) -> Optional[int]:

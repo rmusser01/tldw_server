@@ -16,9 +16,7 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
     build_default_dependencies,
 )
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
-    jsonld as jsonld_strategy,
-)
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import jsonld as jsonld_strategy
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXTRACTION_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "extraction"
@@ -76,6 +74,7 @@ def test_extraction_facade_has_the_phase4b_public_contract() -> None:
         "build_default_dependencies",
         "clear_extraction_caches",
         "get_extraction_cache_stats",
+        "extract_cluster_entities",
         "extract_jsonld_entities",
         "extract_regex_entities",
     ]
@@ -84,6 +83,7 @@ def test_extraction_facade_has_the_phase4b_public_contract() -> None:
 
 
 def test_legacy_jsonld_and_regex_exports_are_canonical() -> None:
+    assert legacy.extract_cluster_entities is extraction.extract_cluster_entities
     assert legacy.extract_jsonld_entities is extraction.extract_jsonld_entities
     assert legacy.extract_regex_entities is extraction.extract_regex_entities
 

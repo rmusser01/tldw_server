@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,12 @@ from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 
 from tldw_Server_API.app.core.Watchlists import fetchers
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
+    build_default_dependencies,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
+    cluster as cluster_strategy,
+)
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchRequest,
     FetchResponse,
@@ -163,6 +170,15 @@ def _install_metric_recorder(monkeypatch: pytest.MonkeyPatch) -> _MetricRecorder
     monkeypatch.setattr(article, "log_counter", recorder.counter("log_counter"))
     monkeypatch.setattr(article, "observe_histogram", recorder.histogram("observe_histogram"))
     monkeypatch.setattr(article, "log_histogram", recorder.histogram("log_histogram"))
+    cluster_dependencies = replace(
+        build_default_dependencies(),
+        increment_counter=recorder.counter("increment_counter"),
+    )
+    monkeypatch.setattr(
+        cluster_strategy,
+        "build_default_dependencies",
+        lambda: cluster_dependencies,
+    )
     return recorder
 
 
