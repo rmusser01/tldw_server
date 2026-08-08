@@ -20,7 +20,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
-updated_date: 2026-08-08 17:48
+updated_date: 2026-08-08 17:53
 ---
 
 ## Description
@@ -45,6 +45,7 @@ Rebased the 34-commit branch cleanly onto origin/dev 5605b9d9906322c2e6b5342b48c
 Tracking reconciliation is complete: the superseded colliding Moderation task files were removed after replacement records were created, and an active-record scan now shows exactly one file for each canonical and replacement ID with no stale ambiguous references. Static gates on the rebased remediation pass: seven-file py_compile, Black check on four new files, Ruff on all touched files with only the documented Workflow I001/F401 ignores, git diff --check, helper annotation and production docstring audits, and Bandit over 3,297 Moderation LOC with zero findings, zero errors, zero skips, and zero nosec.
 Fresh whole-branch re-review found one Important stale-path gap and two Minor documentation regressions. Resolved all three: migrated all 16 remaining implementation-plan paths to the TASK-12992 file, restored the seven original ModerationService facade docstrings verbatim from current dev, and corrected the evaluator match-application docstring to left-to-right. The old-ID/path scan is now empty. Post-fix gates pass: 279 Moderation unit tests, seven-file py_compile, Black on the four new files, Ruff on touched files with documented Workflow ignores, and git diff --check.
 Narrow re-review of fix commit 60d46b2881 reported no Critical, Important, or Minor findings and judged the branch ready to merge. It confirmed all 16 paths now target TASK-12992, the old-ID/path scan is empty, all seven facade docstrings match current dev verbatim, the delegate signatures and bodies are unchanged, the evaluator order description is accurate, and no new issue was introduced.
+Final exact-head local verification at 45ad789955 passes: 279 Moderation unit tests, 97 endpoint/Guardian tests, 16 Chat moderation tests, 12 Workflow moderation tests with 45 deselected, and 1 STT policy redaction test. Seven touched Python files compile; Black leaves the four new files unchanged; Ruff passes touched files with the documented Workflow I001/F401 ignores; git diff --check passes; the stale-ID scan is empty; active Backlog records are unique; and Bandit reports 3,304 LOC with zero findings, errors, skips, or nosec suppressions. AC4 remains open until required GitHub checks pass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
