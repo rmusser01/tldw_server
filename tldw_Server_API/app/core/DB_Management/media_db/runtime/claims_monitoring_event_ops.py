@@ -95,6 +95,55 @@ def list_claims_monitoring_events(
     return [dict(row) for row in rows]
 
 
+def list_claims_monitoring_events_page(
+    self,
+    *,
+    user_id: str,
+    event_type: str | None = None,
+    severity: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    after_created_at: Any = None,
+    after_id: int | None = None,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    if (after_created_at is None) != (after_id is None):
+        raise ValueError("after_created_at and after_id must be provided together")
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 1000
+    limit = max(1, min(1000, limit))
+
+    conditions: list[str] = ["user_id = ?"]
+    params: list[Any] = [str(user_id)]
+    if event_type:
+        conditions.append("event_type = ?")
+        params.append(str(event_type))
+    if severity:
+        conditions.append("severity = ?")
+        params.append(str(severity))
+    if start_time:
+        conditions.append("created_at >= ?")
+        params.append(str(start_time))
+    if end_time:
+        conditions.append("created_at <= ?")
+        params.append(str(end_time))
+    if after_created_at is not None and after_id is not None:
+        conditions.append("(created_at > ? OR (created_at = ? AND id > ?))")
+        params.extend([after_created_at, after_created_at, int(after_id)])
+
+    query = (
+        "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "  # nosec B608
+        "FROM claims_monitoring_events WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY created_at ASC, id ASC LIMIT ?"
+    )
+    params.append(limit)
+    rows = self.execute_query(query, tuple(params)).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_undelivered_claims_monitoring_events(
     self,
     *,

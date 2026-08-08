@@ -3586,7 +3586,10 @@ def get_claims_analytics_export(
     db: MediaDatabase,
 ) -> dict[str, Any]:
     _ensure_claims_admin(principal)
-    row = db.get_claims_analytics_export(str(export_id))
+    row = db.get_claims_analytics_export(
+        str(export_id),
+        user_id=str(current_user.id),
+    )
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found")
     if not _principal_has_platform_admin_claims(principal) and str(row.get("user_id")) != str(current_user.id):

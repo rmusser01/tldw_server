@@ -57,11 +57,16 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_ops import (
     update_chunking_template,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_analytics_export_ops import (
+    attach_claims_analytics_export_job,
     cleanup_claims_analytics_exports,
     count_claims_analytics_exports,
     create_claims_analytics_export,
+    delete_claims_analytics_exports,
     get_claims_analytics_export,
     list_claims_analytics_exports,
+    list_claims_analytics_exports_for_maintenance,
+    mark_claims_analytics_export_ready,
+    transition_claims_analytics_export_status,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_aggregate_ops import (
     get_claim_cluster_member_counts,
@@ -113,6 +118,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_e
     has_successful_claims_monitoring_event_delivery,
     insert_claims_monitoring_event,
     list_claims_monitoring_events,
+    list_claims_monitoring_events_page,
     list_undelivered_claims_monitoring_events,
     mark_claims_monitoring_events_delivered,
 )
@@ -2008,9 +2014,18 @@ MediaDatabase._resolve_email_tenant_id = _resolve_email_tenant_id
 MediaDatabase.upsert_email_message_graph = upsert_email_message_graph
 MediaDatabase.create_claims_analytics_export = create_claims_analytics_export
 MediaDatabase.get_claims_analytics_export = get_claims_analytics_export
+MediaDatabase.attach_claims_analytics_export_job = attach_claims_analytics_export_job
+MediaDatabase.transition_claims_analytics_export_status = (
+    transition_claims_analytics_export_status
+)
+MediaDatabase.mark_claims_analytics_export_ready = mark_claims_analytics_export_ready
 MediaDatabase.list_claims_analytics_exports = list_claims_analytics_exports
+MediaDatabase.list_claims_analytics_exports_for_maintenance = (
+    list_claims_analytics_exports_for_maintenance
+)
 MediaDatabase.count_claims_analytics_exports = count_claims_analytics_exports
 MediaDatabase.cleanup_claims_analytics_exports = cleanup_claims_analytics_exports
+MediaDatabase.delete_claims_analytics_exports = delete_claims_analytics_exports
 MediaDatabase.insert_claim_notification = insert_claim_notification
 MediaDatabase.get_claim_notification = get_claim_notification
 MediaDatabase.get_latest_claim_notification = get_latest_claim_notification
@@ -2090,6 +2105,7 @@ MediaDatabase.upsert_claims_monitoring_health = upsert_claims_monitoring_health
 MediaDatabase.insert_claims_monitoring_event = insert_claims_monitoring_event
 MediaDatabase.get_claims_monitoring_event = get_claims_monitoring_event
 MediaDatabase.list_claims_monitoring_events = list_claims_monitoring_events
+MediaDatabase.list_claims_monitoring_events_page = list_claims_monitoring_events_page
 MediaDatabase.list_undelivered_claims_monitoring_events = (
     list_undelivered_claims_monitoring_events
 )

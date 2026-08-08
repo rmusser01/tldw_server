@@ -29,6 +29,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_e
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     mark_claims_monitoring_events_delivered as helper_mark_claims_monitoring_events_delivered,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import (
+    claims_monitoring_event_ops,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -378,5 +381,109 @@ def test_has_successful_claims_monitoring_event_delivery_checks_bounded_recent_e
             alert_id=3,
             channel="slack",
         ) is False
+    finally:
+        db.close_connection()
+
+
+def test_list_claims_monitoring_events_page_uses_paired_keyset_without_gaps(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-page.db")
+    timestamp = "2026-08-08T12:00:00.000Z"
+    db._get_current_utc_timestamp_str = lambda: timestamp  # type: ignore[method-assign]
+    try:
+        wanted_ids = []
+        for payload in ('{"index":1}', '{"index":2}', '{"index":3}', '{"index":4}'):
+            row = db.insert_claims_monitoring_event(
+                user_id="1",
+                event_type="unsupported_ratio",
+                severity="warning",
+                payload_json=payload,
+            )
+            wanted_ids.append(int(row["id"]))
+        db.insert_claims_monitoring_event(
+            user_id="2",
+            event_type="unsupported_ratio",
+            severity="warning",
+            payload_json='{"owner":2}',
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="info",
+            payload_json='{"filtered":true}',
+        )
+
+        assert (
+            db.list_claims_monitoring_events_page.__func__
+            is claims_monitoring_event_ops.list_claims_monitoring_events_page
+        )
+        first = db.list_claims_monitoring_events_page(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            start_time=timestamp,
+            end_time=timestamp,
+            limit=2,
+        )
+        second = db.list_claims_monitoring_events_page(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            start_time=timestamp,
+            end_time=timestamp,
+            after_created_at=first[-1]["created_at"],
+            after_id=int(first[-1]["id"]),
+            limit=2,
+        )
+
+        rows = first + second
+        assert [int(row["id"]) for row in rows] == wanted_ids
+        assert [int(row["id"]) for row in rows] == sorted(int(row["id"]) for row in rows)
+        assert all(row["user_id"] == "1" for row in rows)
+        assert all(row["event_type"] == "unsupported_ratio" for row in rows)
+        assert all(row["severity"] == "warning" for row in rows)
+    finally:
+        db.close_connection()
+
+
+def test_list_claims_monitoring_events_page_requires_both_cursor_parts(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-page-cursor.db")
+    try:
+        with pytest.raises(ValueError, match="after_created_at and after_id"):
+            db.list_claims_monitoring_events_page(
+                user_id="1",
+                after_created_at="2026-08-08T12:00:00.000Z",
+            )
+        with pytest.raises(ValueError, match="after_created_at and after_id"):
+            db.list_claims_monitoring_events_page(user_id="1", after_id=1)
+    finally:
+        db.close_connection()
+
+
+def test_list_claims_monitoring_events_page_clamps_limit_to_one_through_one_thousand(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-page-limit.db")
+    calls: list[tuple[object, ...]] = []
+
+    class _Cursor:
+        def fetchall(self) -> list[object]:
+            return []
+
+    def _capture_query(_sql: str, params: tuple[object, ...]) -> _Cursor:
+        calls.append(params)
+        return _Cursor()
+
+    try:
+        monkeypatch.setattr(db, "execute_query", _capture_query)
+
+        assert db.list_claims_monitoring_events_page(user_id="1", limit=0) == []
+        assert calls[-1][-1] == 1
+        assert db.list_claims_monitoring_events_page(user_id="1", limit=1001) == []
+        assert calls[-1][-1] == 1000
     finally:
         db.close_connection()

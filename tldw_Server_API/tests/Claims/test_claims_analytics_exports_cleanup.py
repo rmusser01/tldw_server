@@ -19,16 +19,22 @@ def test_claims_analytics_exports_cleanup_and_list(monkeypatch, tmp_path):
             user_id="1",
             format="json",
             status="ready",
+            payload_json='{"events":[]}',
         )
         db.create_claims_analytics_export(
             export_id="new_export",
             user_id="1",
             format="json",
             status="ready",
+            payload_json='{"events":[]}',
         )
         db.execute_query(
-            "UPDATE claims_analytics_exports SET created_at = ? WHERE export_id = ?",
-            ("2000-01-01T00:00:00.000Z", "old_export"),
+            "UPDATE claims_analytics_exports SET created_at = ?, updated_at = ? WHERE export_id = ?",
+            (
+                "2000-01-01T00:00:00.000Z",
+                "2000-01-01T00:00:00.000Z",
+                "old_export",
+            ),
             commit=True,
         )
 
