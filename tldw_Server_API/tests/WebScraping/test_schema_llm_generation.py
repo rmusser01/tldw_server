@@ -1,5 +1,8 @@
-from tldw_Server_API.app.core.Chat import chat_service
+import dataclasses
+
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import schema as schema_strategy
 
 
 def test_generate_schema_rules_from_llm_parses_schema(monkeypatch):
@@ -21,10 +24,10 @@ def test_generate_schema_rules_from_llm_parses_schema(monkeypatch):
                     "message": {
                         "content": (
                             "```json\n"
-                            "{\"schema\": {\"name\": \"Article\", \"baseSelector\": \"//article\","
-                            " \"fields\": ["
-                            "{\"name\": \"title\", \"selector\": \"//article/h1\", \"type\": \"text\"},"
-                            "{\"name\": \"content\", \"selector\": \"//article/div[@class='content']\", \"type\": \"text\"}"
+                            '{"schema": {"name": "Article", "baseSelector": "//article",'
+                            ' "fields": ['
+                            '{"name": "title", "selector": "//article/h1", "type": "text"},'
+                            '{"name": "content", "selector": "//article/div[@class=\'content\']", "type": "text"}'
                             "]}}\n"
                             "```"
                         )
@@ -35,7 +38,11 @@ def test_generate_schema_rules_from_llm_parses_schema(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=_fake_call,
+    )
+    monkeypatch.setattr(schema_strategy, "build_default_dependencies", lambda: dependencies)
 
     result = ael.generate_schema_rules_from_llm(
         html,

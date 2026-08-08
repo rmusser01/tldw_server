@@ -1,3 +1,4 @@
+import dataclasses
 import importlib
 import json
 import logging
@@ -14,12 +15,13 @@ from typing import Any
 import pytest
 import regex as regex_engine
 
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
 from tldw_Server_API.app.core.Web_Scraping import safe_regex as safe_regex_module
 from tldw_Server_API.app.core.Web_Scraping import safe_regex_worker as safe_regex_worker_module
 from tldw_Server_API.app.core.Web_Scraping import scraper_router as scraper_router_module
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import regex as regex_strategy
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import schema as schema_strategy
 from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
     SafeRegexLimits,
     SafeRegexResult,
@@ -144,7 +146,11 @@ def _install_regex_llm_response(
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=_fake_call,
+    )
+    monkeypatch.setattr(schema_strategy, "build_default_dependencies", lambda: dependencies)
 
 
 def _generate_regex(html: str) -> dict[str, Any]:
@@ -1997,13 +2003,13 @@ def test_generated_regex_skips_one_over_sample_without_searching_it(
         {"pattern": "(a)$", "flags": "i", "group": 1},
     )
     searched_values: list[str] = []
-    original_search = ael.search_untrusted
+    original_search = schema_strategy.search_untrusted
 
     def _recording_search(pattern: str, value: str, **kwargs: Any) -> SafeRegexResult:
         searched_values.append(value)
         return original_search(pattern, value, **kwargs)
 
-    monkeypatch.setattr(ael, "search_untrusted", _recording_search)
+    monkeypatch.setattr(schema_strategy, "search_untrusted", _recording_search)
 
     result = _generate_regex(sample)
 
@@ -2034,13 +2040,13 @@ def test_generated_regex_one_over_sample_still_rejects_invalid_pattern(
     sample = "a" * 1_000_001
     _install_regex_llm_response(monkeypatch, payload)
     searched_values: list[str] = []
-    original_search = ael.search_untrusted
+    original_search = schema_strategy.search_untrusted
 
     def _recording_search(pattern: str, value: str, **kwargs: Any) -> SafeRegexResult:
         searched_values.append(value)
         return original_search(pattern, value, **kwargs)
 
-    monkeypatch.setattr(ael, "search_untrusted", _recording_search)
+    monkeypatch.setattr(schema_strategy, "search_untrusted", _recording_search)
 
     result = _generate_regex(sample)
 

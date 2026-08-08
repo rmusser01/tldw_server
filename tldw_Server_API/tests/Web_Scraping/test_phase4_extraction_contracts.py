@@ -76,7 +76,10 @@ def test_extraction_facade_has_the_phase4b_public_contract() -> None:
         "get_extraction_cache_stats",
         "extract_cluster_entities",
         "extract_jsonld_entities",
+        "extract_llm_entities",
         "extract_regex_entities",
+        "generate_regex_pattern_from_llm",
+        "generate_schema_rules_from_llm",
     ]
     assert legacy.clear_extraction_caches is extraction.clear_extraction_caches
     assert legacy.get_extraction_cache_stats is extraction.get_extraction_cache_stats
@@ -86,6 +89,9 @@ def test_legacy_jsonld_and_regex_exports_are_canonical() -> None:
     assert legacy.extract_cluster_entities is extraction.extract_cluster_entities
     assert legacy.extract_jsonld_entities is extraction.extract_jsonld_entities
     assert legacy.extract_regex_entities is extraction.extract_regex_entities
+    assert legacy.extract_llm_entities is extraction.extract_llm_entities
+    assert legacy.generate_regex_pattern_from_llm is extraction.generate_regex_pattern_from_llm
+    assert legacy.generate_schema_rules_from_llm is extraction.generate_schema_rules_from_llm
 
 
 def test_canonical_and_legacy_strategy_signatures_match_predecessor() -> None:

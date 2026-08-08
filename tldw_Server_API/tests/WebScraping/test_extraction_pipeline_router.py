@@ -1,10 +1,22 @@
+import dataclasses
+
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     DEFAULT_EXTRACTION_STRATEGY_ORDER,
     extract_article_with_pipeline,
 )
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
+
+
+def _install_llm_provider(monkeypatch, provider):
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=provider,
+    )
+    monkeypatch.setattr(llm_strategy, "build_default_dependencies", lambda: dependencies)
 
 
 def test_default_extraction_strategy_order_includes_llm_after_regex():
@@ -19,12 +31,10 @@ def test_default_extraction_strategy_order_includes_llm_after_regex():
 
 
 def test_pipeline_trace_default_order(monkeypatch):
-    from tldw_Server_API.app.core.Chat import chat_service
-
     def _fake_llm_call(**_kwargs):
         return {"choices": [{"message": {"content": ""}}], "usage": {}}
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_llm_call)
+    _install_llm_provider(monkeypatch, _fake_llm_call)
 
     def fake_extractor(html: str, url: str):  # noqa: ANN001
         return {
@@ -50,15 +60,13 @@ def test_pipeline_trace_default_order(monkeypatch):
 
 
 def test_default_pipeline_omits_only_llm_when_disallowed(monkeypatch):
-    from tldw_Server_API.app.core.Chat import chat_service
-
     llm_calls = []
 
     def _fake_llm_call(**kwargs):
         llm_calls.append(kwargs)
         return {"choices": [{"message": {"content": ""}}], "usage": {}}
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_llm_call)
+    _install_llm_provider(monkeypatch, _fake_llm_call)
 
     result = extract_article_with_pipeline(
         """
@@ -82,11 +90,8 @@ def test_default_pipeline_omits_only_llm_when_disallowed(monkeypatch):
 
 
 def test_default_pipeline_preserves_llm_when_allowed(monkeypatch):
-    from tldw_Server_API.app.core.Chat import chat_service
-
-    monkeypatch.setattr(
-        chat_service,
-        "perform_chat_api_call",
+    _install_llm_provider(
+        monkeypatch,
         lambda **_kwargs: {"choices": [{"message": {"content": ""}}], "usage": {}},
     )
 
@@ -104,19 +109,13 @@ def test_custom_pipeline_filters_only_llm_when_disallowed(
     monkeypatch,
     allow_llm_extraction,
 ):
-    from tldw_Server_API.app.core.Chat import chat_service
-
     llm_calls = []
 
     def fake_llm_call(**kwargs):
         llm_calls.append(kwargs)
         return {"choices": [{"message": {"content": ""}}], "usage": {}}
 
-    monkeypatch.setattr(
-        chat_service,
-        "perform_chat_api_call",
-        fake_llm_call,
-    )
+    _install_llm_provider(monkeypatch, fake_llm_call)
     custom_order = ["llm", "trafilatura"]
 
     def fake_extractor(_html: str, url: str):

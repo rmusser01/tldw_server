@@ -1,5 +1,19 @@
-from tldw_Server_API.app.core.Chat import chat_service
+import dataclasses
+
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
+
+
+def _install_dependencies(monkeypatch, provider, *, sleep, wall_time):
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=provider,
+        sleep=sleep,
+        wall_time=wall_time,
+    )
+    monkeypatch.setattr(llm_strategy, "build_default_dependencies", lambda: dependencies)
 
 
 def test_llm_throttling_applies_delay(monkeypatch):
@@ -7,8 +21,6 @@ def test_llm_throttling_applies_delay(monkeypatch):
     monkeypatch.setenv("LLM_MAX_CONCURRENCY", "1")
 
     sleeps = []
-    monkeypatch.setattr(ael.time, "sleep", lambda value: sleeps.append(value))
-    monkeypatch.setattr(ael.time, "time", lambda: 1000.0)
 
     def _fake_call(**_kwargs):
         return {
@@ -17,7 +29,13 @@ def test_llm_throttling_applies_delay(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    throttles.clear_throttle_state()
+    _install_dependencies(
+        monkeypatch,
+        _fake_call,
+        sleep=sleeps.append,
+        wall_time=lambda: 1000.0,
+    )
 
     html = "<html><body>" + " ".join(["word"] * 80) + "</body></html>"
     result = ael.extract_article_with_pipeline(
@@ -54,9 +72,7 @@ def test_llm_throttling_uses_env_concurrency(monkeypatch):
         calls["max"] = max_concurrency
         return DummySemaphore()
 
-    monkeypatch.setattr(ael, "_get_llm_semaphore", fake_get)
-    monkeypatch.setattr(ael.time, "sleep", lambda _value: None)
-    monkeypatch.setattr(ael.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(throttles, "get_llm_semaphore", fake_get)
 
     def _fake_call(**_kwargs):
         return {
@@ -65,7 +81,13 @@ def test_llm_throttling_uses_env_concurrency(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    throttles.clear_throttle_state()
+    _install_dependencies(
+        monkeypatch,
+        _fake_call,
+        sleep=lambda _value: None,
+        wall_time=lambda: 1000.0,
+    )
 
     html = "<html><body>" + " ".join(["word"] * 80) + "</body></html>"
     result = ael.extract_article_with_pipeline(

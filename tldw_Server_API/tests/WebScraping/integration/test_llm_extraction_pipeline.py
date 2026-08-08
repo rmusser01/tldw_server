@@ -1,10 +1,11 @@
+import dataclasses
 import types
 
 import pytest
 
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
-
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 
 pytestmark = pytest.mark.integration
 
@@ -51,7 +52,7 @@ async def test_llm_pipeline_uses_plan_settings(monkeypatch):
             "choices": [
                 {
                     "message": {
-                        "content": "```json\n{\"title\": \"LLM Title\", \"content\": \"LLM Body\"}\n```",
+                        "content": '```json\n{"title": "LLM Title", "content": "LLM Body"}\n```',
                     }
                 }
             ],
@@ -59,7 +60,11 @@ async def test_llm_pipeline_uses_plan_settings(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=_fake_call,
+    )
+    monkeypatch.setattr(llm_strategy, "build_default_dependencies", lambda: dependencies)
 
     scraper = EnhancedWebScraper(config={"custom_scrapers_yaml_path": "unused"})
 

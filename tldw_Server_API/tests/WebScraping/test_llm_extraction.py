@@ -1,5 +1,16 @@
-from tldw_Server_API.app.core.Chat import chat_service
+import dataclasses
+
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import extract_article_with_pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
+
+
+def _install_provider(monkeypatch, provider):
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=provider,
+    )
+    monkeypatch.setattr(llm_strategy, "build_default_dependencies", lambda: dependencies)
 
 
 def test_llm_extraction_parses_code_fenced_json(monkeypatch):
@@ -16,7 +27,7 @@ def test_llm_extraction_parses_code_fenced_json(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    _install_provider(monkeypatch, _fake_call)
 
     result = extract_article_with_pipeline(
         "<html><body><p>Body</p></body></html>",
@@ -45,7 +56,7 @@ def test_llm_extraction_strict_json_rejects_extras(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    _install_provider(monkeypatch, _fake_call)
 
     result = extract_article_with_pipeline(
         "<html><body><p>Body</p></body></html>",
@@ -55,4 +66,4 @@ def test_llm_extraction_strict_json_rejects_extras(monkeypatch):
     )
 
     assert result["extraction_successful"] is False
-    assert "strict_json_failed" in (result.get("llm_error") or "")
+    assert result.get("llm_error") == "strict_json_failed"

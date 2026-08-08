@@ -2,7 +2,14 @@
 
 from .caches import clear_extraction_caches, get_extraction_cache_stats
 from .dependencies import ExtractionDependencies, build_default_dependencies
-from .strategies import extract_cluster_entities, extract_jsonld_entities, extract_regex_entities
+from .strategies import (
+    extract_cluster_entities,
+    extract_jsonld_entities,
+    extract_llm_entities,
+    extract_regex_entities,
+    generate_regex_pattern_from_llm,
+    generate_schema_rules_from_llm,
+)
 
 __all__ = [
     "ExtractionDependencies",
@@ -11,5 +18,8 @@ __all__ = [
     "get_extraction_cache_stats",
     "extract_cluster_entities",
     "extract_jsonld_entities",
+    "extract_llm_entities",
     "extract_regex_entities",
+    "generate_regex_pattern_from_llm",
+    "generate_schema_rules_from_llm",
 ]

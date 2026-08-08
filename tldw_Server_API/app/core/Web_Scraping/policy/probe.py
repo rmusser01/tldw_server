@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 from types import MappingProxyType
 from typing import Any
-from urllib.parse import urlsplit
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Security import egress as egress_policy
+from tldw_Server_API.app.core.Web_Scraping.observability import sanitized_host
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressDecision
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import RuntimeRequestContext
 
@@ -69,7 +68,6 @@ _STAGE_LABEL_MAP = MappingProxyType(
         )
     }
 )
-_ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 
 def _bounded_reason(raw: Any, *, allowed: bool) -> str:
@@ -97,64 +95,6 @@ def _bounded_context_label(
     return labels.get(value, fallback)
 
 
-def _is_canonical_idna_label(label: str) -> bool:
-    if not label.startswith("xn--"):
-        return True
-    try:
-        decoded = label.encode("ascii").decode("idna")
-        canonical = decoded.encode("idna").decode("ascii")
-    except UnicodeError:
-        return False
-    return canonical == label
-
-
-def _is_valid_dns_name(host: str) -> bool:
-    if len(host) > 253 or host.replace(".", "").isdigit():
-        return False
-    labels = host.split(".")
-    return all(
-        1 <= len(label) <= 63
-        and label[0].isalnum()
-        and label[-1].isalnum()
-        and all(character.isascii() and (character.isalnum() or character == "-") for character in label)
-        and _is_canonical_idna_label(label)
-        for label in labels
-    )
-
-
-def _sanitized_host_label(url: str) -> str:
-    if type(url) is not str or "\\" in url or any(ord(character) < 32 or ord(character) == 127 for character in url):
-        return "unknown"
-    try:
-        parsed = urlsplit(url)
-        if parsed.scheme.lower() not in _ALLOWED_SCHEMES or not parsed.netloc:
-            return "unknown"
-        if any(ord(character) <= 32 or ord(character) == 127 for character in parsed.netloc):
-            return "unknown"
-        _port = parsed.port
-        host = parsed.hostname
-    except (AttributeError, TypeError, UnicodeError, ValueError):
-        return "unknown"
-    if not host or "%" in host:
-        return "unknown"
-    if host.endswith("."):
-        host = host[:-1]
-    if not host or host.endswith("."):
-        return "unknown"
-    try:
-        return str(ipaddress.ip_address(host))
-    except ValueError:
-        if ":" in host:
-            return "unknown"
-    try:
-        canonical_host = host.encode("idna").decode("ascii").lower()
-    except UnicodeError:
-        return "unknown"
-    if not _is_valid_dns_name(canonical_host):
-        return "unknown"
-    return canonical_host
-
-
 def _log_probe_policy_event(
     message: str,
     *,
@@ -172,7 +112,7 @@ def _log_probe_policy_event(
             labels=_STAGE_LABEL_MAP,
             fallback="runtime",
         ),
-        host=_sanitized_host_label(url),
+        host=sanitized_host(url),
     ).warning(message)
 
 

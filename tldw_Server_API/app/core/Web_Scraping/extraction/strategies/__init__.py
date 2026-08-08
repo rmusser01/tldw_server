@@ -2,6 +2,15 @@
 
 from .cluster import extract_cluster_entities
 from .jsonld import extract_jsonld_entities
+from .llm import extract_llm_entities
 from .regex import extract_regex_entities
+from .schema import generate_regex_pattern_from_llm, generate_schema_rules_from_llm
 
-__all__ = ["extract_cluster_entities", "extract_jsonld_entities", "extract_regex_entities"]
+__all__ = [
+    "extract_cluster_entities",
+    "extract_jsonld_entities",
+    "extract_llm_entities",
+    "extract_regex_entities",
+    "generate_regex_pattern_from_llm",
+    "generate_schema_rules_from_llm",
+]
