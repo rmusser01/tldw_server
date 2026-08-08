@@ -26,7 +26,10 @@ def _bounded_finite_number(
 
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a finite number")
-    numeric = float(value)
+    try:
+        numeric = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be a finite number") from exc
     if not math.isfinite(numeric) or numeric <= lower_exclusive or numeric > upper:
         raise ValueError(
             f"{name} must be finite and greater than {lower_exclusive} "

@@ -10,6 +10,7 @@ from math import inf, nan
 from types import MappingProxyType
 from typing import Any
 
+import mcp_unified.gateway as gateway_api
 import pytest
 from mcp_unified.gateway import (
     CURRENT_PROTOCOL_VERSION,
@@ -22,7 +23,9 @@ from mcp_unified.gateway import (
     GatewayCancellationToken,
     GatewayCoreRuntime,
     GatewayInvalidApplicationResult,
+    GatewayJSONValue,
     GatewayLimits,
+    GatewayProtocolProfile,
     GatewayRequestContext,
     GatewayResourceNotFound,
     GatewayResourceTemplateRuntime,
@@ -95,6 +98,11 @@ def test_protocol_versions_and_profiles_match_the_approved_matrix() -> None:
         "2024-11-05",
     )
     assert isinstance(PROTOCOL_PROFILES, MappingProxyType)
+    assert tuple(PROTOCOL_PROFILES) == SUPPORTED_PROTOCOL_VERSIONS
+    assert all(
+        version == profile.version
+        for version, profile in PROTOCOL_PROFILES.items()
+    )
 
     actual = {
         version: (
@@ -136,6 +144,15 @@ def test_protocol_versions_and_profiles_match_the_approved_matrix() -> None:
     }
     with pytest.raises(FrozenInstanceError):
         PROTOCOL_PROFILES[CURRENT_PROTOCOL_VERSION].era = "legacy"  # type: ignore[misc]
+
+
+def test_protocol_profile_and_json_alias_are_public_exports() -> None:
+    """Strict consumers must be able to import both approved contract types."""
+
+    assert gateway_api.GatewayProtocolProfile is GatewayProtocolProfile
+    assert gateway_api.GatewayJSONValue is GatewayJSONValue
+    assert "GatewayProtocolProfile" in gateway_api.__all__
+    assert "GatewayJSONValue" in gateway_api.__all__
 
 
 def test_gateway_limits_expose_every_approved_default() -> None:
@@ -217,8 +234,10 @@ def test_gateway_limits_reject_boolean_values(field_name: str) -> None:
         ({"max_schema_validation_processes": 33}, "max_schema_validation_processes"),
         ({"schema_validation_timeout_seconds": 0.0}, "schema_validation_timeout_seconds"),
         ({"schema_validation_timeout_seconds": inf}, "schema_validation_timeout_seconds"),
+        ({"schema_validation_timeout_seconds": 10**1000}, "schema_validation_timeout_seconds"),
         ({"graceful_shutdown_timeout_seconds": 60.1}, "graceful_shutdown_timeout_seconds"),
         ({"graceful_shutdown_timeout_seconds": nan}, "graceful_shutdown_timeout_seconds"),
+        ({"graceful_shutdown_timeout_seconds": 10**1000}, "graceful_shutdown_timeout_seconds"),
     ],
 )
 def test_gateway_limits_reject_out_of_range_values(
@@ -410,21 +429,46 @@ def test_legacy_runtime_and_stdio_signatures_remain_compatible() -> None:
         "list_modules",
         "get_modules_health",
     ]
-    assert list(inspect.signature(GatewayStdioServer).parameters) == [
-        "runtime",
-        "path",
-        "metadata",
-    ]
-    stdio_signature = inspect.signature(handle_stdio_line)
-    assert list(stdio_signature.parameters) == [
-        "runtime",
-        "line",
-        "path",
-        "metadata",
-    ]
-    assert stdio_signature.parameters["path"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert stdio_signature.parameters["path"].default == "stdio://stdin"
-    assert stdio_signature.parameters["metadata"].default is None
+    assert {
+        name: str(inspect.signature(getattr(GatewayRuntime, name)))
+        for name in runtime_members
+    } == {
+        "list_tools": (
+            "(self, context: 'GatewayRequestContext') -> 'list[dict[str, Any]]'"
+        ),
+        "call_tool": (
+            "(self, name: 'str', arguments: 'dict[str, Any]', "
+            "context: 'GatewayRequestContext') -> 'dict[str, Any]'"
+        ),
+        "list_resources": (
+            "(self, context: 'GatewayRequestContext') -> 'list[dict[str, Any]]'"
+        ),
+        "read_resource": (
+            "(self, uri: 'str', context: 'GatewayRequestContext') -> 'dict[str, Any]'"
+        ),
+        "list_prompts": (
+            "(self, context: 'GatewayRequestContext') -> 'list[dict[str, Any]]'"
+        ),
+        "get_prompt": (
+            "(self, name: 'str', arguments: 'dict[str, Any]', "
+            "context: 'GatewayRequestContext') -> 'dict[str, Any]'"
+        ),
+        "list_modules": (
+            "(self, context: 'GatewayRequestContext') -> 'list[dict[str, Any]]'"
+        ),
+        "get_modules_health": (
+            "(self, context: 'GatewayRequestContext') -> 'dict[str, Any]'"
+        ),
+    }
+    assert str(inspect.signature(GatewayStdioServer)) == (
+        "(runtime: 'GatewayRuntime', path: 'str' = 'stdio://stdin', "
+        "metadata: 'dict[str, Any]' = <factory>) -> None"
+    )
+    assert str(inspect.signature(handle_stdio_line)) == (
+        "(runtime: 'GatewayRuntime', line: 'str | bytes', *, "
+        "path: 'str' = 'stdio://stdin', "
+        "metadata: 'dict[str, Any] | None' = None) -> 'str | None'"
+    )
 
 
 @pytest.mark.asyncio
