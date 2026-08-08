@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import dataclasses
 from pathlib import Path
+
+import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import extraction
@@ -110,3 +113,84 @@ def test_schema_cache_stores_successes_only_and_reports_selector_keys() -> None:
         "selector_xpath_cache_size": 0,
         "selector_css_cache_size": 0,
     }
+
+
+def test_partial_schema_result_with_no_matches_warning_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><body><article><h1>Available title</h1></article></body></html>
+    """
+    schema_rules = {
+        "baseSelector": "//article",
+        "fields": [
+            {"name": "title", "selector": "//article/h1", "type": "text"},
+            {"name": "content", "selector": "//article/div[@class='missing']", "type": "text"},
+        ],
+    }
+    original_extract_schema_fields = legacy.extract_schema_fields
+    extraction_calls = 0
+
+    def track_schema_extraction(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal extraction_calls
+        extraction_calls += 1
+        return original_extract_schema_fields(*args, **kwargs)
+
+    monkeypatch.setattr(legacy, "extract_schema_fields", track_schema_extraction)
+    extraction.clear_extraction_caches()
+
+    first_result = legacy.extract_article_with_pipeline(
+        html,
+        "https://example.com/partial",
+        strategy_order=["schema"],
+        schema_rules=schema_rules,
+    )
+    second_result = legacy.extract_article_with_pipeline(
+        html,
+        "https://example.com/partial",
+        strategy_order=["schema"],
+        schema_rules=schema_rules,
+    )
+
+    assert first_result["extraction_successful"] is True
+    assert first_result["schema_selector_warnings"] == [
+        {
+            "key": "fields.content",
+            "selector": "//article/div[@class='missing']",
+            "warning": "no_matches",
+        }
+    ]
+    assert extraction.get_extraction_cache_stats()["schema_result_cache_size"] == 0
+    assert second_result.get("schema_cache_hit") is None
+    assert extraction_calls == 2
+
+
+def test_selector_cache_lifecycle_failures_are_silent_and_omit_selector_stats(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "https://user:secret@example.test/selector"
+
+    def raise_sensitive_error() -> None:
+        raise ValueError(secret)
+
+    monkeypatch.setattr(caches, "get_selector_cache_stats", raise_sensitive_error)
+    monkeypatch.setattr(caches, "clear_selector_caches", raise_sensitive_error)
+
+    stats = caches.get_extraction_cache_stats()
+    caches.clear_extraction_caches()
+
+    assert "selector_xpath_cache_size" not in stats
+    assert "selector_css_cache_size" not in stats
+    assert secret not in caplog.text
+
+
+def test_selector_cache_lifecycle_cancellation_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_cancellation() -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(caches, "get_selector_cache_stats", raise_cancellation)
+    with pytest.raises(asyncio.CancelledError):
+        caches.get_extraction_cache_stats()
+
+    monkeypatch.setattr(caches, "clear_selector_caches", raise_cancellation)
+    with pytest.raises(asyncio.CancelledError):
+        caches.clear_extraction_caches()

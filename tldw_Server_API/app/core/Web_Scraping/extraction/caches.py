@@ -7,8 +7,6 @@ from copy import deepcopy
 from threading import Lock
 from typing import Any, Callable
 
-from loguru import logger
-
 from ..selectors import clear_selector_caches, get_selector_cache_stats
 from .throttles import clear_throttle_state, get_throttle_stats
 
@@ -46,8 +44,18 @@ def _schema_cache_get(key: str) -> dict[str, Any] | None:
         return deepcopy(value)
 
 
-def _schema_cache_put(key: str, value: dict[str, Any]) -> None:
+def _is_schema_result_cacheable(value: dict[str, Any]) -> bool:
     if not value.get("extraction_successful"):
+        return False
+    warnings = value.get("schema_selector_warnings")
+    return not (
+        isinstance(warnings, list)
+        and any(isinstance(warning, dict) and warning.get("warning") == "no_matches" for warning in warnings)
+    )
+
+
+def _schema_cache_put(key: str, value: dict[str, Any]) -> None:
+    if not _is_schema_result_cacheable(value):
         return
     with _SCHEMA_CACHE_LOCK:
         _SCHEMA_RESULT_CACHE[key] = deepcopy(value)
@@ -100,14 +108,8 @@ def get_extraction_cache_stats() -> dict[str, int]:
     stats.update(get_throttle_stats())
     try:
         stats.update(get_selector_cache_stats())
-    except _SELECTOR_CACHE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Unable to read selector cache statistics: {}", exc)
-        stats.update(
-            {
-                "selector_xpath_cache_size": 0,
-                "selector_css_cache_size": 0,
-            }
-        )
+    except _SELECTOR_CACHE_NONCRITICAL_EXCEPTIONS:
+        return stats
     return stats
 
 
@@ -119,5 +121,5 @@ def clear_extraction_caches() -> None:
     clear_throttle_state()
     try:
         clear_selector_caches()
-    except _SELECTOR_CACHE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Unable to clear selector caches: {}", exc)
+    except _SELECTOR_CACHE_NONCRITICAL_EXCEPTIONS:
+        return
