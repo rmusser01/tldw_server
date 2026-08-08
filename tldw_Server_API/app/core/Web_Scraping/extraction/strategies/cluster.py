@@ -1,7 +1,5 @@
 """Cluster-based article extraction strategy."""
 
-from __future__ import annotations
-
 import hashlib
 import math
 import os

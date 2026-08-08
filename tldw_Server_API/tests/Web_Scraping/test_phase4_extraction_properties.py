@@ -1,9 +1,10 @@
-from __future__ import annotations
-
+import asyncio
 import dataclasses
 import inspect
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Optional
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -27,15 +28,33 @@ _CLUSTER_HTML = """
 
 
 def test_cluster_strategy_legacy_and_facade_exports_are_direct_aliases() -> None:
-    expected_signature = (
-        "(html_text: 'str', url: 'str', *, cluster_settings: 'Optional[dict[str, Any]]' = None) -> 'dict[str, Any]'"
+    expected_signature = inspect.Signature(
+        parameters=(
+            inspect.Parameter(
+                "html_text",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=str,
+            ),
+            inspect.Parameter(
+                "url",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=str,
+            ),
+            inspect.Parameter(
+                "cluster_settings",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Optional[dict[str, Any]],
+            ),
+        ),
+        return_annotation=dict[str, Any],
     )
 
     assert extraction.extract_cluster_entities is cluster_strategy.extract_cluster_entities
     assert legacy.extract_cluster_entities is cluster_strategy.extract_cluster_entities
-    assert str(inspect.signature(cluster_strategy.extract_cluster_entities)) == expected_signature
-    assert str(inspect.signature(extraction.extract_cluster_entities)) == expected_signature
-    assert str(inspect.signature(legacy.extract_cluster_entities)) == expected_signature
+    assert inspect.signature(cluster_strategy.extract_cluster_entities) == expected_signature
+    assert inspect.signature(extraction.extract_cluster_entities) == expected_signature
+    assert inspect.signature(legacy.extract_cluster_entities) == expected_signature
 
 
 def test_cluster_settings_precede_environment_thresholds(monkeypatch) -> None:
@@ -60,38 +79,45 @@ def test_cluster_settings_precede_environment_thresholds(monkeypatch) -> None:
     assert result["cluster_linkage"] == "single"
 
 
-def test_cluster_uses_call_time_dependencies_for_metrics_and_cancellation(monkeypatch) -> None:
+def test_cluster_cancellation_stops_before_extraction_metrics_or_embedding(monkeypatch) -> None:
+    events: list[str] = []
     counters: list[tuple[str, dict[str, str]]] = []
-    checkpoints: list[None] = []
     default_dependencies = build_default_dependencies()
+
+    def cancellation_checkpoint() -> None:
+        events.append("checkpoint")
+        raise asyncio.CancelledError
+
     dependencies = dataclasses.replace(
         default_dependencies,
         increment_counter=lambda name, *, labels: counters.append((name, labels)),
-        cancellation_checkpoint=lambda: checkpoints.append(None),
+        cancellation_checkpoint=cancellation_checkpoint,
     )
-    calls = 0
 
     def build_dependencies_at_call_time():
-        nonlocal calls
-        calls += 1
         return dependencies
 
     monkeypatch.setattr(cluster_strategy, "build_default_dependencies", build_dependencies_at_call_time)
-
-    result = extraction.extract_cluster_entities(
-        _CLUSTER_HTML,
-        "https://example.com/dependencies",
-        cluster_settings={"min_block_chars": 1, "min_word_count": 1},
+    monkeypatch.setattr(
+        cluster_strategy,
+        "_extract_cluster_blocks",
+        lambda *_args, **_kwargs: events.append("block_extraction") or [],
+    )
+    monkeypatch.setattr(
+        cluster_strategy,
+        "_cluster_embedding",
+        lambda *_args, **_kwargs: events.append("cluster_embedding") or [1.0],
     )
 
-    assert result["extraction_successful"] is True
-    assert calls == 1
-    assert checkpoints
-    status_counters = [entry for entry in counters if entry[0] == "extraction_cluster_total"]
-    assert status_counters == [
-        ("extraction_cluster_total", {"status": "started"}),
-        ("extraction_cluster_total", {"status": "success"}),
-    ]
+    with pytest.raises(asyncio.CancelledError):
+        extraction.extract_cluster_entities(
+            _CLUSTER_HTML,
+            "https://example.com/dependencies",
+            cluster_settings={"min_block_chars": 1, "min_word_count": 1},
+        )
+
+    assert events == ["checkpoint"]
+    assert counters == []
 
 
 def test_cluster_error_values_are_stable_for_each_failure_state(monkeypatch) -> None:
