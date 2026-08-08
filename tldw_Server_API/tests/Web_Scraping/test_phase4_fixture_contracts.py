@@ -463,6 +463,26 @@ def test_change_1_contract_accepts_fresh_multi_block_cluster_success_profile() -
     _assert_change_1(actual, expected)
 
 
+def test_change_1_contract_rejects_cache_event_before_cluster_started() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[7:11] = [metrics[8], metrics[7], metrics[9], metrics[10]]
+
+    with pytest.raises(AssertionError, match="contiguous"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_cluster_success_before_final_cache_lookup() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[7:11] = [metrics[7], metrics[8], metrics[10], metrics[9]]
+
+    with pytest.raises(AssertionError, match="contiguous"):
+        _assert_change_1(actual, expected)
+
+
 def test_change_1_contract_rejects_orphan_cluster_fields_on_trafilatura_success() -> None:
     actual, expected = _coherent_change_1_profile()
     result = actual["result"]
@@ -481,6 +501,15 @@ def test_change_1_contract_rejects_orphan_cluster_fields_on_trafilatura_success(
     )
 
     with pytest.raises(AssertionError, match="cluster result fields"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_cache_growth_after_cluster_no_blocks() -> None:
+    actual, expected = _coherent_change_1_profile()
+    expected["cache_stats"] = {"cluster_embedding_cache_size": 0}
+    actual["cache_stats"] = {"cluster_embedding_cache_size": 17}
+
+    with pytest.raises(AssertionError, match="cache growth"):
         _assert_change_1(actual, expected)
 
 

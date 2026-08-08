@@ -403,35 +403,63 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
         _is_cluster_internal_metric_record(metric) for metric in cluster_internal_metrics
     ), "Change 1 profile contains a noncanonical cluster metric"
     if terminal_strategy == "cluster":
-        assert cluster_internal_metrics, "Change 1 profile requires canonical cluster-internal metrics"
-        total_statuses = [
-            _profile_dict(metric["labels"], "$.metrics[].labels")["status"]
-            for metric in cluster_internal_metrics
-            if metric["name"] == "extraction_cluster_total"
-        ]
-        cache_results = [
-            _profile_dict(metric["labels"], "$.metrics[].labels")["result"]
-            for metric in cluster_internal_metrics
-            if metric["name"] == "extraction_cluster_cache_total"
-        ]
-        assert total_statuses == [
-            "started",
-            "success",
-        ], "Change 1 profile requires exact started/success cluster lifecycle metrics"
         total_blocks = actual_result["cluster_total_blocks"]
         assert type(total_blocks) is int
         embedding_operations = total_blocks + 1
         assert (
             embedding_operations <= extraction_caches._CLUSTER_EMBED_CACHE_MAX
         ), "Change 1 profile default cluster embeddings must fit the canonical cache"
-        assert len(cache_results) == embedding_operations, (
-            "Change 1 profile requires one cache result per document and " "source-block embedding operation"
+        internal_metric_count = embedding_operations + 2
+        assert (
+            len(added_metrics) == internal_metric_count + 3
+        ), "Change 1 profile requires one exact contiguous cluster metric sequence"
+        started_metric = _profile_dict(added_metrics[0], "$.metrics[]")
+        cache_metrics = [_profile_dict(metric, "$.metrics[]") for metric in added_metrics[1 : 1 + embedding_operations]]
+        success_metric = _profile_dict(added_metrics[1 + embedding_operations], "$.metrics[]")
+        pipeline_metrics = added_metrics[internal_metric_count:]
+        assert (
+            _is_cluster_internal_metric_record(started_metric)
+            and started_metric.get("name") == "extraction_cluster_total"
+            and started_metric.get("labels") == {"status": "started"}
+        ), "Change 1 profile requires a contiguous cluster lifecycle starting with started"
+        assert all(
+            _is_cluster_internal_metric_record(metric) and metric.get("name") == "extraction_cluster_cache_total"
+            for metric in cache_metrics
+        ), "Change 1 profile requires contiguous cache lookups between started and success"
+        assert (
+            _is_cluster_internal_metric_record(success_metric)
+            and success_metric.get("name") == "extraction_cluster_total"
+            and success_metric.get("labels") == {"status": "success"}
+        ), "Change 1 profile requires contiguous cluster success after the final cache lookup"
+        assert [_metric_profile(metric) for metric in pipeline_metrics] == expected_added_metrics, (
+            "Change 1 profile requires contiguous pipeline cluster counter, " "duration, and content-length metrics"
         )
+        cache_results = [_profile_dict(metric["labels"], "$.metrics[].labels")["result"] for metric in cache_metrics]
         assert cache_results[0] == "miss", "Change 1 profile requires a fresh document-embedding cache miss"
         miss_count = cache_results.count("miss")
         actual_cache = _profile_dict(actual_root.get("cache_stats"), "$.cache_stats")
         assert actual_cache.get("cluster_embedding_cache_size") == miss_count, (
             "Change 1 profile fresh cache growth must equal the canonical " "embedding miss count"
+        )
+    else:
+        cluster_cache_metrics = [
+            metric for metric in cluster_internal_metrics if metric.get("name") == "extraction_cluster_cache_total"
+        ]
+        assert not cluster_cache_metrics, (
+            "Change 1 profile cluster cache metrics require successful " "terminal cluster extraction"
+        )
+        expected_cache_size = (
+            _profile_dict(expected_root["cache_stats"], "$.cache_stats").get("cluster_embedding_cache_size")
+            if "cache_stats" in expected_root
+            else MISSING
+        )
+        actual_cache_size = (
+            _profile_dict(actual_root["cache_stats"], "$.cache_stats").get("cluster_embedding_cache_size")
+            if "cache_stats" in actual_root
+            else MISSING
+        )
+        assert actual_cache_size == expected_cache_size, (
+            "Change 1 profile rejects cache growth without successful " "terminal cluster extraction"
         )
     actual_added_metrics = [
         _metric_profile(metric)
