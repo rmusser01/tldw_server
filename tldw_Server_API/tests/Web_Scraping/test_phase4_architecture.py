@@ -11,6 +11,9 @@ SELECTORS_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping"
 FETCHERS_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Watchlists" / "fetchers.py"
 ENDPOINT_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "api" / "v1" / "endpoints" / "watchlists.py"
 ARTICLE_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "Article_Extractor_Lib.py"
+HANDLERS_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "handlers.py"
+ENHANCED_SCRAPER_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "enhanced_web_scraping.py"
+EXTRACTION_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "extraction"
 EXTRACTION_DEPENDENCIES_PATH = (
     REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "extraction" / "dependencies.py"
 )
@@ -101,6 +104,34 @@ def _imported_names_at_any_scope(path: Path, module: str) -> set[str]:
         if isinstance(node, ast.ImportFrom) and node.module == module
         for alias in node.names
     }
+
+
+def _function(path: Path, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    return next(
+        node
+        for node in _tree(path).body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+    )
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    return {
+        child.func.id for child in ast.walk(node) if isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+    }
+
+
+def _metric_label_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    for node in ast.walk(_tree(path)):
+        if not isinstance(node, ast.Call):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg != "labels" or not isinstance(keyword.value, ast.Dict):
+                continue
+            for key in keyword.value.keys:
+                if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                    keys.add(key.value)
+    return keys
 
 
 def test_selector_package_has_the_approved_files() -> None:
@@ -201,6 +232,54 @@ def test_article_selector_responsibilities_import_the_canonical_facade() -> None
             imported = {alias.name for alias in node.names}
             if ".Watchlists" in module and imported & (article_selector_names | extraction_selector_names):
                 violations.append({"module": module, "names": sorted(imported)})
+    assert violations == []
+
+
+def test_phase4b_moved_consumers_import_canonical_content_and_extraction_facades() -> None:
+    content_module = "tldw_Server_API.app.core.Web_Scraping.content"
+    extraction_module = "tldw_Server_API.app.core.Web_Scraping.extraction"
+    legacy_module = "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib"
+
+    assert _imported_names_at_any_scope(HANDLERS_PATH, content_module) == {"convert_html_to_markdown"}
+    assert _imported_names_at_any_scope(HANDLERS_PATH, extraction_module) == {"extract_article_data_from_html"}
+    assert _imported_names_at_any_scope(ENHANCED_SCRAPER_PATH, content_module) == {"convert_html_to_markdown"}
+    assert _imported_names_at_any_scope(ENHANCED_SCRAPER_PATH, extraction_module) == {"extract_article_with_pipeline"}
+    assert _imported_names_at_any_scope(HANDLERS_PATH, legacy_module) == set()
+    assert _imported_names_at_any_scope(ENHANCED_SCRAPER_PATH, legacy_module) == {"scrape_article"}
+
+
+def test_phase4b_crawl_bound_article_helper_keeps_its_async_surface_and_canonical_dependency() -> None:
+    extraction_module = "tldw_Server_API.app.core.Web_Scraping.extraction"
+    helper = _function(ARTICLE_PATH, "scrape_article_async")
+
+    assert isinstance(helper, ast.AsyncFunctionDef)
+    assert [argument.arg for argument in helper.args.args[:2]] == ["context", "url"]
+    assert "extract_article_with_pipeline" in _imported_names(ARTICLE_PATH, extraction_module)
+    assert "extract_article_with_pipeline" in _called_names(helper)
+
+
+def test_phase4b_extraction_metrics_use_only_safe_label_keys() -> None:
+    forbidden = {"url", "base_url", "host", "error", "pattern", "payload", "secret", "hash"}
+    metric_label_keys = set().union(*(_metric_label_keys(path) for path in EXTRACTION_ROOT.rglob("*.py")))
+
+    assert metric_label_keys.isdisjoint(forbidden)
+
+
+def test_phase4b_extraction_never_recovers_cancelled_error_in_exception_tuples() -> None:
+    violations: list[str] = []
+    for path in EXTRACTION_ROOT.rglob("*.py"):
+        for node in ast.walk(_tree(path)):
+            if not isinstance(node, ast.ExceptHandler) or not isinstance(node.type, ast.Tuple):
+                continue
+            for exception_type in node.type.elts:
+                if (
+                    isinstance(exception_type, ast.Attribute)
+                    and isinstance(exception_type.value, ast.Name)
+                    and exception_type.value.id == "asyncio"
+                    and exception_type.attr == "CancelledError"
+                ):
+                    violations.append(str(path.relative_to(EXTRACTION_ROOT)))
+
     assert violations == []
 
 
