@@ -290,22 +290,24 @@ async def test_execution_returns_adapter_success_with_adapter_cache_accounting()
             attempted=True,
             success=_success(
                 "openai",
-                vectors=[[0.1, 0.9]],
-                cache_hits=1,
-                cache_misses=0,
+                vectors=[[0.1, 0.9], [0.3, 0.7]],
+                cache_hits=0,
+                cache_misses=2,
                 embeddings_from_adapter=True,
             ),
         ),
     )
 
-    outcome = await coordinator.execute(_prepared(execution_path="adapter"))
+    outcome = await coordinator.execute(
+        _prepared(texts=["first", "second"], execution_path="adapter")
+    )
 
     assert events == ["adapter"]
-    assert outcome.vectors == ((0.1, 0.9),)
+    assert outcome.vectors == ((0.1, 0.9), (0.3, 0.7))
     assert outcome.provider == "openai"
     assert outcome.model == "text-embedding-3-small"
-    assert outcome.cache_hits == 1
-    assert outcome.cache_misses == 0
+    assert outcome.cache_hits == 0
+    assert outcome.cache_misses == 2
     assert outcome.embeddings_from_adapter is True
     assert outcome.attempt_count == 1
     assert outcome.fallback_attempt_count == 0
