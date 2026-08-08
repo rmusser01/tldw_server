@@ -4,7 +4,7 @@ title: Extend Notes Sync v2 core contract for backlinks and restore
 status: Done
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-08 21:46'
+updated_date: '2026-08-08 21:56'
 labels:
   - notes
   - sync-v2
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - >-
     https://github.com/rmusser01/tldw_chatbook/blob/dev/backlog/decisions/046-synchronized-database-notes-parity.md
+  - 'https://github.com/rmusser01/tldw_server/pull/2775'
 documentation:
   - >-
     https://github.com/rmusser01/tldw_chatbook/blob/dev/Docs/superpowers/specs/2026-08-08-notes-server-parity-design.md
@@ -56,6 +57,8 @@ Reason: Establishes the public notes.note payload, restore-intent semantics, and
 - Wired the production Notes adapter and materializer to enforce canonical payloads, current-tombstone-only restore intent, whole-object stale conflicts, idempotency, and server/client-origin parity while preserving the existing keyword-write block.
 - Preserved accepted Markdown and title bytes in ChaChaNotes, included `message_id` in batch reads, and added focused SQLite plus PostgreSQL contract coverage for the complete mutation lifecycle.
 - Verification: 215 focused tests passed and 1 PostgreSQL test skipped because neither a local PostgreSQL server nor Docker daemon was available. Ruff passed for new/reworked Sync files; compileall and `git diff --check` passed; Bandit reported 0 findings across 13,190 production lines. Full-file Ruff on the two legacy Notes files reports the same pre-existing `I001`, `BLE001`, `F841`, and `C409` baseline as `HEAD`, with no new finding introduced by this task.
+
+Review: PR #2775 targets dev from codex/task-13002-notes-core-contract.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
