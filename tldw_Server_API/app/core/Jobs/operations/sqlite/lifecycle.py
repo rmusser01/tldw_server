@@ -5,13 +5,15 @@ from __future__ import annotations
 import sqlite3
 from contextlib import nullcontext
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
+    BatchRenewLeasesCommand,
+    BatchRenewLeasesResult,
     LifecycleResult,
     NoTransitionReason,
     ReleaseJobCommand,
@@ -215,13 +217,12 @@ def _classify_lifecycle_no_transition(
     return LifecycleResult.no_transition(NoTransitionReason.WRONG_STATUS, row=current)
 
 
-def renew_lease(
-    conn: sqlite3.Connection,
-    *,
+def _renew_lease_statement(
     command: RenewLeaseCommand,
+    *,
     now: datetime,
-) -> LifecycleResult:
-    """Renew one processing SQLite job lease without shortening it."""
+) -> tuple[str, tuple[Any, ...]]:
+    """Build the SQLite statement for one lease renewal attempt."""
 
     now_sql = _sqlite_timestamp(now)
     has_percent = command.progress_percent is not None
@@ -235,10 +236,22 @@ def renew_lease(
     params.append(command.job_id)
     if command.enforce:
         params.extend((command.worker_id, command.lease_id))
+    return sql, tuple(params)
+
+
+def renew_lease(
+    conn: sqlite3.Connection,
+    *,
+    command: RenewLeaseCommand,
+    now: datetime,
+) -> LifecycleResult:
+    """Renew one processing SQLite job lease without shortening it."""
+
+    sql, params = _renew_lease_statement(command, now=now)
 
     transaction = nullcontext(conn) if conn.in_transaction else conn
     with transaction:
-        changed = conn.execute(sql, tuple(params))
+        changed = conn.execute(sql, params)
         if changed.rowcount != 1:
             return _classify_lifecycle_no_transition(
                 conn,
@@ -257,6 +270,33 @@ def renew_lease(
         if row is None:
             return LifecycleResult.no_transition(NoTransitionReason.MISSING)
         return LifecycleResult.applied(row=dict(row))
+
+
+def renew_leases_batch(
+    conn: sqlite3.Connection,
+    *,
+    command: BatchRenewLeasesCommand,
+    clock: Callable[[], datetime],
+) -> BatchRenewLeasesResult:
+    """Renew an ordered SQLite lease batch in one transaction."""
+
+    applied_count = 0
+    with conn:
+        for item in command.items:
+            item_command = RenewLeaseCommand(
+                job_id=item.job_id,
+                seconds=item.seconds,
+                enforce=command.enforce,
+                worker_id=item.worker_id,
+                lease_id=item.lease_id,
+            )
+            sql, params = _renew_lease_statement(item_command, now=clock())
+            changed = conn.execute(sql, params)
+            applied_count += int(changed.rowcount or 0)
+        return BatchRenewLeasesResult(
+            requested_count=len(command.items),
+            applied_count=applied_count,
+        )
 
 
 def release_job(
