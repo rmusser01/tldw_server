@@ -7,6 +7,10 @@ from .postgres_collections import (
     run_postgres_migrate_to_v12,
     run_postgres_migrate_to_v13,
 )
+from .postgres_claims_analytics_export_jobs import (
+    PostgresClaimsAnalyticsExportJobsBody,
+    run_postgres_migrate_to_v24,
+)
 from .postgres_early_schema import (
     PostgresEarlySchemaBody,
     run_postgres_migrate_to_v5,
@@ -69,6 +73,8 @@ __all__ = [
     "PostgresMediaFilesBody",
     "run_postgres_migrate_to_v11",
     "run_postgres_migrate_to_v17",
+    "PostgresClaimsAnalyticsExportJobsBody",
+    "run_postgres_migrate_to_v24",
     "PostgresEarlySchemaBody",
     "run_postgres_migrate_to_v5",
     "run_postgres_migrate_to_v6",

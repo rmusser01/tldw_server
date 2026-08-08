@@ -463,14 +463,37 @@ def ensure_postgres_claims_extensions(
                 "filters_json TEXT, "
                 "pagination_json TEXT, "
                 "error_message TEXT, "
+                "job_id BIGINT, "
+                "error_code TEXT, "
+                "snapshot_at TIMESTAMPTZ, "
                 "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             ),
             connection=conn,
         )
         backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('job_id')} BIGINT",
+            connection=conn,
+        )
+        backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('error_code')} TEXT",
+            connection=conn,
+        )
+        backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('snapshot_at')} TIMESTAMPTZ",
+            connection=conn,
+        )
+        backend.execute(
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_analytics_exports_user')} "
             f"ON {ident('claims_analytics_exports')} ({ident('user_id')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_analytics_exports_job_id')} "
+            f"ON {ident('claims_analytics_exports')} ({ident('job_id')})",
             connection=conn,
         )
 

@@ -2204,7 +2204,7 @@ def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_inde
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
         ).fetchone()[0]
 
-        assert db._CURRENT_SCHEMA_VERSION == 23
+        assert db._CURRENT_SCHEMA_VERSION == 24
         assert {
             "latest_transcription_run_id",
             "next_transcription_run_id",
@@ -2517,6 +2517,20 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                 UNIQUE (media_id, chunk_hash, extractor, extractor_version)
             );
 
+            CREATE TABLE claims_analytics_exports (
+                export_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                format TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT,
+                payload_csv TEXT,
+                filters_json TEXT,
+                pagination_json TEXT,
+                error_message TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             INSERT INTO Media (
                 id, title, type, content_hash, source_hash, uuid, last_modified, version, visibility, owner_user_id, client_id
             ) VALUES
@@ -2544,7 +2558,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
     try:
         db.close_connection()
         db.backend.get_pool().close_all()
-        verification_db_path = tmp_path / "media_v23_verification.sqlite"
+        verification_db_path = tmp_path / "media_v24_verification.sqlite"
         with sqlite3.connect(db_path) as source_conn, sqlite3.connect(verification_db_path) as dest_conn:
             source_conn.backup(dest_conn)
 
@@ -2583,7 +2597,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
             version_row = raw_conn.execute(
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()
-            assert version_row["version"] == 23
+            assert version_row["version"] == 24
             assert {
                 "latest_transcription_run_id",
                 "next_transcription_run_id",
@@ -2785,5 +2799,315 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                 )
             raw_conn.rollback()
 
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() -> None:
+    db = MediaDatabase(db_path=":memory:", client_id="claims-export-jobs-bootstrap")
+    try:
+        conn = db.get_connection()
+        columns = {
+            row[1]: {"type": row[2], "notnull": row[3]}
+            for row in conn.execute(
+                "PRAGMA table_info(claims_analytics_exports)"
+            ).fetchall()
+        }
+        indexes = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA index_list(claims_analytics_exports)"
+            ).fetchall()
+        }
+        version = conn.execute(
+            "SELECT version FROM schema_version LIMIT 1"
+        ).fetchone()[0]
+
+        assert version == 24
+        assert db._CURRENT_SCHEMA_VERSION == 24
+        assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
+        assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
+        assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
+        assert "job_status" not in columns
+        assert "idx_claims_analytics_exports_job_id" in indexes
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_preserves_rows(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "media_v23_claims_exports.sqlite"
+    db = MediaDatabase(str(db_path), client_id="claims-export-jobs-migration")
+    db.close_connection()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            DROP INDEX IF EXISTS idx_claims_analytics_exports_job_id;
+            ALTER TABLE claims_analytics_exports RENAME TO claims_analytics_exports_v24;
+            CREATE TABLE claims_analytics_exports (
+                export_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                format TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT,
+                payload_csv TEXT,
+                filters_json TEXT,
+                pagination_json TEXT,
+                error_message TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO claims_analytics_exports (
+                export_id,
+                user_id,
+                format,
+                status,
+                payload_json,
+                filters_json,
+                created_at,
+                updated_at
+            ) VALUES (
+                'export-existing',
+                'user-1',
+                'json',
+                'ready',
+                '{"claim_count": 1}',
+                '{"status": "verified"}',
+                '2026-01-01T00:00:00Z',
+                '2026-01-01T00:00:00Z'
+            );
+            DROP TABLE claims_analytics_exports_v24;
+            CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user
+                ON claims_analytics_exports(user_id);
+            UPDATE schema_version SET version = 23;
+            """
+        )
+
+    try:
+        db._initialize_schema()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            columns = {
+                row["name"]: {"type": row["type"], "notnull": row["notnull"]}
+                for row in conn.execute(
+                    "PRAGMA table_info(claims_analytics_exports)"
+                ).fetchall()
+            }
+            indexes = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA index_list(claims_analytics_exports)"
+                ).fetchall()
+            }
+            version = conn.execute(
+                "SELECT version FROM schema_version LIMIT 1"
+            ).fetchone()["version"]
+
+        assert version == 24
+        assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
+        assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
+        assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
+        assert "job_status" not in columns
+        assert "idx_claims_analytics_exports_job_id" in indexes
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            export_row = dict(
+                conn.execute(
+                    """
+                    SELECT export_id, user_id, format, status, payload_json,
+                           filters_json, job_id, error_code, snapshot_at
+                    FROM claims_analytics_exports
+                    WHERE export_id = 'export-existing'
+                    """
+                ).fetchone()
+            )
+        assert export_row == {
+            "export_id": "export-existing",
+            "user_id": "user-1",
+            "format": "json",
+            "status": "ready",
+            "payload_json": '{"claim_count": 1}',
+            "filters_json": '{"status": "verified"}',
+            "job_id": None,
+            "error_code": None,
+            "snapshot_at": None,
+        }
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.unit
+def test_sqlite_migration_024_loads_as_idempotent(tmp_path) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    migrator = DatabaseMigrator(str(tmp_path / "migration-loader.sqlite"))
+    migration = next(item for item in migrator.load_migrations() if item.version == 24)
+
+    assert migration.name == "claims_analytics_export_jobs"
+    assert migration.idempotent is True
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("present_column_definitions", "job_index_present"),
+    [
+        (("job_id INTEGER",), False),
+        (("job_id INTEGER", "error_code TEXT", "snapshot_at TEXT"), True),
+    ],
+    ids=("partial-v24-ddl", "full-v24-ddl"),
+)
+def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
+    tmp_path,
+    present_column_definitions: tuple[str, ...],
+    job_index_present: bool,
+) -> None:
+    db_path = tmp_path / "media_v23_partial_claims_exports.sqlite"
+    db = MediaDatabase(str(db_path), client_id="claims-export-jobs-recovery")
+    db.close_connection()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            DROP INDEX IF EXISTS idx_claims_analytics_exports_job_id;
+            ALTER TABLE claims_analytics_exports RENAME TO claims_analytics_exports_v24;
+            CREATE TABLE claims_analytics_exports (
+                export_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                format TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT,
+                payload_csv TEXT,
+                filters_json TEXT,
+                pagination_json TEXT,
+                error_message TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO claims_analytics_exports (
+                export_id,
+                user_id,
+                format,
+                status,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (
+                'export-recovery',
+                'user-1',
+                'json',
+                'ready',
+                '{"claim_count": 2}',
+                '2026-01-02T00:00:00Z',
+                '2026-01-02T00:00:00Z'
+            );
+            DROP TABLE claims_analytics_exports_v24;
+            CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user
+                ON claims_analytics_exports(user_id);
+
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TIMESTAMP NOT NULL,
+                execution_time REAL NOT NULL,
+                success BOOLEAN NOT NULL DEFAULT 1,
+                error_message TEXT
+            );
+            DELETE FROM schema_migrations;
+            INSERT INTO schema_migrations (
+                version,
+                name,
+                checksum,
+                applied_at,
+                execution_time,
+                success,
+                error_message
+            ) VALUES (
+                23,
+                'transcript_run_history',
+                'test-v23-checksum',
+                '2026-01-02T00:00:00Z',
+                0,
+                1,
+                NULL
+            );
+            UPDATE schema_version SET version = 23;
+            """
+        )
+        for column_definition in present_column_definitions:
+            conn.execute(
+                f"ALTER TABLE claims_analytics_exports ADD COLUMN {column_definition}"
+            )
+        if job_index_present:
+            conn.execute(
+                """
+                CREATE INDEX idx_claims_analytics_exports_job_id
+                    ON claims_analytics_exports(job_id)
+                """
+            )
+        conn.commit()
+
+    try:
+        db._initialize_schema()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            columns = {
+                row["name"]: {"type": row["type"], "notnull": row["notnull"]}
+                for row in conn.execute(
+                    "PRAGMA table_info(claims_analytics_exports)"
+                ).fetchall()
+            }
+            indexes = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA index_list(claims_analytics_exports)"
+                ).fetchall()
+            }
+            version = conn.execute(
+                "SELECT version FROM schema_version LIMIT 1"
+            ).fetchone()["version"]
+            migration_row = dict(
+                conn.execute(
+                    """
+                    SELECT version, name, success
+                    FROM schema_migrations
+                    WHERE version = 24
+                    """
+                ).fetchone()
+            )
+            export_row = dict(
+                conn.execute(
+                    """
+                    SELECT export_id, payload_json, job_id, error_code, snapshot_at
+                    FROM claims_analytics_exports
+                    WHERE export_id = 'export-recovery'
+                    """
+                ).fetchone()
+            )
+
+        assert version == 24
+        assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
+        assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
+        assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
+        assert "idx_claims_analytics_exports_job_id" in indexes
+        assert migration_row == {
+            "version": 24,
+            "name": "claims_analytics_export_jobs",
+            "success": 1,
+        }
+        assert export_row == {
+            "export_id": "export-recovery",
+            "payload_json": '{"claim_count": 2}',
+            "job_id": None,
+            "error_code": None,
+            "snapshot_at": None,
+        }
     finally:
         db.close_connection()

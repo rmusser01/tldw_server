@@ -148,6 +148,26 @@ def test_ensure_postgres_claims_extensions_executes_representative_claims_ddls_a
         for query in queries
     )
 
+    analytics_export_table = next(
+        query
+        for query in queries
+        if 'CREATE TABLE IF NOT EXISTS "claims_analytics_exports"' in query
+    )
+    assert "job_id BIGINT" in analytics_export_table
+    assert "error_code TEXT" in analytics_export_table
+    assert "snapshot_at TIMESTAMPTZ" in analytics_export_table
+    assert "job_status" not in analytics_export_table
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_analytics_exports_job_id" '
+        'ON "claims_analytics_exports" ("job_id")' in query
+        for query in queries
+    )
+    assert not any(
+        'ALTER COLUMN "job_id" TYPE' in query
+        or 'ALTER COLUMN "snapshot_at" TYPE' in query
+        for query in queries
+    )
+
 
 def test_ensure_postgres_collections_tables_swallows_backend_errors() -> None:
     helper_module = _load_postgres_claims_collection_structures_module()

@@ -421,6 +421,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.pos
     run_postgres_migrate_to_v10,
     run_postgres_migrate_to_v17,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_analytics_export_jobs import (
+    run_postgres_migrate_to_v24,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_collections import (
     run_postgres_migrate_to_v12,
     run_postgres_migrate_to_v13,
@@ -510,7 +513,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
 
-    _CURRENT_SCHEMA_VERSION = 23  # Transcript run-history schema/bootstrap scaffolding
+    _CURRENT_SCHEMA_VERSION = 24  # Claims analytics export Jobs linkage and snapshot metadata
 
     # <<< Schema Definition (Version 1) >>>
 
@@ -1158,10 +1161,14 @@ class MediaDatabase:
         filters_json TEXT,
         pagination_json TEXT,
         error_message TEXT,
+        job_id INTEGER,
+        error_code TEXT,
+        snapshot_at TEXT,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user ON claims_analytics_exports(user_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_job_id ON claims_analytics_exports(job_id);
 
     CREATE TABLE IF NOT EXISTS claims_notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1902,6 +1909,7 @@ MediaDatabase._postgres_migrate_to_v20 = run_postgres_migrate_to_v20
 MediaDatabase._postgres_migrate_to_v21 = run_postgres_migrate_to_v21
 MediaDatabase._postgres_migrate_to_v22 = run_postgres_migrate_to_v22
 MediaDatabase._postgres_migrate_to_v23 = run_postgres_migrate_to_v23
+MediaDatabase._postgres_migrate_to_v24 = run_postgres_migrate_to_v24
 MediaDatabase._get_db_version = get_db_version
 MediaDatabase._update_schema_version_postgres = update_schema_version_postgres
 MediaDatabase._sync_postgres_sequences = sync_postgres_sequences

@@ -347,6 +347,22 @@ class DatabaseMigrator:
                 return stripped.split(":", 1)[1].strip()
         return ""
 
+    @staticmethod
+    def _extract_idempotent_from_sql(sql: str) -> bool:
+        for line in sql.splitlines():
+            stripped = line.strip()
+            if not stripped.lower().startswith("-- idempotent:"):
+                continue
+
+            value = stripped.split(":", 1)[1].strip().lower()
+            if value in {"true", "1", "yes", "on"}:
+                return True
+            if value in {"false", "0", "no", "off"}:
+                return False
+            raise ValueError(f"Invalid SQL migration idempotent metadata: {value}")
+
+        return False
+
     def _load_sql_migration(self, filepath: Path) -> Optional[Migration]:
         try:
             sql_text = filepath.read_text()
@@ -363,6 +379,7 @@ class DatabaseMigrator:
         version = self._extract_version_from_sql(filepath, sql_text)
         name = self._extract_name_from_sql(filepath)
         description = self._extract_description_from_sql(sql_text)
+        idempotent = self._extract_idempotent_from_sql(sql_text)
 
         return Migration(
             version=version,
@@ -370,6 +387,7 @@ class DatabaseMigrator:
             up_sql=sql_text,
             down_sql=None,
             description=description,
+            idempotent=idempotent,
         )
 
     def create_backup(self, description: str = "") -> str:
@@ -441,7 +459,8 @@ class DatabaseMigrator:
                 if direction == "up" and migration.idempotent:
                     statements = [stmt.strip() for stmt in sql.split(";") if stmt.strip()]
                     for statement in statements:
-                        match = self._ADD_COLUMN_RE.match(statement)
+                        classification_sql = self._strip_sql_comments(statement)
+                        match = self._ADD_COLUMN_RE.match(classification_sql)
                         if match:
                             table = match.group("table")
                             column = match.group("column")
