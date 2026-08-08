@@ -480,6 +480,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert metadata.PACKAGE_STATUS == "internal-experimental"
     assert metadata.PUBLISHING_STATUS == "published"
     assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
+    assert "jsonschema" in metadata.PROJECT_DEPENDENCIES
 
     extras = metadata.OPTIONAL_EXTRAS
     assert set(extras) == {  # nosec B101
@@ -769,6 +770,8 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     }
 
     assert _dependency_names(project["dependencies"]) == set(metadata.PROJECT_DEPENDENCIES)
+    assert "jsonschema>=4.23,<5" in project["dependencies"]
+    assert "jsonschema>=4.23,<5" in _load_root_pyproject()["project"]["dependencies"]
 
     optional_dependencies = project["optional-dependencies"]
     assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)

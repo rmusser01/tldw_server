@@ -35,6 +35,7 @@ dependencies = [
   "PyYAML>=6.0.0",
   "httpx>=0.24.0",
   "websockets>=12.0",
+  "jsonschema>=4.23,<5",
 ]
 
 [project.urls]

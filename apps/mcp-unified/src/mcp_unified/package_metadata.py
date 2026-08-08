@@ -59,6 +59,7 @@ NETWORK_DEPENDENCIES: Final = (
 PROJECT_DEPENDENCIES: Final = (
     *CORE_DEPENDENCIES,
     *NETWORK_DEPENDENCIES,
+    "jsonschema",
 )
 FASTAPI_DEPENDENCIES: Final = (
     "fastapi",
