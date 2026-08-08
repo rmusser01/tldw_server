@@ -4,7 +4,7 @@ title: Synchronize Notes keywords collections and folders
 status: In Progress
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-08 22:58'
+updated_date: '2026-08-08 23:44'
 labels:
   - notes
   - sync-v2
@@ -38,6 +38,27 @@ Add first-class Sync v2 ownership for Notes keywords, keyword links and collecti
 - [ ] #7 Existing personal datasets bootstrap their current organization state before the six-domain group becomes write-ready, and interrupted bootstrap resumes without partial enrollment or data loss.
 - [ ] #8 Upgrading one device does not deliver unsupported organization domains to legacy devices whose registered requested domains exclude them.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Detailed execution plan: Docs/superpowers/plans/2026-08-08-notes-organization-sync-implementation-plan.md
+
+1. Define the six-domain public contract, strict payload schemas, and deterministic identities.
+2. Migrate ChaChaNotes to schema v55 and add stable resource identities plus a focused projection seam.
+3. Add atomic mutation-group persistence to the Sync store.
+4. Add batch preflight, durable append, ordered materialization, and resume semantics.
+5. Implement strict organization adapters and conflict policy.
+6. Implement SQLite/PostgreSQL materializers and production factory registration.
+7. Bootstrap existing datasets and isolate legacy-device implicit pulls.
+8. Route direct organization REST mutations through the coordinator.
+9. Make compound note writes, effective folder provenance, and keyword merge lossless.
+10. Integrate restore/repair, update docs, and record focused release evidence.
+
+ADR required: yes
+ADR path: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md
+Reason: This task adds a durable cross-database mutation-group contract, domain ownership boundaries, bootstrap policy, and long-lived Sync semantics.
+<!-- SECTION:PLAN:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
