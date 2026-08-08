@@ -2,20 +2,27 @@
 id: TASK-12993
 title: Implement Claims Jobs Stage 2A analytics exports
 status: In Progress
-created_date: 2026-08-08 21:36
+assignee: []
+created_date: '2026-08-08 21:36'
+updated_date: '2026-08-08 22:29'
 labels:
-- claims
-- jobs
-- implementation
-priority: high
+  - claims
+  - jobs
+  - implementation
+dependencies: []
 references:
-- TASK-12989
-- TASK-12990
-- Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
-- Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
+  - TASK-12989
+  - TASK-12990
+  - >-
+    Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
+  - >-
+    Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
 documentation:
-- Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
-- Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
+  - >-
+    Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
+  - >-
+    Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
+priority: high
 ---
 
 ## Description
@@ -46,13 +53,21 @@ Execute the 12 tasks in Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-an
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Task 1 complete at 10aee095ac: Media DB schema v24, SQLite/PostgreSQL migration parity, interrupted-SQL-migration recovery, 83 focused tests passing, Bandit clean; PostgreSQL fixture unavailable locally. Specification and code-quality reviews approved after fix loops.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
