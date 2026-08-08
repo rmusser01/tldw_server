@@ -18,10 +18,10 @@
 **Goal**: Re-run the approved touched-scope regression and security gates on the rebased head and obtain an independent review.
 **Success Criteria**: Focused suites, compilation, lint, Bandit, scope, and independent review pass.
 **Tests**: Commands recorded in `TASK-12989`.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: PR Integration
 **Goal**: Push the rewritten branch, resolve review threads, obtain green required checks, and merge after the human-authored change-summary gate is satisfied.
 **Success Criteria**: Required checks are green, requester-authored summary is present, and PR #2770 is merged into `dev`.
 **Tests**: GitHub PR state, review-thread state, required checks, merged commit verification.
-**Status**: Not Started
+**Status**: In Progress
