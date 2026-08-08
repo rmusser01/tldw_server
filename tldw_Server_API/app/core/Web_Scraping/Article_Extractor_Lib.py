@@ -21,20 +21,17 @@ import hashlib
 import json
 import os
 import random
-import re
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from threading import BoundedSemaphore
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import pandas as pd
-import trafilatura
 
 # External Libraries
 from bs4 import BeautifulSoup
@@ -65,8 +62,11 @@ from tldw_Server_API.app.core.Web_Scraping.content import (
     convert_html_to_markdown,
 )
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import RateLimiter
-from tldw_Server_API.app.core.Web_Scraping.extraction import (
+from tldw_Server_API.app.core.Web_Scraping.extraction import (  # noqa: F401
+    DEFAULT_EXTRACTION_STRATEGY_ORDER,
     clear_extraction_caches,
+    extract_article_data_from_html,
+    extract_article_with_pipeline,
     extract_cluster_entities,
     extract_jsonld_entities,
     extract_llm_entities,
@@ -76,18 +76,6 @@ from tldw_Server_API.app.core.Web_Scraping.extraction import (
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction import (
     get_extraction_cache_stats as _get_extraction_cache_stats,
-)
-from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
-    _schema_cache_get as _canonical_schema_cache_get,
-)
-from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
-    _schema_cache_put as _canonical_schema_cache_put,
-)
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.llm import (
-    schema_rules_to_field_specs as _schema_rules_to_field_specs,
-)
-from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
-    get_strategy_semaphore as _canonical_get_strategy_semaphore,
 )
 from tldw_Server_API.app.core.Web_Scraping.filters import (
     ContentTypeFilter,
@@ -109,10 +97,6 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.selectors import (
     clear_selector_caches as _clear_selector_caches,
-)
-from tldw_Server_API.app.core.Web_Scraping.selectors import (
-    extract_schema_fields,
-    validate_selector_rules,
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors import (
     get_selector_cache_stats as _get_selector_cache_stats,
@@ -360,50 +344,6 @@ async def is_allowed_by_robots_async(url: str, user_agent: str, *, timeout: floa
         return True
 
 
-DEFAULT_BOILERPLATE_PATTERNS = [
-    r"\bsubscribe\s+now\b",
-    r"\bsubscribe\s+today\b",
-    r"\bsign\s+up\b",
-    r"\bshare\s+this\b",
-    r"\bshare\s+on\s+(facebook|twitter|linkedin|reddit)\b",
-    r"\bfollow\s+us\b",
-    r"\bnewsletter\b",
-    r"\bread\s+more\b",
-    r"\bthanks\s+for\s+reading\b",
-]
-
-_BOILERPLATE_REGEXES = [re.compile(pattern, re.IGNORECASE) for pattern in DEFAULT_BOILERPLATE_PATTERNS]
-
-
-def _strip_boilerplate_sections(text: str) -> str:
-    """Remove common boilerplate phrases from extracted article text."""
-    if not text:
-        return text
-
-    lines = text.splitlines()
-
-    def _is_boilerplate(line: str) -> bool:
-        stripped = line.strip()
-        if not stripped:
-            return False
-        return any(regex.search(stripped) for regex in _BOILERPLATE_REGEXES)
-
-    filtered_lines: list[str] = [line for line in lines if not _is_boilerplate(line)]
-
-    # Collapse consecutive blank lines introduced by removals.
-    collapsed: list[str] = []
-    previous_blank = False
-    for line in filtered_lines:
-        if line.strip():
-            collapsed.append(line)
-            previous_blank = False
-        else:
-            if not previous_blank:
-                collapsed.append(line)
-            previous_blank = True
-
-    return "\n".join(collapsed)
-
 #################################################################
 #
 # Scraping-related functions:
@@ -426,171 +366,6 @@ def get_page_title(url: str) -> str:
         return "Untitled"
 
 
-DEFAULT_EXTRACTION_STRATEGY_ORDER = [
-    "jsonld",
-    "schema",
-    "regex",
-    "llm",
-    "cluster",
-    "trafilatura",
-]
-_STRATEGY_ALIASES = {
-    "json-ld": "jsonld",
-    "json_ld": "jsonld",
-    "microdata": "jsonld",
-    "schema_css": "schema",
-    "schema_xpath": "schema",
-    "clustering": "cluster",
-}
-_KNOWN_STRATEGIES = set(DEFAULT_EXTRACTION_STRATEGY_ORDER)
-def _schema_cache_key(html_text: str, url: str, schema_rules: dict[str, Any]) -> str:
-    html_hash = hashlib.sha1(
-        html_text.encode("utf-8", errors="ignore"),
-        usedforsecurity=False
-    ).hexdigest()
-    try:
-        rules_repr = json.dumps(schema_rules, sort_keys=True, ensure_ascii=True)
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        rules_repr = str(schema_rules)
-    raw = f"{url}|{rules_repr}|{html_hash}"
-    return hashlib.sha1(
-        raw.encode("utf-8", errors="ignore"),
-        usedforsecurity=False
-    ).hexdigest()
-
-
-def _schema_cache_get(key: str) -> Optional[dict[str, Any]]:
-    return _canonical_schema_cache_get(key)
-
-
-def _schema_cache_put(key: str, value: dict[str, Any]) -> None:
-    _canonical_schema_cache_put(key, value)
-
-
-
-def _normalize_strategy_order(
-    strategy_order: Optional[list[str]],
-) -> tuple[list[str], list[str]]:
-    if strategy_order:
-        raw = strategy_order
-    else:
-        return list(DEFAULT_EXTRACTION_STRATEGY_ORDER), []
-    normalized: list[str] = []
-    unknown: list[str] = []
-    for item in raw:
-        if not isinstance(item, str):
-            continue
-        key = item.strip().lower()
-        if not key:
-            continue
-        key = _STRATEGY_ALIASES.get(key, key)
-        if key in _KNOWN_STRATEGIES:
-            if key not in normalized:
-                normalized.append(key)
-        else:
-            unknown.append(key)
-    if not normalized:
-        normalized = list(DEFAULT_EXTRACTION_STRATEGY_ORDER)
-    return normalized, unknown
-
-
-def _trace_entry(strategy: str, status: str, reason: str, detail: Optional[str] = None) -> dict[str, Any]:
-    with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-        log_counter("extraction_strategy_total", labels={"strategy": strategy, "status": status})
-    entry = {"strategy": strategy, "status": status, "reason": reason}
-    if detail:
-        entry["detail"] = detail
-    return entry
-
-
-def _record_strategy_metrics(
-    strategy: str,
-    status: str,
-    duration_s: float,
-    result: Optional[dict[str, Any]] = None,
-) -> None:
-    with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-        observe_histogram(
-            "extraction_strategy_duration_seconds",
-            duration_s,
-            labels={"strategy": strategy, "status": status},
-        )
-    if status != "success" or not result:
-        return
-    content = result.get("content")
-    if isinstance(content, str) and content:
-        with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-            observe_histogram(
-                "extraction_content_length_bytes",
-                len(content.encode("utf-8", errors="ignore")),
-                labels={"strategy": strategy},
-            )
-
-
-def _attach_trace(
-    result: dict[str, Any],
-    trace: list[dict[str, Any]],
-    strategy: Optional[str],
-    strategy_order: list[str],
-) -> dict[str, Any]:
-    result["extraction_trace"] = trace
-    result["extraction_strategy"] = strategy
-    result["extraction_strategy_order"] = strategy_order
-    return result
-
-
-def _extract_with_trafilatura(html: str, url: str) -> dict[str, Any]:
-    """Extract article metadata and body from raw HTML."""
-    logging.info(f"Extracting article data from HTML for {url}")
-    downloaded = trafilatura.extract(
-        html,
-        include_comments=False,
-        include_tables=False,
-        include_images=False,
-    )
-    downloaded = _strip_boilerplate_sections(downloaded)
-    metadata = trafilatura.extract_metadata(html)
-
-    result: dict[str, Any] = {
-        "title": "N/A",
-        "author": "N/A",
-        "content": "",
-        "date": "N/A",
-        "url": url,
-        "extraction_successful": False,
-    }
-
-    if downloaded:
-        logging.info(f"Content extracted successfully from {url}")
-        log_counter("article_extracted", labels={"success": "true", "url": url})
-        result["content"] = ContentMetadataHandler.format_content_with_metadata(
-            url=url,
-            content=downloaded,
-            pipeline="Trafilatura",
-            additional_metadata={
-                "extracted_date": metadata.date if metadata and metadata.date else "N/A",
-                "author": metadata.author if metadata and metadata.author else "N/A",
-            },
-        )
-        result["extraction_successful"] = True
-    else:
-        log_counter("article_extracted", labels={"success": "false", "url": url})
-        logging.warning("Content extraction failed.")
-
-    if metadata:
-        result.update(
-            {
-                "title": metadata.title if metadata.title else "N/A",
-                "author": metadata.author if metadata.author else "N/A",
-                "date": metadata.date if metadata.date else "N/A",
-            }
-        )
-    else:
-        logging.warning("Metadata extraction failed.")
-
-    return result
-
-
 def _env_int(name: str) -> Optional[int]:
     raw = os.getenv(name, "").strip()
     if not raw:
@@ -601,376 +376,11 @@ def _env_int(name: str) -> Optional[int]:
         return None
 
 
-
-def _regex_mask_override(settings: Optional[dict[str, Any]]) -> Optional[bool]:
-    if not isinstance(settings, dict):
-        return None
-    for key in ("mask_pii", "pii_mask"):
-        if key in settings:
-            return bool(settings.get(key))
-    return None
-
-
 def _extractor_max_workers() -> Optional[int]:
     value = _env_int("EXTRACTOR_MAX_WORKERS")
     if value is None or value <= 0:
         return None
     return value
-
-
-def _should_clear_caches(stage: str) -> bool:
-    raw = os.getenv("EXTRACTOR_CLEAR_CACHES", "")
-    if not raw:
-        return False
-    value = raw.strip().lower()
-    if _is_truthy(value):
-        return stage == "end"
-    if value in {"both", "all"}:
-        return True
-    if value in {"start", "before", "entry"}:
-        return stage == "start"
-    if value in {"end", "after", "exit"}:
-        return stage == "end"
-    return False
-
-
-def _get_strategy_semaphore(strategy: str) -> Optional[BoundedSemaphore]:
-    return _canonical_get_strategy_semaphore(strategy, _extractor_max_workers())
-
-
-@contextmanager
-def _strategy_throttle(strategy: str) -> Any:
-    sem = _get_strategy_semaphore(strategy)
-    if sem is None:
-        yield
-        return
-    sem.acquire()
-    try:
-        yield
-    finally:
-        sem.release()
-
-
-
-def _coerce_positive_int(value: Any) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        parsed = int(value)
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        return None
-    return parsed if parsed > 0 else None
-
-
-def _coerce_non_negative_float(value: Any, default: float = 0.0) -> float:
-    if value is None:
-        return default
-    try:
-        parsed = float(value)
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        return default
-    return parsed if parsed >= 0.0 else default
-
-
-def _extractor_retry_settings() -> tuple[int, float, float]:
-    max_retries = _coerce_positive_int(os.getenv("EXTRACTOR_MAX_RETRIES")) or 0
-    base_delay_ms = _coerce_non_negative_float(os.getenv("EXTRACTOR_RETRY_BASE_MS"), default=0.0)
-    jitter_ms = _coerce_non_negative_float(os.getenv("EXTRACTOR_RETRY_JITTER_MS"), default=0.0)
-    return max_retries, base_delay_ms, jitter_ms
-
-
-def _run_with_retries(
-    func: Callable[[], dict[str, Any]],
-    *,
-    strategy: str,
-) -> tuple[Optional[dict[str, Any]], Optional[Exception], int]:
-    max_retries, base_delay_ms, jitter_ms = _extractor_retry_settings()
-    attempts = 0
-    while True:
-        try:
-            return func(), None, attempts
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-            if attempts >= max_retries:
-                return None, exc, attempts
-            delay_s = (base_delay_ms / 1000.0) * (2 ** attempts)
-            if jitter_ms:
-                delay_s += random.uniform(0.0, jitter_ms / 1000.0)  # nosec B311
-            attempts += 1
-            with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-                increment_counter(
-                    "extraction_retry_total",
-                    labels={"strategy": strategy, "attempt": str(attempts)},
-                )
-            if delay_s > 0.0:
-                time.sleep(delay_s)
-
-
-def _schema_rule_keys(schema_rules: Optional[dict[str, Any]]) -> list[str]:
-    """Retain pipeline metadata assembly until Task 10 moves the pipeline."""
-
-    if not isinstance(schema_rules, dict):
-        return []
-    keys: list[str] = []
-    if any(schema_rules.get(key) for key in ("baseSelector", "base_selector", "baseXpath", "base_xpath")):
-        keys.append("baseSelector")
-    fields = _schema_rules_to_field_specs(schema_rules)
-    if fields:
-        keys.extend(field["name"] for field in fields if isinstance(field.get("name"), str))
-    else:
-        for key in (
-            "title_xpath", "title_selector", "summary_xpath", "summary_selector",
-            "description_xpath", "content_xpath", "content_selector", "author_xpath",
-            "author_selector", "published_xpath", "date_xpath", "date_selector",
-        ):
-            if schema_rules.get(key):
-                keys.append(key)
-    return sorted({key for key in keys if key})
-
-
-def extract_article_with_pipeline(
-    html: str,
-    url: str,
-    *,
-    strategy_order: Optional[list[str]] = None,
-    handler: Optional[Callable[[str, str], dict[str, Any]]] = None,
-    fallback_extractor: Optional[Callable[[str, str], dict[str, Any]]] = None,
-    schema_rules: Optional[dict[str, Any]] = None,
-    llm_settings: Optional[dict[str, Any]] = None,
-    regex_settings: Optional[dict[str, Any]] = None,
-    cluster_settings: Optional[dict[str, Any]] = None,
-    allow_llm_extraction: bool = True,
-) -> dict[str, Any]:
-    trace: list[dict[str, Any]] = []
-    jsonld_summary: Optional[str] = None
-    order, unknown = _normalize_strategy_order(strategy_order)
-    if not allow_llm_extraction:
-        order = [strategy for strategy in order if strategy != "llm"]
-    if _should_clear_caches("start"):
-        clear_extraction_caches()
-
-    def _finalize_result(
-        result: dict[str, Any],
-        *,
-        strategy: Optional[str],
-    ) -> dict[str, Any]:
-        summary = result.get("summary")
-        if (
-            result.get("extraction_successful")
-            and jsonld_summary
-            and (not isinstance(summary, str) or not summary.strip())
-        ):
-            result["summary"] = jsonld_summary
-        final = _attach_trace(result, trace, strategy, order)
-        if _should_clear_caches("end"):
-            clear_extraction_caches()
-        return final
-
-    for strategy in unknown:
-        trace.append(_trace_entry(strategy, "skipped", "unknown_strategy"))
-
-    last_result: Optional[dict[str, Any]] = None
-    for strategy in order:
-        start = time.perf_counter()
-        if strategy == "jsonld":
-            with _strategy_throttle(strategy):
-                result = extract_jsonld_entities(html, url)
-            summary = result.get("summary")
-            if isinstance(summary, str) and summary.strip():
-                jsonld_summary = summary
-            last_result = result
-            if result.get("extraction_successful"):
-                trace.append(_trace_entry(strategy, "success", "jsonld_extracted"))
-                _record_strategy_metrics(strategy, "success", time.perf_counter() - start, result)
-                return _finalize_result(result, strategy=strategy)
-            detail = result.get("jsonld_error")
-            trace.append(_trace_entry(strategy, "failed", "jsonld_no_content", str(detail) if detail else None))
-            _record_strategy_metrics(strategy, "failed", time.perf_counter() - start, result)
-            continue
-        if strategy == "schema":
-            if isinstance(schema_rules, dict) and schema_rules:
-                cache_key = _schema_cache_key(html, url, schema_rules)
-                cached = _schema_cache_get(cache_key)
-                if cached and cached.get("extraction_successful"):
-                    cached["schema_cache_hit"] = True
-                    trace.append(_trace_entry(strategy, "success", "schema_cached"))
-                    _record_strategy_metrics(strategy, "success", time.perf_counter() - start, cached)
-                    return _finalize_result(cached, strategy=strategy)
-                try:
-                    validation = validate_selector_rules(
-                        schema_rules,
-                        html_text=html,
-                        include_counts=True,
-                    )
-                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as validation_exc:
-                    reason = "schema_import_error" if isinstance(validation_exc, ImportError) else "schema_error"
-                    trace.append(_trace_entry(strategy, "failed", reason))
-                    _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
-                    continue
-                if validation is None:
-                    trace.append(_trace_entry(strategy, "failed", "schema_error"))
-                    _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
-                    continue
-                errors = validation.get("errors") if isinstance(validation, dict) else None
-                warnings = validation.get("warnings") if isinstance(validation, dict) else None
-                selector_counts = validation.get("selector_counts") if isinstance(validation, dict) else None
-                warning_detail = None
-                if isinstance(warnings, list) and warnings:
-                    warning_detail = f"{len(warnings)} selector warning(s)"
-                if errors:
-                    trace.append(
-                        _trace_entry(
-                            strategy,
-                            "failed",
-                            "schema_invalid_selectors",
-                            f"{len(errors)} invalid selector(s)",
-                        )
-                    )
-                    _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
-                    continue
-                with _strategy_throttle(strategy):
-                    result, exc, _attempts = _run_with_retries(
-                        lambda: extract_schema_fields(html, url, schema_rules),
-                        strategy=strategy,
-                    )
-                if exc or result is None:
-                    reason = "schema_import_error" if isinstance(exc, ImportError) else "schema_error"
-                    trace.append(_trace_entry(strategy, "failed", reason))
-                    _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
-                    continue
-                if warning_detail:
-                    result["schema_selector_warnings"] = warnings
-                if isinstance(selector_counts, dict):
-                    normalized_counts: dict[str, int] = {}
-                    for key, count in selector_counts.items():
-                        if not isinstance(key, str):
-                            continue
-                        if key.startswith("fields.") or key.startswith("baseFields."):
-                            norm_key = key.split(".", 1)[1]
-                        else:
-                            norm_key = key
-                        normalized_counts[norm_key] = int(count)
-                    result["schema_selector_counts"] = normalized_counts
-                result["schema_rule_keys"] = _schema_rule_keys(schema_rules)
-                if result.get("extraction_successful"):
-                    _schema_cache_put(cache_key, result)
-                    trace.append(_trace_entry(strategy, "success", "schema_extracted", warning_detail))
-                    _record_strategy_metrics(strategy, "success", time.perf_counter() - start, result)
-                    return _finalize_result(result, strategy=strategy)
-                trace.append(_trace_entry(strategy, "failed", "schema_no_content", warning_detail))
-                _record_strategy_metrics(strategy, "failed", time.perf_counter() - start, result)
-                last_result = result
-                continue
-            if handler is None:
-                trace.append(_trace_entry(strategy, "skipped", "no_schema_rules_or_handler"))
-                _record_strategy_metrics(strategy, "skipped", time.perf_counter() - start)
-                continue
-            with _strategy_throttle(strategy):
-                result, exc, _attempts = _run_with_retries(lambda: handler(html, url), strategy=strategy)
-            if exc or result is None:
-                trace.append(_trace_entry(strategy, "failed", "handler_error"))
-                _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
-                continue
-            if "extraction_trace" in result:
-                result["handler_trace"] = result.pop("extraction_trace")
-            if result.get("extraction_successful"):
-                trace.append(_trace_entry(strategy, "success", "handler_extracted"))
-                _record_strategy_metrics(strategy, "success", time.perf_counter() - start, result)
-                return _finalize_result(result, strategy=strategy)
-            trace.append(_trace_entry(strategy, "failed", "handler_no_content"))
-            _record_strategy_metrics(strategy, "failed", time.perf_counter() - start, result)
-            last_result = result
-            continue
-        if strategy == "regex":
-            mask_override = _regex_mask_override(regex_settings)
-            with _strategy_throttle(strategy):
-                result = extract_regex_entities(html, url, mask_pii=mask_override)
-            last_result = result
-            if result.get("extraction_successful"):
-                trace.append(_trace_entry(strategy, "success", "regex_extracted"))
-                _record_strategy_metrics(strategy, "success", time.perf_counter() - start, result)
-                return _finalize_result(result, strategy=strategy)
-            trace.append(_trace_entry(strategy, "failed", "regex_no_matches"))
-            _record_strategy_metrics(strategy, "failed", time.perf_counter() - start, result)
-            continue
-        if strategy == "llm":
-            with _strategy_throttle(strategy):
-                result = extract_llm_entities(html, url, llm_settings=llm_settings, schema_rules=schema_rules)
-            last_result = result
-            if result.get("extraction_successful"):
-                trace.append(_trace_entry(strategy, "success", "llm_extracted"))
-                _record_strategy_metrics(strategy, "success", time.perf_counter() - start, result)
-                return _finalize_result(result, strategy=strategy)
-            detail = result.get("llm_error")
-            trace.append(_trace_entry(strategy, "failed", "llm_no_content", str(detail) if detail else None))
-            _record_strategy_metrics(strategy, "failed", time.perf_counter() - start, result)
-            continue
-        if strategy == "cluster":
-            with _strategy_throttle(strategy):
-                result = extract_cluster_entities(html, url, cluster_settings=cluster_settings)
-            last_result = result
-            if result.get("extraction_successful"):
-                detail = f"cluster_blocks={result.get('cluster_block_count')}"
-                trace.append(_trace_entry(strategy, "success", "cluster_extracted", detail))
-                _record_strategy_metrics(strategy, "success", time.perf_counter() - start, result)
-                return _finalize_result(result, strategy=strategy)
-            detail = result.get("cluster_error")
-            trace.append(_trace_entry(strategy, "failed", "cluster_no_content", str(detail) if detail else None))
-            _record_strategy_metrics(strategy, "failed", time.perf_counter() - start, result)
-            continue
-        if strategy == "trafilatura":
-            extractor = fallback_extractor or _extract_with_trafilatura
-            with _strategy_throttle(strategy):
-                result, exc, _attempts = _run_with_retries(
-                    lambda _extractor=extractor: _extractor(html, url),
-                    strategy=strategy,
-                )
-            if exc or result is None:
-                trace.append(_trace_entry(strategy, "failed", "extractor_error"))
-                _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
-                continue
-            last_result = result
-            if result.get("extraction_successful"):
-                trace.append(_trace_entry(strategy, "success", "extracted"))
-                _record_strategy_metrics(strategy, "success", time.perf_counter() - start, result)
-                return _finalize_result(result, strategy=strategy)
-            trace.append(_trace_entry(strategy, "failed", "no_content"))
-            _record_strategy_metrics(strategy, "failed", time.perf_counter() - start, result)
-
-    if last_result is None:
-        last_result = {
-            "title": "N/A",
-            "author": "N/A",
-            "content": "",
-            "date": "N/A",
-            "url": url,
-            "extraction_successful": False,
-        }
-    return _finalize_result(last_result, strategy=None)
-
-
-def extract_article_data_from_html(
-    html: str,
-    url: str,
-    strategy_order: Optional[list[str]] = None,
-    handler: Optional[Callable[[str, str], dict[str, Any]]] = None,
-    schema_rules: Optional[dict[str, Any]] = None,
-    llm_settings: Optional[dict[str, Any]] = None,
-    regex_settings: Optional[dict[str, Any]] = None,
-    cluster_settings: Optional[dict[str, Any]] = None,
-    allow_llm_extraction: bool = True,
-) -> dict[str, Any]:
-    """Extract article metadata and body from raw HTML."""
-    return extract_article_with_pipeline(
-        html,
-        url,
-        strategy_order=strategy_order,
-        handler=handler,
-        schema_rules=schema_rules,
-        llm_settings=llm_settings,
-        regex_settings=regex_settings,
-        cluster_settings=cluster_settings,
-        allow_llm_extraction=allow_llm_extraction,
-    )
 
 
 def _record_robot_policy_block(url: str, reason: str) -> None:

@@ -14,6 +14,7 @@ from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 
 from tldw_Server_API.app.core.Watchlists import fetchers
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline as extraction_pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     build_default_dependencies,
 )
@@ -170,6 +171,17 @@ def _install_metric_recorder(monkeypatch: pytest.MonkeyPatch) -> _MetricRecorder
     monkeypatch.setattr(article, "log_counter", recorder.counter("log_counter"))
     monkeypatch.setattr(article, "observe_histogram", recorder.histogram("observe_histogram"))
     monkeypatch.setattr(article, "log_histogram", recorder.histogram("log_histogram"))
+    pipeline_dependencies = replace(
+        build_default_dependencies(),
+        increment_counter=recorder.counter("increment_counter"),
+        log_counter=recorder.counter("log_counter"),
+        observe_histogram=recorder.histogram("observe_histogram"),
+    )
+    monkeypatch.setattr(
+        extraction_pipeline,
+        "build_default_dependencies",
+        lambda: pipeline_dependencies,
+    )
     cluster_dependencies = replace(
         build_default_dependencies(),
         increment_counter=recorder.counter("increment_counter"),

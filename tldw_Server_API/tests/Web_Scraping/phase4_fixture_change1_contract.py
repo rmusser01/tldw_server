@@ -147,6 +147,26 @@ def _is_new_regex_or_downstream_metric(difference: Difference) -> bool:
     return False
 
 
+def _cluster_cache_created_by_downstream_extraction(difference: Difference) -> bool:
+    return difference.expected == 0 and type(difference.actual) is int and difference.actual > 0
+
+
+def _is_cluster_internal_metric(difference: Difference) -> bool:
+    if difference.expected is not MISSING or type(difference.actual) is not dict:
+        return False
+    record = difference.actual
+    return (
+        record.get("emitter") == "increment_counter"
+        and record.get("kind") == "counter"
+        and record.get("name") in {"extraction_cluster_total", "extraction_cluster_cache_total"}
+        and isinstance(record.get("labels"), dict)
+    )
+
+
+def _is_new_cluster_result_field(difference: Difference) -> bool:
+    return difference.expected is MISSING and difference.actual is not None
+
+
 def _profile_dict(value: object, path: str) -> dict[str, object]:
     assert type(value) is dict, f"Change 1 profile requires an object at {path}"
     return value
@@ -261,7 +281,12 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
             expected_added_metrics.append(("extraction_content_length_bytes", strategy, None))
 
     added_metrics = actual_metrics[len(expected_metrics) :]
-    actual_added_metrics = [_metric_profile(metric) for metric in added_metrics]
+    actual_added_metrics = [
+        _metric_profile(metric)
+        for metric in added_metrics
+        if _profile_dict(metric, "$.metrics[]").get("name")
+        not in {"extraction_cluster_total", "extraction_cluster_cache_total"}
+    ]
     assert actual_added_metrics == expected_added_metrics, (
         "Change 1 profile requires ordered counter/timing pairs and one terminal " "content-length metric"
     )
@@ -317,9 +342,38 @@ CHANGE_1_CONTRACT = DifferenceContract(
             identifier="downstream_metric",
             path=("metrics", ANY_PATH),
             description="regex enrichment emits downstream extraction metrics",
-            validator=_is_new_regex_or_downstream_metric,
+            validator=lambda difference: _is_new_regex_or_downstream_metric(difference)
+            or _is_cluster_internal_metric(difference),
             minimum_count=3,
-            maximum_count=5,
+            maximum_count=9,
+        ),
+        DifferenceRule(
+            identifier="downstream_cluster_cache",
+            path=("cache_stats", "cluster_embedding_cache_size"),
+            description="the newly reached cluster strategy may populate the shared embedding cache",
+            validator=_cluster_cache_created_by_downstream_extraction,
+            minimum_count=0,
+            maximum_count=1,
+        ),
+        *(
+            DifferenceRule(
+                identifier=f"cluster_result_{field}",
+                path=("result", field),
+                description="a successful downstream cluster result may include its established metadata",
+                validator=_is_new_cluster_result_field,
+                minimum_count=0,
+                maximum_count=1,
+            )
+            for field in (
+                "cluster_blocks",
+                "cluster_block_count",
+                "cluster_prefiltered_count",
+                "cluster_total_blocks",
+                "cluster_cluster_count",
+                "cluster_method",
+                "cluster_similarity_threshold",
+                "cluster_word_threshold",
+            )
         ),
     ),
     allow_predecessor_equality=True,
