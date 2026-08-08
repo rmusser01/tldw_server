@@ -261,6 +261,37 @@ class TestNoteStoreSearch:
 
 
 class TestNoteStoreGraphHelpers:
+    def test_notes_batch_preserves_conversation_and_message_backlinks(self, store, db):
+        conversation_id = db.add_conversation({"title": "Source conversation"})
+        message_id = db.add_message(
+            {
+                "conversation_id": conversation_id,
+                "sender": "user",
+                "content": "Source message",
+            }
+        )
+        note_id = store.add_note(
+            title="Linked note",
+            content="Linked content",
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+
+        rows = store.get_notes_batch([note_id])
+
+        assert rows == [
+            {
+                "id": note_id,
+                "title": "Linked note",
+                "content": "Linked content",
+                "created_at": rows[0]["created_at"],
+                "last_modified": rows[0]["last_modified"],
+                "deleted": rows[0]["deleted"],
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+            }
+        ]
+
     def test_graph_helpers_and_keyword_links(self, store, db):
         character_id = db.add_character_card({"name": "Note Source Character"})
         conversation_id = db.add_conversation(

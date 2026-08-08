@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Internal storage models for Sync v2 M1."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -120,6 +120,11 @@ CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE = (
     "Server-front-end mutation is disabled for client_private_v1 datasets "
     "because opaque fields cannot be inspected or re-encrypted by the server."
 )
+NOTES_NOTE_TITLE_MAX_CHARS = 255
+NOTES_NOTE_CONTENT_MAX_CHARS = 5_000_000
+NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS: frozenset[str] = frozenset(
+    {"title", "content", "conversation_id", "message_id"}
+)
 SYNC_KEY_WRAPPED_FOR_VALUES: list[SyncKeyWrappedFor] = [
     "server",
     "passphrase",
@@ -133,6 +138,33 @@ SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
     "failed",
     "blocked",
 ]
+
+
+def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
+    """Return client-discoverable payload contracts for versioned Sync domains."""
+
+    return {
+        "notes.note": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["title", "content"],
+                "properties": {
+                    "title": {"type": "string", "max_length": NOTES_NOTE_TITLE_MAX_CHARS},
+                    "content": {"type": "string", "max_length": NOTES_NOTE_CONTENT_MAX_CHARS},
+                    "conversation_id": {"type": ["string", "null"]},
+                    "message_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+            "restore": {
+                "operation": "upsert",
+                "routing_metadata": {"restore_intent": True},
+                "requires_current_base": True,
+            },
+        }
+    }
 
 
 def server_frontend_mutation_enabled_for_policy(policy: EncryptionPolicy | str) -> bool:
@@ -155,6 +187,47 @@ def client_private_server_frontend_limitation_warning() -> dict[str, str]:
     return {
         "code": CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
         "message": CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
+    }
+
+
+def validate_notes_note_upsert_payload(
+    payload: Mapping[str, object],
+) -> dict[str, str | None]:
+    """Validate and return the lossless version-1 ``notes.note`` payload."""
+
+    unexpected = set(payload).difference(NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS)
+    if unexpected:
+        raise ValueError(
+            "notes.note upsert payload contains unsupported fields: "
+            + ", ".join(sorted(unexpected))
+        )
+
+    title = payload.get("title")
+    content = payload.get("content")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("notes.note upsert payload requires a non-empty string title")
+    if len(title) > NOTES_NOTE_TITLE_MAX_CHARS:
+        raise ValueError(
+            f"notes.note title must be at most {NOTES_NOTE_TITLE_MAX_CHARS} characters"
+        )
+    if not isinstance(content, str) or not content:
+        raise ValueError("notes.note upsert payload requires non-empty string content")
+    if len(content) > NOTES_NOTE_CONTENT_MAX_CHARS:
+        raise ValueError(
+            f"notes.note content must be at most {NOTES_NOTE_CONTENT_MAX_CHARS} characters"
+        )
+
+    backlinks: dict[str, str | None] = {}
+    for field_name in ("conversation_id", "message_id"):
+        value = payload.get(field_name)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"notes.note {field_name} must be a string or null")
+        backlinks[field_name] = value
+
+    return {
+        "title": title,
+        "content": content,
+        **backlinks,
     }
 
 
@@ -1139,6 +1212,9 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS",
+    "NOTES_NOTE_CONTENT_MAX_CHARS",
+    "NOTES_NOTE_TITLE_MAX_CHARS",
     "MEDIA_SYNC_DOMAINS",
     "MEDIA_SYNC_OPERATIONS",
     "STRICT_ENCRYPTION_POLICIES",
@@ -1199,4 +1275,6 @@ __all__ = [
     "client_private_server_frontend_limitation_warning",
     "server_frontend_mutation_blockers_for_policy",
     "server_frontend_mutation_enabled_for_policy",
+    "sync_v2_domain_schemas",
+    "validate_notes_note_upsert_payload",
 ]

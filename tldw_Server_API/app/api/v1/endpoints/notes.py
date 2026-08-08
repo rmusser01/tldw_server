@@ -286,24 +286,12 @@ def _note_keywords_sync_unsupported_error() -> HTTPException:
     )
 
 
-def _note_restore_sync_unsupported_error() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={
-            "error_code": "sync_v2_note_restore_not_supported",
-            "message": "Sync v2 M1 does not support restoring notes through this endpoint.",
-        },
-    )
-
-
 def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
     return {
         "title": str(note.get("title") or ""),
         "content": str(note.get("content") or ""),
         "conversation_id": note.get("conversation_id"),
         "message_id": note.get("message_id"),
-        "client_id": note.get("client_id"),
-        "owner_user_id": note.get("owner_user_id") or note.get("client_id"),
     }
 
 
@@ -1368,8 +1356,6 @@ async def create_note(
                         "content": note_in.content,
                         "conversation_id": conversation_id,
                         "message_id": message_id,
-                        "client_id": str(current_user.id),
-                        "owner_user_id": str(current_user.id),
                     },
                     source="server_api",
                     stable_key=stable_key,
@@ -2161,8 +2147,6 @@ async def import_notes(
                                     "content": parsed_note["content"],
                                     "conversation_id": None,
                                     "message_id": None,
-                                    "client_id": str(current_user.id),
-                                    "owner_user_id": str(current_user.id),
                                 },
                                 source="server_api",
                             )
@@ -4189,10 +4173,9 @@ async def delete_note(
                     operation="tombstone",
                     object_id=note_id,
                     payload={
-                        "id": note_id,
-                        "deleted": True,
-                        "client_id": str(current_user.id),
-                        "owner_user_id": str(current_user.id),
+                        "deleted_at": sync_service.clock()
+                        or datetime.now(timezone.utc).isoformat(),
+                        "reason": "user_deleted",
                     },
                     source="server_api",
                 )
@@ -4258,15 +4241,38 @@ async def restore_note(
         logger.info(
             f"User (DB client_id: {db.client_id}) restoring note: ID='{note_id}', Version={expected_version}")
 
-        if _active_notes_sync_service(current_user) is not None:
-            raise _note_restore_sync_unsupported_error()
-
-        success = db.restore_note(
-            note_id=note_id,
-            expected_version=expected_version
-        )
-        if not success:
-            raise CharactersRAGDBError("Note restore reported non-success without specific exception.")
+        sync_service = _active_notes_sync_service(current_user)
+        if sync_service is not None:
+            if not existing_note:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+            if was_deleted:
+                current_version = existing_note.get("version")
+                if current_version is not None and int(current_version) != int(expected_version):
+                    raise ConflictError(
+                        f"Restore for Note ID {note_id} failed: version mismatch.",
+                        entity="notes",
+                        entity_id=note_id,
+                    )
+                try:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="notes.note",
+                        operation="upsert",
+                        object_id=note_id,
+                        payload=_note_payload_from_row(existing_note),
+                        source="server_api",
+                        routing_metadata={"restore_intent": True},
+                    )
+                except Exception as sync_exc:
+                    raise _note_sync_http_error(sync_exc) from sync_exc
+        else:
+            success = db.restore_note(
+                note_id=note_id,
+                expected_version=expected_version
+            )
+            if not success:
+                raise CharactersRAGDBError("Note restore reported non-success without specific exception.")
 
         logger.info(
             f"Note '{note_id}' restored successfully for user (DB client_id: {db.client_id}).")
@@ -4308,6 +4314,8 @@ async def restore_note(
             deleted=bool(restored_note.get('deleted', False)),
             keywords=keyword_responses,
             folders=list(folders or []),
+            conversation_id=restored_note.get("conversation_id"),
+            message_id=restored_note.get("message_id"),
         )
     except HTTPException:
         raise
@@ -4418,8 +4426,6 @@ async def bulk_create_notes(
                             "content": item.content,
                             "conversation_id": conversation_id,
                             "message_id": message_id,
-                            "client_id": str(current_user.id),
-                            "owner_user_id": str(current_user.id),
                         },
                         source="server_api",
                     )

@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegistry
 from .blob_store import LocalSyncBlobStore
 from .domain_adapters.media import MediaMetadataAdapter
+from .domain_adapters.notes import NotesDomainAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
@@ -43,6 +44,8 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
             (
                 AttachmentRefAdapter()
                 if domain == "attachment.ref"
+                else NotesDomainAdapter()
+                if domain == "notes.note"
                 else StaticSyncAdapter(domain=domain, supported_adapter_versions={1})
             )
             for domain in M1_SYNC_DOMAINS

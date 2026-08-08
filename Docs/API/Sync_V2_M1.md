@@ -937,9 +937,9 @@ conflict that requires explicit review.
   "schema_version": 1,
   "payload": {
     "title": "Trip notes",
-    "body": "Updated outline.",
-    "tags": ["travel", "research"],
-    "updated_at": "2026-05-23T18:30:00Z"
+    "content": "Updated outline.\n\n[[Packing list]]",
+    "conversation_id": "conv_trip_planning",
+    "message_id": "msg_source_42"
   },
   "payload_hash": "sha256:note-upsert",
   "created_at_client": "2026-05-23T18:30:00Z",
@@ -949,6 +949,14 @@ conflict that requires explicit review.
   }
 }
 ```
+
+The canonical version-1 payload contains only `title`, `content`, nullable
+`conversation_id`, and nullable `message_id`. Accepted title and Markdown bytes
+are preserved exactly within the limits advertised by
+`capabilities.domain_schemas.notes.note`; unknown fields are rejected. To
+restore a deleted note, send an `upsert` with the full payload,
+`routing_metadata.restore_intent` set to `true`, and a base cursor, revision,
+and hash that exactly reference the current tombstone head.
 
 ### `chat.conversation` Upsert
 

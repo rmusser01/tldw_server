@@ -280,12 +280,14 @@ def test_restore_preview_paginates_past_scan_limit_without_truncating_domain(
             client_envelope_id="env-note-2",
             client_sequence=2,
             payload_hash="sha256:note-2",
+            stable_key="note:note-2",
         ),
         _note_envelope(
             object_id="note-3",
             client_envelope_id="env-note-3",
             client_sequence=3,
             payload_hash="sha256:note-3",
+            stable_key="note:note-3",
         ),
     )
 

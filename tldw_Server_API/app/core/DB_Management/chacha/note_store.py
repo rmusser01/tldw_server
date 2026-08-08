@@ -118,10 +118,10 @@ class NoteStore:
 
         del object_hash
         normalized_note_id = str(note_id).strip()
-        normalized_title = title.strip() if isinstance(title, str) else ""
+        exact_title = title if isinstance(title, str) else ""
         if not normalized_note_id:
             raise InputError("note_id cannot be empty.")  # noqa: TRY003
-        if not normalized_title:
+        if not exact_title.strip():
             raise InputError("Note title cannot be empty.")  # noqa: TRY003
         if content is None:
             raise InputError("Note content cannot be None.")  # noqa: TRY003
@@ -149,7 +149,7 @@ class NoteStore:
         """
         params = (
             normalized_note_id,
-            normalized_title,
+            exact_title,
             content,
             now,
             sync_client_id,
@@ -608,7 +608,7 @@ class NoteStore:
                 deleted_clause = " AND deleted = ?"
                 params.append(self._deleted_value(False))
             query = (
-                f"SELECT id, title, content, created_at, last_modified, deleted, conversation_id "  # nosec B608
+                f"SELECT id, title, content, created_at, last_modified, deleted, conversation_id, message_id "  # nosec B608
                 f"FROM notes WHERE id IN ({ph}){deleted_clause}"
             )
             cur = self._db.execute_query(query, tuple(params))
@@ -617,6 +617,7 @@ class NoteStore:
                     "id": row[0], "title": row[1], "content": row[2],
                     "created_at": row[3], "last_modified": row[4],
                     "deleted": row[5], "conversation_id": row[6],
+                    "message_id": row[7],
                 }
                 results.append(r)
         return results

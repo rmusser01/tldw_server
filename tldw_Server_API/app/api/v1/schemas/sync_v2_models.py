@@ -6,6 +6,11 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tldw_Server_API.app.core.Sync.v2.models import (
+    sync_v2_domain_schemas,
+    validate_notes_note_upsert_payload,
+)
+
 SyncDomain = Literal[
     "notes.note",
     "chat.conversation",
@@ -267,6 +272,9 @@ class SyncCapabilitiesResponse(BaseModel):
     )
     operations: dict[SyncDomain, list[SyncOperation]] = Field(
         default_factory=lambda: {domain: list(operations) for domain, operations in SYNC_V2_SUPPORTED_OPERATIONS.items()}
+    )
+    domain_schemas: dict[SyncDomain, dict[str, Any]] = Field(
+        default_factory=sync_v2_domain_schemas
     )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
     encryption_policies: list[EncryptionPolicy] = Field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
@@ -1243,6 +1251,9 @@ class SyncV2Envelope(BaseModel):
             self.operation == "append" and (not self.object_id.strip() or not self.payload_hash.strip())
         ):
             raise ValueError("chat.message append envelopes require object_id and payload_hash")
+
+        if self.domain == "notes.note" and self.operation == "upsert":
+            validate_notes_note_upsert_payload(self.payload)
 
         if self.domain == "attachment.ref":
             missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(self.payload)

@@ -84,7 +84,7 @@ def _note_envelope(**overrides) -> SyncEnvelopeCreate:
         "object_revision": 1,
         "payload": {
             "title": "Trip notes",
-            "body": "Packed outline and research links.",
+            "content": "Packed outline and research links.",
         },
         "payload_hash": "sha256:note-v1",
         "created_at_client": "2026-05-23T18:12:44+00:00",
@@ -124,6 +124,45 @@ def test_clean_notes_note_upsert_creates_normal_chacha_note(
     assert state.object_revision == 1
     assert state.object_hash == "sha256:note-v1"
     assert state.deleted is False
+
+
+def test_notes_note_upsert_preserves_exact_markdown_title_and_backlinks(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    conversation_id = chacha_db.add_conversation(
+        {"id": "conversation-1", "title": "Source conversation"}
+    )
+    message_id = chacha_db.add_message(
+        {
+            "id": "message-1",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "Source message",
+        }
+    )
+    exact_title = "  Unicode π note  "
+    exact_content = "# Heading\n\n<link target> & 🧠\n\n[[Exact Target]]\n"
+
+    result = _push_one(
+        sync_service,
+        _note_envelope(
+            payload={
+                "title": exact_title,
+                "content": exact_content,
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+            }
+        ),
+    )
+
+    assert [item.client_envelope_id for item in result.accepted] == ["env-create"]
+    note = chacha_db.get_note_by_id("note-1")
+    assert note is not None
+    assert note["title"] == exact_title
+    assert note["content"] == exact_content
+    assert note["conversation_id"] == "conversation-1"
+    assert note["message_id"] == "message-1"
 
 
 def test_exact_retry_of_applied_create_does_not_rematerialize_or_conflict(
@@ -261,7 +300,7 @@ def test_stale_base_creates_whole_object_conflict_without_overwriting_projection
             base_object_revision=base.object_revision,
             base_object_hash=base.object_hash,
             object_revision=2,
-            payload={"title": "Server winner", "body": "Keep this body."},
+            payload={"title": "Server winner", "content": "Keep this body."},
             payload_hash="sha256:note-v2",
         ),
     )
@@ -277,7 +316,7 @@ def test_stale_base_creates_whole_object_conflict_without_overwriting_projection
             base_object_revision=base_revision,
             base_object_hash=base_hash,
             object_revision=3,
-            payload={"title": "Stale edit", "body": "Do not apply."},
+            payload={"title": "Stale edit", "content": "Do not apply."},
             payload_hash=f"sha256:stale-{base_revision}",
         ),
     )
@@ -323,7 +362,7 @@ def test_materialization_conflict_is_not_returned_by_normal_pull(
             base_object_revision=base.object_revision,
             base_object_hash=base.object_hash,
             object_revision=2,
-            payload={"title": "Server winner", "body": "Keep this body."},
+            payload={"title": "Server winner", "content": "Keep this body."},
             payload_hash="sha256:note-v2",
         ),
     )
@@ -337,7 +376,7 @@ def test_materialization_conflict_is_not_returned_by_normal_pull(
             base_object_revision=base.object_revision,
             base_object_hash=base.object_hash,
             object_revision=3,
-            payload={"title": "Stale edit", "body": "Do not apply."},
+            payload={"title": "Stale edit", "content": "Do not apply."},
             payload_hash="sha256:stale-v3",
         ),
     )
@@ -380,7 +419,7 @@ def test_push_stop_on_conflict_rejects_remaining_envelopes(
                 base_object_revision=current.object_revision + 1,
                 base_object_hash=current.object_hash,
                 object_revision=2,
-                payload={"title": "Stale", "body": "Do not apply."},
+                payload={"title": "Stale", "content": "Do not apply."},
                 payload_hash="sha256:stale",
             ),
             _note_envelope(
@@ -388,7 +427,7 @@ def test_push_stop_on_conflict_rejects_remaining_envelopes(
                 object_id="note-2",
                 client_sequence=3,
                 object_revision=1,
-                payload={"title": "Skipped", "body": "Should not be applied."},
+                payload={"title": "Skipped", "content": "Should not be applied."},
                 payload_hash="sha256:note-2",
             ),
         ],
@@ -422,7 +461,7 @@ def test_pull_paginates_across_hidden_materialization_conflict(
             base_object_revision=base.object_revision,
             base_object_hash=base.object_hash,
             object_revision=2,
-            payload={"title": "Stale edit", "body": "Do not apply."},
+            payload={"title": "Stale edit", "content": "Do not apply."},
             payload_hash="sha256:stale-v2",
         ),
     )
@@ -435,7 +474,7 @@ def test_pull_paginates_across_hidden_materialization_conflict(
             base_object_revision=base.object_revision,
             base_object_hash=base.object_hash,
             object_revision=2,
-            payload={"title": "Server winner", "body": "Keep this body."},
+            payload={"title": "Server winner", "content": "Keep this body."},
             payload_hash="sha256:note-v2",
         ),
     )
@@ -592,7 +631,7 @@ def test_tombstoned_note_is_not_resurrected_by_stale_upsert(
             base_object_revision=base.object_revision,
             base_object_hash=base.object_hash,
             object_revision=2,
-            payload={"title": "Stale resurrect", "body": "Do not revive."},
+            payload={"title": "Stale resurrect", "content": "Do not revive."},
             payload_hash="sha256:stale-resurrect",
         ),
     )
@@ -603,6 +642,154 @@ def test_tombstoned_note_is_not_resurrected_by_stale_upsert(
     deleted_note = chacha_db.get_note_by_id("note-1", include_deleted=True)
     assert deleted_note is not None
     assert bool(deleted_note["deleted"]) is True
+
+
+def test_restore_intent_upsert_against_current_tombstone_restores_note(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    created = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+    assert created is not None
+    _push_one(
+        sync_service,
+        _note_envelope(
+            client_envelope_id="env-delete",
+            client_sequence=2,
+            operation="tombstone",
+            base_server_cursor=created.latest_server_cursor,
+            base_object_revision=created.object_revision,
+            base_object_hash=created.object_hash,
+            object_revision=2,
+            payload={"deleted_at": "2026-05-23T18:35:00+00:00"},
+            payload_hash="sha256:note-delete",
+            deleted=True,
+        ),
+    )
+    tombstone = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+    assert tombstone is not None
+    assert tombstone.deleted is True
+
+    result = _push_one(
+        sync_service,
+        _note_envelope(
+            client_envelope_id="env-restore",
+            client_sequence=3,
+            base_server_cursor=tombstone.latest_server_cursor,
+            base_object_revision=tombstone.object_revision,
+            base_object_hash=tombstone.object_hash,
+            object_revision=3,
+            payload={
+                "title": "Restored note",
+                "content": "Restored exactly.",
+                "conversation_id": None,
+                "message_id": None,
+            },
+            payload_hash="sha256:note-restored",
+            routing_metadata={"restore_intent": True},
+        ),
+    )
+
+    assert [item.client_envelope_id for item in result.accepted] == ["env-restore"]
+    assert result.conflicts == []
+    restored = chacha_db.get_note_by_id("note-1")
+    assert restored is not None
+    assert restored["title"] == "Restored note"
+    state = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+    assert state is not None
+    assert state.deleted is False
+    assert state.object_revision == 3
+
+
+def test_ordinary_upsert_against_current_tombstone_does_not_restore_note(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    created = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+    assert created is not None
+    _push_one(
+        sync_service,
+        _note_envelope(
+            client_envelope_id="env-delete",
+            client_sequence=2,
+            operation="tombstone",
+            base_server_cursor=created.latest_server_cursor,
+            base_object_revision=created.object_revision,
+            base_object_hash=created.object_hash,
+            object_revision=2,
+            payload={"deleted_at": "2026-05-23T18:35:00+00:00"},
+            payload_hash="sha256:note-delete",
+            deleted=True,
+        ),
+    )
+    tombstone = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+    assert tombstone is not None
+
+    result = _push_one(
+        sync_service,
+        _note_envelope(
+            client_envelope_id="env-ordinary-after-delete",
+            client_sequence=3,
+            base_server_cursor=tombstone.latest_server_cursor,
+            base_object_revision=tombstone.object_revision,
+            base_object_hash=tombstone.object_hash,
+            object_revision=3,
+            payload={"title": "Ordinary update", "content": "Must stay deleted."},
+            payload_hash="sha256:ordinary-after-delete",
+        ),
+    )
+
+    assert result.accepted == []
+    assert len(result.conflicts) == 1
+    assert chacha_db.get_note_by_id("note-1") is None
+
+
+def test_restore_intent_upsert_against_active_note_is_a_conflict(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    active = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+    assert active is not None
+
+    result = _push_one(
+        sync_service,
+        _note_envelope(
+            client_envelope_id="env-restore-active",
+            client_sequence=2,
+            base_server_cursor=active.latest_server_cursor,
+            base_object_revision=active.object_revision,
+            base_object_hash=active.object_hash,
+            object_revision=2,
+            payload={"title": "Must conflict", "content": "Already active."},
+            payload_hash="sha256:restore-active",
+            routing_metadata={"restore_intent": True},
+        ),
+    )
+
+    assert result.accepted == []
+    assert len(result.conflicts) == 1
+    assert chacha_db.get_note_by_id("note-1")["title"] == "Trip notes"
+
+
+def test_restore_intent_upsert_cannot_create_a_missing_note(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    result = _push_one(
+        sync_service,
+        _note_envelope(
+            client_envelope_id="env-restore-missing",
+            payload={"title": "Must conflict", "content": "No tombstone exists."},
+            payload_hash="sha256:restore-missing",
+            routing_metadata={"restore_intent": True},
+        ),
+    )
+
+    assert result.accepted == []
+    assert len(result.conflicts) == 1
+    assert chacha_db.get_note_by_id("note-1", include_deleted=True) is None
 
 
 def test_apply_failure_marks_accepted_envelope_failed_and_replayable(

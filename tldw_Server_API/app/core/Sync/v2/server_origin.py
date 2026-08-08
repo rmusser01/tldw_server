@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -70,6 +71,7 @@ def capture_server_origin_mutation(
     source: str,
     parent_id: str | None = None,
     stable_key: str | None = None,
+    routing_metadata: Mapping[str, object] | None = None,
 ) -> ServerOriginCaptureResult:
     """Append and materialize one trusted server-origin Sync v2 mutation."""
 
@@ -108,6 +110,15 @@ def capture_server_origin_mutation(
         if stable_key
         else f"server-origin-{uuid4().hex}"
     )
+    canonical_routing_metadata = dict(routing_metadata or {})
+    canonical_routing_metadata.update(
+        {
+            "source": source,
+            "origin": "server",
+            "server_device_id": SERVER_ORIGIN_DEVICE_ID,
+            "server_owner_user_id": user_id,
+        }
+    )
     envelope = SyncEnvelopeCreate(
         dataset_id=dataset.dataset_id,
         client_envelope_id=client_envelope_id,
@@ -128,11 +139,7 @@ def capture_server_origin_mutation(
         created_at_client=now,
         deleted=operation == "tombstone",
         encryption_metadata={"policy": DEFAULT_M1_ENCRYPTION_POLICY},
-        routing_metadata={
-            "source": source,
-            "origin": "server",
-            "server_device_id": SERVER_ORIGIN_DEVICE_ID,
-        },
+        routing_metadata=canonical_routing_metadata,
         stable_key=stable_key,
     )
 
