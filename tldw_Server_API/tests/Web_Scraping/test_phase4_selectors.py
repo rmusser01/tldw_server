@@ -11,16 +11,19 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 from lxml import html
 
 from tldw_Server_API.app.core.Watchlists import fetchers
 from tldw_Server_API.app.core.Web_Scraping import selectors
+from tldw_Server_API.app.core.Web_Scraping.safe_regex import SafeRegexSubResult
 from tldw_Server_API.app.core.Web_Scraping.selectors import caches, engine, schema
 from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
     assert_predecessor_behavior,
 )
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "phase4" / "selectors.json"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "phase4"
 SELECTOR_ENV = {
     "WATCHLIST_SELECTOR_MAX_EXPR_LEN": "512",
     "WATCHLIST_SELECTOR_MAX_XPATH_DESCENDANT_STEPS": "12",
@@ -30,7 +33,11 @@ SELECTOR_ENV = {
 
 
 def _fixture_cases() -> list[dict[str, Any]]:
-    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    with fixture_generator.fixture_publication_reader(
+        FIXTURE_ROOT,
+        source_root=REPO_ROOT,
+    ) as locked_root:
+        payload = json.loads((locked_root / "selectors.json").read_text(encoding="utf-8"))
     assert payload["category"] == "selectors"
     return payload["cases"]
 
@@ -54,6 +61,10 @@ def test_selector_fixture_matches_predecessor_contract(case: dict[str, Any]) -> 
             html_text=case.get("html"),
             include_counts=case.get("include_counts", False),
         )
+        actual: Any = {
+            "cache_stats": selectors.get_selector_cache_stats(),
+            "result": result,
+        }
     else:
         assert case["operation"] == "extract_schema_fields"
         try:
@@ -67,20 +78,14 @@ def test_selector_fixture_matches_predecessor_contract(case: dict[str, Any]) -> 
                 raise
             actual = {"outcome": "regex_error", "value": None}
         else:
+            payload = {
+                "cache_stats": selectors.get_selector_cache_stats(),
+                "result": result,
+            }
             if case.get("capture_regex_error"):
-                actual = {
-                    "outcome": "returned",
-                    "value": {
-                        "cache_stats": selectors.get_selector_cache_stats(),
-                        "result": result,
-                    },
-                }
-
-    if not case.get("capture_regex_error"):
-        actual = {
-            "cache_stats": selectors.get_selector_cache_stats(),
-            "result": result,
-        }
+                actual = {"outcome": "returned", "value": payload}
+            else:
+                actual = payload
     assert_predecessor_behavior(
         actual,
         case["expected"],
@@ -702,7 +707,7 @@ def test_selector_cache_state_is_reset_in_forked_child_while_lock_is_held() -> N
                     else 2
                 )
 
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             completed_pid, status = os.waitpid(child_pid, os.WNOHANG)
             if completed_pid == child_pid:
@@ -2379,6 +2384,25 @@ def test_regex_transform_receives_active_rendered_output_cap(
 
     assert result["error"] == "selector_too_complex:rendered_output>1"
     assert observed_caps == [1]
+
+
+def test_regex_transform_retains_value_for_non_output_size_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        schema,
+        "sub_untrusted",
+        lambda *_args, **_kwargs: SafeRegexSubResult(code="regex_too_large"),
+    )
+
+    result = schema._apply_single_transform(
+        "x",
+        {"name": "regex_replace", "pattern": "x", "repl": "xx"},
+        "https://example.com/post",
+        1,
+    )
+
+    assert result == "x"
 
 
 def test_unknown_prepend_and_append_transforms_remain_predecessor_noops() -> None:

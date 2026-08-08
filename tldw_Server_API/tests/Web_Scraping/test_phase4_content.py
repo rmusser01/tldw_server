@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import content
@@ -150,8 +151,12 @@ def _validate_metadata_case(case: Mapping[str, Any], *, index: int) -> None:
 
 
 def _load_cases(category: str) -> list[dict[str, Any]]:
-    fixture_path = FIXTURE_ROOT / f"{category}.json"
-    payload = json.loads(fixture_path.read_text(encoding="ascii"))
+    with fixture_generator.fixture_publication_reader(
+        FIXTURE_ROOT,
+        source_root=REPO_ROOT,
+    ) as locked_root:
+        fixture_path = locked_root / f"{category}.json"
+        payload = json.loads(fixture_path.read_text(encoding="ascii"))
 
     _assert_exact_type(payload, dict, location=fixture_path.name)
     _assert_exact_keys(payload, {"cases", "category"}, location=fixture_path.name)

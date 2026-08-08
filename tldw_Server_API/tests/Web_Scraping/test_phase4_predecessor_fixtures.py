@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -73,7 +74,7 @@ def _load_fixture_set(
         for category in sorted(CASE_KEYS):
             case_path = locked_root / manifest["cases"][category]
             if not case_path.is_file():
-                pytest.fail(f"Missing predecessor fixture: {case_path.name}")
+                raise FileNotFoundError(f"Missing predecessor fixture: {case_path}")
             raw = case_path.read_bytes()
             payload = json.loads(raw.decode("utf-8"))
             assert payload["category"] == category
@@ -397,6 +398,19 @@ def test_missing_manifest_is_a_hard_failure(
         monkeypatch.setattr(pytest, "skip", _reject_skip)
         with pytest.raises(FileNotFoundError, match="Missing phase 4 predecessor manifest"):
             _load_fixture_set(tmp_path)
+
+
+def test_missing_case_file_is_a_hard_failure(tmp_path: Path) -> None:
+    fixture_root = tmp_path / "phase4"
+    with fixture_generator.fixture_publication_reader(
+        FIXTURE_ROOT,
+        source_root=REPO_ROOT,
+    ) as locked_root:
+        shutil.copytree(locked_root, fixture_root)
+    (fixture_root / "selectors.json").unlink()
+
+    with pytest.raises(FileNotFoundError, match="Missing predecessor fixture"):
+        _load_fixture_set(fixture_root)
 
 
 def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:

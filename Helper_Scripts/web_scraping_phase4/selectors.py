@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from Helper_Scripts.web_scraping_phase4.shared import case
@@ -356,14 +357,14 @@ def build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
                 html_text=fixture_case.get("html"),
                 include_counts=fixture_case["include_counts"],
             )
-        elif fixture_case.get("capture_regex_error"):
+        elif fixture_case["operation"] == "extract_schema_fields" and fixture_case.get("capture_regex_error"):
             try:
                 result = fetchers.extract_schema_fields(
                     fixture_case["html"],
                     fixture_case["base_url"],
                     fixture_case["rules"],
                 )
-            except fetchers.re.error:
+            except re.error:
                 fixture_case["expected"] = {"outcome": "regex_error", "value": None}
             else:
                 fixture_case["expected"] = {
@@ -375,12 +376,14 @@ def build_selector_cases(fetchers: Any) -> list[dict[str, Any]]:
                 }
             fetchers.clear_selector_caches()
             continue
-        else:
+        elif fixture_case["operation"] == "extract_schema_fields":
             result = fetchers.extract_schema_fields(
                 fixture_case["html"],
                 fixture_case["base_url"],
                 fixture_case["rules"],
             )
+        else:
+            raise ValueError(f"unknown selector fixture operation: {fixture_case['operation']}")
         fixture_case["expected"] = {
             "cache_stats": fetchers.get_selector_cache_stats(),
             "result": result,

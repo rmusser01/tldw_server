@@ -231,6 +231,9 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
     assert all(
         isinstance(strategy, str) for strategy in strategies
     ), "Change 1 profile requires string downstream strategies"
+    assert all(
+        strategy in _DOWNSTREAM_STRATEGIES_ORDER for strategy in strategies
+    ), "Change 1 profile requires known downstream strategies"
     positions = [_DOWNSTREAM_STRATEGIES_ORDER.index(strategy) for strategy in strategies]
     assert positions == sorted(set(positions)), "Change 1 profile has incoherent downstream trace ordering"
 

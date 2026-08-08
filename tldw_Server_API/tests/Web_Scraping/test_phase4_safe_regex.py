@@ -1208,6 +1208,16 @@ def test_sub_untrusted_honors_injected_output_cap_at_exact_boundary() -> None:
     assert over_result == SafeRegexSubResult(code="regex_too_large")
 
 
+def test_substitution_identifies_output_limit_failures() -> None:
+    output_limited = sub_untrusted("x", "ab", "xx", max_output_chars=3)
+    replacement_limited = sub_untrusted("x", "a" * 4_097, "x")
+
+    assert output_limited.code == "regex_too_large"
+    assert output_limited.limit == "output"
+    assert replacement_limited.code == "regex_too_large"
+    assert replacement_limited.limit is None
+
+
 def test_sub_untrusted_honors_injected_output_cap_for_backreferences() -> None:
     exact_result = sub_untrusted(r"(a+)", r"\1\1", "aa", max_output_chars=4)
     over_result = sub_untrusted(r"(a+)", r"\1\1", "aa", max_output_chars=3)

@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from dataclasses import asdict
 from importlib import import_module
 from pathlib import Path
@@ -26,7 +27,41 @@ _PLAN_FIELDS = (
     "llm_settings",
     "regex_settings",
     "cluster_settings",
+    "url_patterns",
 )
+_PREDECESSOR_ERRORS = {
+    ("handler-scalar", "direct", "AttributeError"),
+    ("handler-scalar", "validated", "AttributeError"),
+    ("handler-list", "direct", "AttributeError"),
+    ("handler-list", "validated", "AttributeError"),
+    ("handler-mapping", "direct", "AttributeError"),
+    ("handler-mapping", "validated", "AttributeError"),
+    ("extra_headers-null", "direct", "TypeError"),
+    ("extra_headers-string", "direct", "ValueError"),
+    ("extra_headers-scalar", "direct", "TypeError"),
+    ("extra_headers-list", "direct", "ValueError"),
+    ("cookies-null", "direct", "TypeError"),
+    ("cookies-string", "direct", "ValueError"),
+    ("cookies-scalar", "direct", "TypeError"),
+    ("cookies-list", "direct", "ValueError"),
+    ("proxies-null", "direct", "TypeError"),
+    ("proxies-null", "validated", "TypeError"),
+    ("proxies-string", "direct", "ValueError"),
+    ("proxies-string", "validated", "ValueError"),
+    ("proxies-scalar", "direct", "TypeError"),
+    ("proxies-scalar", "validated", "TypeError"),
+    ("proxies-list", "direct", "ValueError"),
+    ("proxies-list", "validated", "ValueError"),
+    ("url_patterns-mixed-types", "direct", "TypeError"),
+    ("url_patterns-all-non-string", "direct", "TypeError"),
+}
+_APPROVED_CHANGE_4_URL_PATTERN_DIVERGENCES = {
+    "url_patterns-mixed-types:direct",
+    "url_patterns-all-non-string:direct",
+    "url_patterns-all-non-string:validation",
+}
+
+pytestmark = pytest.mark.integration
 
 
 def _load_router_cases() -> list[dict[str, Any]]:
@@ -42,11 +77,13 @@ def _load_router_cases() -> list[dict[str, Any]]:
     return payload["cases"]
 
 
-_ROUTER_CASES = _load_router_cases()
+@pytest.fixture(scope="session")
+def router_cases() -> list[dict[str, Any]]:
+    return _load_router_cases()
 
 
 def _capture_current(case: dict[str, Any], path: str) -> dict[str, Any]:
-    rules = {"domains": {"example.com": case["rule"]}}
+    rules = {"domains": {"example.com": deepcopy(case["rule"])}}
     try:
         if path == "validation":
             value = ScraperRouter.validate_rules(rules)
@@ -60,12 +97,51 @@ def _capture_current(case: dict[str, Any], path: str) -> dict[str, Any]:
     return {"status": "ok", "value": value}
 
 
+def _assert_approved_change_4_url_pattern_divergence(
+    case: dict[str, Any],
+    path: str,
+    actual: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    divergence = f"{case['name']}:{path}"
+    assert divergence in _APPROVED_CHANGE_4_URL_PATTERN_DIVERGENCES
+    assert actual != expected
+
+    if path == "validation":
+        assert expected == {
+            "status": "ok",
+            "value": {"domains": {"example.com": {"url_patterns": []}}},
+        }
+        assert actual == {"status": "ok", "value": {"domains": {}}}
+        return
+
+    assert expected == {"status": "error", "type": "TypeError"}
+    assert actual == {
+        "status": "ok",
+        "value": asdict(ScraperRouter({}).resolve(ROUTER_URL)),
+    }
+
+
 @pytest.mark.parametrize("path", ["validation", "direct", "validated"])
-def test_ordinary_yaml_results_match_checked_predecessor_fixture(path: str) -> None:
+def test_ordinary_yaml_results_match_predecessor_except_approved_change_4(
+    path: str,
+    router_cases: list[dict[str, Any]],
+) -> None:
     differences = []
-    for case in _ROUTER_CASES:
+    approved_divergences: set[str] = set()
+    for case in router_cases:
         expected = case["expected"][path]
         actual = _capture_current(case, path)
+        divergence = f"{case['name']}:{path}"
+        if divergence in _APPROVED_CHANGE_4_URL_PATTERN_DIVERGENCES:
+            _assert_approved_change_4_url_pattern_divergence(
+                case,
+                path,
+                actual,
+                expected,
+            )
+            approved_divergences.add(divergence)
+            continue
         if actual != expected:
             differences.append(
                 {
@@ -76,23 +152,29 @@ def test_ordinary_yaml_results_match_checked_predecessor_fixture(path: str) -> N
             )
 
     assert differences == []
+    assert approved_divergences == {
+        divergence for divergence in _APPROVED_CHANGE_4_URL_PATTERN_DIVERGENCES if divergence.endswith(f":{path}")
+    }
 
 
-def test_router_fixture_has_strict_contract_and_complete_field_coverage() -> None:
+def test_router_fixture_has_strict_contract_and_complete_field_coverage(
+    router_cases: list[dict[str, Any]],
+) -> None:
     covered_fields: set[str] = set()
-    predecessor_error_count = 0
-    for case in _ROUTER_CASES:
+    predecessor_errors: list[tuple[str, str, str]] = []
+    for case in router_cases:
         assert set(case) == {"expected", "name", "rule"}
         assert type(case["name"]) is str and case["name"]
         assert type(case["rule"]) is dict and case["rule"]
         assert set(case["expected"]) == {"validation", "direct", "validated"}
-        for expected in case["expected"].values():
+        for path, expected in case["expected"].items():
             assert expected["status"] in {"ok", "error"}
             assert set(expected) == ({"status", "value"} if expected["status"] == "ok" else {"status", "type"})
-            predecessor_error_count += expected["status"] == "error"
+            if expected["status"] == "error":
+                predecessor_errors.append((case["name"], path, expected["type"]))
         covered_fields.update(case["rule"])
 
-    assert predecessor_error_count == 22
+    assert set(predecessor_errors) == _PREDECESSOR_ERRORS
     assert (
         set(_PLAN_FIELDS)
         - {

@@ -3945,6 +3945,161 @@
             "cluster_settings": null,
             "cookies": {},
             "domain": "example.com",
+            "extra_headers": {},
+            "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+            "impersonate": "chrome120",
+            "llm_settings": null,
+            "proxies": {},
+            "regex_settings": null,
+            "respect_robots": true,
+            "schema_rules": null,
+            "strategy_order": null,
+            "ua_profile": "chrome_120_win",
+            "url": "https://example.com/path"
+          }
+        },
+        "validated": {
+          "status": "ok",
+          "value": {
+            "backend": "auto",
+            "cluster_settings": null,
+            "cookies": {},
+            "domain": "example.com",
+            "extra_headers": {},
+            "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+            "impersonate": "chrome120",
+            "llm_settings": null,
+            "proxies": {},
+            "regex_settings": null,
+            "respect_robots": true,
+            "schema_rules": null,
+            "strategy_order": null,
+            "ua_profile": "chrome_120_win",
+            "url": "https://example.com/path"
+          }
+        },
+        "validation": {
+          "status": "ok",
+          "value": {
+            "domains": {
+              "example.com": {
+                "url_patterns": [
+                  "^https://example\\.com/"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "name": "url_patterns-valid-only",
+      "rule": {
+        "url_patterns": [
+          "^https://example\\.com/"
+        ]
+      }
+    },
+    {
+      "expected": {
+        "direct": {
+          "status": "error",
+          "type": "TypeError"
+        },
+        "validated": {
+          "status": "ok",
+          "value": {
+            "backend": "auto",
+            "cluster_settings": null,
+            "cookies": {},
+            "domain": "example.com",
+            "extra_headers": {},
+            "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+            "impersonate": "chrome120",
+            "llm_settings": null,
+            "proxies": {},
+            "regex_settings": null,
+            "respect_robots": true,
+            "schema_rules": null,
+            "strategy_order": null,
+            "ua_profile": "chrome_120_win",
+            "url": "https://example.com/path"
+          }
+        },
+        "validation": {
+          "status": "ok",
+          "value": {
+            "domains": {
+              "example.com": {
+                "url_patterns": [
+                  "^https://example\\.com/"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "name": "url_patterns-mixed-types",
+      "rule": {
+        "url_patterns": [
+          "^https://example\\.com/",
+          7,
+          null
+        ]
+      }
+    },
+    {
+      "expected": {
+        "direct": {
+          "status": "error",
+          "type": "TypeError"
+        },
+        "validated": {
+          "status": "ok",
+          "value": {
+            "backend": "auto",
+            "cluster_settings": null,
+            "cookies": {},
+            "domain": "example.com",
+            "extra_headers": {},
+            "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+            "impersonate": "chrome120",
+            "llm_settings": null,
+            "proxies": {},
+            "regex_settings": null,
+            "respect_robots": true,
+            "schema_rules": null,
+            "strategy_order": null,
+            "ua_profile": "chrome_120_win",
+            "url": "https://example.com/path"
+          }
+        },
+        "validation": {
+          "status": "ok",
+          "value": {
+            "domains": {
+              "example.com": {
+                "url_patterns": []
+              }
+            }
+          }
+        }
+      },
+      "name": "url_patterns-all-non-string",
+      "rule": {
+        "url_patterns": [
+          7,
+          null
+        ]
+      }
+    },
+    {
+      "expected": {
+        "direct": {
+          "status": "ok",
+          "value": {
+            "backend": "auto",
+            "cluster_settings": null,
+            "cookies": {},
+            "domain": "example.com",
             "extra_headers": {
               "X-Integer": 7,
               "X-List": [

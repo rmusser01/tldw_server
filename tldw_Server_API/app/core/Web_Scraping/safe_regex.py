@@ -12,7 +12,7 @@ import subprocess  # nosec B404
 import sys
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
@@ -172,6 +172,7 @@ class SafeRegexResult:
 class SafeRegexSubResult:
     value: str | None = None
     code: str | None = None
+    limit: Literal["output"] | None = field(default=None, compare=False, repr=False)
 
 
 _FLAG_MAP = (
@@ -559,7 +560,7 @@ def _sub_stdlib_in_worker(
     if code is not None or response is None:
         return SafeRegexSubResult(code=code or "regex_invalid")
     if response == {"status": "too_large"}:
-        return SafeRegexSubResult(code="regex_too_large")
+        return SafeRegexSubResult(code="regex_too_large", limit="output")
     if set(response) != {"status", "value"} or response.get("status") != "sub":
         return SafeRegexSubResult(code="regex_invalid")
 
@@ -745,13 +746,13 @@ def sub_untrusted(
     try:
         replaced = compiled.sub(_bounded_replacement, value, timeout=timeout_s)
     except _RegexOutputTooLarge:
-        return SafeRegexSubResult(code="regex_too_large")
+        return SafeRegexSubResult(code="regex_too_large", limit="output")
     except TimeoutError:
         return SafeRegexSubResult(code="regex_timeout")
     except _REGEX_ERRORS:
         return SafeRegexSubResult(code="regex_invalid")
     if len(replaced) > output_limit:
-        return SafeRegexSubResult(code="regex_too_large")
+        return SafeRegexSubResult(code="regex_too_large", limit="output")
     return SafeRegexSubResult(value=replaced)
 
 

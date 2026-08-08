@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from typing import Any
 
@@ -34,6 +35,17 @@ def _ordinary_yaml_cases() -> list[dict[str, Any]]:
         )
         for name, value in boundaries
     ]
+    cases.extend(
+        {
+            "name": f"url_patterns-{name}",
+            "rule": {"url_patterns": value},
+        }
+        for name, value in (
+            ("valid-only", [r"^https://example\.com/"]),
+            ("mixed-types", [r"^https://example\.com/", 7, None]),
+            ("all-non-string", [7, None]),
+        )
+    )
     cases.extend(
         {
             "name": f"{field}-mixed-mapping",
@@ -78,7 +90,7 @@ def _ordinary_yaml_cases() -> list[dict[str, Any]]:
 
 
 def _capture_path(router_class: Any, rule: dict[str, Any], path: str) -> dict[str, Any]:
-    rules = {"domains": {"example.com": rule}}
+    rules = {"domains": {"example.com": deepcopy(rule)}}
     try:
         if path == "validation":
             value = router_class.validate_rules(rules)

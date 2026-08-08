@@ -6,14 +6,30 @@ from enum import Enum
 from pathlib import Path
 
 import pytest
+from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 
+from tldw_Server_API.tests.Web_Scraping.phase4_fixture_change1_contract import (
+    _validate_change_1_profile,
+)
 from tldw_Server_API.tests.Web_Scraping.phase4_fixture_contracts import (
     assert_predecessor_behavior,
 )
 
 _CHANGE_1_CONTRACT = "change_1_default_regex_non_terminal"
 _CHANGE_4_CONTRACT = "change_4_selector_regex_failure_returns_original"
-_SELECTOR_FIXTURE = Path(__file__).parent / "fixtures" / "phase4" / "selectors.json"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "phase4"
+
+pytestmark = pytest.mark.unit
+
+
+def _load_selector_fixture() -> dict[str, object]:
+    with fixture_generator.fixture_publication_reader(
+        _FIXTURE_ROOT,
+        source_root=_REPO_ROOT,
+    ) as locked_root:
+        manifest = json.loads((locked_root / "manifest.json").read_text(encoding="ascii"))
+        return json.loads((locked_root / manifest["cases"]["selectors"]).read_text(encoding="ascii"))
 
 
 class _StringSubclass(str):
@@ -156,7 +172,7 @@ def _assert_change_4(actual: object, expected: object) -> None:
 
 
 def test_selector_fixture_pins_format_map_and_unknown_transform_parity() -> None:
-    payload = json.loads(_SELECTOR_FIXTURE.read_text(encoding="ascii"))
+    payload = _load_selector_fixture()
     cases = {fixture_case["name"]: fixture_case for fixture_case in payload["cases"]}
 
     assert cases["computed_template_mapping_and_attribute_compatibility"]["expected"]["result"]["schema_fields"] == {
@@ -363,6 +379,18 @@ def test_change_1_contract_rejects_mismatched_terminal_strategy() -> None:
 
     with pytest.raises(AssertionError, match="profile"):
         _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_unknown_downstream_strategy_with_profile_diagnostic() -> None:
+    actual, expected = _coherent_change_1_profile()
+    result = actual["result"]
+    assert isinstance(result, dict)
+    trace = result["extraction_trace"]
+    assert isinstance(trace, list)
+    trace[3]["strategy"] = "unknown"
+
+    with pytest.raises(AssertionError, match="Change 1 profile"):
+        _validate_change_1_profile(actual, expected)
 
 
 def test_change_1_contract_rejects_missing_required_paired_metric() -> None:

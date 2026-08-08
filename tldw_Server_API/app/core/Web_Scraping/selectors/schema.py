@@ -628,13 +628,7 @@ def _apply_single_transform(
             value,
             **kwargs,
         )
-        if (
-            result.code == "regex_too_large"
-            and max_rendered_output_chars is not None
-            and len(pattern) <= 4_096
-            and len(replacement) <= 4_096
-            and len(value) <= 8_192
-        ):
+        if result.limit == "output" and max_rendered_output_chars is not None:
             raise _schema_limit_error(
                 "rendered_output",
                 max_rendered_output_chars,

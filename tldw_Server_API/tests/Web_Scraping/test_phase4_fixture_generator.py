@@ -18,6 +18,9 @@ from typing import Any
 
 import pytest
 from Helper_Scripts import web_scraping_phase4_fixtures as generator
+from Helper_Scripts.web_scraping_phase4 import router as router_fixture_cases
+
+pytestmark = pytest.mark.integration
 
 PHASE4_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "phase4"
 ROUTER_PARITY_TEST = Path(__file__).parent / "test_router_yaml_predecessor_parity.py"
@@ -35,19 +38,47 @@ def test_router_category_is_registered_with_an_explicit_builder() -> None:
     assert callable(generator.build_router_cases)
 
 
-def test_checked_fixture_manifest_includes_router_category() -> None:
-    manifest = json.loads((PHASE4_FIXTURE_ROOT / "manifest.json").read_text(encoding="ascii"))
+def test_router_fixture_matrix_covers_url_pattern_boundaries() -> None:
+    names = {case["name"] for case in router_fixture_cases._ordinary_yaml_cases()}
 
-    assert manifest["cases"]["router"] == "router.json"
-    assert {path.name for path in PHASE4_FIXTURE_ROOT.iterdir()} == {
-        "article_orchestration_fakes.json",
-        "content.json",
-        "extraction.json",
-        "manifest.json",
-        "metadata.json",
-        "router.json",
-        "selectors.json",
-    }
+    assert {
+        "url_patterns-valid-only",
+        "url_patterns-mixed-types",
+        "url_patterns-all-non-string",
+    } <= names
+
+
+def test_router_capture_isolates_mutable_rule_input() -> None:
+    class MutatingRouter:
+        @staticmethod
+        def validate_rules(rules: dict[str, Any]) -> dict[str, Any]:
+            rules["domains"]["example.com"]["url_patterns"].append("mutated")
+            return rules
+
+    rule = {"url_patterns": ["original"]}
+
+    router_fixture_cases._capture_path(MutatingRouter, rule, "validation")
+
+    assert rule == {"url_patterns": ["original"]}
+
+
+def test_checked_fixture_manifest_includes_router_category() -> None:
+    with generator.fixture_publication_reader(
+        PHASE4_FIXTURE_ROOT,
+        source_root=Path(__file__).resolve().parents[3],
+    ) as locked_root:
+        manifest = json.loads((locked_root / "manifest.json").read_text(encoding="ascii"))
+
+        assert manifest["cases"]["router"] == "router.json"
+        assert {path.name for path in locked_root.iterdir()} == {
+            "article_orchestration_fakes.json",
+            "content.json",
+            "extraction.json",
+            "manifest.json",
+            "metadata.json",
+            "router.json",
+            "selectors.json",
+        }
 
 
 def test_router_fixture_replay_is_self_contained() -> None:
@@ -3900,6 +3931,62 @@ def test_cli_rejects_dirty_source_root(
 
     assert exit_code == 2
     assert "source-root is not clean" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("error_type", [AttributeError, ImportError, KeyError, TypeError])
+def test_cli_sanitizes_unexpected_fixture_generation_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error_type: type[Exception],
+) -> None:
+    private_detail = f"private failure at {tmp_path}"
+
+    def _fail_generation(*_args: Any, **_kwargs: Any) -> None:
+        raise error_type(private_detail)
+
+    monkeypatch.setattr(generator, "generate_fixtures", _fail_generation)
+
+    exit_code = generator.main(
+        [
+            "--predecessor-commit",
+            "0" * 40,
+            "--output",
+            str(tmp_path / "output"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.err == "error: fixture generation failed\n"
+    assert private_detail not in captured.err
+
+
+def test_cli_does_not_mask_unclassified_programming_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnclassifiedProgrammingFailure(Exception):
+        pass
+
+    failure = UnclassifiedProgrammingFailure("programming defect")
+
+    def _fail_generation(*_args: Any, **_kwargs: Any) -> None:
+        raise failure
+
+    monkeypatch.setattr(generator, "generate_fixtures", _fail_generation)
+
+    with pytest.raises(UnclassifiedProgrammingFailure) as exc_info:
+        generator.main(
+            [
+                "--predecessor-commit",
+                "0" * 40,
+                "--output",
+                str(tmp_path / "output"),
+            ]
+        )
+
+    assert exc_info.value is failure
 
 
 def test_write_failure_leaves_existing_output_untouched(

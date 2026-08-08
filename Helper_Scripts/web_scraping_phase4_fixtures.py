@@ -1758,6 +1758,9 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except (AttributeError, ImportError, KeyError, TypeError):
+        print("error: fixture generation failed", file=sys.stderr)
+        return 2
     return 0
 
 

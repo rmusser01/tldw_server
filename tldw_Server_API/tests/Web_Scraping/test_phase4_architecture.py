@@ -118,7 +118,7 @@ def test_cache_state_has_one_canonical_owner() -> None:
         "_XPATH_SELECTOR_CACHE",
     }
     owners: dict[str, list[str]] = {token: [] for token in cache_tokens}
-    inspected = [*SELECTORS_ROOT.glob("*.py"), FETCHERS_PATH]
+    inspected = [*SELECTORS_ROOT.glob("*.py"), FETCHERS_PATH, ARTICLE_PATH]
     for path in inspected:
         text = path.read_text(encoding="utf-8")
         for token in cache_tokens:
