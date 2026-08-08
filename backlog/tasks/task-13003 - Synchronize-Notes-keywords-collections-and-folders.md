@@ -1,9 +1,10 @@
 ---
 id: TASK-13003
 title: Synchronize Notes keywords collections and folders
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-08 20:21'
+updated_date: '2026-08-08 22:58'
 labels:
   - notes
   - sync-v2
@@ -12,11 +13,11 @@ labels:
 dependencies:
   - TASK-13002
 references:
-  - >-
-    https://github.com/rmusser01/tldw_chatbook/blob/dev/backlog/decisions/046-synchronized-database-notes-parity.md
+  - Docs/ADR/031-notes-capability-sync-domains.md
+  - Docs/ADR/032-durable-server-origin-sync-mutation-batches.md
 documentation:
-  - >-
-    https://github.com/rmusser01/tldw_chatbook/blob/dev/Docs/Parity/2026-08-08-notes-server-capability-matrix.md
+  - Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md
+  - Docs/API/Sync_V2_M1.md
 priority: high
 ---
 
@@ -34,6 +35,8 @@ Add first-class Sync v2 ownership for Notes keywords, keyword links and collecti
 - [ ] #4 Keyword writes no longer return the active-sync unsupported error only when all required organization domains are enabled for the dataset.
 - [ ] #5 Concurrent rename, hierarchy, membership, merge, and delete/update cases produce deterministic idempotent results or reviewable conflicts.
 - [ ] #6 Restore preview, repair, and capability documentation include every organization domain.
+- [ ] #7 Existing personal datasets bootstrap their current organization state before the six-domain group becomes write-ready, and interrupted bootstrap resumes without partial enrollment or data loss.
+- [ ] #8 Upgrading one device does not deliver unsupported organization domains to legacy devices whose registered requested domains exclude them.
 <!-- AC:END -->
 
 ## Definition of Done
