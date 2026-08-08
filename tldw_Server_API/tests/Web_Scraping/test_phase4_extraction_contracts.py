@@ -146,20 +146,36 @@ def test_jsonld_extracts_article_from_graph() -> None:
 
 
 @pytest.mark.parametrize("reference_key", ["mainEntity", "mainEntityOfPage"])
-def test_jsonld_extracts_inline_article_references(reference_key: str) -> None:
+def test_jsonld_resolves_article_references_through_id_map(
+    monkeypatch: pytest.MonkeyPatch,
+    reference_key: str,
+) -> None:
+    resolved_targets: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    canonical_resolver = jsonld_strategy._resolve_jsonld_refs
+
+    def observe_resolution(value: Any, id_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        resolved = canonical_resolver(value, id_map)
+        if isinstance(value, dict) and value.get("@id") == "#article":
+            assert len(resolved) == 1
+            resolved_targets.append((resolved[0], id_map["#article"]))
+        return resolved
+
+    monkeypatch.setattr(jsonld_strategy, "_resolve_jsonld_refs", observe_resolution)
+
     html = f"""
     <script type="application/ld+json">
-      {{"@type": "WebPage", "{reference_key}": {{
-        "@id": "#article",
-        "@type": "Article",
-        "headline": "Referenced title",
-        "articleBody": "Referenced body"
-      }}}}
+      {{"@graph": [
+        {{"@type": "WebPage", "{reference_key}": {{"@id": "#article"}}}},
+        {{"@id": "#article", "@type": "Article", "headline": "Referenced title", "articleBody": "Referenced body"}}
+      ]}}
     </script>
     """
 
     result = extraction.extract_jsonld_entities(html, "https://example.com/reference")
 
+    assert len(resolved_targets) == 1
+    resolved_target, mapped_target = resolved_targets[0]
+    assert resolved_target is mapped_target
     assert result["title"] == "Referenced title"
     assert result["content"] == "Referenced body"
     assert result["extraction_successful"] is True
