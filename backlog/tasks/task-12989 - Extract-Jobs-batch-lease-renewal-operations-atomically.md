@@ -1,7 +1,7 @@
 ---
 id: TASK-12989
 title: Extract Jobs batch lease renewal operations atomically
-status: In Progress
+status: Done
 created_date: 2026-08-02 02:14
 labels:
 - jobs
@@ -17,15 +17,20 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2765
 documentation:
 - Docs/superpowers/specs/2026-08-01-jobs-batch-lease-renewal-extraction-design.md
+- Docs/superpowers/plans/2026-08-08-jobs-batch-lease-renewal-extraction.md
 modified_files:
 - tldw_Server_API/app/core/Jobs/manager.py
 - tldw_Server_API/app/core/Jobs/operations/contracts.py
 - tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py
 - tldw_Server_API/app/core/Jobs/operations/postgres/lifecycle.py
+- tldw_Server_API/tests/Jobs/test_jobs_batch_renew_characterization_sqlite.py
+- tldw_Server_API/tests/Jobs/test_jobs_batch_renew_characterization_postgres.py
+- tldw_Server_API/tests/Jobs/test_jobs_batch_renew_routing.py
 - tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py
+- tldw_Server_API/tests/Jobs/property/test_operation_contract_properties.py
 - tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_postgres.py
-updated_date: 2026-08-02 02:17
+updated_date: 2026-08-08 19:02
 ---
 
 ## Description
@@ -36,13 +41,13 @@ Characterize and extract JobManager.batch_renew_leases into dedicated SQLite and
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 JobManager.batch_renew_leases keeps its public signature and integer return contract.
-- [ ] #2 SQLite and PostgreSQL batch renewal route through dedicated backend lifecycle operations that do not import JobManager.
-- [ ] #3 Unexpected backend or clock failures roll back every earlier renewal in the batch.
-- [ ] #4 Missing, non-processing, and stale-lease items remain non-fatal no-ops while valid items commit.
-- [ ] #5 Duration clamping, duplicate-item counting, empty-batch behavior, and backend-specific clock timing remain compatible.
-- [ ] #6 Focused SQLite and required real PostgreSQL suites pass with zero PostgreSQL skips.
-- [ ] #7 The established neighboring Jobs matrix, Ruff, compileall, Bandit, and diff hygiene pass.
+- [x] #1 JobManager.batch_renew_leases keeps its public signature and integer return contract.
+- [x] #2 SQLite and PostgreSQL batch renewal route through dedicated backend lifecycle operations that do not import JobManager.
+- [x] #3 Unexpected backend or clock failures roll back every earlier renewal in the batch.
+- [x] #4 Missing, non-processing, and stale-lease items remain non-fatal no-ops while valid items commit.
+- [x] #5 Duration clamping, duplicate-item counting, empty-batch behavior, and backend-specific clock timing remain compatible.
+- [x] #6 Focused SQLite and required real PostgreSQL suites pass with zero PostgreSQL skips.
+- [x] #7 The established neighboring Jobs matrix, Ruff, compileall, Bandit, and diff hygiene pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -54,21 +59,21 @@ Characterize and extract JobManager.batch_renew_leases into dedicated SQLite and
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Approved design recorded at Docs/superpowers/specs/2026-08-01-jobs-batch-lease-renewal-extraction-design.md. Work starts from fresh origin/dev f15365c7bbbcd212733551e5f56d2ed6486fffe2 on branch codex/jobs-batch-renewal-extraction. No production code changed in the design commit.
+Approved design recorded at Docs/superpowers/specs/2026-08-01-jobs-batch-lease-renewal-extraction-design.md. Work started on branch codex/jobs-batch-renewal-extraction and was rebased cleanly onto origin/dev 45490da82e. Post-rebase verification at 2c6a987b40 passed 93 focused SQLite/contracts tests, 43 required PostgreSQL/RLS tests with zero skips, 50 neighboring lifecycle/parity tests with 13 PostgreSQL-only skips confined to the non-required SQLite matrix, and 11 required PostgreSQL parity tests with zero skips. Ruff, compileall, diff hygiene, and operation/manager boundary checks passed. Bandit reported zero findings across 9,273 lines in /tmp/bandit_task_12989_post_rebase.json. Independent task and whole-branch reviews found no remaining code issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Extracted atomic batch lease renewal into dedicated SQLite and PostgreSQL lifecycle operations while preserving the JobManager public contract, ordered duplicate attempts, expected no-ops, non-shortening leases, duration clamping, backend-specific clock behavior, PostgreSQL RLS cursor setup, and one transaction per batch. Added immutable contracts plus public characterization, direct backend, routing, property, and real-database rollback coverage. The rebased branch is 0 behind current dev and technically review-clean. Merge remains blocked until the requester adds the required human-authored Change summary to the pull request; this tracker summary is verification metadata and does not satisfy that policy.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
