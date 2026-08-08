@@ -19,7 +19,7 @@
 - `PolicyEvaluator` owns no mutable state and performs no configuration lookup, file I/O, persistence, logging, or mutation of borrowed policy inputs.
 - Do not change endpoint schemas, caller contracts, Guardian behavior, configuration persistence, logging, diagnostics, or regex hardening.
 - Add literal characterization tests before production extraction and retain distinct direct-evaluator, service-delegation, and real-caller coverage.
-- Track implementation and verification evidence in `TASK-12987`; run compilation, focused regressions, Bandit, diff, and current-`dev` mergeability gates before PR preparation.
+- Track implementation and verification evidence in `TASK-12992`; run compilation, focused regressions, Bandit, diff, and current-`dev` mergeability gates before PR preparation.
 
 ---
 
@@ -27,11 +27,11 @@
 
 Design: `Docs/superpowers/specs/2026-07-20-moderation-policy-evaluator-refactor-design.md`
 
-Design Backlog: `TASK-12984`
+Design Backlog: `TASK-12990`
 
-Plan Backlog: `TASK-12985`
+Plan Backlog: `TASK-12991`
 
-Implementation Backlog: `TASK-12987`
+Implementation Backlog: `TASK-12992`
 
 ## File Structure
 
@@ -75,7 +75,7 @@ source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
 
 Before each task commit:
 
-1. Update `TASK-12987` through Backlog MCP with the task status, files, and focused test result.
+1. Update `TASK-12992` through Backlog MCP with the task status, files, and focused test result.
 2. Run the task's focused tests.
 3. Run `git diff --check`.
 4. Review the staged diff for behavior changes or unrelated edits.
@@ -593,7 +593,7 @@ Expected: PASS against the current pre-extraction `ModerationService`.
 
 - [ ] **Step 6: Record and commit Task 1**
 
-Update `TASK-12987`, then run:
+Update `TASK-12992`, then run:
 
 ```bash
 git add \
@@ -1029,7 +1029,7 @@ Expected: PASS. Do not begin evaluator implementation until every literal baseli
 
 - [ ] **Step 7: Record and commit Task 2**
 
-Update `TASK-12987`, then run:
+Update `TASK-12992`, then run:
 
 ```bash
 git add \
@@ -1989,7 +1989,7 @@ Expected: direct decision tests PASS; baseline service characterization remains 
 
 - [ ] **Step 6: Record and commit Task 3**
 
-Update `TASK-12987`, then run:
+Update `TASK-12992`, then run:
 
 ```bash
 git add \
@@ -2563,7 +2563,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Record and commit Task 4**
 
-Update `TASK-12987`, then run:
+Update `TASK-12992`, then run:
 
 ```bash
 git add \
@@ -3162,7 +3162,7 @@ Expected: PASS.
 
 - [ ] **Step 7: Record and commit Task 5**
 
-Update `TASK-12987`, then run:
+Update `TASK-12992`, then run:
 
 ```bash
 git add \
@@ -3452,7 +3452,7 @@ Expected: PASS. These tests remain contract coverage; they do not replace the re
 
 - [ ] **Step 5: Record and commit Task 6**
 
-Update `TASK-12987`, then run:
+Update `TASK-12992`, then run:
 
 ```bash
 git add \
@@ -3471,7 +3471,7 @@ git commit -m "test: cover moderation evaluator caller integration"
 
 **Interfaces:**
 - Consumes: all implementation commits, literal/direct/delegation tests, and real/stubbed caller suites.
-- Produces: compilation, regression, Bandit, scope, independent-review, and current-`dev` mergeability evidence recorded in finalized `TASK-12987`.
+- Produces: compilation, regression, Bandit, scope, independent-review, and current-`dev` mergeability evidence recorded in finalized `TASK-12992`.
 
 - [x] **Step 1: Compile every touched Python file**
 
@@ -3572,7 +3572,7 @@ python -m bandit \
   -o /tmp/bandit_moderation_policy_evaluator.json
 ```
 
-Expected: exit 0 and no new findings in touched code. Record the JSON summary in `TASK-12987`.
+Expected: exit 0 and no new findings in touched code. Record the JSON summary in `TASK-12992`.
 
 - [x] **Step 6: Run diff and scope checks**
 
@@ -3641,13 +3641,13 @@ git add \
 git commit -m "fix: address PolicyEvaluator review findings"
 ```
 
-If the review is clean, record that result in `TASK-12987` and do not create
+If the review is clean, record that result in `TASK-12992` and do not create
 an empty commit. In either case, rerun Steps 1-7 on the final `HEAD`; the final
 diff/scope and mergeability results must therefore include every review fix.
 
-- [x] **Step 10: Finalize TASK-12987 and commit verification**
+- [x] **Step 10: Finalize TASK-12992 and commit verification**
 
-Update `TASK-12987` with:
+Update `TASK-12992` with:
 
 - completed acceptance criteria and Definition of Done
 - exact test counts and commands

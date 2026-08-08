@@ -1,6 +1,6 @@
 # Moderation PolicyEvaluator Refactor Design
 
-Task: TASK-12984
+Task: TASK-12990
 Date: 2026-07-23
 Status: Approved
 

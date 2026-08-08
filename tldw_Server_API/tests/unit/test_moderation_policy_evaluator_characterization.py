@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.Moderation.moderation_service import (
 from tldw_Server_API.app.core.Moderation.policy_compiler import PolicyCompiler
 from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
 
+pytestmark = pytest.mark.unit
+
 
 def _service(
     *,
@@ -259,17 +261,17 @@ class _MissingLower:
 
 
 class _LowerBytes:
-    def lower(self):
+    def lower(self) -> bytes:
         return b"block"
 
 
 class _LowerBlock:
-    def lower(self):
+    def lower(self) -> str:
         return "block"
 
 
 class _LowerUnhashable:
-    def lower(self):
+    def lower(self) -> list[object]:
         return []
 
 
@@ -330,7 +332,14 @@ def test_check_and_evaluate_dispatch_through_evaluate_text_core():
     calls = []
 
     class _DispatchService(ModerationService):
-        def _evaluate_text_core(self, text, policy, phase, *, include_redacted_text):
+        def _evaluate_text_core(
+            self,
+            text: str,
+            policy: ModerationPolicy,
+            phase: str | None,
+            *,
+            include_redacted_text: bool,
+        ) -> ModerationEvaluationResult:
             calls.append((text, phase, include_redacted_text))
             return ModerationEvaluationResult(action="warn", sample="[SAFE]")
 
@@ -349,7 +358,12 @@ def test_action_wrappers_dispatch_through_public_evaluate_text():
     calls = []
 
     class _DispatchService(ModerationService):
-        def evaluate_text(self, text, policy, phase=None):
+        def evaluate_text(
+            self,
+            text: str,
+            policy: ModerationPolicy,
+            phase: str | None = None,
+        ) -> ModerationEvaluationResult:
             calls.append((text, phase))
             return ModerationEvaluationResult(
                 action="redact",
@@ -386,7 +400,12 @@ def test_action_wrappers_dispatch_through_public_evaluate_text():
 
 def test_check_and_decision_only_core_do_not_invoke_public_redaction():
     class _NoRedactionService(ModerationService):
-        def redact_text(self, text, policy, phase=None):
+        def redact_text(
+            self,
+            text: str,
+            policy: ModerationPolicy,
+            phase: str | None = None,
+        ) -> str:
             raise AssertionError("redaction must not run")
 
     service = _service(service_type=_NoRedactionService)
@@ -406,7 +425,12 @@ def test_check_and_decision_only_core_do_not_invoke_public_redaction():
 
 def test_evaluation_dispatches_through_public_redact_text():
     class _DispatchService(ModerationService):
-        def redact_text(self, text, policy, phase=None):
+        def redact_text(
+            self,
+            text: str,
+            policy: ModerationPolicy,
+            phase: str | None = None,
+        ) -> str:
             return "[PUBLIC REDACTION]"
 
     service = _service(service_type=_DispatchService)
@@ -556,9 +580,14 @@ def test_long_redaction_supported_limit_characterization(
         ("bad", ValueError),
     ],
 )
+@pytest.mark.parametrize(
+    "method_name",
+    ["redact_text", "redact_text_with_count"],
+)
 def test_long_redaction_unsupported_limit_exception_characterization(
     limit,
     error_type,
+    method_name,
 ):
     service = _service(
         max_scan_chars=3,
@@ -566,7 +595,7 @@ def test_long_redaction_unsupported_limit_exception_characterization(
     )
 
     with pytest.raises(error_type):
-        service.redact_text_with_count(
+        getattr(service, method_name)(
             "x x x",
             _policy(_rule("x", replacement="[R]")),
         )
@@ -575,10 +604,10 @@ def test_long_redaction_unsupported_limit_exception_characterization(
 class _RecordingPattern:
     pattern = "never"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.bounds = []
 
-    def search(self, _text, *bounds):
+    def search(self, _text: str, *bounds: int) -> None:
         self.bounds.append(bounds)
         return None
 
@@ -752,16 +781,16 @@ def test_malformed_raw_rule_exceptions_propagate():
 class _RegexErrorPattern:
     pattern = "broken"
 
-    def search(self, *_args, **_kwargs):
+    def search(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
-    def finditer(self, *_args, **_kwargs):
+    def finditer(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
-    def sub(self, *_args, **_kwargs):
+    def sub(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
-    def subn(self, *_args, **_kwargs):
+    def subn(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
 
@@ -787,7 +816,7 @@ def test_replacement_lookup_regex_error_remains_inside_rule_boundary():
         categories_enabled = None
 
         @property
-        def redact_replacement(self):
+        def redact_replacement(self) -> str:
             raise re.error("replacement lookup failed")
 
     service = _service()

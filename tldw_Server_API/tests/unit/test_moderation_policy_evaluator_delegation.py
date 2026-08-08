@@ -3,7 +3,10 @@ from __future__ import annotations
 import inspect
 import re
 import threading
+from typing import Any
 from unittest.mock import Mock, call, sentinel
+
+import pytest
 
 import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service_module
 from tldw_Server_API.app.core.Moderation.moderation_service import (
@@ -17,6 +20,8 @@ from tldw_Server_API.app.core.Moderation.policy_evaluator import (
     PolicyEvaluator,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _service() -> ModerationService:
     service = ModerationService.__new__(ModerationService)
@@ -29,7 +34,7 @@ def _service() -> ModerationService:
     return service
 
 
-def _policy(action="redact"):
+def _policy(action: Any = "redact") -> ModerationPolicy:
     return ModerationPolicy(
         enabled=True,
         input_action="block",
@@ -51,7 +56,7 @@ def test_constructor_owns_exactly_one_stateless_policy_evaluator(
     constructed = []
 
     class RecordingPolicyEvaluator(PolicyEvaluator):
-        def __init__(self):
+        def __init__(self) -> None:
             constructed.append(self)
 
     evaluator_factory = Mock(side_effect=RecordingPolicyEvaluator)
@@ -235,7 +240,7 @@ def test_evaluation_limits_wait_for_service_lock():
     started = threading.Event()
     completed = threading.Event()
 
-    def snapshot():
+    def snapshot() -> None:
         started.set()
         service._evaluation_limits()
         completed.set()
@@ -262,7 +267,7 @@ def test_evaluation_limits_never_observe_reload_partial_assignments(
     observed = []
     load_calls = 0
 
-    def controlled_load_global_policy():
+    def controlled_load_global_policy() -> ModerationPolicy:
         nonlocal load_calls
         load_calls += 1
         service._max_scan_chars = 20
@@ -287,7 +292,7 @@ def test_evaluation_limits_never_observe_reload_partial_assignments(
     reload_thread.start()
     assert partial_assignment.wait(timeout=1)
 
-    def snapshot():
+    def snapshot() -> None:
         observed.append(service._evaluation_limits())
         snapshot_complete.set()
 

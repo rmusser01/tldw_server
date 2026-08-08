@@ -10,12 +10,17 @@ documentation:
 - Docs/superpowers/specs/2026-07-20-moderation-policy-evaluator-refactor-design.md
 - Docs/superpowers/plans/2026-07-23-moderation-policy-evaluator-refactor-implementation-plan.md
 modified_files:
+- Docs/superpowers/plans/2026-08-08-policy-evaluator-pr-2770-remediation.md
+- Docs/superpowers/specs/2026-07-20-moderation-policy-evaluator-refactor-design.md
+- Docs/superpowers/plans/2026-07-23-moderation-policy-evaluator-refactor-implementation-plan.md
+- backlog/tasks/task-12990 - Design-Moderation-PolicyEvaluator-refactor.md
+- backlog/tasks/task-12991 - Plan-Moderation-PolicyEvaluator-refactor-implementation.md
+- backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md
 - tldw_Server_API/app/core/Moderation/policy_evaluator.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
-- Docs/superpowers/specs/2026-07-20-moderation-policy-evaluator-refactor-design.md
-- Docs/superpowers/plans/2026-07-23-moderation-policy-evaluator-refactor-implementation-plan.md
+updated_date: 2026-08-08 17:35
 ---
 
 ## Description
@@ -27,8 +32,8 @@ Resolve every substantiated finding from the independent review and live PR comm
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 All independent review and PR review findings are resolved or documented with a technically justified disposition.
-- [ ] #2 Moderation design, plan, and implementation task records use unique Backlog IDs and all references are consistent.
-- [ ] #3 The branch is rebased onto the latest origin/dev without behavior changes.
+- [x] #2 Moderation design, plan, and implementation task records use unique Backlog IDs and all references are consistent.
+- [x] #3 The branch is rebased onto the latest origin/dev without behavior changes.
 - [ ] #4 Focused tests, compilation, lint, Bandit, diff checks, and required PR checks pass on the rebased head.
 - [ ] #5 The PR is merged only after a requester-authored Change summary explains what changed and why.
 <!-- AC:END -->
@@ -36,7 +41,8 @@ Resolve every substantiated finding from the independent review and live PR comm
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Rebased the 34-commit branch cleanly onto origin/dev 5605b9d9906322c2e6b5342b48c391ae674d315e. Allocated replacement historical records TASK-12990 (design), TASK-12991 (plan), and TASK-12992 (implementation) through Backlog MCP and updated design/plan references. Review remediation added a lazy one-entry policy-type cache, complete evaluator docstrings, explicit best-effort exception rationale, unit markers, typed test helpers, and malformed long-path coverage through both redaction APIs. TDD cache test failed before implementation and the focused green run passed 9 cases. Rebased regression gates currently pass: 279 Moderation unit, 97 endpoint/Guardian, 16 Chat moderation, 12 Workflow moderation with 45 deselected, and 1 STT redaction.
+Tracking reconciliation is complete: the superseded colliding Moderation task files were removed after replacement records were created, and an active-record scan now shows exactly one file for each canonical and replacement ID with no stale ambiguous references. Static gates on the rebased remediation pass: seven-file py_compile, Black check on four new files, Ruff on all touched files with only the documented Workflow I001/F401 ignores, git diff --check, helper annotation and production docstring audits, and Bandit over 3,297 Moderation LOC with zero findings, zero errors, zero skips, and zero nosec.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

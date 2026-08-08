@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import FrozenInstanceError
+from typing import Any
 
 import pytest
 
@@ -16,6 +17,8 @@ from tldw_Server_API.app.core.Moderation.policy_evaluator import (
     PolicyEvaluator,
 )
 
+pytestmark = pytest.mark.unit
+
 LIMITS = EvaluationLimits(
     max_scan_chars=10,
     match_window_chars=5,
@@ -24,7 +27,10 @@ LIMITS = EvaluationLimits(
 )
 
 
-def _policy(*rules, **overrides):
+def _policy(
+    *rules: PatternRule | re.Pattern[str],
+    **overrides: Any,
+) -> ModerationPolicy:
     values = {
         "enabled": True,
         "input_enabled": True,
@@ -41,13 +47,13 @@ def _policy(*rules, **overrides):
 
 
 def _rule(
-    pattern,
+    pattern: str,
     *,
-    action=None,
-    replacement=None,
-    categories=None,
-    phase="both",
-):
+    action: Any = None,
+    replacement: str | None = None,
+    categories: set[str] | None = None,
+    phase: str = "both",
+) -> PatternRule:
     return PatternRule(
         regex=re.compile(pattern),
         action=action,
@@ -62,17 +68,17 @@ class _MissingLower:
 
 
 class _LowerBytes:
-    def lower(self):
+    def lower(self) -> bytes:
         return b"block"
 
 
 class _LowerBlock:
-    def lower(self):
+    def lower(self) -> str:
         return "block"
 
 
 class _LowerUnhashable:
-    def lower(self):
+    def lower(self) -> list[object]:
         return []
 
 
@@ -110,6 +116,7 @@ def test_direct_policy_type_loader_and_evaluator_shape_are_literal():
         PatternRule,
         ModerationEvaluationResult,
     )
+    assert evaluator.policy_types() is evaluator.policy_types()
     assert vars(evaluator) == {}
 
 
@@ -408,10 +415,10 @@ def test_direct_scan_geometry_matches_characterized_behavior():
 class _RecordingPattern:
     pattern = "never"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.bounds = []
 
-    def search(self, _text, *bounds):
+    def search(self, _text: str, *bounds: int) -> None:
         self.bounds.append(bounds)
         return None
 
@@ -419,16 +426,16 @@ class _RecordingPattern:
 class _RegexErrorPattern:
     pattern = "broken"
 
-    def search(self, *_args, **_kwargs):
+    def search(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
-    def finditer(self, *_args, **_kwargs):
+    def finditer(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
-    def sub(self, *_args, **_kwargs):
+    def sub(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
-    def subn(self, *_args, **_kwargs):
+    def subn(self, *_args: Any, **_kwargs: Any) -> Any:
         raise re.error("broken")
 
 
@@ -705,7 +712,7 @@ def test_direct_evaluator_does_not_mutate_borrowed_inputs():
 
 def test_evaluate_without_redacted_text_never_invokes_redaction():
     class _NoRedactionEvaluator(PolicyEvaluator):
-        def redact_text(self, *_args, **_kwargs):
+        def redact_text(self, *_args: Any, **_kwargs: Any) -> str:
             raise AssertionError("redaction must not run")
 
     result = _NoRedactionEvaluator().evaluate_text(
@@ -729,7 +736,7 @@ def test_evaluate_without_redacted_text_never_invokes_redaction():
 @pytest.mark.parametrize("action", ["warn", "block"])
 def test_evaluate_non_redact_decision_never_invokes_redaction(action):
     class _NoRedactionEvaluator(PolicyEvaluator):
-        def redact_text(self, *_args, **_kwargs):
+        def redact_text(self, *_args: Any, **_kwargs: Any) -> str:
             raise AssertionError("redaction must not run")
 
     result = _NoRedactionEvaluator().evaluate_text(
@@ -748,7 +755,13 @@ def test_nested_redaction_receives_identical_limits_object():
     seen = []
 
     class _RecordingEvaluator(PolicyEvaluator):
-        def redact_text(self, text, policy, phase, limits):
+        def redact_text(
+            self,
+            text: str,
+            policy: ModerationPolicy,
+            phase: str | None,
+            limits: EvaluationLimits,
+        ) -> str:
             seen.append(limits)
             return "[R]"
 
@@ -920,9 +933,14 @@ def test_direct_long_redaction_supported_limit_behavior_is_literal(
         ("bad", ValueError),
     ],
 )
+@pytest.mark.parametrize(
+    "method_name",
+    ["redact_text", "redact_text_with_count"],
+)
 def test_direct_long_redaction_unsupported_limit_errors_are_literal(
     limit,
     error_type,
+    method_name,
 ):
     limits = EvaluationLimits(
         max_scan_chars=3,
@@ -932,7 +950,7 @@ def test_direct_long_redaction_unsupported_limit_errors_are_literal(
     )
 
     with pytest.raises(error_type):
-        PolicyEvaluator().redact_text_with_count(
+        getattr(PolicyEvaluator(), method_name)(
             "x x x",
             _policy(_rule("x", replacement="[R]")),
             None,
@@ -1061,7 +1079,7 @@ def test_direct_replacement_lookup_regex_error_is_skipped():
         categories_enabled = None
 
         @property
-        def redact_replacement(self):
+        def redact_replacement(self) -> str:
             raise re.error("replacement lookup failed")
 
     evaluator = PolicyEvaluator()

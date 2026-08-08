@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,6 +33,8 @@ _EVALUATION_NONCRITICAL_EXCEPTIONS = (
 
 @dataclass(frozen=True)
 class EvaluationLimits:
+    """Immutable snapshot of the service-owned evaluation limits."""
+
     max_scan_chars: int
     match_window_chars: int
     max_fallback_scan_chars: int
@@ -44,6 +47,7 @@ class PolicyEvaluator:
     _UNCATEGORIZED_CATEGORY = "uncategorized"
 
     @staticmethod
+    @lru_cache(maxsize=1)
     def policy_types() -> tuple[
         type[ModerationPolicy],
         type[PatternRule],
@@ -61,12 +65,16 @@ class PolicyEvaluator:
 
     @classmethod
     def effective_rule_categories(cls, rule: PatternRule) -> set[str]:
+        """Return normalized categories, including the legacy fallback."""
+
         cats = rule.categories or set()
         normalized = {str(c).strip().lower() for c in cats if str(c).strip()}
         return normalized if normalized else {cls._UNCATEGORIZED_CATEGORY}
 
     @staticmethod
     def rule_applies_to_phase(rule: PatternRule, phase: str | None) -> bool:
+        """Return whether a rule applies to the requested moderation phase."""
+
         if phase not in {"input", "output"}:
             return True
         rule_phase = str(getattr(rule, "phase", "both") or "both").strip().lower()
@@ -80,6 +88,8 @@ class PolicyEvaluator:
         rule: PatternRule,
         categories_enabled: set[str] | None,
     ) -> bool:
+        """Return whether a rule intersects the policy's enabled categories."""
+
         if not categories_enabled or "*" in categories_enabled:
             return True
         rule_categories = cls.effective_rule_categories(rule)
@@ -93,6 +103,8 @@ class PolicyEvaluator:
         match_span: tuple[int, int],
         replacement: str,
     ) -> str | None:
+        """Build a bounded snippet with the matched span replaced."""
+
         if not text or not match_span:
             return None
         start, end = match_span
@@ -116,6 +128,8 @@ class PolicyEvaluator:
         match_span: tuple[int, int] | None,
         pattern: str | None = None,
     ) -> str | None:
+        """Build a snippet using the matching rule's replacement when available."""
+
         if not text or not match_span:
             return None
         _, PatternRule, _ = self.policy_types()
@@ -130,6 +144,8 @@ class PolicyEvaluator:
                             replacement = rule.replacement
                         break
                 except _EVALUATION_NONCRITICAL_EXCEPTIONS:
+                    # Preserve legacy best-effort snippets: rule metadata failures
+                    # fall back to the policy replacement without affecting decisions.
                     continue
         return self.build_sanitized_snippet_for_replacement(
             text,
@@ -142,6 +158,8 @@ class PolicyEvaluator:
         text: str,
         limits: EvaluationLimits,
     ) -> Iterator[tuple[int, int]]:
+        """Yield the legacy overlapping scan ranges for text."""
+
         if not text:
             return
         chunk_size = max(1, int(limits.max_scan_chars))
@@ -167,6 +185,8 @@ class PolicyEvaluator:
         text: str,
         limits: EvaluationLimits,
     ) -> tuple[int, int] | None:
+        """Find the first bounded match using the legacy scan geometry."""
+
         try:
             chunk_limit = max(1, int(limits.max_scan_chars))
             if len(text) <= chunk_limit:
@@ -194,6 +214,8 @@ class PolicyEvaluator:
         pattern: re.Pattern[str],
         limits: EvaluationLimits,
     ) -> list[re.Match[str]]:
+        """Collect non-empty rule matches up to the configured raw limit."""
+
         if not text:
             return []
         limit = limits.max_replacements_per_pattern
@@ -218,6 +240,8 @@ class PolicyEvaluator:
         matches: list[re.Match[str]],
         replacement: str,
     ) -> str:
+        """Apply one rule's matches from right to left."""
+
         if not matches:
             return text
         parts = []
@@ -239,6 +263,8 @@ class PolicyEvaluator:
         phase: str | None,
         limits: EvaluationLimits,
     ) -> str:
+        """Apply enabled policy redactions and return only the resulting text."""
+
         _, PatternRule, _ = self.policy_types()
         if not text or not policy.block_patterns:
             return text
@@ -303,6 +329,8 @@ class PolicyEvaluator:
         phase: str | None,
         limits: EvaluationLimits,
     ) -> tuple[str, int]:
+        """Apply enabled policy redactions and return text plus replacement count."""
+
         _, PatternRule, _ = self.policy_types()
         if not text or not policy.block_patterns:
             return text, 0
@@ -369,6 +397,8 @@ class PolicyEvaluator:
         *,
         include_redacted_text: bool,
     ) -> ModerationEvaluationResult:
+        """Evaluate text against a policy without mutating borrowed inputs."""
+
         _, PatternRule, ModerationEvaluationResult = self.policy_types()
         if not text or not policy.enabled:
             return ModerationEvaluationResult()
