@@ -57,6 +57,7 @@ from .metrics import (
 from .migrations import (
     SQLITE_ARCHIVE_CURSOR_OUTPUT_SQL,
     SQLITE_ARCHIVE_CURSOR_TIME_SQL,
+    _ensure_sqlite_archive_batch_read_indexes,
     ensure_jobs_tables,
 )
 from .operations.contracts import (
@@ -631,7 +632,10 @@ class JobManager:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
             if "batch_group" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_batch_group ON jobs(batch_group)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_batch_group "
+                "ON jobs(batch_group)"
+            )
             row = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='jobs_archive'"
             ).fetchone()
@@ -639,6 +643,7 @@ class JobManager:
                 cols_arch = {r[1] for r in conn.execute("PRAGMA table_info(jobs_archive)").fetchall()}
                 if "batch_group" not in cols_arch:
                     conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
+                _ensure_sqlite_archive_batch_read_indexes(conn)
             conn.commit()
             return True  # noqa: TRY300
         except sqlite3.Error as exc:
@@ -2760,6 +2765,186 @@ class JobManager:
                     + " ORDER BY archive_id DESC LIMIT 1",
                     tuple(params),
                 ).fetchone()
+            if not row:
+                return None
+            return self._normalize_archived_job_row(row)
+        finally:
+            conn.close()
+
+    def _normalize_active_job_row(self, row: Any) -> dict[str, Any]:
+        """Normalize one active row using the same policy as ``get_job``."""
+
+        job_data = dict(row)
+        try:
+            if self.backend != "postgres":
+                if isinstance(job_data.get("payload"), str):
+                    job_data["payload"] = (
+                        json.loads(job_data["payload"])
+                        if job_data["payload"]
+                        else {}
+                    )
+                if isinstance(job_data.get("result"), str):
+                    job_data["result"] = (
+                        json.loads(job_data["result"])
+                        if job_data["result"]
+                        else None
+                    )
+            job_data["payload"] = self._maybe_decrypt_json(
+                job_data.get("payload")
+            )
+            job_data["result"] = self._maybe_decrypt_json(job_data.get("result"))
+        except _JOB_NONCRITICAL_EXCEPTIONS:
+            pass
+        return job_data
+
+    def get_jobs_by_ids(
+        self,
+        job_ids: list[int],
+        *,
+        domain: str | None = None,
+        owner_user_id: str | None = None,
+        include_archived: bool = False,
+    ) -> dict[int, dict[str, Any]]:
+        """Fetch scoped active and optionally archived jobs by numeric ID."""
+
+        if not isinstance(job_ids, list):
+            raise BadRequestError("job_ids must be a list of positive integers")
+
+        unique_ids: list[int] = []
+        seen_ids: set[int] = set()
+        for job_id in job_ids:
+            if type(job_id) is not int or job_id <= 0:
+                raise BadRequestError(
+                    "job_ids must contain only positive integers"
+                )
+            if job_id not in seen_ids:
+                unique_ids.append(job_id)
+                seen_ids.add(job_id)
+        if not unique_ids:
+            return {}
+
+        placeholder = "%s" if self.backend == "postgres" else "?"
+        chunk_size = 1000 if self.backend == "postgres" else 400
+        rows_by_id: dict[int, dict[str, Any]] = {}
+
+        def _query_rows(
+            conn: Any,
+            *,
+            table: str,
+            ids: list[int],
+        ) -> list[Any]:
+            id_placeholders = ",".join([placeholder] * len(ids))
+            query = f"SELECT * FROM {table} WHERE id IN ({id_placeholders})"  # nosec B608
+            params: list[Any] = list(ids)
+            if domain is not None:
+                query += f" AND domain = {placeholder}"  # nosec B608
+                params.append(domain)
+            if owner_user_id is not None:
+                query += f" AND owner_user_id = {placeholder}"  # nosec B608
+                params.append(owner_user_id)
+            if table == "jobs_archive":
+                query += " ORDER BY archive_id DESC"
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(query, tuple(params))
+                    return list(cur.fetchall() or [])
+            return list(conn.execute(query, tuple(params)).fetchall() or [])
+
+        conn = self._connect()
+        try:
+            for offset in range(0, len(unique_ids), chunk_size):
+                chunk = unique_ids[offset : offset + chunk_size]
+                for row in _query_rows(conn, table="jobs", ids=chunk):
+                    job_data = self._normalize_active_job_row(row)
+                    job_data["archived"] = False
+                    rows_by_id[int(job_data["id"])] = job_data
+
+            if include_archived:
+                missing_ids = [
+                    job_id for job_id in unique_ids if job_id not in rows_by_id
+                ]
+                for offset in range(0, len(missing_ids), chunk_size):
+                    chunk = missing_ids[offset : offset + chunk_size]
+                    for row in _query_rows(
+                        conn,
+                        table="jobs_archive",
+                        ids=chunk,
+                    ):
+                        job_data = self._normalize_archived_job_row(row)
+                        job_id = int(job_data["id"])
+                        if job_id not in rows_by_id:
+                            rows_by_id[job_id] = job_data
+            return rows_by_id
+        finally:
+            conn.close()
+
+    def find_job_by_batch_group(
+        self,
+        *,
+        batch_group: str,
+        domain: str,
+        owner_user_id: str,
+        job_type: str,
+        include_archived: bool = False,
+    ) -> dict[str, Any] | None:
+        """Find the newest job matching one exact scoped batch group."""
+
+        placeholder = "%s" if self.backend == "postgres" else "?"
+        predicates = " AND ".join(
+            f"{column} = {placeholder}"
+            for column in (
+                "batch_group",
+                "domain",
+                "owner_user_id",
+                "job_type",
+            )
+        )
+        params = (batch_group, domain, owner_user_id, job_type)
+        conn = self._connect()
+        try:
+            def _sqlite_fetchone_with_batch_group_repair(query: str) -> Any:
+                for attempt in range(2):
+                    try:
+                        return conn.execute(query, params).fetchone()
+                    except sqlite3.OperationalError as exc:
+                        if (
+                            attempt == 0
+                            and self._sqlite_missing_column_error(
+                                exc, "batch_group"
+                            )
+                            and self._sqlite_ensure_batch_group(conn)
+                        ):
+                            continue
+                        raise
+                return None
+
+            active_query = (
+                f"SELECT * FROM jobs WHERE {predicates} "  # nosec B608
+                "ORDER BY id DESC LIMIT 1"
+            )
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(active_query, params)
+                    row = cur.fetchone()
+            else:
+                row = _sqlite_fetchone_with_batch_group_repair(active_query)
+            if row:
+                job_data = self._normalize_active_job_row(row)
+                job_data["archived"] = False
+                return job_data
+            if not include_archived:
+                return None
+
+            archive_query = (
+                f"SELECT * FROM jobs_archive WHERE {predicates} "  # nosec B608
+                "ORDER BY archive_id DESC LIMIT 1"
+            )
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(archive_query, params)
+                    row = cur.fetchone()
+            else:
+                row = _sqlite_fetchone_with_batch_group_repair(archive_query)
             if not row:
                 return None
             return self._normalize_archived_job_row(row)

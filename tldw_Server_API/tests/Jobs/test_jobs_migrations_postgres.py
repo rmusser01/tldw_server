@@ -17,10 +17,16 @@ from tldw_Server_API.app.core.Jobs.pg_migrations import (
 
 pytestmark = [pytest.mark.pg_jobs]
 
-
-@pytest.fixture(autouse=True)
-def _setup(jobs_pg_dsn):
-    return
+_POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS = {
+    "idx_jobs_archive_lookup_id": ("id", "archive_id DESC"),
+    "idx_jobs_archive_batch_group_scope": (
+        "batch_group",
+        "domain",
+        "owner_user_id",
+        "job_type",
+        "archive_id DESC",
+    ),
+}
 
 
 def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_dsn):
@@ -34,6 +40,10 @@ def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_d
                 cur.execute("ALTER TABLE jobs DROP COLUMN IF EXISTS progress_message")
             except Exception:
                 _ = None
+            cur.execute("DROP INDEX IF EXISTS idx_jobs_archive_lookup_id")
+            cur.execute(
+                "DROP INDEX IF EXISTS idx_jobs_archive_batch_group_scope"
+            )
 
     # Run ensure to forward-migrate
     ensure_jobs_tables_pg(jobs_pg_dsn)
@@ -52,6 +62,259 @@ def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_d
             row2 = cur.fetchone()
             assert row2 is not None
             assert "status = 'queued'" in (row2[1] or "")
+            archive_index_states = {
+                index_name: _read_pg_archive_batch_index_state(
+                    cur, index_name
+                )
+                for index_name in _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+            }
+
+    for index_name, expected_columns in (
+        _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS.items()
+    ):
+        state = archive_index_states[index_name]
+        assert state is not None
+        assert state[:8] == (
+            True,
+            True,
+            True,
+            False,
+            True,
+            True,
+            "btree",
+            len(expected_columns),
+        )
+        assert tuple(state[8]) == expected_columns
+
+
+def _read_pg_archive_batch_index_state(cur, index_name):
+    cur.execute(
+        "SELECT i.indrelid = 'jobs_archive'::regclass, i.indisvalid, "
+        "i.indisready, i.indisunique, i.indpred IS NULL, "
+        "i.indexprs IS NULL, am.amname, i.indnkeyatts, "
+        "ARRAY(SELECT pg_get_indexdef(i.indexrelid, key_position, true) "
+        "FROM generate_series(1, i.indnkeyatts) AS key_position "
+        "ORDER BY key_position) "
+        "FROM pg_class idx "
+        "JOIN pg_namespace ns ON ns.oid = idx.relnamespace "
+        "JOIN pg_index i ON i.indexrelid = idx.oid "
+        "JOIN pg_am am ON am.oid = idx.relam "
+        "WHERE ns.nspname = current_schema() AND idx.relname = %s",
+        (index_name,),
+    )
+    return cur.fetchone()
+
+
+@pytest.mark.parametrize(
+    ("index_name", "misdefined_ddl"),
+    (
+        (
+            "idx_jobs_archive_lookup_id",
+            "CREATE INDEX idx_jobs_archive_lookup_id "
+            "ON jobs_archive(id, archive_id)",
+        ),
+        (
+            "idx_jobs_archive_batch_group_scope",
+            "CREATE INDEX idx_jobs_archive_batch_group_scope "
+            "ON jobs_archive(domain, batch_group, owner_user_id, job_type, "
+            "archive_id)",
+        ),
+    ),
+)
+def test_pg_archive_batch_read_index_migration_repairs_misdefined_index(
+    jobs_pg_dsn,
+    index_name,
+    misdefined_ddl,
+):
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"DROP INDEX {index_name}")
+            cur.execute(misdefined_ddl)
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            state = _read_pg_archive_batch_index_state(cur, index_name)
+
+    assert state is not None
+    assert state[:8] == (
+        True,
+        True,
+        True,
+        False,
+        True,
+        True,
+        "btree",
+        len(_POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]),
+    )
+    assert tuple(state[8]) == _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[
+        index_name
+    ]
+
+
+@pytest.mark.parametrize(
+    "index_name",
+    tuple(_POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS),
+)
+def test_pg_archive_batch_read_index_migration_rejects_name_collision(
+    jobs_pg_dsn,
+    index_name,
+):
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"DROP INDEX {index_name}")
+            cur.execute("CREATE TABLE archive_batch_index_name_owner (id INTEGER)")
+            cur.execute(
+                f"CREATE INDEX {index_name} "
+                "ON archive_batch_index_name_owner(id)"
+            )
+
+    with pytest.raises(RuntimeError, match=f"{index_name} belongs to another table"):
+        ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            state = _read_pg_archive_batch_index_state(cur, index_name)
+
+    assert state is not None
+    assert state[0] is False
+
+
+class _ArchiveBatchReadIndexCursor:
+    def __init__(self, states, *, repair_succeeds=True):
+        self.states = dict(states)
+        self.repair_succeeds = repair_succeeds
+        self.calls = []
+        self._selected_index = None
+
+    def execute(self, query, params=None):
+        rendered = str(query)
+        self.calls.append((rendered, params))
+        if "SELECT i.indrelid = 'jobs_archive'::regclass" in rendered:
+            self._selected_index = str(params[0])
+        elif rendered.startswith("DROP INDEX CONCURRENTLY"):
+            index_name = rendered.rsplit(" ", 1)[-1]
+            self.states[index_name] = None
+        elif rendered.startswith("CREATE INDEX CONCURRENTLY"):
+            index_name = next(
+                name for name in self.states if name in rendered
+            )
+            columns = _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]
+            valid = self.repair_succeeds
+            self.states[index_name] = (
+                True,
+                valid,
+                valid,
+                False,
+                True,
+                True,
+                "btree",
+                len(columns),
+                columns,
+                None,
+            )
+
+    def fetchone(self):
+        return self.states[self._selected_index]
+
+
+def _ready_pg_archive_batch_index_state(index_name):
+    columns = _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]
+    return (
+        True,
+        True,
+        True,
+        False,
+        True,
+        True,
+        "btree",
+        len(columns),
+        columns,
+        None,
+    )
+
+
+@pytest.mark.parametrize("bad_state", ("invalid", "misdefined"))
+def test_pg_archive_batch_read_index_mock_repairs_bad_state_once(bad_state):
+    bad_index = "idx_jobs_archive_lookup_id"
+    states = {
+        index_name: _ready_pg_archive_batch_index_state(index_name)
+        for index_name in _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+    }
+    if bad_state == "invalid":
+        states[bad_index] = (
+            True,
+            False,
+            False,
+            False,
+            True,
+            True,
+            "btree",
+            2,
+            ("id", "archive_id DESC"),
+            None,
+        )
+    else:
+        states[bad_index] = (
+            True,
+            True,
+            True,
+            False,
+            True,
+            True,
+            "btree",
+            2,
+            ("archive_id", "id"),
+            None,
+        )
+    cursor = _ArchiveBatchReadIndexCursor(states)
+
+    jobs_pg_migrations._ensure_pg_archive_batch_read_indexes(cursor)
+
+    drop_calls = [
+        query for query, _ in cursor.calls if query.startswith("DROP INDEX")
+    ]
+    create_calls = [
+        query for query, _ in cursor.calls if query.startswith("CREATE INDEX")
+    ]
+    assert drop_calls == [f"DROP INDEX CONCURRENTLY {bad_index}"]
+    assert len(create_calls) == 1
+    assert bad_index in create_calls[0]
+    assert cursor.states[bad_index] == _ready_pg_archive_batch_index_state(
+        bad_index
+    )
+
+
+def test_pg_archive_batch_read_index_mock_rejects_failed_repair():
+    bad_index = "idx_jobs_archive_lookup_id"
+    states = {
+        index_name: _ready_pg_archive_batch_index_state(index_name)
+        for index_name in _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+    }
+    states[bad_index] = (
+        True,
+        False,
+        False,
+        False,
+        True,
+        True,
+        "btree",
+        2,
+        ("id", "archive_id DESC"),
+        None,
+    )
+    cursor = _ArchiveBatchReadIndexCursor(states, repair_succeeds=False)
+
+    with pytest.raises(RuntimeError, match=f"{bad_index} verification failed"):
+        jobs_pg_migrations._ensure_pg_archive_batch_read_indexes(cursor)
+
+    assert sum(
+        query.startswith("DROP INDEX") for query, _ in cursor.calls
+    ) == 1
+    assert sum(
+        query.startswith("CREATE INDEX") for query, _ in cursor.calls
+    ) == 1
 
 
 def test_pg_legacy_archive_migration_backfills_stable_locators_and_paginates(
@@ -135,6 +398,8 @@ def test_pg_legacy_archive_migration_backfills_stable_locators_and_paginates(
     assert "(archive_id)" in str(archive_index_state[2])
     assert "idx_jobs_archive_migration" in indexes
     assert "idx_jobs_archive_cursor_v2" in indexes
+    assert "idx_jobs_archive_lookup_id" in indexes
+    assert "idx_jobs_archive_batch_group_scope" in indexes
 
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     seen: list[int] = []
@@ -736,6 +1001,12 @@ def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
         jobs_pg_migrations,
         "_ensure_pg_archive_locators",
         lambda _dsn: None,
+    )
+    monkeypatch.setattr(
+        jobs_pg_migrations,
+        "_ensure_pg_archive_batch_read_indexes",
+        lambda _cursor: None,
+        raising=False,
     )
     monkeypatch.setattr(
         jobs_pg_migrations,

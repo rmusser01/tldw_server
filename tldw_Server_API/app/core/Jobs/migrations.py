@@ -55,6 +55,33 @@ SQLITE_ARCHIVE_CURSOR_INDEX_SQL = (
     f"{SQLITE_ARCHIVE_CURSOR_TIME_SQL}, "
     "id, COALESCE(uuid, ''), archive_id)"
 )
+SQLITE_ARCHIVE_LOOKUP_ID_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_jobs_archive_lookup_id "
+    "ON jobs_archive(id, archive_id DESC)"
+)
+SQLITE_ARCHIVE_BATCH_GROUP_SCOPE_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_jobs_archive_batch_group_scope "
+    "ON jobs_archive(batch_group, domain, owner_user_id, job_type, "
+    "archive_id DESC)"
+)
+_SQLITE_ARCHIVE_BATCH_READ_INDEX_SPECS = (
+    (
+        "idx_jobs_archive_lookup_id",
+        SQLITE_ARCHIVE_LOOKUP_ID_INDEX_SQL,
+        (("id", False), ("archive_id", True)),
+    ),
+    (
+        "idx_jobs_archive_batch_group_scope",
+        SQLITE_ARCHIVE_BATCH_GROUP_SCOPE_INDEX_SQL,
+        (
+            ("batch_group", False),
+            ("domain", False),
+            ("owner_user_id", False),
+            ("job_type", False),
+            ("archive_id", True),
+        ),
+    ),
+)
 
 JOBS_SQLITE_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -334,6 +361,90 @@ def _sqlite_archive_migration_busy_timeout_ms() -> int:
         return 60_000
 
 
+def _sqlite_archive_batch_read_index_state(
+    conn: sqlite3.Connection,
+    index_name: str,
+) -> tuple[bool, bool, tuple[tuple[str, bool], ...]] | None:
+    """Return uniqueness, partial, and ordered key metadata for an index."""
+
+    object_row = conn.execute(
+        "SELECT tbl_name FROM sqlite_master "
+        "WHERE type = 'index' AND name = ?",
+        (index_name,),
+    ).fetchone()
+    if object_row is None:
+        return None
+    if str(object_row[0]) != "jobs_archive":
+        raise RuntimeError(f"{index_name} belongs to another table")
+
+    index_row = next(
+        (
+            row
+            for row in conn.execute(
+                "PRAGMA index_list(jobs_archive)"
+            ).fetchall()
+            if str(row[1]) == index_name
+        ),
+        None,
+    )
+    if index_row is None:
+        return None
+    key_columns = tuple(
+        (str(row[2]), bool(row[3]))
+        for row in conn.execute(
+            f"PRAGMA index_xinfo({index_name})"  # nosec B608
+        ).fetchall()
+        if bool(row[5])
+    )
+    return bool(index_row[2]), bool(index_row[4]), key_columns
+
+
+def _sqlite_archive_batch_read_index_ready(
+    state: tuple[bool, bool, tuple[tuple[str, bool], ...]] | None,
+    expected_columns: tuple[tuple[str, bool], ...],
+) -> bool:
+    """Return whether one archive lookup index has the canonical shape."""
+
+    return bool(
+        state is not None
+        and not state[0]
+        and not state[1]
+        and state[2] == expected_columns
+    )
+
+
+def _ensure_sqlite_archive_batch_read_indexes(
+    conn: sqlite3.Connection,
+) -> None:
+    """Atomically create, repair, and verify archive batch-read indexes."""
+
+    conn.commit()
+    conn.execute(
+        f"PRAGMA busy_timeout = {_sqlite_archive_migration_busy_timeout_ms()}"
+    )
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for index_name, create_sql, expected_columns in (
+            _SQLITE_ARCHIVE_BATCH_READ_INDEX_SPECS
+        ):
+            state = _sqlite_archive_batch_read_index_state(conn, index_name)
+            if not _sqlite_archive_batch_read_index_ready(
+                state, expected_columns
+            ):
+                if state is not None:
+                    conn.execute(f"DROP INDEX {index_name}")  # nosec B608
+                conn.execute(create_sql)
+            if not _sqlite_archive_batch_read_index_ready(
+                _sqlite_archive_batch_read_index_state(conn, index_name),
+                expected_columns,
+            ):
+                raise RuntimeError(f"{index_name} verification failed")
+        conn.commit()
+    except _JOBS_DB_EXCEPTIONS:
+        conn.rollback()
+        raise
+
+
 def _ensure_sqlite_archive_locators(conn: sqlite3.Connection) -> None:
     """Atomically add and validate stable locators for legacy archives."""
 
@@ -531,9 +642,14 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN owner_user_id TEXT"
+                )
             _ensure_sqlite_dependency_snapshot_columns(conn)
             conn.commit()
             _ensure_sqlite_archive_locators(conn)
+            _ensure_sqlite_archive_batch_read_indexes(conn)
             archive_locator_verified = True
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute(SQLITE_ARCHIVE_CURSOR_INDEX_SQL)
