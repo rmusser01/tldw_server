@@ -9,11 +9,20 @@ from typing import Any, Literal, Protocol
 from tldw_Server_API.app.core.Embeddings.embedding_policy import (
     map_model_for_provider,
 )
+from tldw_Server_API.app.core.Embeddings.execution_coordinator import (
+    EmbeddingAdapterAttempt,
+    EmbeddingExecutionCoordinator,
+    EmbeddingFallbackCoordinator,
+)
 from tldw_Server_API.app.core.Embeddings.preparation import (
     BackendIdentityResolver,
     EmbeddingPreparationPipeline,
     TokenCounter,
     TokenDecoder,
+)
+from tldw_Server_API.app.core.Embeddings.provider_attempt import (
+    EmbeddingProviderAttempt,
+    EmbeddingProviderReadinessCheck,
 )
 from tldw_Server_API.app.core.Embeddings.provider_resolution import ProviderGuesser
 from tldw_Server_API.app.core.Embeddings.request_types import (
@@ -24,6 +33,9 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingProviderError,
     EmbeddingRequestContext,
     PreparedEmbeddingRequest,
+)
+from tldw_Server_API.app.core.Embeddings.result_mapping import (
+    map_outcome_to_legacy_execution_result,
 )
 from tldw_Server_API.app.core.Embeddings.vector_processing import (
     DimensionAdjustmentRecorder,
@@ -117,6 +129,29 @@ class EmbeddingRequestOrchestrator:
         self._backend_identity_resolver = backend_identity_resolver or _no_backend_identity
         self._provider_preflight = provider_preflight or _no_provider_preflight
         self._vector_processor = EmbeddingVectorProcessor(record_dimension_adjustment=record_dimension_adjustment)
+        readiness = EmbeddingProviderReadinessCheck(self._provider_preflight)
+        provider_attempt = EmbeddingProviderAttempt(
+            cache_key_fn=cache_key_fn,
+            cache=cache,
+            executor=executor,
+            backend_identity_resolver=self._backend_identity_resolver,
+            vector_processor=self._vector_processor,
+        )
+        adapter_attempt = EmbeddingAdapterAttempt(
+            executor=executor,
+            vector_processor=self._vector_processor,
+        )
+        fallback_coordinator = EmbeddingFallbackCoordinator(
+            readiness=readiness,
+            provider_attempt=provider_attempt,
+            settings_fallback_model_map=settings_fallback_model_map,
+        )
+        self._execution_coordinator = EmbeddingExecutionCoordinator(
+            adapter_attempt=adapter_attempt,
+            readiness=readiness,
+            provider_attempt=provider_attempt,
+            fallback_coordinator=fallback_coordinator,
+        )
         self._preparation_pipeline = EmbeddingPreparationPipeline(
             count_tokens=count_tokens,
             tokens_to_texts=tokens_to_texts,
@@ -143,114 +178,9 @@ class EmbeddingRequestOrchestrator:
         return self._preparation_pipeline.prepare(raw_input, context)
 
     async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionResult:
-        """Execute a prepared request through cache and provider executor."""
-        plan = prepared.execution_plan
-        adapter_execution = await self._execute_adapter(prepared)
-        if adapter_execution is not None:
-            headers = self._response_headers(
-                actual_provider=adapter_execution.provider,
-                fallback_from=adapter_execution.fallback_from,
-                dimensions=plan.dimensions,
-                dimension_policy=prepared.effective_dimension_policy,
-            )
-            return EmbeddingExecutionResult(
-                vectors=adapter_execution.vectors,
-                provider=adapter_execution.provider,
-                model=adapter_execution.model,
-                prompt_tokens=prepared.prompt_tokens,
-                total_tokens=prepared.total_tokens,
-                cache_hits=0,
-                cache_misses=len(prepared.normalized_input.texts),
-                fallback_from=adapter_execution.fallback_from,
-                response_headers=headers,
-                embeddings_from_adapter=True,
-            )
-
-        results: list[list[float] | None] = []
-        miss_indices: list[int] = []
-        miss_texts: list[str] = []
-
-        await self._provider_preflight(plan.provider, plan.model)
-        primary_backend_identity = self._backend_identity_resolver(plan.provider, plan.model)
-        for index, text in enumerate(prepared.normalized_input.texts):
-            key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, primary_backend_identity)
-            cached = await self._cache.get(key)
-            cached_vector = self._vector_processor.validate_cached_vector(cached)
-            if cached_vector is not None:
-                results.append(
-                    self._vector_processor.process_cached_vector(
-                        cached_vector,
-                        provider=plan.provider,
-                        model=plan.model,
-                        dimensions=plan.dimensions,
-                        dimension_policy=prepared.effective_dimension_policy,
-                    )
-                )
-                continue
-            results.append(None)
-            miss_indices.append(index)
-            miss_texts.append(text)
-
-        actual_provider = plan.provider
-        actual_model = plan.model
-        fallback_from: str | None = None
-        embeddings_from_adapter = False
-        pending_cache_writes: list[tuple[str, list[float]]] = []
-        if miss_texts:
-            execution = await self._execute_misses(prepared, miss_texts)
-            actual_provider = execution.provider
-            actual_model = execution.model
-            fallback_from = execution.fallback_from
-            embeddings_from_adapter = execution.embeddings_from_adapter
-            if execution.complete_response:
-                results = list(execution.vectors)
-                cache_hits = execution.cache_hits
-                cache_misses = execution.cache_misses
-            else:
-                backend_identity = self._backend_identity_resolver(actual_provider, actual_model)
-                cache_vectors = execution.cache_vectors or execution.vectors
-                for index, text, vector, cache_vector in zip(
-                    miss_indices,
-                    miss_texts,
-                    execution.vectors,
-                    cache_vectors,
-                ):
-                    results[index] = vector
-                    if not execution.embeddings_from_adapter:
-                        key = self._cache_key(text, actual_provider, actual_model, plan.dimensions, backend_identity)
-                        pending_cache_writes.append((key, cache_vector))
-                cache_hits = len(results) - len(miss_indices)
-                cache_misses = len(miss_indices)
-        else:
-            cache_hits = len(results)
-            cache_misses = 0
-
-        vectors = self._vector_processor.validate_vector_count(
-            results,
-            expected=len(prepared.normalized_input.texts),
-            provider=actual_provider,
-            model=actual_model,
-        )
-        for key, cache_vector in pending_cache_writes:
-            await self._cache.set(key, cache_vector)
-        headers = self._response_headers(
-            actual_provider=actual_provider,
-            fallback_from=fallback_from,
-            dimensions=plan.dimensions,
-            dimension_policy=prepared.effective_dimension_policy,
-        )
-        return EmbeddingExecutionResult(
-            vectors=vectors,
-            provider=actual_provider,
-            model=actual_model,
-            prompt_tokens=prepared.prompt_tokens,
-            total_tokens=prepared.total_tokens,
-            cache_hits=cache_hits,
-            cache_misses=cache_misses,
-            fallback_from=fallback_from,
-            response_headers=headers,
-            embeddings_from_adapter=embeddings_from_adapter,
-        )
+        """Execute a prepared request through the Stage 2 coordinator boundary."""
+        outcome = await self._execution_coordinator.execute(prepared)
+        return map_outcome_to_legacy_execution_result(outcome)
 
     async def _execute_misses(
         self,
