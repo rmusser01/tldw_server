@@ -244,6 +244,7 @@ def _coordinator(
     primary_result: ProviderAttemptSuccess | ProviderCallFailure | None = None,
     fallback_result: FallbackExecutionSuccess | None = None,
     fallback: RecordingFallbackCoordinator | None = None,
+    provider_attempt: RecordingProviderAttempt | None = None,
 ) -> EmbeddingExecutionCoordinator:
     ordered_events = events if events is not None else []
     adapter = RecordingAdapterAttempt(
@@ -254,9 +255,8 @@ def _coordinator(
         errors={"openai": readiness_error} if readiness_error is not None else None,
         events=ordered_events,
     )
-    attempt = RecordingProviderAttempt(
-        outcomes={"openai": primary_result or _success("openai")},
-        events=ordered_events,
+    attempt = provider_attempt or RecordingProviderAttempt(
+        outcomes={"openai": primary_result or _success("openai")}, events=ordered_events
     )
     fallback_coordinator = fallback or RecordingFallbackCoordinator(fallback_result)
     return EmbeddingExecutionCoordinator(
@@ -325,6 +325,32 @@ async def test_execution_primary_readiness_failure_does_not_enter_fallback():
         await coordinator.execute(_prepared())
 
     assert raised.value is error
+    assert fallback.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_reraises_primary_provider_attempt_exception_without_fallback():
+    error = EmbeddingExecutionError(
+        "internal_execution_failure",
+        "primary provider attempt failed",
+        retryable=True,
+    )
+    prepared = _prepared()
+    attempt = RecordingProviderAttempt(
+        outcomes={},
+        raised={"openai": error},
+    )
+    fallback = RecordingFallbackCoordinator()
+    coordinator = _coordinator(provider_attempt=attempt, fallback=fallback)
+
+    with pytest.raises(EmbeddingExecutionError) as raised:
+        await coordinator.execute(prepared)
+
+    assert raised.value is error
+    assert attempt.calls == [
+        AttemptCall(prepared, "openai", "text-embedding-3-small")
+    ]
     assert fallback.calls == []
 
 
