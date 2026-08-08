@@ -782,6 +782,7 @@ class ModerationService:
         policy: ModerationPolicy,
         phase: str | None = None,
     ) -> tuple[bool, str | None]:
+        """Return (is_flagged, matched_sample)."""
         result = self._evaluate_text_core(
             text,
             policy,
@@ -809,6 +810,7 @@ class ModerationService:
         match_span: tuple[int, int] | None,
         pattern: str | None = None,
     ) -> str | None:
+        """Create a sanitized snippet for a known match span and pattern."""
         return self._policy_evaluator.build_sanitized_snippet(
             text,
             policy,
@@ -835,6 +837,7 @@ class ModerationService:
         policy: ModerationPolicy,
         phase: str | None = None,
     ) -> tuple[str, int]:
+        """Redact text and return (redacted_text, replacement_count)."""
         return self._policy_evaluator.redact_text_with_count(
             text,
             policy,
@@ -849,6 +852,7 @@ class ModerationService:
         policy: ModerationPolicy,
         phase: str | None = None,
     ) -> ModerationEvaluationResult:
+        """Compute the canonical moderation result for text and a policy."""
         return self._evaluate_text_core(
             text,
             policy,
@@ -864,6 +868,7 @@ class ModerationService:
         *,
         include_redacted_text: bool,
     ) -> ModerationEvaluationResult:
+        """Shared moderation evaluation logic for probes and full result generation."""
         decision = self._policy_evaluator.evaluate_text(
             text,
             policy,
@@ -928,6 +933,7 @@ class ModerationService:
         text: str,
         pat: re.Pattern,
     ) -> list[re.Match]:
+        """Collect non-overlapping matches across scan chunks for soft-capped redaction."""
         return self._policy_evaluator.collect_rule_matches(
             text,
             pat,
@@ -940,6 +946,7 @@ class ModerationService:
         matches: list[re.Match],
         replacement: str,
     ) -> str:
+        """Apply redactions using precomputed match objects."""
         return PolicyEvaluator.apply_rule_redactions(
             text,
             matches,

@@ -240,7 +240,7 @@ class PolicyEvaluator:
         matches: list[re.Match[str]],
         replacement: str,
     ) -> str:
-        """Apply one rule's matches from right to left."""
+        """Apply ordered, non-overlapping matches from left to right."""
 
         if not matches:
             return text

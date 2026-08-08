@@ -62,7 +62,7 @@ Implementation Backlog: `TASK-12992`
   - Existing policy-overlay compatibility suite.
 - Verify unchanged: `tldw_Server_API/tests/Audio/test_audio_transcription_retention_and_redaction.py`
   - Existing STT test uses real moderation redaction with a stubbed STT provider.
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
   - Tracks task progress, exact touched files, review results, verification evidence, and final summary.
 
 ## Conventions
@@ -88,7 +88,7 @@ Do not move shared policy/result dataclasses, harden regex behavior, remove priv
 
 **Files:**
 - Create: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py`
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
 
 **Interfaces:**
 - Consumes: existing `ModerationService`, `ModerationPolicy`, `PatternRule`, and `ModerationEvaluationResult` public and private behavior.
@@ -598,7 +598,7 @@ Update `TASK-12992`, then run:
 ```bash
 git add \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
-  'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+  'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "test: characterize moderation evaluation behavior"
 ```
 
@@ -608,7 +608,7 @@ git commit -m "test: characterize moderation evaluation behavior"
 
 **Files:**
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py`
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
 
 **Interfaces:**
 - Consumes: Task 1's `_service()`, `_rule()`, and `_policy()` characterization fixtures.
@@ -1034,7 +1034,7 @@ Update `TASK-12992`, then run:
 ```bash
 git add \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
-  'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+  'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "test: characterize moderation scan and redaction behavior"
 ```
 
@@ -1045,7 +1045,7 @@ git commit -m "test: characterize moderation scan and redaction behavior"
 **Files:**
 - Create: `tldw_Server_API/app/core/Moderation/policy_evaluator.py`
 - Create: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py`
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
 
 **Interfaces:**
 - Consumes: service-owned `ModerationPolicy`, `PatternRule`, and `ModerationEvaluationResult` through deferred runtime imports, plus Task 2's literal oracle.
@@ -1995,7 +1995,7 @@ Update `TASK-12992`, then run:
 git add \
   tldw_Server_API/app/core/Moderation/policy_evaluator.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py \
-  'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+  'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "refactor: add moderation policy decision evaluator"
 ```
 
@@ -2006,7 +2006,7 @@ git commit -m "refactor: add moderation policy decision evaluator"
 **Files:**
 - Modify: `tldw_Server_API/app/core/Moderation/policy_evaluator.py`
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py`
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
 
 **Interfaces:**
 - Consumes: Task 3's `EvaluationLimits`, evaluator type loader, eligibility helpers, and direct decision evaluator.
@@ -2569,7 +2569,7 @@ Update `TASK-12992`, then run:
 git add \
   tldw_Server_API/app/core/Moderation/policy_evaluator.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py \
-  'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+  'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "refactor: add moderation policy redaction evaluator"
 ```
 
@@ -2581,7 +2581,7 @@ git commit -m "refactor: add moderation policy redaction evaluator"
 - Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py`
 - Create: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py`
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
 
 **Interfaces:**
 - Consumes: the complete stateless evaluator from Tasks 3-4 and the unchanged service oracle from Tasks 1-2.
@@ -3169,7 +3169,7 @@ git add \
   tldw_Server_API/app/core/Moderation/moderation_service.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py \
-  'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+  'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "refactor: delegate moderation service policy evaluation"
 ```
 
@@ -3180,7 +3180,7 @@ git commit -m "refactor: delegate moderation service policy evaluation"
 **Files:**
 - Modify: `tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py`
 - Modify: `tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py`
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
 
 **Interfaces:**
 - Consumes: Task 5's unchanged `ModerationService` facade and existing Chat/Workflow dependency seams.
@@ -3458,7 +3458,7 @@ Update `TASK-12992`, then run:
 git add \
   tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py \
   tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py \
-  'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+  'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "test: cover moderation evaluator caller integration"
 ```
 
@@ -3467,7 +3467,7 @@ git commit -m "test: cover moderation evaluator caller integration"
 ### Task 7: Final Verification, Review, And Scope Audit
 
 **Files:**
-- Modify: `backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md`
+- Modify: `backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md`
 
 **Interfaces:**
 - Consumes: all implementation commits, literal/direct/delegation tests, and real/stubbed caller suites.
@@ -3637,7 +3637,7 @@ git add \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py \
   tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py \
   tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py \
-  'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+  'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "fix: address PolicyEvaluator review findings"
 ```
 
@@ -3660,7 +3660,7 @@ Update `TASK-12992` with:
 Then run:
 
 ```bash
-git add 'backlog/tasks/task-12987 - Implement-Moderation-PolicyEvaluator-refactor.md'
+git add 'backlog/tasks/task-12992 - Implement-Moderation-PolicyEvaluator-refactor.md'
 git commit -m "docs: record PolicyEvaluator verification"
 ```
 
