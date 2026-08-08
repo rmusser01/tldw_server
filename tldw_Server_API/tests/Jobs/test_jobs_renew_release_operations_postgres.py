@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+import uuid
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -12,11 +13,15 @@ import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    BatchRenewLeaseItem,
+    BatchRenewLeasesCommand,
+    BatchRenewLeasesResult,
     NoTransitionReason,
     OperationOutcome,
     ReleaseJobCommand,
     RenewLeaseCommand,
 )
+from tldw_Server_API.app.core.Jobs.operations.postgres import renew_leases_batch
 from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
     release_job,
     renew_lease,
@@ -169,6 +174,183 @@ def _release_command(
         lease_id=lease_id,
         reason="yield",
     )
+
+
+class RecordingClock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+        self.calls = 0
+
+    def __call__(self) -> datetime:
+        self.calls += 1
+        return self.now
+
+
+def _run_batch_renew_cleanup(
+    cleanup: Callable[[], None],
+    *,
+    primary_error: BaseException | None,
+) -> None:
+    """Run trigger cleanup without obscuring an earlier test-body failure."""
+
+    try:
+        cleanup()
+    except BaseException as cleanup_error:
+        if primary_error is None:
+            raise
+        primary_error.__cause__ = cleanup_error
+
+
+def test_batch_renew_cleanup_preserves_primary_error_and_chains_cleanup_failure() -> None:
+    primary_error = AssertionError("expected lease rollback")
+
+    def fail_cleanup() -> None:
+        raise RuntimeError("forced cleanup failure")
+
+    def fail_test_body() -> None:
+        try:
+            raise primary_error
+        except BaseException as error:
+            _run_batch_renew_cleanup(fail_cleanup, primary_error=error)
+            raise
+
+    with pytest.raises(AssertionError, match="expected lease rollback") as exc_info:
+        fail_test_body()
+
+    assert exc_info.value is primary_error
+    assert isinstance(primary_error.__cause__, RuntimeError)
+    assert str(primary_error.__cause__) == "forced cleanup failure"
+
+
+def test_batch_renew_cleanup_raises_failure_without_primary_error() -> None:
+    def fail_cleanup() -> None:
+        raise RuntimeError("forced cleanup failure")
+
+    with pytest.raises(RuntimeError, match="forced cleanup failure"):
+        _run_batch_renew_cleanup(fail_cleanup, primary_error=None)
+
+
+def test_postgres_batch_renew_counts_ordered_attempts_and_preserves_longer_lease(
+    manager: JobManager,
+    conn: Any,
+) -> None:
+    valid_id = _insert_job(manager)
+    queued_id = _insert_job(manager, status="queued", worker_id=None, lease_id=None)
+    stale_id = _insert_job(manager)
+    long_expiry = NOW + timedelta(hours=1)
+    long_id = _insert_job(manager, leased_until=long_expiry)
+    command = BatchRenewLeasesCommand(
+        items=(
+            BatchRenewLeaseItem(valid_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(999_999, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(queued_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(stale_id, 30, "worker-2", "lease-1"),
+            BatchRenewLeaseItem(valid_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(long_id, 30, "worker-1", "lease-1"),
+        ),
+        enforce=True,
+    )
+    clock = RecordingClock(NOW)
+
+    result = renew_leases_batch(
+        conn,
+        manager._pg_cursor,
+        command=command,
+        clock=clock,
+    )
+
+    assert result == BatchRenewLeasesResult(requested_count=6, applied_count=3)
+    assert clock.calls == 1
+    assert _fetch_job(manager, valid_id)["leased_until"] == NOW + timedelta(seconds=30)
+    assert _fetch_job(manager, queued_id)["leased_until"] == NOW - timedelta(minutes=15)
+    assert _fetch_job(manager, stale_id)["leased_until"] == NOW - timedelta(minutes=15)
+    assert _fetch_job(manager, long_id)["leased_until"] == long_expiry
+
+
+def test_postgres_batch_renew_empty_command_reads_clock_and_enters_cursor_once(
+    manager: JobManager,
+    conn: Any,
+) -> None:
+    cursor_entries = 0
+    clock = RecordingClock(NOW)
+
+    @contextmanager
+    def tracking_cursor_factory(connection: Any) -> Iterator[Any]:
+        nonlocal cursor_entries
+        cursor_entries += 1
+        with manager._pg_cursor(connection) as cur:
+            yield cur
+
+    result = renew_leases_batch(
+        conn,
+        tracking_cursor_factory,
+        command=BatchRenewLeasesCommand(items=(), enforce=False),
+        clock=clock,
+    )
+
+    assert result == BatchRenewLeasesResult(requested_count=0, applied_count=0)
+    assert clock.calls == 1
+    assert cursor_entries == 1
+
+
+def test_postgres_batch_renew_rolls_back_when_later_update_trigger_fails(
+    manager: JobManager,
+    conn: Any,
+) -> None:
+    first_job_id = _insert_job(manager)
+    second_job_id = _insert_job(manager)
+    original_first_lease = _fetch_job(manager, first_job_id)["leased_until"]
+    original_second_lease = _fetch_job(manager, second_job_id)["leased_until"]
+    function_name = f"force_direct_batch_renew_function_{uuid.uuid4().hex}"
+    trigger_name = f"force_direct_batch_renew_trigger_{uuid.uuid4().hex}"
+    setup_connection = manager._connect()
+    try:
+        with setup_connection, manager._pg_cursor(setup_connection) as cur:
+            cur.execute(
+                f'CREATE FUNCTION "{function_name}"() RETURNS trigger LANGUAGE plpgsql AS $$ '
+                "BEGIN RAISE EXCEPTION 'forced direct batch renewal failure'; END; $$"
+            )
+            cur.execute(
+                f'CREATE TRIGGER "{trigger_name}" BEFORE UPDATE ON jobs '
+                f'FOR EACH ROW WHEN (OLD.id = {int(second_job_id)}) '
+                f'EXECUTE FUNCTION "{function_name}"()'
+            )
+    finally:
+        setup_connection.close()
+
+    command = BatchRenewLeasesCommand(
+        items=(
+            BatchRenewLeaseItem(first_job_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(second_job_id, 30, "worker-1", "lease-1"),
+        ),
+        enforce=True,
+    )
+    primary_error: BaseException | None = None
+
+    def cleanup_trigger() -> None:
+        cleanup_connection = manager._connect()
+        try:
+            with cleanup_connection, manager._pg_cursor(cleanup_connection) as cur:
+                cur.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}" ON jobs')
+                cur.execute(f'DROP FUNCTION IF EXISTS "{function_name}"()')
+        finally:
+            cleanup_connection.close()
+
+    try:
+        with pytest.raises(psycopg.Error, match="forced direct batch renewal failure"):
+            renew_leases_batch(
+                conn,
+                manager._pg_cursor,
+                command=command,
+                clock=RecordingClock(NOW),
+            )
+        assert _fetch_job(manager, first_job_id)["leased_until"] == original_first_lease
+        assert _fetch_job(manager, second_job_id)["leased_until"] == original_second_lease
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        _run_batch_renew_cleanup(cleanup_trigger, primary_error=primary_error)
 
 
 @pytest.mark.parametrize(
