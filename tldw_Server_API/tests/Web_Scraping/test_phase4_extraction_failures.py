@@ -10,11 +10,11 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import extraction
+from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
     build_default_dependencies,
 )
-from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import schema as schema_strategy
 
