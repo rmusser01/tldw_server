@@ -106,6 +106,7 @@ def _predecessor_change_1_profile() -> dict[str, object]:
 
 def _coherent_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
     expected = _predecessor_change_1_profile()
+    expected["cache_stats"] = {"cluster_embedding_cache_size": 0}
     actual = deepcopy(expected)
     result = actual["result"]
     assert isinstance(result, dict)
@@ -131,6 +132,8 @@ def _coherent_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
     metrics[5] = _duration("regex", "enriched")
     metrics.extend(
         [
+            _cluster_counter("extraction_cluster_total", {"status": "started"}),
+            _cluster_counter("extraction_cluster_total", {"status": "no_blocks"}),
             _counter("cluster", "failed"),
             _duration("cluster", "failed"),
             _counter("trafilatura", "success"),
@@ -446,9 +449,42 @@ def test_change_1_contract_accepts_explicit_predecessor_equality_profile() -> No
     _assert_change_1(deepcopy(expected), expected)
 
 
-def test_change_1_contract_accepts_complete_coherent_transition() -> None:
+def test_change_1_contract_accepts_ordered_cluster_no_blocks_then_trafilatura() -> None:
     actual, expected = _coherent_change_1_profile()
     _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_extra_cluster_success_after_no_blocks() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics.insert(
+        9,
+        _cluster_counter("extraction_cluster_total", {"status": "success"}),
+    )
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_wrong_cluster_failure_lifecycle_status() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[8] = _cluster_counter("extraction_cluster_total", {"status": "no_clusters"})
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_reordered_cluster_no_blocks_lifecycle() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[7:9] = [metrics[8], metrics[7]]
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
 
 
 def test_change_1_contract_accepts_exact_cluster_success_profile() -> None:
@@ -506,7 +542,6 @@ def test_change_1_contract_rejects_orphan_cluster_fields_on_trafilatura_success(
 
 def test_change_1_contract_rejects_cache_growth_after_cluster_no_blocks() -> None:
     actual, expected = _coherent_change_1_profile()
-    expected["cache_stats"] = {"cluster_embedding_cache_size": 0}
     actual["cache_stats"] = {"cluster_embedding_cache_size": 17}
 
     with pytest.raises(AssertionError, match="cache growth"):
@@ -701,7 +736,7 @@ def test_change_1_contract_rejects_missing_required_paired_metric() -> None:
     actual, expected = _coherent_change_1_profile()
     metrics = actual["metrics"]
     assert isinstance(metrics, list)
-    del metrics[8]
+    del metrics[10]
 
     with pytest.raises(AssertionError, match="profile"):
         _assert_change_1(actual, expected)
@@ -711,7 +746,7 @@ def test_change_1_contract_rejects_incoherent_trace_metric_ordering() -> None:
     actual, expected = _coherent_change_1_profile()
     metrics = actual["metrics"]
     assert isinstance(metrics, list)
-    metrics[7:] = [*metrics[9:12], *metrics[7:9]]
+    metrics[7:] = [*metrics[7:9], *metrics[11:14], *metrics[9:11]]
 
     with pytest.raises(AssertionError, match="profile"):
         _assert_change_1(actual, expected)
@@ -845,7 +880,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
     ("index", "replacement"),
     [
         (
-            7,
+            9,
             {
                 "emitter": "increment_counter",
                 "kind": "counter",
@@ -854,7 +889,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
             },
         ),
         (
-            8,
+            10,
             {
                 "emitter": "observe_histogram",
                 "kind": "counter",
@@ -864,7 +899,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
             },
         ),
         (
-            11,
+            13,
             {
                 "emitter": "observe_histogram",
                 "kind": "histogram",
@@ -874,7 +909,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
             },
         ),
         (
-            11,
+            13,
             {
                 "emitter": "observe_histogram",
                 "kind": "histogram",

@@ -402,6 +402,10 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
     assert all(
         _is_cluster_internal_metric_record(metric) for metric in cluster_internal_metrics
     ), "Change 1 profile contains a noncanonical cluster metric"
+    cluster_trace = next(
+        (entry for entry in trace_records if entry.get("strategy") == "cluster"),
+        None,
+    )
     if terminal_strategy == "cluster":
         total_blocks = actual_result["cluster_total_blocks"]
         assert type(total_blocks) is int
@@ -448,6 +452,39 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
         assert not cluster_cache_metrics, (
             "Change 1 profile cluster cache metrics require successful " "terminal cluster extraction"
         )
+        if cluster_trace is not None:
+            assert cluster_trace == {
+                "detail": "cluster_no_blocks",
+                "reason": "cluster_no_content",
+                "status": "failed",
+                "strategy": "cluster",
+            }, "Change 1 profile only approves the trace-proven cluster_no_blocks fallback"
+            assert (
+                len(added_metrics) == len(expected_added_metrics) + 2
+            ), "Change 1 profile requires one exact cluster_no_blocks metric segment"
+            started_metric = _profile_dict(added_metrics[0], "$.metrics[]")
+            no_blocks_metric = _profile_dict(added_metrics[1], "$.metrics[]")
+            assert (
+                _is_cluster_internal_metric_record(started_metric)
+                and started_metric.get("name") == "extraction_cluster_total"
+                and started_metric.get("labels") == {"status": "started"}
+            ), "Change 1 profile requires cluster started before cluster_no_blocks"
+            assert (
+                _is_cluster_internal_metric_record(no_blocks_metric)
+                and no_blocks_metric.get("name") == "extraction_cluster_total"
+                and no_blocks_metric.get("labels") == {"status": "no_blocks"}
+            ), "Change 1 profile requires cluster no_blocks immediately after started"
+            pipeline_metrics = added_metrics[2:]
+        else:
+            assert (
+                not cluster_internal_metrics
+            ), "Change 1 profile cluster lifecycle metrics require a matching cluster trace"
+            pipeline_metrics = added_metrics
+        assert [
+            _metric_profile(metric) for metric in pipeline_metrics
+        ] == expected_added_metrics, (
+            "Change 1 profile requires lifecycle and ordered pipeline metrics to match the trace"
+        )
         expected_cache_size = (
             _profile_dict(expected_root["cache_stats"], "$.cache_stats").get("cluster_embedding_cache_size")
             if "cache_stats" in expected_root
@@ -461,15 +498,6 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
         assert actual_cache_size == expected_cache_size, (
             "Change 1 profile rejects cache growth without successful " "terminal cluster extraction"
         )
-    actual_added_metrics = [
-        _metric_profile(metric)
-        for metric in added_metrics
-        if _profile_dict(metric, "$.metrics[]").get("name")
-        not in {"extraction_cluster_total", "extraction_cluster_cache_total"}
-    ]
-    assert actual_added_metrics == expected_added_metrics, (
-        "Change 1 profile requires ordered counter/timing pairs and one terminal " "content-length metric"
-    )
 
 
 CHANGE_1_CONTRACT = DifferenceContract(
