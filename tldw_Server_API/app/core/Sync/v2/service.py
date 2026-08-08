@@ -81,6 +81,7 @@ from .models import (
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
     client_private_server_frontend_limitation_warning,
+    sync_v2_domain_schemas,
 )
 from .profile import SyncProfileStatus, SyncV2ProfileManager
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
@@ -178,6 +179,9 @@ class SyncV2Capabilities:
     max_batch_size: int
     max_envelope_payload_bytes: int
     max_attachment_bytes: int
+    domain_schemas: dict[SyncDomain, dict[str, object]] = field(
+        default_factory=sync_v2_domain_schemas
+    )
     quota: dict[str, object] = field(default_factory=dict)
     supports_restore_manifest: bool = True
     supports_conflicts: bool = True
@@ -600,6 +604,7 @@ class SyncV2Service:
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
+            domain_schemas=sync_v2_domain_schemas(),
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
             compatibility_flags=compatibility_flags,

@@ -9,7 +9,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-from ..models import SyncEnvelope, SyncObjectState
+from ..models import SyncEnvelope, SyncObjectState, validate_notes_note_upsert_payload
 from ..store import SyncV2Store
 from .base import MaterializationResult
 
@@ -49,7 +49,7 @@ class NotesMaterializer:
                     envelope.server_cursor,
                     apply_status="applied",
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - projection state must record every backend failure
                 logger.warning(
                     "Failed to complete notes.note apply status for envelope {} "
                     "on object {}: {}",
@@ -91,16 +91,15 @@ class NotesMaterializer:
                     content=payload["content"],
                     conversation_id=payload.get("conversation_id"),
                     message_id=payload.get("message_id"),
-                    sync_client_id=_projection_client_id(envelope, payload),
+                    sync_client_id=_projection_client_id(envelope),
                     object_revision=object_revision,
                     object_hash=object_hash,
                 )
                 deleted = False
             elif envelope.operation == "tombstone":
-                payload = _note_payload_for_owner(envelope.payload)
                 self.note_db.tombstone_note_from_sync(
                     note_id=envelope.object_id,
-                    sync_client_id=_projection_client_id(envelope, payload),
+                    sync_client_id=_projection_client_id(envelope),
                     object_revision=object_revision,
                     object_hash=object_hash,
                 )
@@ -123,7 +122,7 @@ class NotesMaterializer:
                 envelope.server_cursor,
                 apply_status="applied",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - projection failures are persisted for replay
             logger.warning(
                 "Failed to materialize notes.note envelope {} for object {}: {}",
                 envelope.client_envelope_id,
@@ -155,8 +154,12 @@ class NotesMaterializer:
             envelope.base_object_hash,
         )
         has_base = all(value is not None for value in base_values)
+        restore_requested = (
+            envelope.operation == "upsert"
+            and envelope.routing_metadata.get("restore_intent") is True
+        )
         if current_state is None:
-            if any(value is not None for value in base_values):
+            if restore_requested or any(value is not None for value in base_values):
                 return _conflict_result(
                     reason="missing_server_object",
                     envelope=envelope,
@@ -170,17 +173,26 @@ class NotesMaterializer:
                 envelope=envelope,
                 current_state=current_state,
             )
+        base_matches = (
+            envelope.base_server_cursor == current_state.latest_server_cursor
+            and envelope.base_object_revision == current_state.object_revision
+            and envelope.base_object_hash == current_state.object_hash
+        )
+        if restore_requested and not current_state.deleted:
+            return _conflict_result(
+                reason="restore_target_not_deleted",
+                envelope=envelope,
+                current_state=current_state,
+            )
+        if restore_requested and current_state.deleted and base_matches:
+            return None
         if envelope.operation == "upsert" and current_state.deleted:
             return _conflict_result(
                 reason="server_object_deleted",
                 envelope=envelope,
                 current_state=current_state,
             )
-        if (
-            envelope.base_server_cursor != current_state.latest_server_cursor
-            or envelope.base_object_revision != current_state.object_revision
-            or envelope.base_object_hash != current_state.object_hash
-        ):
+        if not base_matches:
             return _conflict_result(
                 reason="stale_base_state",
                 envelope=envelope,
@@ -219,44 +231,15 @@ class NotesMaterializer:
 
 
 def _note_payload(payload: dict[str, Any]) -> dict[str, str | None]:
-    title = payload.get("title")
-    content = payload.get("content", payload.get("body", ""))
-    if not isinstance(title, str) or not title.strip():
-        raise ValueError("notes.note payload requires a non-empty title")
-    if not isinstance(content, str):
-        raise ValueError("notes.note payload content must be a string")
-    conversation_id = payload.get("conversation_id")
-    message_id = payload.get("message_id")
-    return {
-        "title": title,
-        "content": content,
-        "conversation_id": str(conversation_id) if conversation_id is not None else None,
-        "message_id": str(message_id) if message_id is not None else None,
-        "client_id": _optional_text(payload.get("client_id")),
-        "owner_user_id": _optional_text(payload.get("owner_user_id")),
-    }
+    return validate_notes_note_upsert_payload(payload)
 
 
-def _note_payload_for_owner(payload: dict[str, Any]) -> dict[str, str | None]:
-    return {
-        "client_id": _optional_text(payload.get("client_id")),
-        "owner_user_id": _optional_text(payload.get("owner_user_id")),
-    }
-
-
-def _projection_client_id(envelope: SyncEnvelope, payload: dict[str, Any]) -> str:
+def _projection_client_id(envelope: SyncEnvelope) -> str:
     if envelope.routing_metadata.get("origin") == "server":
-        client_id = payload.get("client_id") or payload.get("owner_user_id")
+        client_id = envelope.routing_metadata.get("server_owner_user_id")
         if isinstance(client_id, str) and client_id.strip():
             return client_id.strip()
     return envelope.device_id or "sync-v2"
-
-
-def _optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 def _conflict_result(

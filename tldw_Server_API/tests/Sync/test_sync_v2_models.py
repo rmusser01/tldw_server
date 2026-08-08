@@ -63,7 +63,12 @@ def _m1_envelope_payload(**overrides):
         "operation": "upsert",
         "parent_id": None,
         "schema_version": 1,
-        "payload": {"title": "Research note"},
+        "payload": {
+            "title": "Research note",
+            "content": "Canonical Markdown",
+            "conversation_id": None,
+            "message_id": None,
+        },
         "payload_hash": "sha256:test",
         "object_revision": None,
         "created_at_client": "2026-05-23T18:12:44Z",
@@ -96,7 +101,73 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
     assert capabilities.encryption["ready"] is True
     assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.blob_transfer == {"supported": False}
+    assert capabilities.domain_schemas["notes.note"] == {
+        "schema_version": 1,
+        "encryption_policy": "server_trusted_v1",
+        "upsert": {
+            "required": ["title", "content"],
+            "properties": {
+                "title": {"type": "string", "max_length": 255},
+                "content": {"type": "string", "max_length": 5_000_000},
+                "conversation_id": {"type": ["string", "null"]},
+                "message_id": {"type": ["string", "null"]},
+            },
+            "additional_properties": False,
+        },
+        "tombstone": {"operation": "tombstone"},
+        "restore": {
+            "operation": "upsert",
+            "routing_metadata": {"restore_intent": True},
+            "requires_current_base": True,
+        },
+    }
     assert "client_private_v1" not in capabilities.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "title": 42,
+            "content": "Markdown",
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": ["not", "text"],
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "x" * 256,
+            "content": "Markdown",
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": "x" * 5_000_001,
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": "Markdown",
+            "conversation_id": 17,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": "Markdown",
+            "conversation_id": None,
+            "message_id": {"id": "message-1"},
+        },
+    ],
+)
+def test_notes_note_upsert_schema_rejects_wrong_types_and_oversized_payloads(payload):
+    with pytest.raises(ValidationError):
+        SyncV2Envelope.model_validate(_m1_envelope_payload(payload=payload))
 
 
 def test_capabilities_normalize_legacy_supported_domains_to_supported_defaults():
@@ -488,7 +559,10 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
             object_id=None,
             server_sequence=101,
             payload=None,
-            payload_clear={"title": "Legacy payload alias"},
+            payload_clear={
+                "title": "Legacy payload alias",
+                "content": "Canonical note body",
+            },
         )
     )
 
@@ -496,8 +570,11 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
     assert envelope.entity_id == "note-from-old-client"
     assert envelope.server_cursor == 101
     assert envelope.server_sequence == 101
-    assert envelope.payload == {"title": "Legacy payload alias"}
-    assert envelope.payload_clear == {"title": "Legacy payload alias"}
+    assert envelope.payload == {
+        "title": "Legacy payload alias",
+        "content": "Canonical note body",
+    }
+    assert envelope.payload_clear == envelope.payload
     assert envelope.client_sequence == 17
     assert envelope.encryption_metadata == {"policy": "server_trusted_v1"}
 

@@ -155,6 +155,17 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
     assert body["encryption"]["attestation"]["mode"] == "managed_storage"
     assert body["encryption_policies"] == ["server_trusted_v1"]
     assert body["blob_transfer"] == {"supported": False}
+    assert body["domain_schemas"]["notes.note"]["upsert"]["properties"] == {
+        "title": {"type": "string", "max_length": 255},
+        "content": {"type": "string", "max_length": 5_000_000},
+        "conversation_id": {"type": ["string", "null"]},
+        "message_id": {"type": ["string", "null"]},
+    }
+    assert body["domain_schemas"]["notes.note"]["restore"] == {
+        "operation": "upsert",
+        "routing_metadata": {"restore_intent": True},
+        "requires_current_base": True,
+    }
     assert body["warnings"] == []
 
 

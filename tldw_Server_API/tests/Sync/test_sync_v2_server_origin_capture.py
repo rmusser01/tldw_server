@@ -585,6 +585,17 @@ def test_normal_notes_create_api_routes_personal_write_through_sync_when_active(
     chacha_db: CharactersRAGDB,
 ) -> None:
     client = _notes_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
+    conversation_id = chacha_db.add_conversation(
+        {"id": "note-api-conversation", "title": "Source conversation"}
+    )
+    message_id = chacha_db.add_message(
+        {
+            "id": "note-api-message",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "Source message",
+        }
+    )
 
     response = client.post(
         "/api/v1/notes/",
@@ -592,6 +603,8 @@ def test_normal_notes_create_api_routes_personal_write_through_sync_when_active(
             "id": "note-api-1",
             "title": "API note",
             "content": "Created through the normal Notes API.",
+            "conversation_id": conversation_id,
+            "message_id": message_id,
         },
     )
 
@@ -629,6 +642,31 @@ def test_normal_notes_create_api_routes_personal_write_through_sync_when_active(
         ("notes.note", "note-api-1", SERVER_ORIGIN_DEVICE_ID, "applied"),
         ("notes.note", "note-api-1", SERVER_ORIGIN_DEVICE_ID, "applied"),
     ]
+    assert [item.payload for item in envelopes[:3]] == [
+        {
+            "title": "API note",
+            "content": "Created through the normal Notes API.",
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+        },
+        {
+            "title": "API note renamed",
+            "content": "Updated content.",
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+        },
+        {
+            "title": "API note renamed",
+            "content": "Patched content.",
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+        },
+    ]
+    assert envelopes[3].payload == {
+        "deleted_at": "2026-05-23T18:12:00+00:00",
+        "reason": "user_deleted",
+    }
+    assert all(item.routing_metadata["server_owner_user_id"] == "user-1" for item in envelopes)
 
 
 def test_normal_notes_create_api_reports_client_private_server_frontend_limitation(
@@ -850,7 +888,7 @@ def test_inactive_sync_note_create_ignores_idempotency_key_for_direct_id_generat
     assert chacha_db.get_note_by_id(response.json()["id"]) is not None
 
 
-def test_active_sync_note_restore_is_rejected_without_direct_projection_write(
+def test_active_sync_note_restore_appends_canonical_restore_intent_upsert(
     monkeypatch: pytest.MonkeyPatch,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -868,15 +906,25 @@ def test_active_sync_note_restore_is_rejected_without_direct_projection_write(
     assert delete_response.status_code == 204
     deleted_note = chacha_db.get_note_by_id("note-restore-active", include_deleted=True)
     assert deleted_note["deleted"] in (1, True)
+    stale_restore_response = client.post(
+        "/api/v1/notes/note-restore-active/restore",
+        params={"expected_version": deleted_note["version"] - 1},
+    )
+
+    assert stale_restore_response.status_code == 409
+    assert stale_restore_response.json()["detail"]["error_code"] == (
+        "sync_server_origin_restore_conflict"
+    )
 
     restore_response = client.post(
         "/api/v1/notes/note-restore-active/restore",
         params={"expected_version": deleted_note["version"]},
     )
 
-    assert restore_response.status_code == 400
-    assert restore_response.json()["detail"]["error_code"] == "sync_v2_note_restore_not_supported"
-    assert chacha_db.get_note_by_id("note-restore-active", include_deleted=True)["deleted"] in (1, True)
+    assert restore_response.status_code == 200
+    assert restore_response.json()["deleted"] is False
+    restored_note = chacha_db.get_note_by_id("note-restore-active", include_deleted=True)
+    assert restored_note["deleted"] in (0, False)
     dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
     envelopes = sync_service.store.list_envelopes_after(
         dataset_id,
@@ -887,7 +935,36 @@ def test_active_sync_note_restore_is_rejected_without_direct_projection_write(
     assert [(item.operation, item.object_id) for item in envelopes] == [
         ("upsert", "note-restore-active"),
         ("tombstone", "note-restore-active"),
+        ("upsert", "note-restore-active"),
     ]
+    restore_envelope = envelopes[-1]
+    assert restore_envelope.routing_metadata["restore_intent"] is True
+    assert restore_envelope.payload == {
+        "title": "Restore",
+        "content": "Delete me.",
+        "conversation_id": None,
+        "message_id": None,
+    }
+    state = sync_service.store.get_object_state(dataset_id, "notes.note", "note-restore-active")
+    assert state is not None
+    assert state.deleted is False
+    assert state.object_revision == 3
+
+    retry_response = client.post(
+        "/api/v1/notes/note-restore-active/restore",
+        params={"expected_version": deleted_note["version"]},
+    )
+
+    assert retry_response.status_code == 409
+    assert retry_response.json()["detail"]["error_code"] == "sync_server_origin_restore_conflict"
+    assert len(
+        sync_service.store.list_envelopes_after(
+            dataset_id,
+            0,
+            domains=["notes.note"],
+            limit=10,
+        )
+    ) == 3
 
 
 def test_inactive_sync_note_restore_keeps_existing_direct_behavior(

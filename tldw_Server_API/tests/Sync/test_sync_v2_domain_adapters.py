@@ -226,6 +226,91 @@ def test_default_attachment_ref_adapter_rejects_invalid_parent_domain():
     assert outcome.error_code == "attachment_ref_parent_domain_invalid"
 
 
+def test_default_notes_note_adapter_rejects_noncanonical_payload_before_append():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("notes.note")
+
+    outcome = adapter.evaluate_envelope(
+        _envelope(
+            domain="notes.note",
+            payload_clear={
+                "title": "Research note",
+                "body": "Legacy alias must not enter the canonical log.",
+            },
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(),
+    )
+
+    assert isinstance(adapter, NotesDomainAdapter)
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "notes_note_payload_invalid"
+
+
+def test_default_notes_note_adapter_rejects_restore_intent_on_tombstone():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("notes.note")
+
+    outcome = adapter.evaluate_envelope(
+        _envelope(
+            domain="notes.note",
+            operation="tombstone",
+            routing_metadata={"restore_intent": True},
+            payload_clear={
+                "deleted_at": "2026-05-23T18:35:00+00:00",
+                "reason": "user_deleted",
+            },
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "notes_note_restore_intent_invalid"
+
+
+def test_default_notes_note_adapter_accepts_restore_based_on_current_tombstone():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("notes.note")
+    created = _stored(
+        _envelope(
+            domain="notes.note",
+            client_envelope_id="env-note-created",
+            payload={"title": "Note", "content": "Original"},
+            payload_hash="sha256:note-created",
+        ),
+        sequence=1,
+    )
+    tombstone = _stored(
+        _envelope(
+            domain="notes.note",
+            client_envelope_id="env-note-deleted",
+            operation="tombstone",
+            payload_clear={
+                "deleted_at": "2026-05-23T18:35:00+00:00",
+                "reason": "user_deleted",
+            },
+            payload_hash="sha256:note-deleted",
+        ),
+        sequence=2,
+    )
+
+    outcome = adapter.evaluate_envelope(
+        _envelope(
+            domain="notes.note",
+            client_envelope_id="env-note-restored",
+            base_server_cursor=2,
+            payload={"title": "Note", "content": "Original"},
+            payload_hash="sha256:note-restored",
+            routing_metadata={"restore_intent": True},
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(created, tombstone),
+    )
+
+    assert outcome == AdapterAccepted(client_envelope_id="env-note-restored")
+
+
 def test_default_attachment_ref_adapter_conflicts_divergent_stable_payload_hash():
     default_sync_v2_registry.cache_clear()
     adapter = default_sync_v2_registry().get("attachment.ref")
@@ -1101,6 +1186,8 @@ def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_dom
     for domain in M1_SYNC_DOMAINS:
         if domain == "attachment.ref":
             assert isinstance(registry.get(domain), AttachmentRefAdapter)
+        elif domain == "notes.note":
+            assert isinstance(registry.get(domain), NotesDomainAdapter)
         else:
             assert isinstance(registry.get(domain), StaticSyncAdapter)
     for domain in WORKSPACE_SYNC_DOMAINS:

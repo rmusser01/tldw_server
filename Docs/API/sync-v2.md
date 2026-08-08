@@ -37,6 +37,26 @@ bodies, chat content, source-cache text, wrapped keys, and similar private
 values must not appear in `payload_clear`, restore manifests, error details, or
 logs.
 
+### `notes.note` contract
+
+The `GET /api/v1/sync/capabilities` response advertises the versioned payload
+contract in `domain_schemas.notes.note`. A version-1 `server_trusted_v1` upsert
+uses exactly these fields:
+
+- required strings: `title`, `content`
+- optional nullable strings: `conversation_id`, `message_id`
+
+The server preserves accepted title and Markdown content exactly. It rejects
+unknown fields and values beyond the advertised limits rather than trimming,
+escaping, or truncating them. A tombstone remains the `tombstone` operation.
+
+Restore is an `upsert` with the full canonical payload and
+`routing_metadata.restore_intent: true`. Its base cursor, object revision, and
+object hash must identify the current tombstone head. Ordinary upserts against
+deleted notes, stale restores, and restore requests against active notes become
+whole-object conflicts. Replaying the same accepted restore envelope is
+idempotent.
+
 ## Restore Manifest
 
 `GET /api/v1/sync/restore-manifest` accepts repeated `dataset_id` and `domain`
