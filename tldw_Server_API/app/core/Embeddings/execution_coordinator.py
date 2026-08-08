@@ -18,9 +18,13 @@ from tldw_Server_API.app.core.Embeddings.provider_attempt import (
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
     EmbeddingExecutionError,
+    EmbeddingExecutionOutcome,
     EmbeddingExecutorOutput,
     EmbeddingProviderError,
     PreparedEmbeddingRequest,
+)
+from tldw_Server_API.app.core.Embeddings.result_mapping import (
+    assemble_embedding_execution_outcome,
 )
 from tldw_Server_API.app.core.Embeddings.vector_processing import (
     EmbeddingVectorProcessor,
@@ -176,6 +180,92 @@ class EmbeddingFallbackCoordinator:
         )
 
 
+class EmbeddingExecutionCoordinator:
+    """Run adapter, primary, and fallback execution into one canonical outcome."""
+
+    def __init__(
+        self,
+        *,
+        adapter_attempt: EmbeddingAdapterAttempt,
+        readiness: EmbeddingProviderReadinessCheck,
+        provider_attempt: EmbeddingProviderAttempt,
+        fallback_coordinator: EmbeddingFallbackCoordinator,
+    ) -> None:
+        self._adapter_attempt = adapter_attempt
+        self._readiness = readiness
+        self._provider_attempt = provider_attempt
+        self._fallback = fallback_coordinator
+
+    async def execute(
+        self,
+        prepared: PreparedEmbeddingRequest,
+    ) -> EmbeddingExecutionOutcome:
+        """Execute the prepared request through the ordered provider boundaries."""
+        adapter_result = await self._adapter_attempt.execute(prepared)
+        base_attempt_count = int(adapter_result.attempted)
+        if adapter_result.success is not None:
+            return self._assemble(
+                prepared,
+                adapter_result.success,
+                attempt_count=base_attempt_count,
+                fallback_attempt_count=0,
+                fallback_from=None,
+            )
+
+        plan = prepared.execution_plan
+        base_attempt_count += 1
+        await self._readiness.check(plan.provider, plan.model)
+        primary = await self._provider_attempt.execute(
+            prepared,
+            provider=plan.provider,
+            model=plan.model,
+        )
+        if isinstance(primary, ProviderAttemptSuccess):
+            return self._assemble(
+                prepared,
+                primary,
+                attempt_count=base_attempt_count,
+                fallback_attempt_count=0,
+                fallback_from=None,
+            )
+
+        error = primary.error
+        if not prepared.policy_decision.fallback_allowed or not _is_fallback_eligible(error):
+            raise error
+
+        fallback = await self._fallback.execute(prepared, primary)
+        return self._assemble(
+            prepared,
+            fallback.success,
+            attempt_count=base_attempt_count + fallback.attempt_count,
+            fallback_attempt_count=fallback.attempt_count,
+            fallback_from=plan.provider,
+        )
+
+    @staticmethod
+    def _assemble(
+        prepared: PreparedEmbeddingRequest,
+        success: ProviderAttemptSuccess,
+        *,
+        attempt_count: int,
+        fallback_attempt_count: int,
+        fallback_from: str | None,
+    ) -> EmbeddingExecutionOutcome:
+        """Map a successful attempt to the immutable execution outcome."""
+        return assemble_embedding_execution_outcome(
+            prepared,
+            vectors=success.vectors,
+            provider=success.provider,
+            model=success.model,
+            cache_hits=success.cache_hits,
+            cache_misses=success.cache_misses,
+            fallback_from=fallback_from,
+            embeddings_from_adapter=success.embeddings_from_adapter,
+            attempt_count=attempt_count,
+            fallback_attempt_count=fallback_attempt_count,
+        )
+
+
 _NON_FALLBACKABLE_ERROR_CODES = frozenset(
     {
         "empty_input",
@@ -215,6 +305,7 @@ def _select_exhausted_error(
 __all__ = [
     "AdapterAttemptResult",
     "EmbeddingAdapterAttempt",
+    "EmbeddingExecutionCoordinator",
     "EmbeddingFallbackCoordinator",
     "FallbackExecutionSuccess",
 ]

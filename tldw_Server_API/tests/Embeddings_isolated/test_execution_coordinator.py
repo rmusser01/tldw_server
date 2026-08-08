@@ -8,7 +8,9 @@ import pytest
 from tldw_Server_API.app.core.Embeddings.execution_coordinator import (
     AdapterAttemptResult,
     EmbeddingAdapterAttempt,
+    EmbeddingExecutionCoordinator,
     EmbeddingFallbackCoordinator,
+    FallbackExecutionSuccess,
 )
 from tldw_Server_API.app.core.Embeddings.provider_attempt import (
     ProviderAttemptSuccess,
@@ -127,16 +129,24 @@ def _retryable(provider: str) -> EmbeddingProviderError:
     )
 
 
-def _success(provider: str) -> ProviderAttemptSuccess:
+def _success(
+    provider: str,
+    *,
+    vectors: list[list[float]] | None = None,
+    cache_hits: int = 0,
+    cache_misses: int = 1,
+    embeddings_from_adapter: bool = False,
+) -> ProviderAttemptSuccess:
     return ProviderAttemptSuccess(
-        vectors=[[0.25, 0.75]],
+        vectors=vectors or [[0.25, 0.75]],
         provider=provider,
         model={
             "cohere": "embed-english-v3.0",
             "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
         }.get(provider, "text-embedding-3-small"),
-        cache_hits=0,
-        cache_misses=1,
+        cache_hits=cache_hits,
+        cache_misses=cache_misses,
+        embeddings_from_adapter=embeddings_from_adapter,
     )
 
 
@@ -194,6 +204,249 @@ class RecordingProviderAttempt:
         if error is not None:
             raise error
         return self.outcomes[provider]
+
+
+class RecordingAdapterAttempt:
+    def __init__(self, result: AdapterAttemptResult, events: list[str]) -> None:
+        self.result = result
+        self.events = events
+
+    async def execute(self, prepared: PreparedEmbeddingRequest) -> AdapterAttemptResult:
+        del prepared
+        if self.result.attempted:
+            self.events.append("adapter")
+        return self.result
+
+
+class RecordingFallbackCoordinator:
+    def __init__(
+        self,
+        result: FallbackExecutionSuccess | None = None,
+    ) -> None:
+        self.result = result or FallbackExecutionSuccess(_success("huggingface"), 1)
+        self.calls: list[tuple[PreparedEmbeddingRequest, ProviderCallFailure]] = []
+
+    async def execute(
+        self,
+        prepared: PreparedEmbeddingRequest,
+        primary_failure: ProviderCallFailure,
+    ) -> FallbackExecutionSuccess:
+        self.calls.append((prepared, primary_failure))
+        return self.result
+
+
+def _coordinator(
+    *,
+    events: list[str] | None = None,
+    adapter_declines: bool = False,
+    adapter_result: AdapterAttemptResult | None = None,
+    readiness_error: EmbeddingDomainError | None = None,
+    primary_result: ProviderAttemptSuccess | ProviderCallFailure | None = None,
+    fallback_result: FallbackExecutionSuccess | None = None,
+    fallback: RecordingFallbackCoordinator | None = None,
+) -> EmbeddingExecutionCoordinator:
+    ordered_events = events if events is not None else []
+    adapter = RecordingAdapterAttempt(
+        adapter_result or AdapterAttemptResult(attempted=adapter_declines),
+        ordered_events,
+    )
+    readiness = RecordingReadiness(
+        errors={"openai": readiness_error} if readiness_error is not None else None,
+        events=ordered_events,
+    )
+    attempt = RecordingProviderAttempt(
+        outcomes={"openai": primary_result or _success("openai")},
+        events=ordered_events,
+    )
+    fallback_coordinator = fallback or RecordingFallbackCoordinator(fallback_result)
+    return EmbeddingExecutionCoordinator(
+        adapter_attempt=adapter,
+        readiness=readiness,
+        provider_attempt=attempt,
+        fallback_coordinator=fallback_coordinator,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_orders_adapter_before_primary_readiness_and_attempt():
+    events: list[str] = []
+    coordinator = _coordinator(events=events, adapter_declines=True)
+
+    outcome = await coordinator.execute(_prepared(execution_path="adapter"))
+
+    assert events == ["adapter", "readiness:openai", "attempt:openai"]
+    assert outcome.attempt_count == 2
+    assert outcome.fallback_attempt_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_returns_adapter_success_with_adapter_cache_accounting():
+    events: list[str] = []
+    coordinator = _coordinator(
+        events=events,
+        adapter_result=AdapterAttemptResult(
+            attempted=True,
+            success=_success(
+                "openai",
+                vectors=[[0.1, 0.9]],
+                cache_hits=1,
+                cache_misses=0,
+                embeddings_from_adapter=True,
+            ),
+        ),
+    )
+
+    outcome = await coordinator.execute(_prepared(execution_path="adapter"))
+
+    assert events == ["adapter"]
+    assert outcome.vectors == ((0.1, 0.9),)
+    assert outcome.provider == "openai"
+    assert outcome.model == "text-embedding-3-small"
+    assert outcome.cache_hits == 1
+    assert outcome.cache_misses == 0
+    assert outcome.embeddings_from_adapter is True
+    assert outcome.attempt_count == 1
+    assert outcome.fallback_attempt_count == 0
+    assert outcome.fallback_from is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_primary_readiness_failure_does_not_enter_fallback():
+    error = _retryable("openai")
+    fallback = RecordingFallbackCoordinator()
+    coordinator = _coordinator(readiness_error=error, fallback=fallback)
+
+    with pytest.raises(EmbeddingDomainError) as raised:
+        await coordinator.execute(_prepared())
+
+    assert raised.value is error
+    assert fallback.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_returns_full_primary_cache_hit_in_input_order():
+    primary = _success(
+        "openai",
+        vectors=[[0.7, 0.3], [0.2, 0.8]],
+        cache_hits=2,
+        cache_misses=0,
+    )
+    coordinator = _coordinator(primary_result=primary)
+
+    outcome = await coordinator.execute(_prepared(texts=["first", "second"]))
+
+    assert outcome.vectors == ((0.7, 0.3), (0.2, 0.8))
+    assert outcome.provider == "openai"
+    assert outcome.model == "text-embedding-3-small"
+    assert outcome.cache_hits == 2
+    assert outcome.cache_misses == 0
+    assert outcome.embeddings_from_adapter is False
+    assert outcome.attempt_count == 1
+    assert outcome.fallback_attempt_count == 0
+    assert outcome.fallback_from is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_reraises_non_retryable_primary_failure_without_fallback():
+    error = EmbeddingProviderError(
+        "provider_denied",
+        "provider denied request",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=False,
+    )
+    fallback = RecordingFallbackCoordinator()
+    coordinator = _coordinator(
+        primary_result=ProviderCallFailure(error),
+        fallback=fallback,
+    )
+
+    with pytest.raises(EmbeddingProviderError) as raised:
+        await coordinator.execute(_prepared())
+
+    assert raised.value is error
+    assert fallback.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_reraises_fallback_disabled_primary_failure():
+    error = _retryable("openai")
+    fallback = RecordingFallbackCoordinator()
+    coordinator = _coordinator(
+        primary_result=ProviderCallFailure(error),
+        fallback=fallback,
+    )
+
+    with pytest.raises(EmbeddingProviderError) as raised:
+        await coordinator.execute(_prepared(fallback_allowed=False))
+
+    assert raised.value is error
+    assert fallback.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_uses_complete_request_for_eligible_primary_failure_fallback():
+    prepared = _prepared(texts=["first", "second"])
+    fallback = RecordingFallbackCoordinator(
+        FallbackExecutionSuccess(
+            success=_success(
+                "huggingface",
+                vectors=[[0.8, 0.2], [0.6, 0.4]],
+                cache_hits=1,
+                cache_misses=1,
+            ),
+            attempt_count=2,
+        )
+    )
+    coordinator = _coordinator(
+        primary_result=ProviderCallFailure(_retryable("openai")),
+        fallback=fallback,
+    )
+
+    outcome = await coordinator.execute(prepared)
+
+    assert fallback.calls[0][0] is prepared
+    assert outcome.vectors == ((0.8, 0.2), (0.6, 0.4))
+    assert outcome.provider == "huggingface"
+    assert outcome.model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert outcome.cache_hits == 1
+    assert outcome.cache_misses == 1
+    assert outcome.embeddings_from_adapter is False
+    assert outcome.fallback_from == "openai"
+    assert outcome.attempt_count == 3
+    assert outcome.fallback_attempt_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execution_returns_successful_primary_execution():
+    coordinator = _coordinator(
+        primary_result=_success(
+            "openai",
+            vectors=[[0.4, 0.6]],
+            cache_hits=0,
+            cache_misses=1,
+        )
+    )
+
+    outcome = await coordinator.execute(_prepared())
+
+    assert outcome.vectors == ((0.4, 0.6),)
+    assert outcome.provider == "openai"
+    assert outcome.model == "text-embedding-3-small"
+    assert outcome.cache_hits == 0
+    assert outcome.cache_misses == 1
+    assert outcome.embeddings_from_adapter is False
+    assert outcome.attempt_count == 1
+    assert outcome.fallback_attempt_count == 0
+    assert outcome.fallback_from is None
 
 
 @pytest.mark.unit
