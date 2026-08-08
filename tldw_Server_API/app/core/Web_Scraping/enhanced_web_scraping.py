@@ -1299,7 +1299,10 @@ class EnhancedWebScraper:
             return result
 
         try:
-            plan, backend_choice, handler_path = self._resolve_scrape_plan(url)
+            plan, backend_choice, handler_path = await asyncio.to_thread(
+                self._resolve_scrape_plan,
+                url,
+            )
             handler_path = str(handler_path or "")
             is_default_handler = (not handler_path) or handler_path == DEFAULT_HANDLER
             handler_func = resolve_handler(handler_path) if not is_default_handler else None

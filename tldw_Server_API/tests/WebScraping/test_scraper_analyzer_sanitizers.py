@@ -170,14 +170,10 @@ async def test_rate_limit_profiler_sanitizes_injected_probe_failures():
 
 
 def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypatch):
-    original_import = __import__
+    def fail_extract(*_args, **_kwargs):
+        raise ImportError(_LEAKY_ERROR)
 
-    def fail_fetchers_import(name, *args, **kwargs):
-        if name == "tldw_Server_API.app.core.Watchlists.fetchers":
-            raise ImportError(_LEAKY_ERROR)
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.__import__", fail_fetchers_import)
+    monkeypatch.setattr(article_extractor, "extract_schema_fields", fail_extract)
 
     result = article_extractor.extract_article_with_pipeline(
         "<html><body><h1>Title</h1></body></html>",
@@ -192,12 +188,10 @@ def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypat
 
 
 def test_article_pipeline_schema_failure_sanitizes_trace_detail(monkeypatch):
-    from tldw_Server_API.app.core.Watchlists import fetchers
-
     def fail_extract(*_args, **_kwargs):
         raise RuntimeError(_LEAKY_ERROR)
 
-    monkeypatch.setattr(fetchers, "extract_schema_fields", fail_extract)
+    monkeypatch.setattr(article_extractor, "extract_schema_fields", fail_extract)
 
     result = article_extractor.extract_article_with_pipeline(
         """
@@ -215,6 +209,78 @@ def test_article_pipeline_schema_failure_sanitizes_trace_detail(monkeypatch):
         schema_rules={"title_xpath": "//article//h1", "content_xpath": "//article//p"},
     )
 
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == "schema_error"
+    _assert_safe_text(trace_entry)
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_reason"),
+    [
+        (ImportError(_LEAKY_ERROR), "schema_import_error"),
+        (RuntimeError(_LEAKY_ERROR), "schema_error"),
+    ],
+    ids=["import", "generic"],
+)
+def test_article_pipeline_schema_validation_failure_is_sanitized_and_falls_back(
+    monkeypatch,
+    error,
+    expected_reason,
+):
+    def fail_validation(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(article_extractor, "validate_selector_rules", fail_validation)
+
+    result = article_extractor.extract_article_with_pipeline(
+        "<html><body><h1>Title</h1></body></html>",
+        "https://example.com/post",
+        strategy_order=["schema", "trafilatura"],
+        schema_rules={"title_xpath": "//h1"},
+        fallback_extractor=lambda *_args, **_kwargs: {
+            "url": "https://example.com/post",
+            "extraction_successful": True,
+            "title": "Fallback",
+            "content": "Body",
+        },
+    )
+
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == expected_reason
+    assert result["extraction_strategy"] == "trafilatura"
+    assert result["extraction_trace"][1]["status"] == "success"
+    _assert_safe_text(trace_entry)
+
+
+def test_article_pipeline_schema_validation_failure_is_not_retried(monkeypatch):
+    validation_calls = 0
+    retry_delays = []
+    retry_metrics = []
+
+    def fail_validation(*_args, **_kwargs):
+        nonlocal validation_calls
+        validation_calls += 1
+        raise RuntimeError(_LEAKY_ERROR)
+
+    def record_counter(metric_name, value=1, labels=None):
+        if metric_name == "extraction_retry_total":
+            retry_metrics.append((value, labels))
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "2")
+    monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "10")
+    monkeypatch.setenv("EXTRACTOR_RETRY_JITTER_MS", "0")
+    monkeypatch.setattr(article_extractor, "validate_selector_rules", fail_validation)
+    monkeypatch.setattr(article_extractor.time, "sleep", retry_delays.append)
+    monkeypatch.setattr(article_extractor, "increment_counter", record_counter)
+
+    result = article_extractor.extract_article_with_pipeline(
+        "<html><body><h1 data-no-retry>Title</h1></body></html>",
+        "https://example.com/schema-validation-no-retry",
+        strategy_order=["schema"],
+        schema_rules={"title_xpath": "//h1[@data-no-retry]"},
+    )
+
+    assert (validation_calls, retry_delays, retry_metrics) == (1, [], [])
     trace_entry = result["extraction_trace"][0]
     assert trace_entry["reason"] == "schema_error"
     _assert_safe_text(trace_entry)

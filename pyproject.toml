@@ -61,6 +61,7 @@ dependencies = [
   "hypothesis",
   "loguru>=0.7.0",
   "lxml>=4.9.0",
+  "cssselect>=1.2.0",
   "numpy>=1.24.0",
   "icalendar>=5.0.0",
   "openpyxl>=3.1.2",

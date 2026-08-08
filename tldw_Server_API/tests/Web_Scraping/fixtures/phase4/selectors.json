@@ -1,0 +1,554 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "content_xpath": 1,
+            "title_xpath": 2
+          },
+          "warnings": [
+            {
+              "count": 2,
+              "key": "title_xpath",
+              "selector": "//h1",
+              "warning": "non_unique_selector"
+            }
+          ]
+        }
+      },
+      "html": "<html><body><h1>One</h1><h1>Two</h1><div class=\"body\">Body</div></body></html>",
+      "include_counts": true,
+      "name": "validation_counts_and_warnings",
+      "operation": "validate",
+      "rules": {
+        "content_xpath": "//div[@class='body']",
+        "title_xpath": "//h1"
+      }
+    },
+    {
+      "behavior_change": 7,
+      "difference_contract": "change_7_selector_invalid",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0
+        },
+        "result": {
+          "errors": [
+            {
+              "error": "Invalid expression",
+              "key": "content_xpath",
+              "selector": "//article["
+            }
+          ],
+          "warnings": []
+        }
+      },
+      "include_counts": false,
+      "name": "invalid_xpath_error",
+      "operation": "validate",
+      "rules": {
+        "content_xpath": "//article["
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0
+        },
+        "result": {
+          "errors": [
+            {
+              "error": "selector_too_complex:length>512",
+              "key": "content_xpath",
+              "selector": "//div/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span"
+            }
+          ],
+          "warnings": []
+        }
+      },
+      "include_counts": false,
+      "name": "selector_complexity_guard",
+      "operation": "validate",
+      "rules": {
+        "content_xpath": "//div/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span/span"
+      }
+    },
+    {
+      "base_url": "https://example.com/post",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 7
+        },
+        "result": {
+          "content": "First paragraph.\nSecond paragraph.",
+          "extraction_successful": true,
+          "published": "2025-01-15T00:00:00+00:00",
+          "schema_fields": {
+            "content": "First paragraph.\nSecond paragraph.",
+            "link": "https://example.com/read-more",
+            "published": "2025-01-15T00:00:00+00:00",
+            "slug": "example-title",
+            "tags": [
+              "news",
+              "tech"
+            ],
+            "title": "Example Title",
+            "views": "1234"
+          },
+          "schema_name": "article",
+          "title": "Example Title",
+          "url": "https://example.com/post"
+        }
+      },
+      "html": "<html><body><article><h1> Example Title </h1><time>2025-01-15</time><span class=\"views\">1,234</span><p class=\"content\">First paragraph.</p><p class=\"content\">Second paragraph.</p><a class=\"more\" href=\"/read-more\">Read more</a><span class=\"tag\">News</span><span class=\"tag\">Tech</span></article></body></html>",
+      "name": "schema_dsl_transforms_and_lists",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "baseFields": [
+          {
+            "name": "title",
+            "selector": ".//h1",
+            "transforms": [
+              "strip"
+            ],
+            "type": "text"
+          },
+          {
+            "join_with": "\n",
+            "name": "content",
+            "selector": ".//p[@class='content']",
+            "type": "text"
+          },
+          {
+            "name": "published",
+            "selector": ".//time",
+            "transforms": [
+              {
+                "format": "%Y-%m-%d",
+                "name": "date_normalize"
+              }
+            ],
+            "type": "text"
+          },
+          {
+            "name": "views",
+            "selector": ".//span[@class='views']",
+            "transforms": [
+              {
+                "name": "number_normalize"
+              }
+            ],
+            "type": "text"
+          }
+        ],
+        "baseSelector": "//article",
+        "fields": [
+          {
+            "attribute": "href",
+            "name": "link",
+            "selector": ".//a[@class='more']",
+            "transforms": [
+              {
+                "name": "urljoin"
+              }
+            ],
+            "type": "attribute"
+          },
+          {
+            "itemType": "text",
+            "name": "tags",
+            "selector": ".//span[@class='tag']",
+            "transforms": [
+              "lowercase"
+            ],
+            "type": "list"
+          },
+          {
+            "from": "title",
+            "name": "slug",
+            "transforms": [
+              "lowercase",
+              {
+                "name": "regex_replace",
+                "pattern": "\\s+",
+                "repl": "-"
+              }
+            ],
+            "type": "computed"
+          }
+        ],
+        "name": "article"
+      }
+    },
+    {
+      "base_url": "https://example.com/templates",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "extraction_successful": true,
+          "schema_fields": {
+            "formatted": "repr='Caf\u00e9 Title'|str=Caf\u00e9 Title|ascii='Caf\\xe9 Title'|first=C|left=[Caf\u00e9 Title          ]|right=[          Caf\u00e9 Title]|missing=[]",
+            "title": "Caf\u00e9 Title"
+          },
+          "schema_name": "template_compatibility",
+          "title": "Caf\u00e9 Title",
+          "url": "https://example.com/templates"
+        }
+      },
+      "html": "<html><body><article><h1>Caf&#233; Title</h1></article></body></html>",
+      "name": "computed_template_format_compatibility",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "baseFields": [
+          {
+            "name": "title",
+            "selector": ".//h1",
+            "type": "text"
+          }
+        ],
+        "baseSelector": "//article",
+        "fields": [
+          {
+            "name": "formatted",
+            "template": "repr={title!r}|str={title!s}|ascii={title!a}|first={title[0]}|left=[{title:20}]|right=[{title:>20}]|missing=[{missing}]",
+            "type": "computed"
+          }
+        ],
+        "name": "template_compatibility"
+      }
+    },
+    {
+      "base_url": "https://example.com/templates/mapping",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "author": {
+            "name": "Ada"
+          },
+          "extraction_successful": true,
+          "schema_fields": {
+            "author": {
+              "name": "Ada"
+            },
+            "byline": "By Ada|type=<class 'str'>",
+            "title": "Headline"
+          },
+          "title": "Headline",
+          "url": "https://example.com/templates/mapping"
+        }
+      },
+      "html": "<html><body><article><h1>Headline</h1><span class=\"author\">Ada</span></article></body></html>",
+      "name": "computed_template_mapping_and_attribute_compatibility",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "fields": [
+          {
+            "name": "title",
+            "selector": "//h1",
+            "type": "text"
+          },
+          {
+            "fields": [
+              {
+                "name": "name",
+                "selector": "//span[@class='author']"
+              }
+            ],
+            "name": "author",
+            "type": "nested"
+          },
+          {
+            "name": "byline",
+            "template": "By {author[name]}|type={title.__class__}",
+            "type": "computed"
+          }
+        ]
+      }
+    },
+    {
+      "base_url": "https://example.com/transforms",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 1
+        },
+        "result": {
+          "extraction_successful": true,
+          "schema_fields": {
+            "value": "x"
+          },
+          "url": "https://example.com/transforms"
+        }
+      },
+      "html": "<html><body><article><h1>x</h1></article></body></html>",
+      "name": "unknown_prepend_append_transform_noops",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "fields": [
+          {
+            "name": "value",
+            "selector": "//h1",
+            "transforms": [
+              {
+                "name": "prepend",
+                "value": "a"
+              },
+              {
+                "name": "append",
+                "value": "b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 1,
+          "selector_xpath_cache_size": 1
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "title_selector": 2,
+            "title_xpath": 1
+          },
+          "warnings": [
+            {
+              "count": 2,
+              "key": "title_selector",
+              "selector": "css:h2",
+              "warning": "non_unique_selector"
+            }
+          ]
+        }
+      },
+      "html": "<html><body><h1>XPath title</h1><h2>CSS one</h2><h2>CSS two</h2></body></html>",
+      "include_counts": true,
+      "name": "validation_checks_both_title_aliases",
+      "operation": "validate",
+      "rules": {
+        "title_selector": "css:h2",
+        "title_xpath": "//h1"
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "alternates[0].content_xpath": 0,
+            "title_xpath": 1
+          },
+          "warnings": [
+            {
+              "key": "alternates[0].content_xpath",
+              "selector": "//div[@class='missing']",
+              "warning": "no_matches"
+            }
+          ]
+        }
+      },
+      "html": "<html><body><h1>Primary title</h1></body></html>",
+      "include_counts": true,
+      "name": "validation_preserves_missing_alternate_path",
+      "operation": "validate",
+      "rules": {
+        "alternates": [
+          {
+            "content_xpath": "//div[@class='missing']"
+          }
+        ],
+        "title_xpath": "//h1"
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 1
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "fields.headline": 1
+          },
+          "warnings": []
+        }
+      },
+      "html": "<html><body><article><h1>Headline</h1><ul><li>One</li><li>Two</li></ul></article></body></html>",
+      "include_counts": true,
+      "name": "validation_dsl_item_selector_is_compile_only",
+      "operation": "validate",
+      "rules": {
+        "fields": [
+          {
+            "itemSelector": ".//li",
+            "name": "headline",
+            "selector": "//h1",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "errors": [],
+          "selector_counts": {
+            "fields.article": 1,
+            "fields.article.heading": 2
+          },
+          "warnings": [
+            {
+              "count": 2,
+              "key": "fields.article.heading",
+              "selector": ".//h2",
+              "warning": "non_unique_selector"
+            }
+          ]
+        }
+      },
+      "html": "<html><body><article class=\"primary\"><h2>Primary</h2></article><article class=\"secondary\"><h2>Secondary</h2></article></body></html>",
+      "include_counts": true,
+      "name": "validation_dsl_nested_selector_uses_root_document",
+      "operation": "validate",
+      "rules": {
+        "fields": [
+          {
+            "fields": [
+              {
+                "name": "heading",
+                "selector": ".//h2",
+                "type": "text"
+              }
+            ],
+            "name": "article",
+            "selector": "//article[@class='primary']",
+            "type": "nested"
+          }
+        ]
+      }
+    },
+    {
+      "base_url": "https://example.com/regex-fallback",
+      "behavior_change": 4,
+      "capture_regex_error": true,
+      "difference_contract": "change_4_selector_regex_failure_returns_original",
+      "expected": {
+        "outcome": "regex_error",
+        "value": null
+      },
+      "html": "<html><body><article><p>AB123</p></article></body></html>",
+      "name": "regex_replace_stdlib_invalid_lookbehind_fallback",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "baseSelector": "//article",
+        "fields": [
+          {
+            "name": "content",
+            "selector": ".//p",
+            "transforms": [
+              {
+                "name": "regex_replace",
+                "pattern": "(?<=[A-Z]{1,3})(\\d+)",
+                "repl": "[\\1]"
+              }
+            ],
+            "type": "text"
+          }
+        ],
+        "name": "regex_fallback"
+      }
+    },
+    {
+      "base_url": "https://example.com/regex-unicode",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 2
+        },
+        "result": {
+          "content": "X\u0301",
+          "extraction_successful": true,
+          "schema_fields": {
+            "content": "X\u0301"
+          },
+          "schema_name": "regex_unicode",
+          "url": "https://example.com/regex-unicode"
+        }
+      },
+      "html": "<html><body><article><p>e&#769;</p></article></body></html>",
+      "name": "regex_replace_stdlib_combining_mark_parity",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "baseSelector": "//article",
+        "fields": [
+          {
+            "name": "content",
+            "selector": ".//p",
+            "transforms": [
+              {
+                "name": "regex_replace",
+                "pattern": "\\w",
+                "repl": "X"
+              }
+            ],
+            "type": "text"
+          }
+        ],
+        "name": "regex_unicode"
+      }
+    },
+    {
+      "base_url": "https://example.com/article",
+      "expected": {
+        "cache_stats": {
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 4
+        },
+        "result": {
+          "author": "Grace Hopper",
+          "content": "One\nTwo",
+          "extraction_successful": true,
+          "title": "Legacy title",
+          "url": "https://example.com/article"
+        }
+      },
+      "html": "<html><body><main><h1>Legacy title</h1><div class=\"body\"><p>One</p><p>Two</p></div><a rel=\"author\">Grace Hopper</a></main></body></html>",
+      "name": "legacy_selector_field_extraction",
+      "operation": "extract_schema_fields",
+      "rules": {
+        "author_xpath": ".//a[@rel='author']",
+        "base_xpath": "//main",
+        "content_xpath": ".//div[@class='body']/p",
+        "title_xpath": ".//h1"
+      }
+    }
+  ],
+  "category": "selectors"
+}
