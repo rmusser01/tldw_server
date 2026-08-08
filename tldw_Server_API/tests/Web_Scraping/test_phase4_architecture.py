@@ -11,6 +11,9 @@ SELECTORS_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping"
 FETCHERS_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Watchlists" / "fetchers.py"
 ENDPOINT_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "api" / "v1" / "endpoints" / "watchlists.py"
 ARTICLE_PATH = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "Article_Extractor_Lib.py"
+EXTRACTION_DEPENDENCIES_PATH = (
+    REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "extraction" / "dependencies.py"
+)
 
 EXPECTED_IMPORTS = {
     "__init__.py": {".caches", ".schema"},
@@ -91,6 +94,15 @@ def _imported_names(path: Path, module: str) -> set[str]:
     return names
 
 
+def _imported_names_at_any_scope(path: Path, module: str) -> set[str]:
+    return {
+        alias.name
+        for node in ast.walk(_tree(path))
+        if isinstance(node, ast.ImportFrom) and node.module == module
+        for alias in node.names
+    }
+
+
 def test_selector_package_has_the_approved_files() -> None:
     assert {path.name for path in SELECTORS_ROOT.glob("*.py")} == set(EXPECTED_IMPORTS)
 
@@ -168,23 +180,27 @@ def test_watchlists_has_direct_canonical_imports_without_selector_bodies() -> No
 
 def test_article_selector_responsibilities_import_the_canonical_facade() -> None:
     facade_module = "tldw_Server_API.app.core.Web_Scraping.selectors"
-    selector_names = {
+    article_selector_names = {
         "clear_selector_caches",
-        "extract_schema_fields",
         "get_selector_cache_stats",
+    }
+    extraction_selector_names = {
+        "extract_schema_fields",
         "validate_selector_rules",
     }
 
-    assert _imported_names(ARTICLE_PATH, facade_module) == selector_names
+    assert _imported_names(ARTICLE_PATH, facade_module) == article_selector_names
+    assert _imported_names_at_any_scope(EXTRACTION_DEPENDENCIES_PATH, facade_module) == extraction_selector_names
 
     violations = []
-    for node in ast.walk(_tree(ARTICLE_PATH)):
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        module = node.module or ""
-        imported = {alias.name for alias in node.names}
-        if ".Watchlists" in module and imported & selector_names:
-            violations.append({"module": module, "names": sorted(imported & selector_names)})
+    for path in (ARTICLE_PATH, EXTRACTION_DEPENDENCIES_PATH):
+        for node in ast.walk(_tree(path)):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module = node.module or ""
+            imported = {alias.name for alias in node.names}
+            if ".Watchlists" in module and imported & (article_selector_names | extraction_selector_names):
+                violations.append({"module": module, "names": sorted(imported)})
     assert violations == []
 
 

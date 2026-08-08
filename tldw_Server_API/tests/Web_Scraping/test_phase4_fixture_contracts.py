@@ -69,6 +69,15 @@ def _content_length(strategy: str, value: int = 31) -> dict[str, object]:
     }
 
 
+def _cluster_counter(name: str, labels: dict[str, str]) -> dict[str, object]:
+    return {
+        "emitter": "increment_counter",
+        "kind": "counter",
+        "labels": labels,
+        "name": name,
+    }
+
+
 def _predecessor_change_1_profile() -> dict[str, object]:
     return {
         "metrics": [
@@ -127,6 +136,64 @@ def _coherent_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
             _counter("trafilatura", "success"),
             _duration("trafilatura", "success"),
             _content_length("trafilatura", 33),
+        ]
+    )
+    return actual, expected
+
+
+def _coherent_cluster_success_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
+    expected = _predecessor_change_1_profile()
+    expected["cache_stats"] = {"cluster_embedding_cache_size": 0}
+    actual = deepcopy(expected)
+    cache_stats = actual["cache_stats"]
+    result = actual["result"]
+    assert isinstance(cache_stats, dict)
+    assert isinstance(result, dict)
+    trace = result["extraction_trace"]
+    metrics = actual["metrics"]
+    assert isinstance(trace, list)
+    assert isinstance(metrics, list)
+
+    cache_stats["cluster_embedding_cache_size"] = 1
+    result.update(
+        {
+            "cluster_blocks": ["Contact predecessor@example.com"],
+            "cluster_block_count": 1,
+            "cluster_prefiltered_count": 1,
+            "cluster_total_blocks": 1,
+            "cluster_cluster_count": 1,
+            "cluster_method": "greedy",
+            "cluster_similarity_threshold": 0.4,
+            "cluster_word_threshold": 8,
+            "extraction_strategy": "cluster",
+        }
+    )
+    trace[2] = {"reason": "regex_enriched", "status": "enriched", "strategy": "regex"}
+    trace.append(
+        {
+            "detail": "cluster_blocks=1",
+            "reason": "cluster_extracted",
+            "status": "success",
+            "strategy": "cluster",
+        }
+    )
+    metrics[4] = _counter("regex", "enriched")
+    metrics[5] = _duration("regex", "enriched")
+    metrics.extend(
+        [
+            _cluster_counter("extraction_cluster_total", {"status": "started"}),
+            _cluster_counter(
+                "extraction_cluster_cache_total",
+                {"cache": "embedding", "result": "miss"},
+            ),
+            _cluster_counter(
+                "extraction_cluster_cache_total",
+                {"cache": "embedding", "result": "hit"},
+            ),
+            _cluster_counter("extraction_cluster_total", {"status": "success"}),
+            _counter("cluster", "success"),
+            _duration("cluster", "success"),
+            _content_length("cluster"),
         ]
     )
     return actual, expected
@@ -335,6 +402,140 @@ def test_change_1_contract_accepts_explicit_predecessor_equality_profile() -> No
 def test_change_1_contract_accepts_complete_coherent_transition() -> None:
     actual, expected = _coherent_change_1_profile()
     _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_accepts_exact_cluster_success_profile() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+
+    _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize("label_key", ["url", "base_url", "error", "host", "payload", "pattern"])
+def test_change_1_contract_rejects_sensitive_or_high_cardinality_cluster_metric_labels(
+    label_key: str,
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[7]
+    assert isinstance(metric, dict)
+    labels = metric["labels"]
+    assert isinstance(labels, dict)
+    labels[label_key] = "https://sensitive.example/path?token=secret"
+
+    with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_extra_cluster_metric_event_key() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[7]
+    assert isinstance(metric, dict)
+    metric["raw_error"] = "https://sensitive.example/path?token=secret"
+
+    with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("metric_index", "labels"),
+    [
+        (7, {"status": "https://sensitive.example/raw-status"}),
+        (8, {"cache": "embedding", "result": "customer-12345"}),
+        (8, {"cache": "provider-payload", "result": "miss"}),
+    ],
+)
+def test_change_1_contract_rejects_unbounded_cluster_metric_label_values(
+    metric_index: int,
+    labels: dict[str, str],
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[metric_index]
+    assert isinstance(metric, dict)
+    metric["labels"] = labels
+
+    with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("cluster_blocks", ["valid", 3]),
+        ("cluster_block_count", True),
+        ("cluster_prefiltered_count", 0),
+        ("cluster_total_blocks", -1),
+        ("cluster_cluster_count", 0),
+        ("cluster_method", "provider_payload"),
+        ("cluster_similarity_threshold", 2.0),
+        ("cluster_word_threshold", 0),
+    ],
+)
+def test_change_1_contract_rejects_invalid_cluster_result_fields(
+    field: str,
+    invalid_value: object,
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    result = actual["result"]
+    assert isinstance(result, dict)
+    result[field] = invalid_value
+
+    with pytest.raises(AssertionError, match="violates contract rule|profile"):
+        _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("cluster_block_count", 2),
+        ("cluster_prefiltered_count", 2),
+        ("cluster_cluster_count", 2),
+    ],
+)
+def test_change_1_contract_rejects_incoherent_cluster_counts(
+    field: str,
+    invalid_value: int,
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    result = actual["result"]
+    assert isinstance(result, dict)
+    result[field] = invalid_value
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_incoherent_cluster_cache_size() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    cache_stats = actual["cache_stats"]
+    assert isinstance(cache_stats, dict)
+    cache_stats["cluster_embedding_cache_size"] = 2
+
+    with pytest.raises(AssertionError, match="violates contract rule|profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_missing_cluster_internal_metrics() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    del metrics[7:11]
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_missing_cluster_cache_profile() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    actual.pop("cache_stats")
+    expected.pop("cache_stats")
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
 
 
 def test_change_1_contract_rejects_duplicate_metric() -> None:

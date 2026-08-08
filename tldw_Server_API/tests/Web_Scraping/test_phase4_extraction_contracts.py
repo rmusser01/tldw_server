@@ -11,7 +11,7 @@ import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import extraction
-from tldw_Server_API.app.core.Web_Scraping.extraction import caches
+from tldw_Server_API.app.core.Web_Scraping.extraction import caches, pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
     build_default_dependencies,
@@ -72,15 +72,21 @@ def test_extraction_facade_has_the_phase4b_public_contract() -> None:
     assert extraction.__all__ == [
         "ExtractionDependencies",
         "build_default_dependencies",
+        "DEFAULT_EXTRACTION_STRATEGY_ORDER",
         "clear_extraction_caches",
         "get_extraction_cache_stats",
         "extract_cluster_entities",
+        "extract_article_data_from_html",
+        "extract_article_with_pipeline",
         "extract_jsonld_entities",
         "extract_llm_entities",
         "extract_regex_entities",
         "generate_regex_pattern_from_llm",
         "generate_schema_rules_from_llm",
     ]
+    assert legacy.DEFAULT_EXTRACTION_STRATEGY_ORDER is extraction.DEFAULT_EXTRACTION_STRATEGY_ORDER
+    assert legacy.extract_article_data_from_html is extraction.extract_article_data_from_html
+    assert legacy.extract_article_with_pipeline is extraction.extract_article_with_pipeline
     assert legacy.clear_extraction_caches is extraction.clear_extraction_caches
     assert legacy.get_extraction_cache_stats is extraction.get_extraction_cache_stats
 
@@ -382,7 +388,8 @@ def test_partial_schema_result_with_no_matches_warning_is_not_cached(monkeypatch
             {"name": "content", "selector": "//article/div[@class='missing']", "type": "text"},
         ],
     }
-    original_extract_schema_fields = legacy.extract_schema_fields
+    default_dependencies = build_default_dependencies()
+    original_extract_schema_fields = default_dependencies.extract_schema_fields
     extraction_calls = 0
 
     def track_schema_extraction(*args: object, **kwargs: object) -> dict[str, object]:
@@ -390,7 +397,11 @@ def test_partial_schema_result_with_no_matches_warning_is_not_cached(monkeypatch
         extraction_calls += 1
         return original_extract_schema_fields(*args, **kwargs)
 
-    monkeypatch.setattr(legacy, "extract_schema_fields", track_schema_extraction)
+    dependencies = dataclasses.replace(
+        default_dependencies,
+        extract_schema_fields=track_schema_extraction,
+    )
+    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
     extraction.clear_extraction_caches()
 
     first_result = legacy.extract_article_with_pipeline(
