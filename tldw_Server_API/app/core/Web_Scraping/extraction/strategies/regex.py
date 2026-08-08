@@ -1,11 +1,9 @@
 """Trusted static regex extraction strategy."""
 
-from __future__ import annotations
-
 import ipaddress
 import os
 import re
-from typing import Any
+from typing import Any, Optional
 
 from bs4 import BeautifulSoup
 
@@ -79,7 +77,7 @@ def extract_regex_entities(
     html_text: str,
     url: str,
     *,
-    mask_pii: bool | None = None,
+    mask_pii: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Extract fixed catalog entities from HTML without evaluating untrusted regex."""
     result: dict[str, Any] = {

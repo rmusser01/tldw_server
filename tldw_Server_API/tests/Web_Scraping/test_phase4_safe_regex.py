@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
 from tldw_Server_API.app.core.Web_Scraping import safe_regex as safe_regex_module
 from tldw_Server_API.app.core.Web_Scraping import safe_regex_worker as safe_regex_worker_module
 from tldw_Server_API.app.core.Web_Scraping import scraper_router as scraper_router_module
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import regex as regex_strategy
 from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
     SafeRegexLimits,
     SafeRegexResult,
@@ -2068,6 +2069,6 @@ def test_generated_regex_timeout_uses_stable_code(
 def test_trusted_catalogs_remain_stdlib_regex_patterns() -> None:
     assert ael._BOILERPLATE_REGEXES
     assert all(isinstance(pattern, re.Pattern) for pattern in ael._BOILERPLATE_REGEXES)
-    assert ael._REGEX_CATALOG
-    assert all(isinstance(pattern, re.Pattern) for _label, pattern in ael._REGEX_CATALOG)
+    assert regex_strategy._REGEX_CATALOG
+    assert all(isinstance(pattern, re.Pattern) for _label, pattern in regex_strategy._REGEX_CATALOG)
     assert ael._strip_boilerplate_sections("Keep this\nSubscribe now\nKeep that") == ("Keep this\nKeep that")

@@ -1,4 +1,5 @@
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as extractor_lib
+from tldw_Server_API.app.core.Web_Scraping import extraction
 
 
 def test_cluster_env_overrides(monkeypatch):
@@ -66,7 +67,13 @@ def test_extractor_max_workers_env(monkeypatch):
 
 def test_regex_pii_mask_flag_accepts_y(monkeypatch):
     monkeypatch.setenv("REGEX_PII_MASK", "y")
-    assert extractor_lib._regex_pii_mask_enabled() is True
+    result = extraction.extract_regex_entities(
+        "Contact demo@example.com",
+        "https://example.com/contact",
+    )
+    email = next(match for match in result["regex_matches"] if match["label"] == "email")
+
+    assert email["value"] == "d***o@example.com"
 
 
 def test_clear_caches_flag_accepts_y_end_only(monkeypatch):

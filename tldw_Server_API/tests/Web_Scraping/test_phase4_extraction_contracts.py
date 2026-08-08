@@ -3,7 +3,9 @@ from __future__ import annotations
 import ast
 import asyncio
 import dataclasses
+import inspect
 from pathlib import Path
+from typing import Any, Optional
 
 import pytest
 
@@ -14,9 +16,58 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
     build_default_dependencies,
 )
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
+    jsonld as jsonld_strategy,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXTRACTION_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "extraction"
+FORBIDDEN_EXTRACTION_IMPORT_PARTS = {
+    "Article_Extractor_Lib",
+    "Watchlists",
+    "WebSearch",
+    "WebSearch_APIs",
+    "enhanced_web_scraping",
+    "orchestration",
+    "playwright",
+    "policy",
+    "preflight",
+    "routing",
+    "scraper_router",
+}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_import"),
+    [
+        (
+            "from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib",
+            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
+        ),
+        ("from .. import policy", "policy"),
+    ],
+)
+def test_extraction_dependency_guard_rejects_absolute_and_relative_imports(
+    source: str,
+    expected_import: str,
+) -> None:
+    assert _forbidden_extraction_imports(ast.parse(source)) == [expected_import]
+
+
+def _forbidden_extraction_imports(tree: ast.AST) -> list[str]:
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            imports = [f"{module}.{alias.name}" if module else alias.name for alias in node.names]
+        else:
+            continue
+        for imported in imports:
+            if set(imported.split(".")) & FORBIDDEN_EXTRACTION_IMPORT_PARTS:
+                violations.append(imported)
+    return violations
 
 
 def test_extraction_facade_has_the_phase4b_public_contract() -> None:
@@ -37,21 +88,197 @@ def test_legacy_jsonld_and_regex_exports_are_canonical() -> None:
     assert legacy.extract_regex_entities is extraction.extract_regex_entities
 
 
-def test_extraction_package_does_not_import_the_legacy_wrapper() -> None:
-    violations: list[str] = []
+def test_canonical_and_legacy_strategy_signatures_match_predecessor() -> None:
+    expected_jsonld = inspect.Signature(
+        parameters=[
+            inspect.Parameter("html_text", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+            inspect.Parameter("url", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+        ],
+        return_annotation=dict[str, Any],
+    )
+    expected_regex = inspect.Signature(
+        parameters=[
+            inspect.Parameter("html_text", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+            inspect.Parameter("url", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+            inspect.Parameter(
+                "mask_pii",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Optional[bool],
+            ),
+        ],
+        return_annotation=dict[str, Any],
+    )
+
+    assert inspect.signature(extraction.extract_jsonld_entities) == expected_jsonld
+    assert inspect.signature(legacy.extract_jsonld_entities) == expected_jsonld
+    assert inspect.signature(extraction.extract_regex_entities) == expected_regex
+    assert inspect.signature(legacy.extract_regex_entities) == expected_regex
+
+
+def test_extraction_package_does_not_import_forbidden_upward_layers() -> None:
+    violations: list[tuple[str, str]] = []
     for path in EXTRACTION_ROOT.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imports = (alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                imports = (node.module or "",)
-            else:
-                continue
-            if any("Article_Extractor_Lib" in imported for imported in imports):
-                violations.append(str(path.relative_to(EXTRACTION_ROOT)))
+        violations.extend(
+            (str(path.relative_to(EXTRACTION_ROOT)), imported) for imported in _forbidden_extraction_imports(tree)
+        )
 
     assert violations == []
+
+
+def test_jsonld_extracts_article_from_graph() -> None:
+    html = """
+    <script type="application/ld+json">
+      {"@graph": [
+        {"@type": "WebPage", "name": "Landing page"},
+        {"@type": "Article", "headline": "Graph title", "articleBody": "Graph body"}
+      ]}
+    </script>
+    """
+
+    result = extraction.extract_jsonld_entities(html, "https://example.com/graph")
+
+    assert result["title"] == "Graph title"
+    assert result["content"] == "Graph body"
+    assert result["jsonld_types"] == ["article"]
+    assert result["extraction_successful"] is True
+
+
+@pytest.mark.parametrize("reference_key", ["mainEntity", "mainEntityOfPage"])
+def test_jsonld_extracts_inline_article_references(reference_key: str) -> None:
+    html = f"""
+    <script type="application/ld+json">
+      {{"@type": "WebPage", "{reference_key}": {{
+        "@id": "#article",
+        "@type": "Article",
+        "headline": "Referenced title",
+        "articleBody": "Referenced body"
+      }}}}
+    </script>
+    """
+
+    result = extraction.extract_jsonld_entities(html, "https://example.com/reference")
+
+    assert result["title"] == "Referenced title"
+    assert result["content"] == "Referenced body"
+    assert result["extraction_successful"] is True
+
+
+def test_jsonld_decodes_concatenated_objects() -> None:
+    html = """
+    <script type="application/ld+json">
+      {"@type": "WebPage", "name": "Landing"}
+      {"@type": "Article", "headline": "Second object", "articleBody": "Second body"}
+    </script>
+    """
+
+    result = extraction.extract_jsonld_entities(html, "https://example.com/objects")
+
+    assert result["title"] == "Second object"
+    assert result["content"] == "Second body"
+    assert result["extraction_successful"] is True
+
+
+def test_jsonld_parse_failure_is_sanitized_and_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = "private parser detail"
+
+    def raise_sensitive_error(_payload: str) -> object:
+        raise ValueError(secret)
+
+    monkeypatch.setattr(jsonld_strategy.json, "loads", raise_sensitive_error)
+
+    result = extraction.extract_jsonld_entities(
+        '<script type="application/ld+json">not-json</script>',
+        "https://example.com/private",
+    )
+
+    assert result["jsonld_error"] == "jsonld_parse_failed"
+    assert secret not in str(result)
+
+
+def test_jsonld_cancellation_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_cancellation(_payload: str) -> object:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(jsonld_strategy.json, "loads", raise_cancellation)
+
+    with pytest.raises(asyncio.CancelledError):
+        extraction.extract_jsonld_entities(
+            '<script type="application/ld+json">not-json</script>',
+            "https://example.com/cancel",
+        )
+
+
+def test_regex_total_match_cap_is_200() -> None:
+    html = " ".join(f"user{index}@example.com" for index in range(250))
+
+    result = extraction.extract_regex_entities(html, "https://example.com/total", mask_pii=False)
+
+    assert len(result["regex_matches"]) == 200
+    assert {match["label"] for match in result["regex_matches"]} == {"email"}
+
+
+def test_regex_number_match_cap_is_50() -> None:
+    html = ";".join(str(index) for index in range(1, 76))
+
+    result = extraction.extract_regex_entities(html, "https://example.com/numbers", mask_pii=False)
+    number_matches = [match for match in result["regex_matches"] if match["label"] == "number"]
+
+    assert len(number_matches) == 50
+
+
+def test_regex_suppresses_number_overlaps() -> None:
+    result = extraction.extract_regex_entities(
+        "Visit https://example.com/12345 today",
+        "https://example.com/overlap",
+        mask_pii=False,
+    )
+
+    assert not [match for match in result["regex_matches"] if match["label"] == "number"]
+
+
+def test_regex_rejects_invalid_ip_addresses() -> None:
+    result = extraction.extract_regex_entities(
+        "Invalid address: 999.999.999.999",
+        "https://example.com/ip",
+        mask_pii=False,
+    )
+
+    assert not [match for match in result["regex_matches"] if match["label"] in {"ipv4", "ipv6"}]
+
+
+def test_regex_applies_luhn_filtering() -> None:
+    result = extraction.extract_regex_entities(
+        "Valid 4111 1111 1111 1111 invalid 4111 1111 1111 1112",
+        "https://example.com/cards",
+        mask_pii=False,
+    )
+    cards = [match["value"] for match in result["regex_matches"] if match["label"] == "credit_card"]
+
+    assert cards == ["4111 1111 1111 1111"]
+
+
+@pytest.mark.parametrize(
+    ("environment_value", "mask_pii", "expected_value"),
+    [("true", False, "demo@example.com"), ("false", True, "d***o@example.com")],
+)
+def test_explicit_regex_mask_setting_precedes_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_value: str,
+    mask_pii: bool,
+    expected_value: str,
+) -> None:
+    monkeypatch.setenv("REGEX_PII_MASK", environment_value)
+
+    result = extraction.extract_regex_entities(
+        "Email demo@example.com",
+        "https://example.com/masking",
+        mask_pii=mask_pii,
+    )
+    email = next(match for match in result["regex_matches"] if match["label"] == "email")
+
+    assert email["value"] == expected_value
 
 
 def test_default_dependencies_are_immutable_and_created_at_call_time() -> None:
