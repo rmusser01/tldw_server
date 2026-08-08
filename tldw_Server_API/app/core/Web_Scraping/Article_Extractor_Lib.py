@@ -26,12 +26,11 @@ import random
 import re
 import tempfile
 import time
-from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
+from threading import BoundedSemaphore
 from typing import Any, Callable, Optional, Union
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -68,6 +67,33 @@ from tldw_Server_API.app.core.Web_Scraping.content import (
     convert_html_to_markdown,
 )
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import RateLimiter
+from tldw_Server_API.app.core.Web_Scraping.extraction import (
+    clear_extraction_caches,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction import (
+    get_extraction_cache_stats as _get_extraction_cache_stats,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
+    _cluster_cache_get as _canonical_cluster_cache_get,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
+    _cluster_cache_put as _canonical_cluster_cache_put,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
+    _schema_cache_get as _canonical_schema_cache_get,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
+    _schema_cache_put as _canonical_schema_cache_put,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
+    apply_llm_delay as _canonical_apply_llm_delay,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
+    get_llm_semaphore as _canonical_get_llm_semaphore,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
+    get_strategy_semaphore as _canonical_get_strategy_semaphore,
+)
 from tldw_Server_API.app.core.Web_Scraping.filters import (
     ContentTypeFilter,
     FilterChain,
@@ -91,10 +117,14 @@ from tldw_Server_API.app.core.Web_Scraping.safe_regex import (
 )
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.selectors import (
-    clear_selector_caches,
+    clear_selector_caches as _clear_selector_caches,
+)
+from tldw_Server_API.app.core.Web_Scraping.selectors import (
     extract_schema_fields,
-    get_selector_cache_stats,
     validate_selector_rules,
+)
+from tldw_Server_API.app.core.Web_Scraping.selectors import (
+    get_selector_cache_stats as _get_selector_cache_stats,
 )
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
     build_browser_headers,
@@ -123,6 +153,10 @@ _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     DefusedXmlException,
 )
+
+get_extraction_cache_stats = _get_extraction_cache_stats
+clear_selector_caches = _clear_selector_caches
+get_selector_cache_stats = _get_selector_cache_stats
 
 #
 #######################################################################################################################
@@ -461,7 +495,6 @@ _REGEX_CATALOG: list[tuple[str, re.Pattern[str]]] = [
     ("iban", re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", re.IGNORECASE)),
     ("credit_card", re.compile(r"\b(?:\d[ -]*?){13,19}\b")),
 ]
-_CLUSTER_EMBED_CACHE_MAX = 512
 _CLUSTER_EMBED_DIM = 128
 _CLUSTER_PREFILTER_THRESHOLD = 0.2
 _CLUSTER_SIM_THRESHOLD = 0.4
@@ -477,59 +510,6 @@ _DEFAULT_CLUSTER_TAG_KEYWORDS: dict[str, list[str]] = {
     "research": ["study", "research", "paper", "dataset"],
     "security": ["security", "encrypt", "token", "oauth"],
 }
-_CLUSTER_EMBED_CACHE: "OrderedDict[str, list[float]]" = OrderedDict()
-_CLUSTER_CACHE_LOCK = Lock()
-_SCHEMA_RESULT_CACHE_MAX = 128
-_SCHEMA_RESULT_CACHE: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
-_SCHEMA_CACHE_LOCK = Lock()
-_LLM_PROVIDER_LIMITS: dict[str, tuple[int, BoundedSemaphore]] = {}
-_LLM_PROVIDER_LIMITS_LOCK = Lock()
-_LLM_PROVIDER_LAST_CALL: dict[str, float] = {}
-_LLM_PROVIDER_LAST_CALL_LOCK = Lock()
-
-
-def get_extraction_cache_stats() -> dict[str, int]:
-    with _CLUSTER_CACHE_LOCK:
-        cluster_size = len(_CLUSTER_EMBED_CACHE)
-    with _SCHEMA_CACHE_LOCK:
-        schema_size = len(_SCHEMA_RESULT_CACHE)
-    with _LLM_PROVIDER_LIMITS_LOCK:
-        llm_limits = len(_LLM_PROVIDER_LIMITS)
-    with _LLM_PROVIDER_LAST_CALL_LOCK:
-        llm_last = len(_LLM_PROVIDER_LAST_CALL)
-    with _STRATEGY_LIMITS_LOCK:
-        strategy_limits = len(_STRATEGY_LIMITS)
-    stats = {
-        "cluster_embedding_cache_size": cluster_size,
-        "schema_result_cache_size": schema_size,
-        "llm_provider_limit_count": llm_limits,
-        "llm_provider_last_call_count": llm_last,
-        "strategy_limit_count": strategy_limits,
-    }
-    try:
-        stats.update(get_selector_cache_stats())
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        pass
-    return stats
-
-
-def clear_extraction_caches() -> None:
-    with _CLUSTER_CACHE_LOCK:
-        _CLUSTER_EMBED_CACHE.clear()
-    with _SCHEMA_CACHE_LOCK:
-        _SCHEMA_RESULT_CACHE.clear()
-    with _LLM_PROVIDER_LIMITS_LOCK:
-        _LLM_PROVIDER_LIMITS.clear()
-    with _LLM_PROVIDER_LAST_CALL_LOCK:
-        _LLM_PROVIDER_LAST_CALL.clear()
-    with _STRATEGY_LIMITS_LOCK:
-        _STRATEGY_LIMITS.clear()
-    try:
-        clear_selector_caches()
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        pass
-
-
 def _schema_cache_key(html_text: str, url: str, schema_rules: dict[str, Any]) -> str:
     html_hash = hashlib.sha1(
         html_text.encode("utf-8", errors="ignore"),
@@ -547,47 +527,23 @@ def _schema_cache_key(html_text: str, url: str, schema_rules: dict[str, Any]) ->
 
 
 def _schema_cache_get(key: str) -> Optional[dict[str, Any]]:
-    with _SCHEMA_CACHE_LOCK:
-        value = _SCHEMA_RESULT_CACHE.get(key)
-        if value is None:
-            return None
-        _SCHEMA_RESULT_CACHE.move_to_end(key)
-        return dict(value)
+    return _canonical_schema_cache_get(key)
 
 
 def _schema_cache_put(key: str, value: dict[str, Any]) -> None:
-    with _SCHEMA_CACHE_LOCK:
-        _SCHEMA_RESULT_CACHE[key] = dict(value)
-        _SCHEMA_RESULT_CACHE.move_to_end(key)
-        while len(_SCHEMA_RESULT_CACHE) > _SCHEMA_RESULT_CACHE_MAX:
-            _SCHEMA_RESULT_CACHE.popitem(last=False)
+    _canonical_schema_cache_put(key, value)
 
 
 def _cluster_cache_get(key: str) -> Optional[list[float]]:
-    with _CLUSTER_CACHE_LOCK:
-        value = _CLUSTER_EMBED_CACHE.get(key)
-        if value is None:
-            with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-                increment_counter(
-                    "extraction_cluster_cache_total",
-                    labels={"cache": "embedding", "result": "miss"},
-                )
-            return None
-        _CLUSTER_EMBED_CACHE.move_to_end(key)
-    with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
-        increment_counter(
-            "extraction_cluster_cache_total",
-            labels={"cache": "embedding", "result": "hit"},
-        )
-    return value
+    def _record_cache_metric(*args: Any, **kwargs: Any) -> None:
+        with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
+            increment_counter(*args, **kwargs)
+
+    return _canonical_cluster_cache_get(key, increment_counter=_record_cache_metric)
 
 
 def _cluster_cache_put(key: str, value: list[float]) -> None:
-    with _CLUSTER_CACHE_LOCK:
-        _CLUSTER_EMBED_CACHE[key] = value
-        _CLUSTER_EMBED_CACHE.move_to_end(key)
-        while len(_CLUSTER_EMBED_CACHE) > _CLUSTER_EMBED_CACHE_MAX:
-            _CLUSTER_EMBED_CACHE.popitem(last=False)
+    _canonical_cluster_cache_put(key, value)
 
 
 def _normalize_strategy_order(
@@ -770,19 +726,8 @@ def _should_clear_caches(stage: str) -> bool:
     return False
 
 
-_STRATEGY_LIMITS: dict[str, tuple[int, BoundedSemaphore]] = {}
-_STRATEGY_LIMITS_LOCK = Lock()
-
-
 def _get_strategy_semaphore(strategy: str) -> Optional[BoundedSemaphore]:
-    max_workers = _extractor_max_workers()
-    if not max_workers:
-        return None
-    with _STRATEGY_LIMITS_LOCK:
-        current = _STRATEGY_LIMITS.get(strategy)
-        if current is None or current[0] != max_workers:
-            _STRATEGY_LIMITS[strategy] = (max_workers, BoundedSemaphore(max_workers))
-        return _STRATEGY_LIMITS[strategy][1]
+    return _canonical_get_strategy_semaphore(strategy, _extractor_max_workers())
 
 
 @contextmanager
@@ -1657,30 +1602,18 @@ def _run_with_retries(
                 time.sleep(delay_s)
 
 
-def _get_llm_semaphore(provider: str, max_concurrency: int) -> BoundedSemaphore:
-    key = provider or "default"
-    with _LLM_PROVIDER_LIMITS_LOCK:
-        existing = _LLM_PROVIDER_LIMITS.get(key)
-        if existing and existing[0] == max_concurrency:
-            return existing[1]
-        semaphore = BoundedSemaphore(max_concurrency)
-        _LLM_PROVIDER_LIMITS[key] = (max_concurrency, semaphore)
-        return semaphore
+def _get_llm_semaphore(provider: str, max_concurrency: int) -> Any:
+    return _canonical_get_llm_semaphore(provider, max_concurrency)
 
 
 def _apply_llm_delay(provider: str, delay_ms: float, jitter_ms: float) -> None:
-    if delay_ms <= 0.0:
-        return
-    now = time.time()
-    with _LLM_PROVIDER_LAST_CALL_LOCK:
-        last_call = _LLM_PROVIDER_LAST_CALL.get(provider)
-    if last_call is not None:
-        remaining = (delay_ms / 1000.0) - (now - last_call)
-        if remaining > 0.0:
-            jitter = random.uniform(0.0, jitter_ms / 1000.0) if jitter_ms > 0.0 else 0.0  # nosec B311
-            time.sleep(remaining + jitter)
-    with _LLM_PROVIDER_LAST_CALL_LOCK:
-        _LLM_PROVIDER_LAST_CALL[provider] = time.time()
+    _canonical_apply_llm_delay(
+        provider,
+        delay_ms,
+        jitter_ms,
+        wall_time=time.time,
+        sleep=time.sleep,
+    )
 
 
 @contextmanager
