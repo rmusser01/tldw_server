@@ -52,6 +52,15 @@ class SyncServerOriginMutationNotSupportedError(SyncStoreError):
         self.error_code = CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
 
 
+class SyncServerOriginRestoreConflictError(SyncStoreError):
+    """Raised when a server-origin restore does not target the current tombstone."""
+
+    def __init__(self, object_id: str) -> None:
+        super().__init__("Note restore requires the current deleted note version.")
+        self.object_id = object_id
+        self.error_code = "sync_server_origin_restore_conflict"
+
+
 @dataclass(frozen=True, slots=True)
 class ServerOriginCaptureResult:
     """Result of accepting and materializing a server-origin mutation."""
@@ -161,6 +170,42 @@ def capture_server_origin_mutation(
     return ServerOriginCaptureResult(dataset=dataset, envelope=inserted)
 
 
+def capture_server_origin_note_restore(
+    service: SyncV2Service,
+    *,
+    user_id: str,
+    object_id: str,
+    note: Mapping[str, object],
+    expected_version: int,
+    source: str,
+) -> ServerOriginCaptureResult:
+    """Validate and capture a restore of the current Notes tombstone."""
+
+    current_version = note.get("version")
+    try:
+        version_matches = int(current_version) == int(expected_version)
+    except (TypeError, ValueError):
+        version_matches = False
+    if not bool(note.get("deleted")) or not version_matches:
+        raise SyncServerOriginRestoreConflictError(object_id)
+
+    return capture_server_origin_mutation(
+        service,
+        user_id=user_id,
+        domain="notes.note",
+        operation="upsert",
+        object_id=object_id,
+        payload={
+            "title": str(note.get("title") or ""),
+            "content": str(note.get("content") or ""),
+            "conversation_id": note.get("conversation_id"),
+            "message_id": note.get("message_id"),
+        },
+        source=source,
+        routing_metadata={"restore_intent": True},
+    )
+
+
 def server_origin_stable_key(
     *,
     source: str,
@@ -260,7 +305,9 @@ __all__ = [
     "CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE",
     "SyncServerOriginMaterializationError",
     "SyncServerOriginMutationNotSupportedError",
+    "SyncServerOriginRestoreConflictError",
     "canonical_payload_hash",
+    "capture_server_origin_note_restore",
     "capture_server_origin_mutation",
     "get_active_server_origin_sync_service_for_user",
 ]

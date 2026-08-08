@@ -4,7 +4,7 @@ title: Extend Notes Sync v2 core contract for backlinks and restore
 status: Done
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-08 21:56'
+updated_date: '2026-08-08 22:14'
 labels:
   - notes
   - sync-v2
@@ -59,6 +59,10 @@ Reason: Establishes the public notes.note payload, restore-intent semantics, and
 - Verification: 215 focused tests passed and 1 PostgreSQL test skipped because neither a local PostgreSQL server nor Docker daemon was available. Ruff passed for new/reworked Sync files; compileall and `git diff --check` passed; Bandit reported 0 findings across 13,190 production lines. Full-file Ruff on the two legacy Notes files reports the same pre-existing `I001`, `BLE001`, `F841`, and `C409` baseline as `HEAD`, with no new finding introduced by this task.
 
 Review: PR #2775 targets dev from codex/task-13002-notes-core-contract.
+
+Review remediation: validating PR #2775 restore-path feedback before merge.
+
+Review remediation: moved active-Sync note restore validation/capture into the reusable server-origin coordinator; active-note and stale-version restore attempts now return a stable 409 without appending an envelope; all restore-path database calls now run through the async thread helper. Evidence: focused active/inactive restore tests passed (2/2), the complete server-origin capture file passed (28/28), Ruff passed for the new/reworked core and test files, compileall and git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

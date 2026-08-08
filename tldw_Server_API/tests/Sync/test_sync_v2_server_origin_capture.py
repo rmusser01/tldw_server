@@ -906,6 +906,15 @@ def test_active_sync_note_restore_appends_canonical_restore_intent_upsert(
     assert delete_response.status_code == 204
     deleted_note = chacha_db.get_note_by_id("note-restore-active", include_deleted=True)
     assert deleted_note["deleted"] in (1, True)
+    stale_restore_response = client.post(
+        "/api/v1/notes/note-restore-active/restore",
+        params={"expected_version": deleted_note["version"] - 1},
+    )
+
+    assert stale_restore_response.status_code == 409
+    assert stale_restore_response.json()["detail"]["error_code"] == (
+        "sync_server_origin_restore_conflict"
+    )
 
     restore_response = client.post(
         "/api/v1/notes/note-restore-active/restore",
@@ -946,8 +955,8 @@ def test_active_sync_note_restore_appends_canonical_restore_intent_upsert(
         params={"expected_version": deleted_note["version"]},
     )
 
-    assert retry_response.status_code == 200
-    assert retry_response.json() == restore_response.json()
+    assert retry_response.status_code == 409
+    assert retry_response.json()["detail"]["error_code"] == "sync_server_origin_restore_conflict"
     assert len(
         sync_service.store.list_envelopes_after(
             dataset_id,
