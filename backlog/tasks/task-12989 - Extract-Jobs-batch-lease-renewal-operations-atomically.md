@@ -15,6 +15,7 @@ references:
 - Docs/superpowers/specs/2026-06-24-jobs-backend-parity-refactor-design.md
 - Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md
 - https://github.com/rmusser01/tldw_server/pull/2765
+- https://github.com/rmusser01/tldw_server/pull/2773
 documentation:
 - Docs/superpowers/specs/2026-08-01-jobs-batch-lease-renewal-extraction-design.md
 - Docs/superpowers/plans/2026-08-08-jobs-batch-lease-renewal-extraction.md
@@ -30,7 +31,7 @@ modified_files:
 - tldw_Server_API/tests/Jobs/property/test_operation_contract_properties.py
 - tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_postgres.py
-updated_date: 2026-08-08 19:02
+updated_date: 2026-08-08 14:36
 ---
 
 ## Description
@@ -65,7 +66,7 @@ Approved design recorded at Docs/superpowers/specs/2026-08-01-jobs-batch-lease-r
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Extracted atomic batch lease renewal into dedicated SQLite and PostgreSQL lifecycle operations while preserving the JobManager public contract, ordered duplicate attempts, expected no-ops, non-shortening leases, duration clamping, backend-specific clock behavior, PostgreSQL RLS cursor setup, and one transaction per batch. Added immutable contracts plus public characterization, direct backend, routing, property, and real-database rollback coverage. The rebased branch is 0 behind current dev and technically review-clean. Merge remains blocked until the requester adds the required human-authored Change summary to the pull request; this tracker summary is verification metadata and does not satisfy that policy.
+Extracted atomic batch lease renewal into dedicated SQLite and PostgreSQL lifecycle operations while preserving the JobManager public contract, ordered duplicate attempts, expected no-ops, non-shortening leases, duration clamping, backend-specific clock behavior, PostgreSQL RLS cursor setup, and one transaction per batch. Added immutable contracts plus public characterization, direct backend, routing, property, and real-database rollback coverage. The rebased branch is 0 behind current dev and technically review-clean. Draft pull request: https://github.com/rmusser01/tldw_server/pull/2773. Merge remains blocked until the requester adds the required human-authored Change summary to the pull request; this tracker summary is verification metadata and does not satisfy that policy.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
