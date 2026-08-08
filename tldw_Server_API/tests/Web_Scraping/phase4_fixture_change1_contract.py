@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import re
 
+from tldw_Server_API.app.core.Web_Scraping.extraction import caches as extraction_caches
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import cluster as cluster_strategy
 from tldw_Server_API.tests.Web_Scraping.phase4_fixture_difference_engine import (
     ANY_PATH,
     MISSING,
@@ -164,7 +166,13 @@ def _is_new_regex_or_downstream_metric(difference: Difference) -> bool:
 
 
 def _cluster_cache_created_by_downstream_extraction(difference: Difference) -> bool:
-    return difference.expected == 0 and type(difference.actual) is int and difference.actual == 1
+    maximum_fresh_entries = min(
+        extraction_caches._CLUSTER_EMBED_CACHE_MAX,
+        cluster_strategy._CLUSTER_MAX_BLOCKS + 1,
+    )
+    return (
+        difference.expected == 0 and type(difference.actual) is int and 0 < difference.actual <= maximum_fresh_entries
+    )
 
 
 def _is_cluster_internal_metric_record(record: object) -> bool:
@@ -203,6 +211,10 @@ def _is_positive_int(value: object) -> bool:
     return type(value) is int and value > 0
 
 
+def _is_default_cluster_total_blocks(value: object) -> bool:
+    return _is_positive_int(value) and value <= cluster_strategy._CLUSTER_MAX_BLOCKS
+
+
 def _is_cluster_method(value: object) -> bool:
     return type(value) is str and value in _CLUSTER_METHODS
 
@@ -215,7 +227,7 @@ _CLUSTER_RESULT_VALIDATORS = {
     "cluster_blocks": _is_nonempty_cluster_blocks,
     "cluster_block_count": _is_positive_int,
     "cluster_prefiltered_count": _is_positive_int,
-    "cluster_total_blocks": _is_positive_int,
+    "cluster_total_blocks": _is_default_cluster_total_blocks,
     "cluster_cluster_count": _is_positive_int,
     "cluster_method": _is_cluster_method,
     "cluster_similarity_threshold": _is_cluster_similarity_threshold,
@@ -327,6 +339,12 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
         actual_result.get("extraction_strategy") == terminal_strategy
     ), "Change 1 profile terminal strategy does not match extraction_strategy"
 
+    present_cluster_fields = [field for field in _CLUSTER_RESULT_FIELDS if field in actual_result]
+    if terminal_strategy != "cluster":
+        assert not present_cluster_fields, (
+            "Change 1 profile cluster result fields require a successful " "terminal cluster strategy"
+        )
+
     if terminal_strategy == "cluster":
         missing_fields = [field for field in _CLUSTER_RESULT_FIELDS if field not in actual_result]
         assert not missing_fields, f"Change 1 profile is missing cluster result fields: {missing_fields}"
@@ -357,8 +375,8 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
             expected_cache.get("cluster_embedding_cache_size") == 0
         ), "Change 1 profile requires an empty predecessor cluster cache"
         assert (
-            actual_cache.get("cluster_embedding_cache_size") == 1
-        ), "Change 1 profile requires exactly one canonical cluster embedding cache entry"
+            type(actual_cache.get("cluster_embedding_cache_size")) is int
+        ), "Change 1 profile requires an integer cluster embedding cache size"
 
     expected_added_metrics: list[tuple[str, str, str | None]] = []
     for entry in trace_records:
@@ -400,7 +418,21 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
             "started",
             "success",
         ], "Change 1 profile requires exact started/success cluster lifecycle metrics"
-        assert cache_results == ["miss", "hit"], "Change 1 profile requires exact miss/hit cluster cache metrics"
+        total_blocks = actual_result["cluster_total_blocks"]
+        assert type(total_blocks) is int
+        embedding_operations = total_blocks + 1
+        assert (
+            embedding_operations <= extraction_caches._CLUSTER_EMBED_CACHE_MAX
+        ), "Change 1 profile default cluster embeddings must fit the canonical cache"
+        assert len(cache_results) == embedding_operations, (
+            "Change 1 profile requires one cache result per document and " "source-block embedding operation"
+        )
+        assert cache_results[0] == "miss", "Change 1 profile requires a fresh document-embedding cache miss"
+        miss_count = cache_results.count("miss")
+        actual_cache = _profile_dict(actual_root.get("cache_stats"), "$.cache_stats")
+        assert actual_cache.get("cluster_embedding_cache_size") == miss_count, (
+            "Change 1 profile fresh cache growth must equal the canonical " "embedding miss count"
+        )
     actual_added_metrics = [
         _metric_profile(metric)
         for metric in added_metrics
@@ -465,7 +497,7 @@ CHANGE_1_CONTRACT = DifferenceContract(
             validator=lambda difference: _is_new_regex_or_downstream_metric(difference)
             or _is_cluster_internal_metric(difference),
             minimum_count=3,
-            maximum_count=9,
+            maximum_count=cluster_strategy._CLUSTER_MAX_BLOCKS + 6,
         ),
         DifferenceRule(
             identifier="downstream_cluster_cache",

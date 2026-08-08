@@ -199,6 +199,53 @@ def _coherent_cluster_success_change_1_profile() -> tuple[dict[str, object], dic
     return actual, expected
 
 
+def _coherent_fresh_multi_block_cluster_success_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    cache_stats = actual["cache_stats"]
+    result = actual["result"]
+    metrics = actual["metrics"]
+    assert isinstance(cache_stats, dict)
+    assert isinstance(result, dict)
+    assert isinstance(metrics, list)
+
+    blocks = [
+        "First distinct article block with enough words for canonical clustering.",
+        "Second distinct article block with enough words for canonical clustering.",
+    ]
+    cache_stats["cluster_embedding_cache_size"] = 3
+    result.update(
+        {
+            "cluster_blocks": blocks,
+            "cluster_block_count": 2,
+            "cluster_prefiltered_count": 2,
+            "cluster_total_blocks": 2,
+            "cluster_cluster_count": 1,
+        }
+    )
+    trace = result["extraction_trace"]
+    assert isinstance(trace, list)
+    terminal = trace[-1]
+    assert isinstance(terminal, dict)
+    terminal["detail"] = "cluster_blocks=2"
+    metrics[7:11] = [
+        _cluster_counter("extraction_cluster_total", {"status": "started"}),
+        _cluster_counter(
+            "extraction_cluster_cache_total",
+            {"cache": "embedding", "result": "miss"},
+        ),
+        _cluster_counter(
+            "extraction_cluster_cache_total",
+            {"cache": "embedding", "result": "miss"},
+        ),
+        _cluster_counter(
+            "extraction_cluster_cache_total",
+            {"cache": "embedding", "result": "miss"},
+        ),
+        _cluster_counter("extraction_cluster_total", {"status": "success"}),
+    ]
+    return actual, expected
+
+
 def _assert_change_1(actual: object, expected: object) -> None:
     assert_predecessor_behavior(
         actual,
@@ -408,6 +455,33 @@ def test_change_1_contract_accepts_exact_cluster_success_profile() -> None:
     actual, expected = _coherent_cluster_success_change_1_profile()
 
     _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_accepts_fresh_multi_block_cluster_success_profile() -> None:
+    actual, expected = _coherent_fresh_multi_block_cluster_success_change_1_profile()
+
+    _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_orphan_cluster_fields_on_trafilatura_success() -> None:
+    actual, expected = _coherent_change_1_profile()
+    result = actual["result"]
+    assert isinstance(result, dict)
+    result.update(
+        {
+            "cluster_blocks": ["Valid-looking orphan cluster block."],
+            "cluster_block_count": 1,
+            "cluster_prefiltered_count": 1,
+            "cluster_total_blocks": 1,
+            "cluster_cluster_count": 1,
+            "cluster_method": "greedy",
+            "cluster_similarity_threshold": 0.4,
+            "cluster_word_threshold": 8,
+        }
+    )
+
+    with pytest.raises(AssertionError, match="cluster result fields"):
+        _assert_change_1(actual, expected)
 
 
 @pytest.mark.parametrize("label_key", ["url", "base_url", "error", "host", "payload", "pattern"])
