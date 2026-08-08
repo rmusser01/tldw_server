@@ -24,7 +24,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from loguru import logger
 
@@ -34,6 +34,10 @@ from tldw_Server_API.app.core.Moderation.policy_compiler import (
     PolicyCompilationReport,
     PolicyCompiler,
     ResolvedModerationConfig,
+)
+from tldw_Server_API.app.core.Moderation.policy_evaluator import (
+    EvaluationLimits,
+    PolicyEvaluator,
 )
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -152,13 +156,14 @@ class _ResolvedModerationServiceState:
 
 class ModerationService:
     """Loads moderation configuration and evaluates content against policies."""
-    _UNCATEGORIZED_CATEGORY = "uncategorized"
+    _UNCATEGORIZED_CATEGORY = PolicyEvaluator._UNCATEGORIZED_CATEGORY
     _ALLOWED_REGEX_FLAGS = set(PolicyCompiler._ALLOWED_REGEX_FLAGS)
     _ALLOWED_ACTIONS = set(PolicyCompiler._ALLOWED_ACTIONS)
 
     def __init__(self) -> None:
         self._config = load_and_log_configs() or {}
         self._lock = threading.RLock()
+        self._policy_evaluator = PolicyEvaluator()
         self._policy_compiler = PolicyCompiler()
         def _read_int_env(name: str, default: int) -> int:
             raw = os.getenv(name)
@@ -190,6 +195,15 @@ class ModerationService:
         except _MODERATION_NONCRITICAL_EXCEPTIONS:
             pass
         self._user_overrides: dict[str, dict[str, object]] = self._load_user_overrides()
+
+    def _evaluation_limits(self) -> EvaluationLimits:
+        with self._lock:
+            return EvaluationLimits(
+                max_scan_chars=self._max_scan_chars,
+                match_window_chars=self._match_window_chars,
+                max_fallback_scan_chars=self._max_fallback_scan_chars,
+                max_replacements_per_pattern=self._max_replacements_per_pattern,
+            )
 
     def _load_global_policy(self) -> ModerationPolicy:
         mod_cfg = self._load_moderation_config_section()
@@ -729,19 +743,14 @@ class ModerationService:
 
     @classmethod
     def _effective_rule_categories(cls, rule: PatternRule) -> set[str]:
-        cats = rule.categories or set()
-        normalized = {str(c).strip().lower() for c in cats if str(c).strip()}
-        return normalized if normalized else {cls._UNCATEGORIZED_CATEGORY}
+        return PolicyEvaluator.effective_rule_categories(rule)
 
     @staticmethod
-    def _rule_applies_to_phase(rule: PatternRule, phase: str | None) -> bool:
-        """Return whether a rule should run for the requested moderation phase."""
-        if phase not in {"input", "output"}:
-            return True
-        rule_phase = str(getattr(rule, "phase", "both") or "both").strip().lower()
-        if rule_phase not in {"input", "output", "both"}:
-            rule_phase = "both"
-        return rule_phase in {"both", phase}
+    def _rule_applies_to_phase(
+        rule: PatternRule,
+        phase: str | None,
+    ) -> bool:
+        return PolicyEvaluator.rule_applies_to_phase(rule, phase)
 
     @classmethod
     def _rule_matches_enabled_categories(
@@ -749,15 +758,10 @@ class ModerationService:
         rule: PatternRule,
         categories_enabled: set[str] | None,
     ) -> bool:
-        """Return whether a rule is allowed by the active category filter."""
-        if not categories_enabled:
-            return True
-        if "*" in categories_enabled:
-            return True
-        rcats = cls._effective_rule_categories(rule)
-        if "*" in rcats:
-            return True
-        return bool(rcats & categories_enabled)
+        return PolicyEvaluator.rule_matches_enabled_categories(
+            rule,
+            categories_enabled,
+        )
 
     def effective_policy_snapshot(self, user_id: str | None) -> dict[str, object]:
         """Return a serializable dict of the effective policy for inspection."""
@@ -772,32 +776,32 @@ class ModerationService:
         return PolicyCompiler.parse_bool_value(v)
 
     # --------------- Checking and transformations ---------------
-    def check_text(self, text: str, policy: ModerationPolicy, phase: str | None = None) -> tuple[bool, str | None]:
+    def check_text(
+        self,
+        text: str,
+        policy: ModerationPolicy,
+        phase: str | None = None,
+    ) -> tuple[bool, str | None]:
         """Return (is_flagged, matched_sample)."""
-        result = self._evaluate_text_core(text, policy, phase, include_redacted_text=False)
+        result = self._evaluate_text_core(
+            text,
+            policy,
+            phase,
+            include_redacted_text=False,
+        )
         return result.action != "pass", result.sample
 
     @staticmethod
-    def _build_sanitized_snippet(text: str, match_span: tuple[int, int], replacement: str) -> str | None:
-        if not text or not match_span:
-            return None
-        start, end = match_span
-        if start < 0:
-            start = 0
-        if end < start:
-            end = start
-        if start > len(text):
-            start = len(text)
-        if end > len(text):
-            end = len(text)
-        left_start = max(0, start - 16)
-        right_end = min(len(text), end + 16)
-        left = text[left_start:start]
-        right = text[end:right_end]
-        snippet = (left + (replacement or "[REDACTED]") + right).strip()
-        if len(snippet) > 80:
-            snippet = snippet[:77] + "..."
-        return snippet
+    def _build_sanitized_snippet(
+        text: str,
+        match_span: tuple[int, int],
+        replacement: str,
+    ) -> str | None:
+        return PolicyEvaluator.build_sanitized_snippet_for_replacement(
+            text,
+            match_span,
+            replacement,
+        )
 
     def build_sanitized_snippet(
         self,
@@ -807,103 +811,39 @@ class ModerationService:
         pattern: str | None = None,
     ) -> str | None:
         """Create a sanitized snippet for a known match span and pattern."""
-        if not text or not match_span:
-            return None
-        replacement = policy.redact_replacement or "[REDACTED]"
-        if pattern and policy.block_patterns:
-            for rule in policy.block_patterns:
-                if not isinstance(rule, PatternRule):
-                    continue
-                try:
-                    if getattr(rule.regex, "pattern", None) == pattern:
-                        if rule.replacement:
-                            replacement = rule.replacement
-                        break
-                except _MODERATION_NONCRITICAL_EXCEPTIONS:
-                    continue
-        return self._build_sanitized_snippet(text, match_span, replacement)
+        return self._policy_evaluator.build_sanitized_snippet(
+            text,
+            policy,
+            match_span,
+            pattern,
+        )
 
-    def redact_text(self, text: str, policy: ModerationPolicy, phase: str | None = None) -> str:
-        if not text or not policy.block_patterns:
-            return text
-        if phase == "input" and not policy.input_enabled:
-            return text
-        if phase == "output" and not policy.output_enabled:
-            return text
-        redacted = text
-        for rule in policy.block_patterns:
-            if isinstance(rule, PatternRule) and not self._rule_applies_to_phase(rule, phase):
-                continue
-            # Respect category gating similar to evaluate_action/check_text
-            if isinstance(rule, PatternRule) and not self._rule_matches_enabled_categories(rule, policy.categories_enabled):
-                continue
-            pat = rule.regex if isinstance(rule, PatternRule) else rule
-            repl = None
-            if isinstance(rule, PatternRule) and rule.replacement:
-                repl = rule.replacement
-            try:
-                replacement = repl or policy.redact_replacement
-                limit_raw = self._max_replacements_per_pattern
-                try:
-                    limit_int = int(limit_raw) if limit_raw is not None else 0
-                except _MODERATION_NONCRITICAL_EXCEPTIONS:
-                    limit_int = 0
-                # Treat non-positive values as unlimited (re.sub uses 0 for no limit)
-                if limit_int <= 0:
-                    limit_int = 0
-                if len(redacted) <= self._max_scan_chars:
-                    redacted = pat.sub(lambda _m, _r=replacement: _r, redacted, count=limit_int)
-                else:
-                    matches = self._collect_rule_matches(redacted, pat)
-                    if matches:
-                        redacted = self._apply_rule_redactions(redacted, matches, replacement)
-            except re.error:
-                # in case of unexpected regex issue, skip
-                continue
-        return redacted
+    def redact_text(
+        self,
+        text: str,
+        policy: ModerationPolicy,
+        phase: str | None = None,
+    ) -> str:
+        return self._policy_evaluator.redact_text(
+            text,
+            policy,
+            phase,
+            self._evaluation_limits(),
+        )
 
-    def redact_text_with_count(self, text: str, policy: ModerationPolicy, phase: str | None = None) -> tuple[str, int]:
+    def redact_text_with_count(
+        self,
+        text: str,
+        policy: ModerationPolicy,
+        phase: str | None = None,
+    ) -> tuple[str, int]:
         """Redact text and return (redacted_text, replacement_count)."""
-        if not text or not policy.block_patterns:
-            return text, 0
-        if phase == "input" and not policy.input_enabled:
-            return text, 0
-        if phase == "output" and not policy.output_enabled:
-            return text, 0
-        redacted = text
-        total_count = 0
-        for rule in policy.block_patterns:
-            if isinstance(rule, PatternRule) and not self._rule_applies_to_phase(rule, phase):
-                continue
-            # Respect category gating similar to evaluate_action/check_text
-            if isinstance(rule, PatternRule) and not self._rule_matches_enabled_categories(rule, policy.categories_enabled):
-                continue
-            pat = rule.regex if isinstance(rule, PatternRule) else rule
-            repl = None
-            if isinstance(rule, PatternRule) and rule.replacement:
-                repl = rule.replacement
-            try:
-                replacement = repl or policy.redact_replacement
-                limit_raw = self._max_replacements_per_pattern
-                try:
-                    limit_int = int(limit_raw) if limit_raw is not None else 0
-                except _MODERATION_NONCRITICAL_EXCEPTIONS:
-                    limit_int = 0
-                # Treat non-positive values as unlimited (re.sub uses 0 for no limit)
-                if limit_int <= 0:
-                    limit_int = 0
-                if len(redacted) <= self._max_scan_chars:
-                    redacted, count = pat.subn(lambda _m, _r=replacement: _r, redacted, count=limit_int)
-                else:
-                    matches = self._collect_rule_matches(redacted, pat)
-                    count = len(matches)
-                    if matches:
-                        redacted = self._apply_rule_redactions(redacted, matches, replacement)
-                total_count += count
-            except re.error:
-                # in case of unexpected regex issue, skip
-                continue
-        return redacted, total_count
+        return self._policy_evaluator.redact_text_with_count(
+            text,
+            policy,
+            phase,
+            self._evaluation_limits(),
+        )
 
     # --------------- Decision helpers ---------------
     def evaluate_text(
@@ -913,7 +853,12 @@ class ModerationService:
         phase: str | None = None,
     ) -> ModerationEvaluationResult:
         """Compute the canonical moderation result for text and a policy."""
-        return self._evaluate_text_core(text, policy, phase, include_redacted_text=True)
+        return self._evaluate_text_core(
+            text,
+            policy,
+            phase,
+            include_redacted_text=True,
+        )
 
     def _evaluate_text_core(
         self,
@@ -924,90 +869,19 @@ class ModerationService:
         include_redacted_text: bool,
     ) -> ModerationEvaluationResult:
         """Shared moderation evaluation logic for probes and full result generation."""
-        if not text:
-            return ModerationEvaluationResult()
-        if not policy.enabled:
-            return ModerationEvaluationResult()
-        enabled_phase = True
-        if phase == "input":
-            enabled_phase = policy.input_enabled
-        elif phase == "output":
-            enabled_phase = policy.output_enabled
-        if not enabled_phase:
-            return ModerationEvaluationResult()
-        default_action = "warn"
-        if phase == "input":
-            default_action = policy.input_action
-        elif phase == "output":
-            default_action = policy.output_action
-        best_action = "pass"
-        best_rank = 0
-        best_pattern = None
-        best_category = None
-        best_match_pos = None
-        best_match_span: tuple[int, int] | None = None
-        best_replacement: str | None = None
-        for rule in policy.block_patterns or []:
-            pat = rule.regex if isinstance(rule, PatternRule) else rule
-            if isinstance(rule, PatternRule) and not self._rule_applies_to_phase(rule, phase):
-                continue
-            # Category gating
-            if isinstance(rule, PatternRule) and not self._rule_matches_enabled_categories(rule, policy.categories_enabled):
-                continue
-            match_span = self._find_match_span(pat, text)
-            if not match_span:
-                continue
-            # Prefer rule action if specified, else global
-            action = None
-            action = rule.action if isinstance(rule, PatternRule) and rule.action else default_action
-            action = (action or 'warn').lower()
-            if action not in {"block", "redact", "warn"}:
-                action = "warn"
-            rank = {"warn": 1, "redact": 2, "block": 3}.get(action, 1)
-            match_pos = match_span[0]
-            if rank > best_rank or (rank == best_rank and (best_match_pos is None or match_pos < best_match_pos)):
-                best_action = action
-                best_rank = rank
-                best_match_pos = match_pos
-                best_match_span = match_span
-                best_pattern = pat.pattern
-                if isinstance(rule, PatternRule) and rule.replacement:
-                    best_replacement = rule.replacement
-                else:
-                    best_replacement = policy.redact_replacement
-                if isinstance(rule, PatternRule):
-                    try:
-                        cats = self._effective_rule_categories(rule)
-                        if policy.categories_enabled:
-                            cats = cats & set(policy.categories_enabled)
-                        if cats:
-                            if "pii" in cats and len(cats) > 1:
-                                cats = {c for c in cats if c != "pii"}
-                            best_category = sorted(cats)[0]
-                        else:
-                            best_category = None
-                    except _MODERATION_NONCRITICAL_EXCEPTIONS:
-                        best_category = None
-                else:
-                    best_category = None
-        if best_action == "pass" or best_match_span is None:
-            return ModerationEvaluationResult()
-        sanitized_sample = self._build_sanitized_snippet(
+        decision = self._policy_evaluator.evaluate_text(
             text,
-            best_match_span,
-            best_replacement or policy.redact_replacement or "[REDACTED]",
+            policy,
+            phase,
+            self._evaluation_limits(),
+            include_redacted_text=False,
         )
-        redacted_text = None
-        if include_redacted_text and best_action == "redact":
-            redacted_text = self.redact_text(text, policy, phase=phase)
-        return ModerationEvaluationResult(
-            action=best_action,
-            redacted_text=redacted_text,
-            matched_pattern=best_pattern,
-            category=best_category,
-            match_span=best_match_span,
-            sample=sanitized_sample,
-        )
+        if include_redacted_text and decision.action == "redact":
+            return replace(
+                decision,
+                redacted_text=self.redact_text(text, policy, phase=phase),
+            )
+        return decision
 
     def _evaluate_action_internal(
         self,
@@ -1034,90 +908,50 @@ class ModerationService:
         result = self.evaluate_text(text, policy, phase)
         return result.action, result.redacted_text, result.matched_pattern, result.category, result.match_span
 
-    def _iter_scan_chunks(self, text: str) -> Iterator[tuple[int, int]]:
-        if not text:
-            return
-        chunk_size = max(1, int(self._max_scan_chars))
-        if len(text) <= chunk_size:
-            yield 0, len(text)
-            return
-        overlap = min(1024, max(32, chunk_size // 10))
-        if overlap >= chunk_size:
-            overlap = max(0, chunk_size - 1)
-        step = chunk_size - overlap if chunk_size > overlap else chunk_size
-        start = 0
-        text_len = len(text)
-        while start < text_len:
-            end = min(text_len, start + chunk_size)
-            yield start, end
-            if end == text_len:
-                break
-            start += step
+    def _iter_scan_chunks(
+        self,
+        text: str,
+    ) -> Iterator[tuple[int, int]]:
+        yield from self._policy_evaluator.iter_scan_chunks(
+            text,
+            self._evaluation_limits(),
+        )
 
-    def _find_match_span(self, pat: re.Pattern, text: str) -> tuple[int, int] | None:
-        try:
-            chunk_limit = max(1, int(self._max_scan_chars))
-            if len(text) <= chunk_limit:
-                m = pat.search(text)
-                if not m:
-                    return None
-                return m.start(), m.end()
-            text_len = len(text)
-            window = max(0, int(self._match_window_chars))
-            for start, end in self._iter_scan_chunks(text):
-                window_end = min(text_len, end + window)
-                m = pat.search(text, start, window_end)
-                if not m:
-                    continue
-                if m.start() < end:
-                    return m.start(), m.end()
-            # Full-text fallback with configurable length guardrail to
-            # mitigate ReDoS risk on very large inputs.
-            fallback_limit = max(1, int(self._max_fallback_scan_chars))
-            if len(text) <= fallback_limit:
-                m = pat.search(text)
-                if m:
-                    return m.start(), m.end()
-            return None
-        except re.error:
-            return None
+    def _find_match_span(
+        self,
+        pat: re.Pattern,
+        text: str,
+    ) -> tuple[int, int] | None:
+        return self._policy_evaluator.find_match_span(
+            pat,
+            text,
+            self._evaluation_limits(),
+        )
 
-    def _collect_rule_matches(self, text: str, pat: re.Pattern) -> list[re.Match]:
+    def _collect_rule_matches(
+        self,
+        text: str,
+        pat: re.Pattern,
+    ) -> list[re.Match]:
         """Collect non-overlapping matches across scan chunks for soft-capped redaction."""
-        if not text:
-            return []
-        limit = self._max_replacements_per_pattern
-        if limit is not None and int(limit) <= 0:
-            limit = None
-        matches: list[re.Match] = []
-        try:
-            for m in pat.finditer(text):
-                span = m.span()
-                if span[0] == span[1]:
-                    continue
-                matches.append(m)
-                if limit is not None and len(matches) >= limit:
-                    break
-        except re.error:
-            return []
-        return matches
+        return self._policy_evaluator.collect_rule_matches(
+            text,
+            pat,
+            self._evaluation_limits(),
+        )
 
     @staticmethod
-    def _apply_rule_redactions(text: str, matches: list[re.Match], replacement: str) -> str:
+    def _apply_rule_redactions(
+        text: str,
+        matches: list[re.Match],
+        replacement: str,
+    ) -> str:
         """Apply redactions using precomputed match objects."""
-        if not matches:
-            return text
-        out_parts: list[str] = []
-        last = 0
-        for m in matches:
-            start, end = m.span()
-            if start < last:
-                continue
-            out_parts.append(text[last:start])
-            out_parts.append(replacement)
-            last = end
-        out_parts.append(text[last:])
-        return "".join(out_parts)
+        return PolicyEvaluator.apply_rule_redactions(
+            text,
+            matches,
+            replacement,
+        )
 
     # --------------- Persistence helpers ---------------
     def list_user_overrides(self) -> dict[str, dict[str, object]]:

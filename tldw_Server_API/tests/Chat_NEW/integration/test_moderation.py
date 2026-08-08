@@ -2,6 +2,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -16,11 +17,30 @@ from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
 from tldw_Server_API.app.api.v1.endpoints.health import router as health_router
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Moderation.moderation_service import (
+    ModerationPolicy,
+    ModerationService,
+    PatternRule,
+)
+from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
 
 # Minimal app with only health and chat routers to avoid unrelated imports
 app = FastAPI()
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1/chat")
+
+
+def _real_moderation_service(policy: ModerationPolicy) -> ModerationService:
+    service = ModerationService.__new__(ModerationService)
+    service._lock = threading.RLock()
+    service._policy_evaluator = PolicyEvaluator()
+    service._max_scan_chars = 200_000
+    service._match_window_chars = 4_096
+    service._max_fallback_scan_chars = 800_000
+    service._max_replacements_per_pattern = 1_000
+    service._global_policy = policy
+    service._user_overrides = {}
+    return service
 
 
 def _assert_mandatory_audit_detail(detail: dict[str, Any]) -> None:
@@ -330,6 +350,87 @@ def test_output_redaction_non_streaming(monkeypatch, credentialed_test_client_fa
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
+
+
+@pytest.mark.unit
+def test_output_redaction_non_streaming_with_real_moderation_service(
+    monkeypatch,
+    credentialed_test_client_factory,
+):
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    db, db_path = _make_test_db()
+    policy = ModerationPolicy(
+        enabled=True,
+        input_action="warn",
+        output_action="redact",
+        redact_replacement="[REDACTED]",
+        per_user_overrides=False,
+        block_patterns=[
+            PatternRule(
+                regex=re.compile("secret", re.IGNORECASE),
+                action="redact",
+                replacement="[RULE]",
+                categories={"confidential"},
+                phase="output",
+            )
+        ],
+    )
+    service = _real_moderation_service(policy)
+    reply = {
+        "id": "chatcmpl-real-moderation",
+        "object": "chat.completion",
+        "created": 123,
+        "model": "gpt-4o-mini",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "this has secret token",
+                },
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    body_completed = False
+    try:
+        app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+        with patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service",
+            return_value=service,
+        ), patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+            return_value=reply,
+        ):
+            with credentialed_test_client_factory(app) as client:
+                response = client.get("/api/v1/health")
+                client.csrf_token = response.cookies.get("csrf_token", "")
+                result = _post_with_csrf(
+                    client,
+                    "/api/v1/chat/completions",
+                    json={
+                        "api_provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": "hello"}],
+                        "stream": False,
+                    },
+                    headers=_auth_headers(client),
+                )
+        assert result.status_code == 200
+        assert (
+            result.json()["choices"][0]["message"]["content"]
+            == "this has [RULE] token"
+        )
+        body_completed = True
+    finally:
+        try:
+            _cleanup_db_artifacts(db_path)
+        except Exception:
+            if body_completed:
+                raise
+        finally:
+            app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
 @pytest.mark.unit
