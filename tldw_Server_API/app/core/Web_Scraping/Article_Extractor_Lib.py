@@ -83,11 +83,11 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
 from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
     _schema_cache_put as _canonical_schema_cache_put,
 )
-from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
-    get_strategy_semaphore as _canonical_get_strategy_semaphore,
-)
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.llm import (
     schema_rules_to_field_specs as _schema_rules_to_field_specs,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
+    get_strategy_semaphore as _canonical_get_strategy_semaphore,
 )
 from tldw_Server_API.app.core.Web_Scraping.filters import (
     ContentTypeFilter,

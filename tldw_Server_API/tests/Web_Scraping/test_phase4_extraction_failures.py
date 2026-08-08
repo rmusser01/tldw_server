@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
     build_default_dependencies,
 )
+from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import schema as schema_strategy
 
@@ -144,7 +145,9 @@ def test_llm_resolves_default_provider_and_uses_call_time_dependency(monkeypatch
     assert calls[0]["api_provider"] == "openai"
 
 
-def test_llm_merges_concatenated_json_and_aggregates_chunk_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_llm_uses_the_first_json_object_per_chunk_and_aggregates_chunk_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     responses = iter(
         [
             _response('{"title": "Title"}{"blocks": [{"text": "First"}]}'),
@@ -172,7 +175,7 @@ def test_llm_merges_concatenated_json_and_aggregates_chunk_usage(monkeypatch: py
 
     assert result["title"] == "Title"
     assert result["content"] == "Second"
-    assert result["llm_extraction"]["blocks"] == [{"text": "First"}]
+    assert result["llm_extraction"] == {"title": "Title", "content": "Second", "summary": "Third"}
     assert result["llm_usage"] == {"prompt_tokens": 6, "completion_tokens": 9, "total_tokens": 15}
 
 
@@ -226,7 +229,7 @@ def test_cancellation_runs_before_next_chunk(monkeypatch: pytest.MonkeyPatch) ->
     def checkpoint() -> None:
         nonlocal checkpoints
         checkpoints += 1
-        if checkpoints == 3:
+        if checkpoints == 4:
             raise asyncio.CancelledError
 
     def provider(**_kwargs: Any) -> dict[str, Any]:
@@ -267,7 +270,7 @@ def test_cancellation_runs_between_provider_retries(
     def checkpoint() -> None:
         nonlocal checkpoints
         checkpoints += 1
-        if checkpoints == 3:
+        if checkpoints == 4:
             raise asyncio.CancelledError
 
     def provider(**_kwargs: Any) -> dict[str, Any]:
@@ -294,6 +297,92 @@ def test_cancellation_runs_between_provider_retries(
 
     assert provider_calls == 1
     assert sleeps == []
+
+
+def test_cancellation_during_throttle_wait_prevents_provider_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    cancelled = False
+    provider_calls = 0
+
+    def checkpoint() -> None:
+        if cancelled:
+            raise asyncio.CancelledError
+
+    def sleep(_delay: float) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal provider_calls
+        provider_calls += 1
+        return _response('{"content": "Unexpected"}')
+
+    monkeypatch.setenv("LLM_DELAY_MS", "10")
+    throttles.clear_throttle_state()
+    throttles.apply_llm_delay(
+        "openai",
+        10.0,
+        0.0,
+        wall_time=lambda: 1000.0,
+        sleep=lambda _delay: None,
+    )
+    _install_dependencies(
+        monkeypatch,
+        llm_strategy,
+        perform_chat_api_call=provider,
+        cancellation_checkpoint=checkpoint,
+        sleep=sleep,
+        wall_time=lambda: 1000.0,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        extraction.extract_llm_entities(
+            "<p>Body</p>",
+            "https://example.com/throttle-cancel",
+            llm_settings={"provider": "openai"},
+        )
+
+    assert provider_calls == 0
+
+
+def test_cancellation_during_retry_backoff_prevents_later_provider_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = False
+    provider_calls = 0
+
+    def checkpoint() -> None:
+        if cancelled:
+            raise asyncio.CancelledError
+
+    def sleep(_delay: float) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal provider_calls
+        provider_calls += 1
+        if provider_calls == 1:
+            raise RuntimeError(SECRET)
+        return _response('{"content": "Unexpected"}')
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "1")
+    monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "10")
+    _install_dependencies(
+        monkeypatch,
+        llm_strategy,
+        perform_chat_api_call=provider,
+        cancellation_checkpoint=checkpoint,
+        sleep=sleep,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        extraction.extract_llm_entities(
+            "<p>Body</p>",
+            "https://example.com/retry-cancel",
+            llm_settings={"provider": "openai"},
+        )
+
+    assert provider_calls == 1
 
 
 def test_provider_retry_uses_backoff_and_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,6 +415,65 @@ def test_provider_retry_uses_backoff_and_then_succeeds(monkeypatch: pytest.Monke
     assert result["content"] == "Recovered"
     assert provider_calls == 2
     assert sleeps == [0.025]
+
+
+@pytest.mark.parametrize("llm_response", ['{"score": 0}', '{"flag": false}'])
+def test_scalar_llm_data_allows_trafilatura_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    llm_response: str,
+) -> None:
+    calls: list[str] = []
+    _install_dependencies(
+        monkeypatch,
+        llm_strategy,
+        perform_chat_api_call=lambda **_kwargs: calls.append("llm") or _response(llm_response),
+    )
+
+    def fallback(_html: str, url: str) -> dict[str, Any]:
+        calls.append("fallback")
+        return {
+            "url": url,
+            "title": "Fallback",
+            "author": "N/A",
+            "content": "Fallback body",
+            "date": "N/A",
+            "extraction_successful": True,
+        }
+
+    result = legacy.extract_article_with_pipeline(
+        "<p>Body</p>",
+        "https://example.com/scalar",
+        strategy_order=["llm", "trafilatura"],
+        llm_settings={"provider": "openai"},
+        fallback_extractor=fallback,
+    )
+
+    assert calls == ["llm", "fallback"]
+    assert result["extraction_strategy"] == "trafilatura"
+    assert result["content"] == "Fallback body"
+
+
+@pytest.mark.parametrize(
+    ("schema_rules", "expected"),
+    [
+        ({"fields": [], "title_selector": "h1"}, []),
+        ({"baseFields": [], "title_selector": "h1"}, []),
+        ({"fields": {"headline": {"type": "headline"}}, "title_selector": "h1"}, [{"name": "title", "type": "text"}]),
+        (
+            {
+                "baseFields": {"container": {"type": "container"}},
+                "fields": {"headline": {"type": "headline"}},
+                "title_selector": "h1",
+            },
+            [{"name": "container", "type": "container"}, {"name": "headline", "type": "headline"}],
+        ),
+    ],
+)
+def test_schema_rules_to_field_specs_preserves_predecessor_branching(
+    schema_rules: dict[str, Any],
+    expected: list[dict[str, str]],
+) -> None:
+    assert llm_strategy.schema_rules_to_field_specs(schema_rules) == expected
 
 
 @pytest.mark.parametrize(

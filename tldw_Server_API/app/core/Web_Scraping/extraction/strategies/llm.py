@@ -136,6 +136,7 @@ def call_llm_provider(
     while True:
         try:
             with _llm_throttle(provider, settings, dependencies):
+                dependencies.cancellation_checkpoint()
                 return (
                     dependencies.perform_chat_api_call(
                         api_provider=provider,
@@ -308,16 +309,25 @@ def schema_rules_to_field_specs(schema_rules: Optional[dict[str, Any]]) -> list[
     if not isinstance(schema_rules, dict):
         return []
     fields: list[dict[str, Any]] = []
-    for group in ("baseFields", "fields"):
-        raw = schema_rules.get(group)
-        if isinstance(raw, dict):
-            raw = [
-                {"name": name, **(spec if isinstance(spec, dict) else {"selector": spec})} for name, spec in raw.items()
-            ]
-        for field in raw if isinstance(raw, list) else []:
-            if isinstance(field, dict) and isinstance(field.get("name"), str) and field["name"].strip():
-                fields.append({"name": field["name"].strip(), "type": str(field.get("type") or "text").strip().lower()})
-    if fields:
+    if isinstance(schema_rules.get("fields"), list) or isinstance(schema_rules.get("baseFields"), (list, dict)):
+
+        def normalize_field_definitions(raw: Any) -> list[dict[str, Any]]:
+            if isinstance(raw, list):
+                return [field for field in raw if isinstance(field, dict)]
+            if isinstance(raw, dict):
+                normalized: list[dict[str, Any]] = []
+                for name, spec in raw.items():
+                    entry = dict(spec) if isinstance(spec, dict) else {"selector": spec}
+                    entry.setdefault("name", str(name))
+                    normalized.append(entry)
+                return normalized
+            return []
+
+        for group in ("baseFields", "fields"):
+            for field in normalize_field_definitions(schema_rules.get(group) or []):
+                name = field.get("name")
+                if isinstance(name, str) and name.strip():
+                    fields.append({"name": name.strip(), "type": str(field.get("type") or "text").strip().lower()})
         return fields
     selector_fields = {
         "title": ("title_xpath", "title_selector"),
@@ -377,12 +387,16 @@ def _merge_results(objects: list[dict[str, Any]], mode: str) -> tuple[dict[str, 
 
 
 def _has_content(data: dict[str, Any]) -> bool:
-    return any(
-        value is not None
-        and (not isinstance(value, str) or bool(value.strip()))
-        and (not isinstance(value, (list, dict)) or bool(value))
-        for value in data.values()
-    )
+    for value in data.values():
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, list) and value:
+            return True
+        if isinstance(value, dict) and value:
+            return True
+    return False
 
 
 def extract_llm_entities(
@@ -468,7 +482,7 @@ def extract_llm_entities(
             usage_total[key] += usage.get(key, 0)
         obj, meta = parse_llm_json(extract_llm_response_text(response), strict=strict_json)
         if isinstance(obj, dict):
-            parsed.extend(item for item in meta.get("objects", [obj]) if isinstance(item, dict))
+            parsed.append(obj)
         else:
             parse_failed = parse_failed or meta.get("error") == "strict_json_failed"
     if not parsed:
