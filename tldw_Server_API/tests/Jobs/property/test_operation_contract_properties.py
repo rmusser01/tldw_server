@@ -17,6 +17,7 @@ from hypothesis import given, settings as hyp_settings, strategies as st
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
+    BatchRenewLeasesResult,
     LifecycleResult,
     NoTransitionReason,
     OperationOutcome,
@@ -229,3 +230,22 @@ class TestLifecycleResultContract:
     def test_impossible_states_raise(self, kwargs: dict) -> None:
         with pytest.raises(ValueError):
             LifecycleResult(**kwargs)
+
+
+@_COMMON
+@given(
+    requested=st.integers(min_value=-5, max_value=100),
+    applied=st.integers(min_value=-5, max_value=105),
+)
+def test_batch_renew_result_constructs_only_for_valid_count_pairs(
+    requested: int,
+    applied: int,
+) -> None:
+    valid = requested >= 0 and 0 <= applied <= requested
+    if valid:
+        result = BatchRenewLeasesResult(requested_count=requested, applied_count=applied)
+        assert result.requested_count == requested
+        assert result.applied_count == applied
+    else:
+        with pytest.raises(ValueError):
+            BatchRenewLeasesResult(requested_count=requested, applied_count=applied)

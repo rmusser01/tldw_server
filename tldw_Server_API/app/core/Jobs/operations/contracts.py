@@ -108,6 +108,45 @@ class RenewLeaseCommand:
 
 
 @dataclass(frozen=True)
+class BatchRenewLeaseItem:
+    """One facade-normalized lease renewal attempt."""
+
+    job_id: int
+    seconds: int
+    worker_id: str | None = None
+    lease_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.seconds < 1:
+            raise ValueError("seconds must be positive")
+
+
+@dataclass(frozen=True)
+class BatchRenewLeasesCommand:
+    """Ordered immutable lease renewal attempts for one transaction."""
+
+    items: tuple[BatchRenewLeaseItem, ...]
+    enforce: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "items", tuple(self.items))
+
+
+@dataclass(frozen=True)
+class BatchRenewLeasesResult:
+    """Counts produced by one atomic batch renewal operation."""
+
+    requested_count: int
+    applied_count: int
+
+    def __post_init__(self) -> None:
+        if self.requested_count < 0:
+            raise ValueError("requested_count must be non-negative")
+        if not 0 <= self.applied_count <= self.requested_count:
+            raise ValueError("applied_count must be between zero and requested_count")
+
+
+@dataclass(frozen=True)
 class ReleaseJobCommand:
     """Backend-neutral command payload for releasing one processing job."""
 
@@ -274,6 +313,9 @@ __all__ = [
     "AdmissionRejectionReason",
     "AdmissionResult",
     "AcquireJobCommand",
+    "BatchRenewLeaseItem",
+    "BatchRenewLeasesCommand",
+    "BatchRenewLeasesResult",
     "CreateJobCommand",
     "LifecycleResult",
     "NoTransitionReason",

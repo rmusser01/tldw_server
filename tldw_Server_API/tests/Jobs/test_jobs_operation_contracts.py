@@ -10,10 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs.operations import contracts
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
+    BatchRenewLeaseItem,
+    BatchRenewLeasesCommand,
+    BatchRenewLeasesResult,
     CreateJobCommand,
     LifecycleResult,
     NoTransitionReason,
@@ -332,6 +336,55 @@ def test_release_job_command_is_frozen() -> None:
 
     with pytest.raises(FrozenInstanceError):
         command.reason = "other"
+
+
+def test_batch_renew_command_snapshots_items_and_is_frozen() -> None:
+    source = [BatchRenewLeaseItem(job_id=1, seconds=30)]
+    command = BatchRenewLeasesCommand(items=source, enforce=True)  # type: ignore[arg-type]
+    source.append(BatchRenewLeaseItem(job_id=2, seconds=45))
+
+    assert command.items == (BatchRenewLeaseItem(job_id=1, seconds=30),)
+    with pytest.raises(FrozenInstanceError):
+        command.enforce = False
+
+
+def test_batch_renew_item_is_frozen_and_preserves_order() -> None:
+    first = BatchRenewLeaseItem(job_id=1, seconds=30)
+    second = BatchRenewLeaseItem(job_id=2, seconds=45)
+    command = BatchRenewLeasesCommand(items=(first, second), enforce=False)
+
+    assert first.worker_id is None
+    assert command.items == (first, second)
+    with pytest.raises(FrozenInstanceError):
+        first.seconds = 60
+
+
+@pytest.mark.parametrize("seconds", [0, -1])
+def test_batch_renew_item_rejects_non_positive_normalized_duration(seconds: int) -> None:
+    with pytest.raises(ValueError, match="seconds must be positive"):
+        BatchRenewLeaseItem(job_id=1, seconds=seconds)
+
+
+@pytest.mark.parametrize(
+    ("requested", "applied"),
+    [(-1, 0), (0, -1), (1, 2)],
+)
+def test_batch_renew_result_rejects_invalid_counts(requested: int, applied: int) -> None:
+    with pytest.raises(ValueError):
+        BatchRenewLeasesResult(requested_count=requested, applied_count=applied)
+
+
+def test_batch_renew_result_accepts_zero_and_complete_counts() -> None:
+    assert BatchRenewLeasesResult(3, 0).applied_count == 0
+    assert BatchRenewLeasesResult(3, 3).applied_count == 3
+
+
+def test_batch_renew_contracts_are_exported() -> None:
+    assert {
+        "BatchRenewLeaseItem",
+        "BatchRenewLeasesCommand",
+        "BatchRenewLeasesResult",
+    }.issubset(contracts.__all__)
 
 
 def test_lifecycle_result_supports_no_eligible_job_reason() -> None:
