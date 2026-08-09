@@ -1,5 +1,6 @@
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as extractor_lib
 from tldw_Server_API.app.core.Web_Scraping import extraction
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
 
 
 def test_cluster_env_overrides(monkeypatch):
@@ -78,5 +79,5 @@ def test_regex_pii_mask_flag_accepts_y(monkeypatch):
 
 def test_clear_caches_flag_accepts_y_end_only(monkeypatch):
     monkeypatch.setenv("EXTRACTOR_CLEAR_CACHES", "y")
-    assert extractor_lib._should_clear_caches("start") is False
-    assert extractor_lib._should_clear_caches("end") is True
+    assert pipeline._should_clear_caches("start") is False
+    assert pipeline._should_clear_caches("end") is True
