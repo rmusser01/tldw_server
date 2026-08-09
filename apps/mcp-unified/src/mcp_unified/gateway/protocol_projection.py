@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from base64 import b64decode
+from binascii import Error as Base64Error
 from collections.abc import Mapping, Sequence
 from typing import Literal, TypeAlias
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -15,12 +17,12 @@ from .protocol_errors import (
     GatewayResultTooLarge,
     GatewayToolExecutionError,
 )
+from .protocol_limits import GatewayLimits
 from .protocol_profiles import GatewayProtocolProfile
+from .protocol_validation import _JSONStructureError, _validate_json_structure
 from .runtime import GatewayJSONValue
 
-GatewayDescriptorKind: TypeAlias = Literal[
-    "tool", "resource", "resource_template", "prompt"
-]
+GatewayDescriptorKind: TypeAlias = Literal["tool", "resource", "resource_template", "prompt"]
 _NAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 _SCHEME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*\Z")
 _META_KEY_PATTERN = re.compile(
@@ -29,6 +31,12 @@ _META_KEY_PATTERN = re.compile(
 )
 _SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
 _TOOL_ERROR_KEY = "io.github.rmusser01.mcp-unified/error"
+_DEFAULT_JSON_DEPTH = GatewayLimits().max_json_depth
+_URI_TEMPLATE_VARIABLE = re.compile(
+    r"(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2})+"
+    r"(?:\.(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2})+)*\Z"
+)
+_ANNOTATION_LAST_MODIFIED_VERSIONS = frozenset({"2026-07-28", "2025-11-25", "2025-06-18"})
 
 
 def _invalid() -> GatewayInvalidApplicationResult:
@@ -38,19 +46,10 @@ def _invalid() -> GatewayInvalidApplicationResult:
 def _deterministic_json(value: object) -> str:
     """Serialize finite JSON with stable Unicode and key ordering."""
 
-    stack = [value]
-    while stack:
-        current = stack.pop()
-        if isinstance(current, dict):
-            if any(not isinstance(key, str) for key in current):
-                raise _invalid()
-            stack.extend(current.values())
-        elif isinstance(current, list):
-            stack.extend(current)
-        elif current is not None and not isinstance(
-            current, (bool, int, float, str)
-        ):
-            raise _invalid()
+    try:
+        _validate_json_structure(value, max_depth=_DEFAULT_JSON_DEPTH)
+    except _JSONStructureError as exc:
+        raise _invalid() from exc
     try:
         return json.dumps(
             value,
@@ -59,7 +58,7 @@ def _deterministic_json(value: object) -> str:
             separators=(",", ":"),
             allow_nan=False,
         )
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+    except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
         raise _invalid() from exc
 
 
@@ -75,8 +74,8 @@ def _required_string(value: object, *, maximum: int = 4_096) -> str:
     return value
 
 
-def _optional_string(value: object, *, maximum: int = 4_096) -> str:
-    if not isinstance(value, str) or len(value) > maximum:
+def _optional_string(value: object, *, maximum: int | None = 4_096) -> str:
+    if not isinstance(value, str) or (maximum is not None and len(value) > maximum):
         raise _invalid()
     return value
 
@@ -93,6 +92,8 @@ def _normalize_uri(value: object, *, template: bool = False) -> str:
     uri = _required_string(value, maximum=2_048)
     if any(character.isspace() or ord(character) < 32 for character in uri):
         raise _invalid()
+    if template:
+        _validate_uri_template(uri)
     try:
         parsed = urlsplit(uri)
         port = parsed.port
@@ -111,17 +112,47 @@ def _normalize_uri(value: object, *, template: bool = False) -> str:
         host = parsed.hostname.lower()
         if ":" in host:
             host = f"[{host}]"
-        default_port = (scheme == "http" and port == 80) or (
-            scheme == "https" and port == 443
-        )
+        default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
         netloc = host if port is None or default_port else f"{host}:{port}"
-    normalized = urlunsplit(
-        SplitResult(scheme, netloc, parsed.path, parsed.query, parsed.fragment)
-    )
+    normalized = urlunsplit(SplitResult(scheme, netloc, parsed.path, parsed.query, parsed.fragment))
     if template and ("{" not in normalized or "}" not in normalized):
         # A concrete URI is still a valid zero-variable RFC 6570 template.
         return normalized
     return normalized
+
+
+def _validate_uri_template(value: str) -> None:
+    """Validate the expression grammar needed for RFC 6570 URI templates."""
+
+    position = 0
+    while position < len(value):
+        if value[position] == "}":
+            raise _invalid()
+        if value[position] != "{":
+            position += 1
+            continue
+        end = value.find("}", position + 1)
+        if end < 0:
+            raise _invalid()
+        expression = value[position + 1 : end]
+        if not expression or "{" in expression:
+            raise _invalid()
+        if expression[0] in "+#./;?&":
+            expression = expression[1:]
+        if not expression:
+            raise _invalid()
+        for variable in expression.split(","):
+            if not variable:
+                raise _invalid()
+            if variable.endswith("*"):
+                variable = variable[:-1]
+            elif ":" in variable:
+                variable, prefix = variable.rsplit(":", 1)
+                if not prefix.isdigit() or not 1 <= len(prefix) <= 4 or prefix[0] == "0":
+                    raise _invalid()
+            if _URI_TEMPLATE_VARIABLE.fullmatch(variable) is None:
+                raise _invalid()
+        position = end + 1
 
 
 def _is_reserved_meta_key(key: str) -> bool:
@@ -176,11 +207,55 @@ def _copy_optional_text(
         target[field] = _optional_string(source[field])
 
 
-def _annotations(value: object) -> dict[str, GatewayJSONValue]:
+def _annotations(
+    value: object,
+    profile: GatewayProtocolProfile,
+    *,
+    tool: bool = False,
+) -> dict[str, GatewayJSONValue]:
     cloned = _json_clone(value)
     if not isinstance(cloned, dict):
         raise _invalid()
+    if tool and profile.version == "2024-11-05":
+        return {}
+    if "audience" in cloned:
+        audience = cloned["audience"]
+        if not isinstance(audience, list) or not all(
+            isinstance(role, str) and role in {"user", "assistant"} for role in audience
+        ):
+            raise _invalid()
+    if "priority" in cloned:
+        priority = cloned["priority"]
+        if isinstance(priority, bool) or not isinstance(priority, (int, float)) or not 0 <= priority <= 1:
+            raise _invalid()
+    if "lastModified" in cloned:
+        if not isinstance(cloned["lastModified"], str):
+            raise _invalid()
+        if profile.version not in _ANNOTATION_LAST_MODIFIED_VERSIONS:
+            del cloned["lastModified"]
+    if tool:
+        if "title" in cloned:
+            cloned["title"] = _optional_string(cloned["title"])
+        for field in (
+            "readOnlyHint",
+            "destructiveHint",
+            "idempotentHint",
+            "openWorldHint",
+        ):
+            if field in cloned and not isinstance(cloned[field], bool):
+                raise _invalid()
     return cloned
+
+
+def _base64_data(value: object) -> str:
+    """Return a string only when it contains standard padded base64 data."""
+
+    data = _optional_string(value, maximum=16_777_216)
+    try:
+        b64decode(data, validate=True)
+    except (Base64Error, ValueError) as exc:
+        raise _invalid() from exc
+    return data
 
 
 def _icons(value: object) -> list[dict[str, GatewayJSONValue]]:
@@ -195,9 +270,7 @@ def _icons(value: object) -> list[dict[str, GatewayJSONValue]]:
             icon["mimeType"] = _required_string(raw["mimeType"], maximum=255)
         if "sizes" in raw:
             sizes = raw["sizes"]
-            if not isinstance(sizes, list) or not all(
-                isinstance(size, str) and 0 < len(size) <= 32 for size in sizes
-            ):
+            if not isinstance(sizes, list) or not all(isinstance(size, str) and 0 < len(size) <= 32 for size in sizes):
                 raise _invalid()
             icon["sizes"] = list(sizes)
         if "theme" in raw:
@@ -257,7 +330,13 @@ def project_descriptor(
     if profile.supports_icons and "icons" in descriptor:
         projected["icons"] = _icons(descriptor["icons"])
     if "annotations" in descriptor:
-        projected["annotations"] = _annotations(descriptor["annotations"])
+        annotations = _annotations(
+            descriptor["annotations"],
+            profile,
+            tool=kind == "tool",
+        )
+        if annotations:
+            projected["annotations"] = annotations
 
     if kind == "tool":
         input_schema = _json_clone(descriptor.get("inputSchema"))
@@ -273,22 +352,16 @@ def project_descriptor(
     elif kind == "resource":
         projected["uri"] = _normalize_uri(descriptor.get("uri"))
         if "mimeType" in descriptor:
-            projected["mimeType"] = _required_string(
-                descriptor["mimeType"], maximum=255
-            )
+            projected["mimeType"] = _required_string(descriptor["mimeType"], maximum=255)
         if "size" in descriptor:
             size = descriptor["size"]
             if isinstance(size, bool) or not isinstance(size, int) or size < 0:
                 raise _invalid()
             projected["size"] = size
     elif kind == "resource_template":
-        projected["uriTemplate"] = _normalize_uri(
-            descriptor.get("uriTemplate"), template=True
-        )
+        projected["uriTemplate"] = _normalize_uri(descriptor.get("uriTemplate"), template=True)
         if "mimeType" in descriptor:
-            projected["mimeType"] = _required_string(
-                descriptor["mimeType"], maximum=255
-            )
+            projected["mimeType"] = _required_string(descriptor["mimeType"], maximum=255)
     elif "arguments" in descriptor:
         projected["arguments"] = _prompt_arguments(descriptor["arguments"])
 
@@ -322,7 +395,9 @@ def _resource_contents(
     if "mimeType" in value:
         projected["mimeType"] = _required_string(value["mimeType"], maximum=255)
     field = "text" if has_text else "blob"
-    projected[field] = _optional_string(value[field], maximum=16_777_216)
+    projected[field] = (
+        _optional_string(value[field], maximum=16_777_216) if field == "text" else _base64_data(value[field])
+    )
     if profile.supports_titles and "_meta" in value:
         meta = _metadata(value["_meta"], profile)
         if meta:
@@ -339,15 +414,16 @@ def _content_block(
     block_type = value.get("type")
     projected: dict[str, GatewayJSONValue]
     if block_type == "text":
-        projected = {"type": "text", "text": _optional_string(value.get("text"))}
+        projected = {
+            "type": "text",
+            "text": _optional_string(value.get("text"), maximum=None),
+        }
     elif block_type in {"image", "audio"}:
-        if block_type == "audio" and not (
-            profile.supports_resource_links or profile.accepts_batches
-        ):
+        if block_type == "audio" and not (profile.supports_resource_links or profile.accepts_batches):
             raise _invalid()
         projected = {
             "type": block_type,
-            "data": _optional_string(value.get("data"), maximum=16_777_216),
+            "data": _base64_data(value.get("data")),
             "mimeType": _required_string(value.get("mimeType"), maximum=255),
         }
     elif block_type == "resource":
@@ -376,7 +452,7 @@ def _content_block(
     else:
         raise _invalid()
     if "annotations" in value:
-        projected["annotations"] = _annotations(value["annotations"])
+        projected["annotations"] = _annotations(value["annotations"], profile)
     if profile.supports_titles and "_meta" in value:
         meta = _metadata(value["_meta"], profile)
         if meta:
@@ -430,8 +506,7 @@ def project_tool_result(
             blocks = _content_blocks(list(content), profile)
         projected = {"content": blocks}
         if profile.structured_content_mode == "any" or (
-            profile.structured_content_mode == "object"
-            and isinstance(structured, dict)
+            profile.structured_content_mode == "object" and isinstance(structured, dict)
         ):
             projected["structuredContent"] = structured
         gateway_owned = None

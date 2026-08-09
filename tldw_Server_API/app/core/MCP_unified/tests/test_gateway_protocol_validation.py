@@ -78,6 +78,57 @@ class _ReapCheckingSemaphore:
         self.released += 1
 
 
+class _CountingSemaphore:
+    """Record releases without assuming unrelated concurrent children are reaped."""
+
+    def __init__(self) -> None:
+        self.acquired = 0
+        self.released = 0
+
+    async def acquire(self) -> bool:
+        self.acquired += 1
+        return True
+
+    def release(self) -> None:
+        self.released += 1
+
+
+class _FakeReceiver:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeProcess:
+    """Controllable process double for cleanup ordering and deadline tests."""
+
+    def __init__(self, *, clock: list[float] | None = None) -> None:
+        self.alive = True
+        self.exitcode: int | None = None
+        self.fail_reap = False
+        self.clock = clock
+        self.calls: list[tuple[str, float | None]] = []
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+    def terminate(self) -> None:
+        self.calls.append(("terminate", None))
+
+    def kill(self) -> None:
+        self.calls.append(("kill", None))
+        if not self.fail_reap:
+            self.alive = False
+            self.exitcode = -9
+
+    def join(self, timeout: float | None = None) -> None:
+        self.calls.append(("join", timeout))
+        if self.clock is not None and timeout is not None:
+            self.clock[0] += timeout
+
+
 async def _wait_for_process(context: _TrackingSpawnContext) -> None:
     for _ in range(500):
         if context.processes and context.processes[-1].pid is not None:
@@ -95,9 +146,7 @@ def test_pinned_official_schema_manifest_hashes_and_literal_vectors() -> None:
         "commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
         "license": "Apache-2.0",
     }
-    assert [entry["revision"] for entry in manifest["fixtures"]] == list(
-        PROTOCOL_PROFILES
-    )
+    assert [entry["revision"] for entry in manifest["fixtures"]] == list(PROTOCOL_PROFILES)
 
     request = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
     result = {"jsonrpc": "2.0", "id": 1, "result": {}}
@@ -105,9 +154,7 @@ def test_pinned_official_schema_manifest_hashes_and_literal_vectors() -> None:
         fixture_path = _FIXTURE_ROOT / entry["path"]
         raw = fixture_path.read_bytes()
         assert hashlib.sha256(raw).hexdigest() == entry["sha256"]
-        assert entry["url"].endswith(
-            f"/{manifest['upstream']['commit']}/schema/{entry['revision']}/schema.json"
-        )
+        assert entry["url"].endswith(f"/{manifest['upstream']['commit']}/schema/{entry['revision']}/schema.json")
 
         schema = json.loads(raw)
         validator_class = validator_for(schema)
@@ -510,3 +557,242 @@ async def test_manager_close_reaps_live_children_releases_permits_and_rejects_wo
             profile=PROTOCOL_PROFILES["2026-07-28"],
         )
     assert closed.value.reason_code == "schema_validator_closed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(2)
+@pytest.mark.parametrize("target", ["schema", "instance"])
+async def test_preflight_rejects_self_referential_json_without_hanging(target: str) -> None:
+    """A Python container cycle must be rejected before encoding or worker spawn."""
+
+    api = _validation_api()
+    cycle: dict[str, Any] = {}
+    cycle["self"] = cycle
+    schema: object = cycle if target == "schema" else {}
+    instance: object = cycle if target == "instance" else None
+    expected = "schema_not_json" if target == "schema" else "instance_not_json"
+    manager = api.GatewaySchemaValidationManager()
+    with pytest.raises(GatewayApplicationError) as raised:
+        await manager.validate(
+            schema,  # type: ignore[arg-type]
+            instance,  # type: ignore[arg-type]
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    assert raised.value.reason_code == expected
+    assert manager.live_process_count == 0
+    await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["schema", "instance"])
+async def test_preflight_enforces_depth_before_python_json_encoder_limit(target: str) -> None:
+    """Deep acyclic JSON must become a bounded gateway error, never RecursionError."""
+
+    api = _validation_api()
+    nested: object = None
+    for _ in range(1_100):
+        nested = [nested]
+    limits = replace(GatewayLimits(), max_schema_depth=32, max_json_depth=32)
+    manager = api.GatewaySchemaValidationManager(limits=limits)
+    expected = "schema_too_deep" if target == "schema" else "instance_too_deep"
+    with pytest.raises(GatewayApplicationError) as raised:
+        await manager.validate(
+            nested if target == "schema" else {},  # type: ignore[arg-type]
+            nested if target == "instance" else None,  # type: ignore[arg-type]
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    assert raised.value.reason_code == expected
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_parent_rejects_a_forged_profile_dialect_before_worker_spawn() -> None:
+    """Only the two accepted dialect literals may select a validator."""
+
+    api = _validation_api()
+    context = _TrackingSpawnContext()
+    manager = api.GatewaySchemaValidationManager(process_context=context)
+    forged = replace(
+        PROTOCOL_PROFILES["2026-07-28"],
+        schema_dialect="https://json-schema.org/draft/2019-09/schema",
+    )
+    with pytest.raises(GatewayApplicationError) as raised:
+        await manager.validate({}, None, profile=forged)
+    assert raised.value.reason_code == "schema_dialect_unsupported"
+    assert context.processes == []
+    await manager.close()
+
+
+def test_worker_registry_never_uses_default_url_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The worker's resolver must fail locally even if parent preflight is bypassed."""
+
+    import urllib.request
+
+    api = _validation_api()
+    retrieved: list[object] = []
+
+    def forbidden_retrieval(*args: object, **kwargs: object) -> object:
+        retrieved.append((args, kwargs))
+        raise AssertionError("network retrieval attempted")
+
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden_retrieval)
+    receiver, sender = multiprocessing.get_context("spawn").Pipe(duplex=False)
+    api._schema_validation_worker(
+        sender,
+        b'{"$ref":"https://example.invalid/schema.json"}',
+        b"null",
+        PROTOCOL_PROFILES["2026-07-28"].schema_dialect,
+    )
+    verdict = json.loads(receiver.recv_bytes())
+    receiver.close()
+    assert verdict[0] in {"invalid", "internal"}
+    assert retrieved == []
+
+
+@pytest.mark.asyncio
+async def test_schema_keywords_inside_instance_payload_keywords_are_not_traversed() -> None:
+    """Annotation payloads named like schema keywords must not consume schema limits."""
+
+    api = _validation_api()
+    limits = replace(
+        GatewayLimits(),
+        max_schema_subschemas=2,
+        max_schema_refs=1,
+        max_schema_pattern_chars=1,
+    )
+    payload = {
+        "$ref": "https://must-not-resolve.invalid",
+        "pattern": "x" * 500,
+        "patternProperties": {"x" * 500: {"$ref": "remote"}},
+    }
+    schema = {
+        "type": "object",
+        "properties": {
+            "payload": {
+                "const": payload,
+                "enum": [payload],
+                "default": payload,
+                "examples": [payload],
+            }
+        },
+    }
+    manager = api.GatewaySchemaValidationManager(limits=limits)
+    try:
+        await manager.validate(
+            schema,
+            {"payload": payload},
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_embedded_resources_and_changed_base_resolve_without_retrieval() -> None:
+    """Relative refs may target submitted embedded resources under their resolved ids."""
+
+    api = _validation_api()
+    schema = {
+        "$id": "https://example.invalid/root.json",
+        "$defs": {
+            "child": {
+                "$id": "child.json",
+                "$anchor": "integer",
+                "type": "integer",
+            }
+        },
+        "properties": {
+            "first": {"$ref": "child.json"},
+            "second": {"$ref": "child.json#integer"},
+        },
+        "type": "object",
+    }
+    manager = api.GatewaySchemaValidationManager()
+    try:
+        await manager.validate(
+            schema,
+            {"first": 1, "second": 2},
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_close_drains_multiple_saturated_real_workers() -> None:
+    """Shutdown must reap every running permit holder under full saturation."""
+
+    api = _validation_api()
+    context = _TrackingSpawnContext()
+    limits = replace(GatewayLimits(), max_schema_validation_processes=2)
+    manager = api.GatewaySchemaValidationManager(
+        limits=limits,
+        process_context=context,
+        _worker_target=_hang_worker,
+    )
+    tasks = [
+        asyncio.create_task(
+            manager.validate(
+                {"type": "integer"},
+                index,
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        )
+        for index in range(3)
+    ]
+    for _ in range(500):
+        if len(context.processes) == 2 and manager.live_process_count == 2:
+            break
+        await asyncio.sleep(0.002)
+    else:
+        pytest.fail("validation workers did not saturate")
+
+    await manager.close()
+    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    assert all(isinstance(outcome, GatewayApplicationError) for outcome in outcomes)
+    assert all(not process.is_alive() for process in context.processes)
+    assert all(process.exitcode is not None for process in context.processes)
+    assert manager.live_process_count == 0
+
+
+@pytest.mark.asyncio
+async def test_close_attempts_later_children_before_reporting_cleanup_failure() -> None:
+    """One unreapable child must not prevent cleanup attempts for every sibling."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+    semaphore = _CountingSemaphore()
+    manager._semaphore = semaphore
+    processes = [_FakeProcess(), _FakeProcess(), _FakeProcess()]
+    manager._live_processes = set(processes)
+    manager._receivers = {process: _FakeReceiver() for process in processes}
+    first = tuple(manager._live_processes)[0]
+    first.fail_reap = True
+
+    with pytest.raises(RuntimeError, match="could not be reaped"):
+        await manager.close()
+
+    assert all(any(call[0] == "terminate" for call in process.calls) for process in processes)
+    assert all(any(call[0] == "kill" for call in process.calls) for process in processes)
+    assert manager.live_process_count == 1
+    assert semaphore.released == 2
+
+
+@pytest.mark.asyncio
+async def test_close_uses_one_global_graceful_shutdown_deadline() -> None:
+    """Per-child waits must share, rather than multiply, the configured grace period."""
+
+    api = _validation_api()
+    clock = [100.0]
+    limits = replace(GatewayLimits(), graceful_shutdown_timeout_seconds=0.12)
+    manager = api.GatewaySchemaValidationManager(limits=limits, _clock=lambda: clock[0])
+    processes = [_FakeProcess(clock=clock) for _ in range(3)]
+    manager._live_processes = set(processes)
+    manager._receivers = {process: _FakeReceiver() for process in processes}
+
+    await manager.close()
+
+    assert clock[0] <= 100.12
+    assert all(any(call[0] == "terminate" for call in process.calls) for process in processes)
+    assert all(any(call[0] == "kill" for call in process.calls) for process in processes)
+    assert manager.live_process_count == 0

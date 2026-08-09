@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
+from jsonschema.validators import validator_for
 from mcp_unified.gateway.protocol_errors import (
     GatewayInvalidApplicationResult,
     GatewayResourceNotFound,
@@ -23,6 +26,7 @@ _SERVER_META = {
         "version": "1.0",
     }
 }
+_FIXTURE_ROOT = Path(__file__).with_name("fixtures") / "mcp_protocol"
 
 
 def _projection_api() -> Any:
@@ -119,9 +123,7 @@ def test_resource_template_and_prompt_descriptors_validate_identity_and_projecti
         {
             "name": "summarize",
             "title": "Summarize",
-            "arguments": [
-                {"name": "style", "description": "Output style", "required": True}
-            ],
+            "arguments": [{"name": "style", "description": "Output style", "required": True}],
         },
         modern,
     )
@@ -141,9 +143,7 @@ def test_resource_template_and_prompt_descriptors_validate_identity_and_projecti
     assert prompt == {
         "name": "summarize",
         "title": "Summarize",
-        "arguments": [
-            {"name": "style", "description": "Output style", "required": True}
-        ],
+        "arguments": [{"name": "style", "description": "Output style", "required": True}],
     }
 
 
@@ -152,11 +152,14 @@ def test_human_resource_names_prompt_arguments_and_empty_content_are_valid() -> 
 
     api = _projection_api()
     modern = PROTOCOL_PROFILES["2026-07-28"]
-    assert api.project_descriptor(
-        "resource",
-        {"name": "User Guide", "uri": "file:///guide.txt"},
-        modern,
-    )["name"] == "User Guide"
+    assert (
+        api.project_descriptor(
+            "resource",
+            {"name": "User Guide", "uri": "file:///guide.txt"},
+            modern,
+        )["name"]
+        == "User Guide"
+    )
     assert api.project_descriptor(
         "prompt",
         {"name": "summarize", "arguments": [{"name": "output style"}]},
@@ -211,12 +214,8 @@ def test_arbitrary_root_tool_result_uses_exact_profile_projection(version: str) 
         reserved_meta=_SERVER_META,
     )
 
-    assert projected["content"] == [
-        {"type": "text", "text": '[3,{"a":2,"z":1}]'}
-    ]
-    assert ("structuredContent" in projected) is (
-        profile.structured_content_mode == "any"
-    )
+    assert projected["content"] == [{"type": "text", "text": '[3,{"a":2,"z":1}]'}]
+    assert ("structuredContent" in projected) is (profile.structured_content_mode == "any")
     if profile.structured_content_mode == "any":
         assert projected["structuredContent"] == [3, {"z": 1, "a": 2}]
     assert (projected.get("resultType") == "complete") is profile.requires_result_type
@@ -293,11 +292,14 @@ def test_audio_content_obeys_the_literal_legacy_profile_matrix() -> None:
 
     api = _projection_api()
     content = [{"type": "audio", "data": "", "mimeType": "audio/wav"}]
-    assert api.project_tool_result(
-        None,
-        PROTOCOL_PROFILES["2025-03-26"],
-        content=content,
-    )["content"] == content
+    assert (
+        api.project_tool_result(
+            None,
+            PROTOCOL_PROFILES["2025-03-26"],
+            content=content,
+        )["content"]
+        == content
+    )
     with pytest.raises(GatewayInvalidApplicationResult):
         api.project_tool_result(
             None,
@@ -419,9 +421,7 @@ def test_invalid_resource_prompt_roles_and_content_fail_closed(
     """Invalid URI, role, or content shapes must become a generic application failure."""
 
     api = _projection_api()
-    function = (
-        api.project_resource_result if "contents" in result else api.project_prompt_result
-    )
+    function = api.project_resource_result if "contents" in result else api.project_prompt_result
     with pytest.raises(GatewayInvalidApplicationResult):
         function(result, PROTOCOL_PROFILES["2026-07-28"])
 
@@ -547,9 +547,7 @@ def test_first_page_sorts_stably_uses_fifty_items_and_continues() -> None:
         items=items,
         cursor=None,
     )
-    assert [item["name"] for item in first.items] == [
-        f"tool-{index:03d}" for index in range(50)
-    ]
+    assert [item["name"] for item in first.items] == [f"tool-{index:03d}" for index in range(50)]
     assert first.next_cursor is not None
 
     second = paginator.page(
@@ -631,3 +629,275 @@ def test_catalog_requires_concrete_method_identity(
             items=[item],
             cursor=None,
         )
+
+
+@pytest.mark.timeout(2)
+def test_projection_and_pagination_reject_cycles_without_hanging() -> None:
+    """Runtime cycles must fail before deterministic encoding begins."""
+
+    projection = _projection_api()
+    pagination = _pagination_api()
+    profile = PROTOCOL_PROFILES["2026-07-28"]
+    cycle: dict[str, Any] = {}
+    cycle["self"] = cycle
+    with pytest.raises(GatewayInvalidApplicationResult):
+        projection.project_tool_result(cycle, profile)
+    with pytest.raises(ValueError, match="finite JSON"):
+        pagination.GatewayCatalogPaginator().page(
+            method="tools/list",
+            profile=profile,
+            items=[{"name": "cycle", "value": cycle}],
+            cursor=None,
+        )
+
+
+def test_projection_and_pagination_translate_encoder_depth_to_bounded_errors() -> None:
+    """Values deeper than policy and Python's encoder must not leak RecursionError."""
+
+    projection = _projection_api()
+    pagination = _pagination_api()
+    profile = PROTOCOL_PROFILES["2026-07-28"]
+    nested: object = None
+    for _ in range(1_100):
+        nested = [nested]
+    with pytest.raises(GatewayInvalidApplicationResult):
+        projection.project_tool_result(nested, profile)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="finite JSON"):
+        pagination.GatewayCatalogPaginator().page(
+            method="tools/list",
+            profile=profile,
+            items=[{"name": "deep", "value": nested}],  # type: ignore[dict-item]
+            cursor=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("kind", "annotations"),
+    [
+        ("resource", {"audience": ["system"]}),
+        ("resource", {"audience": "user"}),
+        ("resource", {"priority": True}),
+        ("resource", {"priority": -0.1}),
+        ("resource", {"priority": 1.1}),
+        ("resource", {"lastModified": 123}),
+        ("tool", {"title": 123}),
+        ("tool", {"readOnlyHint": "yes"}),
+        ("tool", {"destructiveHint": 1}),
+        ("tool", {"idempotentHint": None}),
+        ("tool", {"openWorldHint": []}),
+    ],
+)
+def test_known_annotation_fields_are_typed_and_range_checked(
+    kind: str,
+    annotations: dict[str, Any],
+) -> None:
+    """Known annotation hints must not pass through as arbitrary JSON."""
+
+    api = _projection_api()
+    descriptor: dict[str, Any] = {
+        "name": "safe",
+        "annotations": annotations,
+    }
+    if kind == "tool":
+        descriptor["inputSchema"] = {"type": "object"}
+    else:
+        descriptor["uri"] = "file:///safe"
+    with pytest.raises(GatewayInvalidApplicationResult):
+        api.project_descriptor(
+            kind,
+            descriptor,
+            PROTOCOL_PROFILES["2026-07-28"],
+        )
+
+
+@pytest.mark.parametrize("version", list(PROTOCOL_PROFILES))
+def test_annotation_projection_obeys_revision_specific_fields(version: str) -> None:
+    """Tool hints and resource timestamps appear only in revisions that define them."""
+
+    api = _projection_api()
+    profile = PROTOCOL_PROFILES[version]
+    resource = api.project_descriptor(
+        "resource",
+        {
+            "name": "safe",
+            "uri": "file:///safe",
+            "annotations": {
+                "audience": ["user", "assistant"],
+                "priority": 0.5,
+                "lastModified": "2026-08-08T00:00:00Z",
+            },
+        },
+        profile,
+    )
+    assert resource["annotations"]["audience"] == ["user", "assistant"]
+    assert resource["annotations"]["priority"] == 0.5
+    assert ("lastModified" in resource["annotations"]) is (version in {"2026-07-28", "2025-11-25", "2025-06-18"})
+
+    tool = api.project_descriptor(
+        "tool",
+        {
+            "name": "safe",
+            "inputSchema": {"type": "object"},
+            "annotations": {
+                "title": "Safe tool",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        },
+        profile,
+    )
+    assert ("annotations" in tool) is (version != "2024-11-05")
+
+
+@pytest.mark.parametrize(
+    "uri_template",
+    [
+        "file:///users/{",
+        "file:///users/}",
+        "file:///users/{bad var}",
+        "file:///users/{}",
+        "file:///users/{id:}",
+        "file:///users/{{id}}",
+    ],
+)
+def test_resource_template_requires_valid_rfc6570_syntax(uri_template: str) -> None:
+    """Malformed URI-template expressions must fail at the projection boundary."""
+
+    with pytest.raises(GatewayInvalidApplicationResult):
+        _projection_api().project_descriptor(
+            "resource_template",
+            {"name": "safe", "uriTemplate": uri_template},
+            PROTOCOL_PROFILES["2026-07-28"],
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"type": "image", "data": "***", "mimeType": "image/png"},
+        {"type": "audio", "data": "not base64", "mimeType": "audio/wav"},
+        {
+            "type": "resource",
+            "resource": {"uri": "file:///bad", "blob": "%%%"},
+        },
+    ],
+)
+def test_binary_content_requires_canonical_base64(payload: dict[str, Any]) -> None:
+    """Image, audio, and resource blobs must contain valid base64 data."""
+
+    with pytest.raises(GatewayInvalidApplicationResult):
+        _projection_api().project_tool_result(
+            None,
+            PROTOCOL_PROFILES["2026-07-28"],
+            content=[payload],
+        )
+
+
+def test_text_content_over_4096_is_preserved_and_matches_fallback() -> None:
+    """Per-block text has no undocumented 4 KiB limit below aggregate result bounds."""
+
+    api = _projection_api()
+    profile = PROTOCOL_PROFILES["2026-07-28"]
+    value = "x" * 5_000
+    fallback = api.project_tool_result(value, profile)
+    explicit = api.project_tool_result(
+        value,
+        profile,
+        content=[{"type": "text", "text": json.dumps(value)}],
+    )
+    assert explicit["content"] == fallback["content"]
+    prompt = api.project_prompt_result(
+        {"messages": [{"role": "user", "content": {"type": "text", "text": value}}]},
+        profile,
+    )
+    assert prompt["messages"][0]["content"]["text"] == value
+
+
+@pytest.mark.parametrize("identity", ["has spaces", "has/slash", "has!punctuation"])
+@pytest.mark.parametrize("method", ["tools/list", "prompts/list"])
+def test_catalog_reuses_canonical_tool_and_prompt_name_validation(
+    method: str,
+    identity: str,
+) -> None:
+    """Catalog identities must use the same grammar as projected descriptors."""
+
+    with pytest.raises(ValueError, match="catalog identity"):
+        _pagination_api().GatewayCatalogPaginator().page(
+            method=method,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+            items=[{"name": identity}],
+            cursor=None,
+        )
+
+
+def test_catalog_stores_the_same_normalized_uri_used_for_sorting() -> None:
+    """Published identity and fingerprint identity must be canonical and identical."""
+
+    page = (
+        _pagination_api()
+        .GatewayCatalogPaginator()
+        .page(
+            method="resources/list",
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+            items=[{"uri": "HTTPS://EXAMPLE.COM:443/docs"}],
+            cursor=None,
+        )
+    )
+    assert page.items == [{"uri": "https://example.com/docs"}]
+
+
+@pytest.mark.parametrize("version", list(PROTOCOL_PROFILES))
+def test_all_projected_descriptors_and_results_match_pinned_official_schemas(
+    version: str,
+) -> None:
+    """Every public projection shape must validate against its revision snapshot."""
+
+    api = _projection_api()
+    profile = PROTOCOL_PROFILES[version]
+    schema = json.loads((_FIXTURE_ROOT / version / "schema.json").read_text("utf-8"))
+    validator = validator_for(schema)(schema)
+    definitions_key = "$defs" if "$defs" in schema else "definitions"
+
+    def validate(definition: str, value: object) -> None:
+        validator.evolve(schema={"$ref": f"#/{definitions_key}/{definition}"}).validate(value)
+
+    descriptors = {
+        "Tool": api.project_descriptor(
+            "tool",
+            {"name": "safe", "inputSchema": {"type": "object"}},
+            profile,
+        ),
+        "Resource": api.project_descriptor(
+            "resource",
+            {"name": "Safe resource", "uri": "file:///safe"},
+            profile,
+        ),
+        "ResourceTemplate": api.project_descriptor(
+            "resource_template",
+            {"name": "Safe template", "uriTemplate": "file:///safe/{id}"},
+            profile,
+        ),
+        "Prompt": api.project_descriptor("prompt", {"name": "safe"}, profile),
+    }
+    results = {
+        "CallToolResult": api.project_tool_result({"ok": True}, profile),
+        "ReadResourceResult": api.project_resource_result(
+            {"contents": [{"uri": "file:///safe", "text": "safe"}]},
+            profile,
+        ),
+        "GetPromptResult": api.project_prompt_result(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": {"type": "text", "text": "safe"},
+                    }
+                ]
+            },
+            profile,
+        ),
+    }
+    for definition, value in {**descriptors, **results}.items():
+        validate(definition, value)

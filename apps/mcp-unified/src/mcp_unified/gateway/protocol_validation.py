@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import multiprocessing
+import time
 from collections.abc import Callable
 from multiprocessing.connection import Connection
 from typing import Any, Literal, TypeAlias
+from urllib.parse import unquote, urldefrag, urljoin
 
 from jsonschema import Draft7Validator, Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
+from referencing import Registry
+from referencing.exceptions import NoSuchResource
 
 from .protocol_errors import GatewayApplicationError
 from .protocol_limits import GatewayLimits
@@ -21,10 +26,62 @@ SchemaWorkerVerdict: TypeAlias = tuple[Literal["ok", "invalid", "internal"], str
 SchemaRootMode: TypeAlias = Literal["any", "object"]
 SchemaInstanceRole: TypeAlias = Literal["input", "output"]
 _SCHEMA_WORKER_MAX_VERDICT_BYTES = 4_096
-_SCHEMA_REF_KEYS = frozenset({"$ref", "$dynamicRef", "$recursiveRef"})
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DRAFT_7 = "http://json-schema.org/draft-07/schema#"
+_VALIDATORS = {
+    _DRAFT_2020_12: Draft202012Validator,
+    _DRAFT_7: Draft7Validator,
+}
 _WORKER_INVALID_CODES = frozenset({"invalid_schema", "schema_validation_failed"})
+_MAPPING_SCHEMA_KEYWORDS = {
+    _DRAFT_2020_12: frozenset({"$defs", "dependentSchemas", "patternProperties", "properties"}),
+    _DRAFT_7: frozenset({"definitions", "patternProperties", "properties"}),
+}
+_ARRAY_SCHEMA_KEYWORDS = {
+    _DRAFT_2020_12: frozenset({"allOf", "anyOf", "oneOf", "prefixItems"}),
+    _DRAFT_7: frozenset({"allOf", "anyOf", "oneOf"}),
+}
+_SINGLE_SCHEMA_KEYWORDS = {
+    _DRAFT_2020_12: frozenset(
+        {
+            "additionalProperties",
+            "contains",
+            "contentSchema",
+            "else",
+            "if",
+            "items",
+            "not",
+            "propertyNames",
+            "then",
+            "unevaluatedItems",
+            "unevaluatedProperties",
+        }
+    ),
+    _DRAFT_7: frozenset(
+        {
+            "additionalItems",
+            "additionalProperties",
+            "contains",
+            "else",
+            "if",
+            "not",
+            "propertyNames",
+            "then",
+        }
+    ),
+}
+_DIALECT_REF_KEYS = {
+    _DRAFT_2020_12: frozenset({"$ref", "$dynamicRef"}),
+    _DRAFT_7: frozenset({"$ref"}),
+}
+
+
+class _JSONStructureError(ValueError):
+    """Classify an unsafe Python structure before recursive JSON encoding."""
+
+    def __init__(self, kind: Literal["cycle", "depth", "key", "type", "number"]):
+        super().__init__(kind)
+        self.kind = kind
 
 
 def _validation_error(reason_code: str, message: str) -> GatewayApplicationError:
@@ -45,6 +102,21 @@ def _send_worker_verdict(connection: Connection, verdict: SchemaWorkerVerdict) -
         pass
 
 
+def _deny_schema_retrieval(uri: str) -> Any:
+    """Fail every registry retrieval without consulting network-capable defaults."""
+
+    raise NoSuchResource(ref=uri)
+
+
+def _validator_for_dialect(dialect: str) -> type[Draft7Validator] | type[Draft202012Validator]:
+    """Select only the two explicitly accepted schema dialects."""
+
+    try:
+        return _VALIDATORS[dialect]
+    except KeyError as exc:
+        raise ValueError("unsupported schema dialect") from exc
+
+
 def _schema_validation_worker(
     connection: Connection,
     schema_json: bytes,
@@ -57,9 +129,10 @@ def _schema_validation_worker(
     try:
         schema = json.loads(schema_json)
         instance = json.loads(instance_json)
-        validator_class = Draft202012Validator if dialect == _DRAFT_2020_12 else Draft7Validator
+        validator_class = _validator_for_dialect(dialect)
+        registry: Registry[Any] = Registry(retrieve=_deny_schema_retrieval)
         validator_class.check_schema(schema)
-        validator_class(schema).validate(instance)
+        validator_class(schema, registry=registry).validate(instance)
         verdict = ("ok", "")
     except SchemaError:
         verdict = ("invalid", "invalid_schema")
@@ -71,22 +144,44 @@ def _schema_validation_worker(
     connection.close()
 
 
+def _validate_json_structure(value: object, *, max_depth: int) -> None:
+    """Iteratively reject cycles, excessive depth, and non-JSON Python values."""
+
+    active: set[int] = set()
+    stack: list[tuple[object, int, bool]] = [(value, 1, False)]
+    while stack:
+        current, depth, leaving = stack.pop()
+        if leaving:
+            active.remove(id(current))
+            continue
+        if isinstance(current, (dict, list)):
+            if depth > max_depth:
+                raise _JSONStructureError("depth")
+            identity = id(current)
+            if identity in active:
+                raise _JSONStructureError("cycle")
+            active.add(identity)
+            stack.append((current, depth, True))
+            if isinstance(current, dict):
+                if any(not isinstance(key, str) for key in current):
+                    raise _JSONStructureError("key")
+                children = current.values()
+            else:
+                children = current
+            stack.extend((child, depth + 1, False) for child in children)
+            continue
+        if current is None or isinstance(current, (bool, int, str)):
+            continue
+        if isinstance(current, float):
+            if not math.isfinite(current):
+                raise _JSONStructureError("number")
+            continue
+        raise _JSONStructureError("type")
+
+
 def _serialize_json(value: object, *, reason_code: str, message: str) -> bytes:
     """Serialize finite JSON with deterministic, compact UTF-8 encoding."""
 
-    stack = [value]
-    while stack:
-        current = stack.pop()
-        if isinstance(current, dict):
-            if any(not isinstance(key, str) for key in current):
-                raise _validation_error(reason_code, message)
-            stack.extend(current.values())
-        elif isinstance(current, list):
-            stack.extend(current)
-        elif current is not None and not isinstance(
-            current, (bool, int, float, str)
-        ):
-            raise _validation_error(reason_code, message)
     try:
         encoded = json.dumps(
             value,
@@ -95,41 +190,22 @@ def _serialize_json(value: object, *, reason_code: str, message: str) -> bytes:
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+    except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
         raise _validation_error(reason_code, message) from exc
     return encoded
 
 
-def _json_container_count_and_depth(value: object) -> tuple[int, int]:
-    """Return mapping count and maximum container depth using an iterative walk."""
+def _resolve_fragment(resource: object, fragment: str, anchors: set[str]) -> bool:
+    """Return whether a decoded pointer or anchor resolves in one resource."""
 
-    mapping_count = 0
-    max_depth = 0
-    stack: list[tuple[object, int]] = [(value, 1)]
-    while stack:
-        current, depth = stack.pop()
-        if isinstance(current, dict):
-            mapping_count += 1
-            max_depth = max(max_depth, depth)
-            stack.extend((child, depth + 1) for child in current.values())
-        elif isinstance(current, list):
-            max_depth = max(max_depth, depth)
-            stack.extend((child, depth + 1) for child in current)
-    return mapping_count, max_depth
-
-
-def _resolve_json_pointer(schema: object, reference: str, anchors: set[str]) -> bool:
-    """Return whether an internal JSON Pointer or anchor resolves locally."""
-
-    if reference in {"", "#"}:
+    if not fragment:
         return True
-    fragment = reference[1:]
     if not fragment.startswith("/"):
-        return fragment in anchors
+        return unquote(fragment) in anchors
 
-    current = schema
+    current = resource
     for encoded_token in fragment[1:].split("/"):
-        token = encoded_token.replace("~1", "/").replace("~0", "~")
+        token = unquote(encoded_token).replace("~1", "/").replace("~0", "~")
         if isinstance(current, dict) and token in current:
             current = current[token]
             continue
@@ -143,6 +219,84 @@ def _resolve_json_pointer(schema: object, reference: str, anchors: set[str]) -> 
     return True
 
 
+def _schema_children(node: dict[str, object], dialect: str) -> list[object]:
+    """Return only values occupying schema-valued keywords for one dialect."""
+
+    children: list[object] = []
+    for keyword in _MAPPING_SCHEMA_KEYWORDS[dialect]:
+        value = node.get(keyword)
+        if isinstance(value, dict):
+            children.extend(value.values())
+    for keyword in _ARRAY_SCHEMA_KEYWORDS[dialect]:
+        value = node.get(keyword)
+        if isinstance(value, list):
+            children.extend(value)
+    for keyword in _SINGLE_SCHEMA_KEYWORDS[dialect]:
+        value = node.get(keyword)
+        if isinstance(value, (dict, bool)):
+            children.append(value)
+    items = node.get("items")
+    if dialect == _DRAFT_7:
+        if isinstance(items, (dict, bool)):
+            children.append(items)
+        elif isinstance(items, list):
+            children.extend(items)
+        dependencies = node.get("dependencies")
+        if isinstance(dependencies, dict):
+            children.extend(value for value in dependencies.values() if isinstance(value, (dict, bool)))
+    return children
+
+
+def _inspect_schema_keywords(
+    schema: object,
+    *,
+    dialect: str,
+) -> tuple[int, list[tuple[str, str]], int, dict[str, object], dict[str, set[str]]]:
+    """Inspect only true schema locations and record submitted resources."""
+
+    subschema_count = 0
+    refs: list[tuple[str, str]] = []
+    pattern_chars = 0
+    resources: dict[str, object] = {"": schema}
+    anchors: dict[str, set[str]] = {"": set()}
+    stack: list[tuple[object, str, str]] = [(schema, "", "")]
+    while stack:
+        current, inherited_base, inherited_resource_uri = stack.pop()
+        if not isinstance(current, (dict, bool)):
+            continue
+        subschema_count += 1
+        if isinstance(current, bool):
+            continue
+
+        base = inherited_base
+        resource_uri = inherited_resource_uri
+        identifier = current.get("$id")
+        if isinstance(identifier, str):
+            base = urljoin(inherited_base, identifier)
+            resource_uri = urldefrag(base).url
+            resources[resource_uri] = current
+            anchors.setdefault(resource_uri, set())
+        for anchor_keyword in ("$anchor", "$dynamicAnchor"):
+            anchor = current.get(anchor_keyword)
+            if isinstance(anchor, str):
+                anchors.setdefault(resource_uri, set()).add(anchor)
+        for ref_keyword in _DIALECT_REF_KEYS[dialect]:
+            reference = current.get(ref_keyword)
+            if reference is not None:
+                if not isinstance(reference, str):
+                    refs.append(("\0", base))
+                else:
+                    refs.append((reference, base))
+        pattern = current.get("pattern")
+        if isinstance(pattern, str):
+            pattern_chars += len(pattern)
+        pattern_properties = current.get("patternProperties")
+        if isinstance(pattern_properties, dict):
+            pattern_chars += sum(len(key) for key in pattern_properties)
+        stack.extend((child, base, resource_uri) for child in _schema_children(current, dialect))
+    return subschema_count, refs, pattern_chars, resources, anchors
+
+
 def _preflight_schema(
     schema: object,
     *,
@@ -152,6 +306,17 @@ def _preflight_schema(
 ) -> bytes:
     """Apply bounded structural and reference checks before spawning a worker."""
 
+    if profile.schema_dialect not in _VALIDATORS:
+        raise _validation_error(
+            "schema_dialect_unsupported",
+            "Schema dialect is not supported for this protocol revision",
+        )
+    try:
+        _validate_json_structure(schema, max_depth=limits.max_schema_depth)
+    except _JSONStructureError as exc:
+        reason_code = "schema_too_deep" if exc.kind == "depth" else "schema_not_json"
+        message = "Schema exceeds the configured depth" if exc.kind == "depth" else "Schema must be finite JSON"
+        raise _validation_error(reason_code, message) from exc
     schema_json = _serialize_json(
         schema,
         reason_code="schema_not_json",
@@ -160,17 +325,7 @@ def _preflight_schema(
     if len(schema_json) > limits.max_schema_bytes:
         raise _validation_error("schema_too_large", "Schema exceeds the configured limit")
 
-    mapping_count, max_depth = _json_container_count_and_depth(schema)
-    if max_depth > limits.max_schema_depth:
-        raise _validation_error("schema_too_deep", "Schema exceeds the configured depth")
-    if mapping_count > limits.max_schema_subschemas:
-        raise _validation_error(
-            "schema_too_complex",
-            "Schema exceeds the configured subschema limit",
-        )
-    if root_mode == "object" and (
-        not isinstance(schema, dict) or schema.get("type") != "object"
-    ):
+    if root_mode == "object" and (not isinstance(schema, dict) or schema.get("type") != "object"):
         raise _validation_error(
             "schema_root_not_object",
             "Schema must declare an object root",
@@ -184,39 +339,16 @@ def _preflight_schema(
                 "Schema dialect is not supported for this protocol revision",
             )
 
-    refs: list[str] = []
-    anchors: set[str] = set()
-    pattern_chars = 0
-    stack = [schema]
-    while stack:
-        current = stack.pop()
-        if isinstance(current, dict):
-            anchor = current.get("$anchor")
-            if isinstance(anchor, str):
-                anchors.add(anchor)
-            dynamic_anchor = current.get("$dynamicAnchor")
-            if isinstance(dynamic_anchor, str):
-                anchors.add(dynamic_anchor)
-            for key, child in current.items():
-                if key in _SCHEMA_REF_KEYS:
-                    if not isinstance(child, str) or not child.startswith("#"):
-                        raise _validation_error(
-                            "schema_external_ref",
-                            "Schema references must resolve within the submitted schema",
-                        )
-                    refs.append(child)
-                if key == "pattern" and isinstance(child, str):
-                    pattern_chars += len(child)
-                if key == "patternProperties" and isinstance(child, dict):
-                    pattern_chars += sum(
-                        len(pattern)
-                        for pattern in child
-                        if isinstance(pattern, str)
-                    )
-                stack.append(child)
-        elif isinstance(current, list):
-            stack.extend(current)
+    subschema_count, refs, pattern_chars, resources, anchors = _inspect_schema_keywords(
+        schema,
+        dialect=profile.schema_dialect,
+    )
 
+    if subschema_count > limits.max_schema_subschemas:
+        raise _validation_error(
+            "schema_too_complex",
+            "Schema exceeds the configured subschema limit",
+        )
     if len(refs) > limits.max_schema_refs:
         raise _validation_error("schema_ref_limit", "Schema exceeds the reference limit")
     if pattern_chars > limits.max_schema_pattern_chars:
@@ -224,11 +356,25 @@ def _preflight_schema(
             "schema_pattern_limit",
             "Schema exceeds the pattern-character limit",
         )
-    if any(not _resolve_json_pointer(schema, reference, anchors) for reference in refs):
-        raise _validation_error(
-            "schema_unresolved_ref",
-            "Schema contains an unresolved local reference",
-        )
+    for reference, base in refs:
+        if reference == "\0":
+            raise _validation_error(
+                "schema_unresolved_ref",
+                "Schema contains an unresolved local reference",
+            )
+        absolute = urljoin(base, reference)
+        resource_uri, fragment = urldefrag(absolute)
+        resource = resources.get(resource_uri)
+        if resource is None:
+            raise _validation_error(
+                "schema_external_ref",
+                "Schema references must resolve within the submitted schema",
+            )
+        if not _resolve_fragment(resource, fragment, anchors.get(resource_uri, set())):
+            raise _validation_error(
+                "schema_unresolved_ref",
+                "Schema contains an unresolved local reference",
+            )
     return schema_json
 
 
@@ -239,26 +385,26 @@ def _preflight_instance(
 ) -> bytes:
     """Serialize an instance and reject excessive recursive depth before spawn."""
 
+    try:
+        _validate_json_structure(instance, max_depth=limits.max_json_depth)
+    except _JSONStructureError as exc:
+        reason_code = "instance_too_deep" if exc.kind == "depth" else "instance_not_json"
+        message = (
+            "Validation instance exceeds the configured depth"
+            if exc.kind == "depth"
+            else "Validation instance must be finite JSON"
+        )
+        raise _validation_error(reason_code, message) from exc
     instance_json = _serialize_json(
         instance,
         reason_code="instance_not_json",
         message="Validation instance must be finite JSON",
     )
-    limit_bytes = (
-        limits.max_input_line_bytes
-        if instance_role == "input"
-        else limits.max_result_bytes
-    )
+    limit_bytes = limits.max_input_line_bytes if instance_role == "input" else limits.max_result_bytes
     if len(instance_json) > limit_bytes:
         raise _validation_error(
             "instance_too_large",
             "Validation instance exceeds the configured limit",
-        )
-    _, max_depth = _json_container_count_and_depth(instance)
-    if max_depth > limits.max_json_depth:
-        raise _validation_error(
-            "instance_too_deep",
-            "Validation instance exceeds the configured depth",
         )
     return instance_json
 
@@ -272,10 +418,12 @@ class GatewaySchemaValidationManager:
         *,
         process_context: Any | None = None,
         _worker_target: Callable[..., None] | None = None,
+        _clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._limits = limits
         self._context = process_context or multiprocessing.get_context("spawn")
         self._worker_target = _worker_target or _schema_validation_worker
+        self._clock = _clock
         self._semaphore = asyncio.Semaphore(limits.max_schema_validation_processes)
         self._live_processes: set[multiprocessing.Process] = set()
         self._receivers: dict[multiprocessing.Process, Connection] = {}
@@ -348,7 +496,12 @@ class GatewaySchemaValidationManager:
             if sender is not None:
                 sender.close()
             if process is not None and process in self._live_processes:
-                self._cleanup_process(process)
+                cleanup_errors = self._cleanup_process(
+                    process,
+                    deadline=self._clock() + self._limits.graceful_shutdown_timeout_seconds,
+                )
+                if cleanup_errors:
+                    raise RuntimeError("; ".join(cleanup_errors))
             elif receiver is not None:
                 receiver.close()
             if permit_owned:
@@ -393,25 +546,66 @@ class GatewaySchemaValidationManager:
                 )
             await asyncio.sleep(min(0.005, remaining))
 
-    def _cleanup_process(self, process: multiprocessing.Process) -> None:
-        """Terminate if needed, kill if needed, reap, then release one permit."""
+    def _cleanup_process(
+        self,
+        process: multiprocessing.Process,
+        *,
+        deadline: float,
+        terminate_first: bool = True,
+    ) -> list[str]:
+        """Attempt full cleanup and release only after verified process reaping."""
 
         if process not in self._live_processes:
-            return
-        receiver = self._receivers.pop(process)
+            return []
+        errors: list[str] = []
+        receiver = self._receivers.get(process)
         try:
-            if process.is_alive():
-                process.terminate()
-            process.join(timeout=min(0.5, self._limits.graceful_shutdown_timeout_seconds))
-            if process.is_alive():
-                process.kill()
-                process.join(timeout=min(0.5, self._limits.graceful_shutdown_timeout_seconds))
-            if process.is_alive() or process.exitcode is None:
-                raise RuntimeError("schema validation child could not be reaped")
+            try:
+                alive = process.is_alive()
+            except Exception as exc:  # noqa: BLE001 - cleanup must continue for siblings
+                errors.append(f"schema validation child status failed: {type(exc).__name__}")
+                alive = True
+            if alive and terminate_first:
+                try:
+                    process.terminate()
+                except Exception as exc:  # noqa: BLE001 - kill/join must still be attempted
+                    errors.append(f"schema validation child terminate failed: {type(exc).__name__}")
+            try:
+                process.join(timeout=max(0.0, deadline - self._clock()))
+            except Exception as exc:  # noqa: BLE001 - kill/join must still be attempted
+                errors.append(f"schema validation child join failed: {type(exc).__name__}")
+            try:
+                alive = process.is_alive()
+            except Exception as exc:  # noqa: BLE001 - cleanup must remain fail closed
+                errors.append(f"schema validation child status failed: {type(exc).__name__}")
+                alive = True
+            if alive:
+                try:
+                    process.kill()
+                except Exception as exc:  # noqa: BLE001 - final join must still be attempted
+                    errors.append(f"schema validation child kill failed: {type(exc).__name__}")
+            try:
+                process.join(timeout=max(0.0, deadline - self._clock()))
+            except Exception as exc:  # noqa: BLE001 - reap status is checked below
+                errors.append(f"schema validation child join failed: {type(exc).__name__}")
+            try:
+                reaped = not process.is_alive() and process.exitcode is not None
+            except Exception as exc:  # noqa: BLE001 - cleanup must remain fail closed
+                errors.append(f"schema validation child status failed: {type(exc).__name__}")
+                reaped = False
+            if not reaped:
+                errors.append("schema validation child could not be reaped")
         finally:
-            receiver.close()
-        self._live_processes.remove(process)
-        self._semaphore.release()
+            if receiver is not None:
+                try:
+                    receiver.close()
+                except Exception as exc:  # noqa: BLE001 - reap accounting still must finish
+                    errors.append(f"schema validation receiver close failed: {type(exc).__name__}")
+        if reaped:
+            self._receivers.pop(process, None)
+            self._live_processes.remove(process)
+            self._semaphore.release()
+        return errors
 
     async def close(self) -> None:
         """Reject new work and reap every currently running validation child."""
@@ -419,8 +613,30 @@ class GatewaySchemaValidationManager:
         if self._closed and not self._live_processes:
             return
         self._closed = True
-        for process in tuple(self._live_processes):
-            self._cleanup_process(process)
+        errors: list[str] = []
+        deadline = self._clock() + self._limits.graceful_shutdown_timeout_seconds
+        processes = tuple(self._live_processes)
+        for process in processes:
+            try:
+                alive = process.is_alive()
+            except Exception as exc:  # noqa: BLE001 - every child must be signaled
+                errors.append(f"schema validation child status failed: {type(exc).__name__}")
+                alive = True
+            if alive:
+                try:
+                    process.terminate()
+                except Exception as exc:  # noqa: BLE001 - siblings must still be signaled
+                    errors.append(f"schema validation child terminate failed: {type(exc).__name__}")
+        for process in processes:
+            errors.extend(
+                self._cleanup_process(
+                    process,
+                    deadline=deadline,
+                    terminate_first=False,
+                )
+            )
+        if errors:
+            raise RuntimeError("; ".join(errors))
 
 
 __all__ = [

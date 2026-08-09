@@ -13,7 +13,8 @@ from typing import Any
 from .protocol_errors import GatewayInvalidApplicationResult
 from .protocol_limits import GatewayLimits
 from .protocol_profiles import GatewayProtocolProfile
-from .protocol_projection import _normalize_uri
+from .protocol_projection import _name, _normalize_uri
+from .protocol_validation import _JSONStructureError, _validate_json_structure
 from .runtime import GatewayJSONValue
 
 _CATALOG_IDENTITY_FIELDS = {
@@ -33,20 +34,11 @@ class GatewayCatalogPage:
     next_cursor: str | None
 
 
-def _json_bytes(value: object) -> bytes:
-    stack = [value]
-    while stack:
-        current = stack.pop()
-        if isinstance(current, dict):
-            if any(not isinstance(key, str) for key in current):
-                raise ValueError("catalog items must be finite JSON objects")
-            stack.extend(current.values())
-        elif isinstance(current, list):
-            stack.extend(current)
-        elif current is not None and not isinstance(
-            current, (bool, int, float, str)
-        ):
-            raise ValueError("catalog items must be finite JSON objects")
+def _json_bytes(value: object, *, max_depth: int = GatewayLimits().max_json_depth) -> bytes:
+    try:
+        _validate_json_structure(value, max_depth=max_depth)
+    except _JSONStructureError as exc:
+        raise ValueError("catalog items must be finite JSON objects") from exc
     try:
         return json.dumps(
             value,
@@ -55,12 +47,12 @@ def _json_bytes(value: object) -> bytes:
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+    except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
         raise ValueError("catalog items must be finite JSON objects") from exc
 
 
-def _clone_item(value: object) -> dict[str, GatewayJSONValue]:
-    decoded = json.loads(_json_bytes(value))
+def _clone_item(value: object, *, max_depth: int) -> dict[str, GatewayJSONValue]:
+    decoded = json.loads(_json_bytes(value, max_depth=max_depth))
     if not isinstance(decoded, dict):
         raise ValueError("catalog items must be JSON objects")
     return decoded
@@ -79,9 +71,10 @@ def _identity(method: str, item: dict[str, GatewayJSONValue]) -> str:
             )
         except GatewayInvalidApplicationResult as exc:
             raise ValueError("invalid catalog identity") from exc
-    if not isinstance(value, str) or not value or len(value) > 128:
-        raise ValueError("invalid catalog identity")
-    return value
+    try:
+        return _name(value)
+    except GatewayInvalidApplicationResult as exc:
+        raise ValueError("invalid catalog identity") from exc
 
 
 def _b64encode(value: bytes) -> str:
@@ -136,15 +129,17 @@ class GatewayCatalogPaginator:
         normalized: list[tuple[str, dict[str, GatewayJSONValue]]] = []
         identities: set[str] = set()
         for raw_item in items:
-            item = _clone_item(raw_item)
+            item = _clone_item(raw_item, max_depth=self._limits.max_json_depth)
             identity = _identity(method, item)
             if identity in identities:
                 raise ValueError("duplicate catalog identity")
             identities.add(identity)
+            identity_field = _CATALOG_IDENTITY_FIELDS[method]
+            item[identity_field] = identity
             normalized.append((identity, item))
         normalized.sort(key=lambda pair: pair[0])
         sorted_items = [item for _, item in normalized]
-        fingerprint = hashlib.sha256(_json_bytes(sorted_items)).hexdigest()
+        fingerprint = hashlib.sha256(_json_bytes(sorted_items, max_depth=self._limits.max_json_depth)).hexdigest()
 
         page_size = self._limits.default_catalog_page_size
         offset = 0
