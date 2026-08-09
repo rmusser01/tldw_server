@@ -992,6 +992,15 @@ def test_worker_registry_never_uses_default_url_retrieval(monkeypatch: pytest.Mo
     assert retrieved == []
 
 
+def test_default_worker_target_uses_lightweight_top_level_spawn_module() -> None:
+    """Windows spawn must not import the broad gateway package before worker entry."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+
+    assert manager._worker_target.__module__ == "mcp_unified._schema_worker"  # noqa: SLF001
+
+
 @pytest.mark.asyncio
 async def test_schema_keywords_inside_instance_payload_keywords_are_not_traversed() -> None:
     """Annotation payloads named like schema keywords must not consume schema limits."""

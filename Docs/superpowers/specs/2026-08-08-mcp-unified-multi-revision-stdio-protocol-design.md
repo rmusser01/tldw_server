@@ -369,7 +369,7 @@ defaults:
 | `max_schema_refs` | `int` | `256` | `1..4_096` |
 | `max_schema_pattern_chars` | `int` | `4_096` | `1..65_536` |
 | `max_schema_validation_processes` | `int` | `4` | `1..32` |
-| `schema_validation_timeout_seconds` | `float` | `10.0` | finite and `(0, 10]` |
+| `schema_validation_timeout_seconds` | `float` | `1.0` | finite and `(0, 10]` |
 | `graceful_shutdown_timeout_seconds` | `float` | `5.0` | finite and `(0, 60]` |
 
 Integer fields reject booleans and values outside their accepted ranges.

@@ -13,13 +13,10 @@ from multiprocessing.connection import Connection
 from typing import Any, Literal, TypeAlias
 from urllib.parse import unquote, urldefrag, urljoin
 
-from jsonschema import Draft7Validator, Draft202012Validator
-from jsonschema.exceptions import SchemaError, ValidationError
-from referencing import Registry
-from referencing.exceptions import NoSuchResource
 from referencing.jsonschema import DRAFT7 as REFERENCING_DRAFT7
 from referencing.jsonschema import DRAFT202012 as REFERENCING_DRAFT202012
 
+from .._schema_worker import schema_validation_worker as _schema_validation_worker
 from .protocol_errors import GatewayApplicationError
 from .protocol_limits import GatewayLimits
 from .protocol_profiles import GatewayProtocolProfile
@@ -31,10 +28,7 @@ SchemaInstanceRole: TypeAlias = Literal["input", "output"]
 _SCHEMA_WORKER_MAX_VERDICT_BYTES = 4_096
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DRAFT_7 = "http://json-schema.org/draft-07/schema#"
-_VALIDATORS = {
-    _DRAFT_2020_12: Draft202012Validator,
-    _DRAFT_7: Draft7Validator,
-}
+_VALIDATORS = frozenset({_DRAFT_2020_12, _DRAFT_7})
 _WORKER_INVALID_CODES = frozenset({"invalid_schema", "schema_validation_failed"})
 _SPECIFICATIONS = {
     _DRAFT_2020_12: REFERENCING_DRAFT202012,
@@ -104,61 +98,6 @@ def _validation_error(reason_code: str, message: str) -> GatewayApplicationError
     """Build a bounded safe validation error without input or schema details."""
 
     return GatewayApplicationError(message, reason_code=reason_code)
-
-
-def _send_worker_verdict(connection: Connection, verdict: SchemaWorkerVerdict) -> None:
-    """Send one small JSON verdict and never expose validator diagnostics."""
-
-    payload = json.dumps(verdict, separators=(",", ":")).encode("utf-8")
-    if len(payload) > _SCHEMA_WORKER_MAX_VERDICT_BYTES:
-        payload = b'["internal","schema_validation_worker_failed"]'
-    try:
-        connection.send_bytes(payload)
-    except (BrokenPipeError, EOFError, OSError):
-        pass
-
-
-def _deny_schema_retrieval(uri: str) -> Any:
-    """Fail every registry retrieval without consulting network-capable defaults."""
-
-    raise NoSuchResource(ref=uri)
-
-
-def _validator_for_dialect(dialect: str) -> type[Draft7Validator] | type[Draft202012Validator]:
-    """Select only the two explicitly accepted schema dialects."""
-
-    try:
-        return _VALIDATORS[dialect]
-    except KeyError as exc:
-        raise ValueError("unsupported schema dialect") from exc
-
-
-def _schema_validation_worker(
-    connection: Connection,
-    schema_json: bytes,
-    instance_json: bytes | None,
-    dialect: str,
-) -> None:
-    """Compile a schema and optionally validate one value in a disposable child."""
-
-    verdict: SchemaWorkerVerdict
-    try:
-        schema = json.loads(schema_json)
-        validator_class = _validator_for_dialect(dialect)
-        registry: Registry[Any] = Registry(retrieve=_deny_schema_retrieval)
-        validator = validator_class(schema, registry=registry)
-        validator_class.check_schema(schema)
-        if instance_json is not None:
-            validator.validate(json.loads(instance_json))
-        verdict = ("ok", "")
-    except SchemaError:
-        verdict = ("invalid", "invalid_schema")
-    except ValidationError:
-        verdict = ("invalid", "schema_validation_failed")
-    except Exception:  # noqa: BLE001 - child must reduce every validator failure to a safe verdict
-        verdict = ("internal", "schema_validation_worker_failed")
-    _send_worker_verdict(connection, verdict)
-    connection.close()
 
 
 def _validate_json_structure(value: object, *, max_depth: int) -> None:

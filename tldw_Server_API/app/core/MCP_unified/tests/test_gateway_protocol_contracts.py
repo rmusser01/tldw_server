@@ -176,7 +176,7 @@ def test_gateway_limits_expose_every_approved_default() -> None:
         max_schema_refs=256,
         max_schema_pattern_chars=4_096,
         max_schema_validation_processes=4,
-        schema_validation_timeout_seconds=10.0,
+        schema_validation_timeout_seconds=1.0,
         graceful_shutdown_timeout_seconds=5.0,
     )
 

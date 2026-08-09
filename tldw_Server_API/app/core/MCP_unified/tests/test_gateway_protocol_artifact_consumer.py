@@ -450,7 +450,10 @@ def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
         calls.append({"command": command, "cwd": cwd, "timeout": timeout, "env": env})
         stdout = (
             "MCP_UNIFIED_OFFICIAL_SDK_STDIO_OK\n"
-            if any(str(argument).endswith(OFFICIAL_SDK_SMOKE.as_posix()) for argument in command)
+            if any(
+                str(argument).replace("\\", "/").endswith(OFFICIAL_SDK_SMOKE.as_posix())
+                for argument in command
+            )
             else ""
         )
         return mcp_unified_rc.RcCommandResult(
