@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Any, Callable
 
 from ..selectors import clear_selector_caches, get_selector_cache_stats
+from .metrics import emit_callback_counter
 from .throttles import clear_throttle_state, get_throttle_stats
 
 _CLUSTER_EMBED_CACHE_MAX = 512
@@ -73,7 +74,8 @@ def _cluster_cache_get(
         value = _CLUSTER_EMBED_CACHE.get(key)
         if value is None:
             if increment_counter is not None:
-                increment_counter(
+                emit_callback_counter(
+                    increment_counter,
                     "extraction_cluster_cache_total",
                     labels={"cache": "embedding", "result": "miss"},
                 )
@@ -81,7 +83,8 @@ def _cluster_cache_get(
         _CLUSTER_EMBED_CACHE.move_to_end(key)
         result = list(value)
     if increment_counter is not None:
-        increment_counter(
+        emit_callback_counter(
+            increment_counter,
             "extraction_cluster_cache_total",
             labels={"cache": "embedding", "result": "hit"},
         )

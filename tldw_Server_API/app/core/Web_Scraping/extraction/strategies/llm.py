@@ -13,6 +13,7 @@ from loguru import logger
 from ...observability import bounded_code, bounded_stage, sanitized_host
 from .. import throttles
 from ..dependencies import ExtractionDependencies, build_default_dependencies
+from ..metrics import emit_counter
 
 _NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -180,7 +181,8 @@ def call_llm_provider(
                 return None, True
             dependencies.cancellation_checkpoint()
             attempt += 1
-            dependencies.increment_counter(
+            emit_counter(
+                dependencies,
                 "extraction_retry_total",
                 labels={"strategy": "llm", "attempt": _metric_attempt(attempt)},
             )
@@ -264,10 +266,11 @@ def record_llm_usage_metrics(
     for token_type, value in (("prompt", usage.get("prompt_tokens")), ("completion", usage.get("completion_tokens"))):
         if value:
             labels = {"provider": _metric_provider(provider), "model": "configured", "type": token_type}
-            dependencies.increment_counter("llm_tokens_used_total", float(value), labels=labels)
-            dependencies.increment_counter(
+            emit_counter(dependencies, "llm_tokens_used_total", value=float(value), labels=labels)
+            emit_counter(
+                dependencies,
                 "llm_tokens_used_total_by_operation",
-                float(value),
+                value=float(value),
                 labels={**labels, "operation": "extraction"},
             )
 

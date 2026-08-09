@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 
 from ..caches import _cluster_cache_get, _cluster_cache_put
 from ..dependencies import ExtractionDependencies, build_default_dependencies
+from ..metrics import emit_counter
 
 _CLUSTER_EMBED_DIM = 128
 _CLUSTER_PREFILTER_THRESHOLD = 0.2
@@ -72,7 +73,7 @@ def _increment_counter(
     labels: dict[str, str],
 ) -> None:
     try:
-        dependencies.increment_counter(name, labels=labels)
+        emit_counter(dependencies, name, labels=labels)
     except _METRIC_NONCRITICAL_EXCEPTIONS:
         return
 

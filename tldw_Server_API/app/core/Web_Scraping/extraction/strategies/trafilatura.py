@@ -5,9 +5,9 @@ from typing import Any
 
 import trafilatura
 
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
+from tldw_Server_API.app.core.Web_Scraping.extraction.metrics import emit_global_counter as log_counter
 
 DEFAULT_BOILERPLATE_PATTERNS = [
     r"\bsubscribe\s+now\b",

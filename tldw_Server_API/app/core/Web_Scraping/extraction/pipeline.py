@@ -22,6 +22,11 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.enrichment import (
     enrich_with_regex_matches,
     regex_mask_override,
 )
+from tldw_Server_API.app.core.Web_Scraping.extraction.metrics import (
+    emit_counter,
+    emit_histogram,
+    emit_log_counter,
+)
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
     extract_cluster_entities,
     extract_jsonld_entities,
@@ -129,7 +134,8 @@ def _trace_entry(
     detail: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
-        dependencies.log_counter(
+        emit_log_counter(
+            dependencies,
             "extraction_strategy_total",
             labels={"strategy": _metric_strategy(strategy), "status": status},
         )
@@ -149,7 +155,8 @@ def _record_strategy_metrics(
     result: Optional[dict[str, Any]] = None,
 ) -> None:
     try:
-        dependencies.observe_histogram(
+        emit_histogram(
+            dependencies,
             "extraction_strategy_duration_seconds",
             duration_s,
             labels={"strategy": _metric_strategy(strategy), "status": status},
@@ -161,7 +168,8 @@ def _record_strategy_metrics(
     content = result.get("content")
     if isinstance(content, str) and content:
         try:
-            dependencies.observe_histogram(
+            emit_histogram(
+                dependencies,
                 "extraction_content_length_bytes",
                 len(content.encode("utf-8", errors="ignore")),
                 labels={"strategy": _metric_strategy(strategy)},
@@ -271,7 +279,8 @@ def _run_with_retries(
                 delay_s += random.uniform(0.0, jitter_ms / 1000.0)  # nosec B311
             attempts += 1
             try:
-                dependencies.increment_counter(
+                emit_counter(
+                    dependencies,
                     "extraction_retry_total",
                     labels={"strategy": _metric_strategy(strategy), "attempt": _metric_attempt(attempts)},
                 )

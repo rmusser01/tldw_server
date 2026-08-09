@@ -5,6 +5,7 @@ import asyncio
 import dataclasses
 import inspect
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -23,37 +24,7 @@ EXTRACTION_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping
 EXTRACTION_DEPENDENCIES_PATH = (
     REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "extraction" / "dependencies.py"
 )
-METRIC_SOURCE_PATHS = (
-    EXTRACTION_ROOT / "caches.py",
-    EXTRACTION_ROOT / "pipeline.py",
-    EXTRACTION_ROOT / "strategies" / "cluster.py",
-    EXTRACTION_ROOT / "strategies" / "llm.py",
-    EXTRACTION_ROOT / "strategies" / "trafilatura.py",
-)
-_METRIC_EMISSION_INVENTORY = {
-    "caches.py": {76: "extraction_cluster_cache_total", 84: "extraction_cluster_cache_total"},
-    "pipeline.py": {
-        132: "extraction_strategy_total",
-        152: "extraction_strategy_duration_seconds",
-        164: "extraction_content_length_bytes",
-        274: "extraction_retry_total",
-    },
-    "strategies/cluster.py": {
-        75: "<forwarded_metric_name>",
-        353: "extraction_cluster_total",
-        363: "extraction_cluster_total",
-        404: "extraction_cluster_total",
-        416: "extraction_cluster_total",
-        438: "extraction_cluster_total",
-    },
-    "strategies/llm.py": {
-        183: "extraction_retry_total",
-        267: "llm_tokens_used_total",
-        268: "llm_tokens_used_total_by_operation",
-    },
-    "strategies/trafilatura.py": {71: "article_extracted", 83: "article_extracted"},
-}
-_METRIC_FORWARDING_ONLY_SITES = {("strategies/cluster.py", 367)}
+METRICS_PATH = EXTRACTION_ROOT / "metrics.py"
 
 EXPECTED_IMPORTS = {
     "__init__.py": {".caches", ".schema"},
@@ -157,70 +128,94 @@ def _called_names(node: ast.AST) -> set[str]:
     }
 
 
-def _module_assignments(tree: ast.Module) -> dict[str, ast.expr]:
-    assignments: dict[str, ast.expr] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    assignments[target.id] = node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
-            assignments[node.target.id] = node.value
-    return assignments
+class _CancellationScope:
+    def __init__(self, parent: _CancellationScope | None = None) -> None:
+        self.parent = parent
+        self.assignments: dict[str, ast.expr] = {}
+        self.imports: dict[str, str] = {"asyncio": "asyncio"} if parent is None else {}
+
+    def resolve_name(self, name: str) -> tuple[str, ast.expr | None] | None:
+        if name in self.imports:
+            return self.imports[name], None
+        if name in self.assignments:
+            return "assignment", self.assignments[name]
+        return self.parent.resolve_name(name) if self.parent else None
 
 
-def _cancelled_error_aliases(tree: ast.Module) -> set[str]:
-    aliases = {"asyncio"}
-    for node in tree.body:
+def _scope_for_nodes(tree: ast.Module) -> dict[ast.AST, _CancellationScope]:
+    scopes: dict[ast.AST, _CancellationScope] = {}
+
+    def record_binding(node: ast.AST, scope: _CancellationScope) -> None:
         if isinstance(node, ast.Import):
             for imported in node.names:
-                if imported.name == "asyncio":
-                    aliases.add(imported.asname or imported.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "asyncio":
+                if imported.name in {"asyncio", "asyncio.exceptions"}:
+                    scope.imports[imported.asname or imported.name.split(".")[0]] = imported.name
+        elif isinstance(node, ast.ImportFrom) and node.module in {"asyncio", "asyncio.exceptions"}:
             for imported in node.names:
                 if imported.name == "CancelledError":
-                    aliases.add(imported.asname or imported.name)
-    return aliases
+                    scope.imports[imported.asname or imported.name] = "asyncio.CancelledError"
+                elif node.module == "asyncio" and imported.name == "exceptions":
+                    scope.imports[imported.asname or imported.name] = "asyncio.exceptions"
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    scope.assignments[target.id] = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
+            scope.assignments[node.target.id] = node.value
+
+    def populate(node: ast.AST, scope: _CancellationScope) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                child_scope = _CancellationScope(scope)
+                scopes[child] = child_scope
+                populate(child, child_scope)
+                continue
+            record_binding(child, scope)
+            if isinstance(child, ast.ExceptHandler):
+                scopes[child] = scope
+            populate(child, scope)
+
+    root = _CancellationScope()
+    populate(tree, root)
+    return scopes
 
 
-def _is_cancelled_error_expression(expression: ast.expr, aliases: set[str]) -> bool:
+def _dotted_name(expression: ast.expr, scope: _CancellationScope) -> str | None:
     if isinstance(expression, ast.Name):
-        return expression.id in aliases and expression.id != "asyncio"
-    return (
-        isinstance(expression, ast.Attribute)
-        and expression.attr == "CancelledError"
-        and isinstance(expression.value, ast.Name)
-        and expression.value.id in aliases
-    )
+        resolved = scope.resolve_name(expression.id)
+        return resolved[0] if resolved and resolved[1] is None else None
+    if not isinstance(expression, ast.Attribute):
+        return None
+    parent = _dotted_name(expression.value, scope)
+    return f"{parent}.{expression.attr}" if parent else None
 
 
 def _resolve_exception_expression(
     expression: ast.expr,
-    assignments: dict[str, ast.expr],
-    aliases: set[str],
-    seen: set[str],
+    scope: _CancellationScope,
+    seen: set[tuple[int, str]],
 ) -> tuple[bool, bool]:
     """Return whether an exception expression contains cancellation and is tuple-shaped."""
-    if _is_cancelled_error_expression(expression, aliases):
+    dotted = _dotted_name(expression, scope)
+    if dotted in {"asyncio.CancelledError", "asyncio.exceptions.CancelledError"}:
         return True, False
-    if isinstance(expression, ast.Name) and expression.id in assignments and expression.id not in seen:
-        return _resolve_exception_expression(
-            assignments[expression.id],
-            assignments,
-            aliases,
-            seen | {expression.id},
-        )
+    if isinstance(expression, ast.Name):
+        resolved = scope.resolve_name(expression.id)
+        if resolved and resolved[0] == "assignment" and resolved[1] is not None:
+            key = (id(scope), expression.id)
+            if key not in seen:
+                return _resolve_exception_expression(resolved[1], scope, seen | {key})
     if isinstance(expression, ast.Starred):
-        contains_cancelled, _ = _resolve_exception_expression(expression.value, assignments, aliases, seen)
+        contains_cancelled, _ = _resolve_exception_expression(expression.value, scope, seen)
         return contains_cancelled, True
     if isinstance(expression, ast.Tuple):
         return (
-            any(_resolve_exception_expression(item, assignments, aliases, seen)[0] for item in expression.elts),
+            any(_resolve_exception_expression(item, scope, seen)[0] for item in expression.elts),
             True,
         )
     if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Add):
-        left_contains, _ = _resolve_exception_expression(expression.left, assignments, aliases, seen)
-        right_contains, _ = _resolve_exception_expression(expression.right, assignments, aliases, seen)
+        left_contains, _ = _resolve_exception_expression(expression.left, scope, seen)
+        right_contains, _ = _resolve_exception_expression(expression.right, scope, seen)
         return left_contains or right_contains, True
     return False, False
 
@@ -235,141 +230,50 @@ def _is_unconditional_bare_reraise(handler: ast.ExceptHandler) -> bool:
 
 
 def _recoverable_cancelled_error_violations(tree: ast.Module) -> list[str]:
-    assignments = _module_assignments(tree)
-    aliases = _cancelled_error_aliases(tree)
+    scopes = _scope_for_nodes(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.ExceptHandler) or node.type is None:
             continue
-        contains_cancelled, is_tuple = _resolve_exception_expression(node.type, assignments, aliases, set())
+        contains_cancelled, is_tuple = _resolve_exception_expression(node.type, scopes[node], set())
         if contains_cancelled and (is_tuple or not _is_unconditional_bare_reraise(node)):
             violations.append(ast.unparse(node.type))
     return violations
 
 
-_METRIC_LABEL_CONTRACT: dict[str, dict[str, set[str]]] = {
-    "article_extracted": {"success": {"true", "false"}},
-    "extraction_cluster_cache_total": {"cache": {"embedding"}, "result": {"hit", "miss"}},
-    "extraction_cluster_total": {"status": {"started", "no_blocks", "no_clusters", "empty", "success"}},
-    "extraction_content_length_bytes": {
-        "strategy": {"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}
-    },
-    "extraction_retry_total": {
-        "strategy": {"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"},
-        "attempt": {"1", "2", "3", "4_plus"},
-    },
-    "extraction_strategy_duration_seconds": {
-        "strategy": {"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"},
-        "status": {"skipped", "failed", "success", "enriched"},
-    },
-    "extraction_strategy_total": {
-        "strategy": {"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"},
-        "status": {"skipped", "failed", "success", "enriched"},
-    },
-    "llm_tokens_used_total": {
-        "provider": {
-            "openai",
-            "anthropic",
-            "cohere",
-            "deepseek",
-            "google",
-            "groq",
-            "huggingface",
-            "mistral",
-            "openrouter",
-            "qwen",
-            "moonshot",
-            "zai",
-            "other",
-        },
-        "model": {"configured"},
-        "type": {"prompt", "completion"},
-    },
-    "llm_tokens_used_total_by_operation": {
-        "provider": {
-            "openai",
-            "anthropic",
-            "cohere",
-            "deepseek",
-            "google",
-            "groq",
-            "huggingface",
-            "mistral",
-            "openrouter",
-            "qwen",
-            "moonshot",
-            "zai",
-            "other",
-        },
-        "model": {"configured"},
-        "type": {"prompt", "completion"},
-        "operation": {"extraction"},
-    },
-}
+_RAW_METRIC_SINK_NAMES = {"increment_counter", "log_counter", "observe_histogram"}
+_RAW_METRICS_MODULE_PREFIX = "tldw_Server_API.app.core.Metrics"
 
 
-def _assert_metric_contract(events: list[tuple[str, dict[str, str]]]) -> None:
-    for name, labels in events:
-        assert name in _METRIC_LABEL_CONTRACT
-        expected = _METRIC_LABEL_CONTRACT[name]
-        assert set(labels) == set(expected)
-        for key, allowed_values in expected.items():
-            assert labels[key] in allowed_values
-
-
-def _metric_call_name(node: ast.Call) -> str | None:
-    if isinstance(node.func, ast.Name):
-        return node.func.id
-    if isinstance(node.func, ast.Attribute):
-        return node.func.attr
-    return None
-
-
-def _metric_emission_call(path: Path, lineno: int) -> ast.Call:
-    return next(
-        node
-        for node in ast.walk(_tree(path))
-        if isinstance(node, ast.Call)
-        and node.lineno == lineno
-        and _metric_call_name(node) in {"log_counter", "increment_counter", "observe_histogram", "_increment_counter"}
-    )
-
-
-def _production_metric_names() -> set[str]:
-    names: set[str] = set()
-    for path in METRIC_SOURCE_PATHS:
-        for node in ast.walk(_tree(path)):
-            if not isinstance(node, ast.Call) or _metric_call_name(node) not in {
-                "log_counter",
-                "increment_counter",
-                "observe_histogram",
-                "_increment_counter",
-            }:
-                continue
-            name_index = 1 if _metric_call_name(node) == "_increment_counter" else 0
-            if len(node.args) > name_index and isinstance(node.args[name_index], ast.Constant):
-                if isinstance(node.args[name_index].value, str):
-                    names.add(node.args[name_index].value)
-    return names
-
-
-def _production_metric_call_sites() -> set[tuple[str, int]]:
-    sites: set[tuple[str, int]] = set()
-    for path in METRIC_SOURCE_PATHS:
-        relative_path = str(path.relative_to(EXTRACTION_ROOT))
-        for node in ast.walk(_tree(path)):
-            if isinstance(node, ast.Call) and _metric_call_name(node) in {
-                "log_counter",
-                "increment_counter",
-                "observe_histogram",
-                "_increment_counter",
-            }:
-                sites.add((relative_path, node.lineno))
-    return sites
-
-
-def _assert_metric_name_contract(metric_names: set[str]) -> None:
-    assert metric_names == set(_METRIC_LABEL_CONTRACT)
+def _metric_boundary_bypasses(paths: list[Path]) -> list[str]:
+    """Find extraction modules that emit metrics without the canonical boundary."""
+    violations: list[str] = []
+    for path in paths:
+        if path == METRICS_PATH:
+            continue
+        tree = _tree(path)
+        raw_aliases: set[str] = set()
+        callable_aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(_RAW_METRICS_MODULE_PREFIX):
+                raw_aliases.update(alias.asname or alias.name for alias in node.names)
+                violations.append(f"{path.name}: raw metrics import")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith(_RAW_METRICS_MODULE_PREFIX):
+                        raw_aliases.add(alias.asname or alias.name.split(".")[0])
+                        violations.append(f"{path.name}: raw metrics import")
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                value = node.value
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if isinstance(value, ast.Attribute) and value.attr in _RAW_METRIC_SINK_NAMES:
+                    callable_aliases.update(target.id for target in targets if isinstance(target, ast.Name))
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute) and node.func.attr in _RAW_METRIC_SINK_NAMES:
+                    violations.append(f"{path.name}: direct {node.func.attr} call")
+                elif isinstance(node.func, ast.Name) and node.func.id in raw_aliases | callable_aliases:
+                    violations.append(f"{path.name}: aliased metric sink call")
+    return violations
 
 
 def test_selector_package_has_the_approved_files() -> None:
@@ -732,6 +636,8 @@ print("HANDLER_IMPORTS=" + json.dumps([name for name in blocked if name in sys.m
 
 
 def test_phase4b_metric_contract_rejects_sensitive_or_high_cardinality_values() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.extraction import metrics
+
     invalid_events = [
         ("extraction_strategy_total", {"strategy": "https://example.com", "status": "success"}),
         ("extraction_retry_total", {"strategy": "regex", "attempt": "secret-token"}),
@@ -743,46 +649,49 @@ def test_phase4b_metric_contract_rejects_sensitive_or_high_cardinality_values() 
             {"provider": "openai", "model": "configured", "type": "prompt", "operation": "https://example.com"},
         ),
     ]
-    for event in invalid_events:
-        try:
-            _assert_metric_contract([event])
-        except AssertionError:
-            continue
-        raise AssertionError(f"accepted invalid metric event: {event}")
+    for name, labels in invalid_events:
+        with pytest.raises(ValueError):
+            metrics.validate_metric(name, labels=labels)
 
 
-def test_phase4b_metric_inventory_is_exhaustive_and_bidirectionally_contracted() -> None:
-    expected_emission_sites = {
-        (relative_path, lineno) for relative_path, sites in _METRIC_EMISSION_INVENTORY.items() for lineno in sites
+def test_phase4b_only_the_canonical_metric_boundary_owns_metric_sinks() -> None:
+    assert METRICS_PATH.is_file()
+    assert _metric_boundary_bypasses(sorted(EXTRACTION_ROOT.rglob("*.py"))) == []
+
+
+def test_phase4b_metric_boundary_rejects_unlisted_emitters_and_bypasses(tmp_path: Path) -> None:
+    cases = {
+        "new_emitter.py": """
+from tldw_Server_API.app.core.Metrics import increment_counter
+increment_counter("future_metric", labels={"url": "https://example.com"})
+""",
+        "alias.py": """
+def emit(dependencies):
+    sink = dependencies.increment_counter
+    sink("article_extracted", labels={"success": "true"})
+""",
+        "wrapper.py": """
+def emit(dependencies):
+    dependencies.observe_histogram(
+        "extraction_strategy_duration_seconds", 1.0, labels={"strategy": "jsonld", "status": "success"}
+    )
+""",
     }
-    assert len(expected_emission_sites) == 17
-    assert _production_metric_call_sites() == expected_emission_sites | _METRIC_FORWARDING_ONLY_SITES
-    for relative_path, sites in _METRIC_EMISSION_INVENTORY.items():
-        path = EXTRACTION_ROOT / relative_path
-        for lineno, expected_name in sites.items():
-            call = _metric_emission_call(path, lineno)
-            name_argument = call.args[1] if _metric_call_name(call) == "_increment_counter" else call.args[0]
-            if expected_name == "<forwarded_metric_name>":
-                assert isinstance(name_argument, ast.Name)
-                assert name_argument.id == "name"
-            else:
-                assert isinstance(name_argument, ast.Constant)
-                assert name_argument.value == expected_name
-
-    _assert_metric_name_contract(_production_metric_names())
-    with pytest.raises(AssertionError):
-        _assert_metric_name_contract(_production_metric_names() | {"future_uncontracted_metric"})
+    for filename, source in cases.items():
+        path = tmp_path / filename
+        path.write_text(source, encoding="utf-8")
+        assert _metric_boundary_bypasses([path])
 
 
 def test_phase4b_metric_contract_covers_every_production_emission_and_allowed_value(monkeypatch) -> None:
-    from tldw_Server_API.app.core.Web_Scraping.extraction import caches, pipeline
+    from tldw_Server_API.app.core.Web_Scraping.extraction import caches, metrics, pipeline
     from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
     from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import cluster, llm, trafilatura
 
-    events: list[tuple[str, dict[str, str]]] = []
+    events: list[tuple[str, float | None, dict[str, str]]] = []
 
-    def record(name: str, _value: float | None = None, labels: dict[str, str] | None = None) -> None:
-        events.append((name, dict(labels or {})))
+    def record(name: str, value: float | None = None, labels: dict[str, str] | None = None) -> None:
+        events.append((name, value, dict(labels or {})))
 
     dependencies = dataclasses.replace(
         build_default_dependencies(),
@@ -791,8 +700,9 @@ def test_phase4b_metric_contract_covers_every_production_emission_and_allowed_va
         observe_histogram=record,
     )
 
-    strategies = _METRIC_LABEL_CONTRACT["extraction_strategy_total"]["strategy"]
-    statuses = _METRIC_LABEL_CONTRACT["extraction_strategy_total"]["status"]
+    contract = metrics.METRIC_LABEL_CONTRACT
+    strategies = contract["extraction_strategy_total"]["strategy"]
+    statuses = contract["extraction_strategy_total"]["status"]
     for strategy in strategies:
         for status in statuses:
             pipeline._trace_entry(dependencies, strategy, status, "test")
@@ -832,7 +742,7 @@ def test_phase4b_metric_contract_covers_every_production_emission_and_allowed_va
     assert caches._cluster_cache_get("metric-cache", increment_counter=record) is None
     caches._cluster_cache_put("metric-cache", [1.0])
     assert caches._cluster_cache_get("metric-cache", increment_counter=record) == [1.0]
-    for status in _METRIC_LABEL_CONTRACT["extraction_cluster_total"]["status"]:
+    for status in contract["extraction_cluster_total"]["status"]:
         cluster._increment_counter(dependencies, "extraction_cluster_total", labels={"status": status})
 
     monkeypatch.setattr(trafilatura.trafilatura, "extract_metadata", lambda _html: None)
@@ -842,7 +752,7 @@ def test_phase4b_metric_contract_covers_every_production_emission_and_allowed_va
     monkeypatch.setattr(trafilatura.trafilatura, "extract", lambda _html, **_kwargs: None)
     trafilatura.extract_with_trafilatura("<html></html>", "https://example.com/failure")
 
-    providers = _METRIC_LABEL_CONTRACT["llm_tokens_used_total"]["provider"]
+    providers = contract["llm_tokens_used_total"]["provider"]
     for provider in providers:
         input_provider = provider if provider != "other" else "https://user:secret@example.com"
         llm.record_llm_usage_metrics(
@@ -852,12 +762,49 @@ def test_phase4b_metric_contract_covers_every_production_emission_and_allowed_va
             dependencies=dependencies,
         )
 
-    _assert_metric_contract(events)
-    assert {name for name, _labels in events} == set(_METRIC_LABEL_CONTRACT)
-    for metric_name, labels_contract in _METRIC_LABEL_CONTRACT.items():
-        metric_events = [labels for name, labels in events if name == metric_name]
+    assert {name for name, _value, _labels in events} == set(contract)
+    for name, value, labels in events:
+        metrics.validate_metric(name, value=value, labels=labels)
+        if value is not None:
+            assert math.isfinite(value)
+    for metric_name, labels_contract in contract.items():
+        metric_events = [labels for name, _value, labels in events if name == metric_name]
         for label_name, allowed_values in labels_contract.items():
             assert {labels[label_name] for labels in metric_events} == allowed_values
+
+
+def test_phase4b_metric_boundary_rejects_uncontracted_and_nonfinite_values() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.extraction import metrics
+
+    with pytest.raises(ValueError):
+        metrics.validate_metric("future_uncontracted_metric", labels={})
+    for value in (math.nan, math.inf, -math.inf):
+        with pytest.raises(ValueError):
+            metrics.validate_metric(
+                "extraction_strategy_duration_seconds",
+                value=value,
+                labels={"strategy": "jsonld", "status": "success"},
+            )
+
+
+def test_phase4b_metric_boundary_blocks_an_unsafe_real_pipeline_branch() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.extraction import metrics, pipeline
+    from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+
+    events: list[tuple[str, float | None, dict[str, str]]] = []
+
+    def record(name: str, value: float | None = None, labels: dict[str, str] | None = None) -> None:
+        events.append((name, value, dict(labels or {})))
+
+    dependencies = dataclasses.replace(build_default_dependencies(), log_counter=record)
+    pipeline._trace_entry(dependencies, "jsonld", "https://example.com/raw-error", "test")
+
+    assert events == []
+    with pytest.raises(ValueError):
+        metrics.validate_metric(
+            "extraction_strategy_total",
+            labels={"strategy": "jsonld", "status": "https://example.com/raw-error"},
+        )
 
 
 def test_phase4b_extraction_never_recovers_cancelled_error_in_exception_tuples() -> None:
@@ -893,6 +840,46 @@ except Cancelled:
 """,
             [],
         ),
+        "exceptions_module_alias_bare_reraise": (
+            """
+import asyncio.exceptions as ae
+try:
+    pass
+except ae.CancelledError:
+    raise
+""",
+            [],
+        ),
+        "exceptions_class_alias_bare_reraise": (
+            """
+from asyncio.exceptions import CancelledError as CE
+try:
+    pass
+except CE:
+    raise
+""",
+            [],
+        ),
+        "nested_attribute_bare_reraise": (
+            """
+import asyncio as aio
+try:
+    pass
+except aio.exceptions.CancelledError:
+    raise
+""",
+            [],
+        ),
+        "imported_exceptions_module_bare_reraise": (
+            """
+from asyncio import exceptions as aio_exceptions
+try:
+    pass
+except aio_exceptions.CancelledError:
+    raise
+""",
+            [],
+        ),
         "qualified_swallow": (
             """
 import asyncio
@@ -912,6 +899,46 @@ except Cancelled:
     return None
 """,
             ["Cancelled"],
+        ),
+        "exceptions_module_alias_swallow": (
+            """
+import asyncio.exceptions as ae
+try:
+    pass
+except ae.CancelledError:
+    pass
+""",
+            ["ae.CancelledError"],
+        ),
+        "exceptions_class_alias_swallow": (
+            """
+from asyncio.exceptions import CancelledError as CE
+try:
+    pass
+except CE:
+    return None
+""",
+            ["CE"],
+        ),
+        "nested_attribute_swallow": (
+            """
+import asyncio
+try:
+    pass
+except asyncio.exceptions.CancelledError:
+    pass
+""",
+            ["asyncio.exceptions.CancelledError"],
+        ),
+        "imported_exceptions_module_swallow": (
+            """
+from asyncio import exceptions as aio_exceptions
+try:
+    pass
+except aio_exceptions.CancelledError:
+    pass
+""",
+            ["aio_exceptions.CancelledError"],
         ),
         "explicit_exception": (
             """
@@ -977,6 +1004,32 @@ except _RECOVERABLE:
     pass
 """,
             ["_RECOVERABLE"],
+        ),
+        "function_local_composed_tuple": (
+            """
+import asyncio
+def extract():
+    base = (ValueError,)
+    recoverable = base + (asyncio.CancelledError,)
+    try:
+        pass
+    except recoverable:
+        pass
+""",
+            ["recoverable"],
+        ),
+        "function_local_starred_tuple": (
+            """
+from asyncio.exceptions import CancelledError as CE
+def extract():
+    base = (CE,)
+    recoverable = (*base, ValueError)
+    try:
+        pass
+    except recoverable:
+        pass
+""",
+            ["recoverable"],
         ),
         "inline_tuple": (
             """
