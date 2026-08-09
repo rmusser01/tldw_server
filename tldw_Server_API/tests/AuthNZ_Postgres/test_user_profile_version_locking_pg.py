@@ -153,13 +153,13 @@ async def test_reciprocal_admin_profile_commands_lock_users_without_deadlock(
     first_id = await _create_user(test_db_pool, f"first_{suffix}", role="admin")
     second_id = await _create_user(test_db_pool, f"second_{suffix}", role="admin")
     repo = AuthnzOrgsTeamsRepo(test_db_pool)
-    organization = await repo.create_organization(
+    organization = await repo.create_organization_with_owner_membership(
         name=f"Reciprocal command org {suffix}",
         owner_user_id=owner_id,
+        context=_BOOTSTRAP,
     )
     org_id = int(organization["id"])
     for user_id, role in (
-        (owner_id, "owner"),
         (first_id, "member"),
         (second_id, "member"),
     ):
@@ -247,13 +247,13 @@ async def test_reciprocal_admin_bulk_membership_updates_lock_users_without_deadl
     first_id = await _create_user(test_db_pool, f"bulk_first_{suffix}", role="admin")
     second_id = await _create_user(test_db_pool, f"bulk_second_{suffix}", role="admin")
     repo = AuthnzOrgsTeamsRepo(test_db_pool)
-    organization = await repo.create_organization(
+    organization = await repo.create_organization_with_owner_membership(
         name=f"Reciprocal bulk org {suffix}",
         owner_user_id=owner_id,
+        context=_BOOTSTRAP,
     )
     org_id = int(organization["id"])
     for user_id, role in (
-        (owner_id, "owner"),
         (first_id, "member"),
         (second_id, "member"),
     ):

@@ -21,6 +21,20 @@ _BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
 )
 
 
+async def _execute_membership_fixture_sql(test_db_pool, query: str, *args) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
+    async with test_db_pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            query,
+            *args,
+            backend="postgres",
+        )
+
+
 class _PostgresMutationConnectionGate:
     def __init__(self, connection, owner: "_PostgresMutationGatePool") -> None:
         self.connection = connection
@@ -201,9 +215,10 @@ async def _create_postgres_runtime_scope(test_db_pool) -> tuple[int, int, int]:
         user_id,
     )
     org_id = int(org["id"])
-    await test_db_pool.execute(
+    await _execute_membership_fixture_sql(
+        test_db_pool,
         """
-        INSERT INTO org_members (org_id, user_id, role, status)
+        INSERT INTO public.org_members (org_id, user_id, role, status)
         VALUES ($1, $2, 'lead', 'active')
         """,
         org_id,
@@ -219,15 +234,75 @@ async def _create_postgres_runtime_scope(test_db_pool) -> tuple[int, int, int]:
         f"Runtime Team {suffix}",
     )
     team_id = int(team["id"])
-    await test_db_pool.execute(
+    await _execute_membership_fixture_sql(
+        test_db_pool,
         """
-        INSERT INTO team_members (team_id, user_id, role, status)
+        INSERT INTO public.team_members (team_id, user_id, role, status)
         VALUES ($1, $2, 'lead', 'active')
         """,
         team_id,
         user_id,
     )
     return user_id, org_id, team_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_org_provider_secrets_use_public_schema_under_shadow_search_path(
+    test_db_pool,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+        AuthnzOrgProviderSecretsRepo,
+    )
+
+    _user_id, org_id, _team_id = await _create_postgres_runtime_scope(test_db_pool)
+    schema = f"org_secret_shadow_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc)
+
+    async with test_db_pool.transaction() as conn:
+        await conn.execute(f'CREATE SCHEMA "{schema}"')
+        await conn.execute(
+            f'CREATE TABLE "{schema}".org_provider_secrets '
+            "(LIKE public.org_provider_secrets INCLUDING ALL)"
+        )
+        await conn.execute(f'SET LOCAL search_path TO "{schema}", public')
+
+        class _ConnectionBoundPool:
+            pool = object()
+
+            @asynccontextmanager
+            async def transaction(self):
+                yield conn
+
+            async def fetchall(self, query: str, *args):
+                return await conn.fetch(query, *args)
+
+            async def execute(self, query: str, *args):
+                return await conn.execute(query, *args)
+
+        repo = AuthnzOrgProviderSecretsRepo(_ConnectionBoundPool())  # type: ignore[arg-type]
+        written = await repo.upsert_secret(
+            scope_type="org",
+            scope_id=org_id,
+            provider="openai",
+            encrypted_blob="public-only",
+            key_hint="shadow-test",
+            metadata=None,
+            updated_at=now,
+        )
+        fetched = await repo.fetch_secret("org", org_id, "openai")
+
+        assert written["provider"] == "openai"
+        assert fetched is not None
+        assert fetched["encrypted_blob"] == "public-only"
+        assert await conn.fetchval(
+            "SELECT COUNT(*) FROM public.org_provider_secrets "
+            "WHERE scope_type = 'org' AND scope_id = $1",
+            org_id,
+        ) == 1
+        assert await conn.fetchval(
+            f'SELECT COUNT(*) FROM "{schema}".org_provider_secrets'
+        ) == 0
 
 
 async def _insert_postgres_user_payload(
@@ -374,8 +449,10 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_postgres
             user_id,
         )
     elif null_boundary == "team_membership":
-        await test_db_pool.execute(
-            "UPDATE team_members SET status = NULL WHERE team_id = $1 AND user_id = $2",
+        await _execute_membership_fixture_sql(
+            test_db_pool,
+            "UPDATE public.team_members SET status = NULL "
+            "WHERE team_id = $1 AND user_id = $2",
             scope_id,
             user_id,
         )
@@ -390,8 +467,10 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_postgres
             org_id,
         )
     elif null_boundary == "org_membership":
-        await test_db_pool.execute(
-            "UPDATE org_members SET status = NULL WHERE org_id = $1 AND user_id = $2",
+        await _execute_membership_fixture_sql(
+            test_db_pool,
+            "UPDATE public.org_members SET status = NULL "
+            "WHERE org_id = $1 AND user_id = $2",
             scope_id,
             user_id,
         )
@@ -453,7 +532,7 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         add_org_member,
         add_team_member,
-        create_organization,
+        create_organization_with_owner_membership,
         create_team,
     )
     from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
@@ -529,7 +608,11 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     admin_id = int(admin_row["id"])
     user_id = int(user_row["id"])
 
-    org = await create_organization(name=f"BYOK Org {name_suffix}", owner_user_id=admin_id)
+    org = await create_organization_with_owner_membership(
+        name=f"BYOK Org {name_suffix}",
+        owner_user_id=admin_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     team = await create_team(org_id=int(org["id"]), name=f"BYOK Team {name_suffix}")
     await add_org_member(org_id=int(org["id"]), user_id=user_id, role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
     await add_team_member(team_id=int(team["id"]), user_id=user_id, role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)

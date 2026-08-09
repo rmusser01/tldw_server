@@ -39,6 +39,9 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipAuthority,
     MembershipAuthorizationError,
     MembershipParentRequired,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member as core_add_org_member,
@@ -47,7 +50,10 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_team_member as core_add_team_member,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-    create_organization as core_create_organization,
+    create_organization_as_actor as core_create_organization_as_actor,
+)
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
+    create_organization_with_owner_membership as core_create_organization_with_owner_membership,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     create_team as core_create_team,
@@ -151,10 +157,35 @@ def _membership_write_context(
     )
 
 
-def _membership_authorization_http_error() -> HTTPException:
+_MEMBERSHIP_CONTROL_ERRORS = (
+    MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
+)
+
+
+def _membership_control_http_error(
+    exc: (
+        MembershipAuthorizationError
+        | MembershipPreflightChanged
+        | MembershipScopeNotFound
+        | MembershipTargetNotFound
+    ),
+) -> HTTPException:
+    if isinstance(exc, MembershipAuthorizationError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        )
+    if isinstance(exc, (MembershipScopeNotFound, MembershipTargetNotFound)):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Membership scope or target not found",
+        )
     return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Not authorized to manage memberships",
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Membership write conflicted; retry the request",
     )
 
 
@@ -255,7 +286,9 @@ async def _emit_membership_audit_event(
             metadata=metadata,
         )
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Audit ({action}) skipped/failed: {exc}")
+        logger.bind(error_type=type(exc).__name__, audit_action=action).debug(
+            "Admin organization audit skipped or failed"
+        )
 
 
 async def create_org(
@@ -264,12 +297,22 @@ async def create_org(
 ) -> OrganizationResponse:
     try:
         admin_scope_service.require_platform_admin(principal)
-        row = await core_create_organization(
-            name=payload.name,
-            owner_user_id=payload.owner_user_id,
-            slug=payload.slug,
-        )
+        if payload.owner_user_id is None:
+            row = await core_create_organization_as_actor(
+                name=payload.name,
+                slug=payload.slug,
+                context=_membership_write_context(principal),
+            )
+        else:
+            row = await core_create_organization_with_owner_membership(
+                name=payload.name,
+                owner_user_id=payload.owner_user_id,
+                slug=payload.slug,
+                context=_membership_write_context(principal),
+            )
         return OrganizationResponse(**row)
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except DuplicateOrganizationError as dup:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -634,13 +677,13 @@ async def add_team_member(
             metadata={"target_user_id": payload.user_id, "role": payload.role or "member"},
         )
         return TeamMemberResponse(**row)
-    except MembershipAuthorizationError:
-        raise _membership_authorization_http_error() from None
     except MembershipParentRequired:
         raise HTTPException(
             status_code=400,
             detail="User must be an organization member first",
         ) from None
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -707,8 +750,8 @@ async def remove_team_member(
             user_id=int(res.get("user_id", user_id)),
             removed=True,
         )
-    except MembershipAuthorizationError:
-        raise _membership_authorization_http_error() from None
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -744,8 +787,8 @@ async def update_team_member_role(
         response_payload = dict(row)
         response_payload["org_id"] = team.get("org_id") if isinstance(team, dict) else None
         return TeamMemberResponse(**response_payload)
-    except MembershipAuthorizationError:
-        raise _membership_authorization_http_error() from None
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -776,8 +819,8 @@ async def add_org_member(
             metadata={"target_user_id": payload.user_id, "role": payload.role or "member"},
         )
         return OrgMemberResponse(**row)
-    except MembershipAuthorizationError:
-        raise _membership_authorization_http_error() from None
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -855,8 +898,8 @@ async def remove_org_member(
             user_id=int(res.get("user_id", user_id)),
             removed=True,
         )
-    except MembershipAuthorizationError:
-        raise _membership_authorization_http_error() from None
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -895,8 +938,8 @@ async def update_org_member_role(
             metadata={"target_user_id": user_id, "new_role": payload.role},
         )
         return OrgMemberResponse(**row)
-    except MembershipAuthorizationError:
-        raise _membership_authorization_http_error() from None
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:

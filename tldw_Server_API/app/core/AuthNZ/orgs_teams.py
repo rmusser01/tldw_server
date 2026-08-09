@@ -4,7 +4,10 @@ import threading
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.AuthNZ.membership_writer import MembershipWriteContext
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
 _PG_CORE_TABLES_ENSURED: set[int] = set()
@@ -66,6 +69,44 @@ async def create_organization(
     return await repo.create_organization(
         name=name,
         owner_user_id=owner_user_id,
+        slug=slug,
+        metadata=metadata,
+    )
+
+
+async def create_organization_with_owner_membership(
+    *,
+    name: str,
+    owner_user_id: int,
+    context: MembershipWriteContext,
+    slug: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create an organization and its owner membership atomically."""
+
+    repo = await _get_orgs_teams_repo()
+    return await repo.create_organization_with_owner_membership(
+        name=name,
+        owner_user_id=owner_user_id,
+        context=context,
+        slug=slug,
+        metadata=metadata,
+    )
+
+
+async def create_organization_as_actor(
+    *,
+    name: str,
+    context: ActorMembershipWriteContext,
+    slug: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create an ownerless organization after persisted actor authorization."""
+
+    repo = await _get_orgs_teams_repo()
+    return await repo.create_organization_as_actor(
+        name=name,
+        context=context,
         slug=slug,
         metadata=metadata,
     )

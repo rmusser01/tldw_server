@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipAuthorizationError,
     MembershipMutation,
     MembershipMutationKind,
+    MembershipParentRequired,
     MembershipPreflightChanged,
     MembershipScopeType,
     MembershipWriter,
@@ -60,13 +61,13 @@ async def _create_membership_fixture(pool: Any, prefix: str) -> dict[str, int]:
     first_id = await _create_user(pool, f"{prefix}_first")
     second_id = await _create_user(pool, f"{prefix}_second")
     repo = AuthnzOrgsTeamsRepo(pool)
-    organization = await repo.create_organization(
+    organization = await repo.create_organization_with_owner_membership(
         name=f"{prefix} organization",
         owner_user_id=owner_id,
+        context=_BOOTSTRAP,
     )
     org_id = int(organization["id"])
     for user_id, role in (
-        (owner_id, "owner"),
         (first_id, "member"),
         (second_id, "member"),
     ):
@@ -331,6 +332,58 @@ class _ActorUserLockProbeConnection:
         return getattr(self._conn, name)
 
 
+class _HoldOrganizationLockConnection:
+    def __init__(
+        self,
+        conn: Any,
+        *,
+        organization_id: int,
+        organization_locked: asyncio.Event,
+        allow_removal: asyncio.Event,
+    ) -> None:
+        self._conn = conn
+        self._organization_id = organization_id
+        self._organization_locked = organization_locked
+        self._allow_removal = allow_removal
+
+    async def fetchrow(self, sql: str, *parameters: Any) -> Any:
+        result = await self._conn.fetchrow(sql, *parameters)
+        if (
+            sql == "SELECT id FROM public.organizations WHERE id = $1 FOR UPDATE"
+            and int(parameters[0]) == self._organization_id
+        ):
+            self._organization_locked.set()
+            await self._allow_removal.wait()
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
+class _TargetUserLockAttemptConnection:
+    def __init__(
+        self,
+        conn: Any,
+        *,
+        user_id: int,
+        lock_attempted: asyncio.Event,
+    ) -> None:
+        self._conn = conn
+        self._user_id = user_id
+        self._lock_attempted = lock_attempted
+
+    async def fetchrow(self, sql: str, *parameters: Any) -> Any:
+        if (
+            sql == "SELECT id FROM public.users WHERE id = $1 FOR UPDATE"
+            and int(parameters[0]) == self._user_id
+        ):
+            self._lock_attempted.set()
+        return await self._conn.fetchrow(sql, *parameters)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
 @pytest.mark.asyncio
 async def test_postgres_opposite_request_orders_share_one_canonical_lock_order(
     test_db_pool,
@@ -584,3 +637,80 @@ async def test_postgres_concurrent_last_owner_removals_serialize_and_recheck(
         "WHERE org_id = $1 AND role = 'owner' AND status = 'active'",
         ids["org_id"],
     ) == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_org_member_removal_serializes_concurrent_team_add(
+    test_db_pool,
+) -> None:
+    ids = await _create_membership_fixture(test_db_pool, f"cascade_{uuid.uuid4().hex[:8]}")
+    repo = AuthnzOrgsTeamsRepo(test_db_pool)
+    organization_locked = asyncio.Event()
+    allow_removal = asyncio.Event()
+    add_lock_attempted = asyncio.Event()
+
+    async def _remove_org_member() -> dict[str, Any] | Exception:
+        try:
+            async with test_db_pool.transaction() as conn:
+                return await repo.remove_org_member_on_connection(
+                    conn=_HoldOrganizationLockConnection(
+                        conn,
+                        organization_id=ids["org_id"],
+                        organization_locked=organization_locked,
+                        allow_removal=allow_removal,
+                    ),
+                    org_id=ids["org_id"],
+                    user_id=ids["first_id"],
+                    context=_BOOTSTRAP,
+                    anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+                    operation_time=_OPERATION_TIME,
+                )
+        except Exception as exc:  # noqa: BLE001 - outcome is asserted below
+            return exc
+
+    async def _add_team_member() -> dict[str, Any] | Exception:
+        try:
+            async with test_db_pool.transaction() as conn:
+                return await repo.add_team_member_on_connection(
+                    conn=_TargetUserLockAttemptConnection(
+                        conn,
+                        user_id=ids["first_id"],
+                        lock_attempted=add_lock_attempted,
+                    ),
+                    team_id=ids["team_id"],
+                    user_id=ids["first_id"],
+                    role="member",
+                    context=_BOOTSTRAP,
+                    anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+                    operation_time=_OPERATION_TIME,
+                )
+        except Exception as exc:  # noqa: BLE001 - outcome is asserted below
+            return exc
+
+    removal_task = asyncio.create_task(_remove_org_member())
+    await asyncio.wait_for(organization_locked.wait(), timeout=5)
+    add_task = asyncio.create_task(_add_team_member())
+    await asyncio.wait_for(add_lock_attempted.wait(), timeout=5)
+    await asyncio.sleep(0)
+    assert not add_task.done()
+    allow_removal.set()
+
+    removal_outcome, add_outcome = await asyncio.wait_for(
+        asyncio.gather(removal_task, add_task),
+        timeout=10,
+    )
+
+    assert isinstance(removal_outcome, dict)
+    assert isinstance(add_outcome, MembershipParentRequired)
+    assert await test_db_pool.fetchval(
+        "SELECT COUNT(*) FROM public.org_members WHERE org_id = $1 AND user_id = $2",
+        ids["org_id"],
+        ids["first_id"],
+    ) == 0
+    assert await test_db_pool.fetchval(
+        "SELECT COUNT(*) FROM public.team_members tm "
+        "JOIN public.teams t ON t.id = tm.team_id "
+        "WHERE t.org_id = $1 AND tm.user_id = $2",
+        ids["org_id"],
+        ids["first_id"],
+    ) == 0

@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     resolve_byok_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
@@ -62,6 +63,17 @@ async def _upsert_shared_key(repo, scope_type, scope_id, provider, api_key, cred
         metadata=None,
         updated_at=datetime.now(timezone.utc),
     )
+
+
+async def _set_user_active(pool, *, user_id: int, is_active: bool) -> None:
+    async with pool.transaction() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=user_id,
+            profile_visible_fields=("is_active",),
+            statement="UPDATE users SET is_active = ? WHERE id = ?",
+            parameters=(is_active, user_id),
+        )
 
 
 def _make_request(principal: AuthPrincipal) -> Request:
@@ -607,17 +619,24 @@ async def test_revoked_shared_tombstone_check_wins_before_lower_scope(tmp_path, 
     lower_scope_reached = asyncio.Event()
 
     class GatedSharedRepo:
-        async def fetch_secret(self, scope_type, scope_id, provider, *, include_revoked=False):
-            if scope_type == "team" and include_revoked:
+        async def fetch_authorized_secret_for_user(
+            self,
+            scope_type,
+            scope_id,
+            authorized_user_id,
+            provider,
+        ):
+            assert authorized_user_id == user_id
+            if scope_type == "team":
                 tombstone_check_entered.set()
                 await allow_tombstone_check.wait()
             if scope_type == "org":
                 lower_scope_reached.set()
-            return await real_repo.fetch_secret(
+            return await real_repo.fetch_authorized_secret_for_user(
                 scope_type,
                 scope_id,
+                authorized_user_id,
                 provider,
-                include_revoked=include_revoked,
             )
 
     async def get_gated_repo():

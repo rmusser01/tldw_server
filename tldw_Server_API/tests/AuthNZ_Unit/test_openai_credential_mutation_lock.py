@@ -471,6 +471,29 @@ def test_public_oauth_generation_is_opaque_access_token_only_and_log_safe():
     assert secret not in "".join(log_messages)
 
 
+@pytest.mark.asyncio
+async def test_sqlite_file_lock_creates_configured_directory(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    lock_dir = tmp_path / "nested" / "locks"
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_LOCK_BACKEND", "db")
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_LOCK_DIR", str(lock_dir))
+
+    class _SqlitePool:
+        backend_type = "sqlite"
+
+    async def _get_db_pool():
+        return _SqlitePool()
+
+    monkeypatch.setattr(byok_runtime, "get_db_pool", _get_db_pool)
+
+    async with byok_runtime.openai_credential_mutation_lock(
+        user_id=20,
+        provider="openai",
+    ):
+        assert lock_dir.is_dir()
+
+
 def test_sqlite_file_lock_serializes_independent_event_loops(monkeypatch, tmp_path):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 

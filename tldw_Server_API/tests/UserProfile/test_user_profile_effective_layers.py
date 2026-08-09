@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     create_team,
 )
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _execute_membership_scope_sql,
     _mint_profile_user_sql,
     _profile_user_connection_identity,
     _revoke_profile_user_sql,
@@ -311,16 +312,20 @@ def test_inactive_memberships_do_not_contribute_inherited_overrides(
                 )
 
                 async with pool.transaction() as conn:
-                    await conn.execute(
-                        "UPDATE org_members SET status = 'inactive' "
+                    await _execute_membership_scope_sql(
+                        conn,
+                        "UPDATE main.org_members SET status = 'inactive' "
                         "WHERE org_id = ? AND user_id = ?",
                         (inactive_org_id, user_id),
+                        backend="sqlite",
                     )
-                    await conn.execute(
-                        "UPDATE team_members SET status = 'inactive' "
+                    await _execute_membership_scope_sql(
+                        conn,
+                        "UPDATE main.team_members SET status = 'inactive' "
                         "WHERE user_id = ? AND team_id IN "
-                        "(SELECT id FROM teams WHERE org_id = ?)",
+                        "(SELECT id FROM main.teams WHERE org_id = ?)",
                         (user_id, inactive_org_id),
+                        backend="sqlite",
                     )
                     profile_anchor_update = _mint_profile_user_sql(
                         "UPDATE main.users SET profile_version = ? WHERE id = ?",
