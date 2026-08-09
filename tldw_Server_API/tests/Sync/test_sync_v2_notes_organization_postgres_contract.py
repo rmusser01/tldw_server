@@ -12,6 +12,10 @@ from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store impor
     NotesOrganizationSyncStore,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
+    NotesOrganizationMaterializer,
+)
+from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 
 pytestmark = pytest.mark.unit
@@ -36,6 +40,83 @@ class _PostgresMigrationBackend:
         if normalized.startswith("SELECT COUNT(*)"):
             return QueryResult(rows=[{"count": 0}], rowcount=1)
         return QueryResult(rows=[], rowcount=1)
+
+
+class _CursorResult:
+    def __init__(self, row: dict[str, object] | None = None) -> None:
+        self._row = row
+
+    def fetchone(self) -> dict[str, object] | None:
+        return self._row
+
+
+class _PostgresProjectionConnection:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.inserted = False
+
+    def execute(self, statement: str, params: tuple[object, ...] = ()) -> _CursorResult:
+        normalized = " ".join(statement.split())
+        self.events.append(f"sql:{normalized}")
+        if normalized.startswith("SELECT * FROM chacha_keywords WHERE sync_id"):
+            if not self.inserted:
+                return _CursorResult()
+            return _CursorResult(
+                {
+                    "id": 41,
+                    "sync_id": str(params[0]),
+                    "keyword": "Portable",
+                    "parent_id": None,
+                    "deleted": False,
+                    "version": 1,
+                }
+            )
+        if normalized.startswith("SELECT id, sync_id FROM chacha_keywords"):
+            return _CursorResult()
+        if normalized.startswith("INSERT INTO chacha_keywords"):
+            self.inserted = True
+        return _CursorResult()
+
+
+class _PostgresProjectionDB:
+    backend_type = BackendType.POSTGRESQL
+    client_id = "owner-1"
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.connection = _PostgresProjectionConnection(events)
+
+    @contextmanager
+    def transaction(self):
+        self.events.append("product:begin")
+        yield self.connection
+        self.events.append("product:commit")
+
+    @staticmethod
+    def _map_table_for_backend(table: str) -> str:
+        return "chacha_keywords" if table == "keywords" else table
+
+    @staticmethod
+    def _get_current_utc_timestamp_iso() -> str:
+        return "2026-08-08T00:00:00+00:00"
+
+
+class _SyncApplyStore:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.state = None
+
+    def get_object_state(self, *args):
+        self.events.append("sync:read-state")
+        return self.state
+
+    def upsert_object_state(self, state):
+        self.events.append("sync:write-state")
+        self.state = state
+        return state
+
+    def mark_envelope_apply_status(self, server_cursor: int, *, apply_status: str, **kwargs):
+        self.events.append(f"sync:mark-{apply_status}")
 
 
 def test_postgres_v55_migration_uses_transactional_nullable_backfill_validation_and_constraints() -> None:
@@ -181,3 +262,42 @@ def test_projection_apply_methods_use_one_transaction_and_snapshot_all_domains(
         )
     finally:
         db.close_connection()
+
+
+def test_postgres_materializer_commits_product_sql_before_sync_apply_state() -> None:
+    events: list[str] = []
+    note_db = _PostgresProjectionDB(events)
+    sync_store = _SyncApplyStore(events)
+    envelope = SyncEnvelope(
+        dataset_id="dataset-1",
+        client_envelope_id="env-keyword",
+        domain="notes.keyword",
+        operation="upsert",
+        object_id="11111111-1111-4111-8111-111111111111",
+        server_cursor=7,
+        object_revision=1,
+        payload={"keyword": "Portable"},
+        payload_hash="sha256:portable",
+        status="accepted",
+    )
+
+    result = NotesOrganizationMaterializer(
+        note_db,  # type: ignore[arg-type] - server-free PostgreSQL persistence contract.
+        "notes.keyword",
+    ).apply(
+        envelope,
+        store=sync_store,  # type: ignore[arg-type] - focused Sync ordering recorder.
+    )
+
+    assert result.status == "applied"
+    insert_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.startswith("sql:INSERT INTO chacha_keywords")
+    )
+    assert events.index("product:begin") < insert_index < events.index("product:commit")
+    assert events.index("product:commit") < events.index("sync:write-state")
+    assert events.index("sync:write-state") < events.index("sync:mark-applied")
+    insert_event = events[insert_index]
+    assert "sync_id, keyword" in insert_event
+    assert "deleted" in insert_event

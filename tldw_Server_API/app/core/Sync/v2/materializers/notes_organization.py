@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+"""Materialize Notes organization Sync envelopes into one user's ChaChaNotes DB."""
+
+from dataclasses import dataclass
+
+from loguru import logger
+
+from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+    NotesOrganizationSyncStore,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+from ..models import (
+    NOTES_ORGANIZATION_DOMAINS,
+    SyncDomain,
+    SyncEnvelope,
+    SyncObjectState,
+)
+from ..notes_organization import (
+    parse_notes_organization_payload,
+    validate_organization_object_id,
+)
+from ..store import SyncV2Store
+from .base import MaterializationResult
+
+_RESOURCE_DOMAINS = frozenset(
+    {"notes.keyword", "notes.keyword_collection", "notes.folder"}
+)
+_ERROR_CODE = "notes_organization_projection_failed"
+
+
+@dataclass(slots=True)
+class NotesOrganizationMaterializer:
+    """Apply one Notes organization domain into a user-bound product database."""
+
+    note_db: CharactersRAGDB
+    domain: SyncDomain
+
+    def __post_init__(self) -> None:
+        if self.domain not in NOTES_ORGANIZATION_DOMAINS:
+            raise ValueError(f"Unsupported Notes organization materializer domain: {self.domain}")
+
+    def apply(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store,
+    ) -> MaterializationResult:
+        """Project one accepted organization envelope and record apply state."""
+
+        if envelope.domain != self.domain:
+            return MaterializationResult(status="skipped")
+        if envelope.server_cursor is None:
+            return MaterializationResult(
+                status="failed",
+                error_code=_ERROR_CODE,
+                message="Stored Sync envelope is missing a server cursor",
+            )
+
+        current_state = store.get_object_state(
+            envelope.dataset_id,
+            envelope.domain,
+            envelope.object_id,
+        )
+        if self._is_already_materialized(envelope, current_state):
+            return self._mark_applied(envelope, store=store)
+
+        conflict = self._detect_conflict(envelope, current_state)
+        if conflict is not None:
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="conflict",
+                apply_error_code="whole_object_conflict",
+                apply_error_message=conflict.message,
+            )
+            return conflict
+
+        try:
+            if envelope.schema_version != 1:
+                raise ValueError("Notes organization schema version must be 1")
+            payload = parse_notes_organization_payload(
+                envelope.domain,
+                envelope.operation,
+                envelope.payload,
+            )
+            validate_organization_object_id(envelope.domain, envelope.object_id, payload)
+
+            projection = NotesOrganizationSyncStore(self.note_db)
+            if envelope.domain in _RESOURCE_DOMAINS:
+                projection.apply_resource(
+                    domain=envelope.domain,
+                    object_id=envelope.object_id,
+                    operation=envelope.operation,
+                    payload=payload,
+                )
+            else:
+                projection.apply_relationship(
+                    domain=envelope.domain,
+                    object_id=envelope.object_id,
+                    operation=envelope.operation,
+                    payload=payload,
+                    routing_metadata={},
+                )
+
+            object_revision = self._next_object_revision(envelope, current_state)
+            store.upsert_object_state(
+                SyncObjectState(
+                    dataset_id=envelope.dataset_id,
+                    domain=envelope.domain,
+                    object_id=envelope.object_id,
+                    object_revision=object_revision,
+                    object_hash=envelope.payload_hash or "",
+                    latest_server_cursor=envelope.server_cursor,
+                    deleted=envelope.operation == "tombstone",
+                )
+            )
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="applied",
+            )
+        except Exception as exc:  # noqa: BLE001 - every projection failure is replayable state.
+            message = _safe_error_message(exc)
+            logger.warning(
+                "Failed to materialize {} envelope {} for object {}: {}",
+                envelope.domain,
+                envelope.client_envelope_id,
+                envelope.object_id,
+                type(exc).__name__,
+            )
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code=_ERROR_CODE,
+                apply_error_message=message,
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code=_ERROR_CODE,
+                message=message,
+            )
+        return MaterializationResult(status="applied")
+
+    def _mark_applied(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store,
+    ) -> MaterializationResult:
+        try:
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="applied",
+            )
+        except Exception as exc:  # noqa: BLE001 - apply state failures must remain replayable.
+            message = _safe_error_message(exc)
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code=_ERROR_CODE,
+                apply_error_message=message,
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code=_ERROR_CODE,
+                message=message,
+            )
+        return MaterializationResult(status="applied")
+
+    @staticmethod
+    def _next_object_revision(
+        envelope: SyncEnvelope,
+        current_state: SyncObjectState | None,
+    ) -> int:
+        if envelope.object_revision is not None:
+            return envelope.object_revision
+        return 1 if current_state is None else current_state.object_revision + 1
+
+    @staticmethod
+    def _is_already_materialized(
+        envelope: SyncEnvelope,
+        current_state: SyncObjectState | None,
+    ) -> bool:
+        if current_state is None or current_state.latest_server_cursor != envelope.server_cursor:
+            return False
+        if (
+            envelope.object_revision is not None
+            and current_state.object_revision != envelope.object_revision
+        ):
+            return False
+        return (
+            current_state.object_hash == (envelope.payload_hash or "")
+            and current_state.deleted == (envelope.operation == "tombstone")
+        )
+
+    @staticmethod
+    def _detect_conflict(
+        envelope: SyncEnvelope,
+        current_state: SyncObjectState | None,
+    ) -> MaterializationResult | None:
+        base_values = (
+            envelope.base_server_cursor,
+            envelope.base_object_revision,
+            envelope.base_object_hash,
+        )
+        has_base = all(value is not None for value in base_values)
+        restore_requested = (
+            envelope.operation == "upsert"
+            and envelope.routing_metadata.get("restore_intent") is True
+        )
+        if current_state is None:
+            if restore_requested or any(value is not None for value in base_values):
+                return _conflict_result("missing_server_object", envelope, None)
+            return None
+        if not has_base:
+            return _conflict_result("missing_base_state", envelope, current_state)
+        base_matches = (
+            envelope.base_server_cursor == current_state.latest_server_cursor
+            and envelope.base_object_revision == current_state.object_revision
+            and envelope.base_object_hash == current_state.object_hash
+        )
+        if restore_requested and not current_state.deleted:
+            return _conflict_result("restore_target_not_deleted", envelope, current_state)
+        if restore_requested and current_state.deleted and base_matches:
+            return None
+        if envelope.operation == "upsert" and current_state.deleted:
+            return _conflict_result("server_object_deleted", envelope, current_state)
+        if not base_matches:
+            return _conflict_result("stale_base_state", envelope, current_state)
+        return None
+
+
+def _conflict_result(
+    reason: str,
+    envelope: SyncEnvelope,
+    current_state: SyncObjectState | None,
+) -> MaterializationResult:
+    metadata: dict[str, object] = {
+        "reason": reason,
+        "client_base_object_revision": envelope.base_object_revision,
+        "client_base_object_hash": envelope.base_object_hash,
+        "client_base_server_cursor": envelope.base_server_cursor,
+    }
+    if current_state is not None:
+        metadata.update(
+            {
+                "server_object_revision": current_state.object_revision,
+                "server_object_hash": current_state.object_hash,
+                "server_cursor": current_state.latest_server_cursor,
+                "server_deleted": current_state.deleted,
+            }
+        )
+    return MaterializationResult(
+        status="conflict",
+        conflict_type="whole_object_conflict",
+        message=f"{envelope.domain} base state does not match the current server projection",
+        metadata=metadata,
+    )
+
+
+def _safe_error_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    return message[:200] if message else type(exc).__name__
+
+
+__all__ = ["NotesOrganizationMaterializer"]

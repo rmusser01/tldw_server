@@ -3,6 +3,7 @@ from __future__ import annotations
 """Sync v2 service composition helpers shared by HTTP and non-HTTP entrypoints."""
 
 import os
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,6 +20,7 @@ from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegist
 from .blob_store import LocalSyncBlobStore
 from .domain_adapters.media import MediaMetadataAdapter
 from .domain_adapters.notes import NotesDomainAdapter
+from .domain_adapters.notes_organization import NotesOrganizationDomainAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
@@ -27,13 +29,17 @@ from .materializers import (
     ChatMessageMaterializer,
     MediaMetadataMaterializer,
     NotesMaterializer,
+    NotesOrganizationMaterializer,
     SourceCacheMaterializer,
+    SyncMaterializer,
 )
 from .models import (
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     WORKSPACE_SYNC_DOMAINS,
+    SyncDomain,
 )
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
@@ -58,6 +64,7 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [WorkspacesDomainAdapter(domain=domain) for domain in WORKSPACE_SYNC_DOMAINS]
         + [SourceCacheAdapter(domain=domain) for domain in SOURCE_CACHE_SYNC_DOMAINS]
         + [MediaMetadataAdapter(domain=domain) for domain in MEDIA_SYNC_DOMAINS]
+        + [NotesOrganizationDomainAdapter(domain=domain) for domain in NOTES_ORGANIZATION_DOMAINS]
     )
 
 
@@ -69,23 +76,56 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         os.getenv("SYNC_V2_DATABASE_URL", "").strip(),
         os.getenv("SYNC_V2_SQLITE_PATH", "").strip(),
     )
+    note_db = _chacha_notes_db_for_user(user_id)
+    adapters = default_sync_v2_registry()
+    settings = _sync_v2_settings_from_env()
+    materializers: dict[SyncDomain, SyncMaterializer] = {
+        "attachment.ref": AttachmentRefMaterializer(),
+        "chat.conversation": ChatConversationMaterializer(note_db),
+        "chat.message": ChatMessageMaterializer(note_db),
+        "notes.note": NotesMaterializer(note_db),
+        "source_cache.entry": SourceCacheMaterializer(),
+        "media.item": MediaMetadataMaterializer(domain="media.item"),
+        "media.keyword": MediaMetadataMaterializer(domain="media.keyword"),
+        "media.keyword_link": MediaMetadataMaterializer(domain="media.keyword_link"),
+        **{
+            domain: NotesOrganizationMaterializer(note_db, domain)
+            for domain in NOTES_ORGANIZATION_DOMAINS
+        },
+    }
+    _validate_notes_organization_components(
+        adapters=adapters,
+        materializers=materializers,
+        advertised_domains=settings.supported_domains,
+    )
     return SyncV2Service(
         store=store,
-        adapters=default_sync_v2_registry(),
-        materializers={
-            "attachment.ref": AttachmentRefMaterializer(),
-            "chat.conversation": ChatConversationMaterializer(_chacha_notes_db_for_user(user_id)),
-            "chat.message": ChatMessageMaterializer(_chacha_notes_db_for_user(user_id)),
-            "notes.note": NotesMaterializer(_chacha_notes_db_for_user(user_id)),
-            "source_cache.entry": SourceCacheMaterializer(),
-            "media.item": MediaMetadataMaterializer(domain="media.item"),
-            "media.keyword": MediaMetadataMaterializer(domain="media.keyword"),
-            "media.keyword_link": MediaMetadataMaterializer(domain="media.keyword_link"),
-        },
+        adapters=adapters,
+        materializers=materializers,
         blob_store=_sync_v2_blob_store_for_user(user_id),
-        settings=_sync_v2_settings_from_env(),
+        settings=settings,
         workspace_access_checker=_workspace_access_checker,
     )
+
+
+def _validate_notes_organization_components(
+    *,
+    adapters: SyncAdapterRegistry,
+    materializers: Mapping[SyncDomain, SyncMaterializer],
+    advertised_domains: list[SyncDomain],
+) -> None:
+    """Fail closed when an advertised organization domain is not fully wired."""
+
+    for domain in NOTES_ORGANIZATION_DOMAINS:
+        if domain not in advertised_domains:
+            continue
+        if not adapters.has_domain(domain) or not isinstance(
+            adapters.get(domain), NotesOrganizationDomainAdapter
+        ):
+            raise RuntimeError(f"Advertised Sync domain has no strict adapter: {domain}")
+        materializer = materializers.get(domain)
+        if not isinstance(materializer, NotesOrganizationMaterializer) or materializer.domain != domain:
+            raise RuntimeError(f"Advertised Sync domain has no user-bound materializer: {domain}")
 
 
 def sync_v2_storage_exists_for_user(user_id: str) -> bool:

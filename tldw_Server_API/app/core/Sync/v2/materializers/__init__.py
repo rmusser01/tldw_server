@@ -7,6 +7,7 @@ from .base import MaterializationResult, SyncMaterializer
 from .chat import ChatConversationMaterializer, ChatMessageMaterializer
 from .media_metadata import MediaMetadataMaterializer
 from .notes import NotesMaterializer
+from .notes_organization import NotesOrganizationMaterializer
 from .source_cache import SourceCacheMaterializer
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "MaterializationResult",
     "MediaMetadataMaterializer",
     "NotesMaterializer",
+    "NotesOrganizationMaterializer",
     "SourceCacheMaterializer",
     "SyncMaterializer",
 ]
