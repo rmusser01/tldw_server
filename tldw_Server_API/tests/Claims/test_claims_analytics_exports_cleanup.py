@@ -58,6 +58,8 @@ class MaintenanceDB:
         statuses: tuple[str, ...] | None = None,
         job_id_missing: bool | None = None,
         updated_before: str | None = None,
+        export_id_after: str | None = None,
+        export_id_at_or_before: str | None = None,
     ) -> list[dict[str, Any]]:
         self.list_calls.append(
             {
@@ -66,6 +68,8 @@ class MaintenanceDB:
                 "statuses": statuses,
                 "job_id_missing": job_id_missing,
                 "updated_before": updated_before,
+                "export_id_after": export_id_after,
+                "export_id_at_or_before": export_id_at_or_before,
             }
         )
         rows = [row for row in self.rows.values() if row["user_id"] == user_id]
@@ -77,7 +81,14 @@ class MaintenanceDB:
             rows = [row for row in rows if row["job_id"] is not None]
         if updated_before is not None:
             rows = [row for row in rows if row["updated_at"] < updated_before]
-        rows.sort(key=lambda row: (row["updated_at"], row["export_id"]))
+        if export_id_after is not None:
+            rows = [row for row in rows if row["export_id"] > export_id_after]
+        if export_id_at_or_before is not None:
+            rows = [row for row in rows if row["export_id"] <= export_id_at_or_before]
+        if export_id_after is not None or export_id_at_or_before is not None:
+            rows.sort(key=lambda row: row["export_id"])
+        else:
+            rows.sort(key=lambda row: (row["updated_at"], row["export_id"]))
         return [dict(row) for row in rows[:limit]]
 
     def attach_claims_analytics_export_job(self, *, export_id: str, user_id: str, job_id: int) -> bool:
@@ -248,6 +259,8 @@ def test_reconcile_repairs_exact_active_and_archived_jobs_before_grace(
             "statuses": ("queued",),
             "job_id_missing": True,
             "updated_before": None,
+            "export_id_after": None,
+            "export_id_at_or_before": None,
         }
     ]
     assert {db.rows[active["export_id"]]["job_id"], db.rows[archived["export_id"]]["job_id"]} == {41, 42}
@@ -419,14 +432,35 @@ def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> No
             "updated_before": cutoff,
         }
     ]
+    anchor = exports._cleanup_rotation_anchor(owner_user_id="7", now=NOW)
     assert db.list_calls == [
         {
             "user_id": "7",
-            "limit": 100,
-            "statuses": ("ready", "failed"),
+            "limit": 50,
+            "statuses": ("ready",),
             "job_id_missing": None,
             "updated_before": cutoff,
-        }
+            "export_id_after": None,
+            "export_id_at_or_before": None,
+        },
+        {
+            "user_id": "7",
+            "limit": 50,
+            "statuses": ("failed",),
+            "job_id_missing": None,
+            "updated_before": cutoff,
+            "export_id_after": anchor,
+            "export_id_at_or_before": None,
+        },
+        {
+            "user_id": "7",
+            "limit": 50,
+            "statuses": ("failed",),
+            "job_id_missing": None,
+            "updated_before": cutoff,
+            "export_id_after": None,
+            "export_id_at_or_before": anchor,
+        },
     ]
 
 
@@ -454,6 +488,52 @@ def test_cleanup_candidate_filters_prevent_active_rows_from_consuming_limit() ->
     assert deleted == 1
     assert ready["export_id"] not in db.rows
     assert all(row["export_id"] in db.rows for row in irrelevant)
+
+
+def test_cleanup_rotates_failed_page_past_older_uncertain_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    anchor = f"{50:032x}"
+    monkeypatch.setattr(exports, "_cleanup_rotation_anchor", lambda **_: anchor)
+    uncertain = [
+        _artifact(
+            index,
+            status="failed",
+            job_id=200 + index,
+            updated_seconds_ago=7200,
+        )
+        for index in (1, 2, 3)
+    ]
+    terminal = _artifact(
+        100,
+        status="failed",
+        job_id=300,
+        updated_seconds_ago=3601,
+    )
+    db = MaintenanceDB([*uncertain, terminal])
+    manager = FakeJobManager(
+        jobs_by_id={
+            **{row["job_id"]: {"status": "processing"} for row in uncertain},
+            300: {"status": "completed"},
+        }
+    )
+
+    deleted = cleanup_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=manager,
+        now=NOW,
+        retention_hours=1,
+        limit=4,
+    )
+
+    assert deleted == 1
+    assert terminal["export_id"] not in db.rows
+    assert all(row["export_id"] in db.rows for row in uncertain)
+    assert manager.batch_calls[0]["job_ids"] == [300, 201]
+    failed_calls = [call for call in db.list_calls if call["statuses"] == ("failed",)]
+    assert [call["export_id_after"] for call in failed_calls] == [anchor, None]
+    assert [call["export_id_at_or_before"] for call in failed_calls] == [None, anchor]
 
 
 def test_cleanup_preserves_cutoff_active_and_status_uncertainty() -> None:

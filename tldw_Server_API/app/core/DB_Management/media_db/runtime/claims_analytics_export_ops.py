@@ -297,6 +297,8 @@ def list_claims_analytics_exports_for_maintenance(
     statuses: Sequence[str] | None = None,
     job_id_missing: bool | None = None,
     updated_before: str | None = None,
+    export_id_after: str | None = None,
+    export_id_at_or_before: str | None = None,
 ) -> list[dict[str, Any]]:
     try:
         limit = int(limit)
@@ -322,12 +324,25 @@ def list_claims_analytics_exports_for_maintenance(
     if updated_before is not None:
         conditions.append("updated_at < ?")
         params.append(str(updated_before))
+    if export_id_after is not None and export_id_at_or_before is not None:
+        return []
+    if export_id_after is not None:
+        conditions.append("export_id > ?")
+        params.append(str(export_id_after))
+    elif export_id_at_or_before is not None:
+        conditions.append("export_id <= ?")
+        params.append(str(export_id_at_or_before))
+    order_by = (
+        "export_id ASC"
+        if export_id_after is not None or export_id_at_or_before is not None
+        else "updated_at ASC, export_id ASC"
+    )
     query = (
         "SELECT export_id, user_id, format, status, filters_json, pagination_json, "  # nosec B608
         "error_message, job_id, error_code, snapshot_at, created_at, updated_at "
         "FROM claims_analytics_exports WHERE "
         + " AND ".join(conditions)
-        + " ORDER BY updated_at ASC, export_id ASC LIMIT ?"
+        + f" ORDER BY {order_by} LIMIT ?"
     )
     params.append(limit)
     rows = self.execute_query(query, tuple(params)).fetchall()

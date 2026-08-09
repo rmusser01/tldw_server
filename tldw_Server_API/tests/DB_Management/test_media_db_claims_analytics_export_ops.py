@@ -706,6 +706,39 @@ def test_maintenance_list_filters_cleanup_candidates_before_limit(tmp_path: Path
         db.close_connection()
 
 
+def test_maintenance_list_supports_bounded_export_id_rotation(tmp_path: Path) -> None:
+    db = _make_db(tmp_path, "claims-analytics-maintenance-rotation.db")
+    try:
+        for export_number in (1, 2, 100, 101):
+            _seed_export(
+                db,
+                export_id=f"{export_number:032x}",
+                status="failed",
+            )
+
+        anchor = f"{50:032x}"
+        after = db.list_claims_analytics_exports_for_maintenance(
+            user_id="1",
+            statuses=("failed",),
+            export_id_after=anchor,
+            limit=1,
+        )
+        wrapped = db.list_claims_analytics_exports_for_maintenance(
+            user_id="1",
+            statuses=("failed",),
+            export_id_at_or_before=anchor,
+            limit=2,
+        )
+
+        assert [row["export_id"] for row in after] == [f"{100:032x}"]
+        assert [row["export_id"] for row in wrapped] == [
+            f"{1:032x}",
+            f"{2:032x}",
+        ]
+    finally:
+        db.close_connection()
+
+
 def test_delete_claims_analytics_exports_is_exact_owner_scoped_and_uses_updated_at(
     tmp_path: Path,
 ) -> None:

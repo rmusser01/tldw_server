@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import math
@@ -18,6 +19,7 @@ from tldw_Server_API.app.core.config import settings
 
 DEFAULT_EXPORT_MAX_BYTES = 10_485_760
 DEFAULT_EXPORT_ORPHAN_GRACE_SEC = 300
+CLEANUP_ROTATION_SECONDS = 300
 EXPORT_SCAN_PAGE_SIZE = 1000
 EXPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 CSV_COLUMNS = ("id", "event_type", "severity", "created_at", "payload_json")
@@ -1113,6 +1115,20 @@ def _cleanup_job_status(
     return status if isinstance(status, str) else None
 
 
+def _cleanup_rotation_anchor(*, owner_user_id: str, now: datetime) -> str:
+    """Return a stable rotating anchor for bounded failed-artifact scans."""
+    bucket = int(now.timestamp()) // CLEANUP_ROTATION_SECONDS
+    seed = f"{owner_user_id}:{bucket}".encode("ascii")
+    return hashlib.sha256(seed).hexdigest()[:32]
+
+
+def _cleanup_page_limits(limit: Any) -> tuple[int, int]:
+    bounded = _maintenance_limit(limit)
+    ready_limit = max(1, bounded // 2)
+    failed_limit = max(1, bounded - ready_limit)
+    return ready_limit, failed_limit
+
+
 def cleanup_export_artifacts(
     db: Any,
     *,
@@ -1130,12 +1146,33 @@ def cleanup_export_artifacts(
         return 0
     cutoff = current_time - timedelta(seconds=retention_seconds)
     cutoff_text = _format_utc(cutoff)
-    rows = db.list_claims_analytics_exports_for_maintenance(
+    ready_limit, failed_limit = _cleanup_page_limits(limit)
+    ready_rows = db.list_claims_analytics_exports_for_maintenance(
         user_id=owner,
-        limit=_maintenance_limit(limit),
-        statuses=("ready", "failed"),
+        limit=ready_limit,
+        statuses=("ready",),
         updated_before=cutoff_text,
     )
+    anchor = _cleanup_rotation_anchor(owner_user_id=owner, now=current_time)
+    failed_rows = db.list_claims_analytics_exports_for_maintenance(
+        user_id=owner,
+        limit=failed_limit,
+        statuses=("failed",),
+        updated_before=cutoff_text,
+        export_id_after=anchor,
+    )
+    remaining = failed_limit - len(failed_rows)
+    if remaining > 0:
+        failed_rows.extend(
+            db.list_claims_analytics_exports_for_maintenance(
+                user_id=owner,
+                limit=remaining,
+                statuses=("failed",),
+                updated_before=cutoff_text,
+                export_id_at_or_before=anchor,
+            )
+        )
+    rows = [*ready_rows, *failed_rows]
 
     old_rows: list[dict[str, Any]] = []
     for row in rows:
