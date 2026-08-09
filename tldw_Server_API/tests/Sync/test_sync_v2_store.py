@@ -103,6 +103,25 @@ def _envelope(**overrides) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+def _mutation_group_envelopes(
+    *,
+    mutation_group_id: str = "mutation-group-1",
+    mutation_plan_hash: str = "a" * 64,
+) -> list[SyncEnvelopeCreate]:
+    return [
+        _envelope(
+            client_envelope_id=f"env-group-{step}",
+            object_id=f"note-{step + 1}",
+            payload_hash=f"sha256:note-{step + 1}",
+            mutation_group_id=mutation_group_id,
+            mutation_step=step,
+            mutation_step_count=3,
+            mutation_plan_hash=mutation_plan_hash,
+        )
+        for step in range(3)
+    ]
+
+
 def _conflict(**overrides) -> SyncConflictCreate:
     payload = {
         "conflict_id": "conflict-1",
@@ -468,7 +487,9 @@ def test_blob_chunks_and_completion_validate_idempotency_and_dedupe(
     assert quota.reserved_blob_bytes == 0
 
 
-def test_sync_envelope_schema_contains_m1_columns_and_indexes(sync_store: SyncV2Store):
+def test_sync_envelope_mutation_group_schema_contains_m1_columns_and_indexes(
+    sync_store: SyncV2Store,
+):
     envelope_columns = {
         column["name"]
         for column in sync_store.db.backend.get_table_info("sync_envelopes")
@@ -501,6 +522,10 @@ def test_sync_envelope_schema_contains_m1_columns_and_indexes(sync_store: SyncV2
         "apply_error_message",
         "applied_at",
         "client_profile_id",
+        "mutation_group_id",
+        "mutation_step",
+        "mutation_step_count",
+        "mutation_plan_hash",
     }.issubset(envelope_columns)
     assert {
         "dataset_id",
@@ -518,10 +543,12 @@ def test_sync_envelope_schema_contains_m1_columns_and_indexes(sync_store: SyncV2
         "idx_sync_envelopes_dataset_device_client_sequence",
         "idx_sync_envelopes_payload_hash",
         "idx_sync_envelopes_failed_apply",
+        "uq_sync_envelopes_dataset_mutation_group_step",
+        "idx_sync_envelopes_dataset_mutation_group_step",
     }.issubset(indexes)
 
 
-def test_sync_database_migrates_pre_m1_sqlite_schema_before_index_creation(
+def test_sync_database_migrates_pre_m1_sqlite_schema_for_mutation_groups_before_index_creation(
     tmp_path: Path,
 ):
     db_path = tmp_path / "pre_m1_sync_v2.db"
@@ -566,8 +593,14 @@ def test_sync_database_migrates_pre_m1_sqlite_schema_before_index_creation(
 
     assert "client_sequence" in envelope_columns
     assert "apply_status" in envelope_columns
+    assert "mutation_group_id" in envelope_columns
+    assert "mutation_step" in envelope_columns
+    assert "mutation_step_count" in envelope_columns
+    assert "mutation_plan_hash" in envelope_columns
     assert "idx_sync_envelopes_dataset_device_client_sequence" in indexes
     assert "idx_sync_envelopes_failed_apply" in indexes
+    assert "uq_sync_envelopes_dataset_mutation_group_step" in indexes
+    assert "idx_sync_envelopes_dataset_mutation_group_step" in indexes
 
 
 def test_sync_timestamps_are_timezone_aware_utc():
@@ -990,6 +1023,96 @@ def test_insert_envelope_persists_m1_fields_and_aliases(sync_store: SyncV2Store)
     assert stored.deleted is True
     assert stored.encryption_metadata == {"policy": "server_trusted_v1", "key": "server"}
     assert stored.apply_status == "pending"
+
+
+def test_insert_envelopes_atomic_persists_complete_ordered_mutation_group(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+
+    inserted = sync_store.insert_envelopes_atomic(_mutation_group_envelopes())
+
+    assert [envelope.mutation_step for envelope in inserted] == [0, 1, 2]
+    assert [envelope.server_cursor for envelope in inserted] == [1, 2, 3]
+    assert all(envelope.mutation_step_count == 3 for envelope in inserted)
+    assert all(envelope.mutation_plan_hash == "a" * 64 for envelope in inserted)
+    assert sync_store.list_mutation_group("dataset-1", "mutation-group-1") == inserted
+
+
+def test_insert_envelopes_atomic_returns_identical_mutation_group_replay(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    envelopes = _mutation_group_envelopes()
+
+    first = sync_store.insert_envelopes_atomic(envelopes)
+    replay = sync_store.insert_envelopes_atomic(envelopes)
+
+    assert replay == first
+    assert sync_store.list_envelopes_after("dataset-1", 0) == first
+
+
+def test_insert_envelopes_atomic_rejects_mutation_group_replay_drift(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    sync_store.insert_envelopes_atomic(_mutation_group_envelopes())
+    changed = _mutation_group_envelopes()
+    changed[1] = _envelope(
+        client_envelope_id="env-group-1",
+        object_id="note-2",
+        payload_hash="sha256:changed",
+        mutation_group_id="mutation-group-1",
+        mutation_step=1,
+        mutation_step_count=3,
+        mutation_plan_hash="a" * 64,
+    )
+
+    with pytest.raises(
+        SyncIdempotencyConflictError,
+        match="Sync mutation group idempotency key was reused with different content",
+    ):
+        sync_store.insert_envelopes_atomic(changed)
+
+
+def test_insert_envelopes_atomic_rolls_back_mutation_group_after_step_two_failure(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    original_execute = sync_store.db.execute
+    insert_calls = 0
+
+    def fail_second_envelope_insert(query, params=None, *, connection=None):
+        nonlocal insert_calls
+        if query.lstrip().startswith("INSERT INTO sync_envelopes"):
+            insert_calls += 1
+            if insert_calls == 2:
+                raise RuntimeError("injected mutation-group step 2 failure")
+        return original_execute(query, params, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "execute", fail_second_envelope_insert)
+
+    with pytest.raises(RuntimeError, match="injected mutation-group step 2 failure"):
+        sync_store.insert_envelopes_atomic(_mutation_group_envelopes())
+
+    assert sync_store.list_mutation_group("dataset-1", "mutation-group-1") == []
+    assert sync_store.list_envelopes_after("dataset-1", 0) == []
+
+
+def test_insert_envelopes_atomic_preserves_legacy_single_mutation_group_absence_behavior(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+
+    inserted = sync_store.insert_envelope(_envelope(client_envelope_id="env-legacy"))
+    replay = sync_store.insert_envelope(_envelope(client_envelope_id="env-legacy"))
+
+    assert replay == inserted
+    assert inserted.mutation_group_id is None
+    assert inserted.mutation_step is None
+    assert inserted.mutation_step_count is None
+    assert inserted.mutation_plan_hash is None
 
 
 def test_insert_envelope_is_idempotent_by_dataset_device_and_client_sequence(

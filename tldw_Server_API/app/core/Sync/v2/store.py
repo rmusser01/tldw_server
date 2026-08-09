@@ -185,6 +185,23 @@ class SyncV2Store:
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope)
 
+    def insert_envelopes_atomic(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+    ) -> list[SyncEnvelope]:
+        """Insert one complete validated group or return its exact stored replay."""
+
+        return self.db.insert_envelopes_atomic(envelopes)
+
+    def list_mutation_group(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+    ) -> list[SyncEnvelope]:
+        """Return a complete mutation group ordered by zero-based step."""
+
+        return self.db.list_mutation_group(dataset_id, mutation_group_id)
+
     def get_existing_envelope_for_idempotency(
         self,
         envelope: SyncEnvelopeCreate,

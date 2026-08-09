@@ -599,6 +599,128 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
     assert envelope.encryption_metadata == {"policy": "server_trusted_v1"}
 
 
+def test_core_sync_mutation_group_metadata_round_trips() -> None:
+    expected_sha256 = "a" * 64
+    create = core_sync_models.SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id="env-group-0",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-1",
+        mutation_group_id="mutation-group-1",
+        mutation_step=0,
+        mutation_step_count=3,
+        mutation_plan_hash=expected_sha256,
+    )
+    envelope = CoreSyncEnvelope(
+        dataset_id=create.dataset_id,
+        client_envelope_id=create.client_envelope_id,
+        domain=create.domain,
+        operation=create.operation,
+        object_id=create.object_id,
+        server_cursor=101,
+        mutation_group_id=create.mutation_group_id,
+        mutation_step=create.mutation_step,
+        mutation_step_count=create.mutation_step_count,
+        mutation_plan_hash=create.mutation_plan_hash,
+    )
+
+    assert envelope.mutation_group_id == "mutation-group-1"
+    assert envelope.mutation_step == 0
+    assert envelope.mutation_step_count == 3
+    assert envelope.mutation_plan_hash == expected_sha256
+
+
+def test_core_sync_mutation_group_metadata_allows_legacy_absence() -> None:
+    create = core_sync_models.SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id="env-legacy",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-1",
+    )
+    envelope = CoreSyncEnvelope(
+        dataset_id=create.dataset_id,
+        client_envelope_id=create.client_envelope_id,
+        domain=create.domain,
+        operation=create.operation,
+        object_id=create.object_id,
+        server_cursor=101,
+    )
+
+    assert create.mutation_group_id is None
+    assert create.mutation_step is None
+    assert create.mutation_step_count is None
+    assert create.mutation_plan_hash is None
+    assert envelope.mutation_group_id is None
+    assert envelope.mutation_step is None
+    assert envelope.mutation_step_count is None
+    assert envelope.mutation_plan_hash is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"mutation_group_id": "group-1"},
+        {
+            "mutation_group_id": "   ",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": -1,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 1,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 0,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "A" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 63,
+        },
+    ],
+)
+@pytest.mark.parametrize("stored", [False, True])
+def test_core_sync_mutation_group_metadata_rejects_partial_or_invalid_values(
+    overrides: dict[str, object],
+    stored: bool,
+) -> None:
+    values = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-group-0",
+        "domain": "notes.note",
+        "operation": "upsert",
+        "object_id": "note-1",
+        **overrides,
+    }
+    model = CoreSyncEnvelope if stored else core_sync_models.SyncEnvelopeCreate
+    if stored:
+        values["server_cursor"] = 101
+
+    with pytest.raises(ValueError, match="mutation group"):
+        model(**values)
+
+
 def test_sync_envelope_accepts_source_cache_entry_domain():
     envelope = SyncV2Envelope.model_validate(
         _m1_envelope_payload(

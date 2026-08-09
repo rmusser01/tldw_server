@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Internal storage models for Sync v2 M1."""
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -706,8 +707,18 @@ class SyncEnvelopeCreate:
     entity_version: str | int | None = None
     client_timestamp: str | None = None
     server_timestamp: str | None = None
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    mutation_plan_hash: str | None = None
 
     def __post_init__(self) -> None:
+        _validate_mutation_group_metadata(
+            mutation_group_id=self.mutation_group_id,
+            mutation_step=self.mutation_step,
+            mutation_step_count=self.mutation_step_count,
+            mutation_plan_hash=self.mutation_plan_hash,
+        )
         object_id = _coalesce_identity(self.object_id, self.entity_id, field_name="object_id")
         payload, payload_clear = _coalesce_payload(self.payload, self.payload_clear)
         object.__setattr__(self, "object_id", object_id)
@@ -777,8 +788,18 @@ class SyncEnvelope:
     entity_version: str | int | None = None
     client_timestamp: str | None = None
     server_timestamp: str | None = None
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    mutation_plan_hash: str | None = None
 
     def __post_init__(self) -> None:
+        _validate_mutation_group_metadata(
+            mutation_group_id=self.mutation_group_id,
+            mutation_step=self.mutation_step,
+            mutation_step_count=self.mutation_step_count,
+            mutation_plan_hash=self.mutation_plan_hash,
+        )
         object_id = _coalesce_identity(self.object_id, self.entity_id, field_name="object_id")
         server_cursor = self.server_cursor if self.server_cursor is not None else self.server_sequence
         if server_cursor is None:
@@ -804,6 +825,46 @@ class SyncEnvelope:
             object.__setattr__(self, "base_object_revision", self.base_version)
         if self.object_revision is None and isinstance(self.entity_version, int):
             object.__setattr__(self, "object_revision", self.entity_version)
+
+
+def _validate_mutation_group_metadata(
+    *,
+    mutation_group_id: str | None,
+    mutation_step: int | None,
+    mutation_step_count: int | None,
+    mutation_plan_hash: str | None,
+) -> None:
+    values = (
+        mutation_group_id,
+        mutation_step,
+        mutation_step_count,
+        mutation_plan_hash,
+    )
+    if all(value is None for value in values):
+        return
+    if any(value is None for value in values):
+        raise ValueError("Sync mutation group metadata must be supplied as a complete set")
+    if not isinstance(mutation_group_id, str) or not mutation_group_id.strip():
+        raise ValueError("Sync mutation group id must be a non-empty string")
+    if (
+        isinstance(mutation_step, bool)
+        or not isinstance(mutation_step, int)
+        or mutation_step < 0
+    ):
+        raise ValueError("Sync mutation group step must be a zero-based integer")
+    if (
+        isinstance(mutation_step_count, bool)
+        or not isinstance(mutation_step_count, int)
+        or mutation_step_count <= 0
+    ):
+        raise ValueError("Sync mutation group step count must be a positive integer")
+    if mutation_step >= mutation_step_count:
+        raise ValueError("Sync mutation group step must be less than its step count")
+    if (
+        not isinstance(mutation_plan_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", mutation_plan_hash) is None
+    ):
+        raise ValueError("Sync mutation group plan hash must be lowercase SHA-256 hex")
 
 
 @dataclass(frozen=True, slots=True)

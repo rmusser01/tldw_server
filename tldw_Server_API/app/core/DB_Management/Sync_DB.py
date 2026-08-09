@@ -12,7 +12,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
@@ -67,6 +66,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncObjectState,
     SyncRestoreManifestStats,
 )
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, QueryResult
 from .backends.factory import DatabaseBackendFactory
@@ -215,6 +215,10 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     device_id TEXT,
     client_profile_id TEXT,
     client_sequence INTEGER,
+    mutation_group_id TEXT,
+    mutation_step INTEGER,
+    mutation_step_count INTEGER,
+    mutation_plan_hash TEXT,
     client_timestamp TEXT,
     server_timestamp TEXT NOT NULL,
     base_server_cursor INTEGER,
@@ -254,6 +258,11 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
     ON sync_envelopes(dataset_id, device_id, server_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+    WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
     ON sync_envelopes(dataset_id, device_id, client_sequence)
     WHERE device_id IS NOT NULL AND client_sequence IS NOT NULL;
@@ -560,6 +569,10 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     device_id TEXT,
     client_profile_id TEXT,
     client_sequence BIGINT,
+    mutation_group_id TEXT,
+    mutation_step INTEGER,
+    mutation_step_count INTEGER,
+    mutation_plan_hash TEXT,
     client_timestamp TIMESTAMPTZ,
     server_timestamp TIMESTAMPTZ NOT NULL,
     base_server_cursor BIGINT,
@@ -599,6 +612,11 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
     ON sync_envelopes(dataset_id, device_id, server_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+    WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
     ON sync_envelopes(dataset_id, device_id, client_sequence)
     WHERE device_id IS NOT NULL AND client_sequence IS NOT NULL;
@@ -1057,6 +1075,10 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
             if row.get("client_sequence") is not None
             else None
         ),
+        mutation_group_id=row.get("mutation_group_id"),
+        mutation_step=_optional_int_from_storage(row.get("mutation_step")),
+        mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
+        mutation_plan_hash=row.get("mutation_plan_hash"),
         stable_key=row.get("stable_key"),
         created_at_client=row.get("created_at_client") or row.get("client_timestamp"),
         received_at_server=row.get("received_at_server") or row.get("server_timestamp"),
@@ -1329,6 +1351,12 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
         "encryption_metadata": envelope.encryption_metadata,
         "adapter_version": envelope.adapter_version,
         "status": envelope.status,
+        **_mutation_group_fingerprint(
+            mutation_group_id=envelope.mutation_group_id,
+            mutation_step=envelope.mutation_step,
+            mutation_step_count=envelope.mutation_step_count,
+            mutation_plan_hash=envelope.mutation_plan_hash,
+        ),
     }
 
 
@@ -1385,10 +1413,33 @@ def _envelope_fingerprint_from_row(
         "encryption_metadata": decode_json(row.get("encryption_metadata_json"), default={}),
         "adapter_version": int(row.get("adapter_version") or row.get("schema_version") or 1),
         "status": row["status"],
+        **_mutation_group_fingerprint(
+            mutation_group_id=row.get("mutation_group_id"),
+            mutation_step=_optional_int_from_storage(row.get("mutation_step")),
+            mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
+            mutation_plan_hash=row.get("mutation_plan_hash"),
+        ),
     }
     if not ignore_client_envelope_id:
         fingerprint["client_envelope_id"] = row["client_envelope_id"]
     return fingerprint
+
+
+def _mutation_group_fingerprint(
+    *,
+    mutation_group_id: Any,
+    mutation_step: Any,
+    mutation_step_count: Any,
+    mutation_plan_hash: Any,
+) -> dict[str, Any]:
+    if mutation_group_id is None:
+        return {}
+    return {
+        "mutation_group_id": mutation_group_id,
+        "mutation_step": mutation_step,
+        "mutation_step_count": mutation_step_count,
+        "mutation_plan_hash": mutation_plan_hash,
+    }
 
 
 def _envelope_sequence_fingerprint_from_create(
@@ -2978,65 +3029,101 @@ class SyncDatabase:
             if existing is not None:
                 return _envelope_from_row(existing)
 
-            now = utcnow_iso()
-            self.execute(
-                """
-                INSERT INTO sync_envelopes (
-                    dataset_id, domain, entity_id, stable_key, operation,
-                    client_envelope_id, device_id, client_profile_id, client_sequence,
-                    client_timestamp, server_timestamp, base_server_cursor,
-                    base_object_revision, base_object_hash, object_revision, parent_id,
-                    schema_version, base_version, entity_version, dependency_json,
-                    routing_metadata_json, payload_ciphertext, payload_json,
-                    payload_clear_json, payload_hash, payload_size_bytes,
-                    created_at_client, received_at_server, deleted,
-                    encryption_metadata_json, adapter_version, status, apply_status,
-                    apply_error_code, apply_error_message, applied_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    envelope.dataset_id,
-                    envelope.domain,
-                    envelope.object_id,
-                    envelope.stable_key,
-                    envelope.operation,
-                    envelope.client_envelope_id,
-                    envelope.device_id,
-                    envelope.client_profile_id,
-                    envelope.client_sequence,
-                    envelope.client_timestamp,
-                    now,
-                    envelope.base_server_cursor,
-                    envelope.base_object_revision,
-                    envelope.base_object_hash,
-                    envelope.object_revision,
-                    envelope.parent_id,
-                    envelope.schema_version,
-                    _version_to_storage(envelope.base_version),
-                    _version_to_storage(envelope.entity_version),
-                    encode_json(envelope.dependencies, default=[]),
-                    encode_json(envelope.routing_metadata, default={}),
-                    envelope.payload_ciphertext,
-                    encode_json(envelope.payload, default={}),
-                    encode_json(envelope.payload_clear, default={}),
-                    envelope.payload_hash,
-                    envelope.payload_size_bytes,
-                    envelope.created_at_client,
-                    now,
-                    1 if envelope.deleted else 0,
-                    encode_json(envelope.encryption_metadata, default={}),
-                    envelope.adapter_version,
-                    envelope.status,
-                    envelope.apply_status,
-                    envelope.apply_error_code,
-                    envelope.apply_error_message,
-                    envelope.applied_at,
-                ),
-                connection=conn,
+            return self._insert_envelope_in_transaction(envelope, connection=conn)
+
+    def _insert_envelope_in_transaction(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any,
+    ) -> SyncEnvelope:
+        now = utcnow_iso()
+        self.execute(
+            """
+            INSERT INTO sync_envelopes (
+                dataset_id, domain, entity_id, stable_key, operation,
+                client_envelope_id, device_id, client_profile_id, client_sequence,
+                mutation_group_id, mutation_step, mutation_step_count,
+                mutation_plan_hash, client_timestamp, server_timestamp,
+                base_server_cursor, base_object_revision, base_object_hash,
+                object_revision, parent_id, schema_version, base_version,
+                entity_version, dependency_json, routing_metadata_json,
+                payload_ciphertext, payload_json, payload_clear_json, payload_hash,
+                payload_size_bytes, created_at_client, received_at_server, deleted,
+                encryption_metadata_json, adapter_version, status, apply_status,
+                apply_error_code, apply_error_message, applied_at
             )
-            sequence = self.backend.get_last_insert_id(connection=conn)
-            if sequence is None:
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                envelope.dataset_id,
+                envelope.domain,
+                envelope.object_id,
+                envelope.stable_key,
+                envelope.operation,
+                envelope.client_envelope_id,
+                envelope.device_id,
+                envelope.client_profile_id,
+                envelope.client_sequence,
+                envelope.mutation_group_id,
+                envelope.mutation_step,
+                envelope.mutation_step_count,
+                envelope.mutation_plan_hash,
+                envelope.client_timestamp,
+                now,
+                envelope.base_server_cursor,
+                envelope.base_object_revision,
+                envelope.base_object_hash,
+                envelope.object_revision,
+                envelope.parent_id,
+                envelope.schema_version,
+                _version_to_storage(envelope.base_version),
+                _version_to_storage(envelope.entity_version),
+                encode_json(envelope.dependencies, default=[]),
+                encode_json(envelope.routing_metadata, default={}),
+                envelope.payload_ciphertext,
+                encode_json(envelope.payload, default={}),
+                encode_json(envelope.payload_clear, default={}),
+                envelope.payload_hash,
+                envelope.payload_size_bytes,
+                envelope.created_at_client,
+                now,
+                1 if envelope.deleted else 0,
+                encode_json(envelope.encryption_metadata, default={}),
+                envelope.adapter_version,
+                envelope.status,
+                envelope.apply_status,
+                envelope.apply_error_code,
+                envelope.apply_error_message,
+                envelope.applied_at,
+            ),
+            connection=connection,
+        )
+        sequence = self.backend.get_last_insert_id(connection=connection)
+        if sequence is None:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                    """,
+                    (envelope.dataset_id, envelope.client_envelope_id),
+                    connection=connection,
+                )
+            )
+        else:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (sequence,),
+                    connection=connection,
+                )
+            )
+            if (
+                row is None
+                or row.get("dataset_id") != envelope.dataset_id
+                or row.get("client_envelope_id") != envelope.client_envelope_id
+            ):
                 row = _first(
                     self.execute(
                         """
@@ -3044,52 +3131,170 @@ class SyncDatabase:
                          WHERE dataset_id = ? AND client_envelope_id = ?
                         """,
                         (envelope.dataset_id, envelope.client_envelope_id),
-                        connection=conn,
+                        connection=connection,
                     )
                 )
-            else:
-                row = _first(
-                    self.execute(
-                        "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
-                        (sequence,),
-                        connection=conn,
-                    )
+        if row is None:
+            raise SyncStoreError("Sync envelope insert did not produce a retrievable record")
+        if (
+            _envelope_fingerprint_from_row(row)
+            != _envelope_fingerprint_from_create(envelope)
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync envelope idempotency key was reused with different content"
+            )
+        inserted = _envelope_from_row(row)
+        self._ensure_domain_state(
+            dataset_id=inserted.dataset_id,
+            domain=inserted.domain,
+            adapter_version=inserted.adapter_version,
+            server_sequence=inserted.server_sequence,
+            connection=connection,
+        )
+        return inserted
+
+    def insert_envelopes_atomic(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+    ) -> list[SyncEnvelope]:
+        """Insert one complete validated group or return its exact stored replay."""
+
+        plan = self._validate_mutation_group_plan(envelopes)
+        first = plan[0]
+        mutation_group_id = first.mutation_group_id
+        if mutation_group_id is None:
+            raise SyncStoreError("Atomic Sync append requires mutation group metadata")
+
+        with self.backend.transaction() as conn:
+            for envelope in plan:
+                self._require_dataset_domain(
+                    envelope.dataset_id,
+                    envelope.domain,
+                    connection=conn,
                 )
-                if (
-                    row is None
-                    or row.get("dataset_id") != envelope.dataset_id
-                    or row.get("client_envelope_id") != envelope.client_envelope_id
-                ):
-                    row = _first(
-                        self.execute(
-                            """
-                            SELECT * FROM sync_envelopes
-                             WHERE dataset_id = ? AND client_envelope_id = ?
-                            """,
-                            (envelope.dataset_id, envelope.client_envelope_id),
-                            connection=conn,
-                        )
-                    )
-            if row is None:
-                raise SyncStoreError(
-                    "Sync envelope insert did not produce a retrievable record"
-                )
-            if (
-                _envelope_fingerprint_from_row(row)
-                != _envelope_fingerprint_from_create(envelope)
-            ):
-                raise SyncIdempotencyConflictError(
-                    "Sync envelope idempotency key was reused with different content"
-                )
-            inserted = _envelope_from_row(row)
-            self._ensure_domain_state(
-                dataset_id=inserted.dataset_id,
-                domain=inserted.domain,
-                adapter_version=inserted.adapter_version,
-                server_sequence=inserted.server_sequence,
+
+            existing_rows = self._list_mutation_group_rows(
+                first.dataset_id,
+                mutation_group_id,
                 connection=conn,
             )
-            return inserted
+            if existing_rows:
+                return self._matched_mutation_group_replay(plan, existing_rows)
+
+            for envelope in plan:
+                existing = self._find_existing_envelope_for_idempotency(
+                    envelope,
+                    connection=conn,
+                )
+                if existing is not None:
+                    raise SyncIdempotencyConflictError(
+                        "Sync mutation group idempotency key was reused with different content"
+                    )
+
+            return [
+                self._insert_envelope_in_transaction(envelope, connection=conn)
+                for envelope in plan
+            ]
+
+    def _validate_mutation_group_plan(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+    ) -> list[SyncEnvelopeCreate]:
+        plan = list(envelopes)
+        if not plan:
+            raise SyncStoreError("Sync mutation group must contain at least one envelope")
+        for envelope in plan:
+            self._validate_envelope_contract(envelope)
+
+        first = plan[0]
+        if (
+            first.mutation_group_id is None
+            or first.mutation_step_count is None
+            or first.mutation_plan_hash is None
+        ):
+            raise SyncStoreError("Atomic Sync append requires mutation group metadata")
+        expected_metadata = (
+            first.dataset_id,
+            first.mutation_group_id,
+            first.mutation_step_count,
+            first.mutation_plan_hash,
+        )
+        if any(
+            (
+                envelope.dataset_id,
+                envelope.mutation_group_id,
+                envelope.mutation_step_count,
+                envelope.mutation_plan_hash,
+            )
+            != expected_metadata
+            for envelope in plan
+        ):
+            raise SyncStoreError(
+                "Sync mutation group envelopes must share dataset, group, count, and hash"
+            )
+        if [envelope.mutation_step for envelope in plan] != list(
+            range(first.mutation_step_count)
+        ):
+            raise SyncStoreError(
+                "Sync mutation group steps must exactly match the ordered complete plan"
+            )
+        client_envelope_ids = [envelope.client_envelope_id for envelope in plan]
+        if len(set(client_envelope_ids)) != len(client_envelope_ids):
+            raise SyncStoreError("Sync mutation group client envelope ids must be unique")
+        client_sequence_keys = [
+            (envelope.device_id, envelope.client_sequence)
+            for envelope in plan
+            if envelope.device_id is not None and envelope.client_sequence is not None
+        ]
+        if len(set(client_sequence_keys)) != len(client_sequence_keys):
+            raise SyncStoreError("Sync mutation group client sequence keys must be unique")
+        return plan
+
+    def _list_mutation_group_rows(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.execute(
+            """
+            SELECT * FROM sync_envelopes
+             WHERE dataset_id = ? AND mutation_group_id = ?
+             ORDER BY mutation_step ASC
+            """,
+            (dataset_id, mutation_group_id),
+            connection=connection,
+        ).rows
+
+    def _matched_mutation_group_replay(
+        self,
+        plan: Sequence[SyncEnvelopeCreate],
+        existing_rows: Sequence[dict[str, Any]],
+    ) -> list[SyncEnvelope]:
+        if len(plan) != len(existing_rows) or any(
+            _envelope_fingerprint_from_create(envelope)
+            != _envelope_fingerprint_from_row(row)
+            for envelope, row in zip(plan, existing_rows)
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync mutation group idempotency key was reused with different content"
+            )
+        return [_envelope_from_row(row) for row in existing_rows]
+
+    def list_mutation_group(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+    ) -> list[SyncEnvelope]:
+        """Return a complete mutation group ordered by zero-based step."""
+
+        if not mutation_group_id.strip():
+            raise SyncStoreError("Sync mutation group id must be non-empty")
+        return [
+            _envelope_from_row(row)
+            for row in self._list_mutation_group_rows(dataset_id, mutation_group_id)
+        ]
 
     def list_envelopes_after(
         self,
@@ -5309,6 +5514,10 @@ class SyncDatabase:
             column_specs = {
                 "client_profile_id": "TEXT",
                 "client_sequence": "BIGINT",
+                "mutation_group_id": "TEXT",
+                "mutation_step": "INTEGER",
+                "mutation_step_count": "INTEGER",
+                "mutation_plan_hash": "TEXT",
                 "base_server_cursor": "BIGINT",
                 "base_object_revision": "BIGINT",
                 "base_object_hash": "TEXT",
@@ -5330,6 +5539,10 @@ class SyncDatabase:
             column_specs = {
                 "client_profile_id": "TEXT",
                 "client_sequence": "INTEGER",
+                "mutation_group_id": "TEXT",
+                "mutation_step": "INTEGER",
+                "mutation_step_count": "INTEGER",
+                "mutation_plan_hash": "TEXT",
                 "base_server_cursor": "INTEGER",
                 "base_object_revision": "INTEGER",
                 "base_object_hash": "TEXT",
@@ -5398,6 +5611,15 @@ class SyncDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
                 ON sync_envelopes(dataset_id, domain, entity_id)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+                ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+                WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+                ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
             """,
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
