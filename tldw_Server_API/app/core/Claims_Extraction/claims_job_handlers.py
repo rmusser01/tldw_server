@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    NotSupportedError,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    ConflictError,
+    InputError,
+    SchemaError,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    DatabaseError as MediaDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import MEDIA_NONCRITICAL_EXCEPTIONS
 
 from .claims_alert_delivery import (
@@ -15,12 +30,18 @@ from .claims_alert_delivery import (
     deliver_claims_alert_webhook,
     normalize_claims_alert_channels,
 )
+from .claims_analytics_exports import (
+    ClaimsAnalyticsExportError,
+    process_export_artifact,
+)
 from .claims_job_contracts import (
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
+    CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
     ClaimsJobError,
     validate_alert_delivery_payload,
+    validate_analytics_export_payload,
     validate_rebuild_media_payload,
     validate_review_notification_payload,
 )
@@ -28,6 +49,12 @@ from .claims_notifications import deliver_claim_review_notifications_now
 from .claims_rebuild_service import rebuild_claims_for_media
 
 _CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
+_CLAIMS_EXPORT_TRANSIENT_STORAGE_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    sqlite3.OperationalError,
+    BackendDatabaseError,
+    MediaDatabaseError,
+    OSError,
+)
 
 
 def _payload(job: dict[str, Any]) -> dict[str, Any]:
@@ -92,6 +119,17 @@ def _assert_owner(job: dict[str, Any], owner_user_id: Any) -> str:
     return payload_owner
 
 
+def _positive_job_id(value: Any) -> int:
+    """Require the acquired Jobs row to expose a positive integer ID."""
+    if type(value) is not int or value <= 0:
+        raise ClaimsJobError(
+            "claims job id must be a positive integer",
+            retryable=False,
+            failure_code="claims_invalid_payload",
+        )
+    return value
+
+
 def _db_path(owner_user_id: Any) -> str:
     """Resolve the media database path for a canonical Claims owner id."""
     canonical_owner = _canonical_owner_user_id(owner_user_id)
@@ -119,12 +157,14 @@ def _enabled(value: Any) -> bool:
 
 def _already_delivered(db: Any, *, owner_user_id: str, event_id: int, alert_id: int, channel: str) -> bool:
     """Return whether a matching successful alert delivery is already recorded."""
-    return bool(db.has_successful_claims_monitoring_event_delivery(
-        user_id=str(owner_user_id),
-        event_id=int(event_id),
-        alert_id=int(alert_id),
-        channel=str(channel),
-    ))
+    return bool(
+        db.has_successful_claims_monitoring_event_delivery(
+            user_id=str(owner_user_id),
+            event_id=int(event_id),
+            alert_id=int(alert_id),
+            channel=str(channel),
+        )
+    )
 
 
 def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
@@ -197,6 +237,53 @@ def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
         ) from exc
 
 
+def _process_analytics_export(
+    *,
+    owner_user_id: str,
+    export_id: str,
+    job_id: int,
+) -> dict[str, Any]:
+    """Process one analytics export through the owner-scoped Media DB."""
+    try:
+        with managed_media_database(
+            client_id="claims_jobs_worker",
+            db_path=_db_path(owner_user_id),
+            initialize=False,
+            suppress_init_exceptions=_CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS,
+            suppress_close_exceptions=_CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS,
+        ) as db:
+            return process_export_artifact(
+                db,
+                owner_user_id=owner_user_id,
+                export_id=export_id,
+                job_id=job_id,
+            )
+    except ClaimsAnalyticsExportError as exc:
+        raise ClaimsJobError(
+            exc.public_message,
+            retryable=exc.retryable,
+            failure_code=exc.code,
+        ) from exc
+    except (ConflictError, InputError, NotSupportedError, SchemaError) as exc:
+        raise ClaimsJobError(
+            "Claims analytics export failed.",
+            retryable=False,
+            failure_code="claims_export_failed",
+        ) from exc
+    except _CLAIMS_EXPORT_TRANSIENT_STORAGE_EXCEPTIONS as exc:
+        raise ClaimsJobError(
+            "Claims analytics export storage is temporarily unavailable.",
+            retryable=True,
+            failure_code="claims_export_storage_unavailable",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - prevent raw worker failures from leaking or retrying.
+        raise ClaimsJobError(
+            "Claims analytics export failed.",
+            retryable=False,
+            failure_code="claims_export_failed",
+        ) from exc
+
+
 async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
     """Validate and dispatch one Claims job through the Jobs worker runtime.
 
@@ -240,6 +327,16 @@ async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
         payload = validate_alert_delivery_payload(_payload(job))
         _assert_owner(job, payload["owner_user_id"])
         return await asyncio.to_thread(_deliver_alert, payload)
+    if job_type == CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE:
+        payload = validate_analytics_export_payload(_payload(job))
+        owner_user_id = _assert_owner(job, payload["owner_user_id"])
+        job_id = _positive_job_id(job.get("id"))
+        return await asyncio.to_thread(
+            _process_analytics_export,
+            owner_user_id=owner_user_id,
+            export_id=payload["export_id"],
+            job_id=job_id,
+        )
     raise ClaimsJobError(
         "unsupported claims job type",
         retryable=False,
