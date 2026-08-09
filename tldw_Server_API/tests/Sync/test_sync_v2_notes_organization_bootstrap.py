@@ -276,6 +276,96 @@ def test_bootstrap_resume_tombstones_a_captured_relationship_removed_from_source
     note_db.close_connection()
 
 
+def test_bootstrap_restart_replays_same_applied_relationship_removal_group(
+    tmp_path: Path,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = _seed_source(note_db, store)
+    link_id = organization_link_id(
+        "notes.keyword_link", ["note", NOTE_ID, DELETED_KEYWORD_ID]
+    )
+    link_payload = {
+        "subject_type": "note",
+        "subject_id": NOTE_ID,
+        "keyword_sync_id": DELETED_KEYWORD_ID,
+    }
+    captured_once = False
+
+    def interrupt_after_capture(_completed_groups: int) -> None:
+        nonlocal captured_once
+        if not captured_once:
+            captured_once = True
+            raise NotesOrganizationBootstrapInterrupted("captured relationship")
+
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        NotesOrganizationBootstrapper(
+            note_db,
+            batch_size=8,
+            after_group=interrupt_after_capture,
+        ).bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=store.get_dataset("dataset-1"),
+        )
+    projection.apply_relationship(
+        domain="notes.keyword_link",
+        object_id=link_id,
+        operation="tombstone",
+        payload=link_payload,
+        routing_metadata={},
+    )
+
+    repair_boundaries: list[int] = []
+    crashed_once = False
+
+    def crash_after_removal_group(completed_groups: int) -> None:
+        nonlocal crashed_once
+        repair_boundaries.append(completed_groups)
+        if not crashed_once:
+            crashed_once = True
+            raise NotesOrganizationBootstrapInterrupted("removal applied before ready")
+
+    bootstrapper = NotesOrganizationBootstrapper(
+        note_db,
+        batch_size=100,
+        after_group=crash_after_removal_group,
+    )
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        bootstrapper.bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=store.get_dataset("dataset-1"),
+        )
+    before_restart = _organization_envelopes(store)
+    removed = store.get_current_head("dataset-1", "notes.keyword_link", link_id)
+    assert removed is not None
+    assert removed.operation == "tombstone"
+    assert removed.apply_status == "applied"
+    removal_group_id = removed.mutation_group_id
+    removal_ids = {
+        item.client_envelope_id
+        for item in before_restart
+        if item.mutation_group_id == removal_group_id
+    }
+
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    after_restart = _organization_envelopes(store)
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert repair_boundaries == [1, 1]
+    assert {
+        item.client_envelope_id
+        for item in after_restart
+        if item.mutation_group_id == removal_group_id
+    } == removal_ids
+    assert len({item.client_envelope_id for item in after_restart}) == len(after_restart)
+    note_db.close_connection()
+
+
 def test_bootstrap_resume_of_unchanged_snapshot_reuses_history_without_duplicates(
     tmp_path: Path,
 ) -> None:
@@ -381,6 +471,253 @@ def test_retryable_verification_failure_reuses_bootstrap_group_and_repairs_to_re
     keyword_head = store.get_current_head("dataset-1", "notes.keyword", KEYWORD_ID)
     assert keyword_head is not None
     assert keyword_head.payload == {"keyword": "Renamed during repair"}
+    note_db.close_connection()
+
+
+def test_retryable_deleted_resource_group_repairs_shadowed_steps_after_source_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = NotesOrganizationSyncStore(note_db)
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "Dormant"},
+    )
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="tombstone",
+        payload={},
+    )
+    bootstrapper = NotesOrganizationBootstrapper(note_db, batch_size=2)
+    original_verifier = bootstrapper._step_matches_source
+    failed_once = False
+
+    def fail_once(envelope) -> bool:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            return False
+        return original_verifier(envelope)
+
+    monkeypatch.setattr(bootstrapper, "_step_matches_source", fail_once)
+    paused = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    prior = _organization_envelopes(store)
+    assert paused.metadata["notes_organization_v1"]["state"] == "initializing"
+    assert len(prior) == 2
+    assert [item.operation for item in prior] == ["upsert", "tombstone"]
+    assert all(item.apply_status == "pending" for item in prior)
+    assert len({item.mutation_group_id for item in prior}) == 1
+    assert store.get_current_head(
+        "dataset-1", "notes.keyword", DELETED_KEYWORD_ID
+    ) == prior[-1]
+
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id="88888888-8888-4888-8888-888888888888",
+        operation="upsert",
+        payload={"keyword": "Added during repair"},
+    )
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=paused,
+    )
+
+    repaired = _organization_envelopes(store)
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert all(item.apply_status == "applied" for item in repaired)
+    assert len({item.client_envelope_id for item in repaired}) == len(repaired)
+    assert {item.client_envelope_id for item in prior}.issubset(
+        {item.client_envelope_id for item in repaired}
+    )
+    note_db.close_connection()
+
+
+def test_stale_pending_step_is_reconciled_only_after_verified_correction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = NotesOrganizationSyncStore(note_db)
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "Before"},
+    )
+    bootstrapper = NotesOrganizationBootstrapper(note_db, batch_size=1)
+    original_verifier = bootstrapper._step_matches_source
+    failed_once = False
+
+    def fail_once(envelope) -> bool:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            return False
+        return original_verifier(envelope)
+
+    monkeypatch.setattr(bootstrapper, "_step_matches_source", fail_once)
+    paused = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+    stale = _organization_envelopes(store)[0]
+    assert paused.metadata["notes_organization_v1"]["state"] == "initializing"
+    assert stale.apply_status == "pending"
+    assert stale.server_cursor is not None
+
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "After"},
+    )
+    original_mark_verified = store.mark_bootstrap_envelope_verified
+
+    def reject_stale_preflight_mark(server_cursor: int, *, bootstrap_id: str):
+        assert server_cursor != stale.server_cursor
+        return original_mark_verified(server_cursor, bootstrap_id=bootstrap_id)
+
+    monkeypatch.setattr(
+        store,
+        "mark_bootstrap_envelope_verified",
+        reject_stale_preflight_mark,
+    )
+    reconciliations: list[tuple[int, int]] = []
+    original_reconcile = getattr(store, "reconcile_bootstrap_envelope_superseded", None)
+    if original_reconcile is not None:
+
+        def audit_reconciliation(
+            server_cursor: int,
+            *,
+            bootstrap_id: str,
+            superseded_by_cursor: int,
+        ):
+            correction = next(
+                item
+                for item in _organization_envelopes(store)
+                if item.server_cursor == superseded_by_cursor
+            )
+            assert correction.apply_status == "applied"
+            assert correction.payload == {"keyword": "After"}
+            reconciliations.append((server_cursor, superseded_by_cursor))
+            return original_reconcile(
+                server_cursor,
+                bootstrap_id=bootstrap_id,
+                superseded_by_cursor=superseded_by_cursor,
+            )
+
+        monkeypatch.setattr(
+            store,
+            "reconcile_bootstrap_envelope_superseded",
+            audit_reconciliation,
+        )
+
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=paused,
+    )
+
+    envelopes = _organization_envelopes(store)
+    repaired_stale = next(
+        item for item in envelopes if item.server_cursor == stale.server_cursor
+    )
+    correction = store.get_current_head("dataset-1", "notes.keyword", KEYWORD_ID)
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert correction is not None
+    assert correction.payload == {"keyword": "After"}
+    assert correction.apply_status == "applied"
+    assert reconciliations == [(stale.server_cursor, correction.server_cursor)]
+    assert repaired_stale.apply_status == "applied"
+    assert repaired_stale.apply_error_code == "sync_bootstrap_superseded"
+    note_db.close_connection()
+
+
+def test_deleted_resource_source_change_appends_explicit_correction_lineage(
+    tmp_path: Path,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = NotesOrganizationSyncStore(note_db)
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "Before"},
+    )
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="tombstone",
+        payload={},
+    )
+    interrupted = False
+
+    def interrupt_before_ready(_completed_groups: int) -> None:
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise NotesOrganizationBootstrapInterrupted("captured old deleted lineage")
+
+    bootstrapper = NotesOrganizationBootstrapper(
+        note_db,
+        batch_size=2,
+        after_group=interrupt_before_ready,
+    )
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        bootstrapper.bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=store.get_dataset("dataset-1"),
+        )
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "After"},
+    )
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="tombstone",
+        payload={},
+    )
+
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    history = [
+        item
+        for item in _organization_envelopes(store)
+        if item.object_id == DELETED_KEYWORD_ID
+    ]
+    correction_upsert = next(
+        item
+        for item in history
+        if item.operation == "upsert" and item.payload == {"keyword": "After"}
+    )
+    head = store.get_current_head("dataset-1", "notes.keyword", DELETED_KEYWORD_ID)
+    resource = next(item for item in projection.snapshot().resources if item.sync_id == DELETED_KEYWORD_ID)
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert correction_upsert.routing_metadata["restore_intent"] is True
+    assert all(item.apply_status == "applied" for item in history)
+    assert head is not None
+    assert head.operation == "tombstone"
+    assert resource.deleted is True
+    assert resource.name == "After"
     note_db.close_connection()
 
 

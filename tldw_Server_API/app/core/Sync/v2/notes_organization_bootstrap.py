@@ -33,6 +33,7 @@ _RELATIONSHIP_DOMAINS: tuple[SyncDomain, ...] = tuple(
 )
 _SAFE_SOURCE_ERROR = "notes_organization_bootstrap_source_invalid"
 _SAFE_CAPTURE_ERROR = "notes_organization_bootstrap_capture_failed"
+_BOOTSTRAP_HISTORY_PAGE_SIZE = 200
 
 
 class SyncDatasetBootstrapper(Protocol):
@@ -96,18 +97,30 @@ class NotesOrganizationBootstrapper:
         expected_count = int(metadata.get("expected_count") or 0)
         captured_count = int(metadata.get("captured_count") or 0)
         try:
-            self._drain_preexisting_heads(service, dataset)
-            snapshot = self._projection.snapshot()
+            snapshot, represented_resources, stale_groups = (
+                self._drain_preexisting_heads(service, dataset)
+            )
             removed_relationships = self._captured_relationship_removals(
                 service,
                 dataset,
                 snapshot,
                 bootstrap_id=bootstrap_id,
             )
+            planned_omissions = (
+                represented_resources if removed_relationships else set()
+            )
+            restore_resources = self._resource_restore_keys(
+                service,
+                dataset.dataset_id,
+                snapshot,
+                planned_omissions,
+            )
             steps = self._plan(
                 snapshot,
                 bootstrap_id=bootstrap_id,
                 removed_relationships=removed_relationships,
+                represented_resources=planned_omissions,
+                restore_resources=restore_resources,
             )
             expected_count = len(snapshot.resources) + len(snapshot.relationships)
             dataset = service.store.transition_notes_organization_bootstrap(
@@ -153,6 +166,13 @@ class NotesOrganizationBootstrapper:
             fresh = self._projection.snapshot()
             if _snapshot_hash(fresh) != snapshot_hash:
                 raise _SourceInvalidError("Notes organization source changed during bootstrap")
+            self._reconcile_stale_groups(
+                service,
+                dataset,
+                bootstrap_id=bootstrap_id,
+                snapshot=fresh,
+                groups=stale_groups,
+            )
             return service.store.transition_notes_organization_bootstrap(
                 dataset.dataset_id,
                 bootstrap_id=bootstrap_id,
@@ -210,9 +230,21 @@ class NotesOrganizationBootstrapper:
         *,
         bootstrap_id: str,
         removed_relationships: Sequence[SyncEnvelope],
+        represented_resources: set[tuple[SyncDomain, str]] | None = None,
+        restore_resources: set[tuple[SyncDomain, str]] | None = None,
     ) -> list[ServerOriginMutationStep]:
         ordered_resources = _parents_before_children(snapshot.resources)
-        steps = [self._resource_step(resource, operation="upsert") for resource in ordered_resources]
+        represented = represented_resources or set()
+        restores = restore_resources or set()
+        steps = [
+            self._resource_step(
+                resource,
+                operation="upsert",
+                restore_intent=(resource.domain, resource.sync_id) in restores,
+            )
+            for resource in ordered_resources
+            if (resource.domain, resource.sync_id) not in represented
+        ]
         steps.extend(
             ServerOriginMutationStep(
                 domain=relationship.domain,
@@ -244,7 +276,7 @@ class NotesOrganizationBootstrapper:
         steps.extend(
             self._resource_step(resource, operation="tombstone")
             for resource in ordered_resources
-            if resource.deleted
+            if resource.deleted and (resource.domain, resource.sync_id) not in represented
         )
         return steps
 
@@ -253,6 +285,7 @@ class NotesOrganizationBootstrapper:
         resource: OrganizationResource,
         *,
         operation: str,
+        restore_intent: bool = False,
     ) -> ServerOriginMutationStep:
         if operation == "tombstone":
             payload: dict[str, object] = {}
@@ -265,6 +298,7 @@ class NotesOrganizationBootstrapper:
             operation=operation,
             object_id=resource.sync_id,
             payload=payload,
+            routing_metadata={"restore_intent": True} if restore_intent else {},
             stable_key=f"{resource.domain}:{resource.sync_id}",
         )
 
@@ -295,7 +329,13 @@ class NotesOrganizationBootstrapper:
         )
 
     def _step_matches_source(self, envelope: SyncEnvelope) -> bool:
-        snapshot = self._projection.snapshot()
+        return self._step_matches_snapshot(envelope, self._projection.snapshot())
+
+    @staticmethod
+    def _step_matches_snapshot(
+        envelope: SyncEnvelope,
+        snapshot: OrganizationSnapshot,
+    ) -> bool:
         if envelope.domain not in _RESOURCE_DOMAINS:
             present = any(
                 item.domain == envelope.domain
@@ -323,8 +363,9 @@ class NotesOrganizationBootstrapper:
         )
         return dict(envelope.payload) == expected
 
-    @staticmethod
+    @classmethod
     def _captured_relationship_removals(
+        cls,
         service: SyncV2Service,
         dataset: SyncDataset,
         snapshot: OrganizationSnapshot,
@@ -335,29 +376,57 @@ class NotesOrganizationBootstrapper:
             (relationship.domain, relationship.object_id)
             for relationship in snapshot.relationships
         }
-        removed: list[SyncEnvelope] = []
-        for domain in _RELATIONSHIP_DOMAINS:
-            offset = 0
-            while True:
-                heads = service.store.list_current_heads(
-                    dataset.dataset_id,
-                    domain,
-                    limit=200,
-                    offset=offset,
-                )
-                if not heads:
-                    break
-                removed.extend(
-                    envelope
-                    for envelope in heads
-                    if envelope.operation == "upsert"
-                    and envelope.routing_metadata.get("source")
-                    == "notes-organization-bootstrap"
+        captured: dict[tuple[SyncDomain, str], list[SyncEnvelope]] = {}
+        for group in cls._bootstrap_mutation_groups(service, dataset.dataset_id):
+            for envelope in group:
+                if (
+                    envelope.domain in _RELATIONSHIP_DOMAINS
+                    and envelope.operation == "upsert"
                     and envelope.routing_metadata.get("bootstrap_capture") is True
                     and envelope.routing_metadata.get("bootstrap_id") == bootstrap_id
-                    and (envelope.domain, envelope.object_id) not in current
+                ):
+                    captured.setdefault(
+                        (envelope.domain, envelope.object_id), []
+                    ).append(envelope)
+
+        removed: list[SyncEnvelope] = []
+        for key in sorted(captured):
+            if key in current:
+                continue
+            head = service.store.get_current_head(dataset.dataset_id, *key)
+            if head is None:
+                continue
+            candidates = captured[key]
+            if (
+                head.operation == "upsert"
+                and head.routing_metadata.get("bootstrap_capture") is True
+                and head.routing_metadata.get("bootstrap_id") == bootstrap_id
+            ):
+                template = next(
+                    (
+                        envelope
+                        for envelope in reversed(candidates)
+                        if envelope.client_envelope_id == head.client_envelope_id
+                    ),
+                    None,
                 )
-                offset += len(heads)
+            elif (
+                head.operation == "tombstone"
+                and head.routing_metadata.get("bootstrap_removal") is True
+                and head.routing_metadata.get("bootstrap_id") == bootstrap_id
+            ):
+                template = next(
+                    (
+                        envelope
+                        for envelope in reversed(candidates)
+                        if dict(envelope.payload) == dict(head.payload)
+                    ),
+                    None,
+                )
+            else:
+                template = None
+            if template is not None:
+                removed.append(template)
         return removed
 
     def _ready_snapshot_matches(
@@ -377,7 +446,11 @@ class NotesOrganizationBootstrapper:
         self,
         service: SyncV2Service,
         dataset: SyncDataset,
-    ) -> None:
+    ) -> tuple[
+        OrganizationSnapshot,
+        set[tuple[SyncDomain, str]],
+        list[list[SyncEnvelope]],
+    ]:
         metadata = dataset.metadata.get("notes_organization_v1")
         bootstrap_id = metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
         if not isinstance(bootstrap_id, str) or not bootstrap_id:
@@ -394,22 +467,179 @@ class NotesOrganizationBootstrapper:
                     if envelope.apply_status == "applied":
                         continue
                     if envelope.routing_metadata.get("source") == "notes-organization-bootstrap":
-                        if envelope.server_cursor is None:
-                            raise SyncStoreError(
-                                "Stored bootstrap step has no server cursor"
-                            )
-                        # The step was structurally source-attested before its atomic
-                        # append. Mark that historical capture verified; the fresh plan
-                        # below exact-verifies and supersedes it when source has changed.
-                        service.store.mark_bootstrap_envelope_verified(
-                            envelope.server_cursor,
-                            bootstrap_id=bootstrap_id,
-                        )
                         continue
                     result = service._materialize_envelope(envelope)
                     if result.status != "applied":
                         raise SyncStoreError("Notes organization pre-bootstrap projection failed")
                 offset += len(heads)
+
+        snapshot = self._projection.snapshot()
+        groups = self._bootstrap_mutation_groups(service, dataset.dataset_id)
+        stale_groups: list[list[SyncEnvelope]] = []
+        for group in groups:
+            if all(envelope.apply_status == "applied" for envelope in group):
+                continue
+            if not all(
+                self._step_matches_snapshot(envelope, snapshot) for envelope in group
+            ):
+                stale_groups.append(group)
+                continue
+            # Re-record the complete group in mutation-step order. This also repairs
+            # a legacy non-prefix apply vector without leaving object state pointing
+            # at an earlier step shadowed by an already-applied later step.
+            for envelope in group:
+                if envelope.server_cursor is None:
+                    raise SyncStoreError("Stored bootstrap step has no server cursor")
+                service.store.mark_bootstrap_envelope_verified(
+                    envelope.server_cursor,
+                    bootstrap_id=bootstrap_id,
+                )
+        groups = self._bootstrap_mutation_groups(service, dataset.dataset_id)
+        return (
+            snapshot,
+            self._represented_resource_lineages(
+                service,
+                dataset.dataset_id,
+                snapshot,
+                groups,
+            ),
+            stale_groups,
+        )
+
+    @classmethod
+    def _reconcile_stale_groups(
+        cls,
+        service: SyncV2Service,
+        dataset: SyncDataset,
+        *,
+        bootstrap_id: str,
+        snapshot: OrganizationSnapshot,
+        groups: Sequence[Sequence[SyncEnvelope]],
+    ) -> None:
+        for group in groups:
+            for envelope in group:
+                if envelope.apply_status == "applied":
+                    continue
+                if envelope.server_cursor is None:
+                    raise SyncStoreError("Stored bootstrap step has no server cursor")
+                correction = service.store.get_current_head(
+                    dataset.dataset_id,
+                    envelope.domain,
+                    envelope.object_id,
+                )
+                if (
+                    correction is None
+                    or correction.server_cursor is None
+                    or correction.server_cursor <= envelope.server_cursor
+                    or correction.apply_status != "applied"
+                    or not cls._step_matches_snapshot(correction, snapshot)
+                ):
+                    raise _SourceInvalidError(
+                        "Bootstrap correction is not durably source-verified"
+                    )
+                service.store.reconcile_bootstrap_envelope_superseded(
+                    envelope.server_cursor,
+                    bootstrap_id=bootstrap_id,
+                    superseded_by_cursor=correction.server_cursor,
+                )
+
+    @staticmethod
+    def _resource_restore_keys(
+        service: SyncV2Service,
+        dataset_id: str,
+        snapshot: OrganizationSnapshot,
+        represented_resources: set[tuple[SyncDomain, str]],
+    ) -> set[tuple[SyncDomain, str]]:
+        restores: set[tuple[SyncDomain, str]] = set()
+        for resource in snapshot.resources:
+            key = (resource.domain, resource.sync_id)
+            if not resource.deleted or key in represented_resources:
+                continue
+            head = service.store.get_current_head(dataset_id, *key)
+            if head is not None and head.operation == "tombstone":
+                restores.add(key)
+        return restores
+
+    @classmethod
+    def _represented_resource_lineages(
+        cls,
+        service: SyncV2Service,
+        dataset_id: str,
+        snapshot: OrganizationSnapshot,
+        groups: Sequence[Sequence[SyncEnvelope]],
+    ) -> set[tuple[SyncDomain, str]]:
+        history = [envelope for group in groups for envelope in group]
+        represented: set[tuple[SyncDomain, str]] = set()
+        for resource in snapshot.resources:
+            key = (resource.domain, resource.sync_id)
+            head = service.store.get_current_head(dataset_id, *key)
+            if (
+                head is None
+                or head.apply_status != "applied"
+                or not cls._step_matches_snapshot(head, snapshot)
+                or head.operation != ("tombstone" if resource.deleted else "upsert")
+            ):
+                continue
+            if not resource.deleted:
+                represented.add(key)
+                continue
+            if any(
+                envelope.domain == resource.domain
+                and envelope.object_id == resource.sync_id
+                and envelope.operation == "upsert"
+                and envelope.apply_status == "applied"
+                and cls._step_matches_snapshot(envelope, snapshot)
+                for envelope in history
+            ):
+                represented.add(key)
+        return represented
+
+    @staticmethod
+    def _bootstrap_mutation_groups(
+        service: SyncV2Service,
+        dataset_id: str,
+    ) -> list[list[SyncEnvelope]]:
+        groups: dict[str, list[SyncEnvelope]] = {}
+        cursor = 0
+        while True:
+            page = service.store.list_envelopes_after(
+                dataset_id,
+                cursor,
+                limit=_BOOTSTRAP_HISTORY_PAGE_SIZE,
+                domains=NOTES_ORGANIZATION_DOMAINS,
+                status="accepted",
+            )
+            if not page:
+                break
+            next_cursor = max(envelope.server_cursor or 0 for envelope in page)
+            if next_cursor <= cursor:
+                raise SyncStoreError("Stored bootstrap history cursor did not advance")
+            cursor = next_cursor
+            for envelope in page:
+                if (
+                    envelope.routing_metadata.get("source")
+                    != "notes-organization-bootstrap"
+                ):
+                    continue
+                group_id = envelope.mutation_group_id
+                if not isinstance(group_id, str) or not group_id:
+                    raise SyncStoreError("Stored bootstrap step has no mutation group")
+                groups.setdefault(group_id, []).append(envelope)
+
+        ordered = sorted(
+            groups.values(),
+            key=lambda group: min(envelope.server_cursor or 0 for envelope in group),
+        )
+        for group in ordered:
+            expected_count = group[0].mutation_step_count
+            if (
+                expected_count is None
+                or len(group) != expected_count
+                or [envelope.mutation_step for envelope in group]
+                != list(range(expected_count))
+            ):
+                raise SyncStoreError("Stored bootstrap mutation group is incomplete")
+        return ordered
 
     @staticmethod
     def _pause_retryable(

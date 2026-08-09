@@ -357,6 +357,21 @@ class SyncV2Store:
             server_cursor, bootstrap_id=bootstrap_id
         )
 
+    def reconcile_bootstrap_envelope_superseded(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        superseded_by_cursor: int,
+    ) -> SyncEnvelope:
+        """Mark stale bootstrap history applied without regressing object state."""
+
+        return self.db.reconcile_bootstrap_envelope_superseded(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            superseded_by_cursor=superseded_by_cursor,
+        )
+
     def list_failed_applies(
         self,
         dataset_id: str,

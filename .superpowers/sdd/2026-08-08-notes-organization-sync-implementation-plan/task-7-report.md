@@ -90,6 +90,43 @@ Reviewer findings were verified against the implementation before changes. All f
 - Self-review found and fixed one additional repair edge: a retryable pending capture whose source changed before retry is now historically reconciled and deterministically superseded rather than left as an accepted-unapplied readiness blocker.
 - No Task 8/9 behavior, Task 4 general planning semantics, Task 5 attestation requirements, or Task 6 product materializers were changed. No open blocker remains; live PostgreSQL concurrency remains environment-skipped but has deterministic server-free SQL/ordering coverage.
 
+## Fix Round 2
+
+The three remaining bootstrap-repair findings were verified against the implementation and confirmed. The repair now reasons over complete accepted bootstrap mutation groups rather than current heads alone, preserves removal-plan identity across a pre-ready crash, and never treats a stale preflight attestation as sufficient to mark history applied.
+
+### Changes
+
+- Bootstrap history is paged in bounded chunks and reconstructed as complete mutation groups in server-cursor/group-step order. Exact groups are re-recorded in full step order, including an applied tombstone that shadows an earlier pending upsert, so repair cannot strand accepted history or regress object state.
+- Source-drifted pending groups remain pending until a later current correction head is durably applied and exactly matches the final fresh source snapshot. Only then does a transactional store seam reconcile the stale step with the stable audit code `sync_bootstrap_superseded`; reconciliation does not rewrite current object state or mutation fingerprints.
+- Applied captured-link removal tombstones recover their original capture payload from the current bootstrap history. A restart under the same source snapshot therefore reconstructs the same removal plan, group shape, and client-envelope identities until the ready CAS succeeds.
+- Deleted-resource lineage is omitted only when an applied historical upsert payload exactly matches normalized fresh source state and the applied current tombstone is canonical. If name or parent state changed, repair appends an explicit `restore_intent` correction upsert followed by its tombstone, verifies both without replay, and then reconciles stale history.
+- Ordinary unchanged/additive resumes retain the complete deterministic snapshot plan. Resource omission is limited to relationship-removal repair, whose history-derived tombstone makes the adjusted plan stable across interruption.
+
+### Focused RED/GREEN evidence
+
+- Shadowed complete-group repair RED: `1 failed, 6 deselected, 4 warnings`; a deleted-resource upsert remained pending behind its group tombstone. After tracing the adapter result, the first correction attempt correctly failed because restoring over a tombstone lacked explicit restore intent. Final GREEN: `1 passed, 6 deselected, 3 warnings in 10.37s`.
+- Removal crash stability RED: `1 failed, 7 deselected, 4 warnings`; restart reached ready without replaying the removal group (`repair_boundaries == [1]`). GREEN: `1 passed, 7 deselected, 3 warnings in 9.66s`, with identical removal-group identities before and after restart.
+- Stale-step verification RED: `1 failed, 8 deselected, 4 warnings`; the verified fresh correction was current but the stale accepted step remained pending. GREEN: `1 passed, 8 deselected, 3 warnings in 10.76s`; the spy proves reconciliation occurs only after the correction is applied and exact, and the stale row records `sync_bootstrap_superseded`.
+- Changed deleted-resource contrast RED: `1 failed, 9 deselected, 4 warnings`; repair emitted no valid correction upsert. GREEN: `1 passed, 9 deselected, 3 warnings in 10.45s`; the changed normalized payload produces an explicit restore-intent correction lineage and a final applied tombstone head.
+- The first combined bootstrap run found an unchanged-resume group-shape regression: `9 passed, 1 failed, 4 warnings`. Restricting lineage omission to the stable removal-repair case fixed it. Fresh combined GREEN: `10 passed, 3 warnings in 14.64s`.
+
+### Final focused gates
+
+- Bootstrap file: `10 passed, 3 warnings in 14.64s`.
+- Transaction gate file: `4 passed, 1 skipped, 3 warnings in 40.41s`; the optional live PostgreSQL test skipped because no PostgreSQL server was configured.
+- PostgreSQL server-free contract file: `21 passed, 3 warnings in 17.41s`.
+- Profile selector: `3 passed, 9 deselected, 3 warnings in 9.94s`.
+- Task 4 coordinator compatibility: `20 passed, 3 warnings in 10.35s`.
+- Scoped Ruff: `All checks passed!`.
+- Scoped Bandit: exit 0 with no findings. It reports one informational pre-existing unmatched `nosec` warning for B608 at `Sync_DB.py:3164`.
+- `git diff --check`: exit 0, no output.
+
+### Warning disposition and self-review
+
+- The third recurring pytest warning is `PytestCacheWarning`: the managed external worktree cannot write `.pytest_cache`. The other warnings are repository/runtime deprecations; `system_log_buffer append failed: PermissionError` is test-environment logging noise. None changed an assertion or exit status.
+- The live PostgreSQL concurrency test remains honestly environment-skipped. The deterministic server-free lock/ordering contract continues to pass.
+- Self-review preserved Task 4 planning, Task 5 attestation, Task 6 materializers, prior enrollment/locking/profile fixes, and Task 8/9 scope. No new ADR is required because Round 2 implements the already-governed durable bootstrap repair contract rather than changing the sync ownership or conflict policy.
+
 ## Files
 
 - `tldw_Server_API/app/core/DB_Management/Sync_DB.py`

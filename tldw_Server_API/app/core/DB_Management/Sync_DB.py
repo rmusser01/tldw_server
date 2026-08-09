@@ -4007,6 +4007,89 @@ class SyncDatabase:
             )
         return _envelope_from_row(updated)
 
+    def reconcile_bootstrap_envelope_superseded(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        superseded_by_cursor: int,
+    ) -> SyncEnvelope:
+        """Audit-reconcile a stale step after its correction is current and applied."""
+
+        if superseded_by_cursor <= server_cursor:
+            raise SyncStoreError("Bootstrap correction must follow the stale step")
+        with self.backend.transaction() as conn:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            correction = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (superseded_by_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None or correction is None:
+                raise SyncStoreError("Bootstrap reconciliation envelope was not found")
+            dataset_row = self._require_dataset_domain(
+                str(row["dataset_id"]), row["domain"], connection=conn
+            )
+            self._require_notes_organization_write_ready(
+                dataset_row,
+                row["domain"],
+                trusted_bootstrap_id=bootstrap_id,
+            )
+            correction_metadata = decode_json(
+                correction.get("routing_metadata_json"), default={}
+            )
+            if (
+                correction.get("dataset_id") != row.get("dataset_id")
+                or correction.get("domain") != row.get("domain")
+                or correction.get("entity_id") != row.get("entity_id")
+                or correction.get("status") != "accepted"
+                or correction.get("apply_status") != "applied"
+                or correction_metadata.get("source")
+                != "notes-organization-bootstrap"
+            ):
+                raise SyncStoreError("Bootstrap correction is not durably applied")
+            head = _first(
+                self.execute(
+                    """
+                    SELECT latest_server_cursor FROM sync_current_heads
+                     WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                    """,
+                    (row["dataset_id"], row["domain"], row["entity_id"]),
+                    connection=conn,
+                )
+            )
+            if head is None or int(head["latest_server_cursor"]) != superseded_by_cursor:
+                raise SyncStoreError("Bootstrap correction is not the current head")
+            now = utcnow_iso()
+            self.execute(
+                """
+                UPDATE sync_envelopes
+                   SET apply_status = 'applied',
+                       apply_error_code = 'sync_bootstrap_superseded',
+                       apply_error_message = NULL,
+                       applied_at = ?
+                 WHERE server_sequence = ?
+                """,
+                (now, server_cursor),
+                connection=conn,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+        return _envelope_from_row(updated)
+
     def list_failed_applies(
         self,
         dataset_id: str,
