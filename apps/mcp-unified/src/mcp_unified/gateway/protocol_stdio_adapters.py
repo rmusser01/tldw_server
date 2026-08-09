@@ -10,7 +10,7 @@ import queue
 import sys
 import threading
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, BinaryIO, Literal, Protocol, TypeAlias
 
 from .protocol_limits import GatewayLimits
@@ -297,18 +297,6 @@ class _OwnedStdioAdapters:
     writer: _OwnedByteWriter | None = None
     workers: tuple[_BlockingIOWorker, ...] = ()
     closed: bool = False
-    _thread_count: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        self._thread_count = len(self.workers)
-
-    @property
-    def thread_count(self) -> int:
-        return self._thread_count
-
-    @property
-    def threads_alive(self) -> int:
-        return sum(worker.alive for worker in self.workers)
 
     async def shutdown(
         self,

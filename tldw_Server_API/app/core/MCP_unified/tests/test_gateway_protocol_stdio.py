@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -495,7 +496,7 @@ async def _pipe_server(
     input_bytes: bytes,
     *,
     limits: GatewayLimits = GatewayLimits(),
-) -> tuple[int, bytes, _OwnedStdioAdapters]:
+) -> tuple[int, bytes, _OwnedStdioAdapters, list[threading.Thread]]:
     input_read_fd, input_write_fd = os.pipe()
     output_read_fd, output_write_fd = os.pipe()
     os.write(input_write_fd, input_bytes)
@@ -503,6 +504,8 @@ async def _pipe_server(
     input_file = os.fdopen(input_read_fd, "rb", buffering=0)
     output_file = os.fdopen(output_write_fd, "wb", buffering=0)
     captured: list[_OwnedStdioAdapters] = []
+    owned_threads: list[threading.Thread] = []
+    prior_threads = set(threading.enumerate())
 
     async def selector(
         direction: str,
@@ -512,6 +515,7 @@ async def _pipe_server(
         if not captured:
             adapters = await opener(input_file, output_file, selected_limits)
             captured.append(adapters)
+            owned_threads.extend(thread for thread in threading.enumerate() if thread not in prior_threads)
             input_file.close()
             output_file.close()
         return captured[0]
@@ -526,7 +530,7 @@ async def _pipe_server(
     while chunk := os.read(output_read_fd, 65_536):
         chunks.append(chunk)
     os.close(output_read_fd)
-    return result, b"".join(chunks), captured[0]
+    return result, b"".join(chunks), captured[0], owned_threads
 
 
 @pytest.mark.asyncio
@@ -534,7 +538,7 @@ async def _pipe_server(
 async def test_native_posix_adapter_serves_duplicated_binary_pipes() -> None:
     """Regressing to mocked async streams would leave the native pipe claim unproved."""
 
-    result, output, adapters = await _pipe_server(
+    result, output, adapters, owned_threads = await _pipe_server(
         _open_native_stdio,
         _request("native"),
     )
@@ -542,7 +546,7 @@ async def test_native_posix_adapter_serves_duplicated_binary_pipes() -> None:
     assert result == 0
     assert json.loads(output)["id"] == "native"
     assert adapters.closed is True
-    assert adapters.thread_count == 0
+    assert owned_threads == []
 
 
 @pytest.mark.asyncio
@@ -550,7 +554,7 @@ async def test_threaded_fallback_bounds_reads_serializes_writes_and_joins() -> N
     """An unbounded or shared-executor fallback would not satisfy the Windows contract."""
 
     limits = GatewayLimits(max_input_line_bytes=256)
-    result, output, adapters = await _pipe_server(
+    result, output, adapters, owned_threads = await _pipe_server(
         _open_threaded_stdio,
         b"x" * 300 + b"\n" + _request("fallback"),
         limits=limits,
@@ -560,8 +564,9 @@ async def test_threaded_fallback_bounds_reads_serializes_writes_and_joins() -> N
     assert result == 0
     assert [value.get("id") for value in values] == [None, "fallback"]
     assert values[0]["error"]["code"] == -32700
-    assert adapters.thread_count == 2
-    assert adapters.threads_alive == 0
+    assert len(owned_threads) == 2
+    assert all(thread.name.startswith("mcp-stdio-") for thread in owned_threads)
+    assert all(not thread.is_alive() for thread in owned_threads)
 
 
 @pytest.mark.asyncio
@@ -573,12 +578,15 @@ async def test_threaded_fallback_propagates_cancellation_and_joins_threads() -> 
     input_file = os.fdopen(input_read_fd, "rb", buffering=0)
     output_file = os.fdopen(output_write_fd, "wb", buffering=0)
     captured: list[_OwnedStdioAdapters] = []
+    owned_threads: list[threading.Thread] = []
+    prior_threads = set(threading.enumerate())
 
     async def selector(direction: str, limits: GatewayLimits) -> _OwnedStdioAdapters:
         del direction
         if not captured:
             adapters = await _open_threaded_stdio(input_file, output_file, limits)
             captured.append(adapters)
+            owned_threads.extend(thread for thread in threading.enumerate() if thread not in prior_threads)
             input_file.close()
             output_file.close()
         return captured[0]
@@ -596,7 +604,8 @@ async def test_threaded_fallback_propagates_cancellation_and_joins_threads() -> 
         await task
 
     os.close(output_read_fd)
-    assert captured[0].threads_alive == 0
+    assert len(owned_threads) == 2
+    assert all(not thread.is_alive() for thread in owned_threads)
     assert captured[0].closed is True
 
 
@@ -612,12 +621,15 @@ async def test_threaded_fallback_fatal_write_reaps_workers_and_fds() -> None:
     input_file = os.fdopen(input_read_fd, "rb", buffering=0)
     output_file = os.fdopen(output_write_fd, "wb", buffering=0)
     captured: list[_OwnedStdioAdapters] = []
+    owned_threads: list[threading.Thread] = []
+    prior_threads = set(threading.enumerate())
 
     async def selector(direction: str, limits: GatewayLimits) -> _OwnedStdioAdapters:
         del direction
         if not captured:
             adapters = await _open_threaded_stdio(input_file, output_file, limits)
             captured.append(adapters)
+            owned_threads.extend(thread for thread in threading.enumerate() if thread not in prior_threads)
             input_file.close()
             output_file.close()
         return captured[0]
@@ -628,7 +640,8 @@ async def test_threaded_fallback_fatal_write_reaps_workers_and_fds() -> None:
     ).serve()
 
     assert result == 1
-    assert captured[0].threads_alive == 0
+    assert len(owned_threads) == 2
+    assert all(not thread.is_alive() for thread in owned_threads)
     assert captured[0].closed is True
 
 
@@ -1063,10 +1076,110 @@ class _BlockingCleanupConnection:
         await self.release.wait()
 
 
+class _CancellationAwareReader:
+    def __init__(self, *, resist_cancellation: bool = False) -> None:
+        self.resist_cancellation = resist_cancellation
+        self.entered = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self.release = asyncio.Event()
+        self.active_reads = 0
+
+    async def readline(self) -> bytes:
+        self.active_reads += 1
+        self.entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            if self.resist_cancellation:
+                while not self.release.is_set():
+                    try:
+                        await self.release.wait()
+                    except asyncio.CancelledError:
+                        continue
+            raise
+        finally:
+            self.active_reads -= 1
+
+
+@pytest.mark.asyncio
+async def test_cancellation_inside_read_wait_accounts_both_child_tasks() -> None:
+    """Cancelling the outer wait must reap its read and transport-failure children."""
+
+    reader = _CancellationAwareReader()
+    baseline = set(asyncio.all_tasks())
+    task = asyncio.create_task(
+        serve_stdio(
+            _CoreRuntime(),
+            input_stream=reader,
+            output_stream=_MemoryWriter(),
+        )
+    )
+    await reader.entered.wait()
+    await asyncio.sleep(0)
+    task.cancel()
+
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        assert reader.cancelled.is_set()
+        assert reader.active_reads == 0
+        assert [child for child in asyncio.all_tasks() if child not in baseline] == []
+    finally:
+        leaked = [child for child in asyncio.all_tasks() if child not in baseline]
+        for child in leaked:
+            child.cancel()
+        await asyncio.gather(*leaked, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_resistant_read_cancellation_is_bounded_and_disclosed_safely(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A non-returning injected read is disclosed without delaying cancellation."""
+
+    reader = _CancellationAwareReader(resist_cancellation=True)
+    baseline = set(asyncio.all_tasks())
+    task = asyncio.create_task(
+        serve_stdio(
+            _CoreRuntime(),
+            input_stream=reader,
+            output_stream=_MemoryWriter(),
+            limits=GatewayLimits(graceful_shutdown_timeout_seconds=0.05),
+        )
+    )
+    await reader.entered.wait()
+    await asyncio.sleep(0)
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=0.4)
+
+    try:
+        assert task in done
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert reader.cancelled.is_set()
+        assert reader.active_reads == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == (
+            "MCP stdio shutdown incomplete: residual input read; process termination may be required\n"
+        )
+    finally:
+        leaked = [child for child in asyncio.all_tasks() if child not in baseline]
+        for child in leaked:
+            child.cancel()
+        reader.release.set()
+        await _eventually(lambda: reader.active_reads == 0)
+        await asyncio.sleep(0)
+        await asyncio.gather(*leaked, return_exceptions=True)
+
+
 @pytest.mark.asyncio
 async def test_repeated_cancellation_waits_for_the_same_cleanup_task() -> None:
     """A second cancellation must not detach connection and adapter cleanup."""
 
+    baseline = set(asyncio.all_tasks())
     server = GatewayProtocolStdioServer(
         _CoreRuntime(),
         input_stream=(reader := _QueueReader()),
@@ -1084,15 +1197,28 @@ async def test_repeated_cancellation_waits_for_the_same_cleanup_task() -> None:
 
     try:
         assert task.done() is False
+        assert [
+            child
+            for child in asyncio.all_tasks()
+            if child not in baseline
+            and child is not task
+            and getattr(child.get_coro(), "__qualname__", "") == "Event.wait"
+        ] == []
         connection.release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
         assert connection.shutdown_calls == 1
+        await asyncio.sleep(0)
+        assert [child for child in asyncio.all_tasks() if child not in baseline] == []
     finally:
         connection.release.set()
         if not task.done():
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        leaked = [child for child in asyncio.all_tasks() if child not in baseline]
+        for child in leaked:
+            child.cancel()
+        await asyncio.gather(*leaked, return_exceptions=True)
 
 
 class _PrefixResistantWriter:

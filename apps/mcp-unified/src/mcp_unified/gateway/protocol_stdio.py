@@ -110,7 +110,10 @@ class GatewayProtocolStdioServer:
         self._write_lock = asyncio.Lock()
         self._transport_failed = asyncio.Event()
         self._transport_poisoned = False
+        self._active_read_task: asyncio.Task[bytes] | None = None
+        self._active_failure_task: asyncio.Task[bool] | None = None
         self._active_drain_task: asyncio.Task[None] | None = None
+        self._residual_read_disclosed = False
         self._residual_drain_disclosed = False
         self._connection = GatewayProtocolConnection(
             runtime,
@@ -255,6 +258,8 @@ class GatewayProtocolStdioServer:
         errors: list[BaseException] = []
 
         connection_task = asyncio.create_task(self._connection.shutdown())
+        if not await self._account_input_waiters(deadline):
+            errors.append(TimeoutError("input read did not stop"))
         connection_done, _ = await asyncio.wait({connection_task}, timeout=max(0.0, deadline - loop.time()))
         if connection_task in connection_done:
             try:
@@ -322,21 +327,49 @@ class GatewayProtocolStdioServer:
             raise RuntimeError("stdio output transport is unavailable")
         read_task = asyncio.create_task(reader.readline())
         failure_task = asyncio.create_task(self._transport_failed.wait())
-        done, _ = await asyncio.wait({read_task, failure_task}, return_when=asyncio.FIRST_COMPLETED)
-        if failure_task in done and self._transport_poisoned:
+        self._active_read_task = read_task
+        self._active_failure_task = failure_task
+        read_task.add_done_callback(self._consume_read_result)
+        try:
+            done, _ = await asyncio.wait({read_task, failure_task}, return_when=asyncio.FIRST_COMPLETED)
+            if failure_task in done and self._transport_poisoned:
+                read_task.cancel()
+                failure_task.cancel()
+                raise RuntimeError("stdio output transport is unavailable")
+            failure_task.cancel()
+            await asyncio.gather(failure_task, return_exceptions=True)
+            if self._active_failure_task is failure_task:
+                self._active_failure_task = None
+            try:
+                return await read_task
+            finally:
+                if self._active_read_task is read_task:
+                    self._active_read_task = None
+        except BaseException:
             read_task.cancel()
-            await self._account_cancelled_read(read_task)
-            raise RuntimeError("stdio output transport is unavailable")
-        failure_task.cancel()
-        await asyncio.gather(failure_task, return_exceptions=True)
-        return await read_task
+            failure_task.cancel()
+            raise
 
-    async def _account_cancelled_read(self, task: asyncio.Task[bytes]) -> None:
-        done, _ = await asyncio.wait({task}, timeout=self._limits.graceful_shutdown_timeout_seconds)
-        if task not in done:
-            self._emit_diagnostic(_RESIDUAL_READ_MESSAGE)
-        else:
-            await asyncio.gather(task, return_exceptions=True)
+    async def _account_input_waiters(self, deadline: float) -> bool:
+        failure_task = self._active_failure_task
+        if failure_task is not None:
+            failure_task.cancel()
+            await asyncio.gather(failure_task, return_exceptions=True)
+            if self._active_failure_task is failure_task:
+                self._active_failure_task = None
+
+        read_task = self._active_read_task
+        if read_task is None:
+            return True
+        read_task.cancel()
+        done, _ = await asyncio.wait({read_task}, timeout=max(0.0, deadline - asyncio.get_running_loop().time()))
+        if read_task not in done:
+            self._disclose_residual_read()
+            return False
+        await asyncio.gather(read_task, return_exceptions=True)
+        if self._active_read_task is read_task:
+            self._active_read_task = None
+        return True
 
     async def _account_drain(self, task: asyncio.Task[None], deadline: float) -> bool:
         if task.done():
@@ -354,6 +387,12 @@ class GatewayProtocolStdioServer:
         if not task.cancelled():
             task.exception()
 
+    def _consume_read_result(self, task: asyncio.Task[bytes]) -> None:
+        if self._active_read_task is task:
+            self._active_read_task = None
+        if not task.cancelled():
+            task.exception()
+
     def _poison_transport(self) -> None:
         self._transport_poisoned = True
         self._transport_failed.set()
@@ -362,6 +401,11 @@ class GatewayProtocolStdioServer:
         if not self._residual_drain_disclosed:
             self._residual_drain_disclosed = True
             self._emit_diagnostic(_RESIDUAL_DRAIN_MESSAGE)
+
+    def _disclose_residual_read(self) -> None:
+        if not self._residual_read_disclosed:
+            self._residual_read_disclosed = True
+            self._emit_diagnostic(_RESIDUAL_READ_MESSAGE)
 
     def _emit_diagnostic(self, message: str) -> None:
         try:
