@@ -127,6 +127,41 @@ The three remaining bootstrap-repair findings were verified against the implemen
 - The live PostgreSQL concurrency test remains honestly environment-skipped. The deterministic server-free lock/ordering contract continues to pass.
 - Self-review preserved Task 4 planning, Task 5 attestation, Task 6 materializers, prior enrollment/locking/profile fixes, and Task 8/9 scope. No new ADR is required because Round 2 implements the already-governed durable bootstrap repair contract rather than changing the sync ownership or conflict policy.
 
+## Fix Round 3
+
+The final original-implementer review findings were verified against the Round 2 implementation and confirmed. Repair now avoids every transient object-state regression, resumes from the exact durable manifest for an existing deterministic group, and carries trusted relationship-capture evidence across failed bootstrap attempt IDs.
+
+### Changes
+
+- Exact group repair skips already-applied steps. When an older pending step is shadowed by a later applied current head for the same object, it uses the transactional audit-only reconciliation seam and never calls the verifier seam that rewrites `sync_object_state`.
+- The server-origin batch coordinator can load a validated stored mutation group as its authoritative step manifest using the same source/idempotency-derived group ID. Bootstrap replays contiguous stored groups exactly, including canonical routing and lineage, before batching only semantic source steps not already represented by those manifests.
+- Stored manifests remain guarded by the existing complete-group shape and materialization-plan-hash validation. Mutable post-apply omission/restore state can no longer change an already durable group shape or its envelope IDs for the same bootstrap ID and source snapshot hash.
+- Relationship-removal discovery accepts capture upserts from any non-empty prior bootstrap attempt ID when they belong to accepted, server-origin `notes-organization-bootstrap` history and carry `bootstrap_capture: true`. The emitted verified removal tombstone always belongs to the current attempt. Links without bootstrap capture history remain excluded.
+
+### Focused RED/GREEN evidence
+
+- Transient object-state RED: `1 failed, 10 deselected, 4 warnings in 9.92s`; the shadowed older upsert was recorded through the ordinary verifier rather than with the superseded audit marker, and the SQL hook observed its cursor in an `INSERT INTO sync_object_state` write. GREEN: `1 passed, 10 deselected, 3 warnings in 11.71s`; no traced object-state write references the older cursor and the envelope records `sync_bootstrap_superseded`. The final assertion-order rerun is `1 passed, 12 deselected, 3 warnings in 9.51s`.
+- Durable manifest RED: `1 failed, 11 deselected, 4 warnings`; after an applied removal repair also added a resource, restart rederived a smaller group and transitioned failed on idempotency shape drift. GREEN: `1 passed, 11 deselected, 3 warnings in 11.55s`, with the identical group/envelope IDs, no duplicate history, and ready state.
+- Cross-attempt relationship RED: `1 failed, 12 deselected, 4 warnings`; attempt ID2 ignored ID1's trusted capture and failed final readiness with the stale link head. GREEN: `1 passed, 12 deselected, 3 warnings in 10.00s`; ID2 emits and verifies its tombstone from ID1 capture history.
+
+### Final focused gates
+
+- Bootstrap file: `13 passed, 3 warnings in 15.62s`.
+- Transaction gate file: `4 passed, 1 skipped, 3 warnings in 41.24s`; live PostgreSQL remains unconfigured.
+- PostgreSQL server-free contract file: `21 passed, 3 warnings in 17.57s`.
+- Profile selector: `3 passed, 9 deselected, 3 warnings in 10.25s`.
+- Task 4 coordinator compatibility: `20 passed, 3 warnings in 9.54s`.
+- Scoped Ruff: `All checks passed!`.
+- Scoped Bandit: exit 0 with no findings or output.
+- `git diff --check`: exit 0, no output.
+
+### Warning disposition and self-review
+
+- Pytest warnings remain the managed-worktree `PytestCacheWarning` plus repository/runtime deprecations. `system_log_buffer append failed: PermissionError` remains test-environment logging noise and did not change assertions or exit statuses.
+- The durable manifest loader does not weaken validation: it resolves the same deterministic group identity and reuses the existing stored shape/plan-hash verifier before returning steps. Semantic subtraction only prevents already-manifested source mutations from being appended again; replay retains the exact stored routing/base lineage.
+- Cross-attempt removal cannot infer pre-history deletion because the candidate must still be an accepted server-origin bootstrap group step with explicit capture metadata. Final exact-head/source verification remains unchanged.
+- No Task 8/9 behavior, enrollment/profile surface, PostgreSQL gate, Task 4 planning, Task 5 attestation, or Task 6 materializer was changed. No new ADR is required because Round 3 hardens the already-governed durable bootstrap/resume policy.
+
 ## Files
 
 - `tldw_Server_API/app/core/DB_Management/Sync_DB.py`

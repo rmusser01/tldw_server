@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
@@ -20,6 +21,7 @@ from .server_origin_batch import (
     ServerOriginMutationStep,
     SyncServerOriginBatchMaterializationError,
     capture_server_origin_mutation_batch,
+    load_server_origin_mutation_batch_manifest,
 )
 from .service import SyncV2Service
 
@@ -132,18 +134,34 @@ class NotesOrganizationBootstrapper:
                 expected_count=expected_count,
             )
             snapshot_hash = _snapshot_hash(snapshot)
-            for completed_groups, offset in enumerate(
-                range(0, len(steps), self._batch_size), start=1
-            ):
-                batch = steps[offset : offset + self._batch_size]
+            remaining_steps = list(steps)
+            group_index = 0
+            completed_groups = 0
+            while True:
+                idempotency_key = f"{bootstrap_id}:{snapshot_hash}:{group_index}"
+                stored_manifest = load_server_origin_mutation_batch_manifest(
+                    service=service,
+                    dataset_id=dataset.dataset_id,
+                    source="notes-organization-bootstrap",
+                    idempotency_key=idempotency_key,
+                )
+                if stored_manifest is not None:
+                    batch = list(stored_manifest)
+                    remaining_steps = _without_manifest_steps(
+                        remaining_steps,
+                        stored_manifest,
+                    )
+                elif remaining_steps:
+                    batch = remaining_steps[: self._batch_size]
+                    del remaining_steps[: self._batch_size]
+                else:
+                    break
                 capture_server_origin_mutation_batch(
                     service=service,
                     user_id=user_id,
                     steps=batch,
                     source="notes-organization-bootstrap",
-                    idempotency_key=(
-                        f"{bootstrap_id}:{snapshot_hash}:{offset // self._batch_size}"
-                    ),
+                    idempotency_key=idempotency_key,
                     trusted_notes_organization_bootstrap_id=bootstrap_id,
                     bootstrap_relationship_verifier=self._relationship_matches_source,
                     bootstrap_relationship_absence_verifier=(
@@ -151,7 +169,7 @@ class NotesOrganizationBootstrapper:
                     ),
                     bootstrap_step_verifier=self._step_matches_source,
                 )
-                captured_count = min(expected_count, offset + len(batch))
+                captured_count = min(expected_count, captured_count + len(batch))
                 dataset = service.store.transition_notes_organization_bootstrap(
                     dataset.dataset_id,
                     bootstrap_id=bootstrap_id,
@@ -160,6 +178,8 @@ class NotesOrganizationBootstrapper:
                     captured_count=captured_count,
                     expected_count=expected_count,
                 )
+                group_index += 1
+                completed_groups += 1
                 if self._after_group is not None:
                     self._after_group(completed_groups)
 
@@ -383,7 +403,10 @@ class NotesOrganizationBootstrapper:
                     envelope.domain in _RELATIONSHIP_DOMAINS
                     and envelope.operation == "upsert"
                     and envelope.routing_metadata.get("bootstrap_capture") is True
-                    and envelope.routing_metadata.get("bootstrap_id") == bootstrap_id
+                    and isinstance(
+                        envelope.routing_metadata.get("bootstrap_id"), str
+                    )
+                    and bool(envelope.routing_metadata.get("bootstrap_id"))
                 ):
                     captured.setdefault(
                         (envelope.domain, envelope.object_id), []
@@ -400,7 +423,10 @@ class NotesOrganizationBootstrapper:
             if (
                 head.operation == "upsert"
                 and head.routing_metadata.get("bootstrap_capture") is True
-                and head.routing_metadata.get("bootstrap_id") == bootstrap_id
+                and head.routing_metadata.get("source")
+                == "notes-organization-bootstrap"
+                and isinstance(head.routing_metadata.get("bootstrap_id"), str)
+                and bool(head.routing_metadata.get("bootstrap_id"))
             ):
                 template = next(
                     (
@@ -484,12 +510,31 @@ class NotesOrganizationBootstrapper:
             ):
                 stale_groups.append(group)
                 continue
-            # Re-record the complete group in mutation-step order. This also repairs
-            # a legacy non-prefix apply vector without leaving object state pointing
-            # at an earlier step shadowed by an already-applied later step.
+            # Repair the complete group in mutation-step order. A pending step that
+            # is shadowed by an applied current head is audit-reconciled without
+            # moving object state backward, even transiently.
             for envelope in group:
+                if envelope.apply_status == "applied":
+                    continue
                 if envelope.server_cursor is None:
                     raise SyncStoreError("Stored bootstrap step has no server cursor")
+                current = service.store.get_current_head(
+                    dataset.dataset_id,
+                    envelope.domain,
+                    envelope.object_id,
+                )
+                if (
+                    current is not None
+                    and current.server_cursor is not None
+                    and current.server_cursor > envelope.server_cursor
+                    and current.apply_status == "applied"
+                ):
+                    service.store.reconcile_bootstrap_envelope_superseded(
+                        envelope.server_cursor,
+                        bootstrap_id=bootstrap_id,
+                        superseded_by_cursor=current.server_cursor,
+                    )
+                    continue
                 service.store.mark_bootstrap_envelope_verified(
                     envelope.server_cursor,
                     bootstrap_id=bootstrap_id,
@@ -679,6 +724,37 @@ class NotesOrganizationBootstrapper:
             expected_count=expected_count,
             error_code=error_code,
         )
+
+
+def _without_manifest_steps(
+    planned: Sequence[ServerOriginMutationStep],
+    stored: Sequence[ServerOriginMutationStep],
+) -> list[ServerOriginMutationStep]:
+    stored_counts = Counter(_step_semantic_key(step) for step in stored)
+    remaining: list[ServerOriginMutationStep] = []
+    for step in planned:
+        key = _step_semantic_key(step)
+        if stored_counts[key]:
+            stored_counts[key] -= 1
+        else:
+            remaining.append(step)
+    return remaining
+
+
+def _step_semantic_key(step: ServerOriginMutationStep) -> str:
+    return json.dumps(
+        {
+            "domain": step.domain,
+            "operation": step.operation,
+            "object_id": step.object_id,
+            "payload": step.payload,
+            "parent_id": step.parent_id,
+            "stable_key": step.stable_key,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
 
 
 def _heads_match_snapshot(

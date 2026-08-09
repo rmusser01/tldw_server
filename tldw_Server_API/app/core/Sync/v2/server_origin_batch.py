@@ -171,6 +171,34 @@ def capture_server_origin_mutation_batch(
     )
 
 
+def load_server_origin_mutation_batch_manifest(
+    *,
+    service: SyncV2Service,
+    dataset_id: str,
+    source: str,
+    idempotency_key: str,
+) -> tuple[ServerOriginMutationStep, ...] | None:
+    """Load one validated durable group as its authoritative step manifest."""
+
+    normalized_key = idempotency_key.strip()
+    if not normalized_key:
+        raise SyncStoreError("Sync server-origin mutation batch requires an idempotency key")
+    mutation_group_id = _mutation_group_id(
+        dataset_id,
+        source=source,
+        idempotency_key=normalized_key,
+    )
+    existing = service.store.list_mutation_group(dataset_id, mutation_group_id)
+    if not existing:
+        return None
+    _validate_stored_group(
+        existing,
+        dataset_id=dataset_id,
+        mutation_group_id=mutation_group_id,
+    )
+    return tuple(_canonical_step_from_envelope(envelope) for envelope in existing)
+
+
 def resume_server_origin_mutation_group(
     *,
     service: SyncV2Service,

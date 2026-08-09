@@ -36,6 +36,7 @@ COLLECTION_PARENT_ID = "44444444-4444-4444-8444-444444444444"
 COLLECTION_CHILD_ID = "55555555-5555-4555-8555-555555555555"
 FOLDER_PARENT_ID = "66666666-6666-4666-8666-666666666666"
 FOLDER_CHILD_ID = "77777777-7777-4777-8777-777777777777"
+REPAIR_KEYWORD_ID = "88888888-8888-4888-8888-888888888888"
 
 
 def _service(tmp_path: Path) -> tuple[SyncV2Service, SyncV2Store, CharactersRAGDB]:
@@ -276,6 +277,73 @@ def test_bootstrap_resume_tombstones_a_captured_relationship_removed_from_source
     note_db.close_connection()
 
 
+def test_new_bootstrap_attempt_tombstones_relationship_captured_by_prior_attempt(
+    tmp_path: Path,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = _seed_source(note_db, store)
+    link_id = organization_link_id(
+        "notes.keyword_link", ["note", NOTE_ID, DELETED_KEYWORD_ID]
+    )
+    link_payload = {
+        "subject_type": "note",
+        "subject_id": NOTE_ID,
+        "keyword_sync_id": DELETED_KEYWORD_ID,
+    }
+
+    def interrupt_after_capture(_completed_groups: int) -> None:
+        raise NotesOrganizationBootstrapInterrupted("attempt one captured")
+
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        NotesOrganizationBootstrapper(
+            note_db,
+            batch_size=100,
+            after_group=interrupt_after_capture,
+        ).bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=store.get_dataset("dataset-1"),
+        )
+    attempt_one = store.get_dataset("dataset-1")
+    attempt_one_state = attempt_one.metadata["notes_organization_v1"]
+    failed = store.transition_notes_organization_bootstrap(
+        "dataset-1",
+        bootstrap_id="bootstrap-1",
+        expected_state="initializing",
+        state="failed",
+        captured_count=attempt_one_state["captured_count"],
+        expected_count=attempt_one_state["expected_count"],
+        error_code="notes_organization_bootstrap_capture_failed",
+    )
+    assert failed.metadata["notes_organization_v1"]["state"] == "failed"
+    attempt_two = store.begin_notes_organization_bootstrap(
+        "dataset-1",
+        owner_user_id="user-1",
+        bootstrap_id="bootstrap-2",
+    )
+    projection.apply_relationship(
+        domain="notes.keyword_link",
+        object_id=link_id,
+        operation="tombstone",
+        payload=link_payload,
+        routing_metadata={},
+    )
+
+    ready = NotesOrganizationBootstrapper(note_db, batch_size=100).bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=attempt_two,
+    )
+
+    removed = store.get_current_head("dataset-1", "notes.keyword_link", link_id)
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert removed is not None
+    assert removed.operation == "tombstone"
+    assert removed.apply_status == "applied"
+    assert removed.routing_metadata["bootstrap_id"] == "bootstrap-2"
+    note_db.close_connection()
+
+
 def test_bootstrap_restart_replays_same_applied_relationship_removal_group(
     tmp_path: Path,
 ) -> None:
@@ -363,6 +431,103 @@ def test_bootstrap_restart_replays_same_applied_relationship_removal_group(
         if item.mutation_group_id == removal_group_id
     } == removal_ids
     assert len({item.client_envelope_id for item in after_restart}) == len(after_restart)
+    note_db.close_connection()
+
+
+def test_removal_repair_restart_reuses_manifest_with_new_resource(
+    tmp_path: Path,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = _seed_source(note_db, store)
+    link_id = organization_link_id(
+        "notes.keyword_link", ["note", NOTE_ID, DELETED_KEYWORD_ID]
+    )
+    link_payload = {
+        "subject_type": "note",
+        "subject_id": NOTE_ID,
+        "keyword_sync_id": DELETED_KEYWORD_ID,
+    }
+    first_capture = True
+
+    def interrupt_first_capture(_completed_groups: int) -> None:
+        nonlocal first_capture
+        if first_capture:
+            first_capture = False
+            raise NotesOrganizationBootstrapInterrupted("initial manifest applied")
+
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        NotesOrganizationBootstrapper(
+            note_db,
+            batch_size=100,
+            after_group=interrupt_first_capture,
+        ).bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=store.get_dataset("dataset-1"),
+        )
+    projection.apply_relationship(
+        domain="notes.keyword_link",
+        object_id=link_id,
+        operation="tombstone",
+        payload=link_payload,
+        routing_metadata={},
+    )
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=REPAIR_KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "Added during removal repair"},
+    )
+
+    repair_crash = True
+
+    def interrupt_repair(_completed_groups: int) -> None:
+        nonlocal repair_crash
+        if repair_crash:
+            repair_crash = False
+            raise NotesOrganizationBootstrapInterrupted("repair manifest applied")
+
+    bootstrapper = NotesOrganizationBootstrapper(
+        note_db,
+        batch_size=100,
+        after_group=interrupt_repair,
+    )
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        bootstrapper.bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=store.get_dataset("dataset-1"),
+        )
+    before_restart = _organization_envelopes(store)
+    repair_group = next(
+        item.mutation_group_id
+        for item in before_restart
+        if item.object_id == REPAIR_KEYWORD_ID
+    )
+    repair_ids = {
+        item.client_envelope_id
+        for item in before_restart
+        if item.mutation_group_id == repair_group
+    }
+
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    after_restart = _organization_envelopes(store)
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert {
+        item.client_envelope_id
+        for item in after_restart
+        if item.mutation_group_id == repair_group
+    } == repair_ids
+    assert len({item.client_envelope_id for item in after_restart}) == len(after_restart)
+    removed = store.get_current_head("dataset-1", "notes.keyword_link", link_id)
+    added = store.get_current_head("dataset-1", "notes.keyword", REPAIR_KEYWORD_ID)
+    assert removed is not None and removed.operation == "tombstone"
+    assert added is not None and added.payload == {"keyword": "Added during removal repair"}
     note_db.close_connection()
 
 
@@ -539,6 +704,66 @@ def test_retryable_deleted_resource_group_repairs_shadowed_steps_after_source_dr
     assert {item.client_envelope_id for item in prior}.issubset(
         {item.client_envelope_id for item in repaired}
     )
+    note_db.close_connection()
+
+
+def test_exact_group_reconcile_never_rewrites_state_to_shadowed_pending_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = NotesOrganizationSyncStore(note_db)
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "Dormant"},
+    )
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=DELETED_KEYWORD_ID,
+        operation="tombstone",
+        payload={},
+    )
+    bootstrapper = NotesOrganizationBootstrapper(note_db, batch_size=2)
+    original_verifier = bootstrapper._step_matches_source
+    monkeypatch.setattr(bootstrapper, "_step_matches_source", lambda _envelope: False)
+    paused = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+    monkeypatch.setattr(bootstrapper, "_step_matches_source", original_verifier)
+    upsert, tombstone = _organization_envelopes(store)
+    assert upsert.apply_status == "pending"
+    assert tombstone.server_cursor is not None
+    store.mark_bootstrap_envelope_verified(
+        tombstone.server_cursor,
+        bootstrap_id="bootstrap-1",
+    )
+
+    object_state_writes: list[int] = []
+    original_execute = store.db.execute
+
+    def trace_object_state_writes(sql: str, *args: object, **kwargs: object) -> object:
+        normalized = " ".join(sql.split())
+        if normalized.startswith("INSERT INTO sync_object_state"):
+            params = args[0] if args else kwargs.get("params")
+            assert isinstance(params, tuple)
+            object_state_writes.append(int(params[5]))
+        return original_execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(store.db, "execute", trace_object_state_writes)
+    bootstrapper._drain_preexisting_heads(service, paused)
+
+    repaired_upsert = next(
+        item
+        for item in _organization_envelopes(store)
+        if item.server_cursor == upsert.server_cursor
+    )
+    assert repaired_upsert.apply_status == "applied"
+    assert upsert.server_cursor not in object_state_writes
+    assert repaired_upsert.apply_error_code == "sync_bootstrap_superseded"
     note_db.close_connection()
 
 
