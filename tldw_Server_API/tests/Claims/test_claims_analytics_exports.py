@@ -1282,7 +1282,7 @@ def test_transient_sqlite_error_remains_concrete_and_raw_text_is_not_persisted()
     assert secret not in json.dumps(stored, default=str)
 
 
-def test_late_failure_cannot_move_ready_artifact_to_failed() -> None:
+def test_domain_failure_losing_to_ready_returns_exact_skip() -> None:
     db = ArtifactDB()
     row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
 
@@ -1298,15 +1298,50 @@ def test_late_failure_cannot_move_ready_artifact_to_failed() -> None:
     db.list_claims_monitoring_events_page = serialization_failure  # type: ignore[method-assign]
     db.failure_transition_hook = ready_winner
 
-    with pytest.raises(ClaimsAnalyticsExportError):
-        process_export_artifact(
-            db,
-            owner_user_id="7",
-            export_id=row["export_id"],
-            job_id=42,
-        )
+    result = process_export_artifact(
+        db,
+        owner_user_id="7",
+        export_id=row["export_id"],
+        job_id=42,
+    )
 
     stored = db.artifacts[row["export_id"]]
+    assert result == {
+        "outcome": "skipped",
+        "reason": "already_ready",
+        "export_id": row["export_id"],
+    }
+    assert stored["status"] == "ready"
+    assert stored["payload_json"] == '{"winner":true}'
+    assert stored["error_code"] is None
+
+
+def test_transient_db_failure_losing_to_ready_returns_exact_skip() -> None:
+    db = ArtifactDB()
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+
+    def transient_failure(**_: Any) -> list[dict[str, Any]]:
+        raise sqlite3.OperationalError("database is locked at /private/owner-7.db")
+
+    def ready_winner(artifact: dict[str, Any]) -> None:
+        artifact.update(status="ready", payload_json='{"winner":true}')
+
+    db.list_claims_monitoring_events_page = transient_failure  # type: ignore[method-assign]
+    db.failure_transition_hook = ready_winner
+
+    result = process_export_artifact(
+        db,
+        owner_user_id="7",
+        export_id=row["export_id"],
+        job_id=42,
+    )
+
+    stored = db.artifacts[row["export_id"]]
+    assert result == {
+        "outcome": "skipped",
+        "reason": "already_ready",
+        "export_id": row["export_id"],
+    }
     assert stored["status"] == "ready"
     assert stored["payload_json"] == '{"winner":true}'
     assert stored["error_code"] is None

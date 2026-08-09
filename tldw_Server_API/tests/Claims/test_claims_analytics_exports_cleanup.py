@@ -109,7 +109,7 @@ class FakeJobManager:
                 "id": job_id,
                 "domain": "claims",
                 "owner_user_id": "7",
-                "type": "claims_generate_analytics_export",
+                "job_type": "claims_generate_analytics_export",
                 **job,
             }
             for job_id, job in (jobs_by_id or {}).items()
@@ -138,7 +138,7 @@ def _exact_job(export_id: str, job_id: int, *, archived: bool = False) -> dict[s
         "id": job_id,
         "domain": "claims",
         "owner_user_id": "7",
-        "type": "claims_generate_analytics_export",
+        "job_type": "claims_generate_analytics_export",
         "batch_group": f"claims-analytics-export:{export_id}",
         "archived": archived,
     }
@@ -284,6 +284,24 @@ def test_reconcile_ignores_nonexact_or_wrong_scope_matches(returned_job: Any) ->
     assert db.rows[row["export_id"]]["job_id"] is None
 
 
+def test_reconcile_rejects_type_only_job_row_shape() -> None:
+    row = _artifact(7, created_seconds_ago=1)
+    group = f"claims-analytics-export:{row['export_id']}"
+    type_only = _exact_job(row["export_id"], 55)
+    type_only["type"] = type_only.pop("job_type")
+    db = MaintenanceDB([row])
+
+    result = reconcile_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=FakeJobManager(groups={group: type_only}),
+        now=NOW,
+    )
+
+    assert result == {"examined": 1, "repaired": 0, "failed": 0, "unchanged": 1}
+    assert db.rows[row["export_id"]]["job_id"] is None
+
+
 def test_reconcile_jobs_outage_preserves_artifact_and_zero_grace_is_honored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -422,6 +440,38 @@ def test_cleanup_reconciled_failed_without_job_waits_retention_plus_grace(
     assert manager.batch_calls == []
 
 
+@pytest.mark.parametrize(
+    "error_code",
+    [None, "claims_export_serialization_failed", "claims_export_storage_unavailable"],
+)
+def test_cleanup_preserves_unrelated_failed_without_job_after_retention_and_grace(
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str | None,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    unrelated = _artifact(
+        42,
+        status="failed",
+        updated_seconds_ago=7200,
+        error_code=error_code,
+    )
+    db = MaintenanceDB([unrelated])
+    manager = FakeJobManager(batch_error=RuntimeError("Jobs should not be called"))
+
+    deleted = cleanup_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=manager,
+        now=NOW,
+        retention_hours=1,
+    )
+
+    assert deleted == 0
+    assert unrelated["export_id"] in db.rows
+    assert manager.batch_calls == []
+    assert db.delete_calls == []
+
+
 def test_cleanup_jobs_outage_deletes_ready_but_preserves_uncertain_failed() -> None:
     ready = _artifact(50, status="ready", updated_seconds_ago=7200)
     failed = _artifact(51, status="failed", job_id=111, updated_seconds_ago=7200)
@@ -452,7 +502,7 @@ def test_cleanup_ignores_terminal_job_row_outside_requested_scope() -> None:
                 "status": "completed",
                 "domain": "claims",
                 "owner_user_id": "8",
-                "type": "claims_generate_analytics_export",
+                "job_type": "claims_generate_analytics_export",
             }
         }
     )
@@ -462,6 +512,31 @@ def test_cleanup_ignores_terminal_job_row_outside_requested_scope() -> None:
             db,
             owner_user_id="7",
             job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 0
+    )
+    assert failed["export_id"] in db.rows
+
+
+def test_cleanup_rejects_type_only_terminal_job_row_shape() -> None:
+    failed = _artifact(53, status="failed", job_id=113, updated_seconds_ago=7200)
+    db = MaintenanceDB([failed])
+    type_only = {
+        "id": 113,
+        "status": "completed",
+        "domain": "claims",
+        "owner_user_id": "7",
+        "job_type": None,
+        "type": "claims_generate_analytics_export",
+    }
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=FakeJobManager(jobs_by_id={113: type_only}),
             now=NOW,
             retention_hours=1,
         )

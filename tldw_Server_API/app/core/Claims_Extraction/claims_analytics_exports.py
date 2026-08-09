@@ -652,6 +652,21 @@ def _record_processing_failure(
     )
 
 
+def _ready_after_lost_failure_transition(
+    db: Any,
+    *,
+    owner_user_id: str,
+    export_id: str,
+    transitioned: bool,
+) -> dict[str, Any] | None:
+    if transitioned:
+        return None
+    current = db.get_claims_analytics_export(export_id, user_id=owner_user_id)
+    if current and current.get("user_id") == owner_user_id and current.get("status") == "ready":
+        return _already_ready(export_id)
+    return None
+
+
 def _mark_rendered_ready(
     db: Any,
     *,
@@ -862,22 +877,38 @@ def process_export_artifact(
             return _already_ready(validated_export_id)
         raise _storage_error()
     except ClaimsAnalyticsExportError as exc:
-        _record_processing_failure(
+        transitioned = _record_processing_failure(
             db,
             owner_user_id=owner,
             export_id=validated_export_id,
             error=exc,
         )
+        ready_result = _ready_after_lost_failure_transition(
+            db,
+            owner_user_id=owner,
+            export_id=validated_export_id,
+            transitioned=transitioned,
+        )
+        if ready_result is not None:
+            return ready_result
         raise
     except Exception as exc:
         storage_error = _storage_error()
         try:
-            _record_processing_failure(
+            transitioned = _record_processing_failure(
                 db,
                 owner_user_id=owner,
                 export_id=validated_export_id,
                 error=storage_error,
             )
+            ready_result = _ready_after_lost_failure_transition(
+                db,
+                owner_user_id=owner,
+                export_id=validated_export_id,
+                transitioned=transitioned,
+            )
+            if ready_result is not None:
+                return ready_result
         except Exception as persistence_exc:  # noqa: BLE001
             logger.warning(
                 "Claims export failure state could not be persisted: operation={} "
@@ -967,7 +998,7 @@ def _job_matches_reconciliation(
         job.get("batch_group") != batch_group
         or job.get("domain") != "claims"
         or job.get("owner_user_id") != owner_user_id
-        or job.get("type") != _EXPORT_JOB_TYPE
+        or job.get("job_type") != _EXPORT_JOB_TYPE
     ):
         return None
     return job_id
@@ -1073,7 +1104,7 @@ def _cleanup_job_status(
         job.get("id") != job_id
         or job.get("domain") != "claims"
         or job.get("owner_user_id") != owner_user_id
-        or job.get("type") != _EXPORT_JOB_TYPE
+        or job.get("job_type") != _EXPORT_JOB_TYPE
     ):
         return None
     status = job.get("status")
@@ -1153,7 +1184,7 @@ def cleanup_export_artifacts(
             continue
         job_id = row.get("job_id")
         if job_id is None:
-            if age > retention_seconds + grace:
+            if row.get("error_code") == "claims_export_enqueue_failed" and age > retention_seconds + grace:
                 selected.append(export_id)
             continue
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
