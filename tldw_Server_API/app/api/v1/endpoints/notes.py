@@ -3,14 +3,14 @@
 #
 # Imports
 import asyncio
-from datetime import datetime, timezone
 import hashlib
 import json
 import mimetypes
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 from urllib.parse import quote
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 #
 # 3rd-party Libraries
@@ -30,14 +30,28 @@ from fastapi import (
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RateLimiter,
+    User,
+    get_rate_limiter_dep,
+    get_request_user,
+    rbac_rate_limit,
+)
 
 # Dependency to get user-specific ChaChaNotes_DB instance
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     resolve_chacha_user_base_dir,
+)
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.schemas.notes_moodboards import (
+    MoodboardCreate,
+    MoodboardListResponse,
+    MoodboardNotesListResponse,
+    MoodboardPinResponse,
+    MoodboardResponse,
+    MoodboardUpdate,
 )
 
 #
@@ -48,21 +62,21 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     ConversationKeywordLinkResponse,
     ConversationKeywordLinksResponse,
     DetailResponse,
-    KeywordCreate,
     KeywordCollectionCreate,
     KeywordCollectionResponse,
     KeywordCollectionsListResponse,
     KeywordCollectionUpdate,
+    KeywordCreate,
     KeywordMergeRequest,
     KeywordMergeResponse,
     KeywordResponse,
-    KeywordUpdate,
     KeywordsForNoteResponse,
+    KeywordUpdate,
+    NoteAttachmentResponse,
+    NoteAttachmentsListResponse,
     NoteBulkCreateItemResult,
     NoteBulkCreateRequest,
     NoteBulkCreateResponse,
-    NoteAttachmentsListResponse,
-    NoteAttachmentResponse,
     NoteCreate,
     NoteFolderCreate,
     NoteFolderResponse,
@@ -71,10 +85,10 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteResponse,
     NotesExportRequest,
     NotesExportResponse,
+    NotesForKeywordResponse,
+    NotesImportFileResult,
     NotesImportRequest,
     NotesImportResponse,
-    NotesImportFileResult,
-    NotesForKeywordResponse,
     NotesListResponse,
     NoteUpdate,
     TitleSuggestRequest,
@@ -87,14 +101,6 @@ from tldw_Server_API.app.api.v1.schemas.notes_studio import (
     NoteStudioRegenerateRequest,
     NoteStudioStateResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.notes_moodboards import (
-    MoodboardCreate,
-    MoodboardListResponse,
-    MoodboardNotesListResponse,
-    MoodboardPinResponse,
-    MoodboardResponse,
-    MoodboardUpdate,
-)
 from tldw_Server_API.app.core.config import settings as core_settings
 
 #
@@ -106,7 +112,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # Corrected
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
 from tldw_Server_API.app.core.Notes_Tasks import NotesTaskService, TaskActor
@@ -121,6 +126,7 @@ from tldw_Server_API.app.core.Personalization import (
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.models import SyncDomain
 from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
+    NotesKeywordMergeUnsynchronizedDependencyError,
     NotesOrganizationCoordinator,
     NotesOrganizationDomainsIncompleteError,
     NotesOrganizationNotReadyError,
@@ -134,18 +140,20 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
     SyncServerOriginRestoreConflictError,
-    capture_server_origin_note_restore,
     capture_server_origin_mutation,
+    capture_server_origin_note_restore,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+    ServerOriginMutationStep,
     SyncServerOriginBatchAppendError,
     SyncServerOriginBatchIdempotencyConflictError,
     SyncServerOriginBatchMaterializationError,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
 
 #
@@ -242,6 +250,14 @@ def _ensure_note_exists_or_404(db: CharactersRAGDB, note_id: str) -> None:
 
 
 def _note_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, NotesKeywordMergeUnsynchronizedDependencyError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": exc.error_code,
+                "message": "The keyword has a dependency that is not synchronized.",
+            },
+        )
     if isinstance(exc, NotesOrganizationResourceNotFoundError):
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -472,6 +488,84 @@ def _capture_notes_organization_plan(
         raise _note_sync_http_error(exc) from exc
 
 
+def _compound_note_step(
+    *,
+    note_id: str,
+    payload: dict[str, object],
+    request_key: str,
+) -> ServerOriginMutationStep:
+    return ServerOriginMutationStep(
+        domain="notes.note",
+        operation="upsert",
+        object_id=note_id,
+        payload=payload,
+        stable_key=server_origin_stable_key(
+            source="notes-api",
+            domain="notes.note",
+            operation="upsert",
+            idempotency_key=request_key,
+        ),
+    )
+
+
+def _compound_note_id(request_key: str) -> str:
+    digest = hashlib.sha256(f"notes.note:{request_key}".encode()).hexdigest()
+    return str(UUID(digest[:32], version=4))
+
+
+def _compound_note_request_fingerprint(
+    coordinator: NotesOrganizationCoordinator,
+    *,
+    operation: str,
+    note_id: str,
+    note_fields: dict[str, object],
+    keywords: list[str] | None,
+    folder_paths: list[str] | None,
+    expected_version: int | None = None,
+) -> str:
+    return coordinator.request_fingerprint(
+        operation,
+        {
+            "note_id": note_id,
+            "note_fields": note_fields,
+            "keywords": keywords,
+            "folder_paths": folder_paths,
+            "expected_version": expected_version,
+        },
+    )
+
+
+def _capture_compound_note(
+    coordinator: NotesOrganizationCoordinator,
+    *,
+    note_id: str,
+    note_payload: dict[str, object],
+    keywords: list[str] | None,
+    folder_paths: list[str] | None,
+    request_key: str,
+    request_fingerprint: str,
+) -> dict[str, Any]:
+    plan = coordinator.plan_note_with_organization(
+        note_step=_compound_note_step(
+            note_id=note_id,
+            payload=note_payload,
+            request_key=request_key,
+        ),
+        keywords=keywords,
+        folder_paths=folder_paths,
+    )
+    plan = coordinator.bind_request(plan, request_fingerprint)
+    result = _capture_notes_organization_plan(
+        coordinator,
+        plan,
+        idempotency_key=request_key,
+        source="notes-api",
+    )
+    if not isinstance(result, dict):
+        raise SyncStoreError("Compound note projection did not return a note")
+    return result
+
+
 def _reconcile_note_tasks_after_save(
     *,
     db: CharactersRAGDB,
@@ -490,7 +584,7 @@ def _reconcile_note_tasks_after_save(
             content=str(note_data.get("content") or ""),
             actor=TaskActor(actor_type="user", actor_id=str(current_user.id)),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - saved notes must survive task reconciliation failure.
         logger.warning(
             "Note task reconciliation failed after saved note {} version {}: {}",
             note_id,
@@ -1442,7 +1536,7 @@ async def notes_health() -> dict[str, Any]:
 
         if not exists or not writable:
             health["status"] = "degraded"
-    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+    except _NOTES_NONCRITICAL_EXCEPTIONS:
         health["status"] = "unhealthy"
         health["error"] = "Notes health check failed"
         if base_dir:
@@ -1503,23 +1597,16 @@ async def create_note(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                     detail="Title is required unless auto_title=true")
 
-        conversation_id, message_id = _validate_note_links(
-            db,
-            note_in.conversation_id,
-            note_in.message_id,
-        )
-
         sync_service = _active_notes_sync_service(current_user)
-        if sync_service is not None and _field_supplied(note_in, "keywords"):
-            _require_notes_organization_ready(
-                NotesOrganizationCoordinator(
-                    service=sync_service,
-                    note_db=db,
-                    user_id=str(current_user.id),
-                )
-            )
-            raise _note_keywords_sync_unsupported_error()
         idempotency_key = request.headers.get("Idempotency-Key")
+        keywords_supplied = _field_supplied(note_in, "keywords")
+        folders_supplied = _field_supplied(note_in, "folder_paths")
+        kw_list = (note_in.normalized_keywords or []) if keywords_supplied else None
+        folder_paths = (
+            note_in.normalized_folder_paths if folders_supplied else None
+        )
+        organization_supplied = keywords_supplied or folders_supplied
+        request_key = _organization_request_key(idempotency_key)
         stable_key = server_origin_stable_key(
             source="server_api",
             domain="notes.note",
@@ -1528,10 +1615,84 @@ async def create_note(
         )
         note_id = (
             note_in.id
-            or (server_origin_object_id("notes.note", idempotency_key) if sync_service is not None else None)
+            or (
+                _compound_note_id(request_key)
+                if organization_supplied
+                else server_origin_object_id("notes.note", idempotency_key)
+                if sync_service is not None
+                else None
+            )
             or str(uuid4())
         )
-        if sync_service is not None:
+        compound_note: dict[str, Any] | None = None
+        coordinator = (
+            NotesOrganizationCoordinator(
+                service=sync_service,
+                note_db=db,
+                user_id=str(current_user.id),
+            )
+            if sync_service is not None and organization_supplied
+            else None
+        )
+        raw_note_fields: dict[str, object] = {
+            "title": effective_title,
+            "content": note_in.content,
+            "conversation_id": _normalize_optional_id(note_in.conversation_id),
+            "message_id": _normalize_optional_id(note_in.message_id),
+        }
+        request_fingerprint: str | None = None
+        if coordinator is not None:
+            request_fingerprint = _compound_note_request_fingerprint(
+                coordinator,
+                operation="note.create",
+                note_id=note_id,
+                note_fields=raw_note_fields,
+                keywords=kw_list,
+                folder_paths=folder_paths,
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.note",
+            )
+            if replay is not None:
+                replayed = _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                if not isinstance(replayed, dict):
+                    raise SyncStoreError("Compound note replay did not return a note")
+                compound_note = replayed
+
+        if compound_note is None:
+            conversation_id, message_id = _validate_note_links(
+                db,
+                note_in.conversation_id,
+                note_in.message_id,
+            )
+        else:
+            conversation_id = _normalize_optional_id(note_in.conversation_id)
+            message_id = _normalize_optional_id(note_in.message_id)
+        note_payload = {
+            "title": effective_title,
+            "content": note_in.content,
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+        }
+        if coordinator is not None and compound_note is None:
+            compound_note = _capture_compound_note(
+                coordinator,
+                note_id=note_id,
+                note_payload=note_payload,
+                keywords=kw_list,
+                folder_paths=folder_paths,
+                request_key=request_key,
+                request_fingerprint=request_fingerprint or "",
+            )
+        elif sync_service is not None and compound_note is None:
             try:
                 capture_server_origin_mutation(
                     sync_service,
@@ -1539,18 +1700,13 @@ async def create_note(
                     domain="notes.note",
                     operation="upsert",
                     object_id=note_id,
-                    payload={
-                        "title": effective_title,
-                        "content": note_in.content,
-                        "conversation_id": conversation_id,
-                        "message_id": message_id,
-                    },
+                    payload=note_payload,
                     source="server_api",
                     stable_key=stable_key,
                 )
             except Exception as sync_exc:
                 raise _note_sync_http_error(sync_exc) from sync_exc
-        else:
+        elif sync_service is None:
             note_id = db.add_note(
                 title=effective_title,
                 content=note_in.content,
@@ -1590,13 +1746,15 @@ async def create_note(
         keyword_sync_summary: dict[str, Any] | None = None
         # Handle optional keywords without failing note creation on partial errors.
         try:
-            kw_list = note_in.normalized_keywords if hasattr(note_in, 'normalized_keywords') else None
-            if kw_list:
+            if sync_service is None and kw_list:
                 keyword_sync_summary = _sync_note_keywords(db, note_id=note_id, keywords=kw_list)
         except _NOTES_NONCRITICAL_EXCEPTIONS as kw_outer_err:
             logger.warning(f"Keyword processing encountered an issue for note {note_id}: {kw_outer_err}")
 
-        created_note_data = db.get_note_by_id(note_id=note_id)
+        if sync_service is None and folders_supplied:
+            db.sync_note_folders(note_id, folder_paths or [])
+
+        created_note_data = compound_note or db.get_note_by_id(note_id=note_id)
         if not created_note_data:
             logger.error(
                 f"Failed to retrieve note '{note_id}' immediately after creation for user (DB client_id: {db.client_id}).")
@@ -4258,6 +4416,7 @@ async def update_note(
         note_id: str,
         note_in: NoteUpdate,
         expected_version: int = Header(..., description="The expected version of the note for optimistic locking"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
@@ -4265,9 +4424,11 @@ async def update_note(
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     keywords_supplied = _field_supplied(note_in, "keywords")
+    folders_supplied = _field_supplied(note_in, "folder_paths")
     conversation_supplied = _field_supplied(note_in, "conversation_id")
     message_supplied = _field_supplied(note_in, "message_id")
     kw_list = note_in.normalized_keywords if keywords_supplied else None
+    folder_paths = note_in.normalized_folder_paths if folders_supplied else None
     raw_data = note_in.model_dump(exclude_unset=True)
     update_data: dict[str, Any] = {}
     if "title" in raw_data and raw_data["title"] is not None:
@@ -4284,7 +4445,7 @@ async def update_note(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Title cannot be empty or whitespace.")
         update_data["title"] = stripped_title
-    if not update_data and not keywords_supplied:
+    if not update_data and not keywords_supplied and not folders_supplied:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
     try:
         current_note: Optional[dict[str, Any]] = None
@@ -4306,7 +4467,47 @@ async def update_note(
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                                 detail="Rate limit exceeded for notes.update",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
-        if not update_data and keywords_supplied:
+        sync_service = _active_notes_sync_service(current_user)
+        coordinator = (
+            NotesOrganizationCoordinator(
+                service=sync_service,
+                note_db=db,
+                user_id=str(current_user.id),
+            )
+            if sync_service is not None and (keywords_supplied or folders_supplied)
+            else None
+        )
+        request_key = _organization_request_key(idempotency_key)
+        request_fingerprint: str | None = None
+        compound_note: dict[str, Any] | None = None
+        if coordinator is not None:
+            request_fingerprint = _compound_note_request_fingerprint(
+                coordinator,
+                operation="note.update",
+                note_id=note_id,
+                note_fields=update_data,
+                keywords=(kw_list or []) if keywords_supplied else None,
+                folder_paths=(folder_paths or []) if folders_supplied else None,
+                expected_version=expected_version,
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.note",
+            )
+            if replay is not None:
+                replayed = _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                if not isinstance(replayed, dict):
+                    raise SyncStoreError("Compound note replay did not return a note")
+                compound_note = replayed
+
+        if compound_note is None and not update_data and (keywords_supplied or folders_supplied):
             current_note = _get_current_note()
             current_version = current_note.get("version")
             if current_version is not None and int(current_version) != int(expected_version):
@@ -4315,7 +4516,7 @@ async def update_note(
                     entity="notes",
                     entity_id=note_id,
                 )
-        if conversation_supplied or message_supplied:
+        if compound_note is None and (conversation_supplied or message_supplied):
             current_note = _get_current_note()
             current_conversation_id = current_note.get("conversation_id")
             effective_conversation_id = update_data.get("conversation_id") if conversation_supplied else current_conversation_id
@@ -4337,6 +4538,8 @@ async def update_note(
         data_keys = list(update_data.keys())
         if keywords_supplied:
             data_keys.append("keywords")
+        if folders_supplied:
+            data_keys.append("folder_paths")
         logger.info(
             f"User (DB client_id: {db.client_id}) updating note: ID='{note_id}', Version={expected_version}, DataKeys={data_keys}")
         # Topic monitoring (non-blocking) for updated fields
@@ -4364,17 +4567,27 @@ async def update_note(
                 )
         except _NOTES_NONCRITICAL_EXCEPTIONS:
             pass
-        sync_service = _active_notes_sync_service(current_user)
-        if sync_service is not None and keywords_supplied:
-            _require_notes_organization_ready(
-                NotesOrganizationCoordinator(
-                    service=sync_service,
-                    note_db=db,
-                    user_id=str(current_user.id),
+        if compound_note is None and coordinator is not None:
+            current_note = _get_current_note()
+            current_version = current_note.get("version")
+            if current_version is not None and int(current_version) != int(expected_version):
+                raise ConflictError(
+                    f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                    entity="notes",
+                    entity_id=note_id,
                 )
+            projected_note = dict(current_note)
+            projected_note.update(update_data)
+            compound_note = _capture_compound_note(
+                coordinator,
+                note_id=note_id,
+                note_payload=_note_payload_from_row(projected_note),
+                keywords=(kw_list or []) if keywords_supplied else None,
+                folder_paths=(folder_paths or []) if folders_supplied else None,
+                request_key=request_key,
+                request_fingerprint=request_fingerprint or "",
             )
-            raise _note_keywords_sync_unsupported_error()
-        if update_data:
+        elif compound_note is None and update_data:
             if sync_service is not None:
                 current_note = _get_current_note()
                 current_version = current_note.get("version")
@@ -4408,10 +4621,13 @@ async def update_note(
                     raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
-        if keywords_supplied:
+        if sync_service is None and keywords_supplied:
             keyword_sync_summary = _sync_note_keywords(db, note_id=note_id, keywords=kw_list or [])
 
-        updated_note_data = db.get_note_by_id(note_id=note_id)
+        if sync_service is None and folders_supplied:
+            db.sync_note_folders(note_id, folder_paths or [])
+
+        updated_note_data = compound_note or db.get_note_by_id(note_id=note_id)
         if not updated_note_data:
             logger.error(f"Note '{note_id}' not found after successful update for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
@@ -4457,6 +4673,7 @@ async def patch_note(
         note_in: NoteUpdate,
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         expected_version: Optional[int] = Header(None, description="Optional expected version for optimistic locking"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         task_service: NotesTaskService = Depends(get_notes_task_service),
@@ -4465,9 +4682,11 @@ async def patch_note(
     """PATCH variant that allows updates without an explicit expected-version header.
     If header is not provided, it fetches current version and applies the update."""
     keywords_supplied = _field_supplied(note_in, "keywords")
+    folders_supplied = _field_supplied(note_in, "folder_paths")
     conversation_supplied = _field_supplied(note_in, "conversation_id")
     message_supplied = _field_supplied(note_in, "message_id")
     kw_list = note_in.normalized_keywords if keywords_supplied else None
+    folder_paths = note_in.normalized_folder_paths if folders_supplied else None
     raw_data = note_in.model_dump(exclude_unset=True)
     update_data: dict[str, Any] = {}
     if "title" in raw_data and raw_data["title"] is not None:
@@ -4484,7 +4703,7 @@ async def patch_note(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Title cannot be empty or whitespace.")
         update_data["title"] = stripped_title
-    if not update_data and not keywords_supplied:
+    if not update_data and not keywords_supplied and not folders_supplied:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
     try:
         current_note: Optional[dict[str, Any]] = None
@@ -4497,11 +4716,65 @@ async def patch_note(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
             return current_note
 
+        try:
+            allowed, meta = await rate_limiter.check_user_rate_limit(
+                int(current_user.id), "notes.update"
+            )
+        except _NOTES_NONCRITICAL_EXCEPTIONS:
+            allowed, meta = True, {}
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for notes.update",
+                headers={"Retry-After": str(meta.get("retry_after", 60))},
+            )
+
+        sync_service = _active_notes_sync_service(current_user)
+        coordinator = (
+            NotesOrganizationCoordinator(
+                service=sync_service,
+                note_db=db,
+                user_id=str(current_user.id),
+            )
+            if sync_service is not None and (keywords_supplied or folders_supplied)
+            else None
+        )
+        request_key = _organization_request_key(idempotency_key)
+        request_fingerprint: str | None = None
+        compound_note: dict[str, Any] | None = None
+        if coordinator is not None:
+            request_fingerprint = _compound_note_request_fingerprint(
+                coordinator,
+                operation="note.patch",
+                note_id=note_id,
+                note_fields=update_data,
+                keywords=(kw_list or []) if keywords_supplied else None,
+                folder_paths=(folder_paths or []) if folders_supplied else None,
+                expected_version=expected_version,
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.note",
+            )
+            if replay is not None:
+                replayed = _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                if not isinstance(replayed, dict):
+                    raise SyncStoreError("Compound note replay did not return a note")
+                compound_note = replayed
+
         if expected_version is None:
             # Fallback to current version if not provided
-            current = _get_current_note()
-            expected_version = int(current.get("version", 1))
-        elif not update_data and keywords_supplied:
+            if compound_note is None:
+                current = _get_current_note()
+                expected_version = int(current.get("version", 1))
+        elif compound_note is None and not update_data and (keywords_supplied or folders_supplied):
             current = _get_current_note()
             current_version = current.get("version")
             if current_version is not None and int(current_version) != int(expected_version):
@@ -4511,16 +4784,7 @@ async def patch_note(
                     entity_id=note_id,
                 )
 
-        # Rate limit: notes.update
-        try:
-            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.update")
-        except _NOTES_NONCRITICAL_EXCEPTIONS:
-            allowed, meta = True, {}
-        if not allowed:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                                detail="Rate limit exceeded for notes.update",
-                                headers={"Retry-After": str(meta.get("retry_after", 60))})
-        if conversation_supplied or message_supplied:
+        if compound_note is None and (conversation_supplied or message_supplied):
             current = _get_current_note()
             current_conversation_id = current.get("conversation_id")
             effective_conversation_id = update_data.get("conversation_id") if conversation_supplied else current_conversation_id
@@ -4542,19 +4806,31 @@ async def patch_note(
         data_keys = list(update_data.keys())
         if keywords_supplied:
             data_keys.append("keywords")
+        if folders_supplied:
+            data_keys.append("folder_paths")
         logger.info(
             f"User (DB client_id: {db.client_id}) partially updating note: ID='{note_id}', Version={expected_version}, DataKeys={data_keys}")
-        sync_service = _active_notes_sync_service(current_user)
-        if sync_service is not None and keywords_supplied:
-            _require_notes_organization_ready(
-                NotesOrganizationCoordinator(
-                    service=sync_service,
-                    note_db=db,
-                    user_id=str(current_user.id),
+        if compound_note is None and coordinator is not None:
+            current = _get_current_note()
+            current_version = current.get("version")
+            if current_version is not None and int(current_version) != int(expected_version):
+                raise ConflictError(
+                    f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                    entity="notes",
+                    entity_id=note_id,
                 )
+            payload = _note_payload_from_row(current)
+            payload.update(update_data)
+            compound_note = _capture_compound_note(
+                coordinator,
+                note_id=note_id,
+                note_payload=payload,
+                keywords=(kw_list or []) if keywords_supplied else None,
+                folder_paths=(folder_paths or []) if folders_supplied else None,
+                request_key=request_key,
+                request_fingerprint=request_fingerprint or "",
             )
-            raise _note_keywords_sync_unsupported_error()
-        if update_data:
+        elif compound_note is None and update_data:
             if sync_service is not None:
                 current = _get_current_note()
                 current_version = current.get("version")
@@ -4588,10 +4864,13 @@ async def patch_note(
                     raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
-        if keywords_supplied:
+        if sync_service is None and keywords_supplied:
             keyword_sync_summary = _sync_note_keywords(db, note_id=note_id, keywords=kw_list or [])
 
-        updated_note_data = db.get_note_by_id(note_id=note_id)
+        if sync_service is None and folders_supplied:
+            db.sync_note_folders(note_id, folder_paths or [])
+
+        updated_note_data = compound_note or db.get_note_by_id(note_id=note_id)
         if not updated_note_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
         _reconcile_note_tasks_after_save(
@@ -4863,6 +5142,7 @@ async def suggest_note_title(
 )
 async def bulk_create_notes(
         request: NoteBulkCreateRequest,
+        http_request: Request,
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
@@ -4883,17 +5163,11 @@ async def bulk_create_notes(
                             headers={"Retry-After": str(meta.get("retry_after", 60))})
 
     sync_service = _active_notes_sync_service(current_user)
-    if sync_service is not None and any(_field_supplied(item, "keywords") for item in request.notes):
-        _require_notes_organization_ready(
-            NotesOrganizationCoordinator(
-                service=sync_service,
-                note_db=db,
-                user_id=str(current_user.id),
-            )
-        )
-        raise _note_keywords_sync_unsupported_error()
+    bulk_request_key = _organization_request_key(
+        http_request.headers.get("Idempotency-Key")
+    )
 
-    for item in request.notes:
+    for item_index, item in enumerate(request.notes):
         try:
             # Compute title per item
             effective_title = (getattr(item, 'title', None) or "").strip()
@@ -4912,14 +5186,88 @@ async def bulk_create_notes(
                 else:
                     raise InputError("Title is required for bulk item unless auto_title=true.")
 
-            conversation_id, message_id = _validate_note_links(
-                db,
-                item.conversation_id,
-                item.message_id,
+            keywords_supplied = _field_supplied(item, "keywords")
+            folders_supplied = _field_supplied(item, "folder_paths")
+            kw_list = (item.normalized_keywords or []) if keywords_supplied else None
+            folder_paths = (
+                item.normalized_folder_paths if folders_supplied else None
             )
+            organization_supplied = keywords_supplied or folders_supplied
+            item_key = f"{bulk_request_key}:{item_index}"
+            note_id = item.id or (
+                _compound_note_id(item_key)
+                if sync_service is not None and organization_supplied
+                else str(uuid4())
+            )
+            coordinator = (
+                NotesOrganizationCoordinator(
+                    service=sync_service,
+                    note_db=db,
+                    user_id=str(current_user.id),
+                )
+                if sync_service is not None and organization_supplied
+                else None
+            )
+            compound_note: dict[str, Any] | None = None
+            request_fingerprint: str | None = None
+            if coordinator is not None:
+                request_fingerprint = _compound_note_request_fingerprint(
+                    coordinator,
+                    operation="note.bulk_create",
+                    note_id=note_id,
+                    note_fields={
+                        "title": effective_title,
+                        "content": item.content,
+                        "conversation_id": _normalize_optional_id(item.conversation_id),
+                        "message_id": _normalize_optional_id(item.message_id),
+                    },
+                    keywords=kw_list,
+                    folder_paths=folder_paths,
+                )
+                replay = _replay_notes_organization_plan(
+                    coordinator,
+                    idempotency_key=item_key,
+                    request_fingerprint=request_fingerprint,
+                    result_domain="notes.note",
+                )
+                if replay is not None:
+                    replayed = _capture_notes_organization_plan(
+                        coordinator,
+                        replay,
+                        idempotency_key=item_key,
+                        source="notes-api",
+                    )
+                    if not isinstance(replayed, dict):
+                        raise SyncStoreError("Compound note replay did not return a note")
+                    compound_note = replayed
 
-            note_id = item.id or str(uuid4())
-            if sync_service is not None:
+            if compound_note is None:
+                conversation_id, message_id = _validate_note_links(
+                    db,
+                    item.conversation_id,
+                    item.message_id,
+                )
+            else:
+                conversation_id = _normalize_optional_id(item.conversation_id)
+                message_id = _normalize_optional_id(item.message_id)
+
+            note_payload = {
+                "title": effective_title,
+                "content": item.content,
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+            }
+            if coordinator is not None and compound_note is None:
+                compound_note = _capture_compound_note(
+                    coordinator,
+                    note_id=note_id,
+                    note_payload=note_payload,
+                    keywords=kw_list,
+                    folder_paths=folder_paths,
+                    request_key=item_key,
+                    request_fingerprint=request_fingerprint or "",
+                )
+            elif sync_service is not None and compound_note is None:
                 try:
                     capture_server_origin_mutation(
                         sync_service,
@@ -4927,17 +5275,12 @@ async def bulk_create_notes(
                         domain="notes.note",
                         operation="upsert",
                         object_id=note_id,
-                        payload={
-                            "title": effective_title,
-                            "content": item.content,
-                            "conversation_id": conversation_id,
-                            "message_id": message_id,
-                        },
+                        payload=note_payload,
                         source="server_api",
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            else:
+            elif sync_service is None:
                 note_id = db.add_note(
                     title=effective_title,
                     content=item.content,
@@ -4977,7 +5320,6 @@ async def bulk_create_notes(
             # Attach keywords if provided
             if sync_service is None:
                 try:
-                    kw_list = item.normalized_keywords if hasattr(item, 'normalized_keywords') else None
                     if kw_list:
                         for kw in kw_list:
                             try:
@@ -4989,7 +5331,10 @@ async def bulk_create_notes(
                 except _NOTES_NONCRITICAL_EXCEPTIONS as kw_outer_err:
                     logger.warning(f"[Bulk] Keyword processing issue for note {note_id}: {kw_outer_err}")
 
-            nd = db.get_note_by_id(note_id=note_id)
+                if folders_supplied:
+                    db.sync_note_folders(note_id, folder_paths or [])
+
+            nd = compound_note or db.get_note_by_id(note_id=note_id)
             if not nd:
                 raise CharactersRAGDBError("Created note could not be retrieved.")
             _reconcile_note_tasks_after_save(db=db, note_data=nd, current_user=current_user, task_service=task_service)
@@ -5289,6 +5634,7 @@ async def merge_keyword(
         keyword_id: int,
         merge_in: KeywordMergeRequest,
         expected_version: int = Header(..., description="Expected source keyword version for optimistic locking"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
@@ -5313,8 +5659,46 @@ async def merge_keyword(
         )
         coordinator = _active_notes_organization_coordinator(db, current_user)
         if coordinator is not None:
-            _require_notes_organization_ready(coordinator)
-            raise _note_keywords_sync_unsupported_error()
+            request_key = _organization_request_key(idempotency_key)
+            request_fingerprint = coordinator.request_fingerprint(
+                "keyword.merge",
+                {
+                    "source_keyword_id": keyword_id,
+                    "target_keyword_id": merge_in.target_keyword_id,
+                    "expected_source_version": expected_version,
+                    "expected_target_version": merge_in.expected_target_version,
+                },
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain=None,
+            )
+            if replay is not None:
+                replay = coordinator.restore_keyword_merge_result(replay)
+                return _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+            try:
+                plan = coordinator.plan_keyword_merge(
+                    source_keyword_id=keyword_id,
+                    target_keyword_id=merge_in.target_keyword_id,
+                    expected_source_version=expected_version,
+                    expected_target_version=merge_in.expected_target_version,
+                )
+            except NotesKeywordMergeUnsynchronizedDependencyError as exc:
+                raise _note_sync_http_error(exc) from exc
+            plan = coordinator.bind_request(plan, request_fingerprint)
+            return _capture_notes_organization_plan(
+                coordinator,
+                plan,
+                idempotency_key=request_key,
+                source="notes-api",
+            )
         return db.merge_keywords(
             source_keyword_id=keyword_id,
             target_keyword_id=merge_in.target_keyword_id,

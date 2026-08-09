@@ -256,3 +256,86 @@ def test_keyword_store_rename_merge_and_link_helpers(store, db):
     assert store.get_keywords_for_conversation(conversation_id) == []
     assert db.unlink_collection_to_keyword(collection_id, target_keyword_id)
     assert store.get_collections_for_keyword(target_keyword_id) == []
+
+
+def test_sync_merge_snapshot_is_read_only_unique_and_covers_all_sync_links(store, db):
+    character_id = db.add_character_card({"name": "Sync merge character"})
+    conversation_id = db.add_conversation(
+        {"character_id": character_id, "title": "Sync merge conversation"}
+    )
+    note_id = db.add_note(title="Sync merge note", content="Body")
+    collection_id = store.add_keyword_collection("Sync merge collection")
+    source_id = store.add_keyword("sync-merge-source")
+    target_id = store.add_keyword("sync-merge-target")
+    assert source_id is not None and target_id is not None
+    db.link_note_to_keyword(note_id, source_id)
+    store.link_conversation_to_keyword(conversation_id, source_id)
+    store.link_collection_to_keyword(collection_id, source_id)
+    db.link_note_to_keyword(note_id, target_id)
+    before_source = store.get_keyword_by_id(source_id)
+    before_target = store.get_keyword_by_id(target_id)
+
+    snapshot = store.synchronized_merge_snapshot(
+        source_keyword_id=source_id,
+        target_keyword_id=target_id,
+        expected_source_version=before_source["version"],
+        expected_target_version=before_target["version"],
+    )
+
+    assert [item["domain"] for item in snapshot["relationships"]] == [
+        "notes.keyword_link",
+        "notes.keyword_link",
+        "notes.keyword_collection_link",
+    ]
+    assert [item["members"].get("subject_type") for item in snapshot["relationships"][:2]] == [
+        "note",
+        "conversation",
+    ]
+    assert [item["target_present"] for item in snapshot["relationships"]] == [
+        True,
+        False,
+        False,
+    ]
+    assert snapshot["has_unsynchronized_dependency"] is False
+    assert store.get_keyword_by_id(source_id) == before_source
+    assert store.get_keyword_by_id(target_id) == before_target
+
+
+@pytest.mark.parametrize("dormant", [False, True])
+def test_sync_merge_snapshot_detects_active_or_dormant_flashcard_dependency(
+    store,
+    db,
+    dormant,
+):
+    source_id = store.add_keyword(f"sync-merge-flash-source-{dormant}")
+    target_id = store.add_keyword(f"sync-merge-flash-target-{dormant}")
+    assert source_id is not None and target_id is not None
+    card_uuid = db.add_flashcard({"front": "Front", "back": "Back"})
+    with db.transaction() as conn:
+        card = conn.execute(
+            "SELECT id FROM flashcards WHERE uuid = ?", (card_uuid,)
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO flashcard_keywords(card_id, keyword_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (card["id"], source_id, db._get_current_utc_timestamp_iso()),
+        )
+        if dormant:
+            conn.execute("UPDATE flashcards SET deleted = 1 WHERE id = ?", (card["id"],))
+    source = store.get_keyword_by_id(source_id)
+    target = store.get_keyword_by_id(target_id)
+
+    snapshot = store.synchronized_merge_snapshot(
+        source_keyword_id=source_id,
+        target_keyword_id=target_id,
+        expected_source_version=source["version"],
+        expected_target_version=target["version"],
+    )
+
+    assert snapshot["has_unsynchronized_dependency"] is True
+    assert store.soft_delete_keyword(source_id, source["version"]) is True
+    with db.transaction() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM flashcard_keywords WHERE keyword_id = ?",
+            (source_id,),
+        ).fetchone()[0] == 1

@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 from tldw_Server_API.app.core.Sync.v2.server_origin import capture_server_origin_mutation
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     SyncServerOriginBatchIdempotencyConflictError,
+    server_origin_mutation_batch_group_id,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
@@ -790,9 +791,10 @@ def test_direct_collection_retry_reuses_manifest_after_applied_link(
     _assert_canonical_group_lineage(resumed_group)
 
 
-def test_direct_active_sync_keyword_merge_remains_fail_closed(
+def test_direct_active_sync_keyword_merge_uses_sync_authority(
     client: TestClient,
     chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
 ) -> None:
     source = client.post(
         "/api/v1/notes/keywords/",
@@ -807,17 +809,26 @@ def test_direct_active_sync_keyword_merge_remains_fail_closed(
 
     response = client.post(
         f"/api/v1/notes/keywords/{source['id']}/merge",
-        headers={"expected-version": str(source["version"])},
+        headers={
+            "expected-version": str(source["version"]),
+            "Idempotency-Key": "merge-empty",
+        },
         json={
             "target_keyword_id": target["id"],
             "expected_target_version": target["version"],
         },
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
-    assert chacha_db.get_keyword_by_id(source["id"]) is not None
+    assert response.status_code == 200, response.text
+    assert response.json()["merged_note_links"] == 0
+    assert response.json()["merged_conversation_links"] == 0
+    assert response.json()["merged_collection_links"] == 0
+    assert chacha_db.get_keyword_by_id(source["id"]) is None
     assert chacha_db.get_keyword_by_id(target["id"]) is not None
+    group = _notes_api_group(sync_service, "merge-empty")
+    assert [(item.domain, item.operation) for item in group] == [
+        ("notes.keyword", "tombstone")
+    ]
 
 
 def test_direct_inactive_sync_preserves_local_keyword_collection_and_folder_writes(
@@ -1267,3 +1278,550 @@ def test_direct_missing_deleted_and_stale_keywords_keep_stable_route_statuses(
         ("upsert", {"keyword": "Status keyword"}),
         ("tombstone", {}),
     ]
+
+
+def _notes_api_group(sync_service: SyncV2Service, idempotency_key: str):
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+    group_id = server_origin_mutation_batch_group_id(
+        dataset_id=dataset_id,
+        source="notes-api",
+        idempotency_key=idempotency_key,
+    )
+    return sync_service.store.list_mutation_group(dataset_id, group_id)
+
+
+def test_inline_note_create_captures_one_complete_ordered_group(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    headers = {"Idempotency-Key": "inline-note-create"}
+    response = client.post(
+        "/api/v1/notes/",
+        headers=headers,
+        json={
+            "title": "Compound note",
+            "content": "Body",
+            "keywords": ["Alpha", "Beta"],
+            "folder_paths": ["Projects/Research"],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    note = response.json()
+    assert [item["keyword"] for item in note["keywords"]] == ["Alpha", "Beta"]
+    assert [item["path"] for item in note["folders"]] == [
+        "Projects",
+        "Projects/Research",
+    ]
+    group = _notes_api_group(sync_service, "inline-note-create")
+    assert [item.domain for item in group] == [
+        "notes.note",
+        "notes.keyword",
+        "notes.keyword",
+        "notes.keyword_link",
+        "notes.keyword_link",
+        "notes.folder",
+        "notes.folder",
+        "notes.folder_link",
+        "notes.folder_link",
+    ]
+    assert [item.payload.get("name") for item in group[5:7]] == [
+        "Projects",
+        "Research",
+    ]
+    assert all(item.apply_status == "applied" for item in group)
+    assert chacha_db.get_note_by_id(note["id"])["version"] == 1
+
+
+@pytest.mark.parametrize(("method", "path"), [("put", ""), ("patch", "")])
+def test_inline_note_update_and_patch_capture_note_and_relationship_deltas(
+    method: str,
+    path: str,
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    note_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": f"inline-{method}-setup"},
+        json={"id": note_id, "title": "Before", "content": "Body"},
+    )
+    assert created.status_code == 201, created.text
+    key = f"inline-note-{method}"
+    response = client.request(
+        method,
+        f"/api/v1/notes/{note_id}{path}",
+        headers={
+            "expected-version": str(created.json()["version"]),
+            "Idempotency-Key": key,
+        },
+        json={
+            "title": f"After {method}",
+            "keywords": ["Delta"],
+            "folder_paths": ["Work/Active"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    group = _notes_api_group(sync_service, key)
+    assert [item.domain for item in group] == [
+        "notes.note",
+        "notes.keyword",
+        "notes.keyword_link",
+        "notes.folder",
+        "notes.folder",
+        "notes.folder_link",
+        "notes.folder_link",
+    ]
+    assert response.json()["title"] == f"After {method}"
+    assert [item["keyword"] for item in response.json()["keywords"]] == ["Delta"]
+
+
+def test_bulk_import_uses_one_group_per_note_and_isolates_invalid_items(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    response = client.post(
+        "/api/v1/notes/bulk",
+        headers={"Idempotency-Key": "bulk-import-groups"},
+        json={
+            "notes": [
+                {
+                    "title": "Valid compound",
+                    "content": "Body",
+                    "keywords": ["Bulk"],
+                    "folder_paths": ["Imports/Valid"],
+                },
+                {
+                    "title": "Invalid isolated",
+                    "content": "Body",
+                    "conversation_id": "missing-conversation",
+                    "keywords": ["Must not exist"],
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 207, response.text
+    body = response.json()
+    assert body["created_count"] == 1
+    assert body["failed_count"] == 1
+    assert body["results"][0]["success"] is True
+    assert body["results"][1]["success"] is False
+    first_group = _notes_api_group(sync_service, "bulk-import-groups:0")
+    assert first_group
+    assert {item.mutation_group_id for item in first_group} == {
+        first_group[0].mutation_group_id
+    }
+    assert [item.domain for item in first_group][0] == "notes.note"
+
+
+def test_inline_note_append_failure_writes_no_product_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    monkeypatch.setattr(
+        sync_service.store,
+        "insert_envelopes_atomic",
+        lambda _envelopes: (_ for _ in ()).throw(SyncStoreError("private append")),
+    )
+    response = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": "inline-append-failure"},
+        json={
+            "title": "Not written",
+            "content": "Body",
+            "keywords": ["No keyword"],
+            "folder_paths": ["No/Folder"],
+        },
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_append_failed"
+    )
+    assert chacha_db.search_notes("Not written") == []
+    assert chacha_db.get_keyword_by_text("No keyword") is None
+    assert chacha_db.get_note_folder_by_path("No/Folder") is None
+
+
+def test_inline_note_retry_resumes_manifest_without_duplicate_note_versions(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    original = sync_service.materializers["notes.keyword"]
+    sync_service.materializers["notes.keyword"] = _FailingOrganizationMaterializer()
+    headers = {"Idempotency-Key": "inline-note-resume"}
+    payload = {
+        "title": "Resume compound",
+        "content": "Body",
+        "keywords": ["Resume keyword"],
+        "folder_paths": ["Resume/Folder"],
+    }
+
+    failed = client.post("/api/v1/notes/", headers=headers, json=payload)
+    assert failed.status_code == 503, failed.text
+    group = _notes_api_group(sync_service, "inline-note-resume")
+    assert [item.apply_status for item in group[:3]] == [
+        "applied",
+        "failed",
+        "pending",
+    ]
+    note_id = group[0].object_id
+    assert chacha_db.get_note_by_id(note_id)["version"] == 1
+
+    sync_service.materializers["notes.keyword"] = original
+    resumed = client.post("/api/v1/notes/", headers=headers, json=payload)
+
+    assert resumed.status_code == 201, resumed.text
+    resumed_group = _notes_api_group(sync_service, "inline-note-resume")
+    assert [item.client_envelope_id for item in resumed_group] == [
+        item.client_envelope_id for item in group
+    ]
+    assert chacha_db.get_note_by_id(note_id)["version"] == 1
+    assert len(chacha_db.get_keywords_for_note(note_id)) == 1
+    assert len(chacha_db.get_note_folders_for_note(note_id)) == 2
+
+
+def test_inline_patch_without_version_replays_manifest_before_projection_checks(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    note_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/notes/",
+        json={"id": note_id, "title": "Before", "content": "Body"},
+    )
+    assert created.status_code == 201, created.text
+    headers = {"Idempotency-Key": "inline-patch-no-version"}
+    payload = {"title": "After", "keywords": ["Replay"]}
+
+    first = client.patch(f"/api/v1/notes/{note_id}", headers=headers, json=payload)
+    replay = client.patch(f"/api/v1/notes/{note_id}", headers=headers, json=payload)
+
+    assert first.status_code == 200, first.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["version"] == first.json()["version"]
+    assert chacha_db.get_note_by_id(note_id)["version"] == first.json()["version"]
+
+
+def test_inline_folder_omission_preserves_and_empty_list_removes_relationships(
+    client: TestClient,
+) -> None:
+    note_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": "inline-folder-semantics-create"},
+        json={
+            "id": note_id,
+            "title": "Folder semantics",
+            "content": "Body",
+            "folder_paths": ["Keep/Until/Removed"],
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    preserved = client.patch(
+        f"/api/v1/notes/{note_id}",
+        headers={
+            "expected-version": str(created.json()["version"]),
+            "Idempotency-Key": "inline-folder-semantics-preserve",
+        },
+        json={"title": "Folder still present", "keywords": ["Trigger compound"]},
+    )
+    assert preserved.status_code == 200, preserved.text
+    assert [item["path"] for item in preserved.json()["folders"]] == [
+        "Keep",
+        "Keep/Until",
+        "Keep/Until/Removed",
+    ]
+
+    removed = client.patch(
+        f"/api/v1/notes/{note_id}",
+        headers={
+            "expected-version": str(preserved.json()["version"]),
+            "Idempotency-Key": "inline-folder-semantics-remove",
+        },
+        json={"folder_paths": []},
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["folders"] == []
+
+
+@pytest.mark.parametrize("folder_paths", [["/private/note"], ["C:\\private\\note"], "a,b"])
+def test_inline_folder_paths_reject_absolute_or_comma_delimited_input(
+    client: TestClient,
+    folder_paths,
+) -> None:
+    response = client.post(
+        "/api/v1/notes/",
+        json={
+            "title": "Invalid folder",
+            "content": "Body",
+            "folder_paths": folder_paths,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def _setup_sync_merge(
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+    *,
+    suffix: str,
+) -> tuple[dict, dict]:
+    note_id = str(uuid.uuid4())
+    conversation_id = f"sync-merge-conversation-{suffix}"
+    source_sync_id = str(uuid.uuid4())
+    target_sync_id = str(uuid.uuid4())
+    collection_sync_id = str(uuid.uuid4())
+    setup = (
+        ("notes.note", note_id, {"title": "Merge note", "content": "Body"}),
+        (
+            "chat.conversation",
+            conversation_id,
+            {
+                "title": "Merge conversation",
+                "assistant_kind": "persona",
+                "assistant_id": "assistant-1",
+                "scope_type": "global",
+            },
+        ),
+        ("notes.keyword", source_sync_id, {"keyword": f"Merge source {suffix}"}),
+        ("notes.keyword", target_sync_id, {"keyword": f"Merge target {suffix}"}),
+        (
+            "notes.keyword_collection",
+            collection_sync_id,
+            {"name": f"Merge collection {suffix}", "parent_sync_id": None},
+        ),
+    )
+    for domain, object_id, payload in setup:
+        capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain=domain,
+            operation="upsert",
+            object_id=object_id,
+            payload=payload,
+            source=f"sync-merge-setup-{suffix}",
+        )
+    coordinator = NotesOrganizationCoordinator(sync_service, chacha_db, "user-1")
+    source = chacha_db.get_keyword_by_text(f"Merge source {suffix}")
+    target = chacha_db.get_keyword_by_text(f"Merge target {suffix}")
+    assert source is not None and target is not None
+    source_members = (
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": note_id,
+                "keyword_sync_id": source_sync_id,
+            },
+        ),
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "conversation",
+                "subject_id": conversation_id,
+                "keyword_sync_id": source_sync_id,
+            },
+        ),
+        (
+            "notes.keyword_collection_link",
+            {
+                "collection_sync_id": collection_sync_id,
+                "keyword_sync_id": source_sync_id,
+            },
+        ),
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": note_id,
+                "keyword_sync_id": target_sync_id,
+            },
+        ),
+    )
+    for index, (domain, members) in enumerate(source_members):
+        plan = coordinator.plan_relationship(domain, members, True)
+        coordinator.capture(
+            steps=plan.steps,
+            source=f"sync-merge-setup-{suffix}",
+            idempotency_key=f"relationship-{index}",
+        )
+    return source, target
+
+
+def test_merge_sync_group_moves_all_relationship_domains_and_replays_exactly(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    source, target = _setup_sync_merge(chacha_db, sync_service, suffix="complete")
+    headers = {
+        "expected-version": str(source["version"]),
+        "Idempotency-Key": "sync-merge-complete",
+    }
+    payload = {
+        "target_keyword_id": target["id"],
+        "expected_target_version": target["version"],
+    }
+
+    first = client.post(
+        f"/api/v1/notes/keywords/{source['id']}/merge",
+        headers=headers,
+        json=payload,
+    )
+    replay = client.post(
+        f"/api/v1/notes/keywords/{source['id']}/merge",
+        headers=headers,
+        json=payload,
+    )
+
+    assert first.status_code == replay.status_code == 200, first.text
+    assert replay.json() == first.json()
+    assert first.json()["merged_note_links"] == 0
+    assert first.json()["merged_conversation_links"] == 1
+    assert first.json()["merged_collection_links"] == 1
+    group = _notes_api_group(sync_service, "sync-merge-complete")
+    assert [(item.domain, item.operation) for item in group] == [
+        ("notes.keyword_link", "upsert"),
+        ("notes.keyword_collection_link", "upsert"),
+        ("notes.keyword_link", "tombstone"),
+        ("notes.keyword_link", "tombstone"),
+        ("notes.keyword_collection_link", "tombstone"),
+        ("notes.keyword", "tombstone"),
+    ]
+    assert all(item.apply_status == "applied" for item in group)
+    assert chacha_db.get_keyword_by_id(source["id"]) is None
+
+
+def test_merge_sync_rejects_dormant_flashcard_dependency_before_append(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    source, target = _setup_sync_merge(chacha_db, sync_service, suffix="flashcard")
+    card_uuid = chacha_db.add_flashcard({"front": "Front", "back": "Back"})
+    with chacha_db.transaction() as conn:
+        card = conn.execute(
+            "SELECT id FROM flashcards WHERE uuid = ?", (card_uuid,)
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO flashcard_keywords(card_id, keyword_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (card["id"], source["id"], "2026-08-09T08:00:00+00:00"),
+        )
+        conn.execute("UPDATE flashcards SET deleted = 1 WHERE id = ?", (card["id"],))
+
+    response = client.post(
+        f"/api/v1/notes/keywords/{source['id']}/merge",
+        headers={
+            "expected-version": str(source["version"]),
+            "Idempotency-Key": "sync-merge-flashcard",
+        },
+        json={
+            "target_keyword_id": target["id"],
+            "expected_target_version": target["version"],
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["error_code"] == (
+        "notes_keyword_merge_unsynchronized_dependency"
+    )
+    assert _notes_api_group(sync_service, "sync-merge-flashcard") == []
+    assert chacha_db.get_keyword_by_id(source["id"]) is not None
+
+
+def test_merge_sync_interruption_resumes_before_source_keyword_tombstone(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    source, target = _setup_sync_merge(chacha_db, sync_service, suffix="resume")
+    original = sync_service.materializers["notes.keyword_link"]
+    sync_service.materializers["notes.keyword_link"] = (
+        _FailingSecondRelationshipMaterializer(original)
+    )
+    headers = {
+        "expected-version": str(source["version"]),
+        "Idempotency-Key": "sync-merge-resume",
+    }
+    payload = {
+        "target_keyword_id": target["id"],
+        "expected_target_version": target["version"],
+    }
+
+    failed = client.post(
+        f"/api/v1/notes/keywords/{source['id']}/merge",
+        headers=headers,
+        json=payload,
+    )
+    assert failed.status_code == 503, failed.text
+    first_group = _notes_api_group(sync_service, "sync-merge-resume")
+    assert [item.apply_status for item in first_group] == [
+        "applied",
+        "applied",
+        "failed",
+        "pending",
+        "pending",
+        "pending",
+    ]
+    assert chacha_db.get_keyword_by_id(source["id"]) is not None
+
+    sync_service.materializers["notes.keyword_link"] = original
+    resumed = client.post(
+        f"/api/v1/notes/keywords/{source['id']}/merge",
+        headers=headers,
+        json=payload,
+    )
+
+    assert resumed.status_code == 200, resumed.text
+    resumed_group = _notes_api_group(sync_service, "sync-merge-resume")
+    assert [item.client_envelope_id for item in resumed_group] == [
+        item.client_envelope_id for item in first_group
+    ]
+    assert all(item.apply_status == "applied" for item in resumed_group)
+    assert chacha_db.get_keyword_by_id(source["id"]) is None
+
+
+def test_merge_sync_append_failure_preserves_source_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    source, target = _setup_sync_merge(chacha_db, sync_service, suffix="append")
+    before_note_ids = {
+        row["id"] for row in chacha_db.get_notes_for_keyword(source["id"])
+    }
+    monkeypatch.setattr(
+        sync_service.store,
+        "insert_envelopes_atomic",
+        lambda _envelopes: (_ for _ in ()).throw(SyncStoreError("private append")),
+    )
+
+    response = client.post(
+        f"/api/v1/notes/keywords/{source['id']}/merge",
+        headers={
+            "expected-version": str(source["version"]),
+            "Idempotency-Key": "sync-merge-append",
+        },
+        json={
+            "target_keyword_id": target["id"],
+            "expected_target_version": target["version"],
+        },
+    )
+
+    assert response.status_code == 503, response.text
+    assert chacha_db.get_keyword_by_id(source["id"]) is not None
+    assert {
+        row["id"] for row in chacha_db.get_notes_for_keyword(source["id"])
+    } == before_note_ids
+    assert _notes_api_group(sync_service, "sync-merge-append") == []

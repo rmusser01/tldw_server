@@ -276,6 +276,127 @@ class KeywordStore:
         )
         return inserted_count
 
+    def synchronized_merge_snapshot(
+        self,
+        *,
+        source_keyword_id: int,
+        target_keyword_id: int,
+        expected_source_version: int,
+        expected_target_version: int | None = None,
+    ) -> dict[str, Any]:
+        """Read one stable merge plan without changing keyword projection state."""
+
+        if source_keyword_id == target_keyword_id:
+            raise InputError("Source and target keyword IDs must differ.")
+        keyword_table = self._db._map_table_for_backend("keywords")
+        collection_table = self._db._map_table_for_backend("keyword_collections")
+        active = self._deleted_literal(False)
+        with self._db.transaction() as conn:
+            source = conn.execute(
+                f"SELECT * FROM {keyword_table} WHERE id = ? AND deleted = {active}",  # nosec B608
+                (source_keyword_id,),
+            ).fetchone()
+            target = conn.execute(
+                f"SELECT * FROM {keyword_table} WHERE id = ? AND deleted = {active}",  # nosec B608
+                (target_keyword_id,),
+            ).fetchone()
+            if not source or int(source["version"]) != expected_source_version:
+                raise ConflictError(
+                    "Source keyword version changed before merge",
+                    entity="keywords",
+                    entity_id=source_keyword_id,
+                )
+            if not target or (
+                expected_target_version is not None
+                and int(target["version"]) != expected_target_version
+            ):
+                raise ConflictError(
+                    "Target keyword version changed before merge",
+                    entity="keywords",
+                    entity_id=target_keyword_id,
+                )
+
+            target_notes = {
+                str(row["note_id"])
+                for row in conn.execute(
+                    "SELECT note_id FROM note_keywords WHERE keyword_id = ?",
+                    (target_keyword_id,),
+                ).fetchall()
+            }
+            target_conversations = {
+                str(row["conversation_id"])
+                for row in conn.execute(
+                    "SELECT conversation_id FROM conversation_keywords "
+                    "WHERE keyword_id = ?",
+                    (target_keyword_id,),
+                ).fetchall()
+            }
+            target_collections = {
+                str(row["sync_id"])
+                for row in conn.execute(
+                    f"SELECT c.sync_id FROM collection_keywords links "  # nosec B608
+                    f"JOIN {collection_table} c ON c.id = links.collection_id "
+                    "WHERE links.keyword_id = ?",
+                    (target_keyword_id,),
+                ).fetchall()
+            }
+            relationships: list[dict[str, object]] = []
+            for row in conn.execute(
+                "SELECT note_id FROM note_keywords WHERE keyword_id = ? ORDER BY note_id",
+                (source_keyword_id,),
+            ).fetchall():
+                note_id = str(row["note_id"])
+                relationships.append(
+                    {
+                        "domain": "notes.keyword_link",
+                        "members": {
+                            "subject_type": "note",
+                            "subject_id": note_id,
+                        },
+                        "target_present": note_id in target_notes,
+                    }
+                )
+            for row in conn.execute(
+                "SELECT conversation_id FROM conversation_keywords "
+                "WHERE keyword_id = ? ORDER BY conversation_id",
+                (source_keyword_id,),
+            ).fetchall():
+                conversation_id = str(row["conversation_id"])
+                relationships.append(
+                    {
+                        "domain": "notes.keyword_link",
+                        "members": {
+                            "subject_type": "conversation",
+                            "subject_id": conversation_id,
+                        },
+                        "target_present": conversation_id in target_conversations,
+                    }
+                )
+            for row in conn.execute(
+                f"SELECT c.sync_id FROM collection_keywords links "  # nosec B608
+                f"JOIN {collection_table} c ON c.id = links.collection_id "
+                "WHERE links.keyword_id = ? ORDER BY c.sync_id",
+                (source_keyword_id,),
+            ).fetchall():
+                collection_sync_id = str(row["sync_id"])
+                relationships.append(
+                    {
+                        "domain": "notes.keyword_collection_link",
+                        "members": {"collection_sync_id": collection_sync_id},
+                        "target_present": collection_sync_id in target_collections,
+                    }
+                )
+            flashcard_dependency = conn.execute(
+                "SELECT 1 FROM flashcard_keywords WHERE keyword_id = ? LIMIT 1",
+                (source_keyword_id,),
+            ).fetchone()
+            return {
+                "source": dict(source),
+                "target": dict(target),
+                "relationships": tuple(relationships),
+                "has_unsynchronized_dependency": bool(flashcard_dependency),
+            }
+
     def merge_keywords(
         self,
         *,

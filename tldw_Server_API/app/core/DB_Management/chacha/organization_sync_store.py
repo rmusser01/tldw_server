@@ -520,6 +520,177 @@ class NotesOrganizationSyncStore:
             )
         conn.execute(sql, (*values, now))
 
+    @staticmethod
+    def _source_provenance_values(
+        provenance: Mapping[str, object],
+    ) -> tuple[str, int]:
+        if set(provenance) != {"operation", "source_id"}:
+            raise InputError("Folder source provenance fields are invalid")
+        operation = provenance.get("operation")
+        source_id = provenance.get("source_id")
+        if operation not in {"source_upsert", "source_delete"}:
+            raise InputError("Folder source provenance operation is invalid")
+        if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
+            raise InputError("Folder source provenance identifier is invalid")
+        return str(operation), source_id
+
+    def _folder_relationship_rows(
+        self,
+        conn: Any,
+        *,
+        note_id: str,
+        folder_sync_id: str,
+        require_active: bool,
+    ) -> tuple[Mapping[str, object], Mapping[str, object]]:
+        folder = self._resource_row_for_relationship(
+            conn,
+            "notes.folder",
+            folder_sync_id,
+            require_active=require_active,
+        )
+        note = conn.execute(
+            "SELECT id, deleted FROM notes WHERE id = ?", (note_id,)
+        ).fetchone()
+        if not note or (require_active and bool(note["deleted"])):
+            raise InputError("Referenced folder-link note is missing or deleted")
+        return note, folder
+
+    def source_folder_transition(
+        self,
+        *,
+        note_id: str,
+        source_id: int,
+        folder_sync_id: str,
+        present: bool,
+    ) -> SyncOperation | None:
+        """Return the canonical transition for one prospective source delta."""
+
+        _, validated_source_id = self._source_provenance_values(
+            {
+                "operation": "source_upsert" if present else "source_delete",
+                "source_id": source_id,
+            }
+        )
+        with self._db.transaction() as conn:
+            _, folder = self._folder_relationship_rows(
+                conn,
+                note_id=note_id,
+                folder_sync_id=folder_sync_id,
+                require_active=True,
+            )
+            folder_id = int(folder["id"])
+            suppressed = conn.execute(
+                "SELECT 1 FROM note_folder_sync_suppressions "
+                "WHERE note_id = ? AND folder_id = ?",
+                (note_id, folder_id),
+            ).fetchone()
+            if suppressed:
+                return None
+            manual = conn.execute(
+                "SELECT 1 FROM note_folder_memberships "
+                "WHERE note_id = ? AND folder_id = ?",
+                (note_id, folder_id),
+            ).fetchone()
+            source_rows = conn.execute(
+                "SELECT source_id FROM note_folder_source_memberships "
+                "WHERE note_id = ? AND folder_id = ?",
+                (note_id, folder_id),
+            ).fetchall()
+            source_ids = {int(row["source_id"]) for row in source_rows}
+            before = bool(manual or source_ids)
+            if present:
+                source_ids.add(validated_source_id)
+            else:
+                source_ids.discard(validated_source_id)
+            after = bool(manual or source_ids)
+            if before == after:
+                return None
+            return "upsert" if after else "tombstone"
+
+    def _apply_source_folder_provenance_locked(
+        self,
+        conn: Any,
+        *,
+        note_id: str,
+        folder: Mapping[str, object],
+        operation: str,
+        source_id: int,
+    ) -> None:
+        folder_id = int(folder["id"])
+        if operation == "source_delete":
+            conn.execute(
+                "DELETE FROM note_folder_source_memberships "
+                "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
+                (note_id, source_id, folder_id),
+            )
+            remaining = conn.execute(
+                "SELECT 1 FROM note_folder_source_memberships "
+                "WHERE source_id = ? AND folder_id = ? LIMIT 1",
+                (source_id, folder_id),
+            ).fetchone()
+            if not remaining:
+                conn.execute(
+                    "DELETE FROM note_folder_source_keys "
+                    "WHERE source_id = ? AND folder_id = ?",
+                    (source_id, folder_id),
+                )
+            return
+
+        folder_key = self._db._note_folder_path_key(str(folder["path"]))
+        if not folder_key:
+            raise InputError("Folder source provenance path is invalid")
+        now = self._db._get_current_utc_timestamp_iso()
+        conn.execute(
+            "DELETE FROM note_folder_source_keys "
+            "WHERE source_id = ? AND (folder_key = ? OR folder_id = ?)",
+            (source_id, folder_key, folder_id),
+        )
+        conn.execute(
+            "INSERT INTO note_folder_source_keys(source_id, folder_key, folder_id, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (source_id, folder_key, folder_id, now),
+        )
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            sql = (
+                "INSERT INTO note_folder_source_memberships"
+                "(note_id, source_id, folder_id, created_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT DO NOTHING"
+            )
+        else:
+            sql = (
+                "INSERT OR IGNORE INTO note_folder_source_memberships"
+                "(note_id, source_id, folder_id, created_at) VALUES (?, ?, ?, ?)"
+            )
+        conn.execute(sql, (note_id, source_id, folder_id, now))
+
+    def apply_source_folder_provenance(
+        self,
+        *,
+        note_id: str,
+        folder_sync_id: str,
+        operation: str,
+        source_id: int,
+    ) -> None:
+        """Apply provenance-only bookkeeping without changing canonical visibility."""
+
+        normalized_operation, normalized_source_id = self._source_provenance_values(
+            {"operation": operation, "source_id": source_id}
+        )
+        with self._db.transaction() as conn:
+            _, folder = self._folder_relationship_rows(
+                conn,
+                note_id=note_id,
+                folder_sync_id=folder_sync_id,
+                require_active=True,
+            )
+            self._apply_source_folder_provenance_locked(
+                conn,
+                note_id=note_id,
+                folder=folder,
+                operation=normalized_operation,
+                source_id=normalized_source_id,
+            )
+
     def apply_relationship(
         self,
         *,
@@ -528,10 +699,11 @@ class NotesOrganizationSyncStore:
         operation: SyncOperation,
         payload: Mapping[str, object],
         routing_metadata: Mapping[str, object],
+        origin_provenance: Mapping[str, object] | None = None,
     ) -> None:
         """Apply one relationship envelope in a ChaCha transaction."""
 
-        del routing_metadata  # Reserved for Tasks 6 and 9.
+        del routing_metadata
         normalized = self._validated_payload(domain, operation, object_id, payload)
         require_active = operation == "upsert"
         with self._db.transaction() as conn:
@@ -572,18 +744,13 @@ class NotesOrganizationSyncStore:
                 columns = ("collection_id", "keyword_id")
                 values = (int(collection["id"]), int(keyword["id"]))
             elif domain == "notes.folder_link":
-                folder = self._resource_row_for_relationship(
+                note_id = str(normalized["note_id"])
+                _, folder = self._folder_relationship_rows(
                     conn,
-                    "notes.folder",
-                    str(normalized["folder_sync_id"]),
+                    note_id=note_id,
+                    folder_sync_id=str(normalized["folder_sync_id"]),
                     require_active=require_active,
                 )
-                note_id = str(normalized["note_id"])
-                note = conn.execute(
-                    "SELECT id, deleted FROM notes WHERE id = ?", (note_id,)
-                ).fetchone()
-                if not note or (require_active and bool(note["deleted"])):
-                    raise InputError("Referenced folder-link note is missing or deleted")
                 link_table = "note_folder_memberships"
                 columns = ("note_id", "folder_id")
                 values = (note_id, int(folder["id"]))
@@ -591,13 +758,32 @@ class NotesOrganizationSyncStore:
                 raise InputError(f"Unsupported organization relationship domain: {domain}")
 
             if domain == "notes.folder_link":
+                if origin_provenance is not None:
+                    provenance_operation, provenance_source_id = (
+                        self._source_provenance_values(origin_provenance)
+                    )
+                    expected_operation = (
+                        "source_upsert" if operation == "upsert" else "source_delete"
+                    )
+                    if provenance_operation != expected_operation:
+                        raise InputError(
+                            "Folder source provenance does not match canonical operation"
+                        )
+                    self._apply_source_folder_provenance_locked(
+                        conn,
+                        note_id=str(values[0]),
+                        folder=folder,
+                        operation=provenance_operation,
+                        source_id=provenance_source_id,
+                    )
                 if operation == "upsert":
                     conn.execute(
                         "DELETE FROM note_folder_sync_suppressions "
                         "WHERE note_id = ? AND folder_id = ?",
                         values,
                     )
-                    self._insert_link(conn, link_table, columns, values)
+                    if origin_provenance is None:
+                        self._insert_link(conn, link_table, columns, values)
                 else:
                     conn.execute(
                         "DELETE FROM note_folder_memberships "

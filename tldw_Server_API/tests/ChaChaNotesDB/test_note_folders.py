@@ -360,3 +360,180 @@ def test_postgres_note_folder_schema_deduplicates_paths_before_unique_index() ->
     assert any("note_folder_source_memberships" in statement for statement in dedupe_statements)
     assert any("note_folder_source_keys" in statement for statement in dedupe_statements)
     assert any("DELETE FROM note_folders" in statement for statement in dedupe_statements)
+
+
+def test_effective_sync_union_emits_only_visible_source_transitions(
+    db: CharactersRAGDB,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    note_id = str(uuid.uuid4())
+    db.add_note(title="Union", content="Body", note_id=note_id)
+    folder = db.create_note_folder_path("Union/Folder")
+
+    assert store.source_folder_transition(
+        note_id=note_id,
+        source_id=11,
+        folder_sync_id=folder["sync_id"],
+        present=True,
+    ) == "upsert"
+    db.sync_note_source_folders(note_id, 11, [folder["path"]])
+    assert store.source_folder_transition(
+        note_id=note_id,
+        source_id=22,
+        folder_sync_id=folder["sync_id"],
+        present=True,
+    ) is None
+    db.sync_note_source_folders(note_id, 22, [folder["path"]])
+    assert store.source_folder_transition(
+        note_id=note_id,
+        source_id=11,
+        folder_sync_id=folder["sync_id"],
+        present=False,
+    ) is None
+    db.sync_note_source_folders(note_id, 11, [])
+    assert store.source_folder_transition(
+        note_id=note_id,
+        source_id=22,
+        folder_sync_id=folder["sync_id"],
+        present=False,
+    ) == "tombstone"
+
+    db.sync_note_folders(note_id, [folder["path"]])
+    assert store.source_folder_transition(
+        note_id=note_id,
+        source_id=22,
+        folder_sync_id=folder["sync_id"],
+        present=False,
+    ) is None
+
+
+def test_effective_sync_union_origin_provenance_and_projection_are_atomic(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    note_id = str(uuid.uuid4())
+    db.add_note(title="Origin", content="Body", note_id=note_id)
+    folder = db.create_note_folder_path("Origin/Folder")
+    payload = {"note_id": note_id, "folder_sync_id": folder["sync_id"]}
+    object_id = organization_link_id(
+        "notes.folder_link", [note_id, folder["sync_id"]]
+    )
+    provenance = {"operation": "source_upsert", "source_id": 41}
+
+    store.apply_relationship(
+        domain="notes.folder_link",
+        object_id=object_id,
+        operation="upsert",
+        payload=payload,
+        routing_metadata={},
+        origin_provenance=provenance,
+    )
+    with db.transaction() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
+            (note_id, 41, folder["id"]),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_memberships "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 0
+
+    monkeypatch.setattr(
+        store,
+        "_insert_link",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("rollback")),
+    )
+    with pytest.raises(RuntimeError, match="rollback"):
+        store.apply_relationship(
+            domain="notes.folder_link",
+            object_id=object_id,
+            operation="tombstone",
+            payload=payload,
+            routing_metadata={},
+            origin_provenance={"operation": "source_delete", "source_id": 41},
+        )
+    with db.transaction() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
+            (note_id, 41, folder["id"]),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_sync_suppressions "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 0
+
+
+def test_effective_sync_union_trust_filter_is_owner_bound_and_allowlisted(
+    db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.materializers import notes_organization
+
+    envelope = type(
+        "Envelope",
+        (),
+        {
+            "domain": "notes.folder_link",
+            "device_id": "server-origin",
+            "routing_metadata": {
+                "origin": "server",
+                "server_device_id": "server-origin",
+                "server_owner_user_id": "folder-test",
+                "notes_folder_origin_provenance": {
+                    "operation": "source_upsert",
+                    "source_id": 51,
+                },
+            },
+        },
+    )()
+    trusted = notes_organization._trusted_folder_origin_provenance(envelope, db)
+
+    assert trusted == {"operation": "source_upsert", "source_id": 51}
+    assert set(envelope.routing_metadata["notes_folder_origin_provenance"]) == {
+        "operation",
+        "source_id",
+    }
+    envelope.device_id = "remote-device"
+    assert notes_organization._trusted_folder_origin_provenance(envelope, db) is None
+    envelope.device_id = "server-origin"
+    envelope.routing_metadata["notes_folder_origin_provenance"]["path"] = "/private"
+    assert notes_organization._trusted_folder_origin_provenance(envelope, db) is None
+
+
+def test_effective_sync_union_provenance_only_change_preserves_suppression(
+    db: CharactersRAGDB,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    note_id = str(uuid.uuid4())
+    db.add_note(title="Suppressed origin", content="Body", note_id=note_id)
+    folder = db.create_note_folder_path("Suppressed/Origin")
+    payload = {"note_id": note_id, "folder_sync_id": folder["sync_id"]}
+    object_id = organization_link_id(
+        "notes.folder_link", [note_id, folder["sync_id"]]
+    )
+    store.apply_relationship(
+        domain="notes.folder_link",
+        object_id=object_id,
+        operation="tombstone",
+        payload=payload,
+        routing_metadata={},
+    )
+
+    store.apply_source_folder_provenance(
+        note_id=note_id,
+        folder_sync_id=folder["sync_id"],
+        operation="source_upsert",
+        source_id=61,
+    )
+
+    assert db.get_note_folders_for_note(note_id) == []
+    with db.transaction() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_sync_suppressions "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 1

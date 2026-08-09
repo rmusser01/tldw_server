@@ -3,6 +3,7 @@ from __future__ import annotations
 """Materialize Notes organization Sync envelopes into one user's ChaChaNotes DB."""
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from loguru import logger
@@ -38,6 +39,35 @@ _RESOURCE_DOMAINS = frozenset(
     {"notes.keyword", "notes.keyword_collection", "notes.folder"}
 )
 _ERROR_CODE = "notes_organization_projection_failed"
+_FOLDER_PROVENANCE_KEY = "notes_folder_origin_provenance"
+_SERVER_ORIGIN_DEVICE_ID = "server-origin"
+
+
+def _trusted_folder_origin_provenance(
+    envelope: SyncEnvelope,
+    note_db: CharactersRAGDB,
+) -> dict[str, object] | None:
+    """Return safe owner-bound local provenance; ignore every other origin."""
+
+    routing = envelope.routing_metadata
+    if (
+        envelope.domain != "notes.folder_link"
+        or envelope.device_id != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("origin") != "server"
+        or routing.get("server_device_id") != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("server_owner_user_id") != str(note_db.client_id)
+    ):
+        return None
+    raw = routing.get(_FOLDER_PROVENANCE_KEY)
+    if not isinstance(raw, Mapping) or set(raw) != {"operation", "source_id"}:
+        return None
+    operation = raw.get("operation")
+    source_id = raw.get("source_id")
+    if operation not in {"source_upsert", "source_delete"}:
+        return None
+    if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
+        return None
+    return {"operation": operation, "source_id": source_id}
 
 
 @dataclass(slots=True)
@@ -110,7 +140,10 @@ class NotesOrganizationMaterializer:
                     object_id=envelope.object_id,
                     operation=envelope.operation,
                     payload=payload,
-                    routing_metadata={},
+                    routing_metadata=envelope.routing_metadata,
+                    origin_provenance=_trusted_folder_origin_provenance(
+                        envelope, self.note_db
+                    ),
                 )
 
             object_revision = self._next_object_revision(envelope, current_state)

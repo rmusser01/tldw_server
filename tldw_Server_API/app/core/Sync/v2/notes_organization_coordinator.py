@@ -7,7 +7,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
@@ -41,6 +41,8 @@ _RESOURCE_TABLES: dict[SyncDomain, tuple[str, str]] = {
 }
 _REQUEST_FINGERPRINT_KEY = "notes_organization_request_fingerprint"
 _RESPONSE_STATUS_KEY = "notes_organization_response_status"
+_FOLDER_PROVENANCE_KEY = "notes_folder_origin_provenance"
+_KEYWORD_MERGE_RESPONSE_KEY = "notes_keyword_merge_response"
 
 
 class NotesOrganizationDomainsIncompleteError(SyncStoreError):
@@ -86,6 +88,15 @@ class NotesOrganizationVersionConflictError(ConflictError):
     """An organization resource failed its optimistic-version precondition."""
 
     error_code = "notes_organization_version_conflict"
+
+    def __init__(self) -> None:
+        super().__init__(self.error_code)
+
+
+class NotesKeywordMergeUnsynchronizedDependencyError(InputError):
+    """A merge would rewrite a relationship outside the synchronized domains."""
+
+    error_code = "notes_keyword_merge_unsynchronized_dependency"
 
     def __init__(self) -> None:
         super().__init__(self.error_code)
@@ -299,6 +310,9 @@ class NotesOrganizationCoordinator:
                     return self._relationship_present(
                         result_domain, result_step.object_id
                     )
+            elif result_domain == "notes.note":
+                def loader() -> object:
+                    return self._load_note_row(result_step.object_id)
             else:
                 def loader() -> object:
                     return self._load_resource_row(
@@ -655,6 +669,349 @@ class NotesOrganizationCoordinator:
             )
         return PlannedNotesMutation(steps=tuple(steps), load_result=collection.load_result)
 
+    def plan_note_with_organization(
+        self,
+        *,
+        note_step: ServerOriginMutationStep,
+        keywords: Sequence[str] | None,
+        folder_paths: Sequence[str] | None,
+    ) -> PlannedNotesMutation:
+        """Plan one note mutation and all requested organization deltas."""
+
+        if note_step.domain != "notes.note" or note_step.operation != "upsert":
+            raise InputError("Compound note organization requires a note upsert")
+        note_id = note_step.object_id
+        identity_seed = note_step.stable_key or hashlib.sha256(
+            json.dumps(
+                {
+                    "object_id": note_id,
+                    "payload": dict(note_step.payload),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        steps: list[ServerOriginMutationStep] = [note_step]
+
+        if keywords is not None:
+            desired_keywords: list[tuple[str, str]] = []
+            seen_keywords: set[str] = set()
+            for raw_keyword in keywords:
+                keyword = str(raw_keyword or "").strip()
+                key = keyword.casefold()
+                if not keyword or key in seen_keywords:
+                    continue
+                seen_keywords.add(key)
+                existing = self.note_db.get_keyword_by_text(keyword)
+                if existing is None:
+                    sync_id = self._create_sync_id(
+                        "notes.keyword", f"{identity_seed}:keyword:{key}"
+                    )
+                    steps.append(
+                        ServerOriginMutationStep(
+                            domain="notes.keyword",
+                            operation="upsert",
+                            object_id=sync_id,
+                            payload={"keyword": keyword},
+                        )
+                    )
+                else:
+                    sync_id = str(existing["sync_id"])
+                desired_keywords.append((key, sync_id))
+
+            current_keyword_ids = {
+                str(row["sync_id"])
+                for row in (
+                    self.note_db.get_keywords_for_note(note_id)
+                    if self.note_db.get_note_by_id(note_id) is not None
+                    else []
+                )
+            }
+            desired_keyword_ids = {sync_id for _, sync_id in desired_keywords}
+            for sync_id in sorted(current_keyword_ids - desired_keyword_ids):
+                steps.extend(
+                    self.plan_relationship(
+                        "notes.keyword_link",
+                        {
+                            "subject_type": "note",
+                            "subject_id": note_id,
+                            "keyword_sync_id": sync_id,
+                        },
+                        False,
+                    ).steps
+                )
+            for _, sync_id in desired_keywords:
+                if sync_id in current_keyword_ids:
+                    continue
+                steps.extend(
+                    self.plan_relationship(
+                        "notes.keyword_link",
+                        {
+                            "subject_type": "note",
+                            "subject_id": note_id,
+                            "keyword_sync_id": sync_id,
+                        },
+                        True,
+                    ).steps
+                )
+
+        if folder_paths is not None:
+            expanded_paths: list[str] = []
+            seen_paths: set[str] = set()
+            for raw_path in folder_paths:
+                normalized_path = self.normalize_folder_path(raw_path)
+                parts = normalized_path.split("/")
+                for index in range(len(parts)):
+                    path = "/".join(parts[: index + 1])
+                    key = path.casefold()
+                    if key not in seen_paths:
+                        seen_paths.add(key)
+                        expanded_paths.append(path)
+
+            desired_folders: list[tuple[str, str]] = []
+            parent_sync_ids: dict[str, str] = {}
+            for path in expanded_paths:
+                existing = self.note_db.get_note_folder_by_path(path)
+                if existing is None:
+                    sync_id = self._create_sync_id(
+                        "notes.folder", f"{identity_seed}:folder:{path.casefold()}"
+                    )
+                    parent_path = path.rsplit("/", 1)[0] if "/" in path else None
+                    parent_sync_id = (
+                        parent_sync_ids[parent_path.casefold()]
+                        if parent_path is not None
+                        else None
+                    )
+                    steps.append(
+                        ServerOriginMutationStep(
+                            domain="notes.folder",
+                            operation="upsert",
+                            object_id=sync_id,
+                            payload={
+                                "name": path.rsplit("/", 1)[-1],
+                                "parent_sync_id": parent_sync_id,
+                            },
+                            parent_id=parent_sync_id,
+                        )
+                    )
+                else:
+                    sync_id = str(existing["sync_id"])
+                parent_sync_ids[path.casefold()] = sync_id
+                desired_folders.append((path, sync_id))
+
+            current_folder_ids = {
+                str(row["sync_id"])
+                for row in (
+                    self.note_db.get_note_folders_for_note(note_id)
+                    if self.note_db.get_note_by_id(note_id) is not None
+                    else []
+                )
+            }
+            desired_folder_ids = {sync_id for _, sync_id in desired_folders}
+            for sync_id in sorted(current_folder_ids - desired_folder_ids):
+                steps.extend(
+                    self.plan_relationship(
+                        "notes.folder_link",
+                        {"note_id": note_id, "folder_sync_id": sync_id},
+                        False,
+                    ).steps
+                )
+            for _, sync_id in desired_folders:
+                if sync_id in current_folder_ids:
+                    continue
+                steps.extend(
+                    self.plan_relationship(
+                        "notes.folder_link",
+                        {"note_id": note_id, "folder_sync_id": sync_id},
+                        True,
+                    ).steps
+                )
+
+        return PlannedNotesMutation(
+            steps=tuple(steps),
+            load_result=lambda: self._load_note_row(note_id),
+        )
+
+    def plan_source_folder_change(
+        self,
+        *,
+        note_id: str,
+        source_id: int,
+        folder_id: int,
+        present: bool,
+    ) -> PlannedNotesMutation:
+        """Plan only a prospective effective source-folder transition."""
+
+        folder = self._resource_row("notes.folder", folder_id)
+        folder_sync_id = str(folder["sync_id"])
+        transition = NotesOrganizationSyncStore(
+            self.note_db
+        ).source_folder_transition(
+            note_id=note_id,
+            source_id=source_id,
+            folder_sync_id=folder_sync_id,
+            present=present,
+        )
+        if transition is None:
+            return PlannedNotesMutation(steps=(), load_result=lambda: None)
+        relationship = self.plan_relationship(
+            "notes.folder_link",
+            {"note_id": note_id, "folder_sync_id": folder_sync_id},
+            transition == "upsert",
+        )
+        provenance = {
+            "operation": "source_upsert" if present else "source_delete",
+            "source_id": source_id,
+        }
+        return PlannedNotesMutation(
+            steps=tuple(
+                replace(
+                    step,
+                    routing_metadata={
+                        **dict(step.routing_metadata),
+                        _FOLDER_PROVENANCE_KEY: provenance,
+                    },
+                )
+                for step in relationship.steps
+            ),
+            load_result=relationship.load_result,
+        )
+
+    def apply_source_folder_provenance_only(
+        self,
+        *,
+        note_id: str,
+        source_id: int,
+        folder_id: int,
+        present: bool,
+    ) -> None:
+        """Apply a non-visible source delta only after Sync readiness succeeds."""
+
+        self.require_ready()
+        folder = self._resource_row("notes.folder", folder_id)
+        NotesOrganizationSyncStore(self.note_db).apply_source_folder_provenance(
+            note_id=note_id,
+            folder_sync_id=str(folder["sync_id"]),
+            operation="source_upsert" if present else "source_delete",
+            source_id=source_id,
+        )
+
+    def plan_keyword_merge(
+        self,
+        *,
+        source_keyword_id: int,
+        target_keyword_id: int,
+        expected_source_version: int,
+        expected_target_version: int | None,
+    ) -> PlannedNotesMutation:
+        """Plan every synchronized relationship move and tombstone source last."""
+
+        snapshot = self.note_db.keyword_store.synchronized_merge_snapshot(
+            source_keyword_id=source_keyword_id,
+            target_keyword_id=target_keyword_id,
+            expected_source_version=expected_source_version,
+            expected_target_version=expected_target_version,
+        )
+        if snapshot["has_unsynchronized_dependency"]:
+            raise NotesKeywordMergeUnsynchronizedDependencyError()
+        source = cast(Mapping[str, object], snapshot["source"])
+        target = cast(Mapping[str, object], snapshot["target"])
+        source_sync_id = str(source["sync_id"])
+        target_sync_id = str(target["sync_id"])
+        relationships = cast(Sequence[Mapping[str, object]], snapshot["relationships"])
+        steps: list[ServerOriginMutationStep] = []
+        merged_counts = {
+            "merged_note_links": 0,
+            "merged_conversation_links": 0,
+            "merged_collection_links": 0,
+        }
+
+        for item in relationships:
+            if bool(item["target_present"]):
+                continue
+            domain = cast(SyncDomain, item["domain"])
+            members = dict(cast(Mapping[str, str], item["members"]))
+            members["keyword_sync_id"] = target_sync_id
+            steps.extend(self.plan_relationship(domain, members, True).steps)
+            if domain == "notes.keyword_collection_link":
+                merged_counts["merged_collection_links"] += 1
+            elif members["subject_type"] == "note":
+                merged_counts["merged_note_links"] += 1
+            else:
+                merged_counts["merged_conversation_links"] += 1
+
+        for item in relationships:
+            domain = cast(SyncDomain, item["domain"])
+            members = dict(cast(Mapping[str, str], item["members"]))
+            members["keyword_sync_id"] = source_sync_id
+            steps.extend(self.plan_relationship(domain, members, False).steps)
+        steps.append(
+            ServerOriginMutationStep(
+                domain="notes.keyword",
+                operation="tombstone",
+                object_id=source_sync_id,
+                payload={},
+            )
+        )
+        response: dict[str, object] = {
+            "source_keyword_id": source_keyword_id,
+            "target_keyword_id": target_keyword_id,
+            "source_deleted_version": expected_source_version + 1,
+            "target_version": int(target["version"]),
+            **merged_counts,
+            "merged_flashcard_links": 0,
+        }
+        plan = PlannedNotesMutation(
+            steps=tuple(
+                replace(
+                    step,
+                    routing_metadata={
+                        **dict(step.routing_metadata),
+                        _KEYWORD_MERGE_RESPONSE_KEY: response,
+                    },
+                )
+                for step in steps
+            ),
+            load_result=lambda: dict(response),
+        )
+        return plan
+
+    @staticmethod
+    def restore_keyword_merge_result(
+        plan: PlannedNotesMutation,
+    ) -> PlannedNotesMutation:
+        """Restore an exact merge response from its immutable durable manifest."""
+
+        responses = [
+            step.routing_metadata.get(_KEYWORD_MERGE_RESPONSE_KEY)
+            for step in plan.steps
+        ]
+        if not responses or not isinstance(responses[0], Mapping):
+            raise SyncServerOriginBatchIdempotencyConflictError("invalid-merge-manifest")
+        response = dict(responses[0])
+        if any(item != response for item in responses):
+            raise SyncServerOriginBatchIdempotencyConflictError("invalid-merge-manifest")
+        expected_keys = {
+            "source_keyword_id",
+            "target_keyword_id",
+            "source_deleted_version",
+            "target_version",
+            "merged_note_links",
+            "merged_conversation_links",
+            "merged_collection_links",
+            "merged_flashcard_links",
+        }
+        if set(response) != expected_keys or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in response.values()
+        ):
+            raise SyncServerOriginBatchIdempotencyConflictError("invalid-merge-manifest")
+        return PlannedNotesMutation(
+            steps=plan.steps,
+            load_result=lambda: dict(response),
+            response_status=plan.response_status,
+        )
+
     def _resource_row(self, domain: SyncDomain, local_id: int) -> dict[str, Any]:
         try:
             logical_table, _ = _RESOURCE_TABLES[domain]
@@ -681,6 +1038,12 @@ class NotesOrganizationCoordinator:
             row = self.note_db.get_note_folder_by_path(self._folder_path(resource.local_id))
         if row is None:
             raise SyncStoreError("Materialized organization resource was not found")
+        return row
+
+    def _load_note_row(self, note_id: str) -> dict[str, Any]:
+        row = self.note_db.get_note_by_id(note_id)
+        if row is None:
+            raise SyncStoreError("Materialized note was not found")
         return row
 
     def _folder_path(self, local_id: int) -> str:
@@ -734,5 +1097,6 @@ __all__ = [
     "NotesOrganizationPreflightError",
     "NotesOrganizationResourceNotFoundError",
     "NotesOrganizationVersionConflictError",
+    "NotesKeywordMergeUnsynchronizedDependencyError",
     "PlannedNotesMutation",
 ]
