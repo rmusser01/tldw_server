@@ -1,7 +1,7 @@
 ---
 id: TASK-13009
 title: Implement MCP Unified multi-revision stdio protocol
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-08 23:07'
 updated_date: '2026-08-09 00:27'
@@ -40,8 +40,8 @@ Implement and release the reusable MCP Unified stdio protocol runtime defined by
 - [x] #6 JSON Schema validation uses the declared direct dependency and disposable fully reaped bounded worker processes
 - [x] #7 Current arbitrary JSON structured results and legacy text-only projection preserve protocol-correct cache and error metadata
 - [x] #8 Native and fallback binary stdio paths enforce bounded payload-safe logging and deterministic child cleanup
-- [ ] #9 Wheel and sdist installs support Python 3.10 through 3.13 and pass a synthetic downstream consumer contract
-- [ ] #10 Focused unit integration security packaging documentation and release verification evidence is recorded
+- [x] #9 Wheel and sdist installs support Python 3.10 through 3.13 and pass a synthetic downstream consumer contract
+- [x] #10 Focused unit integration security packaging documentation and release verification evidence is recorded
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,7 +60,7 @@ Reason: This implementation directly realizes the accepted public protocol depen
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
@@ -120,3 +120,24 @@ USER_GUIDE package-copy parity, and diff checks pass. The public docs disclose
 that native Windows briefly uses an owner-only temporary validation payload so
 applications with stricter no-temporary-storage requirements can make an
 informed privacy decision.
+
+Release closure completed on 2026-08-09. Corrective PR
+`rmusser01/tldw_server#2779` was verified directly on the latest `dev`, passed
+the complete protected MCP matrix in run `31328083969`, and merged as
+`9cc82850f4f6ffdb288189d679ba18c92483cd83`. The authoritative post-merge
+release-candidate run `31328705517` then passed the standalone package UAT and
+all five portable jobs: Ubuntu Python 3.10, 3.11, 3.12, and 3.13 plus Windows
+Python 3.11. Protected publish run `31329088314` passed its version detector,
+full RC and dry-run, duplicate-version guard, and trusted PyPI upload.
+
+Fresh public-index verification reports `mcp-unified==0.2.1`. The downloaded
+wheel and sdist match PyPI SHA-256 values
+`cf0180f570a118ebabd588ec3a92b0f23ad8f47367b52f65010d3be3f7544e11`
+and `aac3c40ff7f1515f5b78367ba9ad3a259f245ad93ee0254dd6e7ab1600e167c7`.
+Each artifact was installed independently into a clean Python 3.12 virtual
+environment outside the checkout, imported from `site-packages`, reported
+package version `0.2.1` and current protocol `2026-07-28`, retained direct
+`jsonschema` metadata, and passed the marker-only official `mcp==2.0.0` SDK
+stdio negotiation, tool discovery, and tool-call smoke. ADR-033 remains the
+governing decision; no further ADR was required. All acceptance criteria and
+Definition of Done items are now complete.
