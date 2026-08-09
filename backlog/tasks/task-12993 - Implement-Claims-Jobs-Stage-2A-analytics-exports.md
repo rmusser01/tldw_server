@@ -4,7 +4,7 @@ title: Implement Claims Jobs Stage 2A analytics exports
 status: In Progress
 assignee: []
 created_date: '2026-08-08 21:36'
-updated_date: '2026-08-08 23:25'
+updated_date: '2026-08-09 00:36'
 labels:
   - claims
   - jobs
@@ -54,13 +54,7 @@ Execute the 12 tasks in Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-an
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-Task 1 complete at 10aee095ac: Media DB schema v24, SQLite/PostgreSQL migration parity, interrupted-SQL-migration recovery, 83 focused tests passing, Bandit clean; PostgreSQL fixture unavailable locally. Specification and code-quality reviews approved after fix loops.
-
-Task 2 complete at a15f053d24: strict owner-scoped artifact operations, ready-terminal payload invariants, positive Job IDs, conservative ready-only retention, chunked exact deletion, and tied-timestamp keyset event pages. Final focused verification: 71 passed; Bandit clean; spec and quality reviews approved.
+Task 1 complete at 10aee095ac: Media DB schema v24, migration parity, interrupted-migration recovery, 83 focused tests, Bandit clean, reviews approved. Task 2 complete at a15f053d24: owner-scoped artifacts, ready invariants, strict Job IDs, conservative retention, chunked deletion, keyset event pages; 71 focused tests, reviews approved. Task 3 complete at de7a800cd4: scoped active/archive Jobs reads, exact batch lookup, legacy repair, verified SQLite/PostgreSQL archive indexes; independent Jobs verification 72 passed with 2 crypto-backend skips, PostgreSQL fixture unavailable, reviews approved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
