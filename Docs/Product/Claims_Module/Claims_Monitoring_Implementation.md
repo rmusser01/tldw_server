@@ -267,7 +267,7 @@ Request schema:
 {
   "format": "csv|json",               // required
   "filters": {
-    "workspace_id": "string|null",    // admin-only; non-admins should omit (ignored if provided); 403 on other workspace
+    "workspace_id": "string|null",    // optional admin cross-owner target; non-admins may omit or provide their own ID; 403 for another workspace
     "event_type": "string|null",
     "severity": "string|null",
     "provider": "string|null",
@@ -366,8 +366,8 @@ Response schema:
 
 Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
 JSON or CSV output is bounded by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; the default
-configured limit is 10 MiB (10,485,760 UTF-8 bytes). Any positive configured
-value overrides that default, while invalid or non-positive values use 10 MiB.
+configured limit is 10 MiB (10,485,760 UTF-8 bytes). Any configured positive
+integer value overrides that default, while invalid or non-positive values use 10 MiB.
 Synchronous requests that exceed the configured byte limit return HTTP 413 with
 the stable `claims_export_too_large` code; asynchronous requests expose the safe
 failed artifact through the normal status APIs.
