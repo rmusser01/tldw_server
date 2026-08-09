@@ -15,6 +15,11 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import 
 NOW = datetime(2026, 8, 8, 12, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _clear_orphan_grace_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", raising=False)
+
+
 def _timestamp(seconds_ago: float) -> str:
     value = NOW - timedelta(seconds=seconds_ago)
     return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")

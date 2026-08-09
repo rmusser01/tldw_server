@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import 
     CSV_COLUMNS,
     DEFAULT_EXPORT_MAX_BYTES,
     DEFAULT_EXPORT_ORPHAN_GRACE_SEC,
+    DEFAULT_EXPORT_RETENTION_HOURS,
     EXPORT_ID_RE,
     EXPORT_SCAN_PAGE_SIZE,
     ClaimsAnalyticsExportError,
@@ -565,6 +566,33 @@ def test_explicit_export_settings_override_process_environment(
     monkeypatch.setenv(key, env_value)
 
     assert resolver({key: settings_value}) == settings_value
+
+
+@pytest.mark.parametrize(
+    ("settings_value", "expected"),
+    [
+        (1, 1.0),
+        ("1", 1.0),
+        (0.5, 0.5),
+        ("0.5", 0.5),
+        (True, DEFAULT_EXPORT_RETENTION_HOURS),
+        (False, DEFAULT_EXPORT_RETENTION_HOURS),
+        ("", DEFAULT_EXPORT_RETENTION_HOURS),
+        ("not-a-number", DEFAULT_EXPORT_RETENTION_HOURS),
+        (float("inf"), DEFAULT_EXPORT_RETENTION_HOURS),
+        (float("-inf"), DEFAULT_EXPORT_RETENTION_HOURS),
+        (float("nan"), DEFAULT_EXPORT_RETENTION_HOURS),
+        (0, DEFAULT_EXPORT_RETENTION_HOURS),
+        ("0", DEFAULT_EXPORT_RETENTION_HOURS),
+        (-0.5, DEFAULT_EXPORT_RETENTION_HOURS),
+        ("-0.5", DEFAULT_EXPORT_RETENTION_HOURS),
+    ],
+)
+def test_export_retention_hours_accepts_only_finite_positive_numbers(
+    settings_value: Any,
+    expected: float,
+) -> None:
+    assert export_retention_hours({"CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS": settings_value}) == expected
 
 
 @pytest.mark.parametrize(

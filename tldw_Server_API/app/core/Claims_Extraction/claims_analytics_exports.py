@@ -305,13 +305,16 @@ def orphan_grace_seconds(settings_obj: Any = None) -> int:
     )
 
 
-def export_retention_hours(settings_obj: Any = None) -> int:
+def export_retention_hours(settings_obj: Any = None) -> float:
     """Resolve the positive completed-export retention period in hours."""
-    return _positive_int_setting(
-        settings_obj,
-        "CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS",
-        DEFAULT_EXPORT_RETENTION_HOURS,
-    )
+    value = _setting_value(settings_obj, "CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS")
+    if isinstance(value, bool):
+        return DEFAULT_EXPORT_RETENTION_HOURS
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return DEFAULT_EXPORT_RETENTION_HOURS
+    return parsed if math.isfinite(parsed) and parsed > 0 else DEFAULT_EXPORT_RETENTION_HOURS
 
 
 def spreadsheet_safe(value: Any) -> Any:
