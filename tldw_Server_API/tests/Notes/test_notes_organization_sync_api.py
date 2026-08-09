@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -12,7 +13,11 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
-from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.adapters import (
+    AdapterRejected,
+    StaticSyncAdapter,
+    SyncAdapterRegistry,
+)
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
@@ -38,6 +43,7 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin import capture_server_origin_mutation
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+    ServerOriginMutationStep,
     SyncServerOriginBatchIdempotencyConflictError,
     server_origin_mutation_batch_group_id,
 )
@@ -1378,6 +1384,60 @@ def test_inline_note_update_and_patch_capture_note_and_relationship_deltas(
     assert [item["keyword"] for item in response.json()["keywords"]] == ["Delta"]
 
 
+@pytest.mark.parametrize("method", ["put", "patch"])
+def test_inline_note_update_replays_original_response_after_later_mutation(
+    method: str,
+    client: TestClient,
+) -> None:
+    note_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": f"{method}-replay-setup"},
+        json={"id": note_id, "title": "Before", "content": "Body"},
+    )
+    assert created.status_code == 201, created.text
+    headers = {
+        "Expected-Version": str(created.json()["version"]),
+        "Idempotency-Key": f"{method}-durable-update",
+    }
+    payload = {
+        "title": "Original update",
+        "keywords": ["Original keyword"],
+        "folder_paths": ["Original/Path"],
+    }
+    original = client.request(
+        method,
+        f"/api/v1/notes/{note_id}",
+        headers=headers,
+        json=payload,
+    )
+    assert original.status_code == 200, original.text
+
+    changed = client.put(
+        f"/api/v1/notes/{note_id}",
+        headers={
+            "Expected-Version": str(original.json()["version"]),
+            "Idempotency-Key": f"{method}-later-update",
+        },
+        json={
+            "title": "Later update",
+            "keywords": ["Later keyword"],
+            "folder_paths": ["Later/Path"],
+        },
+    )
+    assert changed.status_code == 200, changed.text
+
+    replay = client.request(
+        method,
+        f"/api/v1/notes/{note_id}",
+        headers=headers,
+        json=payload,
+    )
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == original.json()
+
+
 def test_bulk_import_uses_one_group_per_note_and_isolates_invalid_items(
     client: TestClient,
     sync_service: SyncV2Service,
@@ -1417,6 +1477,232 @@ def test_bulk_import_uses_one_group_per_note_and_isolates_invalid_items(
     assert [item.domain for item in first_group][0] == "notes.note"
 
 
+def test_literal_import_create_uses_one_compound_note_keyword_group(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    note_id = str(uuid.uuid4())
+    content = json.dumps(
+        [
+            {
+                "id": note_id,
+                "title": "Imported",
+                "content": "Body",
+                "keywords": ["Research"],
+            }
+        ]
+    )
+
+    response = client.post(
+        "/api/v1/notes/import",
+        json={
+            "duplicate_strategy": "overwrite",
+            "items": [
+                {
+                    "file_name": "import.json",
+                    "format": "json",
+                    "content": content,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["created_count"] == 1
+    assert [row["keyword"] for row in chacha_db.get_keywords_for_note(note_id)] == [
+        "Research"
+    ]
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+    direct = [
+        item
+        for item in sync_service.store.list_envelopes_after(dataset_id, 0)
+        if item.routing_metadata.get("source") == "notes-api"
+    ]
+    assert [item.domain for item in direct] == [
+        "notes.note",
+        "notes.keyword",
+        "notes.keyword_link",
+    ]
+    assert len({item.mutation_group_id for item in direct}) == 1
+
+
+def test_literal_import_overwrite_uses_one_compound_note_keyword_group(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    created = client.post(
+        "/api/v1/notes/",
+        json={"title": "Before", "content": "Old body"},
+    )
+    assert created.status_code == 201, created.text
+    note_id = created.json()["id"]
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+    before_cursor = max(
+        item.server_cursor or 0
+        for item in sync_service.store.list_envelopes_after(dataset_id, 0)
+    )
+    content = json.dumps(
+        [
+            {
+                "id": note_id,
+                "title": "After",
+                "content": "New body",
+                "keywords": ["Updated"],
+            }
+        ]
+    )
+
+    response = client.post(
+        "/api/v1/notes/import",
+        json={
+            "duplicate_strategy": "overwrite",
+            "items": [
+                {
+                    "file_name": "overwrite.json",
+                    "format": "json",
+                    "content": content,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["updated_count"] == 1
+    note = chacha_db.get_note_by_id(note_id)
+    assert note is not None and note["title"] == "After"
+    assert [row["keyword"] for row in chacha_db.get_keywords_for_note(note_id)] == [
+        "Updated"
+    ]
+    direct = [
+        item
+        for item in sync_service.store.list_envelopes_after(
+            dataset_id, before_cursor
+        )
+        if item.routing_metadata.get("source") == "notes-api"
+    ]
+    assert [item.domain for item in direct] == [
+        "notes.note",
+        "notes.keyword",
+        "notes.keyword_link",
+    ]
+    assert len({item.mutation_group_id for item in direct}) == 1
+
+
+def test_inline_durable_original_response_replays_after_later_mutation(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    original_payload = {
+        "title": "Original",
+        "content": "Original body",
+        "keywords": ["First"],
+        "folder_paths": ["Archive/Original"],
+    }
+    original = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": "durable-original-response"},
+        json=original_payload,
+    )
+    assert original.status_code == 201, original.text
+    original_body = original.json()
+
+    changed = client.put(
+        f"/api/v1/notes/{original_body['id']}",
+        headers={
+            "Idempotency-Key": "durable-later-mutation",
+            "Expected-Version": str(original_body["version"]),
+        },
+        json={
+            "title": "Later",
+            "content": "Later body",
+            "keywords": ["Second"],
+            "folder_paths": ["Archive/Later"],
+        },
+    )
+    assert changed.status_code == 200, changed.text
+
+    original_keyword = original_body["keywords"][0]
+    renamed_keyword = client.patch(
+        f"/api/v1/notes/keywords/{original_keyword['id']}",
+        headers={
+            "Idempotency-Key": "durable-later-keyword-rename",
+            "Expected-Version": str(original_keyword["version"]),
+        },
+        json={"keyword": "Renamed later"},
+    )
+    assert renamed_keyword.status_code == 200, renamed_keyword.text
+
+    original_folder = chacha_db.get_note_folder_by_path("Archive/Original")
+    parent_folder = chacha_db.get_note_folder_by_path("Archive")
+    assert original_folder is not None
+    assert parent_folder is not None
+    coordinator = NotesOrganizationCoordinator(sync_service, chacha_db, "user-1")
+    coordinator.capture(
+        steps=(
+            ServerOriginMutationStep(
+                domain="notes.folder",
+                operation="upsert",
+                object_id=str(original_folder["sync_id"]),
+                payload={
+                    "name": "Renamed later",
+                    "parent_sync_id": str(parent_folder["sync_id"]),
+                },
+                parent_id=str(parent_folder["sync_id"]),
+            ),
+        ),
+        source="notes-api",
+        idempotency_key="durable-later-folder-rename",
+    )
+
+    replay = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": "durable-original-response"},
+        json=original_payload,
+    )
+
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == original_body
+
+
+def test_inline_auto_title_replay_looks_up_manifest_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    generated: list[str] = []
+
+    def _generate_title(content: str, options=None) -> str:
+        del content, options
+        title = f"Generated {len(generated) + 1}"
+        generated.append(title)
+        return title
+
+    monkeypatch.setattr(notes_endpoint, "generate_note_title", _generate_title)
+    payload = {
+        "content": "Auto-title body",
+        "auto_title": True,
+        "keywords": ["Generated"],
+    }
+    first = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": "durable-auto-title"},
+        json=payload,
+    )
+    assert first.status_code == 201, first.text
+
+    replay = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": "durable-auto-title"},
+        json=payload,
+    )
+
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == first.json()
+    assert generated == ["Generated 1"]
+
+
 def test_inline_note_append_failure_writes_no_product_projection(
     monkeypatch: pytest.MonkeyPatch,
     client: TestClient,
@@ -1446,6 +1732,243 @@ def test_inline_note_append_failure_writes_no_product_projection(
     assert chacha_db.search_notes("Not written") == []
     assert chacha_db.get_keyword_by_text("No keyword") is None
     assert chacha_db.get_note_folder_by_path("No/Folder") is None
+
+
+def test_inline_note_compound_preflight_rejection_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    original = sync_service._evaluate_envelope
+
+    def _reject_keyword(dataset, envelope, *, context=None):
+        if envelope.domain == "notes.keyword":
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="test_rejection",
+                message="safe test rejection",
+            )
+        return original(dataset, envelope, context=context)
+
+    monkeypatch.setattr(sync_service, "_evaluate_envelope", _reject_keyword)
+    response = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": "inline-preflight-rejection"},
+        json={
+            "title": "Rejected compound",
+            "content": "Body",
+            "keywords": ["Rejected keyword"],
+            "folder_paths": ["Rejected/Folder"],
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["error_code"] == (
+        "notes_organization_sync_preflight_failed"
+    )
+    assert chacha_db.search_notes("Rejected compound") == []
+    assert chacha_db.get_keyword_by_text("Rejected keyword") is None
+    assert chacha_db.get_note_folder_by_path("Rejected/Folder") is None
+    assert _notes_api_group(sync_service, "inline-preflight-rejection") == []
+
+
+def test_inline_note_same_key_drift_conflicts_without_second_projection(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    headers = {"Idempotency-Key": "inline-note-drift"}
+    first = client.post(
+        "/api/v1/notes/",
+        headers=headers,
+        json={
+            "title": "Original drift note",
+            "content": "Original body",
+            "keywords": ["Original keyword"],
+        },
+    )
+    drift = client.post(
+        "/api/v1/notes/",
+        headers=headers,
+        json={
+            "title": "Changed drift note",
+            "content": "Changed body",
+            "keywords": ["Changed keyword"],
+        },
+    )
+
+    assert first.status_code == 201, first.text
+    assert drift.status_code == 409, drift.text
+    assert drift.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_idempotency_conflict"
+    )
+    assert chacha_db.get_note_by_id(first.json()["id"])["title"] == (
+        "Original drift note"
+    )
+    assert chacha_db.get_keyword_by_text("Changed keyword") is None
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_code"),
+    [
+        ("partial", "notes_organization_sync_domains_incomplete"),
+        ("initializing", "notes_organization_sync_not_ready"),
+        ("failed", "notes_organization_sync_not_ready"),
+    ],
+)
+def test_inline_note_active_sync_readiness_failures_do_not_fall_back(
+    state: str,
+    expected_code: str,
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+    if state == "partial":
+        replacement = replace(
+            dataset,
+            domains=[
+                domain for domain in dataset.domains if domain != "notes.folder_link"
+            ],
+        )
+    else:
+        metadata = dict(dataset.metadata)
+        organization = dict(metadata["notes_organization_v1"])
+        organization["state"] = state
+        organization["error_code"] = "safe_repair_code" if state == "failed" else None
+        metadata["notes_organization_v1"] = organization
+        replacement = replace(dataset, metadata=metadata)
+    monkeypatch.setattr(
+        sync_service.store,
+        "list_datasets_for_user",
+        lambda user_id: [replacement] if user_id == "user-1" else [],
+    )
+
+    response = client.post(
+        "/api/v1/notes/",
+        headers={"Idempotency-Key": f"inline-readiness-{state}"},
+        json={
+            "title": "Must not write",
+            "content": "Body",
+            "keywords": ["Must not write"],
+            "folder_paths": ["Must/Not/Write"],
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["error_code"] == expected_code
+    assert chacha_db.search_notes("Must not write") == []
+    assert chacha_db.get_keyword_by_text("Must not write") is None
+
+
+def test_bulk_compound_append_failure_isolated_without_product_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    monkeypatch.setattr(
+        sync_service.store,
+        "insert_envelopes_atomic",
+        lambda _envelopes: (_ for _ in ()).throw(SyncStoreError("private append")),
+    )
+    response = client.post(
+        "/api/v1/notes/bulk",
+        headers={"Idempotency-Key": "bulk-append-failure"},
+        json={
+            "notes": [
+                {
+                    "title": "Bulk not written",
+                    "content": "Body",
+                    "keywords": ["Bulk not written"],
+                    "folder_paths": ["Bulk/Not/Written"],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 207, response.text
+    assert response.json()["failed_count"] == 1
+    assert chacha_db.search_notes("Bulk not written") == []
+    assert chacha_db.get_keyword_by_text("Bulk not written") is None
+    assert _notes_api_group(sync_service, "bulk-append-failure:0") == []
+
+
+def test_bulk_compound_interruption_resumes_and_replays_without_duplicates(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    original = sync_service.materializers["notes.keyword"]
+    sync_service.materializers["notes.keyword"] = _FailingOrganizationMaterializer()
+    headers = {"Idempotency-Key": "bulk-interruption-replay"}
+    payload = {
+        "notes": [
+            {
+                "title": "Bulk resumes",
+                "content": "Body",
+                "keywords": ["Bulk resume keyword"],
+                "folder_paths": ["Bulk/Resume"],
+            }
+        ]
+    }
+
+    failed = client.post("/api/v1/notes/bulk", headers=headers, json=payload)
+    assert failed.status_code == 207, failed.text
+    first_group = _notes_api_group(sync_service, "bulk-interruption-replay:0")
+    assert [item.apply_status for item in first_group[:3]] == [
+        "applied",
+        "failed",
+        "pending",
+    ]
+    note_id = first_group[0].object_id
+
+    sync_service.materializers["notes.keyword"] = original
+    resumed = client.post("/api/v1/notes/bulk", headers=headers, json=payload)
+    replay = client.post("/api/v1/notes/bulk", headers=headers, json=payload)
+
+    assert resumed.status_code == replay.status_code == 200, resumed.text
+    assert replay.json() == resumed.json()
+    resumed_group = _notes_api_group(sync_service, "bulk-interruption-replay:0")
+    assert [item.client_envelope_id for item in resumed_group] == [
+        item.client_envelope_id for item in first_group
+    ]
+    assert chacha_db.get_note_by_id(note_id)["version"] == 1
+    assert len(chacha_db.get_keywords_for_note(note_id)) == 1
+    assert len(chacha_db.get_note_folders_for_note(note_id)) == 2
+
+
+def test_bulk_auto_title_replay_looks_up_manifest_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    generated: list[str] = []
+
+    def _generate_title(content: str, options=None) -> str:
+        del content, options
+        title = f"Bulk generated {len(generated) + 1}"
+        generated.append(title)
+        return title
+
+    monkeypatch.setattr(notes_endpoint, "generate_note_title", _generate_title)
+    headers = {"Idempotency-Key": "bulk-auto-title-replay"}
+    payload = {
+        "notes": [
+            {
+                "content": "Bulk auto-title body",
+                "auto_title": True,
+                "keywords": ["Generated"],
+            }
+        ]
+    }
+
+    first = client.post("/api/v1/notes/bulk", headers=headers, json=payload)
+    replay = client.post("/api/v1/notes/bulk", headers=headers, json=payload)
+
+    assert first.status_code == replay.status_code == 200, replay.text
+    assert replay.json() == first.json()
+    assert generated == ["Bulk generated 1"]
 
 
 def test_inline_note_retry_resumes_manifest_without_duplicate_note_versions(

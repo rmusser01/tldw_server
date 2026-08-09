@@ -9,17 +9,24 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
     NotesOrganizationMaterializer,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_ORGANIZATION_DOMAINS,
     SyncDatasetCreate,
+    SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelope,
     SyncEnvelopeCreate,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
+from tldw_Server_API.app.core.Sync.v2.security import (
+    server_trusted_encryption_status_from_config,
+)
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 pytestmark = pytest.mark.unit
@@ -30,6 +37,14 @@ PARENT_COLLECTION_ID = "33333333-3333-4333-8333-333333333333"
 FOLDER_ID = "44444444-4444-4444-8444-444444444444"
 PARENT_FOLDER_ID = "55555555-5555-4555-8555-555555555555"
 NOTE_ID = "66666666-6666-4666-8666-666666666666"
+
+
+def _ready_encryption():
+    return server_trusted_encryption_status_from_config(
+        mode="managed_storage",
+        server_trusted_enabled=True,
+        auth_mode="multi_user",
+    )
 
 
 @pytest.fixture()
@@ -61,6 +76,34 @@ def sync_store(tmp_path: Path) -> SyncV2Store:
         ),
     )
     return store
+
+
+def _folder_link_service(
+    sync_store: SyncV2Store,
+    note_db: CharactersRAGDB,
+) -> SyncV2Service:
+    return SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry(
+            [
+                StaticSyncAdapter(
+                    domain="notes.folder_link",
+                    supported_adapter_versions={1},
+                )
+            ]
+        ),
+        materializers={
+            "notes.folder_link": NotesOrganizationMaterializer(
+                note_db,
+                "notes.folder_link",
+            )
+        },
+        settings=SyncV2Settings(
+            supported_domains=["notes.folder_link"],
+            operations={"notes.folder_link": ["upsert", "tombstone"]},
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
 
 
 def _payload(domain: SyncDomain) -> dict[str, object]:
@@ -132,6 +175,36 @@ def _stored_envelope(
             routing_metadata={"restore_intent": True} if restore else (routing_metadata or {}),
             status="accepted",
         )
+    )
+
+
+def _folder_link_push_envelope(
+    *,
+    device_id: str,
+    client_envelope_id: str,
+) -> SyncEnvelopeCreate:
+    return SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id=client_envelope_id,
+        domain="notes.folder_link",
+        operation="upsert",
+        object_id=organization_link_id(
+            "notes.folder_link",
+            [NOTE_ID, FOLDER_ID],
+        ),
+        device_id=device_id,
+        object_revision=1,
+        payload={"note_id": NOTE_ID, "folder_sync_id": FOLDER_ID},
+        payload_hash=f"sha256:{client_envelope_id}",
+        routing_metadata={
+            "origin": "server",
+            "server_device_id": "server-origin",
+            "server_owner_user_id": "owner-1",
+            "notes_folder_origin_provenance": {
+                "operation": "source_upsert",
+                "source_id": 71,
+            },
+        },
     )
 
 
@@ -439,6 +512,126 @@ def test_resource_tombstones_preserve_relationships_source_rows_and_child_parent
         ).fetchone()["count"]
     assert child["parent_id"] == parent_row["id"]
     assert membership_count == 1
+
+
+def test_reserved_server_origin_device_id_is_rejected_at_client_registration(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+) -> None:
+    service = _folder_link_service(sync_store, note_db)
+
+    with pytest.raises(SyncStoreError, match="reserved device identifier"):
+        service.register_device(
+            user_id="owner-1",
+            display_name="Client",
+            client_type="chatbook",
+            device_id="server-origin",
+        )
+
+
+def test_legacy_reserved_server_origin_device_id_is_rejected_at_client_push(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+) -> None:
+    _seed_dependencies(note_db, "notes.folder_link")
+    service = _folder_link_service(sync_store, note_db)
+    sync_store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="server-origin",
+            user_id="owner-1",
+            display_name="Legacy client",
+            client_type="chatbook",
+        )
+    )
+
+    result = service.push(
+        user_id="owner-1",
+        dataset_id="dataset-1",
+        device_id="server-origin",
+        envelopes=[
+            _folder_link_push_envelope(
+                device_id="server-origin",
+                client_envelope_id="env-reserved-device",
+            )
+        ],
+    )
+
+    assert result.accepted == []
+    assert [item.error_code for item in result.rejected] == ["reserved_device_id"]
+    rows = note_db.execute_query(
+        "SELECT source_id FROM note_folder_source_memberships WHERE note_id = ?",
+        (NOTE_ID,),
+    ).fetchall()
+    assert rows == []
+
+
+def test_reserved_server_origin_envelope_is_rejected_under_normal_client_device(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+) -> None:
+    _seed_dependencies(note_db, "notes.folder_link")
+    service = _folder_link_service(sync_store, note_db)
+    service.register_device(
+        user_id="owner-1",
+        display_name="Client",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+
+    result = service.push(
+        user_id="owner-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _folder_link_push_envelope(
+                device_id="server-origin",
+                client_envelope_id="env-reserved-envelope",
+            )
+        ],
+    )
+
+    assert result.accepted == []
+    assert [item.error_code for item in result.rejected] == ["device_mismatch"]
+    rows = note_db.execute_query(
+        "SELECT source_id FROM note_folder_source_memberships WHERE note_id = ?",
+        (NOTE_ID,),
+    ).fetchall()
+    assert rows == []
+
+
+def test_client_push_routing_cannot_activate_local_folder_origin_provenance(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+) -> None:
+    _seed_dependencies(note_db, "notes.folder_link")
+    service = _folder_link_service(sync_store, note_db)
+    service.register_device(
+        user_id="owner-1",
+        display_name="Client",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+
+    result = service.push(
+        user_id="owner-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _folder_link_push_envelope(
+                device_id="device-1",
+                client_envelope_id="env-client-routing",
+            )
+        ],
+    )
+
+    assert [item.client_envelope_id for item in result.accepted] == [
+        "env-client-routing"
+    ]
+    rows = note_db.execute_query(
+        "SELECT source_id FROM note_folder_source_memberships WHERE note_id = ?",
+        (NOTE_ID,),
+    ).fetchall()
+    assert rows == []
 
 
 def test_folder_link_tombstone_suppresses_source_membership_and_restore_ignores_remote_provenance(

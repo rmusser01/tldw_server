@@ -41,6 +41,7 @@ _RESOURCE_TABLES: dict[SyncDomain, tuple[str, str]] = {
 }
 _REQUEST_FINGERPRINT_KEY = "notes_organization_request_fingerprint"
 _RESPONSE_STATUS_KEY = "notes_organization_response_status"
+_NOTE_RESPONSE_KEY = "notes_organization_note_response"
 _FOLDER_PROVENANCE_KEY = "notes_folder_origin_provenance"
 _KEYWORD_MERGE_RESPONSE_KEY = "notes_keyword_merge_response"
 
@@ -259,6 +260,17 @@ class NotesOrganizationCoordinator:
         )
         if manifest is None:
             return None
+        mutation_group_id = server_origin_mutation_batch_group_id(
+            dataset_id=dataset.dataset_id,
+            source=source,
+            idempotency_key=normalized_key,
+        )
+        stored_group = self.service.store.list_mutation_group(
+            dataset.dataset_id, mutation_group_id
+        )
+        group_boundary = max(
+            int(envelope.server_cursor or 0) for envelope in stored_group
+        )
         if any(
             step.routing_metadata.get(_REQUEST_FINGERPRINT_KEY)
             != request_fingerprint
@@ -312,7 +324,11 @@ class NotesOrganizationCoordinator:
                     )
             elif result_domain == "notes.note":
                 def loader() -> object:
-                    return self._load_note_row(result_step.object_id)
+                    return self._load_note_response(
+                        result_step,
+                        dataset_id=dataset.dataset_id,
+                        server_cursor_boundary=group_boundary,
+                    )
             else:
                 def loader() -> object:
                     return self._load_resource_row(
@@ -691,6 +707,17 @@ class NotesOrganizationCoordinator:
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
+        existing_note = self.note_db.get_note_by_id(note_id)
+        current_keywords = (
+            self.note_db.get_keywords_for_note(note_id) if existing_note is not None else []
+        )
+        current_folders = (
+            self.note_db.get_note_folders_for_note(note_id)
+            if existing_note is not None
+            else []
+        )
+        result_keyword_ids = [str(row["sync_id"]) for row in current_keywords]
+        result_folder_ids = [str(row["sync_id"]) for row in current_folders]
         steps: list[ServerOriginMutationStep] = [note_step]
 
         if keywords is not None:
@@ -719,15 +746,9 @@ class NotesOrganizationCoordinator:
                     sync_id = str(existing["sync_id"])
                 desired_keywords.append((key, sync_id))
 
-            current_keyword_ids = {
-                str(row["sync_id"])
-                for row in (
-                    self.note_db.get_keywords_for_note(note_id)
-                    if self.note_db.get_note_by_id(note_id) is not None
-                    else []
-                )
-            }
+            current_keyword_ids = set(result_keyword_ids)
             desired_keyword_ids = {sync_id for _, sync_id in desired_keywords}
+            result_keyword_ids = [sync_id for _, sync_id in desired_keywords]
             for sync_id in sorted(current_keyword_ids - desired_keyword_ids):
                 steps.extend(
                     self.plan_relationship(
@@ -799,15 +820,9 @@ class NotesOrganizationCoordinator:
                 parent_sync_ids[path.casefold()] = sync_id
                 desired_folders.append((path, sync_id))
 
-            current_folder_ids = {
-                str(row["sync_id"])
-                for row in (
-                    self.note_db.get_note_folders_for_note(note_id)
-                    if self.note_db.get_note_by_id(note_id) is not None
-                    else []
-                )
-            }
+            current_folder_ids = set(result_folder_ids)
             desired_folder_ids = {sync_id for _, sync_id in desired_folders}
+            result_folder_ids = [sync_id for _, sync_id in desired_folders]
             for sync_id in sorted(current_folder_ids - desired_folder_ids):
                 steps.extend(
                     self.plan_relationship(
@@ -827,9 +842,33 @@ class NotesOrganizationCoordinator:
                     ).steps
                 )
 
+        response_time = self.service.clock()
+        response_metadata = {
+            "created_at": (
+                str(existing_note["created_at"])
+                if existing_note is not None
+                else response_time
+            ),
+            "last_modified": response_time,
+            "version": (
+                int(existing_note["version"]) + 1 if existing_note is not None else 1
+            ),
+            "client_id": self.user_id,
+            "deleted": False,
+            "keyword_sync_ids": result_keyword_ids,
+            "folder_sync_ids": result_folder_ids,
+        }
+        note_step = replace(
+            note_step,
+            routing_metadata={
+                **dict(note_step.routing_metadata),
+                _NOTE_RESPONSE_KEY: response_metadata,
+            },
+        )
+        steps[0] = note_step
         return PlannedNotesMutation(
             steps=tuple(steps),
-            load_result=lambda: self._load_note_row(note_id),
+            load_result=lambda: self._load_note_response(note_step),
         )
 
     def plan_source_folder_change(
@@ -1045,6 +1084,156 @@ class NotesOrganizationCoordinator:
         if row is None:
             raise SyncStoreError("Materialized note was not found")
         return row
+
+    def _load_note_response(
+        self,
+        note_step: ServerOriginMutationStep,
+        *,
+        dataset_id: str | None = None,
+        server_cursor_boundary: int | None = None,
+    ) -> dict[str, Any]:
+        """Rebuild one immutable compound response from its durable manifest."""
+
+        current = self._load_note_row(note_step.object_id)
+        metadata = note_step.routing_metadata.get(_NOTE_RESPONSE_KEY)
+        if not isinstance(metadata, Mapping):
+            return current
+        response = {
+            **current,
+            "id": note_step.object_id,
+            "title": str(note_step.payload.get("title") or ""),
+            "content": str(note_step.payload.get("content") or ""),
+            "conversation_id": note_step.payload.get("conversation_id"),
+            "message_id": note_step.payload.get("message_id"),
+        }
+        for key in ("created_at", "last_modified", "version", "client_id", "deleted"):
+            if key in metadata:
+                response[key] = metadata[key]
+        keyword_ids = metadata.get("keyword_sync_ids")
+        folder_ids = metadata.get("folder_sync_ids")
+        resolved_dataset_id = dataset_id or self.active_dataset().dataset_id
+        if isinstance(keyword_ids, list) and all(
+            isinstance(sync_id, str) for sync_id in keyword_ids
+        ):
+            response["keywords"] = sorted(
+                (
+                    self._load_resource_response_at(
+                        resolved_dataset_id,
+                        "notes.keyword",
+                        sync_id,
+                        server_cursor_boundary,
+                    )
+                    for sync_id in keyword_ids
+                ),
+                key=lambda row: str(row.get("keyword") or "").casefold(),
+            )
+        if isinstance(folder_ids, list) and all(
+            isinstance(sync_id, str) for sync_id in folder_ids
+        ):
+            response["folders"] = sorted(
+                (
+                    self._load_resource_response_at(
+                        resolved_dataset_id,
+                        "notes.folder",
+                        sync_id,
+                        server_cursor_boundary,
+                    )
+                    for sync_id in folder_ids
+                ),
+                key=lambda row: str(row.get("path") or "").casefold(),
+            )
+        return response
+
+    def _load_resource_response_at(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        sync_id: str,
+        server_cursor_boundary: int | None,
+    ) -> dict[str, Any]:
+        """Rebuild resource display data from canonical envelope history."""
+
+        envelope = self._resource_envelope_at(
+            dataset_id, domain, sync_id, server_cursor_boundary
+        )
+        resource = NotesOrganizationSyncStore(self.note_db).get_resource(domain, sync_id)
+        if resource is None:
+            raise SyncStoreError("Materialized organization resource was not found")
+        logical_table, _ = _RESOURCE_TABLES[domain]
+        table = self.note_db._map_table_for_backend(logical_table)
+        row = self.note_db.execute_query(
+            f"SELECT * FROM {table} WHERE id = ?",  # nosec B608
+            (resource.local_id,),
+        ).fetchone()
+        if row is None:
+            raise SyncStoreError("Materialized organization resource was not found")
+        result = dict(row)
+        if domain == "notes.keyword":
+            result.update(
+                {
+                    "keyword": str(envelope.payload.get("keyword") or ""),
+                    "last_modified": envelope.created_at_client
+                    or result.get("last_modified"),
+                    "version": envelope.object_revision or result.get("version"),
+                    "client_id": envelope.routing_metadata.get(
+                        "server_owner_user_id"
+                    )
+                    or envelope.device_id
+                    or result.get("client_id"),
+                    "deleted": False,
+                }
+            )
+            return result
+        if domain != "notes.folder":
+            return result
+        parent_sync_id = envelope.payload.get("parent_sync_id")
+        parent_id = None
+        parent_path = None
+        if isinstance(parent_sync_id, str) and parent_sync_id:
+            parent_resource = NotesOrganizationSyncStore(self.note_db).get_resource(
+                "notes.folder", parent_sync_id
+            )
+            if parent_resource is None:
+                raise SyncStoreError("Materialized folder parent was not found")
+            parent_id = parent_resource.local_id
+            parent_row = self._load_resource_response_at(
+                dataset_id,
+                "notes.folder",
+                parent_sync_id,
+                server_cursor_boundary,
+            )
+            parent_path = str(parent_row["path"])
+        name = str(envelope.payload.get("name") or "")
+        result.update(
+            {
+                "name": name,
+                "path": f"{parent_path}/{name}" if parent_path else name,
+                "parent_id": parent_id,
+            }
+        )
+        return result
+
+    def _resource_envelope_at(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        sync_id: str,
+        server_cursor_boundary: int | None,
+    ):
+        history = self.service.store.list_envelopes_for_entity(
+            dataset_id,
+            domain,
+            entity_id=sync_id,
+            limit=100,
+        )
+        for envelope in history:
+            cursor = int(envelope.server_cursor or 0)
+            if server_cursor_boundary is not None and cursor > server_cursor_boundary:
+                continue
+            if envelope.operation != "upsert":
+                raise SyncStoreError("Organization resource was not active at replay")
+            return envelope
+        raise SyncStoreError("Organization resource history was not found")
 
     def _folder_path(self, local_id: int) -> str:
         row = self.note_db.execute_query(

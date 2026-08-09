@@ -107,6 +107,12 @@ from .store import SyncV2Store
 
 SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
 SYNC_KEY_RECOVERY_MAX_WRAPPED_KEY_BYTES = 64 * 1024
+_SERVER_ORIGIN_DEVICE_ID = "server-origin"
+
+
+def _require_client_device_id(device_id: str) -> None:
+    if device_id == _SERVER_ORIGIN_DEVICE_ID:
+        raise SyncStoreError("Sync server-origin is a reserved device identifier")
 
 
 def _safe_projection_error_message(exc: Exception) -> str:
@@ -625,9 +631,11 @@ class SyncV2Service:
         client_version: str | None = None,
         capabilities: dict[str, object] | None = None,
     ) -> SyncDeviceRegistration:
+        resolved_device_id = device_id or self.id_factory("device")
+        _require_client_device_id(resolved_device_id)
         device = self.store.upsert_device(
             SyncDeviceUpsert(
-                device_id=device_id or self.id_factory("device"),
+                device_id=resolved_device_id,
                 user_id=user_id,
                 display_name=display_name,
                 client_type=client_type,
@@ -1372,6 +1380,18 @@ class SyncV2Service:
     ) -> SyncPushResult:
         # The top-level cursor is a client dataset checkpoint; object conflict checks use envelope bases.
         _ = base_server_cursor
+        if device_id == _SERVER_ORIGIN_DEVICE_ID:
+            return SyncPushResult(
+                dataset_id=dataset_id,
+                rejected=[
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="reserved_device_id",
+                        message="Sync device identifier is reserved for server use",
+                    )
+                    for envelope in envelopes
+                ],
+            )
         self._require_registered_device(user_id, device_id)
         try:
             dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)

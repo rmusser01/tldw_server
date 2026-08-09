@@ -1578,25 +1578,6 @@ async def create_note(
         if len(safe_title_log) > 30:
             safe_title_log = safe_title_log[:30] + "..."
         logger.info(f"User (via DB instance client_id: {db.client_id}) creating note: Title='{safe_title_log}'")
-        # Compute title (auto-generate if requested)
-        effective_title = (note_in.title or "").strip()
-        if not effective_title:
-            if getattr(note_in, "auto_title", False):
-                try:
-                    opts = _build_title_opts(note_in)
-                    effective_title = await asyncio.to_thread(
-                        generate_note_title,
-                        note_in.content,
-                        options=opts,
-                    )
-                except _NOTES_NONCRITICAL_EXCEPTIONS as gen_err:
-                    logger.warning(f"Auto-title generation failed, falling back: {gen_err}")
-                    # Fallback to safe timestamped title
-                    effective_title = await asyncio.to_thread(generate_note_title, note_in.content)
-            else:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail="Title is required unless auto_title=true")
-
         sync_service = _active_notes_sync_service(current_user)
         idempotency_key = request.headers.get("Idempotency-Key")
         keywords_supplied = _field_supplied(note_in, "keywords")
@@ -1635,10 +1616,14 @@ async def create_note(
             else None
         )
         raw_note_fields: dict[str, object] = {
-            "title": effective_title,
+            "title": (note_in.title or "").strip(),
             "content": note_in.content,
             "conversation_id": _normalize_optional_id(note_in.conversation_id),
             "message_id": _normalize_optional_id(note_in.message_id),
+            "auto_title": note_in.auto_title,
+            "title_strategy": note_in.title_strategy,
+            "title_max_len": note_in.title_max_len,
+            "language": note_in.language,
         }
         request_fingerprint: str | None = None
         if coordinator is not None:
@@ -1666,6 +1651,32 @@ async def create_note(
                 if not isinstance(replayed, dict):
                     raise SyncStoreError("Compound note replay did not return a note")
                 compound_note = replayed
+
+        # Nondeterministic title work follows durable raw-request manifest lookup.
+        effective_title = (
+            str(compound_note["title"])
+            if compound_note is not None
+            else (note_in.title or "").strip()
+        )
+        if not effective_title:
+            if getattr(note_in, "auto_title", False):
+                try:
+                    opts = _build_title_opts(note_in)
+                    effective_title = await asyncio.to_thread(
+                        generate_note_title,
+                        note_in.content,
+                        options=opts,
+                    )
+                except _NOTES_NONCRITICAL_EXCEPTIONS as gen_err:
+                    logger.warning(f"Auto-title generation failed, falling back: {gen_err}")
+                    effective_title = await asyncio.to_thread(
+                        generate_note_title, note_in.content
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Title is required unless auto_title=true",
+                )
 
         if compound_note is None:
             conversation_id, message_id = _validate_note_links(
@@ -1766,9 +1777,9 @@ async def create_note(
             current_user=current_user,
             task_service=task_service,
         )
-        # Attach keywords inline
-        created_note_data = _attach_keywords_inline(db, created_note_data)
-        created_note_data = _attach_folders_inline(db, created_note_data)
+        if compound_note is None:
+            created_note_data = _attach_keywords_inline(db, created_note_data)
+            created_note_data = _attach_folders_inline(db, created_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
             created_note_data["keyword_sync"] = {
                 "failed_count": int(keyword_sync_summary.get("failed_count", 0)),
@@ -2394,6 +2405,7 @@ async def export_notes_post_csv(
     tags=["notes"],
 )
 async def import_notes(
+        request: Request,
         payload: NotesImportRequest,
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
@@ -2423,8 +2435,20 @@ async def import_notes(
         }
         companion_events: list[dict[str, Any]] = []
         sync_service = _active_notes_sync_service(current_user)
+        coordinator = (
+            NotesOrganizationCoordinator(
+                service=sync_service,
+                note_db=db,
+                user_id=str(current_user.id),
+            )
+            if sync_service is not None
+            else None
+        )
+        request_base = _organization_request_key(
+            request.headers.get("Idempotency-Key")
+        )
 
-        for item in payload.items:
+        for file_index, item in enumerate(payload.items):
             file_result = NotesImportFileResult(
                 file_name=item.file_name,
                 source_format=item.format,
@@ -2453,21 +2477,14 @@ async def import_notes(
                 file_result.failed_count += 1
                 file_result.errors.append(f"Could not parse import content: {parse_err}")
 
-            if sync_service is not None and any(
-                parsed_note.get("keywords_provided") or parsed_note.get("keywords")
-                for parsed_note in parsed_notes
-            ):
-                _require_notes_organization_ready(
-                    NotesOrganizationCoordinator(
-                        service=sync_service,
-                        note_db=db,
-                        user_id=str(current_user.id),
-                    )
-                )
-                raise _note_keywords_sync_unsupported_error()
-
             for note_index, parsed_note in enumerate(parsed_notes, start=1):
                 try:
+                    request_key = f"{request_base}:{file_index}:{note_index}"
+                    keywords = (
+                        list(parsed_note.get("keywords", []))
+                        if parsed_note.get("keywords_provided")
+                        else None
+                    )
                     imported_id = parsed_note.get("id")
                     existing_note = db.get_note_by_id(imported_id) if imported_id else None
 
@@ -2480,21 +2497,46 @@ async def import_notes(
                             "title": parsed_note["title"],
                             "content": parsed_note["content"],
                         }
-                        if sync_service is not None:
+                        if coordinator is not None:
                             projected_note = dict(existing_note)
                             projected_note.update(update_patch)
-                            try:
-                                capture_server_origin_mutation(
-                                    sync_service,
-                                    user_id=str(current_user.id),
-                                    domain="notes.note",
-                                    operation="upsert",
-                                    object_id=str(imported_id),
-                                    payload=_note_payload_from_row(projected_note),
-                                    source="server_api",
+                            note_payload = _note_payload_from_row(projected_note)
+                            request_fingerprint = _compound_note_request_fingerprint(
+                                coordinator,
+                                operation="note.import",
+                                note_id=str(imported_id),
+                                note_fields=note_payload,
+                                keywords=keywords,
+                                folder_paths=None,
+                            )
+                            replay = _replay_notes_organization_plan(
+                                coordinator,
+                                idempotency_key=request_key,
+                                request_fingerprint=request_fingerprint,
+                                result_domain="notes.note",
+                            )
+                            if replay is not None:
+                                replayed_note = _capture_notes_organization_plan(
+                                    coordinator,
+                                    replay,
+                                    idempotency_key=request_key,
+                                    source="notes-api",
                                 )
-                            except Exception as sync_exc:
-                                raise _note_sync_http_error(sync_exc) from sync_exc
+                                if not isinstance(replayed_note, dict):
+                                    raise SyncStoreError(
+                                        "Imported note replay did not return a note"
+                                    )
+                                overwritten_note = replayed_note
+                            else:
+                                overwritten_note = _capture_compound_note(
+                                    coordinator,
+                                    note_id=str(imported_id),
+                                    note_payload=note_payload,
+                                    keywords=keywords,
+                                    folder_paths=None,
+                                    request_key=request_key,
+                                    request_fingerprint=request_fingerprint,
+                                )
                         else:
                             expected_version = int(existing_note.get("version", 1))
                             db.update_note(
@@ -2502,7 +2544,7 @@ async def import_notes(
                                 update_data=update_patch,
                                 expected_version=expected_version,
                             )
-                        overwritten_note = db.get_note_by_id(str(imported_id))
+                            overwritten_note = db.get_note_by_id(str(imported_id))
                         if not overwritten_note:
                             raise CharactersRAGDBError("Import overwrite note could not be retrieved.")  # noqa: TRY003
                         _reconcile_note_tasks_after_save(
@@ -2511,7 +2553,7 @@ async def import_notes(
                             current_user=current_user,
                             task_service=task_service,
                         )
-                        if parsed_note.get("keywords_provided"):
+                        if coordinator is None and parsed_note.get("keywords_provided"):
                             _sync_note_keywords(
                                 db,
                                 note_id=str(imported_id),
@@ -2529,34 +2571,65 @@ async def import_notes(
                         continue
 
                     create_with_id = None if payload.duplicate_strategy == "create_copy" else imported_id
-                    if sync_service is not None:
-                        created_note_id = str(create_with_id or uuid4())
-                        try:
-                            capture_server_origin_mutation(
-                                sync_service,
-                                user_id=str(current_user.id),
-                                domain="notes.note",
-                                operation="upsert",
-                                object_id=created_note_id,
-                                payload={
-                                    "title": parsed_note["title"],
-                                    "content": parsed_note["content"],
-                                    "conversation_id": None,
-                                    "message_id": None,
-                                },
-                                source="server_api",
+                    if coordinator is not None:
+                        created_note_id = str(
+                            create_with_id or _compound_note_id(request_key)
+                        )
+                        note_payload = {
+                            "title": parsed_note["title"],
+                            "content": parsed_note["content"],
+                            "conversation_id": None,
+                            "message_id": None,
+                        }
+                        request_fingerprint = _compound_note_request_fingerprint(
+                            coordinator,
+                            operation="note.import",
+                            note_id=created_note_id,
+                            note_fields=note_payload,
+                            keywords=keywords,
+                            folder_paths=None,
+                        )
+                        replay = _replay_notes_organization_plan(
+                            coordinator,
+                            idempotency_key=request_key,
+                            request_fingerprint=request_fingerprint,
+                            result_domain="notes.note",
+                        )
+                        if replay is not None:
+                            replayed_note = _capture_notes_organization_plan(
+                                coordinator,
+                                replay,
+                                idempotency_key=request_key,
+                                source="notes-api",
                             )
-                        except Exception as sync_exc:
-                            raise _note_sync_http_error(sync_exc) from sync_exc
+                            if not isinstance(replayed_note, dict):
+                                raise SyncStoreError(
+                                    "Imported note replay did not return a note"
+                                )
+                            created_note = replayed_note
+                        else:
+                            created_note = _capture_compound_note(
+                                coordinator,
+                                note_id=created_note_id,
+                                note_payload=note_payload,
+                                keywords=keywords,
+                                folder_paths=None,
+                                request_key=request_key,
+                                request_fingerprint=request_fingerprint,
+                            )
                     else:
                         created_note_id = db.add_note(
                             title=parsed_note["title"],
                             content=parsed_note["content"],
                             note_id=create_with_id,
                         )
+                        created_note = (
+                            db.get_note_by_id(str(created_note_id))
+                            if created_note_id
+                            else None
+                        )
                     if not created_note_id:
                         raise CharactersRAGDBError("Import create returned no note ID.")  # noqa: TRY003
-                    created_note = db.get_note_by_id(str(created_note_id))
                     if not created_note:
                         raise CharactersRAGDBError("Import created note could not be retrieved.")  # noqa: TRY003
                     _reconcile_note_tasks_after_save(
@@ -2565,7 +2638,7 @@ async def import_notes(
                         current_user=current_user,
                         task_service=task_service,
                     )
-                    if parsed_note.get("keywords"):
+                    if coordinator is None and parsed_note.get("keywords"):
                         _sync_note_keywords(
                             db,
                             note_id=str(created_note_id),
@@ -4480,6 +4553,7 @@ async def update_note(
         request_key = _organization_request_key(idempotency_key)
         request_fingerprint: str | None = None
         compound_note: dict[str, Any] | None = None
+        compound_replayed = False
         if coordinator is not None:
             request_fingerprint = _compound_note_request_fingerprint(
                 coordinator,
@@ -4506,6 +4580,7 @@ async def update_note(
                 if not isinstance(replayed, dict):
                     raise SyncStoreError("Compound note replay did not return a note")
                 compound_note = replayed
+                compound_replayed = True
 
         if compound_note is None and not update_data and (keywords_supplied or folders_supplied):
             current_note = _get_current_note()
@@ -4631,14 +4706,16 @@ async def update_note(
         if not updated_note_data:
             logger.error(f"Note '{note_id}' not found after successful update for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
-        _reconcile_note_tasks_after_save(
-            db=db,
-            note_data=updated_note_data,
-            current_user=current_user,
-            task_service=task_service,
-        )
-        updated_note_data = _attach_keywords_inline(db, updated_note_data)
-        updated_note_data = _attach_folders_inline(db, updated_note_data)
+        if not compound_replayed:
+            _reconcile_note_tasks_after_save(
+                db=db,
+                note_data=updated_note_data,
+                current_user=current_user,
+                task_service=task_service,
+            )
+        if compound_note is None:
+            updated_note_data = _attach_keywords_inline(db, updated_note_data)
+            updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
             updated_note_data["keyword_sync"] = {
                 "failed_count": int(keyword_sync_summary.get("failed_count", 0)),
@@ -4742,6 +4819,7 @@ async def patch_note(
         request_key = _organization_request_key(idempotency_key)
         request_fingerprint: str | None = None
         compound_note: dict[str, Any] | None = None
+        compound_replayed = False
         if coordinator is not None:
             request_fingerprint = _compound_note_request_fingerprint(
                 coordinator,
@@ -4768,6 +4846,7 @@ async def patch_note(
                 if not isinstance(replayed, dict):
                     raise SyncStoreError("Compound note replay did not return a note")
                 compound_note = replayed
+                compound_replayed = True
 
         if expected_version is None:
             # Fallback to current version if not provided
@@ -4873,14 +4952,16 @@ async def patch_note(
         updated_note_data = compound_note or db.get_note_by_id(note_id=note_id)
         if not updated_note_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
-        _reconcile_note_tasks_after_save(
-            db=db,
-            note_data=updated_note_data,
-            current_user=current_user,
-            task_service=task_service,
-        )
-        updated_note_data = _attach_keywords_inline(db, updated_note_data)
-        updated_note_data = _attach_folders_inline(db, updated_note_data)
+        if not compound_replayed:
+            _reconcile_note_tasks_after_save(
+                db=db,
+                note_data=updated_note_data,
+                current_user=current_user,
+                task_service=task_service,
+            )
+        if compound_note is None:
+            updated_note_data = _attach_keywords_inline(db, updated_note_data)
+            updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
             updated_note_data["keyword_sync"] = {
                 "failed_count": int(keyword_sync_summary.get("failed_count", 0)),
@@ -5169,23 +5250,6 @@ async def bulk_create_notes(
 
     for item_index, item in enumerate(request.notes):
         try:
-            # Compute title per item
-            effective_title = (getattr(item, 'title', None) or "").strip()
-            if not effective_title:
-                if getattr(item, "auto_title", False):
-                    try:
-                        opts = _build_title_opts(item)
-                        effective_title = await asyncio.to_thread(
-                            generate_note_title,
-                            item.content,
-                            options=opts,
-                        )
-                    except _NOTES_NONCRITICAL_EXCEPTIONS as gen_err:
-                        logger.warning(f"[Bulk] Auto-title generation failed, falling back: {gen_err}")
-                        effective_title = await asyncio.to_thread(generate_note_title, item.content)
-                else:
-                    raise InputError("Title is required for bulk item unless auto_title=true.")
-
             keywords_supplied = _field_supplied(item, "keywords")
             folders_supplied = _field_supplied(item, "folder_paths")
             kw_list = (item.normalized_keywords or []) if keywords_supplied else None
@@ -5216,10 +5280,14 @@ async def bulk_create_notes(
                     operation="note.bulk_create",
                     note_id=note_id,
                     note_fields={
-                        "title": effective_title,
+                        "title": (getattr(item, "title", None) or "").strip(),
                         "content": item.content,
                         "conversation_id": _normalize_optional_id(item.conversation_id),
                         "message_id": _normalize_optional_id(item.message_id),
+                        "auto_title": item.auto_title,
+                        "title_strategy": item.title_strategy,
+                        "title_max_len": item.title_max_len,
+                        "language": item.language,
                     },
                     keywords=kw_list,
                     folder_paths=folder_paths,
@@ -5240,6 +5308,33 @@ async def bulk_create_notes(
                     if not isinstance(replayed, dict):
                         raise SyncStoreError("Compound note replay did not return a note")
                     compound_note = replayed
+
+            effective_title = (
+                str(compound_note["title"])
+                if compound_note is not None
+                else (getattr(item, "title", None) or "").strip()
+            )
+            if not effective_title:
+                if getattr(item, "auto_title", False):
+                    try:
+                        opts = _build_title_opts(item)
+                        effective_title = await asyncio.to_thread(
+                            generate_note_title,
+                            item.content,
+                            options=opts,
+                        )
+                    except _NOTES_NONCRITICAL_EXCEPTIONS as gen_err:
+                        logger.warning(
+                            "[Bulk] Auto-title generation failed, falling back: {}",
+                            gen_err,
+                        )
+                        effective_title = await asyncio.to_thread(
+                            generate_note_title, item.content
+                        )
+                else:
+                    raise InputError(
+                        "Title is required for bulk item unless auto_title=true."
+                    )
 
             if compound_note is None:
                 conversation_id, message_id = _validate_note_links(
@@ -5338,8 +5433,9 @@ async def bulk_create_notes(
             if not nd:
                 raise CharactersRAGDBError("Created note could not be retrieved.")
             _reconcile_note_tasks_after_save(db=db, note_data=nd, current_user=current_user, task_service=task_service)
-            nd = _attach_keywords_inline(db, nd)
-            nd = _attach_folders_inline(db, nd)
+            if compound_note is None:
+                nd = _attach_keywords_inline(db, nd)
+                nd = _attach_folders_inline(db, nd)
             companion_events.append(
                 build_note_bulk_import_activity(
                     note=nd,

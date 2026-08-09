@@ -135,3 +135,158 @@ def test_notes_sink_syncs_source_managed_folders_from_relative_path(fake_notes_d
             "folder_paths": ["docs", "docs/api"],
         }
     ]
+
+
+@pytest.mark.unit
+def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+        NotesOrganizationSyncStore,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+        CharactersRAGDB,
+        ConflictError,
+    )
+    from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
+    from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
+    from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
+    from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
+        NotesOrganizationDomainAdapter,
+    )
+    from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
+    from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
+        NotesOrganizationMaterializer,
+    )
+    from tldw_Server_API.app.core.Sync.v2.models import (
+        NOTES_ORGANIZATION_DOMAINS,
+        SyncDatasetCreate,
+    )
+    from tldw_Server_API.app.core.Sync.v2.security import (
+        server_trusted_encryption_status_from_config,
+    )
+    from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
+    from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
+
+    notes_db = CharactersRAGDB(
+        db_path=str(tmp_path / "notes.sqlite"),
+        client_id="user-1",
+    )
+    sync_store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.sqlite"))
+    sync_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_organization_v1": {"state": "ready"},
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry(
+            [
+                NotesDomainAdapter(),
+                *[
+                    NotesOrganizationDomainAdapter(domain=domain)
+                    for domain in NOTES_ORGANIZATION_DOMAINS
+                ],
+            ]
+        ),
+        materializers={
+            "notes.note": NotesMaterializer(notes_db),
+            **{
+                domain: NotesOrganizationMaterializer(notes_db, domain)
+                for domain in NOTES_ORGANIZATION_DOMAINS
+            },
+        },
+        settings=SyncV2Settings(
+            supported_domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+            operations={
+                "notes.note": ["upsert", "tombstone"],
+                **{
+                    domain: ["upsert", "tombstone"]
+                    for domain in NOTES_ORGANIZATION_DOMAINS
+                },
+            },
+            server_trusted_encryption=server_trusted_encryption_status_from_config(
+                mode="managed_storage",
+                server_trusted_enabled=True,
+                auth_mode="multi_user",
+            ),
+        ),
+        clock=lambda: "2026-08-09T08:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        notes_sink,
+        "get_active_server_origin_sync_service_for_user",
+        lambda user_id: service,
+        raising=False,
+    )
+
+    def _direct_source_folder_write(*args, **kwargs):
+        raise AssertionError("active-ready Sync must not use the legacy direct path")
+
+    monkeypatch.setattr(notes_db, "sync_note_source_folders", _direct_source_folder_write)
+    result = notes_sink.apply_notes_change(
+        notes_db,
+        binding=None,
+        change={
+            "event_type": "created",
+            "relative_path": "docs/api/a.md",
+            "text": "# A\n\nBody",
+            "source_id": 91,
+        },
+        policy="canonical",
+    )
+
+    assert result["action"] == "created"
+    note_id = str(result["note_id"])
+    assert [row["path"] for row in notes_db.get_note_folders_for_note(note_id)] == [
+        "docs",
+        "docs/api",
+    ]
+    with notes_db.transaction() as conn:
+        provenance = conn.execute(
+            "SELECT source_id FROM note_folder_source_memberships "
+            "WHERE note_id = ? ORDER BY folder_id",
+            (note_id,),
+        ).fetchall()
+    assert [int(row["source_id"]) for row in provenance] == [91, 91]
+    folder_links = [
+        envelope
+        for envelope in sync_store.list_envelopes_after("dataset-1", 0)
+        if envelope.domain == "notes.folder_link"
+    ]
+    assert len(folder_links) == 2
+    assert all(
+        envelope.routing_metadata["notes_folder_origin_provenance"]
+        == {"operation": "source_upsert", "source_id": 91}
+        for envelope in folder_links
+    )
+    assert len(NotesOrganizationSyncStore(notes_db).snapshot().relationships) == 2
+
+    envelope_count = len(sync_store.list_envelopes_after("dataset-1", 0))
+    with pytest.raises(ConflictError, match="version mismatch"):
+        notes_sink.apply_notes_change(
+            notes_db,
+            binding={
+                "note_id": note_id,
+                "current_version": 99,
+                "sync_status": "sync_managed",
+            },
+            change={
+                "event_type": "changed",
+                "relative_path": "docs/api/a.md",
+                "text": "# Changed\n\nBody",
+                "source_id": 91,
+            },
+            policy="canonical",
+        )
+    assert len(sync_store.list_envelopes_after("dataset-1", 0)) == envelope_count
+    notes_db.close_connection()
