@@ -199,6 +199,24 @@ def load_server_origin_mutation_batch_manifest(
     return tuple(_canonical_step_from_envelope(envelope) for envelope in existing)
 
 
+def server_origin_mutation_batch_group_id(
+    *,
+    dataset_id: str,
+    source: str,
+    idempotency_key: str,
+) -> str:
+    """Resolve the durable group identity for one server-origin idempotency key."""
+
+    normalized_key = idempotency_key.strip()
+    if not normalized_key:
+        raise SyncStoreError("Sync server-origin mutation batch requires an idempotency key")
+    return _mutation_group_id(
+        dataset_id,
+        source=source,
+        idempotency_key=normalized_key,
+    )
+
+
 def resume_server_origin_mutation_group(
     *,
     service: SyncV2Service,

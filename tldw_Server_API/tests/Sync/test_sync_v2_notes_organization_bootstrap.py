@@ -869,6 +869,156 @@ def test_stale_pending_step_is_reconciled_only_after_verified_correction(
     note_db.close_connection()
 
 
+def test_reverted_source_defers_stale_audit_until_matching_correction_is_applied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = NotesOrganizationSyncStore(note_db)
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "A"},
+    )
+    bootstrapper = NotesOrganizationBootstrapper(note_db, batch_size=1)
+    original_verifier = bootstrapper._step_matches_source
+    failed_once = False
+
+    def fail_a_once(envelope) -> bool:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            return False
+        return original_verifier(envelope)
+
+    monkeypatch.setattr(bootstrapper, "_step_matches_source", fail_a_once)
+    paused_a = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+    old_a = _organization_envelopes(store)[0]
+    assert paused_a.metadata["notes_organization_v1"]["state"] == "initializing"
+    assert old_a.payload == {"keyword": "A"}
+    assert old_a.apply_status == "pending"
+    assert old_a.server_cursor is not None
+
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "B"},
+    )
+    crashed = False
+
+    def crash_after_b_group(_completed_groups: int) -> None:
+        nonlocal crashed
+        if not crashed:
+            crashed = True
+            raise NotesOrganizationBootstrapInterrupted("B applied before stale audit")
+
+    bootstrapper = NotesOrganizationBootstrapper(
+        note_db,
+        batch_size=1,
+        after_group=crash_after_b_group,
+    )
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        bootstrapper.bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=paused_a,
+        )
+    before_revert = _organization_envelopes(store)
+    durable_b = store.get_current_head("dataset-1", "notes.keyword", KEYWORD_ID)
+    assert durable_b is not None
+    assert durable_b.payload == {"keyword": "B"}
+    assert durable_b.apply_status == "applied"
+    assert old_a.server_cursor < durable_b.server_cursor
+    assert next(
+        item for item in before_revert if item.server_cursor == old_a.server_cursor
+    ).apply_status == "pending"
+
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "A"},
+    )
+    chronology: list[tuple[str, int]] = []
+    original_mark_verified = store.mark_bootstrap_envelope_verified
+    original_reconcile = store.reconcile_bootstrap_envelope_superseded
+
+    def record_verified(server_cursor: int, *, bootstrap_id: str):
+        envelope = next(
+            item
+            for item in _organization_envelopes(store)
+            if item.server_cursor == server_cursor
+        )
+        assert envelope.payload == {"keyword": "A"}
+        chronology.append(("verified", server_cursor))
+        return original_mark_verified(server_cursor, bootstrap_id=bootstrap_id)
+
+    def record_reconciled(
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        superseded_by_cursor: int,
+    ):
+        correction = store.get_current_head("dataset-1", "notes.keyword", KEYWORD_ID)
+        assert correction is not None
+        assert correction.server_cursor == superseded_by_cursor
+        assert correction.payload == {"keyword": "A"}
+        chronology.append(("reconciled", superseded_by_cursor))
+        return original_reconcile(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            superseded_by_cursor=superseded_by_cursor,
+        )
+
+    monkeypatch.setattr(store, "mark_bootstrap_envelope_verified", record_verified)
+    monkeypatch.setattr(
+        store,
+        "reconcile_bootstrap_envelope_superseded",
+        record_reconciled,
+    )
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    after_repair = _organization_envelopes(store)
+    correction_a = store.get_current_head("dataset-1", "notes.keyword", KEYWORD_ID)
+    old_a_after = next(
+        item for item in after_repair if item.server_cursor == old_a.server_cursor
+    )
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert correction_a is not None
+    assert correction_a.payload == {"keyword": "A"}
+    assert correction_a.apply_status == "applied"
+    assert correction_a.server_cursor > durable_b.server_cursor
+    assert chronology == [
+        ("verified", correction_a.server_cursor),
+        ("reconciled", correction_a.server_cursor),
+    ]
+    assert old_a_after.apply_status == "applied"
+    assert old_a_after.apply_error_code == "sync_bootstrap_superseded"
+    client_ids = [item.client_envelope_id for item in after_repair]
+    assert len(client_ids) == len(set(client_ids))
+    assert {item.client_envelope_id for item in before_revert}.issubset(client_ids)
+    replay = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=ready,
+    )
+    assert replay.metadata["notes_organization_v1"]["state"] == "ready"
+    assert [
+        item.client_envelope_id for item in _organization_envelopes(store)
+    ] == client_ids
+    note_db.close_connection()
+
+
 def test_deleted_resource_source_change_appends_explicit_correction_lineage(
     tmp_path: Path,
 ) -> None:

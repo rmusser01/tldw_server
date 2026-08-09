@@ -22,6 +22,7 @@ from .server_origin_batch import (
     SyncServerOriginBatchMaterializationError,
     capture_server_origin_mutation_batch,
     load_server_origin_mutation_batch_manifest,
+    server_origin_mutation_batch_group_id,
 )
 from .service import SyncV2Service
 
@@ -135,10 +136,21 @@ class NotesOrganizationBootstrapper:
             )
             snapshot_hash = _snapshot_hash(snapshot)
             remaining_steps = list(steps)
+            stale_group_ids = {
+                group_id
+                for group in stale_groups
+                if isinstance(group_id := group[0].mutation_group_id, str)
+                and group_id
+            }
             group_index = 0
             completed_groups = 0
             while True:
                 idempotency_key = f"{bootstrap_id}:{snapshot_hash}:{group_index}"
+                mutation_group_id = server_origin_mutation_batch_group_id(
+                    dataset_id=dataset.dataset_id,
+                    source="notes-organization-bootstrap",
+                    idempotency_key=idempotency_key,
+                )
                 stored_manifest = load_server_origin_mutation_batch_manifest(
                     service=service,
                     dataset_id=dataset.dataset_id,
@@ -146,6 +158,9 @@ class NotesOrganizationBootstrapper:
                     idempotency_key=idempotency_key,
                 )
                 if stored_manifest is not None:
+                    if mutation_group_id in stale_group_ids:
+                        group_index += 1
+                        continue
                     batch = list(stored_manifest)
                     remaining_steps = _without_manifest_steps(
                         remaining_steps,
@@ -508,6 +523,28 @@ class NotesOrganizationBootstrapper:
             if not all(
                 self._step_matches_snapshot(envelope, snapshot) for envelope in group
             ):
+                stale_groups.append(group)
+                continue
+            source_wrong_shadow = False
+            for envelope in group:
+                if envelope.apply_status == "applied":
+                    continue
+                current = service.store.get_current_head(
+                    dataset.dataset_id,
+                    envelope.domain,
+                    envelope.object_id,
+                )
+                if (
+                    current is not None
+                    and current.server_cursor is not None
+                    and envelope.server_cursor is not None
+                    and current.server_cursor > envelope.server_cursor
+                    and current.apply_status == "applied"
+                    and not self._step_matches_snapshot(current, snapshot)
+                ):
+                    source_wrong_shadow = True
+                    break
+            if source_wrong_shadow:
                 stale_groups.append(group)
                 continue
             # Repair the complete group in mutation-step order. A pending step that

@@ -162,6 +162,36 @@ The final original-implementer review findings were verified against the Round 2
 - Cross-attempt removal cannot infer pre-history deletion because the candidate must still be an accepted server-origin bootstrap group step with explicit capture metadata. Final exact-head/source verification remains unchanged.
 - No Task 8/9 behavior, enrollment/profile surface, PostgreSQL gate, Task 4 planning, Task 5 attestation, or Task 6 materializer was changed. No new ADR is required because Round 3 hardens the already-governed durable bootstrap/resume policy.
 
+## Fix Round 4
+
+The correction-order finding was reproduced with the exact A-to-B-to-A crash sequence. A pending A capture can no longer be audit-superseded against a newer applied B head after the source has returned to A.
+
+### Changes
+
+- Drain classifies a matching pending group as stale when its newer applied current head does not match the fresh source snapshot. It leaves the pending history untouched instead of recording a false audit reconciliation.
+- Bootstrap resolves the exact deterministic mutation-group ID for each snapshot/group index. When that exact stored group is the stale group awaiting correction, its occupied index is preserved but its manifest is not replayed or subtracted from the fresh plan.
+- The source-matching correction is therefore appended and verified under the next deterministic group index. Only after that correction is the applied current head does the existing stale-group path audit-reconcile the older envelope.
+- The regression spies on chronology and proves `verified A correction -> reconciled old A`, final ready state, no duplicate client-envelope IDs, and stable history on replay.
+
+### Focused RED/GREEN evidence
+
+- A-to-B-to-A correction-order RED: `1 failed, 13 deselected, 4 warnings in 12.45s`; final state was `failed` because old A had been reconciled against B and A's stale manifest was reused instead of creating a source-correct correction. GREEN: `1 passed, 13 deselected, 3 warnings in 10.27s`; after strengthening exact group identity, the final rerun was `1 passed, 13 deselected, 3 warnings in 11.23s`.
+
+### Final focused gates
+
+- Bootstrap file: `14 passed, 3 warnings in 15.75s` (fresh final run).
+- Task 4 coordinator compatibility: `20 passed, 3 warnings in 9.86s` (fresh final run).
+- Scoped Ruff: `All checks passed!`.
+- Scoped Bandit: exit 0 with no findings or output.
+- `git diff --check`: exit 0, no output.
+
+### Warning disposition and self-review
+
+- Pytest warnings remain the managed-worktree `PytestCacheWarning` plus repository/runtime deprecations. `system_log_buffer append failed: PermissionError` remains test-environment logging noise and did not change assertions or exit statuses.
+- Exact mutation-group IDs, rather than semantic manifest matching, ensure only the stale occupied index is skipped when repeated groups have identical domain/object/payload content.
+- The change does not alter stored manifests, group fingerprints, materialization order, profile/enrollment behavior, or the final exact source/head readiness verifier. No new ADR is required; this is a correction-order hardening of the existing durable bootstrap policy.
+- No open concern remains in the focused scope.
+
 ## Files
 
 - `tldw_Server_API/app/core/DB_Management/Sync_DB.py`
