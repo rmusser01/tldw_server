@@ -8,9 +8,15 @@ from typing import Any, Optional
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import (
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatProviderError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import extraction
-from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline, throttles
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
     build_default_dependencies,
@@ -417,17 +423,90 @@ def test_provider_retry_uses_backoff_and_then_succeeds(monkeypatch: pytest.Monke
     assert sleeps == [0.025]
 
 
+class _ArbitraryProviderSDKError(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        ChatAuthenticationError,
+        ChatBadRequestError,
+        ChatRateLimitError,
+        ChatProviderError,
+        _ArbitraryProviderSDKError,
+    ],
+)
+def test_provider_exceptions_are_sanitized_and_retried(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
+) -> None:
+    provider_calls = 0
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal provider_calls
+        provider_calls += 1
+        raise error_type(SECRET)
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "1")
+    monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "0")
+    monkeypatch.setenv("EXTRACTOR_RETRY_JITTER_MS", "0")
+    _install_dependencies(monkeypatch, llm_strategy, perform_chat_api_call=provider)
+    records: list[Any] = []
+    handler_id = logger.add(records.append, level="WARNING")
+    try:
+        result = extraction.extract_llm_entities(
+            "<p>Body</p>",
+            "https://example.com/provider-error",
+            llm_settings={"provider": "openai"},
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert provider_calls == 2
+    assert result["llm_error"] == "provider_error"
+    assert SECRET not in str(result)
+    assert len(records) == 2
+    assert all(SECRET not in str(record.record) for record in records)
+
+
+@pytest.mark.parametrize("signal_type", [asyncio.CancelledError, KeyboardInterrupt])
+def test_provider_base_exceptions_are_not_translated_or_retried(
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    provider_calls = 0
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal provider_calls
+        provider_calls += 1
+        raise signal_type
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "2")
+    _install_dependencies(monkeypatch, llm_strategy, perform_chat_api_call=provider)
+
+    with pytest.raises(signal_type):
+        extraction.extract_llm_entities(
+            "<p>Body</p>",
+            "https://example.com/provider-cancel",
+            llm_settings={"provider": "openai"},
+        )
+
+    assert provider_calls == 1
+
+
 @pytest.mark.parametrize("llm_response", ['{"score": 0}', '{"flag": false}'])
 def test_scalar_llm_data_allows_trafilatura_fallback(
     monkeypatch: pytest.MonkeyPatch,
     llm_response: str,
 ) -> None:
     calls: list[str] = []
-    _install_dependencies(
+    dependencies = _install_dependencies(
         monkeypatch,
         llm_strategy,
         perform_chat_api_call=lambda **_kwargs: calls.append("llm") or _response(llm_response),
     )
+    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
 
     def fallback(_html: str, url: str) -> dict[str, Any]:
         calls.append("fallback")
@@ -552,7 +631,8 @@ def test_pipeline_trace_receives_provider_error(monkeypatch: pytest.MonkeyPatch)
     def provider(**_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError(SECRET)
 
-    _install_dependencies(monkeypatch, llm_strategy, perform_chat_api_call=provider)
+    dependencies = _install_dependencies(monkeypatch, llm_strategy, perform_chat_api_call=provider)
+    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
 
     result = legacy.extract_article_with_pipeline(
         "<p>Body</p>",

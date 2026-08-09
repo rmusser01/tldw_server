@@ -1,9 +1,8 @@
 import dataclasses
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline, throttles
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 
 
 def _install_dependencies(monkeypatch, provider, *, sleep, wall_time):
@@ -13,7 +12,7 @@ def _install_dependencies(monkeypatch, provider, *, sleep, wall_time):
         sleep=sleep,
         wall_time=wall_time,
     )
-    monkeypatch.setattr(llm_strategy, "build_default_dependencies", lambda: dependencies)
+    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
 
 
 def test_llm_throttling_applies_delay(monkeypatch):

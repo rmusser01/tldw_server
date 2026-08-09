@@ -20,6 +20,8 @@ from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import cluster as cluster_strategy
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import trafilatura as direct_trafilatura
 
 URL = "https://example.com/article"
@@ -45,8 +47,16 @@ def _result(
 
 def _install_default_strategies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline, "extract_jsonld_entities", lambda *_args: _result(success=False))
-    monkeypatch.setattr(pipeline, "extract_llm_entities", lambda *_args, **_kwargs: _result(success=False))
-    monkeypatch.setattr(pipeline, "extract_cluster_entities", lambda *_args, **_kwargs: _result(success=False))
+    monkeypatch.setattr(
+        pipeline,
+        "_extract_llm_entities_with_dependencies",
+        lambda *_args, **_kwargs: _result(success=False),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_extract_cluster_entities_with_dependencies",
+        lambda *_args, **_kwargs: _result(success=False),
+    )
 
 
 def test_default_regex_enriches_but_does_not_terminate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,7 +267,11 @@ def test_jsonld_summary_carries_forward_without_mutating_strategy_result(monkeyp
     jsonld_result = _result(success=False, summary="JSON-LD summary")
     llm_result = _result(success=True, content="LLM body")
     monkeypatch.setattr(pipeline, "extract_jsonld_entities", lambda *_args: jsonld_result)
-    monkeypatch.setattr(pipeline, "extract_llm_entities", lambda *_args, **_kwargs: llm_result)
+    monkeypatch.setattr(
+        pipeline,
+        "_extract_llm_entities_with_dependencies",
+        lambda *_args, **_kwargs: llm_result,
+    )
 
     result = pipeline.extract_article_with_pipeline(HTML, URL, strategy_order=["jsonld", "llm"])
 
@@ -298,8 +312,8 @@ def test_pipeline_copies_handler_and_cached_results_before_adding_metadata(
     [
         ("jsonld", "extract_jsonld_entities"),
         ("regex", "extract_regex_entities"),
-        ("llm", "extract_llm_entities"),
-        ("cluster", "extract_cluster_entities"),
+        ("llm", "_extract_llm_entities_with_dependencies"),
+        ("cluster", "_extract_cluster_entities_with_dependencies"),
     ],
 )
 def test_pipeline_deep_copies_direct_strategy_results(
@@ -347,7 +361,11 @@ def test_pipeline_deep_copies_final_failure_result(monkeypatch: pytest.MonkeyPat
         success=False,
         nested={"values": ["provider-owned"]},
     )
-    monkeypatch.setattr(pipeline, "extract_cluster_entities", lambda *_args, **_kwargs: failed_result)
+    monkeypatch.setattr(
+        pipeline,
+        "_extract_cluster_entities_with_dependencies",
+        lambda *_args, **_kwargs: failed_result,
+    )
 
     result = pipeline.extract_article_with_pipeline(HTML, URL, strategy_order=["cluster"])
     result["nested"]["values"].append("caller-mutation")
@@ -386,6 +404,230 @@ def test_pipeline_cancellation_stops_before_strategy_dispatch(monkeypatch: pytes
             dependencies=dependencies,
             strategy_order=["regex"],
         )
+
+
+def test_pipeline_llm_uses_injected_provider_and_observes_cancellation_before_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = False
+    events: list[str] = []
+    defaults = build_default_dependencies()
+
+    def checkpoint() -> None:
+        if cancelled:
+            raise asyncio.CancelledError
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal cancelled
+        events.append("provider")
+        cancelled = True
+        return {
+            "choices": [{"message": {"content": '{"content": "injected"}'}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "model": "injected-model",
+        }
+
+    dependencies = dataclasses.replace(
+        defaults,
+        perform_chat_api_call=provider,
+        increment_counter=lambda *_args, **_kwargs: None,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        log_counter=lambda *_args, **_kwargs: None,
+        cancellation_checkpoint=checkpoint,
+    )
+    nested_defaults = dataclasses.replace(
+        defaults,
+        perform_chat_api_call=lambda **_kwargs: events.append("nested-provider")
+        or {
+            "choices": [{"message": {"content": '{"content": "nested"}'}}],
+            "usage": {},
+        },
+        increment_counter=lambda *_args, **_kwargs: None,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        log_counter=lambda *_args, **_kwargs: None,
+    )
+
+    def build_nested_defaults():
+        events.append("nested-defaults")
+        return nested_defaults
+
+    monkeypatch.setattr(llm_strategy, "build_default_dependencies", build_nested_defaults)
+    monkeypatch.setattr(pipeline, "get_strategy_semaphore", lambda *_args: None)
+
+    with pytest.raises(asyncio.CancelledError):
+        pipeline._extract_article_with_pipeline_with_dependencies(
+            "<p>" + " ".join(f"word-{index}" for index in range(80)) + "</p>",
+            URL,
+            dependencies=dependencies,
+            strategy_order=["llm", "trafilatura"],
+            llm_settings={
+                "provider": "openai",
+                "chunk_token_threshold": 50,
+                "word_token_rate": 1.0,
+                "overlap_rate": 0.0,
+            },
+            fallback_extractor=lambda *_args: events.append("fallback") or _result(success=True),
+        )
+
+    assert events == ["provider"]
+
+
+def test_pipeline_llm_reuses_injected_clocks_sleeps_and_metric_sinks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_calls = 0
+    perf_calls = 0
+    wall_time_calls = 0
+    sleeps: list[float] = []
+    counter_names: list[str] = []
+    histogram_names: list[str] = []
+    log_counter_names: list[str] = []
+    defaults = build_default_dependencies()
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal provider_calls
+        provider_calls += 1
+        return {
+            "choices": [{"message": {"content": '{"content": "injected"}'}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "model": "injected-model",
+        }
+
+    def perf_counter() -> float:
+        nonlocal perf_calls
+        perf_calls += 1
+        return float(perf_calls)
+
+    def wall_time() -> float:
+        nonlocal wall_time_calls
+        wall_time_calls += 1
+        return 1000.0
+
+    dependencies = dataclasses.replace(
+        defaults,
+        perform_chat_api_call=provider,
+        increment_counter=lambda name, *_args, **_kwargs: counter_names.append(name),
+        observe_histogram=lambda name, *_args, **_kwargs: histogram_names.append(name),
+        log_counter=lambda name, *_args, **_kwargs: log_counter_names.append(name),
+        perf_counter=perf_counter,
+        wall_time=wall_time,
+        sleep=sleeps.append,
+    )
+    monkeypatch.setattr(
+        llm_strategy,
+        "build_default_dependencies",
+        lambda: pytest.fail("pipeline rebuilt nested LLM dependencies"),
+    )
+    monkeypatch.setattr(pipeline, "get_strategy_semaphore", lambda *_args: None)
+    html = "<p>" + " ".join(f"word-{index}" for index in range(80)) + "</p>"
+    llm_strategy.throttles.clear_throttle_state()
+    try:
+        result = pipeline._extract_article_with_pipeline_with_dependencies(
+            html,
+            URL,
+            dependencies=dependencies,
+            strategy_order=["llm"],
+            llm_settings={
+                "provider": "openai",
+                "chunk_token_threshold": 50,
+                "word_token_rate": 1.0,
+                "overlap_rate": 0.0,
+                "delay_ms": 10,
+            },
+        )
+    finally:
+        llm_strategy.throttles.clear_throttle_state()
+
+    assert result["extraction_strategy"] == "llm"
+    assert result["content"] == "injected"
+    assert provider_calls == 2
+    assert perf_calls == 2
+    assert wall_time_calls == 4
+    assert sleeps == [0.01]
+    assert set(counter_names) == {
+        "llm_tokens_used_total",
+        "llm_tokens_used_total_by_operation",
+    }
+    assert histogram_names == [
+        "extraction_strategy_duration_seconds",
+        "extraction_content_length_bytes",
+    ]
+    assert log_counter_names == ["extraction_strategy_total"]
+
+
+def test_pipeline_cluster_observes_injected_cancellation_before_successful_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = False
+    events: list[str] = []
+    defaults = build_default_dependencies()
+
+    def checkpoint() -> None:
+        if cancelled:
+            raise asyncio.CancelledError
+
+    dependencies = dataclasses.replace(
+        defaults,
+        increment_counter=lambda *_args, **_kwargs: None,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        log_counter=lambda *_args, **_kwargs: None,
+        cancellation_checkpoint=checkpoint,
+    )
+    nested_defaults = dataclasses.replace(
+        defaults,
+        increment_counter=lambda *_args, **_kwargs: None,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        log_counter=lambda *_args, **_kwargs: None,
+    )
+
+    def build_nested_defaults():
+        events.append("nested-defaults")
+        return nested_defaults
+
+    def cancel_during_clustering(
+        items: list[tuple[int, str, list[float], float]],
+        *,
+        cluster_threshold: float,
+    ) -> list[dict[str, Any]]:
+        nonlocal cancelled
+        del cluster_threshold
+        events.append("cluster-execution")
+        cancelled = True
+        index, block, vector, similarity = items[0]
+        return [
+            {
+                "members": [(index, block, similarity)],
+                "sum_vec": list(vector),
+                "centroid": list(vector),
+                "total_chars": len(block),
+            }
+        ]
+
+    monkeypatch.setattr(cluster_strategy, "build_default_dependencies", build_nested_defaults)
+    monkeypatch.setattr(cluster_strategy, "_cluster_blocks_greedy", cancel_during_clustering)
+    monkeypatch.setattr(pipeline, "get_strategy_semaphore", lambda *_args: None)
+    html = """
+    <html><head><title>Cluster</title></head><body>
+    <p>Primary article block with enough words for deterministic cluster extraction.</p>
+    <p>Secondary article block with enough words for deterministic cluster extraction.</p>
+    </body></html>
+    """
+
+    with pytest.raises(asyncio.CancelledError):
+        pipeline._extract_article_with_pipeline_with_dependencies(
+            html,
+            URL,
+            dependencies=dependencies,
+            strategy_order=["cluster", "trafilatura"],
+            cluster_settings={
+                "min_block_chars": 1,
+                "min_word_count": 1,
+                "prefilter_threshold": 0.0,
+            },
+            fallback_extractor=lambda *_args: events.append("fallback") or _result(success=True),
+        )
+
+    assert events == ["cluster-execution"]
 
 
 def test_pipeline_cancellation_after_semaphore_wait_releases_permit_without_dispatch(

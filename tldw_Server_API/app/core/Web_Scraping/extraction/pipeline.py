@@ -28,12 +28,16 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.metrics import (
     emit_log_counter,
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
-    extract_cluster_entities,
     extract_jsonld_entities,
-    extract_llm_entities,
     extract_regex_entities,
 )
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.llm import schema_rules_to_field_specs
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.cluster import (
+    _extract_cluster_entities_with_dependencies,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.llm import (
+    _extract_llm_entities_with_dependencies,
+    schema_rules_to_field_specs,
+)
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.trafilatura import extract_with_trafilatura
 from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import get_strategy_semaphore
 
@@ -503,7 +507,13 @@ def _extract_article_with_pipeline_with_dependencies(
         if strategy == "llm":
             with _strategy_throttle(strategy, dependencies):
                 result = _copy_result(
-                    extract_llm_entities(html, url, llm_settings=llm_settings, schema_rules=schema_rules)
+                    _extract_llm_entities_with_dependencies(
+                        html,
+                        url,
+                        dependencies=dependencies,
+                        llm_settings=llm_settings,
+                        schema_rules=schema_rules,
+                    )
                 )
             last_result = result
             if result.get("extraction_successful"):
@@ -518,7 +528,14 @@ def _extract_article_with_pipeline_with_dependencies(
             continue
         if strategy == "cluster":
             with _strategy_throttle(strategy, dependencies):
-                result = _copy_result(extract_cluster_entities(html, url, cluster_settings=cluster_settings))
+                result = _copy_result(
+                    _extract_cluster_entities_with_dependencies(
+                        html,
+                        url,
+                        dependencies=dependencies,
+                        cluster_settings=cluster_settings,
+                    )
+                )
             last_result = result
             if result.get("extraction_successful"):
                 detail = f"cluster_blocks={result.get('cluster_block_count')}"

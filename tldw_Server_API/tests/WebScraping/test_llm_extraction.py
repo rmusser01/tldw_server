@@ -1,8 +1,8 @@
 import dataclasses
 
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import extract_article_with_pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 
 
 def _install_provider(monkeypatch, provider):
@@ -10,7 +10,7 @@ def _install_provider(monkeypatch, provider):
         build_default_dependencies(),
         perform_chat_api_call=provider,
     )
-    monkeypatch.setattr(llm_strategy, "build_default_dependencies", lambda: dependencies)
+    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
 
 
 def test_llm_extraction_parses_code_fenced_json(monkeypatch):

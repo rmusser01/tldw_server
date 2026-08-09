@@ -78,6 +78,8 @@ BANNED_UPWARD_IMPORT_PARTS = {
     "routing",
 }
 
+_BUILTIN_BASE_EXCEPTION = "builtins.BaseException"
+
 
 def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -240,6 +242,12 @@ class _CancellationScopeBuilder(ast.NodeVisitor):
     def __init__(self) -> None:
         self.order = 0
         self.scope = _CancellationScope(kind="module")
+        self.scope.bind(
+            "BaseException",
+            self.order,
+            kind="import",
+            imported_name=_BUILTIN_BASE_EXCEPTION,
+        )
         self.contexts: dict[ast.ExceptHandler, _CancellationContext] = {}
 
     def next_order(self) -> int:
@@ -360,11 +368,13 @@ def _resolve_exception_expression(
     scope: _CancellationScope,
     before_order: int,
     seen: set[int],
-) -> tuple[bool, bool]:
-    """Return whether an exception expression contains cancellation and is tuple-shaped."""
+) -> tuple[bool, bool, bool]:
+    """Return cancellation, tuple-shape, and built-in BaseException resolution."""
     dotted = _dotted_name(expression, scope, before_order, seen)
     if dotted in {"asyncio.CancelledError", "asyncio.exceptions.CancelledError"}:
-        return True, False
+        return True, False, False
+    if dotted == _BUILTIN_BASE_EXCEPTION:
+        return True, False, True
     if isinstance(expression, ast.Name):
         binding = scope.resolve_name(expression.id, before_order=before_order)
         if binding is not None and id(binding) not in seen:
@@ -377,36 +387,51 @@ def _resolve_exception_expression(
                 and binding.value is not None
             ):
                 previous = binding.owner.resolve_name(binding.name, before_order=binding.order)
-                previous_contains = (
+                previous_resolution = (
                     _resolve_exception_expression(
                         ast.Name(id=binding.name, ctx=ast.Load()),
                         binding.owner,
                         binding.order,
                         binding_seen,
-                    )[0]
+                    )
                     if previous is not None
-                    else False
+                    else (False, False, False)
                 )
-                added_contains = _resolve_exception_expression(
+                added_resolution = _resolve_exception_expression(
                     binding.value,
                     binding.owner,
                     binding.order,
                     binding_seen,
-                )[0]
-                return previous_contains or added_contains, True
+                )
+                return (
+                    previous_resolution[0] or added_resolution[0],
+                    True,
+                    previous_resolution[2] or added_resolution[2],
+                )
     if isinstance(expression, ast.Starred):
-        contains_cancelled, _ = _resolve_exception_expression(expression.value, scope, before_order, seen)
-        return contains_cancelled, True
+        contains_cancelled, _, contains_base_exception = _resolve_exception_expression(
+            expression.value,
+            scope,
+            before_order,
+            seen,
+        )
+        return contains_cancelled, True, contains_base_exception
     if isinstance(expression, ast.Tuple):
+        resolutions = [_resolve_exception_expression(item, scope, before_order, seen) for item in expression.elts]
         return (
-            any(_resolve_exception_expression(item, scope, before_order, seen)[0] for item in expression.elts),
+            any(resolution[0] for resolution in resolutions),
             True,
+            any(resolution[2] for resolution in resolutions),
         )
     if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Add):
-        left_contains, _ = _resolve_exception_expression(expression.left, scope, before_order, seen)
-        right_contains, _ = _resolve_exception_expression(expression.right, scope, before_order, seen)
-        return left_contains or right_contains, True
-    return False, False
+        left_resolution = _resolve_exception_expression(expression.left, scope, before_order, seen)
+        right_resolution = _resolve_exception_expression(expression.right, scope, before_order, seen)
+        return (
+            left_resolution[0] or right_resolution[0],
+            True,
+            left_resolution[2] or right_resolution[2],
+        )
+    return False, False, False
 
 
 def _is_unconditional_bare_reraise(handler: ast.ExceptHandler) -> bool:
@@ -422,16 +447,22 @@ def _recoverable_cancelled_error_violations(tree: ast.Module) -> list[str]:
     contexts = _scope_for_nodes(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler) or node.type is None:
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        if node.type is None:
+            if not _is_unconditional_bare_reraise(node):
+                violations.append("bare except")
             continue
         context = contexts[node]
-        contains_cancelled, is_tuple = _resolve_exception_expression(
+        contains_cancelled, is_tuple, contains_base_exception = _resolve_exception_expression(
             node.type,
             context.scope,
             context.order,
             set(),
         )
-        if contains_cancelled and (is_tuple or not _is_unconditional_bare_reraise(node)):
+        if contains_cancelled and (
+            (is_tuple and not contains_base_exception) or not _is_unconditional_bare_reraise(node)
+        ):
             violations.append(ast.unparse(node.type))
     return violations
 
@@ -1032,8 +1063,179 @@ def test_phase4b_extraction_never_recovers_cancelled_error_in_exception_tuples()
     assert violations == []
 
 
-def test_phase4b_cancellation_guard_rejects_inline_and_named_recoverable_tuples() -> None:
+def test_phase4b_cancellation_guard_rejects_recoverable_handlers() -> None:
     cases = {
+        "bare_except_bare_reraise": (
+            """
+try:
+    pass
+except:
+    raise
+""",
+            [],
+        ),
+        "bare_except_swallow": (
+            """
+try:
+    pass
+except:
+    pass
+""",
+            ["bare except"],
+        ),
+        "bare_except_cleanup_before_reraise": (
+            """
+try:
+    pass
+except:
+    cleanup()
+    raise
+""",
+            ["bare except"],
+        ),
+        "base_exception_bare_reraise": (
+            """
+try:
+    pass
+except BaseException:
+    raise
+""",
+            [],
+        ),
+        "base_exception_swallow": (
+            """
+try:
+    pass
+except BaseException:
+    pass
+""",
+            ["BaseException"],
+        ),
+        "base_exception_explicit_reraise": (
+            """
+try:
+    pass
+except BaseException as exc:
+    raise exc
+""",
+            ["BaseException"],
+        ),
+        "base_exception_alias_tuple_bare_reraise": (
+            """
+ROOT_EXCEPTION = BaseException
+_RECOVERABLE = (ValueError, ROOT_EXCEPTION)
+try:
+    pass
+except _RECOVERABLE:
+    raise
+""",
+            [],
+        ),
+        "base_exception_alias_tuple_swallow": (
+            """
+ROOT_EXCEPTION = BaseException
+_RECOVERABLE = (ValueError, ROOT_EXCEPTION)
+try:
+    pass
+except _RECOVERABLE:
+    pass
+""",
+            ["_RECOVERABLE"],
+        ),
+        "base_exception_augmented_tuple_swallow": (
+            """
+_RECOVERABLE = (ValueError,)
+_RECOVERABLE += (BaseException,)
+try:
+    pass
+except _RECOVERABLE:
+    pass
+""",
+            ["_RECOVERABLE"],
+        ),
+        "shadowed_base_exception": (
+            """
+BaseException = ValueError
+try:
+    pass
+except BaseException:
+    pass
+""",
+            [],
+        ),
+        "shadowed_base_exception_alias_tuple": (
+            """
+BaseException = ValueError
+_RECOVERABLE = (TypeError, BaseException)
+try:
+    pass
+except _RECOVERABLE:
+    pass
+""",
+            [],
+        ),
+        "base_exception_rebound_after_handler": (
+            """
+try:
+    pass
+except BaseException:
+    pass
+BaseException = ValueError
+""",
+            ["BaseException"],
+        ),
+        "function_parameter_shadows_base_exception": (
+            """
+def extract(BaseException):
+    try:
+        pass
+    except BaseException:
+        pass
+""",
+            [],
+        ),
+        "function_runtime_global_shadows_base_exception": (
+            """
+def extract():
+    try:
+        operation()
+    except BaseException:
+        recover()
+
+BaseException = ValueError
+extract()
+""",
+            [],
+        ),
+        "closure_runtime_binding_shadows_base_exception": (
+            """
+def outer():
+    def extract():
+        try:
+            operation()
+        except BaseException:
+            recover()
+
+    BaseException = ValueError
+    extract()
+
+outer()
+""",
+            [],
+        ),
+        "method_skips_class_base_exception_shadow": (
+            """
+class Extractor:
+    BaseException = ValueError
+
+    def extract(self):
+        try:
+            pass
+        except BaseException:
+            pass
+""",
+            ["BaseException"],
+        ),
         "qualified_bare_reraise": (
             """
 import asyncio

@@ -147,21 +147,20 @@ def call_llm_provider(
         try:
             with _llm_throttle(provider, settings, dependencies):
                 dependencies.cancellation_checkpoint()
-                return (
-                    dependencies.perform_chat_api_call(
-                        api_provider=provider,
-                        messages=messages,
-                        system_message=settings.get("system_message"),
-                        model=settings.get("model"),
-                        api_key=settings.get("api_key"),
-                        temperature=settings.get("temperature"),
-                        max_tokens=settings.get("max_tokens"),
-                        response_format=settings.get("response_format"),
-                        app_config=app_config,
-                    ),
-                    False,
+                response = dependencies.perform_chat_api_call(
+                    api_provider=provider,
+                    messages=messages,
+                    system_message=settings.get("system_message"),
+                    model=settings.get("model"),
+                    api_key=settings.get("api_key"),
+                    temperature=settings.get("temperature"),
+                    max_tokens=settings.get("max_tokens"),
+                    response_format=settings.get("response_format"),
+                    app_config=app_config,
                 )
-        except _NONCRITICAL_EXCEPTIONS as exc:
+                dependencies.cancellation_checkpoint()
+                return response, False
+        except Exception as exc:  # noqa: BLE001 - provider SDKs use unrelated exception hierarchies
             _log_provider_failure(exc, stage=stage, url=url)
             if attempt >= max_retries:
                 return None, True
@@ -411,14 +410,14 @@ def _has_content(data: dict[str, Any]) -> bool:
     return False
 
 
-def extract_llm_entities(
+def _extract_llm_entities_with_dependencies(
     html_text: str,
     url: str,
     *,
+    dependencies: ExtractionDependencies,
     llm_settings: Optional[dict[str, Any]] = None,
     schema_rules: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    dependencies = build_default_dependencies()
     dependencies.cancellation_checkpoint()
     result: dict[str, Any] = {
         "url": url,
@@ -526,4 +525,21 @@ def extract_llm_entities(
         if parts:
             result["content"] = "\n\n".join(parts)
     result["extraction_successful"] = _has_content(merged)
+    dependencies.cancellation_checkpoint()
     return result
+
+
+def extract_llm_entities(
+    html_text: str,
+    url: str,
+    *,
+    llm_settings: Optional[dict[str, Any]] = None,
+    schema_rules: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    return _extract_llm_entities_with_dependencies(
+        html_text,
+        url,
+        dependencies=build_default_dependencies(),
+        llm_settings=llm_settings,
+        schema_rules=schema_rules,
+    )

@@ -294,14 +294,14 @@ def _tag_cluster_text(
     return [tag for tag, _score in ranked[:top_k]], scores
 
 
-def extract_cluster_entities(
+def _extract_cluster_entities_with_dependencies(
     html_text: str,
     url: str,
     *,
+    dependencies: ExtractionDependencies,
     cluster_settings: Optional[dict[str, Any]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Extract the dominant content cluster from article HTML."""
-    dependencies = build_default_dependencies()
     result: dict[str, Any] = {
         "url": url,
         "title": "N/A",
@@ -372,10 +372,12 @@ def extract_cluster_entities(
         embed_dims,
         increment_counter=cache_counter,
     )
+    dependencies.cancellation_checkpoint()
     scored_blocks: list[tuple[int, str, list[float], float]] = []
     for index, block in enumerate(blocks):
         dependencies.cancellation_checkpoint()
         vector = _cluster_embedding(block, embed_dims, increment_counter=cache_counter)
+        dependencies.cancellation_checkpoint()
         similarity = _cosine_similarity(vector, document_vector)
         scored_blocks.append((index, block, vector, similarity))
 
@@ -391,6 +393,7 @@ def extract_cluster_entities(
             similarity_threshold=cluster_threshold,
             linkage=linkage,
         )
+        dependencies.cancellation_checkpoint()
         if assignments and len(assignments) == len(kept):
             clusters = _build_clusters_from_assignments(assignments, kept)
         else:
@@ -399,6 +402,7 @@ def extract_cluster_entities(
     else:
         cluster_method = "greedy"
         clusters = _cluster_blocks_greedy(kept, cluster_threshold=cluster_threshold)
+    dependencies.cancellation_checkpoint()
 
     if not clusters:
         result["cluster_error"] = "cluster_no_clusters"
@@ -435,6 +439,22 @@ def extract_cluster_entities(
     if tags:
         result["cluster_tags"] = tags
         result["cluster_tag_scores"] = tag_scores
+    dependencies.cancellation_checkpoint()
     result["extraction_successful"] = True
     _increment_counter(dependencies, "extraction_cluster_total", labels={"status": "success"})
     return result
+
+
+def extract_cluster_entities(
+    html_text: str,
+    url: str,
+    *,
+    cluster_settings: Optional[dict[str, Any]] = None,  # noqa: UP045
+) -> dict[str, Any]:
+    """Extract the dominant content cluster from article HTML."""
+    return _extract_cluster_entities_with_dependencies(
+        html_text,
+        url,
+        dependencies=build_default_dependencies(),
+        cluster_settings=cluster_settings,
+    )
