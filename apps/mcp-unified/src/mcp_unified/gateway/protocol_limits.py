@@ -59,7 +59,7 @@ class GatewayLimits:
     max_schema_refs: int = 256
     max_schema_pattern_chars: int = 4_096
     max_schema_validation_processes: int = 4
-    schema_validation_timeout_seconds: float = 5.0
+    schema_validation_timeout_seconds: float = 10.0
     graceful_shutdown_timeout_seconds: float = 5.0
 
     def __post_init__(self) -> None:

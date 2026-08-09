@@ -149,7 +149,7 @@ The exact `GatewayLimits` defaults are:
 | `request_burst` | 32 | `max_schema_bytes` | 262,144 |
 | `max_schema_depth` | 32 | `max_schema_subschemas` | 1,024 |
 | `max_schema_refs` | 256 | `max_schema_pattern_chars` | 4,096 |
-| `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 5.0 |
+| `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 10.0 |
 | `graceful_shutdown_timeout_seconds` | 5.0 | | |
 
 The modern profile emits private, zero-TTL cache hints:

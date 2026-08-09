@@ -1075,6 +1075,8 @@ def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:
 
     assert "build" in dev_dependency_names  # nosec B101
     assert "tomli" in dev_dependency_names  # nosec B101
+    assert "setuptools>=79.0.1" in build_dependencies  # nosec B101
+    assert "setuptools>=79.0.1" in dev_dependencies  # nosec B101
     assert build_dependency_names.issubset(dev_dependency_names)  # nosec B101
     assert any(  # nosec B101
         "python_version" in dependency

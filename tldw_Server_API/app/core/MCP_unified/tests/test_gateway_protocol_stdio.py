@@ -243,7 +243,7 @@ def test_strict_stdio_public_contract_is_exact() -> None:
         "max_catalog_items=10000, max_batch_items=100, max_requests_per_minute=600, "
         "request_burst=32, max_schema_bytes=262144, max_schema_depth=32, "
         "max_schema_subschemas=1024, max_schema_refs=256, max_schema_pattern_chars=4096, "
-        "max_schema_validation_processes=4, schema_validation_timeout_seconds=5.0, "
+        "max_schema_validation_processes=4, schema_validation_timeout_seconds=10.0, "
         "graceful_shutdown_timeout_seconds=5.0), "
         "metadata: 'Mapping[str, Any] | None' = None) -> 'int'"
     )
@@ -776,7 +776,10 @@ def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> No
     assert setup_python["with"]["python-version"] == "${{ matrix.python }}"
     run_blocks = "\n".join(step["run"] for step in job["steps"] if "run" in step)
     assert 'python -m pip install "./apps/mcp-unified[dev]"' not in run_blocks
-    assert "python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit" in run_blocks
+    assert (
+        'python -m pip install build twine "setuptools>=79.0.1" wheel pytest pytest-asyncio bandit'
+        in run_blocks
+    )
     assert '"jsonschema>=4.23,<5"' in run_blocks
     assert "python Helper_Scripts/mcp_unified_rc.py portable-gate" in run_blocks
     assert "tldw_Server_API/app/core/MCP_unified/tests/" not in run_blocks

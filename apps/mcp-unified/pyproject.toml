@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=79.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -80,7 +80,7 @@ gateway = [
 ]
 dev = [
   "build>=1.0.0",
-  "setuptools>=61.0",
+  "setuptools>=79.0.1",
   "wheel>=0.41.0",
   "tomli>=2.0.0; python_version < '3.11'",
   "pytest>=9.0.3",
