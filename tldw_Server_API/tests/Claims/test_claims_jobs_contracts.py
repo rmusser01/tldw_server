@@ -160,6 +160,136 @@ def test_payload_validation_rejects_paths() -> None:
     assert exc.failure_code == "claims_invalid_payload"  # nosec B101
 
 
+def test_analytics_export_payload_accepts_exact_id_only_contract() -> None:
+    export_id = "0123456789abcdef0123456789abcdef"
+
+    payload = contracts.validate_analytics_export_payload(
+        {"version": 1, "owner_user_id": "123", "export_id": export_id}
+    )
+
+    assert payload == {  # nosec B101
+        "version": 1,
+        "owner_user_id": "123",
+        "export_id": export_id,
+    }
+
+
+@pytest.mark.parametrize(
+    "export_id",
+    [
+        "0123456789ABCDEF0123456789ABCDEF",
+        "01234567-89ab-cdef-0123-456789abcdef",
+        "0123456789abcdef0123456789abcde",
+        "0123456789abcdef0123456789abcdef0",
+        "g123456789abcdef0123456789abcdef",
+        "",
+        None,
+        123,
+    ],
+)
+def test_analytics_export_payload_rejects_noncanonical_export_ids(
+    export_id: object,
+) -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_analytics_export_payload(
+            {"version": 1, "owner_user_id": "123", "export_id": export_id}
+        )
+
+    exc = excinfo.value
+    assert exc.retryable is False  # nosec B101
+    assert exc.failure_code == "claims_export_invalid_payload"  # nosec B101
+
+
+@pytest.mark.parametrize(
+    "owner_user_id",
+    [123, True, "", "0", "0123", " 123", "123 ", "+123", "abc"],
+)
+def test_analytics_export_payload_rejects_noncanonical_owner_strings(
+    owner_user_id: object,
+) -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_analytics_export_payload(
+            {
+                "version": 1,
+                "owner_user_id": owner_user_id,
+                "export_id": "0123456789abcdef0123456789abcdef",
+            }
+        )
+
+    assert excinfo.value.failure_code == "claims_missing_owner"  # nosec B101
+
+
+@pytest.mark.parametrize("version", [0, 2, "2"])
+def test_analytics_export_payload_rejects_unsupported_versions(version: object) -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_analytics_export_payload(
+            {
+                "version": version,
+                "owner_user_id": "123",
+                "export_id": "0123456789abcdef0123456789abcdef",
+            }
+        )
+
+    assert excinfo.value.failure_code == (  # nosec B101
+        "claims_unsupported_payload_version"
+        if version in {2, "2"}
+        else "claims_invalid_payload"
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("filters", {"provider": "private-provider"}),
+        ("pagination", {"limit": 100}),
+        ("events", [{"claim": "private claim"}]),
+        ("payload_json", "private-json"),
+        ("payload_csv", "private,csv"),
+        ("content", "private-content"),
+        ("workspace_id", "private-workspace"),
+        ("db_path", "/private/media.db"),
+        ("database_path", "/private/media.db"),
+        ("file_path", "/private/export.csv"),
+        ("credentials", {"username": "u", "password": "p"}),
+        ("api_key", "private-api-key"),
+        ("unexpected", "private-unknown-value"),
+    ],
+)
+def test_analytics_export_payload_rejects_every_extra_key_without_echoing_values(
+    key: str,
+    value: object,
+) -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_analytics_export_payload(
+            {
+                "version": 1,
+                "owner_user_id": "123",
+                "export_id": "0123456789abcdef0123456789abcdef",
+                key: value,
+            }
+        )
+
+    exc = excinfo.value
+    assert exc.retryable is False  # nosec B101
+    assert exc.failure_code == "claims_export_invalid_payload"  # nosec B101
+    assert repr(value) not in str(exc)  # nosec B101
+
+
+def test_analytics_export_body_keys_are_in_sensitive_payload_coverage() -> None:
+    assert {  # nosec B101
+        "filters",
+        "pagination",
+        "events",
+        "payload_json",
+        "payload_csv",
+        "content",
+        "workspace_id",
+        "database_path",
+        "file_path",
+        "credentials",
+    }.issubset(contracts.SENSITIVE_PAYLOAD_KEYS)
+
+
 def test_review_payload_sorts_and_dedupes_notification_ids() -> None:
     payload = contracts.validate_review_notification_payload(
         {"version": 1, "owner_user_id": "7", "notification_ids": [3, "2", 3]}

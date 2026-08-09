@@ -14,11 +14,13 @@ from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int, jobs_manager_
 from .claims_job_contracts import (
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
+    CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
     CLAIMS_JOB_PAYLOAD_VERSION,
     CLAIMS_JOBS_DEFAULT_QUEUE,
     CLAIMS_JOBS_DOMAIN,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
     validate_alert_delivery_payload,
+    validate_analytics_export_payload,
     validate_rebuild_media_payload,
     validate_review_notification_payload,
 )
@@ -51,6 +53,15 @@ def _truthy(value: Any) -> bool:
 def claims_jobs_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
     """Return whether Claims background work should enqueue through Jobs."""
     return _truthy(_setting_value("CLAIMS_JOBS_ENABLED", False, settings_obj))
+
+
+def claims_analytics_export_jobs_enabled(
+    settings_obj: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether Claims analytics exports should enqueue through Jobs."""
+    return claims_jobs_enabled(settings_obj) and _truthy(
+        _setting_value("CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED", False, settings_obj)
+    )
 
 
 def claims_jobs_worker_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
@@ -123,6 +134,42 @@ def enqueue_claims_rebuild_media(
         idempotency_key=idempotency_key,
     )
     return _refresh(manager, created)
+
+
+def enqueue_claims_analytics_export(
+    *,
+    owner_user_id: str,
+    export_id: str,
+    job_manager: JobManager | None = None,
+    settings_obj: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create one analytics export Job and return its acceptance result directly."""
+    payload = validate_analytics_export_payload(
+        {
+            "version": CLAIMS_JOB_PAYLOAD_VERSION,
+            "owner_user_id": owner_user_id,
+            "export_id": export_id,
+        }
+    )
+    manager = _manager(job_manager)
+    return manager.create_job(
+        domain=CLAIMS_JOBS_DOMAIN,
+        queue=claims_jobs_queue(settings_obj),
+        job_type=CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
+        payload=payload,
+        owner_user_id=payload["owner_user_id"],
+        priority=5,
+        max_retries=_max_retries(
+            "CLAIMS_JOBS_MAX_RETRIES_ANALYTICS_EXPORT",
+            3,
+            settings_obj,
+        ),
+        batch_group=f"claims-analytics-export:{payload['export_id']}",
+        idempotency_key=(
+            f"claims:analytics_export:{payload['owner_user_id']}:"
+            f"{payload['export_id']}"
+        ),
+    )
 
 
 def enqueue_claims_review_notification(
