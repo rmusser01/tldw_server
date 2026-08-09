@@ -738,8 +738,17 @@ def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label()
             {
                 "labels": {"strategy": "mystery", "status": "skipped"},
                 "name": "extraction_strategy_total",
-            }
-        ]
+                "emitter": "log_counter",
+                "kind": "counter",
+            },
+            {
+                "labels": {"strategy": "trafilatura", "status": "success"},
+                "name": "extraction_strategy_total",
+                "emitter": "log_counter",
+                "kind": "counter",
+            },
+        ],
+        "result": {"extraction_trace": [{"strategy": "mystery"}]},
     }
     actual = deepcopy(expected)
     actual["metrics"][0]["labels"]["strategy"] = "unknown"
@@ -751,10 +760,52 @@ def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label()
         difference_contract="change_10_unknown_strategy_metric",
     )
 
-    actual["metrics"][0]["labels"]["strategy"] = "https://example.com/raw"
-    with pytest.raises(AssertionError, match="bounded metric label"):
+    actual = deepcopy(expected)
+    actual["metrics"][1]["labels"]["strategy"] = "unknown"
+    with pytest.raises(AssertionError):
         assert_predecessor_behavior(
             actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    actual = deepcopy(expected)
+    actual["metrics"][0]["name"] = "extraction_retry_total"
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+    with pytest.raises(AssertionError):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    actual = deepcopy(expected)
+    actual["metrics"][0]["labels"]["status"] = "failed"
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+    with pytest.raises(AssertionError):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    actual = deepcopy(expected)
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+    actual["result"]["extraction_trace"][0]["strategy"] = "unknown"
+    with pytest.raises(AssertionError):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    with pytest.raises(AssertionError, match="no predecessor-equality profile"):
+        assert_predecessor_behavior(
+            expected,
             expected,
             behavior_change=10,
             difference_contract="change_10_unknown_strategy_metric",

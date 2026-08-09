@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 
 from tldw_Server_API.tests.Web_Scraping.phase4_fixture_change1_contract import (
     CHANGE_1_CONTRACT,
@@ -38,7 +39,33 @@ def _changed_from_to(expected: str, actual: str) -> Callable[[Difference], bool]
 
 
 def _unknown_strategy_metric_is_bounded(difference: Difference) -> bool:
-    return isinstance(difference.expected, str) and difference.actual == "unknown"
+    return difference.expected == "mystery" and difference.actual == "unknown"
+
+
+def _validate_change_10_unknown_strategy_metric_profile(actual: object, expected: object) -> None:
+    assert isinstance(expected, dict) and isinstance(actual, dict), "Change 10 requires object profiles"
+    expected_metrics = expected.get("metrics")
+    assert isinstance(expected_metrics, list) and expected_metrics, "Change 10 requires the predecessor metric profile"
+    expected_event = expected_metrics[0]
+    assert isinstance(expected_event, dict), "Change 10 requires a metric object at index zero"
+    assert expected_event.get("name") == "extraction_strategy_total", "Change 10 requires strategy total at index zero"
+    expected_labels = expected_event.get("labels")
+    assert expected_labels == {
+        "status": "skipped",
+        "strategy": "mystery",
+    }, "Change 10 requires the skipped mystery predecessor metric"
+
+    allowed_current = deepcopy(expected)
+    allowed_metrics = allowed_current["metrics"]
+    assert isinstance(allowed_metrics, list)
+    allowed_event = allowed_metrics[0]
+    assert isinstance(allowed_event, dict)
+    allowed_labels = allowed_event["labels"]
+    assert isinstance(allowed_labels, dict)
+    allowed_labels["strategy"] = "unknown"
+    assert not collect_differences(
+        actual, allowed_current
+    ), "Change 10 permits only the index-zero skipped mystery strategy metric to become unknown"
 
 
 _CHANGE_4_PREDECESSOR_PROFILE = {"outcome": "regex_error", "value": None}
@@ -125,12 +152,13 @@ DIFFERENCE_CONTRACTS = {
         rules=(
             DifferenceRule(
                 identifier="unknown_strategy_metric",
-                path=("metrics", ANY_PATH, "labels", "strategy"),
+                path=("metrics", 0, "labels", "strategy"),
                 description="unknown extraction strategies use the bounded metric label",
                 validator=_unknown_strategy_metric_is_bounded,
                 minimum_count=1,
             ),
         ),
+        profile_validator=_validate_change_10_unknown_strategy_metric_profile,
     ),
     "change_11_response_too_large": DifferenceContract(
         behavior_change=11,

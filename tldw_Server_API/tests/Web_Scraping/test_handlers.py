@@ -18,6 +18,62 @@ def test_resolve_handler_valid_path():
     assert handler is handlers.handle_generic_html
 
 
+def test_generic_html_handler_uses_canonical_extraction_and_converts_successful_content(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import content, extraction, handlers
+
+    result = {"content": "<p>body</p>", "extraction_successful": True}
+    calls = []
+
+    def extract(html, url):
+        calls.append(("extract", html, url))
+        return result
+
+    def convert(content):
+        calls.append(("convert", content))
+        return "body"
+
+    monkeypatch.setattr(extraction, "extract_article_data_from_html", extract)
+    monkeypatch.setattr(content, "convert_html_to_markdown", convert)
+
+    actual = handlers.handle_generic_html("<html>body</html>", "https://example.com/article")
+
+    assert actual is result
+    assert actual["content"] == "body"
+    assert calls == [
+        ("extract", "<html>body</html>", "https://example.com/article"),
+        ("convert", "<p>body</p>"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("result", "expected_calls"),
+    [
+        ({"content": "<p>body</p>", "extraction_successful": False}, [("extract",)]),
+        ({"content": "", "extraction_successful": True}, [("extract",)]),
+    ],
+)
+def test_generic_html_handler_preserves_failure_or_empty_content_without_markdown(monkeypatch, result, expected_calls):
+    from tldw_Server_API.app.core.Web_Scraping import content, extraction, handlers
+
+    calls = []
+
+    def extract(html, url):
+        calls.append(("extract", html, url))
+        return result
+
+    def convert(_content):
+        calls.append(("convert",))
+        return "unexpected"
+
+    monkeypatch.setattr(extraction, "extract_article_data_from_html", extract)
+    monkeypatch.setattr(content, "convert_html_to_markdown", convert)
+
+    actual = handlers.handle_generic_html("<html>body</html>", "https://example.com/article")
+
+    assert actual is result
+    assert [call[:1] for call in calls] == expected_calls
+
+
 @pytest.mark.asyncio
 async def test_scrape_article_uses_handler(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael  # noqa: I001
