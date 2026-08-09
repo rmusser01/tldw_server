@@ -452,6 +452,10 @@ def _shadows_base_exception(tree: ast.Module) -> bool:
             return True
         if isinstance(node, ast.ExceptHandler) and node.name == "BaseException":
             return True
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == "BaseException":
+            return True
+        if isinstance(node, ast.MatchMapping) and node.rest == "BaseException":
+            return True
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == "BaseException":
             return True
         if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
@@ -1312,6 +1316,45 @@ try:
     operation()
 except BaseException:
     recover()
+""",
+            ["shadow BaseException"],
+        ),
+        "match_capture_rebind": (
+            """
+def extract(value):
+    match value:
+        case BaseException:
+            pass
+    try:
+        operation()
+    except BaseException:
+        recover()
+""",
+            ["shadow BaseException"],
+        ),
+        "match_star_capture_rebind": (
+            """
+def extract(value):
+    match value:
+        case [*BaseException]:
+            pass
+    try:
+        operation()
+    except BaseException:
+        recover()
+""",
+            ["shadow BaseException"],
+        ),
+        "match_mapping_rest_rebind": (
+            """
+def extract(value):
+    match value:
+        case {"error": _, **BaseException}:
+            pass
+    try:
+        operation()
+    except BaseException:
+        recover()
 """,
             ["shadow BaseException"],
         ),
