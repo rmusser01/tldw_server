@@ -1113,9 +1113,10 @@ repair against another user's dataset.
 ```
 
 If `domains` is empty, the server selects enrolled domains that have registered
-materializers. `failed_only=true` selects failed envelope work and, when a failed
-envelope belongs to a mutation group, its required pending suffix. `since_cursor`
-is inclusive of work after that cursor and must be non-negative.
+materializers. `failed_only=true` selects accepted work that is not yet applied,
+including pending-only mutation groups and single envelopes. A group resumes at
+its first unapplied step and processes only its required ordered suffix.
+`since_cursor` is inclusive of work after that cursor and must be non-negative.
 
 ### Response
 
@@ -1160,8 +1161,9 @@ is inclusive of work after that cursor and must be non-negative.
 Envelope-level repair errors include `server_cursor`, `client_envelope_id`,
 `domain`, `object_id`, a stable `error_code`, and a null message; raw exception
 text is not returned. A response status of `repair_needed` means at least one
-envelope failed replay or replay produced a conflict that requires explicit
-review.
+envelope failed replay, produced a conflict, or was skipped and remains pending,
+including work blocked by an unavailable materializer. Only a run with no failed,
+conflicting, or skipped work reports `healthy`.
 
 Mutation-group results appear under `repair_status.mutation_groups`. For example:
 

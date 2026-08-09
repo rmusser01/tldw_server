@@ -288,6 +288,24 @@ def _organization_group(
     return [replace(envelope, mutation_plan_hash=plan_hash) for envelope in plan]
 
 
+def _keyword_link_envelope(
+    *, note_id: str, keyword_id: str, client_envelope_id: str
+) -> SyncEnvelopeCreate:
+    return _organization_envelope(
+        client_envelope_id=client_envelope_id,
+        domain="notes.keyword_link",
+        object_id=organization_link_id(
+            "notes.keyword_link", ["note", note_id, keyword_id]
+        ),
+        payload={
+            "subject_type": "note",
+            "subject_id": note_id,
+            "keyword_sync_id": keyword_id,
+        },
+        payload_hash=f"sha256:{client_envelope_id}",
+    )
+
+
 def test_restore_preview_empty_inventory_returns_safe_applies_ranges_counts_and_key_status(
     sync_service: SyncV2Service,
 ) -> None:
@@ -653,6 +671,211 @@ def test_spec_fix_restore_keeps_historical_group_before_superseding_head(
         stored[0].server_cursor,
         stored[1].server_cursor,
         superseding.server_cursor,
+    ]
+
+
+def test_provider_selection_internal_group_precedes_later_resource_revision(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    keyword_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    note = sync_service.store.insert_envelope(
+        _note_envelope(
+            client_envelope_id="env-provider-note",
+            object_id=note_id,
+            payload_hash="sha256:provider-note",
+        )
+    )
+    group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-provider-group",
+            _organization_envelope(
+                client_envelope_id="env-provider-keyword-v1",
+                object_id=keyword_id,
+                payload_hash="sha256:provider-keyword-v1",
+            ),
+            _keyword_link_envelope(
+                note_id=note_id,
+                keyword_id=keyword_id,
+                client_envelope_id="env-provider-link",
+            ),
+        )
+    )
+    latest = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-provider-keyword-v2",
+            object_id=keyword_id,
+            object_revision=2,
+            payload={"keyword": "Synthetic keyword v2"},
+            payload_hash="sha256:provider-keyword-v2",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+        local_inventory=[],
+    )
+
+    assert [item.server_cursor for item in preview.safe_applies] == [
+        note.server_cursor,
+        group[0].server_cursor,
+        group[1].server_cursor,
+        latest.server_cursor,
+    ]
+
+
+def test_provider_selection_uses_only_earlier_external_resource(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    keyword_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    note = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-earlier-note", object_id=note_id)
+    )
+    keyword = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-earlier-keyword", object_id=keyword_id
+        )
+    )
+    link = sync_service.store.insert_envelope(
+        _keyword_link_envelope(
+            note_id=note_id,
+            keyword_id=keyword_id,
+            client_envelope_id="env-earlier-link",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+        local_inventory=[],
+    )
+
+    assert [item.server_cursor for item in preview.safe_applies] == [
+        note.server_cursor,
+        keyword.server_cursor,
+        link.server_cursor,
+    ]
+
+
+def test_provider_selection_uses_earliest_later_resource_when_none_is_earlier(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    keyword_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    note = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-later-note", object_id=note_id)
+    )
+    link = sync_service.store.insert_envelope(
+        _keyword_link_envelope(
+            note_id=note_id,
+            keyword_id=keyword_id,
+            client_envelope_id="env-later-link",
+        )
+    )
+    keyword = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-later-keyword", object_id=keyword_id
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+        local_inventory=[],
+    )
+
+    assert [item.server_cursor for item in preview.safe_applies] == [
+        note.server_cursor,
+        keyword.server_cursor,
+        link.server_cursor,
+    ]
+
+
+def test_provider_selection_prefers_latest_earlier_revision_over_later_revision(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    keyword_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    note = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-history-note", object_id=note_id)
+    )
+    first_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-provider-history-one",
+            _organization_envelope(
+                client_envelope_id="env-history-keyword-v1",
+                object_id=keyword_id,
+                payload_hash="sha256:history-keyword-v1",
+            ),
+            _organization_envelope(
+                client_envelope_id="env-history-folder-one",
+                domain="notes.folder",
+                object_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                payload={"name": "One", "parent_sync_id": None},
+                payload_hash="sha256:history-folder-one",
+            ),
+        )
+    )
+    second_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-provider-history-two",
+            _organization_envelope(
+                client_envelope_id="env-history-keyword-v2",
+                object_id=keyword_id,
+                object_revision=2,
+                payload={"keyword": "Synthetic keyword v2"},
+                payload_hash="sha256:history-keyword-v2",
+            ),
+            _organization_envelope(
+                client_envelope_id="env-history-folder-two",
+                domain="notes.folder",
+                object_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                payload={"name": "Two", "parent_sync_id": None},
+                payload_hash="sha256:history-folder-two",
+            ),
+        )
+    )
+    link = sync_service.store.insert_envelope(
+        _keyword_link_envelope(
+            note_id=note_id,
+            keyword_id=keyword_id,
+            client_envelope_id="env-history-link",
+        )
+    )
+    latest = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-history-keyword-v3",
+            object_id=keyword_id,
+            object_revision=3,
+            payload={"keyword": "Synthetic keyword v3"},
+            payload_hash="sha256:history-keyword-v3",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+        local_inventory=[],
+    )
+
+    assert [item.server_cursor for item in preview.safe_applies] == [
+        note.server_cursor,
+        first_group[0].server_cursor,
+        first_group[1].server_cursor,
+        second_group[0].server_cursor,
+        second_group[1].server_cursor,
+        link.server_cursor,
+        latest.server_cursor,
     ]
 
 

@@ -70,14 +70,27 @@ def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvel
                     raise RestorePlanningError("Restore dependency is missing")
                 live = [item for item in occurrences if item[2].operation != "tombstone"]
                 if live:
-                    for dependency_unit, dependency_position, _ in live:
-                        if dependency_unit == unit_index:
-                            if dependency_position >= position:
-                                raise RestorePlanningError(
-                                    "Mutation group ordering conflicts with restore dependencies"
-                                )
-                            continue
-                        edges[dependency_unit].add(unit_index)
+                    if any(
+                        dependency_unit == unit_index and dependency_position < position
+                        for dependency_unit, dependency_position, _ in live
+                    ):
+                        continue
+                    external = [item for item in live if item[0] != unit_index]
+                    if not external:
+                        raise RestorePlanningError(
+                            "Mutation group ordering conflicts with restore dependencies"
+                        )
+                    earlier = [
+                        item
+                        for item in external
+                        if (item[2].server_cursor or 0) < (envelope.server_cursor or 0)
+                    ]
+                    provider = (
+                        max(earlier, key=lambda item: item[2].server_cursor or 0)
+                        if earlier
+                        else min(external, key=lambda item: item[2].server_cursor or 0)
+                    )
+                    edges[provider[0]].add(unit_index)
                     continue
                 for tombstone_unit, tombstone_position, _ in occurrences:
                     if tombstone_unit == unit_index:
