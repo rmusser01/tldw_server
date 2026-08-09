@@ -35,6 +35,16 @@ FIXED_NOW = datetime(2026, 8, 8, 12, 0, 0, 123456, tzinfo=timezone.utc)
 FIXED_SNAPSHOT = "2026-08-08T12:00:00.123Z"
 
 
+@pytest.fixture(autouse=True)
+def _clear_export_settings_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in (
+        "CLAIMS_ANALYTICS_EXPORT_MAX_BYTES",
+        "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC",
+        "CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 

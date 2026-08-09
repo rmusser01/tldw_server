@@ -22,6 +22,16 @@ _SNAPSHOT = "2026-08-08T12:00:00.000Z"
 _EXPORT_ID = "a" * 32
 
 
+@pytest.fixture(autouse=True)
+def _clear_export_settings_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in (
+        "CLAIMS_ANALYTICS_EXPORT_MAX_BYTES",
+        "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC",
+        "CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 class _FakeDb:
     def __init__(self, backend_type: BackendType = BackendType.SQLITE) -> None:
         self.backend_type = backend_type
