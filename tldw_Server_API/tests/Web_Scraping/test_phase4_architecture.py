@@ -176,8 +176,9 @@ class _CancellationScope:
             return None
         if self.parent is None:
             return None
-        # Function globals are resolved when called, not captured during definition traversal.
-        parent_order = None if self.kind == "function" and self.parent.kind == "module" else before_order
+        # Function free variables resolve from live closure cells or globals when called.
+        runtime_parent = self.kind == "function" and self.parent.kind in {"function", "module"}
+        parent_order = None if runtime_parent else before_order
         return self.parent.resolve_name(name, before_order=parent_order)
 
 
@@ -1359,6 +1360,40 @@ def extract():
 
 CE = ValueError
 extract()
+""",
+            [],
+        ),
+        "closure_imported_after_inner_definition": (
+            """
+def outer():
+    def extract():
+        try:
+            operation()
+        except CE:
+            recover()
+
+    from asyncio import CancelledError as CE
+    extract()
+
+outer()
+""",
+            ["CE"],
+        ),
+        "closure_rebound_after_inner_definition": (
+            """
+def outer():
+    from asyncio import CancelledError as CE
+
+    def extract():
+        try:
+            operation()
+        except CE:
+            recover()
+
+    CE = ValueError
+    extract()
+
+outer()
 """,
             [],
         ),
