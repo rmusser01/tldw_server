@@ -9,7 +9,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int, jobs_manager_from_env
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 
 from .claims_job_contracts import (
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
@@ -80,9 +80,20 @@ def _max_retries(
     default: int = 3,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> int:
-    """Resolve a non-negative max retry count for a Claims job type."""
-    retries = coerce_int(_setting_value(key, None, settings_obj), default)
-    return int(default) if retries < 0 else retries
+    """Resolve a retry count within the Jobs schema's inclusive 0..100 range."""
+    value = _setting_value(key, None, settings_obj)
+    if isinstance(value, bool):
+        return int(default)
+    if isinstance(value, int):
+        retries = value
+    elif isinstance(value, str):
+        normalized = value.strip()
+        if not normalized or not normalized.isascii() or not normalized.isdigit():
+            return int(default)
+        retries = int(normalized, 10)
+    else:
+        return int(default)
+    return retries if 0 <= retries <= 100 else int(default)
 
 
 def _manager(job_manager: JobManager | None = None) -> JobManager:

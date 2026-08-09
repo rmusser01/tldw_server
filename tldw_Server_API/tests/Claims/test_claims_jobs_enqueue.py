@@ -173,7 +173,10 @@ def test_enqueue_analytics_export_creates_exact_job_and_does_not_refresh() -> No
     ]
 
 
-@pytest.mark.parametrize("configured", [-1, "-2", "invalid"])
+@pytest.mark.parametrize(
+    "configured",
+    [-1, "-2", "invalid", True, False, 1.9, "1.9", 101, "101", 10**100],
+)
 def test_enqueue_analytics_export_defaults_invalid_or_negative_retries(
     configured: object,
 ) -> None:
@@ -189,6 +192,24 @@ def test_enqueue_analytics_export_defaults_invalid_or_negative_retries(
     )
 
     assert fake.created[0]["max_retries"] == 3  # nosec B101
+
+
+@pytest.mark.parametrize("configured", [0, "0", 100, "100"])
+def test_enqueue_analytics_export_accepts_jobs_retry_boundaries(
+    configured: object,
+) -> None:
+    fake = NoRefreshJobManager()
+
+    claims_jobs.enqueue_claims_analytics_export(
+        owner_user_id="123",
+        export_id="0123456789abcdef0123456789abcdef",
+        job_manager=fake,
+        settings_obj={
+            "CLAIMS_JOBS_MAX_RETRIES_ANALYTICS_EXPORT": configured,
+        },
+    )
+
+    assert fake.created[0]["max_retries"] == int(configured)  # nosec B101
 
 
 @pytest.mark.parametrize(
