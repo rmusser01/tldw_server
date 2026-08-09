@@ -1012,6 +1012,18 @@ def test_parent_preloads_validator_classes_before_bounded_spawn() -> None:
     }
 
 
+def test_worker_target_defers_validator_imports_until_after_spawn_reconstruction() -> None:
+    """The Windows child target module must remain stdlib-only while unpickling."""
+
+    api = _validation_api()
+    worker_globals = api._schema_validation_worker.__globals__  # noqa: SLF001
+
+    assert "Draft7Validator" not in worker_globals
+    assert "Draft202012Validator" not in worker_globals
+    assert "Registry" not in worker_globals
+    assert "NoSuchResource" not in worker_globals
+
+
 @pytest.mark.asyncio
 async def test_schema_keywords_inside_instance_payload_keywords_are_not_traversed() -> None:
     """Annotation payloads named like schema keywords must not consume schema limits."""
