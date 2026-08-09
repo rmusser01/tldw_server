@@ -77,6 +77,16 @@ class SyncServerOriginBatchMaterializationError(SyncStoreError):
         self.retryable = retryable
 
 
+class SyncServerOriginBatchAppendError(SyncStoreError):
+    """Raised when the complete preflighted group cannot be appended atomically."""
+
+    error_code = "sync_server_origin_batch_append_failed"
+
+    def __init__(self, mutation_group_id: str) -> None:
+        super().__init__(self.error_code)
+        self.mutation_group_id = mutation_group_id
+
+
 def capture_server_origin_mutation_batch(
     *,
     service: SyncV2Service,
@@ -162,6 +172,8 @@ def capture_server_origin_mutation_batch(
             )
     except SyncIdempotencyConflictError as exc:
         raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
+    except SyncStoreError as exc:
+        raise SyncServerOriginBatchAppendError(mutation_group_id) from exc
     return _materialize_group(
         service=service,
         dataset=dataset,
@@ -673,6 +685,7 @@ def _require_batch_write_ready(
 __all__ = [
     "ServerOriginBatchResult",
     "ServerOriginMutationStep",
+    "SyncServerOriginBatchAppendError",
     "SyncServerOriginBatchIdempotencyConflictError",
     "SyncServerOriginBatchMaterializationError",
     "capture_server_origin_mutation_batch",

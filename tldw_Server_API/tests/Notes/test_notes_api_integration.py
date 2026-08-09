@@ -195,6 +195,15 @@ def create_timestamped_data(base_data: Dict[str, Any], client_id: str) -> Dict[s
     # For NoteResponse specifically
     if 'title' in base_data and 'content' not in base_data:  # Heuristic: if it looks like a note
         base_data.setdefault('content', 'Default test content')
+    if "id" in base_data and "sync_id" not in base_data:
+        if "keyword" in base_data:
+            base_data["sync_id"] = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"test-keyword:{base_data['id']}")
+            )
+        elif "name" in base_data and "path" not in base_data:
+            base_data["sync_id"] = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"test-collection:{base_data['id']}")
+            )
 
     return {**default_data, **base_data}
 
