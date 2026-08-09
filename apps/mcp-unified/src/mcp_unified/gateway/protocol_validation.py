@@ -135,19 +135,20 @@ def _validator_for_dialect(dialect: str) -> type[Draft7Validator] | type[Draft20
 def _schema_validation_worker(
     connection: Connection,
     schema_json: bytes,
-    instance_json: bytes,
+    instance_json: bytes | None,
     dialect: str,
 ) -> None:
-    """Compile and validate one bounded value in a disposable child process."""
+    """Compile a schema and optionally validate one value in a disposable child."""
 
     verdict: SchemaWorkerVerdict
     try:
         schema = json.loads(schema_json)
-        instance = json.loads(instance_json)
         validator_class = _validator_for_dialect(dialect)
         registry: Registry[Any] = Registry(retrieve=_deny_schema_retrieval)
+        validator = validator_class(schema, registry=registry)
         validator_class.check_schema(schema)
-        validator_class(schema, registry=registry).validate(instance)
+        if instance_json is not None:
+            validator.validate(json.loads(instance_json))
         verdict = ("ok", "")
     except SchemaError:
         verdict = ("invalid", "invalid_schema")
@@ -544,6 +545,27 @@ class GatewaySchemaValidationManager:
 
         return len(self._live_processes)
 
+    async def validate_schema(
+        self,
+        schema: dict[str, GatewayJSONValue] | bool,
+        *,
+        profile: GatewayProtocolProfile,
+        root_mode: SchemaRootMode = "any",
+    ) -> None:
+        """Compile one finite JSON Schema without validating a fabricated instance."""
+
+        if self._closed:
+            raise _validation_error("schema_validator_closed", "Schema validator is closed")
+        if root_mode not in {"any", "object"}:
+            raise ValueError("root_mode must be any or object")
+        schema_json = _preflight_schema(
+            schema,
+            profile=profile,
+            limits=self._limits,
+            root_mode=root_mode,
+        )
+        await self._run_worker(schema_json, None, profile.schema_dialect)
+
     async def validate(
         self,
         schema: dict[str, GatewayJSONValue] | bool,
@@ -570,6 +592,16 @@ class GatewaySchemaValidationManager:
         )
         instance_json = _preflight_instance(instance, self._limits, instance_role)
 
+        await self._run_worker(schema_json, instance_json, profile.schema_dialect)
+
+    async def _run_worker(
+        self,
+        schema_json: bytes,
+        instance_json: bytes | None,
+        dialect: str,
+    ) -> None:
+        """Run one compile or validation job through the shared process lifecycle."""
+
         await self._semaphore.acquire()
         process: multiprocessing.Process | None = None
         receiver: Connection | None = None
@@ -584,7 +616,7 @@ class GatewaySchemaValidationManager:
             receiver, sender = self._context.Pipe(duplex=False)
             process = self._context.Process(
                 target=self._worker_target,
-                args=(sender, schema_json, instance_json, profile.schema_dialect),
+                args=(sender, schema_json, instance_json, dialect),
                 daemon=True,
             )
             process.start()

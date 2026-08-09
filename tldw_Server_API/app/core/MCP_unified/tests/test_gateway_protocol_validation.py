@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import multiprocessing
 import os
@@ -234,6 +235,253 @@ def test_pinned_official_schema_manifest_hashes_and_literal_vectors() -> None:
         validator = validator_class(schema)
         validator.validate(request)
         validator.validate(result)
+
+
+def test_validate_schema_exposes_the_compile_only_public_signature() -> None:
+    """Task 3 needs an explicit compile API with no instance parameter."""
+
+    api = _validation_api()
+    signature = inspect.signature(api.GatewaySchemaValidationManager.validate_schema)
+    assert list(signature.parameters) == ["self", "schema", "profile", "root_mode"]
+    assert signature.parameters["profile"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["root_mode"].default == "any"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("schema", "version", "root_mode"),
+    [
+        ({"type": "object", "required": ["value"]}, "2026-07-28", "any"),
+        ({"const": 42}, "2026-07-28", "any"),
+        (False, "2026-07-28", "any"),
+        ({"type": "object", "required": ["legacy"]}, "2025-06-18", "object"),
+    ],
+)
+async def test_validate_schema_compiles_without_fabricating_an_instance(
+    schema: dict[str, Any] | bool,
+    version: str,
+    root_mode: str,
+) -> None:
+    """Required, const, false, and legacy schemas compile without instance checks."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+    try:
+        await manager.validate_schema(
+            schema,
+            profile=PROTOCOL_PROFILES[version],
+            root_mode=root_mode,
+        )
+        assert manager.live_process_count == 0
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_validate_schema_returns_bounded_invalid_schema() -> None:
+    """A schema compilation failure must expose only the bounded reason code."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+    try:
+        with pytest.raises(GatewayApplicationError) as raised:
+            await manager.validate_schema(
+                {"type": 7},  # type: ignore[dict-item]
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        assert raised.value.reason_code == "invalid_schema"
+        assert manager.live_process_count == 0
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("limits", "schema", "root_mode", "reason_code"),
+    [
+        (
+            replace(GatewayLimits(), max_schema_bytes=64),
+            {"description": "x" * 80},
+            "any",
+            "schema_too_large",
+        ),
+        (
+            replace(GatewayLimits(), max_schema_depth=2),
+            {"allOf": [{"allOf": [{"type": "string"}]}]},
+            "any",
+            "schema_too_deep",
+        ),
+        (
+            replace(GatewayLimits(), max_schema_subschemas=2),
+            {"allOf": [{"type": "string"}, {"minLength": 1}]},
+            "any",
+            "schema_too_complex",
+        ),
+        (
+            replace(GatewayLimits(), max_schema_refs=1),
+            {"$defs": {"x": {}}, "allOf": [{"$ref": "#/$defs/x"}, {"$ref": "#/$defs/x"}]},
+            "any",
+            "schema_ref_limit",
+        ),
+        (
+            replace(GatewayLimits(), max_schema_pattern_chars=3),
+            {"pattern": "abcd"},
+            "any",
+            "schema_pattern_limit",
+        ),
+        (
+            GatewayLimits(),
+            {"$ref": "https://example.invalid/schema.json"},
+            "any",
+            "schema_external_ref",
+        ),
+        (
+            GatewayLimits(),
+            {"$ref": "#/$defs/missing"},
+            "any",
+            "schema_unresolved_ref",
+        ),
+        (GatewayLimits(), {"type": "array"}, "object", "schema_root_not_object"),
+    ],
+)
+async def test_validate_schema_applies_every_parent_preflight_boundary(
+    limits: GatewayLimits,
+    schema: dict[str, Any],
+    root_mode: str,
+    reason_code: str,
+) -> None:
+    """Compile-only work must fail before spawn on every parent schema boundary."""
+
+    api = _validation_api()
+    context = _TrackingSpawnContext()
+    manager = api.GatewaySchemaValidationManager(limits=limits, process_context=context)
+    with pytest.raises(GatewayApplicationError) as raised:
+        await manager.validate_schema(
+            schema,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+            root_mode=root_mode,
+        )
+    assert raised.value.reason_code == reason_code
+    assert context.processes == []
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_validate_schema_only_checks_catastrophic_regex_syntax() -> None:
+    """Compilation must not evaluate a valid catastrophic regular expression."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+    started = time.monotonic()
+    try:
+        await manager.validate_schema(
+            {"type": "string", "pattern": "^(a+)+$"},
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+        assert time.monotonic() - started < 1.0
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "invalid", "crash", "timeout"])
+async def test_validate_schema_reaps_before_releasing_its_process_permit(
+    outcome: str,
+) -> None:
+    """Every compile verdict must reap its real worker before permit release."""
+
+    api = _validation_api()
+    context = _TrackingSpawnContext()
+    worker_target = {"crash": _crash_worker, "timeout": _hang_worker}.get(outcome)
+    limits = replace(
+        GatewayLimits(),
+        schema_validation_timeout_seconds=0.15 if outcome == "timeout" else 1.0,
+    )
+    manager = api.GatewaySchemaValidationManager(
+        limits=limits,
+        process_context=context,
+        _worker_target=worker_target,
+    )
+    semaphore = _ReapCheckingSemaphore(context)
+    manager._semaphore = semaphore
+    schema: dict[str, Any] = {"type": 7} if outcome == "invalid" else {"type": "integer"}
+    try:
+        if outcome == "success":
+            await manager.validate_schema(
+                schema,
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        else:
+            with pytest.raises(GatewayApplicationError):
+                await manager.validate_schema(
+                    schema,
+                    profile=PROTOCOL_PROFILES["2026-07-28"],
+                )
+        assert semaphore.acquired == 1
+        assert semaphore.released == 1
+        assert manager.live_process_count == 0
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shutdown", ["cancel", "close"])
+async def test_validate_schema_cancel_and_close_reap_live_workers(
+    shutdown: str,
+) -> None:
+    """Cancellation and close must drain compile-only children before release."""
+
+    api = _validation_api()
+    context = _TrackingSpawnContext()
+    manager = api.GatewaySchemaValidationManager(
+        process_context=context,
+        _worker_target=_hang_worker,
+    )
+    semaphore = _ReapCheckingSemaphore(context)
+    manager._semaphore = semaphore
+    task = asyncio.create_task(
+        manager.validate_schema(
+            {"type": "integer"},
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    )
+    await _wait_for_process(context)
+    if shutdown == "cancel":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await manager.close()
+    else:
+        await manager.close()
+        with pytest.raises(GatewayApplicationError) as raised:
+            await task
+        assert raised.value.reason_code == "schema_validator_closed"
+    assert semaphore.acquired == 1
+    assert semaphore.released == 1
+    assert manager.live_process_count == 0
+
+
+@pytest.mark.asyncio
+async def test_validate_still_checks_instances_after_compile_runner_refactor() -> None:
+    """A real JSON instance must never be confused with compile-only mode."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+    try:
+        with pytest.raises(GatewayApplicationError) as raised:
+            await manager.validate(
+                {"const": None},
+                1,
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        assert raised.value.reason_code == "schema_validation_failed"
+        await manager.validate(
+            {"const": None},
+            None,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    finally:
+        await manager.close()
 
 
 @pytest.mark.asyncio
