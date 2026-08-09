@@ -173,6 +173,7 @@ class NoteFolderCreate(BaseModel):
 
 class NoteFolderResponse(BaseModel):
     id: int = Field(..., description="Integer ID of the folder")
+    sync_id: str = Field(..., description="Stable opaque Sync identity")
     name: str = Field(..., description="Folder display name")
     path: str = Field(..., description="Normalized relative folder path")
     parent_id: int | None = Field(default=None, description="Parent folder ID, if any")
@@ -242,6 +243,7 @@ class KeywordMergeResponse(BaseModel):
 
 class KeywordResponse(KeywordBase):
     id: int = Field(..., description="Integer ID of the keyword")
+    sync_id: str = Field(..., description="Stable opaque Sync identity")
     created_at: datetime = Field(..., description="Timestamp of keyword creation")
     last_modified: datetime = Field(..., description="Timestamp of last modification")
     version: int = Field(..., description="Version number for optimistic locking")
@@ -348,6 +350,7 @@ class KeywordCollectionUpdate(BaseModel):
 
 class KeywordCollectionResponse(BaseModel):
     id: int = Field(..., ge=1)
+    sync_id: str = Field(..., description="Stable opaque Sync identity")
     name: str = Field(..., min_length=1, max_length=255)
     parent_id: int | None = Field(default=None)
     created_at: datetime

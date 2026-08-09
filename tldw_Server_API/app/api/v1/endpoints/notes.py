@@ -4299,6 +4299,7 @@ async def restore_note(
         keyword_responses = [
             KeywordResponse(
                 id=kw['id'],
+                sync_id=kw['sync_id'],
                 keyword=kw['keyword'],
                 created_at=kw['created_at'],
                 last_modified=kw['last_modified'],

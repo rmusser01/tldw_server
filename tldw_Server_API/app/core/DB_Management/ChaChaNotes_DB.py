@@ -648,7 +648,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 54  # Schema v54 adds workspace source saved views
+    _CURRENT_SCHEMA_VERSION = 55  # Schema v55 adds stable Notes organization identities
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -759,12 +759,18 @@ class CharactersRAGDB:
         "persona_memory_entries": "PRAGMA table_info('persona_memory_entries')",
         "persona_visual_candidates": "PRAGMA table_info('persona_visual_candidates')",
         "quiz_questions": "PRAGMA table_info('quiz_questions')",
+        "keywords": "PRAGMA table_info('keywords')",
+        "keyword_collections": "PRAGMA table_info('keyword_collections')",
+        "note_folders": "PRAGMA table_info('note_folders')",
     }
     _SQLITE_SCHEMA_INDEX_LIST_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA index_list('persona_profiles')",
         "persona_memory_entries": "PRAGMA index_list('persona_memory_entries')",
         "persona_visual_packs": "PRAGMA index_list('persona_visual_packs')",
         "persona_visual_assets": "PRAGMA index_list('persona_visual_assets')",
+        "keywords": "PRAGMA index_list('keywords')",
+        "keyword_collections": "PRAGMA index_list('keyword_collections')",
+        "note_folders": "PRAGMA index_list('note_folders')",
     }
     _ALLOWED_WORKSPACE_ARTIFACT_REVIEW_STATES: tuple[str, ...] = (
         "draft",
@@ -1090,6 +1096,7 @@ CREATE INDEX IF NOT EXISTS idx_message_images_message ON message_images(message_
 ----------------------------------------------------------------*/
 CREATE TABLE IF NOT EXISTS keywords(
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  sync_id       TEXT    NOT NULL,
   keyword       TEXT    UNIQUE NOT NULL COLLATE NOCASE,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1097,6 +1104,8 @@ CREATE TABLE IF NOT EXISTS keywords(
   client_id     TEXT     NOT NULL DEFAULT 'unknown',
   version       INTEGER  NOT NULL DEFAULT 1
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_sync_id_unique ON keywords(sync_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS keywords_fts
 USING fts5(
@@ -1145,6 +1154,7 @@ END;
 ----------------------------------------------------------------*/
 CREATE TABLE IF NOT EXISTS keyword_collections(
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  sync_id       TEXT    NOT NULL,
   name          TEXT    UNIQUE NOT NULL COLLATE NOCASE,
   parent_id     INTEGER REFERENCES keyword_collections(id)
                          ON DELETE SET NULL ON UPDATE CASCADE,
@@ -1154,6 +1164,8 @@ CREATE TABLE IF NOT EXISTS keyword_collections(
   client_id     TEXT     NOT NULL DEFAULT 'unknown',
   version       INTEGER  NOT NULL DEFAULT 1
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_sync_id_unique ON keyword_collections(sync_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS keyword_collections_fts
 USING fts5(
@@ -1176,7 +1188,8 @@ END;
 CREATE TRIGGER keyword_collections_au
 AFTER UPDATE ON keyword_collections BEGIN
   INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
-  VALUES('delete',old.id,old.name);
+  SELECT 'delete',old.id,old.name
+  WHERE old.deleted = 0;
 
   INSERT INTO keyword_collections_fts(rowid,name)
   SELECT new.id,new.name
@@ -1186,7 +1199,8 @@ END;
 CREATE TRIGGER keyword_collections_ad
 AFTER DELETE ON keyword_collections BEGIN
   INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
-  VALUES('delete',old.id,old.name);
+  SELECT 'delete',old.id,old.name
+  WHERE old.deleted = 0;
 END;
 
 /*----------------------------------------------------------------
@@ -7428,6 +7442,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (51, "_migrate_from_v51_to_v52"),
             (52, "_migrate_from_v52_to_v53"),
             (53, "_migrate_from_v53_to_v54"),
+            (54, "_migrate_from_v54_to_v55"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -8912,6 +8927,150 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 f"Unexpected error migrating to V54 for '{self._SCHEMA_NAME}': {exc}"
             ) from exc  # noqa: TRY003
 
+    def _migrate_from_v54_to_v55(self, conn: sqlite3.Connection) -> None:
+        """Migrate organization resources to stable, unique UUIDv4 identities."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V54 to V55 for DB: {self.db_path_str}...")
+        try:
+            from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+
+            if "note_folders" not in self._sqlite_table_names(conn):
+                self._ensure_note_folder_schema_sqlite(conn)
+            table_indexes = (
+                ("keywords", "idx_keywords_sync_id_unique"),
+                ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
+                ("note_folders", "idx_note_folders_sync_id_unique"),
+            )
+            for table_name, index_name in table_indexes:
+                columns = self._sqlite_column_names(conn, table_name)
+                if "sync_id" not in columns:
+                    conn.execute(
+                        f"ALTER TABLE {table_name} "  # nosec B608
+                        "ADD COLUMN sync_id TEXT NOT NULL DEFAULT ''"
+                    )
+                rows = conn.execute(
+                    f"SELECT id FROM {table_name} WHERE sync_id = ''"  # nosec B608
+                ).fetchall()
+                for row in rows:
+                    conn.execute(
+                        f"UPDATE {table_name} SET sync_id = ? WHERE id = ?"  # nosec B608
+                        ,
+                        (new_organization_sync_id(), row["id"]),
+                    )
+
+                invalid = conn.execute(
+                    f"SELECT COUNT(*) FROM {table_name} WHERE sync_id IS NULL OR sync_id = ''"  # nosec B608
+                ).fetchone()[0]
+                duplicates = conn.execute(
+                    f"SELECT COUNT(*) FROM ("  # nosec B608
+                    f"SELECT sync_id FROM {table_name} GROUP BY sync_id HAVING COUNT(*) > 1)"
+                ).fetchone()[0]
+                if invalid or duplicates:
+                    raise SchemaError(  # noqa: TRY003
+                        f"Cannot migrate {table_name} stable identities: "
+                        f"invalid={invalid}, duplicates={duplicates}."
+                    )
+                conn.execute(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(sync_id)"  # nosec B608
+                )
+
+            conn.execute("DROP TRIGGER IF EXISTS keyword_collections_au")
+            conn.execute("DROP TRIGGER IF EXISTS keyword_collections_ad")
+            conn.execute(
+                """
+                CREATE TRIGGER keyword_collections_au
+                AFTER UPDATE ON keyword_collections BEGIN
+                  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
+                  SELECT 'delete',old.id,old.name WHERE old.deleted = 0;
+                  INSERT INTO keyword_collections_fts(rowid,name)
+                  SELECT new.id,new.name WHERE new.deleted = 0;
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER keyword_collections_ad
+                AFTER DELETE ON keyword_collections BEGIN
+                  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
+                  SELECT 'delete',old.id,old.name WHERE old.deleted = 0;
+                END
+                """
+            )
+
+            conn.execute(
+                "UPDATE db_schema_version SET version = 55 WHERE schema_name = ? AND version < 55",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 55:
+                raise SchemaError(  # noqa: TRY003
+                    f"[{self._SCHEMA_NAME}] Migration V54->V55 failed version check. Expected 55, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V55 completed.")
+        except sqlite3.Error as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V54->V55 failed: {exc}", exc_info=True)
+            raise SchemaError(f"Migration V54->V55 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V54->V55: {exc}", exc_info=True)
+            raise SchemaError(
+                f"Unexpected error migrating to V55 for '{self._SCHEMA_NAME}': {exc}"
+            ) from exc  # noqa: TRY003
+
+    def _migrate_from_v54_to_v55_postgres(self, conn: Any) -> None:
+        """Backfill stable organization identities inside the caller's transaction."""
+        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+
+        table_indexes = (
+            ("chacha_keywords", "idx_keywords_sync_id_unique"),
+            ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
+            ("note_folders", "idx_note_folders_sync_id_unique"),
+        )
+        for table_name, index_name in table_indexes:
+            self.backend.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS sync_id TEXT",  # nosec B608
+                connection=conn,
+            )
+            rows = self.backend.execute(
+                f"SELECT id FROM {table_name} WHERE sync_id IS NULL OR sync_id = %s ORDER BY id",  # nosec B608
+                ("",),
+                connection=conn,
+            ).rows
+            for row in rows:
+                self.backend.execute(
+                    f"UPDATE {table_name} SET sync_id = %s WHERE id = %s",  # nosec B608
+                    (new_organization_sync_id(), int(row["id"])),
+                    connection=conn,
+                )
+
+            invalid = self.backend.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE sync_id IS NULL OR sync_id = %s",  # nosec B608
+                ("",),
+                connection=conn,
+            ).scalar
+            duplicates = self.backend.execute(
+                f"SELECT COUNT(*) FROM ("  # nosec B608
+                f"SELECT sync_id FROM {table_name} GROUP BY sync_id HAVING COUNT(*) > 1"
+                ") duplicate_sync_ids",
+                connection=conn,
+            ).scalar
+            if int(invalid or 0) or int(duplicates or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {table_name} stable identities: "
+                    f"invalid={int(invalid or 0)}, duplicates={int(duplicates or 0)}."
+                )
+
+            self.backend.execute(
+                f"ALTER TABLE {table_name} ALTER COLUMN sync_id SET NOT NULL",  # nosec B608
+                connection=conn,
+            )
+            self.backend.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(sync_id)",  # nosec B608
+                connection=conn,
+            )
+
+        self._set_schema_version_postgres(conn, 55)
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -9234,6 +9393,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """
             CREATE TABLE IF NOT EXISTS note_folders(
               id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              sync_id       TEXT    NOT NULL,
               name          TEXT    NOT NULL,
               path          TEXT    UNIQUE NOT NULL COLLATE NOCASE,
               parent_id     INTEGER REFERENCES note_folders(id)
@@ -9248,6 +9408,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_nocase ON note_folders(LOWER(path))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique ON note_folders(sync_id)",
             """
             CREATE TABLE IF NOT EXISTS note_folder_memberships(
               note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -9313,6 +9474,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """
             CREATE TABLE IF NOT EXISTS note_folders(
               id            BIGSERIAL PRIMARY KEY,
+              sync_id       TEXT    NOT NULL,
               name          TEXT    NOT NULL,
               path          TEXT    NOT NULL,
               parent_id     BIGINT REFERENCES note_folders(id)
@@ -9327,6 +9489,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE note_folders DROP CONSTRAINT IF EXISTS note_folders_path_key",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique ON note_folders(sync_id)",
             """
             CREATE TABLE IF NOT EXISTS note_folder_memberships(
               note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -11461,6 +11624,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 54 and current_db_version == 53:
                         self._migrate_from_v53_to_v54(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 55 and current_db_version == 54:
+                        self._migrate_from_v54_to_v55(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -11871,6 +12037,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 54 and current_db_version == 53:
                     self._migrate_from_v53_to_v54(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 55 and current_db_version == 54:
+                    self._migrate_from_v54_to_v55(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -15789,6 +15958,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_workspace_source_saved_view_schema_postgres(conn)
                 self._set_schema_version_postgres(conn, 54)
                 current_version = 54
+            if current_version < 55:
+                if (
+                    backend.table_exists("keywords", connection=conn)
+                    and not backend.table_exists("chacha_keywords", connection=conn)
+                ):
+                    backend.execute(
+                        "ALTER TABLE keywords RENAME TO chacha_keywords",
+                        connection=conn,
+                    )
+                if not backend.table_exists("note_folders", connection=conn):
+                    self._ensure_note_folder_schema_postgres(conn)
+                self._migrate_from_v54_to_v55_postgres(conn)
+                current_version = 55
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -22868,6 +23050,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     update_set_parts = [f"{unique_col_name} = ?"]
                     update_params_list = [main_col_value]
                     for i, col_db in enumerate(other_cols):
+                        if col_db == "sync_id":
+                            continue
                         update_set_parts.append(f"{col_db} = ?")
                         update_params_list.append(other_values[i])
                     update_set_parts.extend(["deleted = 0", "last_modified = ?", "version = ?", "client_id = ?"])
@@ -24098,11 +24282,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conn.execute(
             """
             INSERT INTO note_folders(
-              name, path, parent_id, created_at, last_modified, deleted, client_id, version
+              sync_id, name, path, parent_id, created_at, last_modified, deleted, client_id, version
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                self._generate_uuid(),
                 stored_path.rsplit("/", 1)[-1],
                 stored_path,
                 parent_id,
@@ -24129,7 +24314,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 folder_row = self._coerce_mapping_row(
                     conn.execute(
                         """
-                        SELECT id, name, path, parent_id
+                        SELECT id, sync_id, name, path, parent_id
                           FROM note_folders
                          WHERE id = ? AND deleted = ?
                         """,
@@ -24151,7 +24336,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return None
         cursor = self.execute_query(
             """
-            SELECT id, name, path, parent_id
+            SELECT id, sync_id, name, path, parent_id
               FROM note_folders
              WHERE LOWER(path) = LOWER(?) AND deleted = ?
             """,
@@ -24166,7 +24351,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return []
         path_order_expr = self._case_insensitive_order_expression("path")
         query = (
-            "SELECT id, name, path, parent_id "
+            "SELECT id, sync_id, name, path, parent_id "
             "FROM note_folders "
             "WHERE deleted = ? "
             f"ORDER BY {path_order_expr} "  # nosec B608
@@ -24331,7 +24516,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_note_folders_for_note(self, note_id: str) -> list[dict[str, Any]]:
         order_clause = self._case_insensitive_order_clause("f.path")
         query = """
-                SELECT f.id, f.name, f.path, f.parent_id
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
                   FROM note_folders f
                   JOIN (
                         SELECT folder_id
@@ -24359,7 +24544,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             batch = note_ids[start:start + max_vars]
             placeholders = ",".join(["?"] * len(batch))
             query = """
-                    SELECT memberships.note_id AS note_id, f.id, f.name, f.path, f.parent_id
+                    SELECT memberships.note_id AS note_id, f.id, f.sync_id, f.name, f.path, f.parent_id
                       FROM note_folders f
                       JOIN (
                             SELECT note_id, folder_id

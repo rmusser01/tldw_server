@@ -4,8 +4,10 @@ import re
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    BackendConnectionWrapper,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
@@ -13,8 +15,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     logger,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import (
-    DatabaseError as BackendDatabaseError,
+from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+    new_organization_sync_id,
 )
 
 if TYPE_CHECKING:
@@ -58,7 +60,13 @@ class KeywordStore:
         """
         if not keyword_text or not keyword_text.strip():
             raise InputError("Keyword text cannot be empty.")  # noqa: TRY003
-        return self._db._add_generic_item("keywords", "keyword", {}, keyword_text.strip(), {})  # No other_fields_map
+        return self._db._add_generic_item(
+            "keywords",
+            "keyword",
+            {"sync_id": new_organization_sync_id()},
+            keyword_text.strip(),
+            {"sync_id": "sync_id"},
+        )
 
     def get_keyword_by_id(self, keyword_id: int) -> dict[str, Any] | None:
         """
@@ -513,8 +521,13 @@ class KeywordStore:
         """
         if not name or not name.strip():
             raise InputError("Collection name cannot be empty.")  # noqa: TRY003
-        return self._db._add_generic_item("keyword_collections", "name", {"parent_id": parent_id}, name.strip(),
-                                          {"parent_id": "parent_id"})  # Maps DB 'parent_id' to item_data['parent_id']
+        return self._db._add_generic_item(
+            "keyword_collections",
+            "name",
+            {"parent_id": parent_id, "sync_id": new_organization_sync_id()},
+            name.strip(),
+            {"parent_id": "parent_id", "sync_id": "sync_id"},
+        )
 
     def get_keyword_collection_by_id(self, collection_id: int) -> dict[str, Any] | None:
         """
