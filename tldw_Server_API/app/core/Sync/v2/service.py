@@ -1341,6 +1341,8 @@ class SyncV2Service:
     ) -> SyncProfileStatus:
         """Idempotently bootstrap the user's default Sync v2 M1 profile."""
 
+        if device_id is not None:
+            _require_client_device_id(device_id)
         return self._profile_manager().bootstrap_profile(
             user_id=user_id,
             mode=mode,

@@ -185,6 +185,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "reserved device identifier" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "reserved_device_id",
+                    "message": "The requested Sync device identifier is reserved.",
+                },
+            )
         if "sync_reserved_dataset_enrollment" in lowered:
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

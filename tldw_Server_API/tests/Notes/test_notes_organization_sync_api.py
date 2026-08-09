@@ -1590,6 +1590,151 @@ def test_literal_import_overwrite_uses_one_compound_note_keyword_group(
     assert len({item.mutation_group_id for item in direct}) == 1
 
 
+def test_literal_import_overwrite_replays_raw_request_before_mutable_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    note_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/notes/",
+        json={"id": note_id, "title": "Before", "content": "Old body"},
+    )
+    assert created.status_code == 201, created.text
+    reconciled_versions: list[int] = []
+
+    def _record_reconciliation(**kwargs) -> None:
+        reconciled_versions.append(int(kwargs["note_data"]["version"]))
+
+    monkeypatch.setattr(
+        notes_endpoint,
+        "_reconcile_note_tasks_after_save",
+        _record_reconciliation,
+    )
+    headers = {"Idempotency-Key": "literal-import-durable-overwrite"}
+    imported_row = {
+        "id": note_id,
+        "title": "Imported original",
+        "content": "Imported body",
+        "keywords": ["Imported keyword"],
+    }
+    body = {
+        "duplicate_strategy": "overwrite",
+        "items": [
+            {
+                "file_name": "overwrite.json",
+                "format": "json",
+                "content": json.dumps([imported_row]),
+            }
+        ],
+    }
+
+    original = client.post("/api/v1/notes/import", headers=headers, json=body)
+    assert original.status_code == 200, original.text
+    original_group = _notes_api_group(
+        sync_service, "literal-import-durable-overwrite:0:1"
+    )
+    original_ids = [item.client_envelope_id for item in original_group]
+
+    conversation_id = chacha_db.add_conversation({"title": "Later conversation"})
+    changed = client.put(
+        f"/api/v1/notes/{note_id}",
+        headers={
+            "Expected-Version": str(chacha_db.get_note_by_id(note_id)["version"]),
+            "Idempotency-Key": "literal-import-later-mutation",
+        },
+        json={
+            "title": "Later title",
+            "content": "Later body",
+            "conversation_id": conversation_id,
+            "keywords": ["Later keyword"],
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    reconciliation_count = len(reconciled_versions)
+
+    replay = client.post("/api/v1/notes/import", headers=headers, json=body)
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == original.json()
+    assert len(reconciled_versions) == reconciliation_count
+    assert [
+        item.client_envelope_id
+        for item in _notes_api_group(
+            sync_service, "literal-import-durable-overwrite:0:1"
+        )
+    ] == original_ids
+    assert chacha_db.get_note_by_id(note_id)["title"] == "Later title"
+
+    drifted_row = {**imported_row, "content": "Changed import request"}
+    drifted = client.post(
+        "/api/v1/notes/import",
+        headers=headers,
+        json={
+            **body,
+            "items": [
+                {
+                    **body["items"][0],
+                    "content": json.dumps([drifted_row]),
+                }
+            ],
+        },
+    )
+    assert drifted.status_code == 409, drifted.text
+
+    strategy_drift = client.post(
+        "/api/v1/notes/import",
+        headers=headers,
+        json={**body, "duplicate_strategy": "skip"},
+    )
+    assert strategy_drift.status_code == 409, strategy_drift.text
+
+
+def test_literal_import_create_durable_replay_skips_stale_reconciliation(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    headers = {"Idempotency-Key": "literal-import-create-durable"}
+    body = {
+        "duplicate_strategy": "overwrite",
+        "items": [
+            {
+                "file_name": "create.json",
+                "format": "json",
+                "content": json.dumps(
+                    [{"title": "Imported create", "content": "Imported body"}]
+                ),
+            }
+        ],
+    }
+    original = client.post("/api/v1/notes/import", headers=headers, json=body)
+    assert original.status_code == 200, original.text
+    group = _notes_api_group(sync_service, "literal-import-create-durable:0:1")
+    note_id = next(item.object_id for item in group if item.domain == "notes.note")
+    note = chacha_db.get_note_by_id(note_id)
+    assert note is not None
+    deleted = client.delete(
+        f"/api/v1/notes/{note_id}",
+        headers={"Expected-Version": str(note["version"])},
+    )
+    assert deleted.status_code == 204, deleted.text
+
+    monkeypatch.setattr(
+        notes_endpoint,
+        "_reconcile_note_tasks_after_save",
+        lambda **_kwargs: pytest.fail("durable replay must not reconcile"),
+    )
+    replay = client.post("/api/v1/notes/import", headers=headers, json=body)
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == original.json()
+    deleted_row = chacha_db.get_note_by_id(note_id, include_deleted=True)
+    assert deleted_row is not None and deleted_row["deleted"] == 1
+
+
 def test_inline_durable_original_response_replays_after_later_mutation(
     client: TestClient,
     chacha_db: CharactersRAGDB,
@@ -1665,6 +1810,184 @@ def test_inline_durable_original_response_replays_after_later_mutation(
 
     assert replay.status_code == 201, replay.text
     assert replay.json() == original_body
+
+
+def test_inline_durable_replay_finds_resource_before_over_100_later_revisions(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    payload = {
+        "title": "History boundary",
+        "content": "Body",
+        "keywords": ["Original boundary keyword"],
+    }
+    headers = {"Idempotency-Key": "durable-history-boundary"}
+    original = client.post("/api/v1/notes/", headers=headers, json=payload)
+    assert original.status_code == 201, original.text
+    keyword_sync_id = str(original.json()["keywords"][0]["sync_id"])
+    coordinator = NotesOrganizationCoordinator(sync_service, chacha_db, "user-1")
+    for revision in range(101):
+        result = coordinator.capture(
+            steps=(
+                ServerOriginMutationStep(
+                    domain="notes.keyword",
+                    operation="upsert",
+                    object_id=keyword_sync_id,
+                    payload={"keyword": f"Later boundary keyword {revision}"},
+                ),
+            ),
+            source="notes-api",
+            idempotency_key=f"later-history-revision-{revision}",
+        )
+        assert result.fully_applied
+
+    replay = client.post("/api/v1/notes/", headers=headers, json=payload)
+
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == original.json()
+
+
+def test_inline_durable_create_replays_after_later_note_deletion(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    payload = {
+        "title": "Create before deletion",
+        "content": "Body",
+        "keywords": ["Deleted note keyword"],
+        "folder_paths": ["Deleted/Create"],
+    }
+    headers = {"Idempotency-Key": "durable-create-before-note-deletion"}
+    original = client.post("/api/v1/notes/", headers=headers, json=payload)
+    assert original.status_code == 201, original.text
+    note_id = original.json()["id"]
+    deleted = client.delete(
+        f"/api/v1/notes/{note_id}",
+        headers={"Expected-Version": str(original.json()["version"])},
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert chacha_db.get_note_by_id(note_id) is None
+
+    monkeypatch.setattr(
+        notes_endpoint,
+        "_reconcile_note_tasks_after_save",
+        lambda **_kwargs: pytest.fail("durable replay must not reconcile"),
+    )
+    replay = client.post("/api/v1/notes/", headers=headers, json=payload)
+
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == original.json()
+    deleted_row = chacha_db.get_note_by_id(note_id, include_deleted=True)
+    assert deleted_row is not None and deleted_row["deleted"] == 1
+
+
+def test_inline_durable_update_replays_after_later_note_deletion(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    created = client.post(
+        "/api/v1/notes/",
+        json={"title": "Before update deletion", "content": "Body"},
+    )
+    assert created.status_code == 201, created.text
+    note_id = created.json()["id"]
+    payload = {
+        "title": "Update before deletion",
+        "keywords": ["Deleted update keyword"],
+        "folder_paths": ["Deleted/Update"],
+    }
+    headers = {
+        "Expected-Version": str(created.json()["version"]),
+        "Idempotency-Key": "durable-update-before-note-deletion",
+    }
+    original = client.put(f"/api/v1/notes/{note_id}", headers=headers, json=payload)
+    assert original.status_code == 200, original.text
+    deleted = client.delete(
+        f"/api/v1/notes/{note_id}",
+        headers={"Expected-Version": str(original.json()["version"])},
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert chacha_db.get_note_by_id(note_id) is None
+
+    monkeypatch.setattr(
+        notes_endpoint,
+        "_reconcile_note_tasks_after_save",
+        lambda **_kwargs: pytest.fail("durable replay must not reconcile"),
+    )
+    replay = client.put(f"/api/v1/notes/{note_id}", headers=headers, json=payload)
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == original.json()
+    deleted_row = chacha_db.get_note_by_id(note_id, include_deleted=True)
+    assert deleted_row is not None and deleted_row["deleted"] == 1
+
+
+def test_inline_durable_replay_survives_later_organization_resource_deletion(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    payload = {
+        "title": "Organization before deletion",
+        "content": "Body",
+        "keywords": ["Deleted original keyword"],
+        "folder_paths": ["Deleted/Original"],
+    }
+    headers = {"Idempotency-Key": "durable-before-organization-deletion"}
+    original = client.post("/api/v1/notes/", headers=headers, json=payload)
+    assert original.status_code == 201, original.text
+    body = original.json()
+
+    changed = client.put(
+        f"/api/v1/notes/{body['id']}",
+        headers={
+            "Expected-Version": str(body["version"]),
+            "Idempotency-Key": "durable-remove-original-organization",
+        },
+        json={
+            "title": "Organization later",
+            "keywords": ["Replacement keyword"],
+            "folder_paths": ["Replacement/Folder"],
+        },
+    )
+    assert changed.status_code == 200, changed.text
+
+    original_keyword = body["keywords"][0]
+    keyword_deleted = client.delete(
+        f"/api/v1/notes/keywords/{original_keyword['id']}",
+        headers={"Expected-Version": str(original_keyword["version"])},
+    )
+    assert keyword_deleted.status_code == 204, keyword_deleted.text
+
+    original_folder_rows = [
+        chacha_db.get_note_folder_by_path(path)
+        for path in ("Deleted/Original", "Deleted")
+    ]
+    assert all(row is not None for row in original_folder_rows)
+    coordinator = NotesOrganizationCoordinator(sync_service, chacha_db, "user-1")
+    deleted_folders = coordinator.capture(
+        steps=tuple(
+            ServerOriginMutationStep(
+                domain="notes.folder",
+                operation="tombstone",
+                object_id=str(row["sync_id"]),
+                payload={},
+            )
+            for row in original_folder_rows
+            if row is not None
+        ),
+        source="notes-api",
+        idempotency_key="durable-delete-original-folders",
+    )
+    assert deleted_folders.fully_applied
+
+    replay = client.post("/api/v1/notes/", headers=headers, json=payload)
+
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == body
 
 
 def test_inline_auto_title_replay_looks_up_manifest_before_generation(

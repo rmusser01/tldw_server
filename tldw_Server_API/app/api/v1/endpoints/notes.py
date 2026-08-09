@@ -544,6 +544,7 @@ def _capture_compound_note(
     folder_paths: list[str] | None,
     request_key: str,
     request_fingerprint: str,
+    response_status: int | None = None,
 ) -> dict[str, Any]:
     plan = coordinator.plan_note_with_organization(
         note_step=_compound_note_step(
@@ -555,6 +556,8 @@ def _capture_compound_note(
         folder_paths=folder_paths,
     )
     plan = coordinator.bind_request(plan, request_fingerprint)
+    if response_status is not None:
+        plan = coordinator.bind_response_status(plan, response_status)
     result = _capture_notes_organization_plan(
         coordinator,
         plan,
@@ -1606,6 +1609,7 @@ async def create_note(
             or str(uuid4())
         )
         compound_note: dict[str, Any] | None = None
+        compound_replayed = False
         coordinator = (
             NotesOrganizationCoordinator(
                 service=sync_service,
@@ -1651,6 +1655,7 @@ async def create_note(
                 if not isinstance(replayed, dict):
                     raise SyncStoreError("Compound note replay did not return a note")
                 compound_note = replayed
+                compound_replayed = True
 
         # Nondeterministic title work follows durable raw-request manifest lookup.
         effective_title = (
@@ -1771,12 +1776,13 @@ async def create_note(
                 f"Failed to retrieve note '{note_id}' immediately after creation for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Note created but could not be retrieved.")
-        _reconcile_note_tasks_after_save(
-            db=db,
-            note_data=created_note_data,
-            current_user=current_user,
-            task_service=task_service,
-        )
+        if not compound_replayed:
+            _reconcile_note_tasks_after_save(
+                db=db,
+                note_data=created_note_data,
+                current_user=current_user,
+                task_service=task_service,
+            )
         if compound_note is None:
             created_note_data = _attach_keywords_inline(db, created_note_data)
             created_note_data = _attach_folders_inline(db, created_note_data)
@@ -2486,6 +2492,53 @@ async def import_notes(
                         else None
                     )
                     imported_id = parsed_note.get("id")
+                    raw_note_payload = {
+                        "title": parsed_note["title"],
+                        "content": parsed_note["content"],
+                        "conversation_id": None,
+                        "message_id": None,
+                    }
+                    request_fingerprint = None
+                    if coordinator is not None:
+                        request_note_id = str(
+                            imported_id
+                            if imported_id
+                            and payload.duplicate_strategy != "create_copy"
+                            else _compound_note_id(request_key)
+                        )
+                        request_fingerprint = _compound_note_request_fingerprint(
+                            coordinator,
+                            operation=f"note.import.{payload.duplicate_strategy}",
+                            note_id=request_note_id,
+                            note_fields=raw_note_payload,
+                            keywords=keywords,
+                            folder_paths=None,
+                        )
+                        replay = _replay_notes_organization_plan(
+                            coordinator,
+                            idempotency_key=request_key,
+                            request_fingerprint=request_fingerprint,
+                            result_domain="notes.note",
+                        )
+                        if replay is not None:
+                            replayed_note = _capture_notes_organization_plan(
+                                coordinator,
+                                replay,
+                                idempotency_key=request_key,
+                                source="notes-api",
+                            )
+                            if not isinstance(replayed_note, dict):
+                                raise SyncStoreError(
+                                    "Imported note replay did not return a note"
+                                )
+                            if replay.response_status == status.HTTP_201_CREATED or (
+                                replay.response_status is None
+                                and int(replayed_note.get("version", 0)) == 1
+                            ):
+                                file_result.created_count += 1
+                            else:
+                                file_result.updated_count += 1
+                            continue
                     existing_note = db.get_note_by_id(imported_id) if imported_id else None
 
                     if existing_note and payload.duplicate_strategy == "skip":
@@ -2501,42 +2554,16 @@ async def import_notes(
                             projected_note = dict(existing_note)
                             projected_note.update(update_patch)
                             note_payload = _note_payload_from_row(projected_note)
-                            request_fingerprint = _compound_note_request_fingerprint(
+                            overwritten_note = _capture_compound_note(
                                 coordinator,
-                                operation="note.import",
                                 note_id=str(imported_id),
-                                note_fields=note_payload,
+                                note_payload=note_payload,
                                 keywords=keywords,
                                 folder_paths=None,
+                                request_key=request_key,
+                                request_fingerprint=request_fingerprint or "",
+                                response_status=status.HTTP_200_OK,
                             )
-                            replay = _replay_notes_organization_plan(
-                                coordinator,
-                                idempotency_key=request_key,
-                                request_fingerprint=request_fingerprint,
-                                result_domain="notes.note",
-                            )
-                            if replay is not None:
-                                replayed_note = _capture_notes_organization_plan(
-                                    coordinator,
-                                    replay,
-                                    idempotency_key=request_key,
-                                    source="notes-api",
-                                )
-                                if not isinstance(replayed_note, dict):
-                                    raise SyncStoreError(
-                                        "Imported note replay did not return a note"
-                                    )
-                                overwritten_note = replayed_note
-                            else:
-                                overwritten_note = _capture_compound_note(
-                                    coordinator,
-                                    note_id=str(imported_id),
-                                    note_payload=note_payload,
-                                    keywords=keywords,
-                                    folder_paths=None,
-                                    request_key=request_key,
-                                    request_fingerprint=request_fingerprint,
-                                )
                         else:
                             expected_version = int(existing_note.get("version", 1))
                             db.update_note(
@@ -2575,48 +2602,28 @@ async def import_notes(
                         created_note_id = str(
                             create_with_id or _compound_note_id(request_key)
                         )
-                        note_payload = {
-                            "title": parsed_note["title"],
-                            "content": parsed_note["content"],
-                            "conversation_id": None,
-                            "message_id": None,
-                        }
-                        request_fingerprint = _compound_note_request_fingerprint(
-                            coordinator,
-                            operation="note.import",
-                            note_id=created_note_id,
-                            note_fields=note_payload,
-                            keywords=keywords,
-                            folder_paths=None,
-                        )
-                        replay = _replay_notes_organization_plan(
-                            coordinator,
-                            idempotency_key=request_key,
-                            request_fingerprint=request_fingerprint,
-                            result_domain="notes.note",
-                        )
-                        if replay is not None:
-                            replayed_note = _capture_notes_organization_plan(
+                        note_payload = raw_note_payload
+                        request_fingerprint = (
+                            request_fingerprint
+                            or _compound_note_request_fingerprint(
                                 coordinator,
-                                replay,
-                                idempotency_key=request_key,
-                                source="notes-api",
-                            )
-                            if not isinstance(replayed_note, dict):
-                                raise SyncStoreError(
-                                    "Imported note replay did not return a note"
-                                )
-                            created_note = replayed_note
-                        else:
-                            created_note = _capture_compound_note(
-                                coordinator,
+                                operation=f"note.import.{payload.duplicate_strategy}",
                                 note_id=created_note_id,
-                                note_payload=note_payload,
+                                note_fields=note_payload,
                                 keywords=keywords,
                                 folder_paths=None,
-                                request_key=request_key,
-                                request_fingerprint=request_fingerprint,
                             )
+                        )
+                        created_note = _capture_compound_note(
+                            coordinator,
+                            note_id=created_note_id,
+                            note_payload=note_payload,
+                            keywords=keywords,
+                            folder_paths=None,
+                            request_key=request_key,
+                            request_fingerprint=request_fingerprint,
+                            response_status=status.HTTP_201_CREATED,
+                        )
                     else:
                         created_note_id = db.add_note(
                             title=parsed_note["title"],

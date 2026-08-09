@@ -292,6 +292,23 @@ class SyncV2Store:
             limit=limit,
         )
 
+    def get_envelope_for_entity_at_or_before(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str,
+        server_sequence: int,
+    ) -> SyncEnvelope | None:
+        """Return one accepted entity envelope at a durable sequence boundary."""
+
+        return self.db.get_envelope_for_entity_at_or_before(
+            dataset_id,
+            domain,
+            entity_id=entity_id,
+            server_sequence=server_sequence,
+        )
+
     def get_object_state(
         self,
         dataset_id: str,

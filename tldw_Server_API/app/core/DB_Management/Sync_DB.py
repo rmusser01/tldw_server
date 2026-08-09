@@ -3783,6 +3783,35 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_envelope_from_row(row) for row in result.rows]
 
+    def get_envelope_for_entity_at_or_before(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str,
+        server_sequence: int,
+    ) -> SyncEnvelope | None:
+        """Return the newest accepted entity envelope at one durable boundary."""
+
+        if server_sequence < 1:
+            return None
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain = ?
+                   AND status = 'accepted'
+                   AND entity_id = ?
+                   AND server_sequence <= ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+                """,
+                (dataset_id, domain, entity_id, server_sequence),
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
     def get_object_state(
         self,
         dataset_id: str,

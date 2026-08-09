@@ -1094,12 +1094,10 @@ class NotesOrganizationCoordinator:
     ) -> dict[str, Any]:
         """Rebuild one immutable compound response from its durable manifest."""
 
-        current = self._load_note_row(note_step.object_id)
         metadata = note_step.routing_metadata.get(_NOTE_RESPONSE_KEY)
         if not isinstance(metadata, Mapping):
-            return current
+            return self._load_note_row(note_step.object_id)
         response = {
-            **current,
             "id": note_step.object_id,
             "title": str(note_step.payload.get("title") or ""),
             "content": str(note_step.payload.get("content") or ""),
@@ -1220,20 +1218,27 @@ class NotesOrganizationCoordinator:
         sync_id: str,
         server_cursor_boundary: int | None,
     ):
-        history = self.service.store.list_envelopes_for_entity(
-            dataset_id,
-            domain,
-            entity_id=sync_id,
-            limit=100,
-        )
-        for envelope in history:
-            cursor = int(envelope.server_cursor or 0)
-            if server_cursor_boundary is not None and cursor > server_cursor_boundary:
-                continue
-            if envelope.operation != "upsert":
-                raise SyncStoreError("Organization resource was not active at replay")
-            return envelope
-        raise SyncStoreError("Organization resource history was not found")
+        boundary = server_cursor_boundary
+        if boundary is None:
+            history = self.service.store.list_envelopes_for_entity(
+                dataset_id,
+                domain,
+                entity_id=sync_id,
+                limit=1,
+            )
+            envelope = history[0] if history else None
+        else:
+            envelope = self.service.store.get_envelope_for_entity_at_or_before(
+                dataset_id,
+                domain,
+                entity_id=sync_id,
+                server_sequence=boundary,
+            )
+        if envelope is None:
+            raise SyncStoreError("Organization resource history was not found")
+        if envelope.operation != "upsert":
+            raise SyncStoreError("Organization resource was not active at replay")
+        return envelope
 
     def _folder_path(self, local_id: int) -> str:
         row = self.note_db.execute_query(

@@ -472,6 +472,38 @@ def test_profile_bootstrap_endpoint_idempotently_creates_dataset_and_device(
     assert len(sync_service.store.list_devices_for_user("user-1")) == 1
 
 
+def test_profile_bootstrap_rejects_reserved_server_origin_device_id(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    registration = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "server-origin",
+            "display_name": "Client",
+            "client_type": "chatbook",
+        },
+    )
+    response = client.post(
+        "/api/v1/sync/profile/bootstrap",
+        json={
+            "client_family": "chatbook",
+            "mode": "offline_sync",
+            "device_id": "server-origin",
+            "device_name": "Client",
+        },
+    )
+
+    expected_detail = {
+        "error_code": "reserved_device_id",
+        "message": "The requested Sync device identifier is reserved.",
+    }
+    assert registration.status_code == response.status_code == 400
+    assert registration.json()["detail"] == response.json()["detail"] == expected_detail
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+    assert sync_service.store.list_devices_for_user("user-1") == []
+
+
 def test_profile_endpoint_exposes_only_typed_notes_organization_summary(
     client: TestClient,
     sync_service: SyncV2Service,
