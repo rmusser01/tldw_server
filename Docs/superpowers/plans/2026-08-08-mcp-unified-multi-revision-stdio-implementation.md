@@ -410,6 +410,7 @@
 
 **Files:**
 - Create: `apps/mcp-unified/src/mcp_unified/gateway/protocol_stdio.py`
+- Create: `apps/mcp-unified/src/mcp_unified/gateway/protocol_stdio_adapters.py`
 - Modify: `apps/mcp-unified/src/mcp_unified/gateway/__init__.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py`
 - Modify: `.github/workflows/mcp-unified-rc.yml`
@@ -472,9 +473,14 @@
 - [ ] **Step 7: Commit Task 4**
 
   ```bash
-  git add apps/mcp-unified/src/mcp_unified/gateway/protocol_stdio.py apps/mcp-unified/src/mcp_unified/gateway/__init__.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py .github/workflows/mcp-unified-rc.yml
+  git add apps/mcp-unified/src/mcp_unified/gateway/protocol_stdio.py apps/mcp-unified/src/mcp_unified/gateway/protocol_stdio_adapters.py apps/mcp-unified/src/mcp_unified/gateway/__init__.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py .github/workflows/mcp-unified-rc.yml
   git commit -m "feat(mcp): serve strict protocol over portable stdio"
   ```
+
+  Accepted Task 4 split: the portable native/thread fallback adapters were
+  kept private in `protocol_stdio_adapters.py` rather than widening the public
+  gateway surface. The accepted Task 4 commit sequence is `fd263514a2`,
+  `e0ae834c95`, and `ac8408c5fd`.
 
 ---
 
@@ -484,7 +490,9 @@
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
 - Modify: `Helper_Scripts/mcp_unified_rc.py`
+- Modify: `.github/workflows/mcp-unified-rc.yml`
 - Modify: `.github/workflows/mcp-unified-publish.yml`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py`
 - Modify: `apps/mcp-unified/README.md`
 - Modify: `apps/mcp-unified/USER_GUIDE.md`
 - Modify: `apps/mcp-unified/src/mcp_unified/README.md`
@@ -511,7 +519,13 @@
 
 - [ ] **Step 3: Update RC/publish dependency and artifact gates**
 
-  Make the RC helper assert `jsonschema` is a base dependency in wheel and sdist metadata, run the five protocol suites from the installed artifact, and record the normative fixture commit/checksums. Update publish workflow setup to install `jsonschema>=4.23,<5`; keep live upload behind the existing protected environment, `MCP_UNIFIED_PUBLISH` confirmation, and `MCP_UNIFIED_ALLOW_PUBLISH=1` guard.
+  Make the RC helper assert `jsonschema` is a base dependency in wheel and sdist metadata, run the five protocol suites from the installed artifact, and record the normative fixture commit/checksums. Expand the protected portable-stdio workflow to exactly five jobs (Ubuntu Python 3.10-3.13 and Windows Python 3.11), with each job running the wheel and sdist downstream consumer as well as contracts, connection, and stdio tests. Update publish workflow setup to install `jsonschema>=4.23,<5`; keep live upload behind the existing protected environment, `MCP_UNIFIED_PUBLISH` confirmation, and `MCP_UNIFIED_ALLOW_PUBLISH=1` guard.
+
+  Task 4 divergence note: its accepted two-OS Python 3.11 portable-stdio
+  coverage proved the transport implementation. Task 5 intentionally widens
+  that protected gate to the bounded five-job OS/Python artifact matrix needed
+  for release acceptance; this is release verification, not a protocol
+  production change.
 
 - [ ] **Step 4: Update public documentation and package status**
 
@@ -562,7 +576,7 @@
 - [ ] **Step 8: Commit Task 5**
 
   ```bash
-  git add apps/mcp-unified Helper_Scripts/mcp_unified_rc.py .github/workflows/mcp-unified-publish.yml tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py backlog/tasks/task-13009\ -\ Implement-MCP-Unified-multi-revision-stdio-protocol.md Docs/superpowers/plans/2026-08-08-mcp-unified-multi-revision-stdio-implementation.md
+  git add apps/mcp-unified Helper_Scripts/mcp_unified_rc.py .github/workflows/mcp-unified-rc.yml .github/workflows/mcp-unified-publish.yml tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py backlog/tasks/task-13009\ -\ Implement-MCP-Unified-multi-revision-stdio-protocol.md Docs/superpowers/plans/2026-08-08-mcp-unified-multi-revision-stdio-implementation.md
   git commit -m "release(mcp): prepare multi-revision stdio 0.2.0"
   ```
 

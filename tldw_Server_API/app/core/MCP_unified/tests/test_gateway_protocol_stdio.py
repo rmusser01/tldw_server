@@ -726,24 +726,42 @@ async def test_compatibility_stdio_keeps_parse_error_and_notification_behavior()
 
 
 def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> None:
-    """Removing either real platform job would invalidate the portable package claim."""
+    """The protected matrix must prove each supported Python artifact contract."""
 
     workflow = yaml.load(
         (_REPO_ROOT / ".github/workflows/mcp-unified-rc.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     job = workflow["jobs"]["portable-stdio"]
-    assert job["strategy"]["matrix"]["os"] == ["ubuntu-latest", "windows-latest"]
+    assert job["name"] == "Portable stdio (${{ matrix.os }}, Python ${{ matrix.python }})"
+    assert job["strategy"]["matrix"] == {
+        "include": [
+            {"os": "ubuntu-latest", "python": "3.10"},
+            {"os": "ubuntu-latest", "python": "3.11"},
+            {"os": "ubuntu-latest", "python": "3.12"},
+            {"os": "ubuntu-latest", "python": "3.13"},
+            {"os": "windows-latest", "python": "3.11"},
+        ]
+    }
     assert job["runs-on"] == "${{ matrix.os }}"
+    assert job["needs"] == "admission"
+    assert workflow["jobs"]["admission"]["uses"] == "./.github/workflows/license-first-admission.yml"
     checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
     assert re.fullmatch(r"actions/checkout@[0-9a-f]{40}", checkout["uses"])
+    setup_python = next(step for step in job["steps"] if step["name"] == "Setup Python")
+    assert setup_python["with"]["python-version"] == "${{ matrix.python }}"
     run_blocks = "\n".join(step["run"] for step in job["steps"] if "run" in step)
     assert 'python -m pip install "./apps/mcp-unified[dev]"' in run_blocks
     assert "test_gateway_protocol_contracts.py" in run_blocks
     assert "test_gateway_protocol_connection.py" in run_blocks
     assert "test_gateway_protocol_stdio.py" in run_blocks
+    assert "test_gateway_protocol_artifact_consumer.py" in run_blocks
     assert "--noconftest" in run_blocks
     assert "-c apps/mcp-unified/pyproject.toml" in run_blocks
+    assert (
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py"
+        in workflow["on"]["pull_request"]["paths"]
+    )
 
 
 def _pipe_files() -> tuple[Any, Any, list[int]]:

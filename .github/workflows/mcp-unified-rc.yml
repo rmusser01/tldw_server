@@ -13,6 +13,7 @@ on:
       - .github/tests/test_mcp_unified_artifact_gate.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py
@@ -89,7 +90,7 @@ jobs:
           if-no-files-found: error
 
   portable-stdio:
-    name: Portable stdio (${{ matrix.os }})
+    name: Portable stdio (${{ matrix.os }}, Python ${{ matrix.python }})
     needs: admission
     if: >-
       always() && !cancelled() &&
@@ -104,7 +105,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.11"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -117,7 +128,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install standalone base and dev dependencies
         run: |
@@ -132,4 +143,5 @@ jobs:
           tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py
           tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py
           tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py
+          tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
           -q

@@ -4,17 +4,20 @@ This guide is for users and operators working with the package-local MCP
 Unified standalone gateway boundary. It focuses on profiles, external servers,
 credential grants, configuration snapshots, and remote runtime commands.
 
-The package is currently internal/experimental and published on PyPI as the
-early standalone boundary extracted from the `tldw-server` source tree. The
-package CLI does not launch a supported end-user gateway server; remote runtime
-commands require an already running package-local gateway mounted by a host
-application.
+The package status is `public-alpha`, and its publishing status is `published`.
+Version `0.2.0` remains a release candidate until the protected PyPI publish
+succeeds. The package is published on PyPI; the former internal/experimental
+phase applies only to earlier
+releases. The package CLI does not launch a supported end-user gateway server;
+remote runtime commands require an already running package-local gateway
+mounted by a host application.
 
 ## Publishing Readiness
 
-The standalone package is published on PyPI, while the package status remains
-`internal-experimental`. New users can install the released package from PyPI;
-developers testing unpublished changes should install from the repository.
+The standalone package has publishing status `published` and package status
+`public-alpha`. New users can install the released package from PyPI;
+developers testing the `0.2.0` release candidate before its protected publish
+should install from the repository.
 
 Run the full internal release candidate gate from the repository root:
 
@@ -40,6 +43,12 @@ From PyPI:
 
 ```bash
 python -m pip install "mcp-unified[gateway]"
+```
+
+Downstream applications should use a compatible-minor pin:
+
+```bash
+python -m pip install "mcp-unified[gateway]~=0.2.0"
 ```
 
 From the repository root, when testing unpublished changes:
@@ -80,6 +89,73 @@ available and run the deterministic in-process fixture:
 mcp-unified-smoke --help
 mcp-unified-smoke inprocess --json-report -
 ```
+
+### Embed The Strict Stdio Server
+
+The public `mcp_unified.gateway` API supports these exact protocol profiles:
+
+| Revision | Lifecycle | Batch requests |
+| --- | --- | --- |
+| `2026-07-28` | Per-request `_meta`; no initialize session | Rejected |
+| `2025-11-25` | `initialize`, then operations | Rejected |
+| `2025-06-18` | `initialize`, then operations | Rejected |
+| `2025-03-26` | Standalone `initialize`, then operations | Accepted only after initialization |
+| `2024-11-05` | `initialize`, then operations | Rejected |
+
+Strict stdio owns negotiation, validation, profile projection, pagination,
+cancellation, limits, and newline-delimited binary framing. Existing
+HTTP/WebSocket routes retain their compatibility contracts; this package does
+not claim modern MCP conformance for HTTP.
+
+Pass a `GatewayCoreRuntime` implementation to the public entrypoint. Inject
+caller-owned asynchronous binary streams for an embedded transport, or omit
+them to use process stdin/stdout:
+
+```python
+import asyncio
+
+from mcp_unified.gateway import GatewayLimits, serve_stdio
+
+raise SystemExit(
+    asyncio.run(
+        serve_stdio(runtime, limits=GatewayLimits(max_in_flight=1))
+    )
+)
+```
+
+The runtime and host application own catalog contents, authorization, policy,
+audit, local files and databases, application errors, and privacy decisions.
+The protocol layer neither exposes nor duplicates application-local data, and
+self-reported client identity is never an authorization input.
+
+The exact `GatewayLimits` defaults are:
+
+| Limit | Default | Limit | Default |
+| --- | ---: | --- | ---: |
+| `max_input_line_bytes` | 1,048,576 | `max_output_line_bytes` | 1,048,576 |
+| `max_result_bytes` | 786,432 | `max_json_depth` | 64 |
+| `max_in_flight` | 16 | `default_catalog_page_size` | 50 |
+| `max_catalog_page_size` | 100 | `max_catalog_items` | 10,000 |
+| `max_batch_items` | 100 | `max_requests_per_minute` | 600 |
+| `request_burst` | 32 | `max_schema_bytes` | 262,144 |
+| `max_schema_depth` | 32 | `max_schema_subschemas` | 1,024 |
+| `max_schema_refs` | 256 | `max_schema_pattern_chars` | 4,096 |
+| `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 1.0 |
+| `graceful_shutdown_timeout_seconds` | 5.0 | | |
+
+The modern profile emits private, zero-TTL cache hints:
+`{"ttlMs": 0, "cacheScope": "private"}`. Legacy profiles omit those modern
+fields. Public errors are typed and bounded; they allowlist stable reason,
+kind, and safe limit metadata rather than leaking payloads, paths, credentials,
+schemas, exception strings, or private result sizes. The smallest generic
+overflow response is exactly 79 bytes including its newline: an output limit
+of 79 emits it, while 78 fails closed with no truncated line.
+
+Cancellation propagates to pending asynchronous runtime work. Shutdown uses
+the configured 5.0-second grace period and reports residual input, output, or
+cleanup work to stderr only. Python cannot forcibly stop a non-returning worker
+thread, so hosts must bound synchronous work; clients supervising a stuck child
+must escalate from closing streams to process termination and finally a kill.
 
 ## 2. Choose A Store
 

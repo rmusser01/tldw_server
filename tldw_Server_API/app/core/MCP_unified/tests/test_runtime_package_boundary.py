@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
 from pydantic import ValidationError
 
 pytestmark = pytest.mark.unit
@@ -299,6 +300,39 @@ def _read_wheel_metadata(wheel: Path) -> Message:
     return Parser().parsestr(raw_metadata)
 
 
+def _read_sdist_metadata(sdist: Path) -> Message:
+    """Read the source distribution PKG-INFO metadata."""
+
+    with tarfile.open(sdist, "r:gz") as archive:
+        metadata_members = [
+            member
+            for member in archive.getmembers()
+            if member.name.endswith("/PKG-INFO")
+            and len(Path(member.name).parts) == 2
+        ]
+        assert len(metadata_members) == 1  # nosec B101
+        extracted = archive.extractfile(metadata_members[0])
+        assert extracted is not None  # nosec B101
+        raw_metadata = extracted.read().decode("utf-8")
+
+    return Parser().parsestr(raw_metadata)
+
+
+def _base_requirement(metadata: Message, distribution_name: str) -> Requirement:
+    """Return one unmarked base requirement from distribution metadata."""
+
+    normalized_name = distribution_name.lower().replace("_", "-")
+    matches = [
+        requirement
+        for value in metadata.get_all("Requires-Dist") or []
+        if (requirement := Requirement(value)).name.lower().replace("_", "-")
+        == normalized_name
+        and requirement.marker is None
+    ]
+    assert len(matches) == 1  # nosec B101
+    return matches[0]
+
+
 def _read_wheel_entry_points(wheel: Path) -> configparser.ConfigParser:
     """Read wheel entry points as a ConfigParser document."""
 
@@ -477,7 +511,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     metadata = importlib.import_module("mcp_unified.package_metadata")
 
     assert metadata.PACKAGE_NAME == "mcp-unified"
-    assert metadata.PACKAGE_STATUS == "internal-experimental"
+    assert metadata.PACKAGE_STATUS == "public-alpha"
     assert metadata.PUBLISHING_STATUS == "published"
     assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
     assert "jsonschema" in metadata.PROJECT_DEPENDENCIES
@@ -546,7 +580,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     }
 
 
-def test_mcp_unified_publish_metadata_is_ready_but_internal() -> None:
+def test_mcp_unified_publish_metadata_is_ready_for_public_alpha() -> None:
     """Standalone package metadata should be published but still experimental."""
 
     metadata = importlib.import_module("mcp_unified.package_metadata")
@@ -586,7 +620,7 @@ def test_mcp_unified_publish_metadata_is_ready_but_internal() -> None:
 
     summary = metadata.package_metadata_summary()
     assert summary["publishing_status"] == "published"  # nosec B101
-    assert summary["package_status"] == "internal-experimental"  # nosec B101
+    assert summary["package_status"] == "public-alpha"  # nosec B101
     assert summary["authors"] == list(metadata.PACKAGE_AUTHORS)  # nosec B101
     assert summary["maintainers"] == list(metadata.PACKAGE_MAINTAINERS)  # nosec B101
     assert summary["keywords"] == list(metadata.PACKAGE_KEYWORDS)  # nosec B101
@@ -906,6 +940,20 @@ def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     )  # nosec B101
 
 
+def test_mcp_unified_artifacts_declare_bounded_jsonschema_base_dependency(
+    standalone_distributions: tuple[Path, Path],
+) -> None:
+    """Wheel and sdist metadata must carry the validator as a base dependency."""
+
+    wheel, sdist = standalone_distributions
+    for distribution_metadata in (
+        _read_wheel_metadata(wheel),
+        _read_sdist_metadata(sdist),
+    ):
+        requirement = _base_requirement(distribution_metadata, "jsonschema")
+        assert str(requirement.specifier) == "<5,>=4.23"  # nosec B101
+
+
 def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -1130,6 +1178,22 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
         step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
         for step in pypi_job["steps"]
     )
+
+
+def test_mcp_unified_publish_workflow_installs_direct_validator_dependency() -> None:
+    """RC and upload build jobs must install the direct schema dependency."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-publish.yml"
+    workflow = _load_workflow(workflow_path)
+    install_blocks = [
+        str(step["run"])
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Install packaging tools"
+    ]
+
+    assert len(install_blocks) == 2  # nosec B101
+    assert all('"jsonschema>=4.23,<5"' in block for block in install_blocks)  # nosec B101
 
 
 def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
