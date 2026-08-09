@@ -93,6 +93,7 @@ from .replay import SyncReplayRepairer, SyncReplayRepairResult
 from .restore import (
     OBJECT_RESTORE_DOMAINS,
     WHOLE_OBJECT_RESTORE_DOMAINS,
+    LocalRestoreInventoryItem,
     RestorePlanningError,
     attachment_available_locally,
     attachment_restore_status,
@@ -509,6 +510,22 @@ class SyncRestorePreviewObjectConflict:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncRestoreOrderedAction:
+    """One safe, executable step in the canonical restore-preview plan."""
+
+    plan_index: int
+    action: str
+    domain: SyncDomain
+    object_id: str
+    operation: SyncOperation
+    server_cursor: int
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncRestorePreviewAttachmentRef:
     dataset_id: str
     attachment_id: str
@@ -535,6 +552,7 @@ class SyncRestorePreviewWarning:
 @dataclass(frozen=True, slots=True)
 class SyncRestorePreview:
     datasets: list[SyncRestorePreviewDataset] = field(default_factory=list)
+    ordered_actions: list[SyncRestoreOrderedAction] = field(default_factory=list)
     safe_applies: list[SyncRestorePreviewObject] = field(default_factory=list)
     object_conflicts: list[SyncRestorePreviewObjectConflict] = field(default_factory=list)
     tombstones: list[SyncRestorePreviewObject] = field(default_factory=list)
@@ -1690,6 +1708,7 @@ class SyncV2Service:
         datasets = self._accessible_datasets(user_id=user_id, dataset_ids=dataset_ids)
 
         preview_datasets: list[SyncRestorePreviewDataset] = []
+        ordered_actions: list[SyncRestoreOrderedAction] = []
         safe_applies: list[SyncRestorePreviewObject] = []
         object_conflicts: list[SyncRestorePreviewObjectConflict] = []
         tombstones: list[SyncRestorePreviewObject] = []
@@ -1700,6 +1719,7 @@ class SyncV2Service:
         total_counts: dict[str, int] = {}
         key_status: dict[str, dict[str, bool]] = {}
         warnings: list[SyncRestorePreviewWarning] = []
+        planned_inventory_keys: set[tuple[str, SyncDomain, str]] = set()
 
         for dataset in datasets:
             dataset_domains = [
@@ -1825,7 +1845,21 @@ class SyncV2Service:
                         deleted=deleted,
                     )
                 )
+                inventory_key = (dataset.dataset_id, domain, object_id)
                 if deleted:
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="tombstone",
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                        )
+                    )
                     tombstones.append(
                         SyncRestorePreviewObject(
                             dataset_id=dataset.dataset_id,
@@ -1846,18 +1880,49 @@ class SyncV2Service:
                             parent_id=envelope.parent_id,
                         )
                     )
+                    local_index[inventory_key] = LocalRestoreInventoryItem(
+                        dataset_id=dataset.dataset_id,
+                        domain=domain,
+                        object_id=object_id,
+                        object_revision=server_revision,
+                        object_hash=server_hash,
+                        deleted=True,
+                    )
+                    planned_inventory_keys.add(inventory_key)
                     continue
-                if local_item is None or local_matches:
+                if (
+                    local_item is None
+                    or local_matches
+                    or inventory_key in planned_inventory_keys
+                ):
+                    action = (
+                        "noop"
+                        if local_matches
+                        else restore_action_for_domain(
+                            domain,
+                            deleted=False,
+                            local_present=False,
+                        )
+                    )
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="noop" if action == "noop" else "apply",
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                        )
+                    )
                     safe_applies.append(
                         SyncRestorePreviewObject(
                             dataset_id=dataset.dataset_id,
                             domain=domain,
                             object_id=object_id,
-                            action=restore_action_for_domain(
-                                domain,
-                                deleted=False,
-                                local_present=local_item is not None,
-                            ),
+                            action=action,
                             server_revision=server_revision,
                             server_hash=server_hash,
                             server_cursor=envelope.server_cursor,
@@ -1868,6 +1933,15 @@ class SyncV2Service:
                             parent_id=envelope.parent_id,
                         )
                     )
+                    local_index[inventory_key] = LocalRestoreInventoryItem(
+                        dataset_id=dataset.dataset_id,
+                        domain=domain,
+                        object_id=object_id,
+                        object_revision=server_revision,
+                        object_hash=server_hash,
+                        deleted=False,
+                    )
+                    planned_inventory_keys.add(inventory_key)
                     continue
                 conflict_type = (
                     "whole_object_conflict"
@@ -1888,6 +1962,20 @@ class SyncV2Service:
                         local_hash=local_item.object_hash,
                         local_deleted=local_item.deleted,
                         message="Local object differs from the server restore candidate.",
+                    )
+                )
+                ordered_actions.append(
+                    SyncRestoreOrderedAction(
+                        plan_index=len(ordered_actions),
+                        action="conflict",
+                        domain=domain,
+                        object_id=object_id,
+                        operation=envelope.operation,
+                        server_cursor=envelope.server_cursor or 0,
+                        mutation_group_id=envelope.mutation_group_id,
+                        mutation_step=envelope.mutation_step,
+                        mutation_step_count=envelope.mutation_step_count,
+                        code=conflict_type,
                     )
                 )
 
@@ -2017,6 +2105,7 @@ class SyncV2Service:
 
         return SyncRestorePreview(
             datasets=preview_datasets,
+            ordered_actions=ordered_actions,
             safe_applies=safe_applies,
             object_conflicts=object_conflicts,
             tombstones=tombstones,

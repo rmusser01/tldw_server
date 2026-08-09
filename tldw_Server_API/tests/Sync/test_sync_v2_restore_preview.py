@@ -437,6 +437,10 @@ def test_restore_preview_matching_local_inventory_is_safe_noop(
     assert [(item.domain, item.object_id, item.action) for item in preview.safe_applies] == [
         ("notes.note", "note-1", "noop")
     ]
+    assert [
+        (item.plan_index, item.action, item.domain, item.object_id, item.operation)
+        for item in preview.ordered_actions
+    ] == [(0, "noop", "notes.note", "note-1", "upsert")]
     assert preview.object_conflicts == []
 
 
@@ -964,6 +968,257 @@ def test_tombstone_graph_keeps_historical_group_before_later_exact_restore(
     assert [item.server_cursor for item in preview.safe_applies] == [
         restored.server_cursor
     ]
+
+
+def test_restore_preview_ordered_actions_simulate_historical_tombstones_before_restore(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    folder_id = "22222222-2222-4222-8222-222222222222"
+    tombstone_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-public-plan-history",
+            _organization_tombstone(
+                client_envelope_id="env-public-keyword-tombstone",
+                domain="notes.keyword",
+                object_id=keyword_id,
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-public-folder-tombstone",
+                domain="notes.folder",
+                object_id=folder_id,
+            ),
+        )
+    )
+    restored = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-public-keyword-restore",
+            object_id=keyword_id,
+            object_revision=3,
+            base_server_cursor=tombstone_group[0].server_cursor,
+            base_object_revision=2,
+            base_object_hash=tombstone_group[0].payload_hash,
+            routing_metadata={"restore_intent": True},
+            payload={"keyword": "Restored synthetic keyword"},
+            payload_hash="sha256:public-keyword-restore",
+        )
+    )
+    local_inventory = [
+        {
+            "domain": "notes.keyword",
+            "object_id": keyword_id,
+            "object_revision": 3,
+            "object_hash": restored.payload_hash,
+            "deleted": False,
+        }
+    ]
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        local_inventory=local_inventory,
+    )
+    repeated = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        local_inventory=local_inventory,
+    )
+
+    assert preview.ordered_actions == repeated.ordered_actions
+    assert [
+        (
+            item.plan_index,
+            item.action,
+            item.domain,
+            item.object_id,
+            item.operation,
+            item.server_cursor,
+            item.mutation_group_id,
+            item.mutation_step,
+            item.mutation_step_count,
+        )
+        for item in preview.ordered_actions
+    ] == [
+        (
+            0,
+            "tombstone",
+            "notes.keyword",
+            keyword_id,
+            "tombstone",
+            tombstone_group[0].server_cursor,
+            "server-origin-public-plan-history",
+            0,
+            2,
+        ),
+        (
+            1,
+            "tombstone",
+            "notes.folder",
+            folder_id,
+            "tombstone",
+            tombstone_group[1].server_cursor,
+            "server-origin-public-plan-history",
+            1,
+            2,
+        ),
+        (
+            2,
+            "apply",
+            "notes.keyword",
+            keyword_id,
+            "upsert",
+            restored.server_cursor,
+            None,
+            None,
+            None,
+        ),
+    ]
+    assert [(item.object_id, item.action) for item in preview.safe_applies] == [
+        (keyword_id, "apply")
+    ]
+    assert [item.object_id for item in preview.tombstones] == [keyword_id, folder_id]
+
+    simulated_live: dict[tuple[str, str], bool] = {}
+    for item in preview.ordered_actions:
+        if item.action == "conflict":
+            break
+        if item.action == "tombstone":
+            simulated_live[(item.domain, item.object_id)] = False
+        elif item.action == "apply":
+            simulated_live[(item.domain, item.object_id)] = True
+    assert simulated_live == {
+        ("notes.keyword", keyword_id): True,
+        ("notes.folder", folder_id): False,
+    }
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "domains": list(NOTES_ORGANIZATION_DOMAINS),
+            "local_inventory": local_inventory,
+        },
+    )
+    assert response.status_code == 200
+    assert [
+        (item["plan_index"], item["action"], item["server_cursor"])
+        for item in response.json()["ordered_actions"]
+    ] == [
+        (0, "tombstone", tombstone_group[0].server_cursor),
+        (1, "tombstone", tombstone_group[1].server_cursor),
+        (2, "apply", restored.server_cursor),
+    ]
+    assert response.json()["safe_applies"][0]["action"] == "apply"
+
+
+def test_restore_preview_endpoint_exposes_one_safe_canonical_ordered_plan(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    keyword_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    tombstoned_keyword_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    folder_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    note = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-public-plan-note", object_id=note_id)
+    )
+    keyword = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-public-plan-keyword",
+            object_id=keyword_id,
+        )
+    )
+    link = sync_service.store.insert_envelope(
+        _keyword_link_envelope(
+            note_id=note_id,
+            keyword_id=keyword_id,
+            client_envelope_id="env-public-plan-link",
+        )
+    )
+    tombstone_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-public-plan-latest",
+            _organization_tombstone(
+                client_envelope_id="env-public-plan-keyword-tombstone",
+                domain="notes.keyword",
+                object_id=tombstoned_keyword_id,
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-public-plan-folder-tombstone",
+                domain="notes.folder",
+                object_id=folder_id,
+            ),
+        )
+    )
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "domains": ["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+            "local_inventory": [
+                {
+                    "domain": "notes.note",
+                    "object_id": note_id,
+                    "object_revision": 1,
+                    "object_hash": "sha256:local-divergent-note",
+                    "deleted": False,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["server_cursor"] for item in body["ordered_actions"]] == [
+        note.server_cursor,
+        keyword.server_cursor,
+        link.server_cursor,
+        tombstone_group[0].server_cursor,
+        tombstone_group[1].server_cursor,
+    ]
+    assert [item["action"] for item in body["ordered_actions"]] == [
+        "conflict",
+        "apply",
+        "apply",
+        "tombstone",
+        "tombstone",
+    ]
+    assert [item["plan_index"] for item in body["ordered_actions"]] == list(range(5))
+    assert [
+        (
+            item.get("mutation_group_id"),
+            item.get("mutation_step"),
+            item.get("mutation_step_count"),
+        )
+        for item in body["ordered_actions"][-2:]
+    ] == [
+        ("server-origin-public-plan-latest", 0, 2),
+        ("server-origin-public-plan-latest", 1, 2),
+    ]
+    assert set(body["ordered_actions"][0]) == {
+        "plan_index",
+        "action",
+        "domain",
+        "object_id",
+        "operation",
+        "server_cursor",
+        "mutation_group_id",
+        "mutation_step",
+        "mutation_step_count",
+        "code",
+    }
+    assert body["ordered_actions"][0]["code"] == "whole_object_conflict"
+    assert body["restore_status"] == "blocked_by_conflicts"
+    assert len(body["safe_applies"]) == 2
+    assert len(body["object_conflicts"]) == 1
+    assert len(body["tombstones"]) == 2
+    assert "Synthetic keyword" not in str(body["ordered_actions"])
 
 
 def test_tombstone_graph_keeps_unrelated_live_before_latest_tombstone_group(

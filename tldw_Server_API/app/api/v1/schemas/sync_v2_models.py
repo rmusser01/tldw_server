@@ -46,6 +46,7 @@ ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
+SyncRestoreOrderedActionKind = Literal["apply", "tombstone", "noop", "conflict"]
 SyncDeviceStatus = Literal["pending_authorization", "active", "paused", "revoked"]
 SyncDeviceAuthorizationStatus = Literal["pending", "approved", "rejected"]
 SyncBackgroundLeaseStatus = Literal["acquired", "refreshed", "held_by_other"]
@@ -968,6 +969,23 @@ class SyncRestorePreviewObjectConflict(BaseModel):
     message: str | None = None
 
 
+class SyncRestoreOrderedAction(BaseModel):
+    """One content-free action in canonical restore execution order."""
+
+    plan_index: int = Field(..., ge=0)
+    action: SyncRestoreOrderedActionKind
+    domain: SyncDomain
+    object_id: str
+    operation: SyncOperation
+    server_cursor: int = Field(..., ge=0)
+    mutation_group_id: str | None = None
+    mutation_step: int | None = Field(None, ge=0)
+    mutation_step_count: int | None = Field(None, ge=1)
+    code: str | None = None
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
 class SyncRestorePreviewAttachmentRef(BaseModel):
     """Attachment metadata surfaced in a restore preview."""
 
@@ -998,6 +1016,7 @@ class SyncRestorePreviewResponse(BaseModel):
     """Non-mutating Sync v2 M1 restore preview response."""
 
     datasets: list[SyncRestorePreviewDataset] = Field(default_factory=list)
+    ordered_actions: list[SyncRestoreOrderedAction] = Field(default_factory=list)
     safe_applies: list[SyncRestorePreviewObject] = Field(default_factory=list)
     object_conflicts: list[SyncRestorePreviewObjectConflict] = Field(default_factory=list)
     tombstones: list[SyncRestorePreviewObject] = Field(default_factory=list)
@@ -1809,6 +1828,7 @@ __all__ = [
     "SyncRestoreManifestDevice",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestResponse",
+    "SyncRestoreOrderedAction",
     "SyncRestorePreviewAttachmentRef",
     "SyncRestorePreviewDataset",
     "SyncRestorePreviewRequest",

@@ -4,7 +4,7 @@ title: Synchronize Notes keywords collections and folders
 status: Done
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-09 20:59'
+updated_date: '2026-08-09 21:30'
 labels:
   - notes
   - sync-v2
@@ -142,6 +142,8 @@ Reason: This task implements the existing durable cross-database mutation-group 
 Related ADR path: Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md
 
 No lesson was added: execution found routine stale test expectations and sandbox-only SQLite/cache permissions, with no new repository-general incident beyond the existing testing-evidence guidance.
+
+Spec Fix Round 4/5 adds the public content-free ordered_actions restore plan while retaining safe_applies, object_conflicts, tombstones, counts, and existing aliases as compatibility category summaries. Each ordered row exposes only plan index, action kind, domain/object identity, operation, server cursor, optional immutable mutation-group ID/step/size, and optional stable conflict code. Restore preview now classifies canonical actions sequentially against an in-memory simulated inventory, so a historical tombstone followed by an exact live restore is apply rather than an unsafe noop; preview does not mutate product state. Real service/store and FastAPI coverage verifies historical grouped tombstones then restore, ordinary live/link work before compatible tombstones, stable plan/group metadata, safe noop/conflict rows, final simulated state, and the public field allow-list. Docs/API/Sync_V2_M1.md identifies ordered_actions as executable and legacy arrays as summaries, and includes a content-neutral synthetic example. RED: 2 failed, 26 deselected, 2 warnings. Final focused: 3 passed, 25 deselected, 2 warnings; restore/repair: 44 passed, 2 warnings; endpoint selectors: 4 passed, 53 deselected, 2 warnings; service selector: 2 passed, 92 deselected, 2 warnings; authorized capture/batch: 48 passed, 7 warnings; Step 8: 89 passed, 2 warnings and 74 passed, 2 warnings; touched Ruff passed; Bandit exited 0. No new ADR or general lesson required; ADR-032 and ADR-033 remain governing. Known non-blocking concerns remain the documented 20-finding broad Ruff legacy baseline and optional live PostgreSQL skip.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

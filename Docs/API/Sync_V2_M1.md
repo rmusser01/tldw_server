@@ -760,7 +760,8 @@ repair flow.
 Compares server envelopes against a local inventory and returns a restore plan.
 Clean profile restore uses the same endpoint with an empty `local_inventory`.
 The response includes available datasets/domains, latest per-domain cursors,
-safe applies, tombstones, missing blobs, attachment-reference summaries,
+one canonical `ordered_actions` plan, compatibility safe applies and tombstones,
+missing blobs, attachment-reference summaries,
 envelope ranges needed for local apply, and encryption/key status.
 
 Restore planning preserves each complete stored mutation group and chronological
@@ -770,6 +771,69 @@ compatible live and relationship work, but this is not a blanket override of
 history: an immutable historical tombstone group remains before a later exact
 restore of the same identity. A contradictory dependency or chronology graph
 fails closed with `sync_restore_plan_invalid`.
+
+`ordered_actions` is the only executable object-action sequence. Its zero-based
+`plan_index` values are stable for the returned plan. Each row contains only
+`plan_index`, `action`, `domain`, `object_id`, `operation`, `server_cursor`, optional
+`mutation_group_id`/`mutation_step`/`mutation_step_count`, and an optional stable
+`code`. It never contains payload data, labels, content, local paths or keys, raw
+errors, or routing metadata. Complete group steps have the same opaque group ID and
+step count and remain adjacent in ascending step order.
+
+The action is `apply`, `tombstone`, `noop`, or `conflict`. A conflict's safe `code`
+describes its category and blocks execution of the plan. `safe_applies`,
+`object_conflicts`, and `tombstones` remain compatibility category views, and the
+existing counts are derived from the same ordered plan; concatenating those arrays
+does not reconstruct execution order.
+
+Classification simulates the local inventory sequentially without changing product
+state. An earlier planned tombstone therefore changes the state used to classify a
+later exact restore. If the initial inventory already matches that later live head,
+the later action is still `apply`, not `noop`, because the preceding tombstone would
+otherwise undo the final state. For example:
+
+```json
+{
+  "ordered_actions": [
+    {
+      "plan_index": 0,
+      "action": "tombstone",
+      "domain": "notes.keyword",
+      "object_id": "11111111-1111-4111-8111-111111111111",
+      "operation": "tombstone",
+      "server_cursor": 41,
+      "mutation_group_id": "server-origin-group-0001",
+      "mutation_step": 0,
+      "mutation_step_count": 2,
+      "code": null
+    },
+    {
+      "plan_index": 1,
+      "action": "tombstone",
+      "domain": "notes.folder",
+      "object_id": "22222222-2222-4222-8222-222222222222",
+      "operation": "tombstone",
+      "server_cursor": 42,
+      "mutation_group_id": "server-origin-group-0001",
+      "mutation_step": 1,
+      "mutation_step_count": 2,
+      "code": null
+    },
+    {
+      "plan_index": 2,
+      "action": "apply",
+      "domain": "notes.keyword",
+      "object_id": "11111111-1111-4111-8111-111111111111",
+      "operation": "upsert",
+      "server_cursor": 43,
+      "mutation_group_id": null,
+      "mutation_step": null,
+      "mutation_step_count": null,
+      "code": null
+    }
+  ]
+}
+```
 
 ### Request
 
