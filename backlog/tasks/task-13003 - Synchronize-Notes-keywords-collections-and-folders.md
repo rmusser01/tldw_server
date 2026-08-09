@@ -4,7 +4,7 @@ title: Synchronize Notes keywords collections and folders
 status: Done
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-09 20:41'
+updated_date: '2026-08-09 20:59'
 labels:
   - notes
   - sync-v2
@@ -65,7 +65,7 @@ Reason: This task adds durable cross-database mutation groups and a local derive
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Completed first-class Sync v2 ownership for the indivisible six-domain Notes organization group. The implementation uses strict public payloads and deterministic resource/link identities, durable mutation-group append followed by resumable ordered product projection, readiness-gated bootstrap, device-aware pulls, conflict-aware materialization, dependency-ordered restore, and group-aware repair. Restore loads and validates each complete persisted group, rejects explicit filters that would split it, retains historical grouped siblings before superseding heads, and fails closed for incomplete or unsatisfiable dependency plans. For a live relationship dependency, restore uses a valid earlier provider inside the immutable group; otherwise it chooses only the latest eligible earlier external revision or, when none exists, the earliest eligible later revision. Repair uses the same canonical full-envelope group validator as server-origin batch resume, resumes pending suffixes and singletons, and reports corrupt or blocked work only through stable safe fields. `Docs/API/Sync_V2_M1.md` documents the complete public contract, corrected SHA-256 vectors, bootstrap/repair behavior, ownership and provenance rules, and explicit non-goals.
+Completed first-class Sync v2 ownership for the indivisible six-domain Notes organization group. The implementation uses strict public payloads and deterministic resource/link identities, durable mutation-group append followed by resumable ordered product projection, readiness-gated bootstrap, device-aware pulls, conflict-aware materialization, dependency-ordered restore, and group-aware repair. Restore loads and validates each complete persisted group, rejects explicit filters that would split it, retains historical grouped siblings before superseding heads, and fails closed for incomplete or unsatisfiable dependency plans. For a live relationship dependency, restore uses a valid earlier provider inside the immutable group; otherwise it chooses only the latest eligible earlier external revision or, when none exists, the earliest eligible later revision. Compatible tombstones follow applicable live/link work, while an immutable historical tombstone group remains before later exact restores of a shared identity. Repair uses the same canonical full-envelope group validator as server-origin batch resume, resumes pending suffixes and singletons, and reports corrupt or blocked work only through stable safe fields. `Docs/API/Sync_V2_M1.md` documents the complete public contract, corrected SHA-256 vectors, bootstrap/repair behavior, ownership and provenance rules, and explicit non-goals.
 
 | AC | Evidence |
 | --- | --- |
@@ -74,7 +74,7 @@ Completed first-class Sync v2 ownership for the indivisible six-domain Notes org
 | 3 | `test_sync_v2_server_origin_batch.py`, `test_sync_v2_server_origin_capture.py`, and `test_notes_organization_sync_api.py` verify durable canonical capture for direct and compound REST mutations. |
 | 4 | `test_notes_organization_sync_api.py` and the M1-only compatibility cases in `test_sync_v2_server_origin_capture.py` verify ready-group writes and stable fail-closed behavior when the group is absent. |
 | 5 | Adapter and API tests cover rename, hierarchy, membership, merge, delete/update, idempotent replay, and reviewable conflict paths. |
-| 6 | SQLite-backed service/store tests in `test_sync_v2_restore_preview.py` cover all six domains, immutable groups, internal/earlier/later resource providers, multiple historical revisions, filters, missing dependencies, and genuine contradictions; `test_sync_v2_replay_repair.py` covers canonical stored-plan validation, pending/failed resume, safe blocked results, and exact-post-state bookkeeping. `Docs/API/Sync_V2_M1.md` records the matching public behavior. |
+| 6 | SQLite-backed service/store tests in `test_sync_v2_restore_preview.py` cover all six domains, immutable groups, internal/earlier/later resource providers, multiple historical revisions, compatible tombstone-last ordering, historical tombstone groups before later exact restores, filters, missing dependencies, and genuine contradictions; `test_sync_v2_replay_repair.py` covers canonical stored-plan validation, pending/failed resume, safe blocked results, and exact-post-state bookkeeping. `Docs/API/Sync_V2_M1.md` records the matching public behavior. |
 | 7 | `test_sync_v2_profile_bootstrap.py` and `test_sync_v2_notes_organization_bootstrap.py` verify all-or-none enrollment, source snapshot capture, interruption recovery, and readiness gates. |
 | 8 | `test_sync_v2_service.py` verifies device-requested implicit pulls and excludes unsupported organization domains from legacy devices. |
 
@@ -120,6 +120,21 @@ Verification used the eleven focused plan commands. Supported SQLite and mock-co
 | `bandit -q tldw_Server_API/app/core/Sync/v2/restore.py` | Exit 0, no output. |
 
 Round 2 changes only the tested dependency-provider choice inside the existing restore ordering contract. It does not add a restore payload, schema, domain, authorization rule, dependency, or ADR. The repair documentation now states that `failed_only=true` includes pending-only groups and single envelopes, and that skipped or unmaterializable pending work keeps aggregate status at `repair_needed`.
+
+| Round 3 review-fix command | Exact result |
+| --- | --- |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_restore_preview.py -k tombstone_graph` | RED: 2 failed, 3 passed, 21 deselected, 4 warnings. GREEN: 5 passed, 21 deselected, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_restore_preview.py tldw_Server_API/tests/Sync/test_sync_v2_replay_repair.py` | 42 passed, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_service.py -k "notes_organization or implicit_pull or legacy_device"` | 2 passed, 92 deselected, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_server_origin_capture.py tldw_Server_API/tests/Sync/test_sync_v2_server_origin_batch.py` | Authorized SQLite run: 48 passed, 7 warnings. |
+| Step 8 representative command 1 | 89 passed, 4 warnings. |
+| Step 8 representative command 2 | Authorized SQLite run: 74 passed, 2 warnings. |
+| Touched-file Ruff | All checks passed. |
+| `bandit -q tldw_Server_API/app/core/Sync/v2/restore.py` | Exit 0, no output. |
+| Step 8 `git diff --check` immediately before the Round 3 commit | Exit 0, no output. |
+| Step 8 `git status --short` immediately before the Round 3 commit | Four scoped staged paths: this task file, `Docs/API/Sync_V2_M1.md`, `restore.py`, and `test_sync_v2_restore_preview.py`; no unrelated path. |
+
+Round 3 makes tombstone-last a compatible graph preference instead of a blanket reverse edge. The bounded unit graph retains immutable group and per-identity history precedence; a candidate live-to-tombstone edge is added only when it cannot close a tombstone-to-live path. This preserves unrelated and latest tombstone ordering without hiding genuine dependency cycles. No new schema, payload, domain, authorization rule, dependency, ADR, or support file was added.
 
 ADR required: yes
 ADR path: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md

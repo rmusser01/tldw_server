@@ -44,6 +44,20 @@ class LocalRestoreInventoryItem:
 LocalInventoryIndex = dict[tuple[str | None, SyncDomain, str], LocalRestoreInventoryItem]
 
 
+def _unit_path_exists(edges: Mapping[int, set[int]], source: int, target: int) -> bool:
+    pending = [source]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current == target:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(sorted(edges.get(current, set()) - seen, reverse=True))
+    return False
+
+
 def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvelope]:
     """Order restore candidates without splitting complete mutation groups."""
 
@@ -111,8 +125,10 @@ def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvel
         for index, unit in enumerate(units)
         if all(envelope.operation == "tombstone" for envelope in unit)
     }
-    for live_unit in live_units:
-        edges[live_unit].update(tombstone_units)
+    for live_unit in sorted(live_units):
+        for tombstone_unit in sorted(tombstone_units):
+            if not _unit_path_exists(edges, tombstone_unit, live_unit):
+                edges[live_unit].add(tombstone_unit)
 
     ordered_units: list[int] = []
     remaining = set(range(len(units)))

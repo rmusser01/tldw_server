@@ -763,6 +763,14 @@ The response includes available datasets/domains, latest per-domain cursors,
 safe applies, tombstones, missing blobs, attachment-reference summaries,
 envelope ranges needed for local apply, and encryption/key status.
 
+Restore planning preserves each complete stored mutation group and chronological
+revisions of the same identity. Applicable resource, hierarchy, and relationship
+dependencies are ordered before their consumers. Tombstones are ordered after
+compatible live and relationship work, but this is not a blanket override of
+history: an immutable historical tombstone group remains before a later exact
+restore of the same identity. A contradictory dependency or chronology graph
+fails closed with `sync_restore_plan_invalid`.
+
 ### Request
 
 ```json

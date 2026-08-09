@@ -17,12 +17,14 @@ from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    SyncEnvelope,
     SyncEnvelopeCreate,
 )
 from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
     mutation_group_plan_hash,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
+from tldw_Server_API.app.core.Sync.v2.restore import order_restore_envelopes
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
@@ -304,6 +306,34 @@ def _keyword_link_envelope(
         },
         payload_hash=f"sha256:{client_envelope_id}",
     )
+
+
+def _organization_tombstone(
+    *, client_envelope_id: str, domain: str, object_id: str, object_revision: int = 2
+) -> SyncEnvelopeCreate:
+    return _organization_envelope(
+        client_envelope_id=client_envelope_id,
+        domain=domain,
+        operation="tombstone",
+        object_id=object_id,
+        object_revision=object_revision,
+        payload={},
+        payload_hash=f"sha256:{client_envelope_id}",
+    )
+
+
+def _ordered_restore_heads(
+    service: SyncV2Service, *heads: SyncEnvelope
+) -> list[SyncEnvelope]:
+    latest = {(head.domain, head.object_id): head for head in heads}
+    expanded = service._expand_restore_mutation_groups(
+        dataset_id="dataset-1",
+        envelopes=list(heads),
+        latest_object_envelopes=latest,
+        selected_domains=set(),
+        selected_object_ids=set(),
+    )
+    return order_restore_envelopes(expanded)
 
 
 def test_restore_preview_empty_inventory_returns_safe_applies_ranges_counts_and_key_status(
@@ -877,6 +907,261 @@ def test_provider_selection_prefers_latest_earlier_revision_over_later_revision(
         link.server_cursor,
         latest.server_cursor,
     ]
+
+
+def test_tombstone_graph_keeps_historical_group_before_later_exact_restore(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    folder_id = "22222222-2222-4222-8222-222222222222"
+    tombstone_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-tombstone-history",
+            _organization_tombstone(
+                client_envelope_id="env-history-keyword-tombstone",
+                domain="notes.keyword",
+                object_id=keyword_id,
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-history-folder-tombstone",
+                domain="notes.folder",
+                object_id=folder_id,
+            ),
+        )
+    )
+    restored = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-history-keyword-restore",
+            object_id=keyword_id,
+            object_revision=3,
+            base_server_cursor=tombstone_group[0].server_cursor,
+            base_object_revision=2,
+            base_object_hash=tombstone_group[0].payload_hash,
+            routing_metadata={"restore_intent": True},
+            payload={"keyword": "Restored synthetic keyword"},
+            payload_hash="sha256:history-keyword-restore",
+        )
+    )
+
+    ordered = _ordered_restore_heads(sync_service, tombstone_group[1], restored)
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        local_inventory=[],
+    )
+
+    assert [item.server_cursor for item in ordered] == [
+        tombstone_group[0].server_cursor,
+        tombstone_group[1].server_cursor,
+        restored.server_cursor,
+    ]
+    assert [item.server_cursor for item in preview.tombstones] == [
+        tombstone_group[0].server_cursor,
+        tombstone_group[1].server_cursor,
+    ]
+    assert [item.server_cursor for item in preview.safe_applies] == [
+        restored.server_cursor
+    ]
+
+
+def test_tombstone_graph_keeps_unrelated_live_before_latest_tombstone_group(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-unrelated-live")
+    )
+    tombstone_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-latest-tombstones",
+            _organization_tombstone(
+                client_envelope_id="env-latest-keyword-tombstone",
+                domain="notes.keyword",
+                object_id="11111111-1111-4111-8111-111111111111",
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-latest-folder-tombstone",
+                domain="notes.folder",
+                object_id="22222222-2222-4222-8222-222222222222",
+            ),
+        )
+    )
+
+    ordered = _ordered_restore_heads(sync_service, note, *tombstone_group)
+
+    assert [item.server_cursor for item in ordered] == [
+        note.server_cursor,
+        tombstone_group[0].server_cursor,
+        tombstone_group[1].server_cursor,
+    ]
+
+
+def test_tombstone_graph_keeps_latest_tombstones_after_live_relationship(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    keyword_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    note = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-dormant-note", object_id=note_id)
+    )
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-dormant-keyword", object_id=keyword_id
+        )
+    )
+    link = sync_service.store.insert_envelope(
+        _keyword_link_envelope(
+            note_id=note_id,
+            keyword_id=keyword_id,
+            client_envelope_id="env-dormant-link",
+        )
+    )
+    tombstone_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-dormant-tombstones",
+            _organization_tombstone(
+                client_envelope_id="env-dormant-keyword-tombstone",
+                domain="notes.keyword",
+                object_id=keyword_id,
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-dormant-folder-tombstone",
+                domain="notes.folder",
+                object_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            ),
+        )
+    )
+
+    ordered = _ordered_restore_heads(sync_service, note, link, *tombstone_group)
+
+    assert [item.server_cursor for item in ordered] == [
+        note.server_cursor,
+        link.server_cursor,
+        tombstone_group[0].server_cursor,
+        tombstone_group[1].server_cursor,
+    ]
+
+
+def test_tombstone_graph_preserves_multiple_later_identity_revisions(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    tombstone_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-multiple-history-tombstones",
+            _organization_tombstone(
+                client_envelope_id="env-multiple-keyword-tombstone",
+                domain="notes.keyword",
+                object_id=keyword_id,
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-multiple-folder-tombstone",
+                domain="notes.folder",
+                object_id="22222222-2222-4222-8222-222222222222",
+            ),
+        )
+    )
+    restore_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-multiple-restore",
+            _organization_envelope(
+                client_envelope_id="env-multiple-keyword-restore",
+                object_id=keyword_id,
+                object_revision=3,
+                base_server_cursor=tombstone_group[0].server_cursor,
+                base_object_revision=2,
+                base_object_hash=tombstone_group[0].payload_hash,
+                routing_metadata={"restore_intent": True},
+                payload={"keyword": "Restored synthetic keyword"},
+                payload_hash="sha256:multiple-keyword-restore",
+            ),
+            _organization_envelope(
+                client_envelope_id="env-multiple-folder-live",
+                domain="notes.folder",
+                object_id="33333333-3333-4333-8333-333333333333",
+                payload={"name": "Live", "parent_sync_id": None},
+                payload_hash="sha256:multiple-folder-live",
+            ),
+        )
+    )
+    latest = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-multiple-keyword-v4",
+            object_id=keyword_id,
+            object_revision=4,
+            base_server_cursor=restore_group[0].server_cursor,
+            base_object_revision=3,
+            base_object_hash=restore_group[0].payload_hash,
+            payload={"keyword": "Restored synthetic keyword v4"},
+            payload_hash="sha256:multiple-keyword-v4",
+        )
+    )
+
+    ordered = _ordered_restore_heads(
+        sync_service,
+        tombstone_group[1],
+        restore_group[1],
+        latest,
+    )
+
+    assert [item.server_cursor for item in ordered] == [
+        tombstone_group[0].server_cursor,
+        tombstone_group[1].server_cursor,
+        restore_group[0].server_cursor,
+        restore_group[1].server_cursor,
+        latest.server_cursor,
+    ]
+
+
+def test_tombstone_graph_still_rejects_genuine_dependency_cycle(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    folder_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    folder_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-tombstone-cycle-a",
+            domain="notes.folder",
+            object_id=folder_a,
+            payload={"name": "A", "parent_sync_id": folder_b},
+        )
+    )
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-tombstone-cycle-b",
+            domain="notes.folder",
+            object_id=folder_b,
+            payload={"name": "B", "parent_sync_id": folder_a},
+        )
+    )
+    sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-cycle-tombstones",
+            _organization_tombstone(
+                client_envelope_id="env-cycle-keyword-tombstone",
+                domain="notes.keyword",
+                object_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-cycle-folder-tombstone",
+                domain="notes.folder",
+                object_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            ),
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_restore_plan_invalid"):
+        sync_service.restore_preview(
+            user_id="user-1",
+            dataset_ids=["dataset-1"],
+            domains=list(NOTES_ORGANIZATION_DOMAINS),
+            local_inventory=[],
+        )
 
 
 def test_spec_fix_restore_rejects_incomplete_persisted_group(
