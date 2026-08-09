@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import sqlite3
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -16,9 +17,12 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import 
     EXPORT_ID_RE,
     EXPORT_SCAN_PAGE_SIZE,
     ClaimsAnalyticsExportError,
+    create_queued_artifact,
+    create_ready_artifact,
     export_max_bytes,
     normalize_export_request,
     orphan_grace_seconds,
+    process_export_artifact,
     render_export,
     spreadsheet_safe,
     validate_export_id,
@@ -108,11 +112,7 @@ class FakeMonitoringDB:
         rows.sort(key=lambda row: (_parse_time(str(row["created_at"])), int(row["id"])))
         if after_created_at is not None and after_id is not None:
             cursor = (_parse_time(str(after_created_at)), int(after_id))
-            rows = [
-                row
-                for row in rows
-                if (_parse_time(str(row["created_at"])), int(row["id"])) > cursor
-            ]
+            rows = [row for row in rows if (_parse_time(str(row["created_at"])), int(row["id"])) > cursor]
         return [dict(row) for row in rows[:limit]]
 
 
@@ -159,6 +159,94 @@ class ScriptedPageDB:
         if isinstance(scripted, BaseException):
             raise scripted
         return scripted
+
+
+class ArtifactDB(FakeMonitoringDB):
+    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(rows or [], expected_owner="7")
+        self.artifacts: dict[str, dict[str, Any]] = {}
+        self.mark_ready_hook: Any = None
+        self.failure_transition_hook: Any = None
+        self.force_wrong_owner_get = False
+
+    def create_claims_analytics_export(self, **values: Any) -> dict[str, Any]:
+        row = {
+            "payload_json": None,
+            "payload_csv": None,
+            "filters_json": None,
+            "pagination_json": None,
+            "error_message": None,
+            "job_id": None,
+            "error_code": None,
+            "snapshot_at": None,
+            "created_at": FIXED_SNAPSHOT,
+            "updated_at": FIXED_SNAPSHOT,
+            **values,
+        }
+        row["user_id"] = str(row["user_id"])
+        self.artifacts[row["export_id"]] = row
+        return dict(row)
+
+    def get_claims_analytics_export(self, export_id: str, *, user_id: str) -> dict[str, Any]:
+        row = self.artifacts.get(export_id)
+        if row is None:
+            return {}
+        if not self.force_wrong_owner_get and row["user_id"] != user_id:
+            return {}
+        return dict(row)
+
+    def attach_claims_analytics_export_job(self, *, export_id: str, user_id: str, job_id: int) -> bool:
+        row = self.artifacts.get(export_id)
+        if row is None or row["user_id"] != user_id:
+            return False
+        if row["job_id"] not in (None, job_id):
+            return False
+        row["job_id"] = job_id
+        return True
+
+    def transition_claims_analytics_export_status(
+        self,
+        *,
+        export_id: str,
+        user_id: str,
+        from_statuses: tuple[str, ...],
+        to_status: str,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> bool:
+        row = self.artifacts.get(export_id)
+        if row is None or row["user_id"] != user_id:
+            return False
+        if to_status == "failed" and self.failure_transition_hook is not None:
+            self.failure_transition_hook(row)
+        if row["status"] not in from_statuses:
+            return False
+        row["status"] = to_status
+        row["error_code"] = error_code
+        row["error_message"] = error_message
+        return True
+
+    def mark_claims_analytics_export_ready(
+        self,
+        *,
+        export_id: str,
+        user_id: str,
+        payload_json: str | None,
+        payload_csv: str | None,
+    ) -> bool:
+        row = self.artifacts[export_id]
+        if self.mark_ready_hook is not None:
+            self.mark_ready_hook(row)
+        if row["user_id"] != user_id or row["status"] != "processing":
+            return False
+        row.update(
+            status="ready",
+            payload_json=payload_json,
+            payload_csv=payload_csv,
+            error_code=None,
+            error_message=None,
+        )
+        return True
 
 
 def _normalized(
@@ -748,7 +836,7 @@ def test_render_csv_preserves_unicode_delimiters_quotes_newlines_and_formula_saf
     assert parsed_rows[1] == [
         "1",
         "'=SUM(A1:A2)",
-        "'+critical,\"quoted\"\nnext",
+        '\'+critical,"quoted"\nnext',
         "2026-08-08T11:00:00.000Z",
         '{"formula":"-1","place":"Montréal, 東京","text":"line 1\\nline 2"}',
     ]
@@ -865,3 +953,360 @@ def test_render_result_has_only_compact_artifact_fields() -> None:
     assert "owner_user_id" not in result
     assert "db_path" not in result
     assert "/private/owner-7.db" not in json.dumps(result, sort_keys=True)
+
+
+def test_create_queued_artifact_persists_only_compact_normalized_request() -> None:
+    db = ArtifactDB()
+    normalized = _normalized(
+        filters={"severity": "warning"},
+        pagination={"limit": 25, "offset": 2},
+    )
+
+    row = create_queued_artifact(db, owner_user_id="7", normalized=normalized)
+
+    assert EXPORT_ID_RE.fullmatch(row["export_id"])
+    assert row["user_id"] == "7"
+    assert row["format"] == "json"
+    assert row["status"] == "queued"
+    assert row["job_id"] is None
+    assert row["payload_json"] is None
+    assert row["payload_csv"] is None
+    assert row["snapshot_at"] == FIXED_SNAPSHOT
+    assert row["filters_json"] == json.dumps(normalized["filters"], ensure_ascii=False, separators=(",", ":"))
+    assert row["pagination_json"] == '{"limit":25,"offset":2}'
+    assert " " not in row["filters_json"]
+
+
+@pytest.mark.parametrize(
+    ("owner_user_id", "normalized_owner"),
+    [("07", "7"), ("7", "8"), ("7", 7)],
+)
+def test_artifact_creation_rejects_invalid_or_mismatched_normalized_owner(
+    owner_user_id: Any,
+    normalized_owner: Any,
+) -> None:
+    normalized = _normalized()
+    normalized["owner_user_id"] = normalized_owner
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        create_queued_artifact(
+            ArtifactDB(),
+            owner_user_id=owner_user_id,
+            normalized=normalized,
+        )
+
+    assert exc_info.value.code == "claims_owner_scope_violation"
+
+
+def test_synchronous_and_worker_artifacts_use_identical_renderer_content() -> None:
+    normalized = _normalized(filters={"severity": "warning"})
+    events = [_event(1, severity="warning", payload={"model": "model-a"})]
+    sync_db = ArtifactDB(events)
+    worker_db = ArtifactDB(events)
+
+    sync_row = create_ready_artifact(
+        sync_db,
+        owner_user_id="7",
+        normalized=normalized,
+    )
+    queued = create_queued_artifact(
+        worker_db,
+        owner_user_id="7",
+        normalized=normalized,
+    )
+    worker_result = process_export_artifact(
+        worker_db,
+        owner_user_id="7",
+        export_id=queued["export_id"],
+        job_id=42,
+    )
+    worker_row = worker_db.get_claims_analytics_export(queued["export_id"], user_id="7")
+
+    assert sync_row["status"] == "ready"
+    assert sync_row["payload_json"] == worker_row["payload_json"]
+    assert worker_result == {
+        "outcome": "ok",
+        "export_id": queued["export_id"],
+        "format": "json",
+        "event_count": 1,
+        "size_bytes": len(worker_row["payload_json"].encode("utf-8")),
+    }
+    assert "content" not in worker_result
+    assert "filters" not in worker_result
+    assert "path" not in worker_result
+
+
+@pytest.mark.parametrize("starting_status", ["queued", "failed", "processing"])
+def test_process_repairs_missing_job_and_resumes_retryable_states(
+    starting_status: str,
+) -> None:
+    db = ArtifactDB([_event(1)])
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+    db.artifacts[row["export_id"]]["status"] = starting_status
+
+    result = process_export_artifact(
+        db,
+        owner_user_id="7",
+        export_id=row["export_id"],
+        job_id=42,
+    )
+
+    stored = db.get_claims_analytics_export(row["export_id"], user_id="7")
+    assert result["outcome"] == "ok"
+    assert stored["job_id"] == 42
+    assert stored["status"] == "ready"
+
+
+def test_process_rejects_conflicting_job_without_mutating_artifact() -> None:
+    db = ArtifactDB()
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+    db.artifacts[row["export_id"]]["job_id"] = 41
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        process_export_artifact(
+            db,
+            owner_user_id="7",
+            export_id=row["export_id"],
+            job_id=42,
+        )
+
+    assert exc_info.value.code == "claims_export_invalid_artifact"
+    assert db.artifacts[row["export_id"]]["status"] == "queued"
+    assert db.artifacts[row["export_id"]]["job_id"] == 41
+
+
+def test_process_ready_artifact_returns_exact_non_mutating_skip() -> None:
+    db = ArtifactDB([_event(1)])
+    row = create_ready_artifact(db, owner_user_id="7", normalized=_normalized())
+    before = dict(row)
+
+    result = process_export_artifact(
+        db,
+        owner_user_id="7",
+        export_id=row["export_id"],
+        job_id=42,
+    )
+
+    assert result == {
+        "outcome": "skipped",
+        "reason": "already_ready",
+        "export_id": row["export_id"],
+    }
+    assert db.artifacts[row["export_id"]] == before
+
+
+def test_process_late_ready_race_returns_skip_without_overwrite() -> None:
+    db = ArtifactDB([_event(1)])
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+
+    def winner(artifact: dict[str, Any]) -> None:
+        artifact["status"] = "ready"
+        artifact["payload_json"] = '{"winner":true}'
+
+    db.mark_ready_hook = winner
+    result = process_export_artifact(
+        db,
+        owner_user_id="7",
+        export_id=row["export_id"],
+        job_id=42,
+    )
+
+    assert result == {
+        "outcome": "skipped",
+        "reason": "already_ready",
+        "export_id": row["export_id"],
+    }
+    assert db.artifacts[row["export_id"]]["payload_json"] == '{"winner":true}'
+
+
+def test_process_late_failure_race_raises_stable_retryable_failure() -> None:
+    db = ArtifactDB([_event(1)])
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+    db.mark_ready_hook = lambda artifact: artifact.update(status="failed")
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        process_export_artifact(
+            db,
+            owner_user_id="7",
+            export_id=row["export_id"],
+            job_id=42,
+        )
+
+    assert exc_info.value.code == "claims_export_storage_unavailable"
+    assert exc_info.value.retryable is True
+    assert "failed" not in exc_info.value.public_message.lower()
+
+
+def test_process_transition_race_to_failed_is_retryable_not_malformed() -> None:
+    db = ArtifactDB([_event(1)])
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+    transition = db.transition_claims_analytics_export_status
+
+    def losing_transition(**values: Any) -> bool:
+        changed = transition(**values)
+        if values["to_status"] == "processing":
+            db.artifacts[row["export_id"]]["status"] = "failed"
+        return changed
+
+    db.transition_claims_analytics_export_status = losing_transition  # type: ignore[method-assign]
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        process_export_artifact(
+            db,
+            owner_user_id="7",
+            export_id=row["export_id"],
+            job_id=42,
+        )
+
+    assert exc_info.value.code == "claims_export_storage_unavailable"
+    assert exc_info.value.retryable is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("filters_json", "[]"),
+        ("filters_json", "not-json"),
+        ("pagination_json", "[]"),
+        ("format", "JSON"),
+        ("snapshot_at", "2026-08-08T12:00:00.123456Z"),
+    ],
+)
+def test_process_rejects_malformed_or_noncanonical_persisted_request(
+    field: str,
+    value: Any,
+) -> None:
+    db = ArtifactDB()
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+    db.artifacts[row["export_id"]][field] = value
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        process_export_artifact(
+            db,
+            owner_user_id="7",
+            export_id=row["export_id"],
+            job_id=42,
+        )
+
+    stored = db.artifacts[row["export_id"]]
+    assert exc_info.value.code == "claims_export_invalid_artifact"
+    assert stored["status"] == "failed"
+    assert stored["error_code"] == "claims_export_invalid_artifact"
+    assert "not-json" not in (stored["error_message"] or "")
+
+
+def test_process_missing_or_wrong_owner_artifact_uses_same_safe_code() -> None:
+    db = ArtifactDB()
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+    db.artifacts[row["export_id"]]["user_id"] = "8"
+    db.force_wrong_owner_get = True
+
+    for export_id in ("0" * 32, row["export_id"]):
+        with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+            process_export_artifact(
+                db,
+                owner_user_id="7",
+                export_id=export_id,
+                job_id=42,
+            )
+        assert exc_info.value.code == "claims_export_missing"
+        assert exc_info.value.http_status == 404
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_code"),
+    [
+        ("too_large", "claims_export_too_large"),
+        ("serialization", "claims_export_serialization_failed"),
+    ],
+)
+def test_deterministic_render_failures_persist_only_safe_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_code: str,
+) -> None:
+    event = _event(1)
+    if failure_kind == "serialization":
+        event["severity"] = object()
+    else:
+        monkeypatch.setitem(
+            __import__(
+                "tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports",
+                fromlist=["settings"],
+            ).settings,
+            "CLAIMS_ANALYTICS_EXPORT_MAX_BYTES",
+            1,
+        )
+    db = ArtifactDB([event])
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        process_export_artifact(
+            db,
+            owner_user_id="7",
+            export_id=row["export_id"],
+            job_id=42,
+        )
+
+    stored = db.artifacts[row["export_id"]]
+    assert exc_info.value.code == expected_code
+    assert stored["status"] == "failed"
+    assert stored["error_code"] == expected_code
+    assert stored["error_message"] == exc_info.value.public_message
+    assert stored["payload_json"] is None
+    assert stored["payload_csv"] is None
+
+
+def test_transient_sqlite_error_remains_concrete_and_raw_text_is_not_persisted() -> None:
+    secret = "database is locked at /private/owner-7.db"
+    db = ArtifactDB()
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+
+    def locked_page(**_: Any) -> list[dict[str, Any]]:
+        raise sqlite3.OperationalError(secret)
+
+    db.list_claims_monitoring_events_page = locked_page  # type: ignore[method-assign]
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        process_export_artifact(
+            db,
+            owner_user_id="7",
+            export_id=row["export_id"],
+            job_id=42,
+        )
+
+    stored = db.artifacts[row["export_id"]]
+    assert stored["status"] == "failed"
+    assert stored["error_code"] == "claims_export_storage_unavailable"
+    assert stored["error_message"] == "Claims analytics export storage is temporarily unavailable."
+    assert secret not in json.dumps(stored, default=str)
+
+
+def test_late_failure_cannot_move_ready_artifact_to_failed() -> None:
+    db = ArtifactDB()
+    row = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+
+    def serialization_failure(**_: Any) -> list[dict[str, Any]]:
+        raise ClaimsAnalyticsExportError(
+            "Safe deterministic failure.",
+            code="claims_export_serialization_failed",
+        )
+
+    def ready_winner(artifact: dict[str, Any]) -> None:
+        artifact.update(status="ready", payload_json='{"winner":true}')
+
+    db.list_claims_monitoring_events_page = serialization_failure  # type: ignore[method-assign]
+    db.failure_transition_hook = ready_winner
+
+    with pytest.raises(ClaimsAnalyticsExportError):
+        process_export_artifact(
+            db,
+            owner_user_id="7",
+            export_id=row["export_id"],
+            job_id=42,
+        )
+
+    stored = db.artifacts[row["export_id"]]
+    assert stored["status"] == "ready"
+    assert stored["payload_json"] == '{"winner":true}'
+    assert stored["error_code"] is None

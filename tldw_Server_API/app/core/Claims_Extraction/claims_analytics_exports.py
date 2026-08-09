@@ -5,10 +5,14 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
+
+from loguru import logger
 
 from tldw_Server_API.app.core.config import settings
 
@@ -22,6 +26,24 @@ _OWNER_ID_RE = re.compile(r"^[1-9][0-9]*$")
 _SCALAR_FILTERS = ("event_type", "severity", "provider", "model")
 _EVENT_COLUMNS = ("id", "user_id", "event_type", "severity", "created_at", "delivered_at")
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+_NORMALIZED_REQUEST_KEYS = {
+    "owner_user_id",
+    "format",
+    "filters",
+    "pagination",
+    "snapshot_at",
+}
+_EXPORT_TRANSITIONS = {
+    ("queued", "processing"),
+    ("queued", "failed"),
+    ("processing", "ready"),
+    ("processing", "failed"),
+    ("failed", "processing"),
+    ("ready", "ready"),
+}
+_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
+_EXPORT_JOB_TYPE = "claims_generate_analytics_export"
+_EXPORT_BATCH_GROUP_PREFIX = "claims-analytics-export:"
 
 
 class ClaimsAnalyticsExportError(RuntimeError):
@@ -67,6 +89,38 @@ def _serialization_error() -> ClaimsAnalyticsExportError:
     return ClaimsAnalyticsExportError(
         "Claims analytics export could not be serialized.",
         code="claims_export_serialization_failed",
+    )
+
+
+def _missing_artifact_error() -> ClaimsAnalyticsExportError:
+    return ClaimsAnalyticsExportError(
+        "Claims analytics export was not found.",
+        code="claims_export_missing",
+        http_status=404,
+    )
+
+
+def _invalid_artifact_error() -> ClaimsAnalyticsExportError:
+    return ClaimsAnalyticsExportError(
+        "Claims analytics export artifact is invalid.",
+        code="claims_export_invalid_artifact",
+    )
+
+
+def _storage_error() -> ClaimsAnalyticsExportError:
+    return ClaimsAnalyticsExportError(
+        "Claims analytics export storage is temporarily unavailable.",
+        code="claims_export_storage_unavailable",
+        retryable=True,
+        http_status=503,
+    )
+
+
+def _enqueue_failed_error() -> ClaimsAnalyticsExportError:
+    return ClaimsAnalyticsExportError(
+        "Claims analytics export could not be queued.",
+        code="claims_export_enqueue_failed",
+        http_status=503,
     )
 
 
@@ -474,3 +528,654 @@ def render_export(
         "event_count": len(events),
         "size_bytes": size_bytes,
     }
+
+
+def apply_export_transition(current: str, requested: str) -> str:
+    """Apply the Claims artifact transition table without side effects."""
+    return requested if (current, requested) in _EXPORT_TRANSITIONS else current
+
+
+def _compact_json(value: dict[str, Any]) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError, OverflowError, UnicodeError) as exc:
+        raise _invalid_payload_error() from exc
+
+
+def _validate_normalized_request(
+    normalized: Any,
+    *,
+    owner_user_id: str,
+    persisted: bool,
+) -> dict[str, Any]:
+    if not isinstance(normalized, dict):
+        raise _invalid_artifact_error() if persisted else _invalid_payload_error()
+    if normalized.get("owner_user_id") != owner_user_id:
+        raise _owner_error()
+    try:
+        _canonical_owner_id(normalized["owner_user_id"])
+    except (KeyError, ClaimsAnalyticsExportError) as exc:
+        raise _owner_error() from exc
+
+    invalid = _invalid_artifact_error if persisted else _invalid_payload_error
+    if set(normalized) != _NORMALIZED_REQUEST_KEYS:
+        raise invalid()
+    try:
+        snapshot = _parse_iso8601(normalized["snapshot_at"])
+        rebuilt = normalize_export_request(
+            {
+                "format": normalized["format"],
+                "filters": normalized["filters"],
+                "pagination": normalized["pagination"],
+            },
+            owner_user_id=owner_user_id,
+            now=snapshot,
+        )
+    except (KeyError, ClaimsAnalyticsExportError) as exc:
+        raise invalid() from exc
+    if rebuilt != normalized:
+        raise invalid()
+    return rebuilt
+
+
+def _create_artifact(
+    db: Any,
+    *,
+    owner_user_id: str,
+    normalized: dict[str, Any],
+    status: str,
+) -> dict[str, Any]:
+    owner = _canonical_owner_id(owner_user_id)
+    request = _validate_normalized_request(
+        normalized,
+        owner_user_id=owner,
+        persisted=False,
+    )
+    return db.create_claims_analytics_export(
+        export_id=uuid4().hex,
+        user_id=owner,
+        format=request["format"],
+        status=status,
+        filters_json=_compact_json(request["filters"]),
+        pagination_json=_compact_json(request["pagination"]),
+        snapshot_at=request["snapshot_at"],
+    )
+
+
+def create_queued_artifact(
+    db: Any,
+    *,
+    owner_user_id: str,
+    normalized: dict[str, Any],
+) -> dict[str, Any]:
+    """Create one queued artifact containing only its normalized request."""
+    return _create_artifact(
+        db,
+        owner_user_id=owner_user_id,
+        normalized=normalized,
+        status="queued",
+    )
+
+
+def _already_ready(export_id: str) -> dict[str, Any]:
+    return {
+        "outcome": "skipped",
+        "reason": "already_ready",
+        "export_id": export_id,
+    }
+
+
+def _success_result(export_id: str, rendered: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "outcome": "ok",
+        "export_id": export_id,
+        "format": rendered["format"],
+        "event_count": rendered["event_count"],
+        "size_bytes": rendered["size_bytes"],
+    }
+
+
+def _record_processing_failure(
+    db: Any,
+    *,
+    owner_user_id: str,
+    export_id: str,
+    error: ClaimsAnalyticsExportError,
+) -> bool:
+    return db.transition_claims_analytics_export_status(
+        export_id=export_id,
+        user_id=owner_user_id,
+        from_statuses=("processing",),
+        to_status="failed",
+        error_code=error.code,
+        error_message=error.public_message,
+    )
+
+
+def _mark_rendered_ready(
+    db: Any,
+    *,
+    owner_user_id: str,
+    export_id: str,
+    rendered: dict[str, Any],
+) -> bool:
+    return db.mark_claims_analytics_export_ready(
+        export_id=export_id,
+        user_id=owner_user_id,
+        payload_json=rendered["payload_json"],
+        payload_csv=rendered["payload_csv"],
+    )
+
+
+def _render_normalized(
+    db: Any,
+    *,
+    owner_user_id: str,
+    normalized: dict[str, Any],
+) -> dict[str, Any]:
+    return render_export(
+        db,
+        owner_user_id=owner_user_id,
+        format=normalized["format"],
+        filters=normalized["filters"],
+        pagination=normalized["pagination"],
+        snapshot_at=normalized["snapshot_at"],
+        max_bytes=export_max_bytes(),
+    )
+
+
+def create_ready_artifact(
+    db: Any,
+    *,
+    owner_user_id: str,
+    normalized: dict[str, Any],
+) -> dict[str, Any]:
+    """Synchronously render and atomically complete one artifact."""
+    owner = _canonical_owner_id(owner_user_id)
+    request = _validate_normalized_request(
+        normalized,
+        owner_user_id=owner,
+        persisted=False,
+    )
+    row = _create_artifact(
+        db,
+        owner_user_id=owner,
+        normalized=request,
+        status="processing",
+    )
+    export_id = row["export_id"]
+    try:
+        rendered = _render_normalized(
+            db,
+            owner_user_id=owner,
+            normalized=request,
+        )
+        if not _mark_rendered_ready(
+            db,
+            owner_user_id=owner,
+            export_id=export_id,
+            rendered=rendered,
+        ):
+            current = db.get_claims_analytics_export(export_id, user_id=owner)
+            if current.get("status") != "ready":
+                raise _storage_error()
+    except ClaimsAnalyticsExportError as exc:
+        _record_processing_failure(
+            db,
+            owner_user_id=owner,
+            export_id=export_id,
+            error=exc,
+        )
+        raise
+    except Exception as exc:
+        storage_error = _storage_error()
+        try:
+            _record_processing_failure(
+                db,
+                owner_user_id=owner,
+                export_id=export_id,
+                error=storage_error,
+            )
+        except Exception as persistence_exc:  # noqa: BLE001
+            logger.warning(
+                "Claims export failure state could not be persisted: operation={} "
+                "export_id={} error_code={} original_error_type={} persistence_error_type={}",
+                "record_processing_failure",
+                export_id,
+                storage_error.code,
+                type(exc).__name__,
+                type(persistence_exc).__name__,
+            )
+        raise
+    return db.get_claims_analytics_export(export_id, user_id=owner)
+
+
+def _decode_persisted_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        raise _invalid_artifact_error()
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise _invalid_artifact_error() from exc
+    if not isinstance(decoded, dict):
+        raise _invalid_artifact_error()
+    return decoded
+
+
+def _persisted_request(row: Any, *, owner_user_id: str) -> dict[str, Any]:
+    if not isinstance(row, Mapping) or row.get("user_id") != owner_user_id:
+        raise _missing_artifact_error()
+    normalized = {
+        "owner_user_id": owner_user_id,
+        "format": row.get("format"),
+        "filters": _decode_persisted_object(row.get("filters_json")),
+        "pagination": _decode_persisted_object(row.get("pagination_json")),
+        "snapshot_at": row.get("snapshot_at"),
+    }
+    return _validate_normalized_request(
+        normalized,
+        owner_user_id=owner_user_id,
+        persisted=True,
+    )
+
+
+def _validate_job_id(job_id: Any) -> int:
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+        raise _invalid_artifact_error()
+    return job_id
+
+
+def process_export_artifact(
+    db: Any,
+    *,
+    owner_user_id: str,
+    export_id: str,
+    job_id: int,
+) -> dict[str, Any]:
+    """Render one persisted artifact safely across retries and late races."""
+    owner = _canonical_owner_id(owner_user_id)
+    validated_export_id = validate_export_id(export_id)
+    validated_job_id = _validate_job_id(job_id)
+    row = db.get_claims_analytics_export(validated_export_id, user_id=owner)
+    if not row or row.get("user_id") != owner:
+        raise _missing_artifact_error()
+    if row.get("status") == "ready":
+        return _already_ready(validated_export_id)
+
+    persisted_job_id = row.get("job_id")
+    if persisted_job_id is None:
+        attached = db.attach_claims_analytics_export_job(
+            export_id=validated_export_id,
+            user_id=owner,
+            job_id=validated_job_id,
+        )
+        row = db.get_claims_analytics_export(validated_export_id, user_id=owner)
+        if row.get("status") == "ready":
+            return _already_ready(validated_export_id)
+        if not attached and row.get("job_id") is None:
+            raise _storage_error()
+        persisted_job_id = row.get("job_id")
+    if persisted_job_id != validated_job_id:
+        raise _invalid_artifact_error()
+
+    status = row.get("status")
+    if status in {"queued", "failed"}:
+        transitioned = db.transition_claims_analytics_export_status(
+            export_id=validated_export_id,
+            user_id=owner,
+            from_statuses=(status,),
+            to_status="processing",
+        )
+        row = db.get_claims_analytics_export(validated_export_id, user_id=owner)
+        if row.get("status") == "ready":
+            return _already_ready(validated_export_id)
+        if not transitioned and row.get("status") != "processing":
+            raise _storage_error()
+    elif status != "processing":
+        raise _invalid_artifact_error()
+
+    try:
+        row = db.get_claims_analytics_export(validated_export_id, user_id=owner)
+        if not row or row.get("user_id") != owner:
+            raise _missing_artifact_error()
+        if row.get("status") == "ready":
+            return _already_ready(validated_export_id)
+        if row.get("status") != "processing":
+            raise _storage_error()
+        if row.get("job_id") != validated_job_id:
+            raise _invalid_artifact_error()
+        normalized = _persisted_request(row, owner_user_id=owner)
+        rendered = _render_normalized(
+            db,
+            owner_user_id=owner,
+            normalized=normalized,
+        )
+        if _mark_rendered_ready(
+            db,
+            owner_user_id=owner,
+            export_id=validated_export_id,
+            rendered=rendered,
+        ):
+            return _success_result(validated_export_id, rendered)
+        current = db.get_claims_analytics_export(validated_export_id, user_id=owner)
+        if current.get("status") == "ready":
+            return _already_ready(validated_export_id)
+        raise _storage_error()
+    except ClaimsAnalyticsExportError as exc:
+        _record_processing_failure(
+            db,
+            owner_user_id=owner,
+            export_id=validated_export_id,
+            error=exc,
+        )
+        raise
+    except Exception as exc:
+        storage_error = _storage_error()
+        try:
+            _record_processing_failure(
+                db,
+                owner_user_id=owner,
+                export_id=validated_export_id,
+                error=storage_error,
+            )
+        except Exception as persistence_exc:  # noqa: BLE001
+            logger.warning(
+                "Claims export failure state could not be persisted: operation={} "
+                "export_id={} error_code={} original_error_type={} persistence_error_type={}",
+                "record_processing_failure",
+                validated_export_id,
+                storage_error.code,
+                type(exc).__name__,
+                type(persistence_exc).__name__,
+            )
+        raise
+
+
+def _valid_artifact_job_ids(rows: list[dict[str, Any]]) -> list[int]:
+    job_ids: list[int] = []
+    seen: set[int] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        job_id = row.get("job_id")
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0 or job_id in seen:
+            continue
+        seen.add(job_id)
+        job_ids.append(job_id)
+    return job_ids
+
+
+def hydrate_job_statuses(
+    rows: list[dict[str, Any]],
+    *,
+    owner_user_id: str,
+    job_manager: Any,
+) -> dict[int, str | None]:
+    """Project scoped Jobs statuses without mutating artifact rows."""
+    owner = _canonical_owner_id(owner_user_id)
+    job_ids = _valid_artifact_job_ids(rows)
+    if not job_ids:
+        return {}
+    statuses = dict.fromkeys(job_ids)
+    try:
+        jobs = job_manager.get_jobs_by_ids(
+            job_ids,
+            domain="claims",
+            owner_user_id=owner,
+            include_archived=True,
+        )
+    except Exception:  # noqa: BLE001 - Jobs outages degrade to null projections.
+        return statuses
+    if not isinstance(jobs, Mapping):
+        return statuses
+    for job_id in job_ids:
+        job = jobs.get(job_id)
+        status = job.get("status") if isinstance(job, Mapping) else None
+        statuses[job_id] = status if isinstance(status, str) else None
+    return statuses
+
+
+def _maintenance_limit(value: Any) -> int:
+    if isinstance(value, bool):
+        return 100
+    try:
+        return max(1, min(100, int(value)))
+    except (TypeError, ValueError, OverflowError):
+        return 100
+
+
+def _artifact_age_seconds(row: Mapping[str, Any], *, field: str, now: datetime) -> float | None:
+    try:
+        timestamp, _ = _database_timestamp(row.get(field))
+    except ClaimsAnalyticsExportError:
+        return None
+    return (now - timestamp).total_seconds()
+
+
+def _job_matches_reconciliation(
+    job: Any,
+    *,
+    owner_user_id: str,
+    batch_group: str,
+) -> int | None:
+    if not isinstance(job, Mapping):
+        return None
+    job_id = job.get("id")
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+        return None
+    if (
+        job.get("batch_group") != batch_group
+        or job.get("domain") != "claims"
+        or job.get("owner_user_id") != owner_user_id
+        or job.get("type") != _EXPORT_JOB_TYPE
+    ):
+        return None
+    return job_id
+
+
+def reconcile_export_artifacts(
+    db: Any,
+    *,
+    owner_user_id: str,
+    job_manager: Any,
+    now: datetime | None = None,
+    limit: int = 100,
+) -> dict[str, int]:
+    """Repair missing Job links and fail only Jobs-proven queued orphans."""
+    owner = _canonical_owner_id(owner_user_id)
+    current_time = _normalize_now(now)
+    rows = db.list_claims_analytics_exports_for_maintenance(
+        user_id=owner,
+        limit=_maintenance_limit(limit),
+    )
+    candidates = [
+        row for row in rows if isinstance(row, Mapping) and row.get("status") == "queued" and row.get("job_id") is None
+    ]
+    counters = {
+        "examined": len(candidates),
+        "repaired": 0,
+        "failed": 0,
+        "unchanged": 0,
+    }
+    grace = orphan_grace_seconds()
+    enqueue_error = _enqueue_failed_error()
+    for row in candidates:
+        export_id = row.get("export_id")
+        try:
+            validated_export_id = validate_export_id(export_id)
+        except ClaimsAnalyticsExportError:
+            counters["unchanged"] += 1
+            continue
+        batch_group = f"{_EXPORT_BATCH_GROUP_PREFIX}{validated_export_id}"
+        try:
+            job = job_manager.find_job_by_batch_group(
+                batch_group=batch_group,
+                domain="claims",
+                owner_user_id=owner,
+                job_type=_EXPORT_JOB_TYPE,
+                include_archived=True,
+            )
+        except Exception:  # noqa: BLE001 - uncertainty must not fail an artifact.
+            counters["unchanged"] += 1
+            continue
+        if job is not None:
+            job_id = _job_matches_reconciliation(
+                job,
+                owner_user_id=owner,
+                batch_group=batch_group,
+            )
+            if job_id is not None and db.attach_claims_analytics_export_job(
+                export_id=validated_export_id,
+                user_id=owner,
+                job_id=job_id,
+            ):
+                counters["repaired"] += 1
+            else:
+                counters["unchanged"] += 1
+            continue
+        age = _artifact_age_seconds(row, field="created_at", now=current_time)
+        if age is None or age < grace:
+            counters["unchanged"] += 1
+            continue
+        if db.transition_claims_analytics_export_status(
+            export_id=validated_export_id,
+            user_id=owner,
+            from_statuses=("queued",),
+            to_status="failed",
+            error_code=enqueue_error.code,
+            error_message=enqueue_error.public_message,
+        ):
+            counters["failed"] += 1
+        else:
+            counters["unchanged"] += 1
+    return counters
+
+
+def _cleanup_retention_seconds(retention_hours: Any) -> float | None:
+    if isinstance(retention_hours, bool):
+        return None
+    try:
+        seconds = float(retention_hours) * 3600
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds > 0 else None
+
+
+def _cleanup_job_status(
+    job: Any,
+    *,
+    job_id: int,
+    owner_user_id: str,
+) -> str | None:
+    if not isinstance(job, Mapping):
+        return None
+    if (
+        job.get("id") != job_id
+        or job.get("domain") != "claims"
+        or job.get("owner_user_id") != owner_user_id
+        or job.get("type") != _EXPORT_JOB_TYPE
+    ):
+        return None
+    status = job.get("status")
+    return status if isinstance(status, str) else None
+
+
+def cleanup_export_artifacts(
+    db: Any,
+    *,
+    owner_user_id: str,
+    job_manager: Any,
+    now: datetime | None = None,
+    retention_hours: float = 24,
+    limit: int = 100,
+) -> int:
+    """Delete only bounded artifacts with proven terminal lifecycle state."""
+    owner = _canonical_owner_id(owner_user_id)
+    current_time = _normalize_now(now)
+    retention_seconds = _cleanup_retention_seconds(retention_hours)
+    if retention_seconds is None:
+        return 0
+    cutoff = current_time - timedelta(seconds=retention_seconds)
+    cutoff_text = _format_utc(cutoff)
+    rows = db.list_claims_analytics_exports_for_maintenance(
+        user_id=owner,
+        limit=_maintenance_limit(limit),
+    )
+
+    old_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        age = _artifact_age_seconds(row, field="updated_at", now=current_time)
+        if age is not None and age > retention_seconds:
+            old_rows.append(dict(row))
+
+    failed_with_jobs = [
+        row
+        for row in old_rows
+        if row.get("status") == "failed"
+        and isinstance(row.get("job_id"), int)
+        and not isinstance(row.get("job_id"), bool)
+        and row["job_id"] > 0
+    ]
+    job_ids = _valid_artifact_job_ids(failed_with_jobs)
+    jobs_lookup_succeeded = True
+    jobs: Mapping[int, Any] = {}
+    if job_ids:
+        try:
+            result = job_manager.get_jobs_by_ids(
+                job_ids,
+                domain="claims",
+                owner_user_id=owner,
+                include_archived=True,
+            )
+            if isinstance(result, Mapping):
+                jobs = result
+            else:
+                jobs_lookup_succeeded = False
+        except Exception:  # noqa: BLE001 - uncertain Jobs state blocks deletion.
+            jobs_lookup_succeeded = False
+
+    grace = orphan_grace_seconds()
+    selected: list[str] = []
+    for row in old_rows:
+        export_id = row.get("export_id")
+        if not isinstance(export_id, str):
+            continue
+        status = row.get("status")
+        if status == "ready":
+            selected.append(export_id)
+            continue
+        if status != "failed":
+            continue
+        age = _artifact_age_seconds(row, field="updated_at", now=current_time)
+        if age is None:
+            continue
+        job_id = row.get("job_id")
+        if job_id is None:
+            if age > retention_seconds + grace:
+                selected.append(export_id)
+            continue
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+            continue
+        if not jobs_lookup_succeeded:
+            continue
+        job = jobs.get(job_id)
+        if isinstance(job, Mapping):
+            job_status = _cleanup_job_status(
+                job,
+                job_id=job_id,
+                owner_user_id=owner,
+            )
+            if job_status in _TERMINAL_JOB_STATUSES:
+                selected.append(export_id)
+        elif age > grace:
+            selected.append(export_id)
+
+    if not selected:
+        return 0
+    return db.delete_claims_analytics_exports(
+        user_id=owner,
+        export_ids=selected,
+        updated_before=cutoff_text,
+    )
