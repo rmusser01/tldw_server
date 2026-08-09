@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import html
-import io
 import json
 import math
 import socket
@@ -13,7 +11,6 @@ import time
 from contextlib import contextmanager, suppress
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
 
 from fastapi import HTTPException, status
 from loguru import logger
@@ -27,7 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.core.Claims_Extraction import claims_jobs
+from tldw_Server_API.app.core.Claims_Extraction import claims_analytics_exports, claims_jobs
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim_span
 from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
     build_claims_alert_delivery_payload,
@@ -65,6 +62,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_da
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Setup import setup_manager
 
 try:
@@ -90,7 +88,6 @@ _CLAIMS_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
     UnicodeDecodeError,
-    csv.Error,
     json.JSONDecodeError,
     socket.timeout,
     ssl.SSLError,
@@ -3386,116 +3383,296 @@ def list_claims_review_metrics(
     }
 
 
+def _claims_export_http_exception(error: claims_analytics_exports.ClaimsAnalyticsExportError) -> HTTPException:
+    return HTTPException(
+        status_code=error.http_status,
+        detail={"code": error.code, "message": error.public_message},
+    )
+
+
+def _claims_export_owner_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "code": "claims_owner_scope_violation",
+            "message": "Invalid Claims analytics export owner.",
+        },
+    )
+
+
+def _canonical_claims_export_owner_id(value: Any) -> str:
+    if isinstance(value, bool):
+        raise _claims_export_owner_error()
+    if isinstance(value, int):
+        if value <= 0:
+            raise _claims_export_owner_error()
+        return str(value)
+    if not isinstance(value, str):
+        raise _claims_export_owner_error()
+    if (
+        not value
+        or not value.isascii()
+        or not value.isdigit()
+        or value == "0"
+        or (len(value) > 1 and value.startswith("0"))
+    ):
+        raise _claims_export_owner_error()
+    return value
+
+
+def _claims_export_request_owner(
+    *,
+    payload: dict[str, Any],
+    principal: AuthPrincipal,
+    current_user: User,
+) -> tuple[str, str | None, dict[str, Any]]:
+    owner_user_id = _canonical_claims_export_owner_id(getattr(current_user, "id", None))
+    request_payload = dict(payload)
+    raw_filters = request_payload.get("filters")
+    workspace_id: str | None = None
+    if isinstance(raw_filters, dict) and "workspace_id" in raw_filters:
+        workspace_id = _canonical_claims_export_owner_id(raw_filters["workspace_id"])
+        if workspace_id != owner_user_id and not _principal_has_platform_admin_claims(principal):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+        owner_user_id = workspace_id
+        filters = dict(raw_filters)
+        filters.pop("workspace_id", None)
+        request_payload["filters"] = filters
+    return owner_user_id, workspace_id, request_payload
+
+
+def _claims_export_maintenance(
+    *,
+    db: MediaDatabase,
+    owner_user_id: str,
+) -> Any | None:
+    job_manager = None
+    try:
+        job_manager = jobs_manager_from_env()
+    except Exception as exc:  # noqa: BLE001 - maintenance is best effort.
+        logger.warning(
+            "Claims export maintenance unavailable: operation={} error_type={}",
+            "jobs_manager_from_env",
+            type(exc).__name__,
+        )
+
+    try:
+        claims_analytics_exports.reconcile_export_artifacts(
+            db,
+            owner_user_id=owner_user_id,
+            job_manager=job_manager,
+            limit=100,
+        )
+    except Exception as exc:  # noqa: BLE001 - create must survive maintenance failures.
+        logger.warning(
+            "Claims export maintenance unavailable: operation={} error_type={}",
+            "reconcile_export_artifacts",
+            type(exc).__name__,
+        )
+
+    try:
+        claims_analytics_exports.cleanup_export_artifacts(
+            db,
+            owner_user_id=owner_user_id,
+            job_manager=job_manager,
+            retention_hours=settings.get("CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS", 24),
+            limit=100,
+        )
+    except Exception as exc:  # noqa: BLE001 - create must survive maintenance failures.
+        logger.warning(
+            "Claims export maintenance unavailable: operation={} error_type={}",
+            "cleanup_export_artifacts",
+            type(exc).__name__,
+        )
+    return job_manager
+
+
+def _claims_export_response(
+    *,
+    row: dict[str, Any],
+    normalized: dict[str, Any],
+    workspace_id: str | None,
+    accepted_job_id: int | None = None,
+    job_status: str | None = None,
+) -> dict[str, Any]:
+    export_id = str(row["export_id"])
+    download_url = f"/api/v1/claims/analytics/export/{export_id}"
+    if workspace_id is not None:
+        download_url = f"{download_url}?workspace_id={workspace_id}"
+    return {
+        "export_id": export_id,
+        "format": row.get("format") or normalized["format"],
+        "status": row.get("status"),
+        "download_url": download_url,
+        "created_at": row.get("created_at"),
+        "job_id": accepted_job_id if accepted_job_id is not None else row.get("job_id"),
+        "job_status": job_status,
+        "error_code": row.get("error_code"),
+        "snapshot_at": row.get("snapshot_at") or normalized["snapshot_at"],
+    }
+
+
+def _mark_claims_export_enqueue_failed(
+    *,
+    db: MediaDatabase,
+    owner_user_id: str,
+    export_id: str,
+    original_error: Exception,
+) -> None:
+    failure_code = "claims_export_enqueue_failed"
+    public_message = "Claims analytics export could not be queued."
+    try:
+        db.transition_claims_analytics_export_status(
+            export_id=export_id,
+            user_id=owner_user_id,
+            from_statuses=("queued",),
+            to_status="failed",
+            error_code=failure_code,
+            error_message=public_message,
+        )
+    except Exception as persistence_error:  # noqa: BLE001 - preserve the stable public failure.
+        logger.warning(
+            "Claims export enqueue compensation failed: operation={} export_id={} "
+            "error_code={} original_error_type={} persistence_error_type={}",
+            "mark_enqueue_failed",
+            export_id,
+            failure_code,
+            type(original_error).__name__,
+            type(persistence_error).__name__,
+        )
+
+
 def export_claims_analytics(
     *,
     payload: dict[str, Any],
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
-) -> Any:
+) -> tuple[dict[str, Any], int]:
     _ensure_claims_admin(principal)
-    fmt = str(payload.get("format") or "json").lower()
-    if fmt not in {"json", "csv"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported export format")
-
-    filters = payload.get("filters") or {}
-    pagination = payload.get("pagination") or {}
-    target_user_id = str(current_user.id)
-    workspace_id = filters.get("workspace_id")
-    if workspace_id:
-        if not _principal_has_platform_admin_claims(principal):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-        target_user_id = str(workspace_id)
-
-    retention_hours = settings.get("CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS", 24)
-    try:
-        retention_val = float(retention_hours)
-    except (TypeError, ValueError):
-        retention_val = 24.0
-    if retention_val > 0:
-        try:
-            db.cleanup_claims_analytics_exports(user_id=target_user_id, retention_hours=retention_val)
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Claims analytics export cleanup failed: {}", exc)
-
-    events = db.list_claims_monitoring_events(
-        user_id=target_user_id,
-        event_type=filters.get("event_type"),
-        severity=filters.get("severity"),
-        start_time=filters.get("start_time"),
-        end_time=filters.get("end_time"),
+    owner_user_id, workspace_id, request_payload = _claims_export_request_owner(
+        payload=payload,
+        principal=principal,
+        current_user=current_user,
     )
-    normalized_events = [_normalize_monitoring_event_row(row) for row in events]
-    filtered_events = _filter_monitoring_events_by_payload(
-        normalized_events,
-        provider=filters.get("provider"),
-        model=filters.get("model"),
-    )
-    total = len(filtered_events)
     try:
-        limit = int(pagination.get("limit", 1000))
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        limit = 1000
-    try:
-        offset = int(pagination.get("offset", 0))
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        offset = 0
-    limit = max(1, min(10000, limit))
-    offset = max(0, offset)
-    page_events = filtered_events[offset: offset + limit]
-    pagination_meta = {
-        "limit": limit,
-        "offset": offset,
-        "total": total,
-    }
+        normalized = claims_analytics_exports.normalize_export_request(
+            request_payload,
+            owner_user_id=owner_user_id,
+        )
+    except claims_analytics_exports.ClaimsAnalyticsExportError as exc:
+        raise _claims_export_http_exception(exc) from exc
 
-    export_id = uuid4().hex
-    filters_json = json.dumps(filters) if filters else None
-    pagination_json = json.dumps(pagination_meta)
-
-    payload_json = None
-    payload_csv = None
-    if fmt == "csv":
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["id", "event_type", "severity", "created_at", "payload_json"])
-        for event in page_events:
-            writer.writerow(
-                [
-                    event.get("id"),
-                    event.get("event_type"),
-                    event.get("severity"),
-                    event.get("created_at"),
-                    json.dumps(event.get("payload") or {}),
-                ]
+    route_user_id = int(workspace_id) if workspace_id is not None else None
+    with _resolve_media_db(
+        db=db,
+        current_user=current_user,
+        user_id=route_user_id,
+        admin_required=False,
+        owner_filter=False,
+    ) as (target_db, _owner_filter):
+        job_manager = _claims_export_maintenance(
+            db=target_db,
+            owner_user_id=owner_user_id,
+        )
+        if not claims_jobs.claims_analytics_export_jobs_enabled():
+            try:
+                row = claims_analytics_exports.create_ready_artifact(
+                    target_db,
+                    owner_user_id=owner_user_id,
+                    normalized=normalized,
+                )
+            except claims_analytics_exports.ClaimsAnalyticsExportError as exc:
+                raise _claims_export_http_exception(exc) from exc
+            return (
+                _claims_export_response(
+                    row=row,
+                    normalized=normalized,
+                    workspace_id=workspace_id,
+                ),
+                status.HTTP_200_OK,
             )
-        payload_csv = output.getvalue()
-    else:
-        export_payload = {
-            "events": page_events,
-            "filters": filters,
-            "pagination": pagination_meta,
-        }
-        payload_json = json.dumps(export_payload)
 
-    export_row = db.create_claims_analytics_export(
-        export_id=export_id,
-        user_id=target_user_id,
-        format=fmt,
-        status="ready",
-        payload_json=payload_json,
-        payload_csv=payload_csv,
-        filters_json=filters_json,
-        pagination_json=pagination_json,
-    )
+        try:
+            row = claims_analytics_exports.create_queued_artifact(
+                target_db,
+                owner_user_id=owner_user_id,
+                normalized=normalized,
+            )
+        except claims_analytics_exports.ClaimsAnalyticsExportError as exc:
+            raise _claims_export_http_exception(exc) from exc
 
-    return {
-        "export_id": export_id,
-        "format": fmt,
-        "status": export_row.get("status", "ready") if export_row else "ready",
-        "download_url": f"/api/v1/claims/analytics/export/{export_id}",
-        "created_at": export_row.get("created_at") if export_row else None,
-    }
+        export_id = str(row["export_id"])
+        try:
+            enqueue_kwargs: dict[str, Any] = {
+                "owner_user_id": owner_user_id,
+                "export_id": export_id,
+            }
+            if job_manager is not None:
+                enqueue_kwargs["job_manager"] = job_manager
+            accepted = claims_jobs.enqueue_claims_analytics_export(**enqueue_kwargs)
+            if not isinstance(accepted, dict):
+                raise ValueError("Jobs acceptance must be an object")
+            job_id = accepted.get("id")
+            if type(job_id) is not int or job_id <= 0:
+                raise ValueError("Jobs acceptance must include a positive integer ID")
+        except Exception as exc:  # noqa: BLE001 - cross-store enqueue failures need compensation.
+            _mark_claims_export_enqueue_failed(
+                db=target_db,
+                owner_user_id=owner_user_id,
+                export_id=export_id,
+                original_error=exc,
+            )
+            logger.warning(
+                "Claims export enqueue failed: operation={} export_id={} error_code={} error_type={}",
+                "enqueue_claims_analytics_export",
+                export_id,
+                "claims_export_enqueue_failed",
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "claims_export_enqueue_failed",
+                    "message": "Claims analytics export could not be queued.",
+                },
+            ) from exc
+
+        try:
+            attached = target_db.attach_claims_analytics_export_job(
+                export_id=export_id,
+                user_id=owner_user_id,
+                job_id=job_id,
+            )
+            if not attached:
+                logger.warning(
+                    "Claims export Job attachment deferred: operation={} export_id={} job_id={} error_type={}",
+                    "attach_claims_analytics_export_job",
+                    export_id,
+                    job_id,
+                    "AttachRejected",
+                )
+        except Exception as exc:  # noqa: BLE001 - accepted Jobs are repaired asynchronously.
+            logger.warning(
+                "Claims export Job attachment deferred: operation={} export_id={} job_id={} error_type={}",
+                "attach_claims_analytics_export_job",
+                export_id,
+                job_id,
+                type(exc).__name__,
+            )
+
+        accepted_status = accepted.get("status")
+        job_status = accepted_status if isinstance(accepted_status, str) and accepted_status else "queued"
+        return (
+            _claims_export_response(
+                row=row,
+                normalized=normalized,
+                workspace_id=workspace_id,
+                accepted_job_id=job_id,
+                job_status=job_status,
+            ),
+            status.HTTP_202_ACCEPTED,
+        )
 
 
 def list_claims_analytics_exports(

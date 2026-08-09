@@ -449,6 +449,10 @@ class ClaimsAnalyticsExportResponse(BaseModel):
     status: str
     download_url: str | None = None
     created_at: str | None = None
+    job_id: int | None = None
+    job_status: str | None = None
+    error_code: str | None = None
+    snapshot_at: str | None = None
 
 
 class ClaimsAnalyticsExportPaginationMeta(BaseModel):
@@ -475,6 +479,10 @@ class ClaimsAnalyticsExportListItem(BaseModel):
     filters: ClaimsAnalyticsExportFilters | None = None
     pagination: ClaimsAnalyticsExportPaginationMeta | None = None
     error_message: str | None = None
+    job_id: int | None = None
+    job_status: str | None = None
+    error_code: str | None = None
+    snapshot_at: str | None = None
 
 
 class ClaimsAnalyticsExportListResponse(BaseModel):

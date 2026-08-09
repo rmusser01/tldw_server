@@ -201,6 +201,10 @@ def test_claims_dashboard_analytics_and_export(monkeypatch):
             assert r2.status_code == 200, r2.text
             export_meta = r2.json()
             assert export_meta["status"] == "ready"
+            assert export_meta["job_id"] is None
+            assert export_meta["job_status"] is None
+            assert export_meta["error_code"] is None
+            assert export_meta["snapshot_at"]
             download_url = export_meta.get("download_url")
             assert download_url
 

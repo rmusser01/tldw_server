@@ -2,8 +2,14 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AdminPrincipal, get_auth_principal, get_request_user, RequirePermission, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    AdminPrincipal,
+    RequirePermission,
+    User,
+    get_auth_principal,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimNotificationResponse,
@@ -558,20 +564,27 @@ def claims_dashboard_analytics(
     )
 
 
-@router.post("/analytics/export", response_model=ClaimsAnalyticsExportResponse)
+@router.post(
+    "/analytics/export",
+    response_model=ClaimsAnalyticsExportResponse,
+    responses={202: {"model": ClaimsAnalyticsExportResponse}},
+)
 def export_claims_analytics(
     payload: ClaimsAnalyticsExportRequest,
+    response: Response,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> Any:
+) -> dict[str, Any]:
     """Export claims analytics in JSON or CSV."""
-    return claims_service.export_claims_analytics(
+    body, response_status = claims_service.export_claims_analytics(
         payload=payload.model_dump(exclude_unset=True),
         principal=principal,
         current_user=current_user,
         db=db,
     )
+    response.status_code = response_status
+    return body
 
 
 @router.get("/analytics/exports", response_model=ClaimsAnalyticsExportListResponse)
