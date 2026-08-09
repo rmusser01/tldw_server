@@ -287,12 +287,24 @@ Response schema:
 {
   "export_id": "string",
   "format": "csv|json",
-  "status": "queued|ready|failed",
+  "status": "queued|processing|ready|failed",
+  "job_id": "integer|null",
+  "job_status": "queued|processing|completed|failed|cancelled|quarantined|null",
+  "snapshot_at": "string",
   "download_url": "string|null",
   "created_at": "string"
 }
 ```
-Download endpoint: `GET /api/v1/claims/analytics/export/{export_id}` returns the export payload (JSON) or CSV body.
+When either `CLAIMS_JOBS_ENABLED` or `CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED` is
+disabled, the request runs synchronously and returns HTTP 200 with a ready
+artifact and null Job fields. When both producer flags are enabled, the request
+returns HTTP 202 with a queued artifact, `job_id`, `job_status`, and
+`snapshot_at`; the same response also includes the owner-scoped `download_url`.
+The producer does not require `CLAIMS_JOBS_WORKER_ENABLED`, because dedicated
+worker processes may run the WorkerSDK service separately.
+
+Download endpoint: `GET /api/v1/claims/analytics/export/{export_id}` returns the
+export payload (JSON) or CSV body only when the artifact is ready.
 
 #### GET /api/v1/claims/analytics/exports
 Lists stored analytics exports.
@@ -317,7 +329,10 @@ Response schema:
     {
       "export_id": "string",
       "format": "csv|json",
-      "status": "queued|ready|failed",
+      "status": "queued|processing|ready|failed",
+      "job_id": "integer|null",
+      "job_status": "queued|processing|completed|failed|cancelled|quarantined|null",
+      "snapshot_at": "string|null",
       "download_url": "string|null",
       "created_at": "string",
       "updated_at": "string",
@@ -332,14 +347,45 @@ Response schema:
 }
 ```
 
+Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
+JSON or CSV output is also capped at 10 MiB (10,485,760 UTF-8 bytes), configured
+by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; invalid or non-positive settings use the
+10 MiB default. Synchronous requests that exceed the byte limit fail during the
+request; asynchronous requests expose the safe failed artifact through the
+normal status APIs.
+
+CSV downloads use UTF-8, standard CSV quoting, and spreadsheet-formula
+protection. String cells beginning with `=`, `+`, `-`, `@`, tab, or carriage
+return are prefixed with a single quote before writing. Ready CSV responses use
+`text/csv; charset=utf-8` and attachment headers with a safe filename derived
+only from the validated server-generated `export_id`. JSON responses use
+`application/json`.
+
+Export lookup, list, and download are owner-scoped at the database query. A
+platform-admin caller authorized to target another user receives generated
+cross-user URLs with that target's `workspace_id` query parameter so per-user
+SQLite routing resolves the correct database. Non-admin callers cannot set
+another owner, and missing and wrong-owner exports both return HTTP 404.
+
 ### Export Status Lifecycle
 - **queued**: export request accepted and queued for async processing.
+- **processing**: a worker attempt is rendering or persisting output.
 - **ready**: export payload stored; `download_url` populated.
-- **failed**: processing error; `error_message` populated.
+- **failed**: the latest artifact attempt failed or reconciliation proved that
+  no accepted Job exists; `error_message` is a short safe message.
+
+Claims artifact status and Jobs lifecycle status are separate. `status` is the
+artifact state owned by Claims. `job_status` is a read-only projection of the
+shared Jobs lifecycle, which may include `queued`, `processing`, `completed`,
+`failed`, `cancelled`, or `quarantined`. Jobs remains authoritative for retries,
+leases, cancellation, quarantine, and terminal execution state; Claims does not
+maintain a second Jobs state machine. A ready artifact remains downloadable even
+when its Jobs row is unavailable or still completing.
 
 State transitions:
-- queued -> ready: backend completes payload generation (typical: < 30s for < 100k records).
-- queued -> failed: validation, timeout, or storage error.
+- queued -> processing -> ready: a worker completes payload generation.
+- queued/processing -> failed: a non-retryable artifact or reconciliation error.
+- failed -> processing: a later Jobs retry runs the same artifact.
 
 Client guidance:
 - Poll `GET /api/v1/claims/analytics/export/{export_id}` with exponential backoff
@@ -347,9 +393,17 @@ Client guidance:
 - No webhook callback is provided; `export_id` is the tracking identifier.
 
 Cleanup:
-- Exports older than `CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS` (default 24) are deleted
-  by a scheduled cleanup job (e.g., every 6 hours).
-- Clients should download before expiry.
+- Retention cleanup and orphan reconciliation run as bounded, best-effort work
+  during existing Claims create/list activity. They use
+  `CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS` (default 24) and
+  `CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC` (default 300).
+- Cleanup is lifecycle-aware: it may remove eligible ready artifacts and proven
+  terminal orphans, but preserves queued, processing, retrying, and uncertain
+  non-ready artifacts. If Jobs cannot be read, uncertain non-ready artifacts are
+  left unchanged.
+- This is request-time maintenance, not a scheduled Claims cleanup job,
+  scheduler, daemon, lease loop, or retry engine. Clients should download before
+  expiry.
 
 ### Error Handling
 All endpoints return consistent error payloads:
@@ -363,8 +417,14 @@ All endpoints return consistent error payloads:
 }
 ```
 Status codes: 400 for validation failures, 401/403 for auth/permissions, 404 for
-missing resources, 409 for conflicts, 429 for rate limits, 500 for unexpected errors.
+missing or wrong-owner exports, 409 for non-ready or failed download conflicts,
+429 for rate limits, 500 for unexpected errors.
 Error code guidance: `invalid_channels` when all alert channels are false (400).
+
+Download behavior is explicit: a non-ready or failed artifact returns HTTP 409
+with artifact status, nullable `job_status`, and a stable public error code. A
+missing or wrong-owner export returns HTTP 404 without revealing whether another
+owner has that ID.
 
 Webhook delivery:
 - Retry strategy: exponential backoff with jitter.
@@ -396,6 +456,43 @@ the latest row per workspace.
 ## Access Control
 - Require `admin` role or `claims.admin` permission for config/alerts endpoints.
 - Health endpoint should be limited to `admin`/SRE roles.
+
+## Jobs Operator Boundary
+Claims owns export authorization, request normalization, artifact status,
+rendering, reconciliation, and download readiness. Shared Jobs owns queue
+admission, leases, retries, backoff, cancellation, quarantine, lifecycle
+status, and administrative controls. Existing Jobs admin endpoints are the only
+pause, cancel, retry, quarantine, or drain controls; Claims must not recreate
+those controls or add a Claims scheduler.
+
+Producer and worker enablement are independent. The asynchronous producer
+requires both `CLAIMS_JOBS_ENABLED` and
+`CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED`, while
+`CLAIMS_JOBS_WORKER_ENABLED` only controls whether the WorkerSDK service starts
+in that process. Request-time reconciliation and cleanup are bounded maintenance
+on existing create/list activity, not a Claims scheduler, daemon, or retry loop.
+
+## Rollout And Rollback
+Roll out in this order:
+
+1. Deploy the schema and Job payload/handler support with producers disabled.
+2. Start or enable Claims WorkerSDK workers and verify they advertise the
+   configured Claims queue.
+3. Enable `CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED` for a producer canary while
+   retaining the synchronous fallback elsewhere.
+4. Verify accepted exports, Job status, retries, artifact readiness, safe
+   downloads, limits, and retention behavior before expanding the canary.
+
+Roll back in this order:
+
+1. Disable the producer flags first so new requests use the synchronous path.
+2. Keep workers running to drain accepted Jobs and repair accepted artifacts.
+3. Disable workers only after the accepted Jobs have drained. Use the existing
+   Jobs admin endpoints for any required pause, cancel, retry, quarantine, or
+   drain action.
+
+Disabling workers before producers can strand accepted artifacts and is not the
+supported rollback sequence.
 
 ## Testing
 - API tests for config CRUD and rebuild health response shape.
