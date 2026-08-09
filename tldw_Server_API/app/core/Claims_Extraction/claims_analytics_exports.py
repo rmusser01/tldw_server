@@ -1018,6 +1018,8 @@ def reconcile_export_artifacts(
     rows = db.list_claims_analytics_exports_for_maintenance(
         user_id=owner,
         limit=_maintenance_limit(limit),
+        statuses=("queued",),
+        job_id_missing=True,
     )
     candidates = [
         row for row in rows if isinstance(row, Mapping) and row.get("status") == "queued" and row.get("job_id") is None
@@ -1131,6 +1133,8 @@ def cleanup_export_artifacts(
     rows = db.list_claims_analytics_exports_for_maintenance(
         user_id=owner,
         limit=_maintenance_limit(limit),
+        statuses=("ready", "failed"),
+        updated_before=cutoff_text,
     )
 
     old_rows: list[dict[str, Any]] = []
@@ -1184,8 +1188,40 @@ def cleanup_export_artifacts(
             continue
         job_id = row.get("job_id")
         if job_id is None:
-            if row.get("error_code") == "claims_export_enqueue_failed" and age > retention_seconds + grace:
-                selected.append(export_id)
+            if row.get("error_code") != "claims_export_enqueue_failed" or age <= retention_seconds + grace:
+                continue
+            try:
+                validated_export_id = validate_export_id(export_id)
+            except ClaimsAnalyticsExportError:
+                continue
+            batch_group = f"{_EXPORT_BATCH_GROUP_PREFIX}{validated_export_id}"
+            try:
+                job = job_manager.find_job_by_batch_group(
+                    batch_group=batch_group,
+                    domain="claims",
+                    owner_user_id=owner,
+                    job_type=_EXPORT_JOB_TYPE,
+                    include_archived=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - uncertainty must preserve the artifact.
+                logger.warning(
+                    "Claims export cleanup Jobs lookup unavailable: operation={} export_id={} error_type={}",
+                    "find_job_by_batch_group",
+                    validated_export_id,
+                    type(exc).__name__,
+                )
+                continue
+            if job is None:
+                selected.append(validated_export_id)
+            elif (
+                _job_matches_reconciliation(
+                    job,
+                    owner_user_id=owner,
+                    batch_group=batch_group,
+                )
+                is None
+            ):
+                continue
             continue
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
             continue

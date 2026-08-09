@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
-
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
@@ -294,21 +294,43 @@ def list_claims_analytics_exports_for_maintenance(
     *,
     user_id: str,
     limit: int = 100,
+    statuses: Sequence[str] | None = None,
+    job_id_missing: bool | None = None,
+    updated_before: str | None = None,
 ) -> list[dict[str, Any]]:
     try:
         limit = int(limit)
     except (TypeError, ValueError):
         limit = 100
     limit = max(1, min(1000, limit))
-    rows = self.execute_query(
-        (
-            "SELECT export_id, user_id, format, status, filters_json, pagination_json, "
-            "error_message, job_id, error_code, snapshot_at, created_at, updated_at "
-            "FROM claims_analytics_exports WHERE user_id = ? "
-            "ORDER BY updated_at ASC, export_id ASC LIMIT ?"
-        ),
-        (str(user_id), limit),
-    ).fetchall()
+    conditions = ["user_id = ?"]
+    params: list[Any] = [str(user_id)]
+    if statuses is not None:
+        normalized_statuses = tuple(dict.fromkeys(str(status) for status in statuses))
+        if not normalized_statuses or any(
+            status not in _SUPPORTED_EXPORT_STATUSES
+            for status in normalized_statuses
+        ):
+            return []
+        placeholders = ", ".join("?" for _ in normalized_statuses)
+        conditions.append(f"status IN ({placeholders})")
+        params.extend(normalized_statuses)
+    if job_id_missing is True:
+        conditions.append("job_id IS NULL")
+    elif job_id_missing is False:
+        conditions.append("job_id IS NOT NULL")
+    if updated_before is not None:
+        conditions.append("updated_at < ?")
+        params.append(str(updated_before))
+    query = (
+        "SELECT export_id, user_id, format, status, filters_json, pagination_json, "  # nosec B608
+        "error_message, job_id, error_code, snapshot_at, created_at, updated_at "
+        "FROM claims_analytics_exports WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY updated_at ASC, export_id ASC LIMIT ?"
+    )
+    params.append(limit)
+    rows = self.execute_query(query, tuple(params)).fetchall()
     return [dict(row) for row in rows]
 
 

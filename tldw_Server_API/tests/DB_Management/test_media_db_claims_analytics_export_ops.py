@@ -8,7 +8,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import 
     MediaDatabase,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -625,6 +624,84 @@ def test_claims_analytics_export_maintenance_list_is_owner_scoped_and_determinis
         assert all(row["user_id"] == "1" for row in rows)
         assert all("job_id" in row and "error_code" in row and "snapshot_at" in row for row in rows)
         assert all("payload_json" not in row and "payload_csv" not in row for row in rows)
+    finally:
+        db.close_connection()
+
+
+def test_maintenance_list_filters_reconciliation_candidates_before_limit(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-analytics-maintenance-reconciliation-filter.db")
+    try:
+        for index in range(3):
+            _seed_export(
+                db,
+                export_id=f"exp-attached-{index}",
+                status="queued",
+                job_id=100 + index,
+            )
+        _seed_export(db, export_id="exp-orphan", status="queued")
+        _seed_export(db, export_id="exp-failed", status="failed")
+        _seed_export(db, export_id="exp-other-owner", user_id="2", status="queued")
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET updated_at = ? WHERE export_id LIKE ?",
+            ("2026-08-08T12:00:00.000Z", "exp-attached-%"),
+            commit=True,
+        )
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET updated_at = ? WHERE export_id IN (?, ?, ?)",
+            (
+                "2026-08-08T12:00:01.000Z",
+                "exp-orphan",
+                "exp-failed",
+                "exp-other-owner",
+            ),
+            commit=True,
+        )
+
+        rows = db.list_claims_analytics_exports_for_maintenance(
+            user_id="1",
+            statuses=("queued",),
+            job_id_missing=True,
+            limit=2,
+        )
+
+        assert [row["export_id"] for row in rows] == ["exp-orphan"]
+    finally:
+        db.close_connection()
+
+
+def test_maintenance_list_filters_cleanup_candidates_before_limit(tmp_path: Path) -> None:
+    db = _make_db(tmp_path, "claims-analytics-maintenance-cleanup-filter.db")
+    try:
+        for index, status in enumerate(("queued", "processing", "queued")):
+            _seed_export(db, export_id=f"exp-active-{index}", status=status)
+        _seed_export(db, export_id="exp-old-ready", status="ready")
+        _seed_export(db, export_id="exp-fresh-ready", status="ready")
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET updated_at = ? WHERE export_id LIKE ?",
+            ("2026-08-08T12:00:00.000Z", "exp-active-%"),
+            commit=True,
+        )
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET updated_at = ? WHERE export_id = ?",
+            ("2026-08-08T12:00:01.000Z", "exp-old-ready"),
+            commit=True,
+        )
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET updated_at = ? WHERE export_id = ?",
+            ("2026-08-08T12:00:03.000Z", "exp-fresh-ready"),
+            commit=True,
+        )
+
+        rows = db.list_claims_analytics_exports_for_maintenance(
+            user_id="1",
+            statuses=("ready", "failed"),
+            updated_before="2026-08-08T12:00:02.000Z",
+            limit=1,
+        )
+
+        assert [row["export_id"] for row in rows] == ["exp-old-ready"]
     finally:
         db.close_connection()
 

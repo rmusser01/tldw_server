@@ -50,10 +50,35 @@ class MaintenanceDB:
         self.delete_calls: list[dict[str, Any]] = []
         self.before_delete: Any = None
 
-    def list_claims_analytics_exports_for_maintenance(self, *, user_id: str, limit: int) -> list[dict[str, Any]]:
-        self.list_calls.append({"user_id": user_id, "limit": limit})
-        rows = sorted(self.rows.values(), key=lambda row: (row["updated_at"], row["export_id"]))
-        return [dict(row) for row in rows[:limit] if row["user_id"] == user_id]
+    def list_claims_analytics_exports_for_maintenance(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+        statuses: tuple[str, ...] | None = None,
+        job_id_missing: bool | None = None,
+        updated_before: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self.list_calls.append(
+            {
+                "user_id": user_id,
+                "limit": limit,
+                "statuses": statuses,
+                "job_id_missing": job_id_missing,
+                "updated_before": updated_before,
+            }
+        )
+        rows = [row for row in self.rows.values() if row["user_id"] == user_id]
+        if statuses is not None:
+            rows = [row for row in rows if row["status"] in statuses]
+        if job_id_missing is True:
+            rows = [row for row in rows if row["job_id"] is None]
+        elif job_id_missing is False:
+            rows = [row for row in rows if row["job_id"] is not None]
+        if updated_before is not None:
+            rows = [row for row in rows if row["updated_at"] < updated_before]
+        rows.sort(key=lambda row: (row["updated_at"], row["export_id"]))
+        return [dict(row) for row in rows[:limit]]
 
     def attach_claims_analytics_export_job(self, *, export_id: str, user_id: str, job_id: int) -> bool:
         self.attach_calls.append({"export_id": export_id, "user_id": user_id, "job_id": job_id})
@@ -216,7 +241,15 @@ def test_reconcile_repairs_exact_active_and_archived_jobs_before_grace(
     )
 
     assert result == {"examined": 2, "repaired": 2, "failed": 0, "unchanged": 0}
-    assert db.list_calls == [{"user_id": "7", "limit": 100}]
+    assert db.list_calls == [
+        {
+            "user_id": "7",
+            "limit": 100,
+            "statuses": ("queued",),
+            "job_id_missing": True,
+            "updated_before": None,
+        }
+    ]
     assert {db.rows[active["export_id"]]["job_id"], db.rows[archived["export_id"]]["job_id"]} == {41, 42}
     assert all(
         call
@@ -318,6 +351,41 @@ def test_reconcile_jobs_outage_preserves_artifact_and_zero_grace_is_honored(
     assert db.rows[proven["export_id"]]["status"] == "failed"
 
 
+def test_reconcile_candidate_filters_prevent_attached_rows_from_consuming_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    irrelevant = [
+        _artifact(
+            60 + index,
+            status="queued",
+            job_id=160 + index,
+            created_seconds_ago=7200,
+            updated_seconds_ago=7200,
+        )
+        for index in range(3)
+    ]
+    orphan = _artifact(
+        63,
+        status="queued",
+        created_seconds_ago=600,
+        updated_seconds_ago=600,
+    )
+    db = MaintenanceDB([*irrelevant, orphan])
+
+    result = reconcile_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=FakeJobManager(),
+        now=NOW,
+        limit=2,
+    )
+
+    assert result == {"examined": 1, "repaired": 0, "failed": 1, "unchanged": 0}
+    assert db.rows[orphan["export_id"]]["status"] == "failed"
+    assert all(db.rows[row["export_id"]]["status"] == "queued" for row in irrelevant)
+
+
 @pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled", "quarantined"])
 def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> None:
     ready = _artifact(10, status="ready", updated_seconds_ago=3601)
@@ -351,6 +419,41 @@ def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> No
             "updated_before": cutoff,
         }
     ]
+    assert db.list_calls == [
+        {
+            "user_id": "7",
+            "limit": 100,
+            "statuses": ("ready", "failed"),
+            "job_id_missing": None,
+            "updated_before": cutoff,
+        }
+    ]
+
+
+def test_cleanup_candidate_filters_prevent_active_rows_from_consuming_limit() -> None:
+    irrelevant = [
+        _artifact(
+            70 + index,
+            status="queued" if index % 2 == 0 else "processing",
+            updated_seconds_ago=7200,
+        )
+        for index in range(3)
+    ]
+    ready = _artifact(73, status="ready", updated_seconds_ago=3601)
+    db = MaintenanceDB([*irrelevant, ready])
+
+    deleted = cleanup_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=FakeJobManager(),
+        now=NOW,
+        retention_hours=1,
+        limit=2,
+    )
+
+    assert deleted == 1
+    assert ready["export_id"] not in db.rows
+    assert all(row["export_id"] in db.rows for row in irrelevant)
 
 
 def test_cleanup_preserves_cutoff_active_and_status_uncertainty() -> None:
@@ -424,7 +527,7 @@ def test_cleanup_reconciled_failed_without_job_waits_retention_plus_grace(
         error_code="claims_export_enqueue_failed",
     )
     db = MaintenanceDB([old, exact])
-    manager = FakeJobManager(batch_error=RuntimeError("Jobs should not be called"))
+    manager = FakeJobManager()
 
     deleted = cleanup_export_artifacts(
         db,
@@ -438,6 +541,104 @@ def test_cleanup_reconciled_failed_without_job_waits_retention_plus_grace(
     assert old["export_id"] not in db.rows
     assert exact["export_id"] in db.rows
     assert manager.batch_calls == []
+    assert manager.group_calls == [
+        {
+            "batch_group": f"claims-analytics-export:{old['export_id']}",
+            "domain": "claims",
+            "owner_user_id": "7",
+            "job_type": "claims_generate_analytics_export",
+            "include_archived": True,
+        }
+    ]
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_cleanup_preserves_enqueue_failed_without_job_when_exact_job_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    archived: bool,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    row = _artifact(
+        43,
+        status="failed",
+        updated_seconds_ago=7200,
+        error_code="claims_export_enqueue_failed",
+    )
+    batch_group = f"claims-analytics-export:{row['export_id']}"
+    db = MaintenanceDB([row])
+    manager = FakeJobManager(groups={batch_group: _exact_job(row["export_id"], 143, archived=archived)})
+
+    deleted = cleanup_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=manager,
+        now=NOW,
+        retention_hours=1,
+    )
+
+    assert deleted == 0
+    assert row["export_id"] in db.rows
+    assert len(manager.group_calls) == 1
+    assert manager.group_calls[0]["include_archived"] is True
+    assert db.delete_calls == []
+
+
+def test_cleanup_preserves_enqueue_failed_without_job_on_malformed_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    row = _artifact(
+        44,
+        status="failed",
+        updated_seconds_ago=7200,
+        error_code="claims_export_enqueue_failed",
+    )
+    batch_group = f"claims-analytics-export:{row['export_id']}"
+    db = MaintenanceDB([row])
+    manager = FakeJobManager(groups={batch_group: {**_exact_job(row["export_id"], 144), "owner_user_id": "8"}})
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 0
+    )
+    assert row["export_id"] in db.rows
+    assert len(manager.group_calls) == 1
+    assert db.delete_calls == []
+
+
+def test_cleanup_preserves_enqueue_failed_without_job_during_jobs_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    row = _artifact(
+        45,
+        status="failed",
+        updated_seconds_ago=7200,
+        error_code="claims_export_enqueue_failed",
+    )
+    batch_group = f"claims-analytics-export:{row['export_id']}"
+    db = MaintenanceDB([row])
+    manager = FakeJobManager(groups={batch_group: RuntimeError("jobs outage secret")})
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 0
+    )
+    assert row["export_id"] in db.rows
+    assert len(manager.group_calls) == 1
+    assert db.delete_calls == []
 
 
 @pytest.mark.parametrize(
@@ -469,6 +670,7 @@ def test_cleanup_preserves_unrelated_failed_without_job_after_retention_and_grac
     assert deleted == 0
     assert unrelated["export_id"] in db.rows
     assert manager.batch_calls == []
+    assert manager.group_calls == []
     assert db.delete_calls == []
 
 
