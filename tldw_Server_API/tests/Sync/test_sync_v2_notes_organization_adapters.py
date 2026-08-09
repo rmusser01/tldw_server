@@ -342,6 +342,42 @@ def test_exact_resource_base_and_idempotent_replay_are_accepted() -> None:
     assert isinstance(replay, AdapterAccepted)
 
 
+def test_literal_original_retry_is_accepted_but_id_or_payload_drift_is_not() -> None:
+    original = _envelope(
+        "notes.keyword",
+        client_envelope_id="literal-create",
+        object_revision=1,
+    )
+    head = _stored(original, sequence=7)
+    adapter = NotesOrganizationDomainAdapter("notes.keyword")
+
+    literal_retry = adapter.evaluate_envelope(
+        original,
+        dataset=_dataset(),
+        context=_context(head),
+    )
+    same_id_drift = adapter.evaluate_envelope(
+        replace(
+            original,
+            payload={"keyword": "Changed"},
+            payload_hash="hash:changed",
+        ),
+        dataset=_dataset(),
+        context=_context(head),
+    )
+    new_baseless_change = adapter.evaluate_envelope(
+        replace(original, client_envelope_id="new-envelope"),
+        dataset=_dataset(),
+        context=_context(head),
+    )
+
+    assert isinstance(literal_retry, AdapterAccepted)
+    assert isinstance(same_id_drift, AdapterConflict)
+    assert same_id_drift.conflict_type == "notes_organization_base_conflict"
+    assert isinstance(new_baseless_change, AdapterConflict)
+    assert new_baseless_change.conflict_type == "notes_organization_base_conflict"
+
+
 def test_base_version_is_canonical_lineage_for_updates_and_equivalent_replays() -> None:
     head = _stored(
         replace(

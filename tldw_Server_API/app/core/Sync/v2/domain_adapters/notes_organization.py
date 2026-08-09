@@ -104,11 +104,14 @@ class NotesOrganizationDomainAdapter:
             )
 
         head = _get_head(envelope, context)
+        literal_replay = head is not None and _literal_replay(head, envelope)
         equivalent = head is not None and _equivalent_state(head, envelope.operation, payload)
         if head is None and _has_base(envelope):
             return _base_conflict(envelope, "The referenced base head does not exist")
-        if head is not None and not _exact_base(envelope, head):
+        if head is not None and not literal_replay and not _exact_base(envelope, head):
             return _base_conflict(envelope, "The incoming base does not match the current head")
+        if literal_replay:
+            return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
 
         restore_intent = envelope.routing_metadata.get("restore_intent")
         if restore_intent not in {None, True} or (
@@ -427,6 +430,52 @@ def _exact_base(envelope: SyncEnvelopeCreate, head: SyncHead) -> bool:
         and revision_matches
         and version_matches
         and cursor_matches
+    )
+
+
+def _literal_replay(head: SyncHead, envelope: SyncEnvelopeCreate) -> bool:
+    fingerprint_fields = (
+        "dataset_id",
+        "domain",
+        "object_id",
+        "stable_key",
+        "operation",
+        "client_envelope_id",
+        "device_id",
+        "client_profile_id",
+        "client_sequence",
+        "created_at_client",
+        "base_server_cursor",
+        "base_object_revision",
+        "base_object_hash",
+        "object_revision",
+        "parent_id",
+        "schema_version",
+        "base_version",
+        "entity_version",
+        "dependencies",
+        "routing_metadata",
+        "payload_ciphertext",
+        "payload",
+        "payload_hash",
+        "payload_size_bytes",
+        "deleted",
+        "encryption_metadata",
+        "adapter_version",
+        "status",
+    )
+    if any(getattr(head, name) != getattr(envelope, name) for name in fingerprint_fields):
+        return False
+    if envelope.mutation_group_id is None:
+        return True
+    return all(
+        getattr(head, name) == getattr(envelope, name)
+        for name in (
+            "mutation_group_id",
+            "mutation_step",
+            "mutation_step_count",
+            "mutation_plan_hash",
+        )
     )
 
 
