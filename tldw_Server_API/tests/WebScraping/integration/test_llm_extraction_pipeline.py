@@ -4,8 +4,8 @@ import types
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm as llm_strategy
 
 pytestmark = pytest.mark.integration
 
@@ -64,7 +64,7 @@ async def test_llm_pipeline_uses_plan_settings(monkeypatch):
         build_default_dependencies(),
         perform_chat_api_call=_fake_call,
     )
-    monkeypatch.setattr(llm_strategy, "build_default_dependencies", lambda: dependencies)
+    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
 
     scraper = EnhancedWebScraper(config={"custom_scrapers_yaml_path": "unused"})
 
