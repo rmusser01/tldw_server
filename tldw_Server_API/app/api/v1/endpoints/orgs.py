@@ -13,7 +13,6 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_db_transaction,
@@ -25,6 +24,7 @@ from tldw_Server_API.app.api.v1.API_Deps.org_deps import (
     require_org_membership,
     require_org_owner,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     OrgBudgetItem,
     OrgBudgetSelfUpdateRequest,
@@ -63,6 +63,12 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     RegistrationCodeExpiredError,
     RegistrationDisabledError,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipParentRequired,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.Billing.subscription_service import get_subscription_service
@@ -84,6 +90,25 @@ router = APIRouter(
         403: {"description": "Not authorized"},
     },
 )
+
+
+def _membership_context(
+    principal: AuthPrincipal,
+    ctx: OrgContext | None = None,
+) -> ActorMembershipWriteContext:
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        )
+    return ActorMembershipWriteContext(
+        actor_user_id=principal.user_id,
+        required_authority=(
+            MembershipAuthority.PLATFORM_ADMIN
+            if ctx is not None and ctx.is_platform_admin
+            else MembershipAuthority.SCOPED_MEMBERSHIP
+        ),
+    )
 
 
 # =============================================================================
@@ -155,6 +180,7 @@ async def create_org(
             org_id=org["id"],
             user_id=principal.user_id,
             role="owner",
+            context=_membership_context(principal),
         )
 
         logger.info(f"User {principal.user_id} created org {org['id']} ({body.name})")
@@ -171,6 +197,11 @@ async def create_org(
             team_count=0,
             user_role="owner",
         )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        ) from exc
     except DuplicateOrganizationError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -387,6 +418,7 @@ async def list_org_members(
 async def add_org_member(
     body: OrgMemberAddRequest,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     """Add a member to the organization. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -399,11 +431,18 @@ async def add_org_member(
             detail="Use the transfer ownership endpoint to add an owner",
         )
 
-    result = await repo.add_org_member(
-        org_id=ctx.org_id,
-        user_id=body.user_id,
-        role=body.role or "member",
-    )
+    try:
+        result = await repo.add_org_member(
+            org_id=ctx.org_id,
+            user_id=body.user_id,
+            role=body.role or "member",
+            context=_membership_context(principal, ctx),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        ) from exc
 
     logger.info(f"Added user {body.user_id} to org {ctx.org_id} as {body.role}")
     return OrgMemberResponse(**result)
@@ -418,6 +457,7 @@ async def update_member_role(
     user_id: int,
     body: OrgMemberRoleUpdateRequest,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     """Update a member's role. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -430,11 +470,18 @@ async def update_member_role(
             detail="Use the transfer ownership endpoint to assign owner role",
         )
 
-    result = await repo.update_org_member_role(
-        org_id=ctx.org_id,
-        user_id=user_id,
-        role=body.role,
-    )
+    try:
+        result = await repo.update_org_member_role(
+            org_id=ctx.org_id,
+            user_id=user_id,
+            role=body.role,
+            context=_membership_context(principal, ctx),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        ) from exc
 
     if not result:
         raise HTTPException(
@@ -480,7 +527,17 @@ async def remove_org_member(
                 detail="Cannot remove the last owner. Transfer ownership first.",
             )
 
-    result = await repo.remove_org_member(org_id=ctx.org_id, user_id=user_id)
+    try:
+        result = await repo.remove_org_member(
+            org_id=ctx.org_id,
+            user_id=user_id,
+            context=_membership_context(principal, ctx),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        ) from exc
 
     if result.get("error") == "owner_required":
         raise HTTPException(
@@ -698,6 +755,7 @@ async def add_team_member(
     team_id: int,
     body: TeamMemberAddRequest,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     """Add a member to a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -719,11 +777,23 @@ async def add_team_member(
             detail="User must be an organization member first",
         )
 
-    result = await repo.add_team_member(
-        team_id=team_id,
-        user_id=body.user_id,
-        role=body.role or "member",
-    )
+    try:
+        result = await repo.add_team_member(
+            team_id=team_id,
+            user_id=body.user_id,
+            role=body.role or "member",
+            context=_membership_context(principal, ctx),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        ) from exc
+    except MembershipParentRequired as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must be an organization member first",
+        ) from exc
 
     logger.info(f"Added user {body.user_id} to team {team_id}")
     return TeamMemberResponse(**result)
@@ -739,6 +809,7 @@ async def remove_team_member(
     team_id: int,
     user_id: int,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> Response:
     """Remove a member from a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -752,7 +823,17 @@ async def remove_team_member(
             detail="Team not found",
         )
 
-    result = await repo.remove_team_member(team_id=team_id, user_id=user_id)
+    try:
+        result = await repo.remove_team_member(
+            team_id=team_id,
+            user_id=user_id,
+            context=_membership_context(principal, ctx),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        ) from exc
     if not result.get("removed"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

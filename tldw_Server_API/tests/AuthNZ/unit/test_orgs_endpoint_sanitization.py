@@ -38,6 +38,99 @@ def _request(path: str, method: str) -> SimpleNamespace:
     )
 
 
+def test_membership_context_uses_platform_authority_for_platform_org_context():
+    from tldw_Server_API.app.api.v1.API_Deps.org_deps import OrgContext
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import MembershipAuthority
+
+    principal = SimpleNamespace(user_id=17)
+
+    scoped = orgs._membership_context(  # noqa: SLF001
+        principal,
+        OrgContext(org_id=9, role="admin"),
+    )
+    platform = orgs._membership_context(  # noqa: SLF001
+        principal,
+        OrgContext(org_id=9, role="admin", is_platform_admin=True),
+    )
+
+    assert scoped.required_authority is MembershipAuthority.SCOPED_MEMBERSHIP
+    assert platform.required_authority is MembershipAuthority.PLATFORM_ADMIN
+
+
+@pytest.mark.asyncio
+async def test_platform_admin_membership_route_requests_persisted_platform_authority(
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.API_Deps.org_deps import OrgContext
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgMemberAddRequest
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import MembershipAuthority
+
+    captured: dict[str, object] = {}
+
+    class _Repo:
+        def __init__(self, db_pool) -> None:
+            captured["db_pool"] = db_pool
+
+        async def add_org_member(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "org_id": kwargs["org_id"],
+                "user_id": kwargs["user_id"],
+                "role": kwargs["role"],
+            }
+
+    async def _pool():
+        return object()
+
+    monkeypatch.setattr(orgs, "get_db_pool", _pool)
+    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _Repo)
+
+    response = await orgs.add_org_member(
+        body=OrgMemberAddRequest(user_id=23, role="member"),
+        ctx=OrgContext(org_id=9, role="admin", is_platform_admin=True),
+        principal=SimpleNamespace(user_id=17),
+    )
+
+    assert response.org_id == 9
+    assert captured["context"].required_authority is MembershipAuthority.PLATFORM_ADMIN
+
+
+def test_membership_route_openapi_contract_has_no_new_parameters():
+    from fastapi import FastAPI
+
+    from tldw_Server_API.app.api.v1.endpoints.orgs import router
+
+    app = FastAPI()
+    app.include_router(router)
+    paths = app.openapi()["paths"]
+    expected = {
+        ("post", "/orgs/{org_id}/members"): (["org_id"], True),
+        ("patch", "/orgs/{org_id}/members/{user_id}"): (
+            ["user_id", "org_id"],
+            True,
+        ),
+        ("delete", "/orgs/{org_id}/members/{user_id}"): (
+            ["user_id", "org_id"],
+            False,
+        ),
+        ("post", "/orgs/{org_id}/teams/{team_id}/members"): (
+            ["team_id", "org_id"],
+            True,
+        ),
+        ("delete", "/orgs/{org_id}/teams/{team_id}/members/{user_id}"): (
+            ["team_id", "user_id", "org_id"],
+            False,
+        ),
+    }
+
+    for (method, path), (parameter_names, has_body) in expected.items():
+        operation = paths[path][method]
+        assert [item["name"] for item in operation.get("parameters", [])] == parameter_names
+        assert ("requestBody" in operation) is has_body
+
+
 @pytest.mark.asyncio
 async def test_update_org_budgets_upsert_failure_log_is_sanitized(monkeypatch):
     from fastapi import HTTPException

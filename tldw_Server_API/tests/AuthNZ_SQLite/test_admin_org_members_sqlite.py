@@ -15,9 +15,9 @@ async def test_admin_org_members_endpoints_sqlite(tmp_path):
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     # Reset singletons and init schema
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     reset_settings()
     await reset_db_pool()
 
@@ -36,11 +36,12 @@ async def test_admin_org_members_endpoints_sqlite(tmp_path):
     )
 
     # Prepare app client and override principal to simulate admin claims
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
     from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
     app_settings['CSRF_ENABLED'] = False
 
     async def _principal_override(request: Request):  # type: ignore[override]

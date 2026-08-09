@@ -952,6 +952,10 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
 
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+            TrustedMembershipReason,
+            TrustedMembershipWriteContext,
+        )
         from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
         from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
@@ -969,7 +973,14 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
 
         pool = await get_db_pool()
         repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-        await repo.add_org_member(org_id=org["id"], user_id=int(user_id), role="owner")
+        await repo.add_org_member(
+            org_id=org["id"],
+            user_id=int(user_id),
+            role="owner",
+            context=TrustedMembershipWriteContext(
+                trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+            ),
+        )
     except Exception as exc:
         # Best-effort bootstrap: org creation failures must not block login flows.
         logger.warning("Org bootstrap failed for user {}: {}", user_id, exc)

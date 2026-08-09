@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipLockBackend,
+    MembershipMutationResult,
+    MembershipUserVersionFloor,
+    MembershipWriter,
+    MembershipWriteResult,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 class _Tx:
@@ -48,7 +62,7 @@ class _SqliteConnWithPgTrap:
         lower_q = str(query).lower()
         if "select tm.team_id, tm.user_id, tm.role, t.org_id" in lower_q:
             return _Cursor((2, 7, "member", 11))
-        if "select id from teams where org_id = ? and name = ?" in lower_q:
+        if "select id from main.teams where org_id = ? and name = ?" in lower_q:
             self._default_team_select_calls += 1
             if self._default_team_select_calls == 1:
                 return _Cursor(None)
@@ -251,32 +265,67 @@ class _PostgresDeleteTeamConn:
 
 
 @pytest.mark.asyncio
-async def test_add_team_member_sqlite_backend_selection_uses_execute():
+async def test_add_team_member_sqlite_delegates_with_sqlite_writer(
+    monkeypatch: pytest.MonkeyPatch,
+):
     conn = _SqliteConnWithPgTrap()
     repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=False))
+    observed: list[tuple[Any, MembershipLockBackend]] = []
 
-    row = await repo.add_team_member(team_id=2, user_id=7, role="member")
+    async def _apply(writer, **kwargs):
+        observed.append((kwargs["conn"], writer._backend))  # noqa: SLF001
+        mutation = kwargs["mutations"][0]
+        floor = datetime.now(timezone.utc)
+        return MembershipWriteResult(
+            mutation_results=(MembershipMutationResult(mutation, True, True, mutation.role, 11),),
+            affected_user_ids=(7,),
+            version_floors=(MembershipUserVersionFloor(7, floor, floor),),
+        )
+
+    monkeypatch.setattr(MembershipWriter, "apply_membership_mutations", _apply)
+
+    row = await repo.add_team_member(
+        team_id=2,
+        user_id=7,
+        role="member",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
 
     assert row["team_id"] == 2
     assert row["org_id"] == 11
-    assert conn.execute_calls
-    assert "insert or ignore into team_members" in conn.execute_calls[0][0].lower()
-    assert "where tm.team_id = ? and tm.user_id = ?" in conn.execute_calls[1][0].lower()
+    assert observed == [(conn, MembershipLockBackend.SQLITE)]
 
 
 @pytest.mark.asyncio
-async def test_add_team_member_postgres_backend_selection_uses_fetchrow():
+async def test_add_team_member_postgres_delegates_with_postgres_writer(
+    monkeypatch: pytest.MonkeyPatch,
+):
     conn = _PostgresConnWithSqliteTrap()
     repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=True))
+    observed: list[tuple[Any, MembershipLockBackend]] = []
 
-    row = await repo.add_team_member(team_id=2, user_id=7, role="member")
+    async def _apply(writer, **kwargs):
+        observed.append((kwargs["conn"], writer._backend))  # noqa: SLF001
+        mutation = kwargs["mutations"][0]
+        floor = datetime.now(timezone.utc)
+        return MembershipWriteResult(
+            mutation_results=(MembershipMutationResult(mutation, True, True, mutation.role, 11),),
+            affected_user_ids=(7,),
+            version_floors=(MembershipUserVersionFloor(7, floor, floor),),
+        )
+
+    monkeypatch.setattr(MembershipWriter, "apply_membership_mutations", _apply)
+
+    row = await repo.add_team_member(
+        team_id=2,
+        user_id=7,
+        role="member",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
 
     assert row["team_id"] == 2
     assert row["org_id"] == 11
-    assert conn.execute_calls
-    assert "on conflict (team_id, user_id) do nothing" in conn.execute_calls[0][0].lower()
-    assert conn.fetchrow_calls
-    assert "where tm.team_id = $1 and tm.user_id = $2" in conn.fetchrow_calls[0][0].lower()
+    assert observed == [(conn, MembershipLockBackend.POSTGRESQL)]
 
 
 @pytest.mark.asyncio

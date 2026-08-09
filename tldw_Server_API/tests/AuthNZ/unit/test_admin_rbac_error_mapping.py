@@ -274,3 +274,65 @@ async def test_delete_user_override_sanitizes_backend_error(monkeypatch: pytest.
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to delete user override"
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_sql", "parameters"),
+    (
+        (
+            lambda db: admin_rbac.remove_role_from_user(
+                user_id=42,
+                role_id=3,
+                principal=object(),
+                db=db,
+            ),
+            "DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2",
+            (42, 3),
+        ),
+        (
+            lambda db: admin_rbac.revoke_permission_from_role(
+                role_id=3,
+                permission_id=7,
+                db=db,
+            ),
+            "DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2",
+            (3, 7),
+        ),
+        (
+            lambda db: admin_rbac.delete_user_override(
+                user_id=42,
+                permission_id=7,
+                principal=object(),
+                db=db,
+            ),
+            "DELETE FROM user_permissions WHERE user_id = $1 AND permission_id = $2",
+            (42, 7),
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_runtime_rbac_revocations_use_writer_serialized_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    operation,
+    expected_sql: str,
+    parameters: tuple[int, int],
+) -> None:
+    class _RecordingDB:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[int, ...]]] = []
+
+        async def execute(self, sql: str, *params: int) -> str:
+            self.calls.append((sql, params))
+            return "DELETE 1"
+
+    _configure_error_mapping_env(monkeypatch)
+    monkeypatch.setattr(
+        admin_rbac,
+        "_get_is_postgres_backend_fn",
+        lambda: _fake_is_pg_true,
+    )
+    db = _RecordingDB()
+
+    await operation(db)
+
+    assert db.calls == [(expected_sql, parameters)]

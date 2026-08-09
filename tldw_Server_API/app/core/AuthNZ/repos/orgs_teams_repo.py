@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -10,6 +11,18 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateOrganizationError,
     DuplicateTeamError,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership,
+    MembershipMutation,
+    MembershipMutationKind,
+    MembershipMutationRelationship,
+    MembershipParentRequired,
+    MembershipScopeType,
+    MembershipWriteContext,
+    MembershipWriter,
+    MembershipWriteResult,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 
 DEFAULT_BASE_TEAM_NAME = "Default-Base"
 DEFAULT_BASE_TEAM_SLUG = "default-base"
@@ -35,6 +48,50 @@ class AuthnzOrgsTeamsRepo:
         """
         _ = conn  # Compatibility placeholder for legacy call sites.
         return bool(getattr(self.db_pool, "pool", None))
+
+    async def _apply_direct_membership_mutations(
+        self,
+        *,
+        context: MembershipWriteContext,
+        mutations: tuple[MembershipMutation, ...],
+        operation_time: datetime | None = None,
+    ) -> MembershipWriteResult:
+        """Own one bounded transaction and one final anchor touch per changed user."""
+
+        sampled_time = operation_time or datetime.now(timezone.utc)
+        async with self.db_pool.transaction() as conn:
+            return await MembershipWriter(self.db_pool).apply_membership_mutations(
+                conn=conn,
+                context=context,
+                mutations=mutations,
+                anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+                operation_time=sampled_time,
+            )
+
+    async def _final_touch_membership_results(
+        self,
+        conn: Any,
+        *,
+        results: tuple[MembershipWriteResult, ...],
+        operation_time: datetime,
+    ) -> None:
+        floors: dict[int, datetime] = {}
+        for result in results:
+            for floor in result.version_floors:
+                floors[floor.user_id] = max(
+                    floors.get(floor.user_id, floor.version_floor),
+                    floor.version_floor,
+                )
+        gateway = VersionedUserWriteGateway(
+            "postgres" if self._is_postgres() else "sqlite",
+            clock=lambda: operation_time,
+        )
+        for user_id in sorted(floors):
+            await gateway.final_touch(
+                conn,
+                user_id=user_id,
+                version_floor=floors[user_id],
+            )
 
     async def create_organization(
         self,
@@ -848,6 +905,7 @@ class AuthnzOrgsTeamsRepo:
         *,
         team_id: int,
         user_id: int,
+        context: MembershipWriteContext,
         role: str = "member",
     ) -> dict[str, Any]:
         """
@@ -856,58 +914,24 @@ class AuthnzOrgsTeamsRepo:
         Returns a dict with ``team_id``, ``user_id``, ``role``, and ``org_id``.
         """
         try:
-            async with self.db_pool.transaction() as conn:
-                if self._is_postgres():
-                    await conn.execute(
-                        """
-                        INSERT INTO team_members (team_id, user_id, role)
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (team_id, user_id) DO NOTHING
-                        """,
-                        team_id,
-                        user_id,
-                        role,
-                    )
-                    row = await conn.fetchrow(
-                        """
-                        SELECT tm.team_id, tm.user_id, tm.role, t.org_id
-                        FROM team_members tm
-                        JOIN teams t ON tm.team_id = t.id
-                        WHERE tm.team_id = $1 AND tm.user_id = $2
-                        """,
-                        team_id,
-                        user_id,
-                    )
-                    if row:
-                        return dict(row)
-                    return {"team_id": int(team_id), "user_id": int(user_id), "role": role}
-
-                # SQLite / aiosqlite path
-                await conn.execute(
-                    """
-                    INSERT OR IGNORE INTO team_members (team_id, user_id, role)
-                    VALUES (?, ?, ?)
-                    """,
-                    (team_id, user_id, role),
-                )
-                cur = await conn.execute(
-                    """
-                    SELECT tm.team_id, tm.user_id, tm.role, t.org_id
-                    FROM team_members tm
-                    JOIN teams t ON tm.team_id = t.id
-                    WHERE tm.team_id = ? AND tm.user_id = ?
-                    """,
-                    (team_id, user_id),
-                )
-                row = await cur.fetchone()
-                if row:
-                    return {
-                        "team_id": row[0],
-                        "user_id": row[1],
-                        "role": row[2],
-                        "org_id": row[3],
-                    }
-                return {"team_id": int(team_id), "user_id": int(user_id), "role": role}
+            mutation = MembershipMutation(
+                scope_type=MembershipScopeType.TEAM,
+                scope_id=team_id,
+                user_id=user_id,
+                kind=MembershipMutationKind.ADD,
+                role=role,
+            )
+            result = await self._apply_direct_membership_mutations(
+                context=context,
+                mutations=(mutation,),
+            )
+            mutation_result = result.mutation_results[0]
+            if mutation_result.error == "org_membership_required":
+                raise MembershipParentRequired()
+            legacy = mutation_result.to_legacy_result()
+            if legacy is None:  # pragma: no cover - impossible for ADD
+                raise RuntimeError("Membership add produced no result")
+            return legacy
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzOrgsTeamsRepo.add_team_member failed: {exc}")
             raise
@@ -960,50 +984,25 @@ class AuthnzOrgsTeamsRepo:
         team_id: int,
         user_id: int,
         role: str,
+        context: MembershipWriteContext,
     ) -> dict[str, Any] | None:
         """
         Update a team member's role.
         """
         try:
-            async with self.db_pool.transaction() as conn:
-                if self._is_postgres():
-                    row = await conn.fetchrow(
-                        """
-                        UPDATE team_members
-                        SET role = $3
-                        WHERE team_id = $1 AND user_id = $2
-                        RETURNING team_id, user_id, role
-                        """,
-                        team_id,
-                        user_id,
-                        role,
-                    )
-                    return dict(row) if row else None
-
-                await conn.execute(
-                    """
-                    UPDATE team_members
-                    SET role = ?
-                    WHERE team_id = ? AND user_id = ?
-                    """,
-                    (role, team_id, user_id),
-                )
-                cur = await conn.execute(
-                    """
-                    SELECT team_id, user_id, role
-                    FROM team_members
-                    WHERE team_id = ? AND user_id = ?
-                    """,
-                    (team_id, user_id),
-                )
-                row = await cur.fetchone()
-                if row:
-                    return {
-                        "team_id": row[0],
-                        "user_id": row[1],
-                        "role": row[2],
-                    }
-                return None
+            result = await self._apply_direct_membership_mutations(
+                context=context,
+                mutations=(
+                    MembershipMutation(
+                        scope_type=MembershipScopeType.TEAM,
+                        scope_id=team_id,
+                        user_id=user_id,
+                        kind=MembershipMutationKind.UPDATE_ROLE,
+                        role=role,
+                    ),
+                ),
+            )
+            return result.mutation_results[0].to_legacy_result()
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzOrgsTeamsRepo.update_team_member_role failed: {exc}")
             raise
@@ -1102,6 +1101,7 @@ class AuthnzOrgsTeamsRepo:
         *,
         team_id: int,
         user_id: int,
+        context: MembershipWriteContext,
     ) -> dict[str, Any]:
         """
         Remove a user from a team.
@@ -1109,34 +1109,21 @@ class AuthnzOrgsTeamsRepo:
         Returns ``{\"team_id\", \"user_id\", \"removed\"}``.
         """
         try:
-            async with self.db_pool.transaction() as conn:
-                removed = False
-                if self._is_postgres():
-                    row = await conn.fetchrow(
-                        """
-                        DELETE FROM team_members
-                        WHERE team_id = $1 AND user_id = $2
-                        RETURNING team_id, user_id
-                        """,
-                        team_id,
-                        user_id,
-                    )
-                    removed = row is not None
-                else:
-                    cur = await conn.execute(
-                        """
-                        DELETE FROM team_members
-                        WHERE team_id = ? AND user_id = ?
-                        """,
-                        (team_id, user_id),
-                    )
-                    removed = bool((getattr(cur, "rowcount", 0) or 0) > 0)
-
-            return {
-                "team_id": int(team_id),
-                "user_id": int(user_id),
-                "removed": bool(removed),
-            }
+            result = await self._apply_direct_membership_mutations(
+                context=context,
+                mutations=(
+                    MembershipMutation(
+                        scope_type=MembershipScopeType.TEAM,
+                        scope_id=team_id,
+                        user_id=user_id,
+                        kind=MembershipMutationKind.REMOVE,
+                    ),
+                ),
+            )
+            legacy = result.mutation_results[0].to_legacy_result()
+            if legacy is None:  # pragma: no cover - impossible for REMOVE
+                raise RuntimeError("Membership remove produced no result")
+            return legacy
         except Exception:  # pragma: no cover - surfaced via callers
             logger.exception(
                 'AuthnzOrgsTeamsRepo.remove_team_member failed for team_id={} user_id={}',
@@ -1161,7 +1148,7 @@ class AuthnzOrgsTeamsRepo:
             row = await conn.fetchrow(
                 """
                 SELECT id
-                FROM teams
+                FROM public.teams
                 WHERE org_id = $1 AND name = $2
                 """,
                 org_id,
@@ -1173,8 +1160,9 @@ class AuthnzOrgsTeamsRepo:
                 return None
             new_row = await conn.fetchrow(
                 """
-                INSERT INTO teams (org_id, name, slug, description, metadata)
+                INSERT INTO public.teams (org_id, name, slug, description, metadata)
                 VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
                 RETURNING id
                 """,
                 org_id,
@@ -1187,7 +1175,7 @@ class AuthnzOrgsTeamsRepo:
 
         # SQLite / aiosqlite connection
         cur = await conn.execute(
-            "SELECT id FROM teams WHERE org_id = ? AND name = ?",
+            "SELECT id FROM main.teams WHERE org_id = ? AND name = ?",
             (org_id, DEFAULT_BASE_TEAM_NAME),
         )
         row = await cur.fetchone()
@@ -1197,7 +1185,7 @@ class AuthnzOrgsTeamsRepo:
             return None
         await conn.execute(
             """
-            INSERT INTO teams (org_id, name, slug, description, metadata)
+            INSERT OR IGNORE INTO main.teams (org_id, name, slug, description, metadata)
             VALUES (?, ?, ?, ?, ?)
             """,
             (
@@ -1209,11 +1197,49 @@ class AuthnzOrgsTeamsRepo:
             ),
         )
         cur = await conn.execute(
-            "SELECT id FROM teams WHERE org_id = ? AND name = ?",
+            "SELECT id FROM main.teams WHERE org_id = ? AND name = ?",
             (org_id, DEFAULT_BASE_TEAM_NAME),
         )
         row = await cur.fetchone()
         return int(row[0]) if row else None
+
+    async def _create_default_team_best_effort(
+        self,
+        conn: Any,
+        org_id: int,
+    ) -> int | None:
+        """Create the default team behind a savepoint on the existing transaction."""
+
+        if self._is_postgres():
+            savepoint = conn.transaction()
+            await savepoint.start()
+            try:
+                team_id = await self._get_or_create_default_team_id(
+                    conn,
+                    org_id,
+                    create=True,
+                )
+            except Exception as exc:
+                await savepoint.rollback()
+                logger.warning("Default team auto-enroll failed for org_id={}: {}", org_id, exc)
+                return None
+            await savepoint.commit()
+            return team_id
+
+        await conn.create_savepoint("default_team_companion")
+        try:
+            team_id = await self._get_or_create_default_team_id(
+                conn,
+                org_id,
+                create=True,
+            )
+        except Exception as exc:
+            await conn.rollback_savepoint("default_team_companion")
+            await conn.release_savepoint("default_team_companion")
+            logger.warning("Default team auto-enroll failed for org_id={}: {}", org_id, exc)
+            return None
+        await conn.release_savepoint("default_team_companion")
+        return team_id
 
     async def _ensure_user_in_default_team(
         self,
@@ -1282,77 +1308,90 @@ class AuthnzOrgsTeamsRepo:
         *,
         org_id: int,
         user_id: int,
+        context: MembershipWriteContext,
         role: str = "member",
     ) -> dict[str, Any]:
         """
         Add a user to an organization (idempotent) and ensure default-team membership.
         """
         try:
+            operation_time = datetime.now(timezone.utc)
+            org_mutation = MembershipMutation(
+                scope_type=MembershipScopeType.ORGANIZATION,
+                scope_id=org_id,
+                user_id=user_id,
+                kind=MembershipMutationKind.ADD,
+                role=role,
+            )
             async with self.db_pool.transaction() as conn:
-                if self._is_postgres():
-                    await conn.execute(
-                        """
-                        INSERT INTO org_members (org_id, user_id, role)
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (org_id, user_id) DO NOTHING
-                        """,
-                        org_id,
-                        user_id,
-                        role,
+                writer = MembershipWriter(self.db_pool)
+                default_team_id = await self._get_or_create_default_team_id(
+                    conn,
+                    org_id,
+                    create=False,
+                )
+                if default_team_id is not None:
+                    result = await writer.apply_membership_mutations(
+                        conn=conn,
+                        context=context,
+                        mutations=(
+                            org_mutation,
+                            MembershipMutation(
+                                scope_type=MembershipScopeType.TEAM,
+                                scope_id=default_team_id,
+                                user_id=user_id,
+                                kind=MembershipMutationKind.ADD,
+                                role="member",
+                                relationship=MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
+                            ),
+                        ),
+                        anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+                        operation_time=operation_time,
                     )
-                    row = await conn.fetchrow(
-                        """
-                        SELECT org_id, user_id, role
-                        FROM org_members
-                        WHERE org_id = $1 AND user_id = $2
-                        """,
-                        org_id,
-                        user_id,
-                    )
-                    result = (
-                        dict(row)
-                        if row
-                        else {"org_id": int(org_id), "user_id": int(user_id), "role": role}
-                    )
+                    results = (result,)
+                    primary_result = result.mutation_results[0]
                 else:
-                    await conn.execute(
-                        """
-                        INSERT OR IGNORE INTO org_members (org_id, user_id, role)
-                        VALUES (?, ?, ?)
-                        """,
-                        (org_id, user_id, role),
+                    first_result = await writer.apply_membership_mutations(
+                        conn=conn,
+                        context=context,
+                        mutations=(org_mutation,),
+                        anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+                        operation_time=operation_time,
                     )
-                    cur = await conn.execute(
-                        """
-                        SELECT org_id, user_id, role
-                        FROM org_members
-                        WHERE org_id = ? AND user_id = ?
-                        """,
-                        (org_id, user_id),
-                    )
-                    row = await cur.fetchone()
-                    if row:
-                        result = {
-                            "org_id": row[0],
-                            "user_id": row[1],
-                            "role": row[2],
-                        }
-                    else:
-                        result = {
-                            "org_id": int(org_id),
-                            "user_id": int(user_id),
-                            "role": role,
-                        }
-                try:
-                    await self._ensure_user_in_default_team(conn, org_id, user_id)
-                except Exception as exc:
-                    logger.warning(
-                        'Default team auto-enroll failed for org_id={}, user_id={}: {}',
+                    default_team_id = await self._create_default_team_best_effort(
+                        conn,
                         org_id,
-                        user_id,
-                        exc,
                     )
-                return result
+                    results = (first_result,)
+                    primary_result = first_result.mutation_results[0]
+                    if default_team_id is not None:
+                        companion_result = await writer.apply_membership_mutations(
+                            conn=conn,
+                            context=context,
+                            mutations=(
+                                org_mutation,
+                                MembershipMutation(
+                                    scope_type=MembershipScopeType.TEAM,
+                                    scope_id=default_team_id,
+                                    user_id=user_id,
+                                    kind=MembershipMutationKind.ADD,
+                                    role="member",
+                                    relationship=MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
+                                ),
+                            ),
+                            anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+                            operation_time=operation_time,
+                        )
+                        results += (companion_result,)
+                await self._final_touch_membership_results(
+                    conn,
+                    results=results,
+                    operation_time=operation_time,
+                )
+            legacy = primary_result.to_legacy_result()
+            if legacy is None:  # pragma: no cover - impossible for ADD
+                raise RuntimeError("Membership add produced no result")
+            return legacy
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzOrgsTeamsRepo.add_org_member failed: {exc}")
             raise
@@ -1429,112 +1468,54 @@ class AuthnzOrgsTeamsRepo:
         *,
         org_id: int,
         user_id: int,
+        context: MembershipWriteContext,
     ) -> dict[str, Any]:
         """
         Remove a user from an organization, enforcing at least one owner.
         """
         try:
+            operation_time = datetime.now(timezone.utc)
+            org_mutation = MembershipMutation(
+                scope_type=MembershipScopeType.ORGANIZATION,
+                scope_id=org_id,
+                user_id=user_id,
+                kind=MembershipMutationKind.REMOVE,
+            )
             async with self.db_pool.transaction() as conn:
-                removed = False
-                if self._is_postgres():
-                    current_role = await conn.fetchval(
-                        """
-                        SELECT role
-                        FROM org_members
-                        WHERE org_id = $1 AND user_id = $2
-                        """,
-                        org_id,
-                        user_id,
-                    )
-                    if (current_role or "").lower() == "owner":
-                        owner_count = await conn.fetchval(
-                            """
-                            SELECT COUNT(*) FROM org_members
-                            WHERE org_id = $1 AND role = 'owner'
-                            """,
-                            org_id,
+                default_team_id = await self._get_or_create_default_team_id(
+                    conn,
+                    org_id,
+                    create=False,
+                )
+                mutations = [org_mutation]
+                if default_team_id is not None:
+                    mutations.append(
+                        MembershipMutation(
+                            scope_type=MembershipScopeType.TEAM,
+                            scope_id=default_team_id,
+                            user_id=user_id,
+                            kind=MembershipMutationKind.REMOVE,
+                            relationship=MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
                         )
-                        if owner_count is not None and int(owner_count) <= 1:
-                            return {
-                                "org_id": int(org_id),
-                                "user_id": int(user_id),
-                                "removed": False,
-                                "error": "owner_required",
-                            }
-                    row = await conn.fetchrow(
-                        """
-                        DELETE FROM org_members
-                        WHERE org_id = $1 AND user_id = $2
-                        RETURNING org_id, user_id
-                        """,
-                        org_id,
-                        user_id,
                     )
-                    removed = row is not None
-                    if removed:
-                        try:
-                            await self._remove_user_from_default_team(conn, org_id, user_id)
-                        except Exception as exc:
-                            logger.warning(
-                                'Default team removal failed for org_id={}, user_id={}: {}',
-                                org_id,
-                                user_id,
-                                exc,
-                            )
-                else:
-                    cur_role = await conn.execute(
-                        """
-                        SELECT role
-                        FROM org_members
-                        WHERE org_id = ? AND user_id = ?
-                        """,
-                        (org_id, user_id),
-                    )
-                    role_row = await cur_role.fetchone()
-                    if role_row and (role_row[0] or "").lower() == "owner":
-                        owner_count_row = await conn.execute(
-                            """
-                            SELECT COUNT(*) FROM org_members
-                            WHERE org_id = ? AND role = 'owner'
-                            """,
-                            (org_id,),
-                        )
-                        owner_count = await owner_count_row.fetchone()
-                        if owner_count and int(owner_count[0]) <= 1:
-                            return {
-                                "org_id": int(org_id),
-                                "user_id": int(user_id),
-                                "removed": False,
-                                "error": "owner_required",
-                            }
-                    cur = await conn.execute(
-                        """
-                        DELETE FROM org_members
-                        WHERE org_id = ? AND user_id = ?
-                        """,
-                        (org_id, user_id),
-                    )
-                    try:
-                        removed = (cur.rowcount or 0) > 0
-                    except AttributeError:
-                        # aiosqlite cursor may not expose rowcount reliably
-                        removed = True
-                    if removed:
-                        try:
-                            await self._remove_user_from_default_team(conn, org_id, user_id)
-                        except Exception as exc:
-                            logger.warning(
-                                'Default team removal failed for org_id={}, user_id={}: {}',
-                                org_id,
-                                user_id,
-                                exc,
-                            )
-
-            return {
-                "org_id": int(org_id),
-                "user_id": int(user_id),
-                "removed": bool(removed),
-            }
+                result = await MembershipWriter(
+                    self.db_pool
+                ).apply_membership_mutations(
+                    conn=conn,
+                    context=context,
+                    mutations=tuple(mutations),
+                    anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+                    operation_time=operation_time,
+                )
+                await self._final_touch_membership_results(
+                    conn,
+                    results=(result,),
+                    operation_time=operation_time,
+                )
+            legacy = result.mutation_results[0].to_legacy_result()
+            if legacy is None:  # pragma: no cover - impossible for REMOVE
+                raise RuntimeError("Membership remove produced no result")
+            return legacy
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzOrgsTeamsRepo.remove_org_member failed: {exc}")
             raise
@@ -1545,105 +1526,25 @@ class AuthnzOrgsTeamsRepo:
         org_id: int,
         user_id: int,
         role: str,
+        context: MembershipWriteContext,
     ) -> dict[str, Any] | None:
         """
         Update an org member's role, enforcing at least one owner.
         """
-        target_role = (role or "").lower()
         try:
-            async with self.db_pool.transaction() as conn:
-                if self._is_postgres():
-                    current_role = await conn.fetchval(
-                        """
-                        SELECT role
-                        FROM org_members
-                        WHERE org_id = $1 AND user_id = $2
-                        """,
-                        org_id,
-                        user_id,
-                    )
-                    if current_role is None:
-                        return None
-                    if (current_role or "").lower() == "owner" and target_role != "owner":
-                        owner_count = await conn.fetchval(
-                            """
-                            SELECT COUNT(*) FROM org_members
-                            WHERE org_id = $1 AND role = 'owner'
-                            """,
-                            org_id,
-                        )
-                        if owner_count is not None and int(owner_count) <= 1:
-                            return {
-                                "org_id": int(org_id),
-                                "user_id": int(user_id),
-                                "role": current_role,
-                                "error": "owner_required",
-                            }
-                    row = await conn.fetchrow(
-                        """
-                        UPDATE org_members
-                        SET role = $3
-                        WHERE org_id = $1 AND user_id = $2
-                        RETURNING org_id, user_id, role
-                        """,
-                        org_id,
-                        user_id,
-                        role,
-                    )
-                    return dict(row) if row else None
-
-                cur = await conn.execute(
-                    """
-                    SELECT role
-                    FROM org_members
-                    WHERE org_id = ? AND user_id = ?
-                    """,
-                    (org_id, user_id),
-                )
-                row = await cur.fetchone()
-                if not row:
-                    return None
-                current_role = row[0] if not hasattr(row, "keys") else row["role"]
-                if (current_role or "").lower() == "owner" and target_role != "owner":
-                    owner_count_cur = await conn.execute(
-                        """
-                        SELECT COUNT(*) FROM org_members
-                        WHERE org_id = ? AND role = 'owner'
-                        """,
-                        (org_id,),
-                    )
-                    owner_count_row = await owner_count_cur.fetchone()
-                    if owner_count_row and int(owner_count_row[0]) <= 1:
-                        return {
-                            "org_id": int(org_id),
-                            "user_id": int(user_id),
-                            "role": current_role,
-                            "error": "owner_required",
-                        }
-                await conn.execute(
-                    """
-                    UPDATE org_members
-                    SET role = ?
-                    WHERE org_id = ? AND user_id = ?
-                    """,
-                    (role, org_id, user_id),
-                )
-                cur2 = await conn.execute(
-                    """
-                    SELECT org_id, user_id, role
-                    FROM org_members
-                    WHERE org_id = ? AND user_id = ?
-                    """,
-                    (org_id, user_id),
-                )
-                row2 = await cur2.fetchone()
-                if row2:
-                    return {
-                        "org_id": row2[0],
-                        "user_id": row2[1],
-                        "role": row2[2],
-                    }
-                return None
+            result = await self._apply_direct_membership_mutations(
+                context=context,
+                mutations=(
+                    MembershipMutation(
+                        scope_type=MembershipScopeType.ORGANIZATION,
+                        scope_id=org_id,
+                        user_id=user_id,
+                        kind=MembershipMutationKind.UPDATE_ROLE,
+                        role=role,
+                    ),
+                ),
+            )
+            return result.mutation_results[0].to_legacy_result()
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(
                 f"AuthnzOrgsTeamsRepo.update_org_member_role failed: {exc}"

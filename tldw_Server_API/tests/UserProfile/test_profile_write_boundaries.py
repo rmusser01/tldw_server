@@ -31,7 +31,45 @@ PROFILE_VISIBLE_COLUMNS = frozenset(
 )
 MEMBERSHIP_TABLES = frozenset({"org_members", "team_members"})
 PARENT_SCOPE_TABLES = frozenset({"organizations", "teams"})
-
+DIRECT_MEMBERSHIP_CALL_NAMES = frozenset(
+    {
+        "add_org_member",
+        "remove_org_member",
+        "update_org_member_role",
+        "add_team_member",
+        "remove_team_member",
+        "update_team_member_role",
+    }
+)
+DIRECT_MEMBERSHIP_PROXY_CALLS = frozenset(
+    {
+        (
+            "tldw_Server_API/app/api/v1/endpoints/admin/admin_orgs.py",
+            "admin_orgs_service",
+            call_name,
+        )
+        for call_name in DIRECT_MEMBERSHIP_CALL_NAMES
+    }
+    | {
+        (
+            "tldw_Server_API/tests/AuthNZ/unit/test_orgs_endpoint_sanitization.py",
+            "orgs",
+            "add_org_member",
+        )
+    }
+)
+SERVING_MEMBERSHIP_CONTEXT_CATEGORIES = {
+    "tldw_Server_API/app/api/v1/endpoints/auth.py": "trusted",
+    "tldw_Server_API/app/api/v1/endpoints/orgs.py": "actor",
+    "tldw_Server_API/app/services/admin_e2e_support_service.py": "trusted",
+    "tldw_Server_API/app/services/admin_orgs_service.py": "actor",
+    "tldw_Server_API/app/services/org_invite_service.py": "trusted",
+    "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py": "trusted",
+    "tldw_Server_API/app/core/AuthNZ/orgs_teams.py": "passthrough",
+}
+ACTOR_MEMBERSHIP_CONTEXT_FACTORIES = frozenset(
+    {"_membership_context", "_membership_write_context"}
+)
 REPO_ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = REPO_ROOT / "tldw_Server_API" / "app"
 SQL_CALL_NAMES = frozenset(
@@ -150,47 +188,47 @@ EXPECTED_MEMBERSHIP_WRITES = (
         "DELETE team_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.add_org_member",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._insert_membership",
         "INSERT org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.add_org_member",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._insert_membership",
         "INSERT org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.add_team_member",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._insert_membership",
         "INSERT team_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.add_team_member",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._insert_membership",
         "INSERT team_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.remove_org_member",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._delete_membership",
         "DELETE org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.remove_org_member",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._delete_membership",
         "DELETE org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.remove_team_member",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._delete_membership",
+        "DELETE team_members",
+    ),
+    ExpectedWrite(
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._delete_membership",
         "DELETE team_members",
     ),
     ExpectedWrite(
         "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.remove_team_member",
-        "DELETE team_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
         "AuthnzOrgsTeamsRepo.transfer_organization_ownership",
         "UPDATE org_members",
     ),
@@ -210,23 +248,23 @@ EXPECTED_MEMBERSHIP_WRITES = (
         "UPDATE org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.update_org_member_role",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._update_membership_role",
         "UPDATE org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.update_org_member_role",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._update_membership_role",
         "UPDATE org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.update_team_member_role",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._update_membership_role",
         "UPDATE team_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.update_team_member_role",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._update_membership_role",
         "UPDATE team_members",
     ),
     ExpectedWrite(
@@ -589,6 +627,65 @@ def _call_name(node: ast.Call) -> str:
         return node.func.attr
     if isinstance(node.func, ast.Name):
         return node.func.id
+    return ""
+
+
+def _direct_membership_import_aliases(tree: ast.AST) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        for imported in node.names:
+            if imported.name not in DIRECT_MEMBERSHIP_CALL_NAMES:
+                continue
+            aliases[imported.asname or imported.name] = imported.name
+    return aliases
+
+
+def _trusted_membership_context_symbols(tree: ast.AST) -> frozenset[str]:
+    symbols: set[str] = set()
+    for node in ast.walk(tree):
+        target: ast.AST | None = None
+        value: ast.AST | None = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+        if not isinstance(target, ast.Name) or not isinstance(value, ast.Call):
+            continue
+        if _call_name(value) != "TrustedMembershipWriteContext":
+            continue
+        if any(keyword.arg == "trusted_reason" for keyword in value.keywords):
+            symbols.add(target.id)
+    return frozenset(symbols)
+
+
+def _membership_context_category(
+    expression: ast.AST,
+    *,
+    trusted_symbols: frozenset[str],
+) -> str | None:
+    if isinstance(expression, ast.Name):
+        if expression.id in trusted_symbols:
+            return "trusted"
+        if expression.id == "context":
+            return "passthrough"
+        return None
+    if not isinstance(expression, ast.Call):
+        return None
+    call_name = _call_name(expression)
+    if call_name in ACTOR_MEMBERSHIP_CONTEXT_FACTORIES:
+        return "actor"
+    if call_name == "TrustedMembershipWriteContext" and any(
+        keyword.arg == "trusted_reason" for keyword in expression.keywords
+    ):
+        return "trusted"
+    return None
+
+
+def _attribute_base_name(node: ast.Call) -> str:
+    if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+        return node.func.value.id
     return ""
 
 
@@ -1067,6 +1164,58 @@ def test_membership_dml_inventory_is_frozen() -> None:
         label="Membership DML writer",
         observed=inventory.get("membership", ()),
         expected=EXPECTED_MEMBERSHIP_WRITES,
+    )
+
+
+def test_direct_membership_callers_supply_explicit_context() -> None:
+    missing_context: list[str] = []
+    wrong_context_category: list[str] = []
+    for root in (APP_ROOT, REPO_ROOT / "tldw_Server_API" / "tests"):
+        for path in sorted(root.rglob("*.py")):
+            relative_path = _relative_path(path)
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            aliases = _direct_membership_import_aliases(tree)
+            trusted_symbols = _trusted_membership_context_symbols(tree)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                call_name = aliases.get(_call_name(node), _call_name(node))
+                if call_name not in DIRECT_MEMBERSHIP_CALL_NAMES:
+                    continue
+                if (
+                    relative_path,
+                    _attribute_base_name(node),
+                    call_name,
+                ) in DIRECT_MEMBERSHIP_PROXY_CALLS:
+                    continue
+                context_keywords = [
+                    keyword for keyword in node.keywords if keyword.arg == "context"
+                ]
+                if not context_keywords:
+                    missing_context.append(f"{relative_path}:{node.lineno}")
+                    continue
+                expected_category = SERVING_MEMBERSHIP_CONTEXT_CATEGORIES.get(
+                    relative_path
+                )
+                if expected_category is None:
+                    continue
+                observed_category = _membership_context_category(
+                    context_keywords[0].value,
+                    trusted_symbols=trusted_symbols,
+                )
+                if observed_category != expected_category:
+                    wrong_context_category.append(
+                        f"{relative_path}:{node.lineno} expected "
+                        f"{expected_category}, found {observed_category or 'unknown'}"
+                    )
+
+    assert not missing_context, (
+        "Direct membership calls must supply an explicit write context:\n  "
+        + "\n  ".join(missing_context)
+    )
+    assert not wrong_context_category, (
+        "Serving membership adapters must use the expected context category:\n  "
+        + "\n  ".join(wrong_context_category)
     )
 
 
