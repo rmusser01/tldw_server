@@ -31,6 +31,7 @@
       "Makefile",
       "Helper_Scripts/mcp_unified_rc.py",
       "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py",
+      "Helper_Scripts/Testing-related/mcp_official_sdk_stdio_smoke.py",
       ".github/tests/test_mcp_unified_artifact_gate.py",
       "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py",
       "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_validation.py",

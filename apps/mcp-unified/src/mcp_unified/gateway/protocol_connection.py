@@ -214,14 +214,17 @@ class _OutputLimiter:
         ):
             return ()
 
-        candidates: list[_Response] = []
+        correlated: list[_Response] = []
+        uncorrelated: list[_Response] = []
         data = raw_error.get("data")
         if data is not None:
-            candidates.append(_error_response(None, code, message, data=data))
-        candidates.append(_error_response(request_id, code, message))
+            correlated.append(_error_response(request_id, code, message, data=data))
+            if request_id is not None:
+                uncorrelated.append(_error_response(None, code, message, data=data))
+        correlated.append(_error_response(request_id, code, message))
         if request_id is not None:
-            candidates.append(_error_response(None, code, message))
-        return tuple(candidates)
+            uncorrelated.append(_error_response(None, code, message))
+        return (*correlated, *uncorrelated)
 
     def _result_too_large_candidates(
         self,
@@ -235,8 +238,8 @@ class _OutputLimiter:
         message = "Application result exceeds the configured limit"
         return (
             _error_response(request_id, -33001, message, data=data),
-            _error_response(None, -33001, message, data=data),
             _error_response(request_id, -33001, message),
+            _error_response(None, -33001, message, data=data),
             _error_response(None, -33001, message),
         )
 
@@ -1024,13 +1027,24 @@ class GatewayProtocolConnection:
             ):
                 root_mode = "object"
             try:
-                await self._validator.validate(
-                    output_schema,  # type: ignore[arg-type]
-                    raw_result,
-                    profile=prepared.profile,
-                    root_mode=root_mode,
-                    instance_role="output",
-                )
+                if prepared.profile.era == "legacy" and (
+                    prepared.profile.structured_content_mode == "none" or root_mode == "any"
+                ):
+                    await self._validator.validate_declared_dialect(
+                        output_schema,  # type: ignore[arg-type]
+                        raw_result,
+                        profile=prepared.profile,
+                        root_mode=root_mode,
+                        instance_role="output",
+                    )
+                else:
+                    await self._validator.validate(
+                        output_schema,  # type: ignore[arg-type]
+                        raw_result,
+                        profile=prepared.profile,
+                        root_mode=root_mode,
+                        instance_role="output",
+                    )
             except GatewayApplicationError as exc:
                 raise _ProtocolFailure(_INTERNAL_ERROR, "Internal error") from exc
         return project_tool_result(

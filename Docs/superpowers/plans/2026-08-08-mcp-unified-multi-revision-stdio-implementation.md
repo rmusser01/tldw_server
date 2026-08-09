@@ -489,7 +489,9 @@
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/mcp_unified_artifact_test_utils.py`
+- Create: `Helper_Scripts/Testing-related/mcp_official_sdk_stdio_smoke.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py`
 - Modify: `Helper_Scripts/mcp_unified_rc.py`
 - Modify: `.github/workflows/mcp-unified-rc.yml`
 - Modify: `.github/workflows/mcp-unified-publish.yml`
@@ -503,6 +505,8 @@
 - Modify: `apps/mcp-unified/src/mcp_unified/README.md`
 - Modify: `apps/mcp-unified/src/mcp_unified/USER_GUIDE.md`
 - Modify: `apps/mcp-unified/src/mcp_unified/package_metadata.py`
+- Modify: `apps/mcp-unified/src/mcp_unified/gateway/protocol_connection.py`
+- Modify: `apps/mcp-unified/src/mcp_unified/gateway/protocol_validation.py`
 - Modify: `backlog/tasks/task-13009 - Implement-MCP-Unified-multi-revision-stdio-protocol.md`
 
 **Interfaces:**
@@ -524,13 +528,26 @@
 
 - [ ] **Step 3: Update RC/publish dependency and artifact gates**
 
-  Make the RC helper assert `jsonschema` is a base dependency in wheel and sdist metadata, run the five protocol suites from the installed artifact, and record the normative fixture commit/checksums. Keep `wheel>=0.41.0` in the development extra so the no-isolation wheel-and-sdist artifact gate has an explicitly declared, consistently available wheel builder. Confine fixture staging to the manifest, NOTICE, and five exact pinned regular non-symlink schema files; recursively sanitize the complete evidence payload. Expand the protected portable-stdio workflow to exactly five jobs (Ubuntu Python 3.10-3.13 and Windows Python 3.11), with each job running the wheel and sdist downstream consumer as well as contracts, connection, and stdio tests. Keep the pull-request trigger and license-first admission manifest in exact parity for all protocol suites, fixtures, release helpers, package-status boundary tests, and release workflows. Update publish workflow setup to install `jsonschema>=4.23,<5`; keep live upload behind the existing protected environment, `MCP_UNIFIED_PUBLISH` confirmation, and `MCP_UNIFIED_ALLOW_PUBLISH=1` guard.
+  Make the RC helper assert `jsonschema` is a base dependency in wheel and sdist metadata, run the five protocol suites from the installed artifact, and record the normative fixture commit/checksums. Keep `wheel>=0.41.0` in the development extra so the no-isolation wheel-and-sdist artifact gate has an explicitly declared, consistently available wheel builder. Confine fixture staging to the manifest, NOTICE, and five exact pinned regular non-symlink schema files; recursively sanitize the complete evidence payload. Every package-only RC invocation must use the explicit mirrored tree outside the checkout package hierarchy, including the downstream artifact consumer. Install the exact CI-only official Tier 1 Python SDK pin `mcp==2.0.0` in each wheel and sdist environment and run a bounded stdio smoke covering automatic `2026-07-28` negotiation, tool discovery, and a tool call. Record the official SDK index, release tag, and tag commit `6f69a37`; do not add the SDK to runtime dependencies or claim the URL-oriented conformance server harness passed. Expand the protected portable-stdio workflow to exactly five jobs (Ubuntu Python 3.10-3.13 and Windows Python 3.11), with each job building and testing both wheel and sdist through the isolated portable gate. Keep the pull-request trigger and license-first admission manifest in exact parity for all protocol suites, fixtures, release helpers, package-status boundary tests, and release workflows. Update publish workflow setup to install `jsonschema>=4.23,<5`; keep live upload behind the existing protected environment, `MCP_UNIFIED_PUBLISH` confirmation, and `MCP_UNIFIED_ALLOW_PUBLISH=1` guard.
 
   Task 4 divergence note: its accepted two-OS Python 3.11 portable-stdio
   coverage proved the transport implementation. Task 5 intentionally widens
   that protected gate to the bounded five-job OS/Python artifact matrix needed
   for release acceptance; this is release verification, not a protocol
   production change.
+
+  Final branch-review divergence note: clean protected execution exposed that
+  direct checkout test paths imported the host `MCP_unified` package before
+  pytest could exercise the installed distribution, so Task 5 replaces every
+  package-only workflow/consumer invocation with the same explicit mirrored
+  release gate. The same review found two concrete strict-protocol defects:
+  bounded error replacement now prefers any fitting correlated response before
+  a null-ID variant, and legacy arbitrary-root text fallback validates a
+  supported schema-declared dialect while published object-root descriptors
+  remain constrained to the negotiated profile dialect. These are bounded
+  contract corrections in `protocol_connection.py` and
+  `protocol_validation.py`, not changes to compatibility HTTP/WebSocket or the
+  accepted private stdio-adapter split.
 
 - [ ] **Step 4: Update public documentation and package status**
 
@@ -566,7 +583,7 @@
   python -m compileall -q apps/mcp-unified/src/mcp_unified
   python -m ruff check apps/mcp-unified/src/mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_*.py
   python -m mypy apps/mcp-unified/src/mcp_unified/gateway
-  python -m bandit -r apps/mcp-unified/src/mcp_unified/gateway -f json -o /tmp/bandit_task_13009.json
+  python -m bandit -r apps/mcp-unified/src/mcp_unified/gateway Helper_Scripts/mcp_unified_rc.py Helper_Scripts/Testing-related/mcp_official_sdk_stdio_smoke.py -f json -o /tmp/bandit_task_13009.json
   make mcp-unified-rc
   make mcp-unified-publish-dry-run
   git diff --check
@@ -581,7 +598,7 @@
 - [ ] **Step 8: Commit Task 5**
 
   ```bash
-  git add apps/mcp-unified Helper_Scripts/mcp_unified_rc.py .github/workflows/mcp-unified-rc.yml .github/workflows/mcp-unified-publish.yml .github/license-first-paths.json tldw_Server_API/app/core/MCP_unified/tests/mcp_unified_artifact_test_utils.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py backlog/tasks/task-13009\ -\ Implement-MCP-Unified-multi-revision-stdio-protocol.md Docs/superpowers/plans/2026-08-08-mcp-unified-multi-revision-stdio-implementation.md
+  git add apps/mcp-unified Helper_Scripts/mcp_unified_rc.py Helper_Scripts/Testing-related/mcp_official_sdk_stdio_smoke.py .github/workflows/mcp-unified-rc.yml .github/workflows/mcp-unified-publish.yml .github/license-first-paths.json tldw_Server_API/app/core/MCP_unified/tests/mcp_unified_artifact_test_utils.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py backlog/tasks/task-13009\ -\ Implement-MCP-Unified-multi-revision-stdio-protocol.md Docs/superpowers/plans/2026-08-08-mcp-unified-multi-revision-stdio-implementation.md
   git commit -m "release(mcp): prepare multi-revision stdio 0.2.0"
   ```
 

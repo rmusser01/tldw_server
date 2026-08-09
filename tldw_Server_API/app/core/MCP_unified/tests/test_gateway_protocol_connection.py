@@ -1112,6 +1112,115 @@ async def test_current_arbitrary_output_and_legacy_object_output_use_correct_roo
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("version", ["2025-06-18", "2025-03-26", "2024-11-05"])
+async def test_legacy_arbitrary_root_fallback_uses_declared_modern_schema_dialect(
+    version: str,
+) -> None:
+    """Legacy text fallback must honor a supported dialect declared by the tool."""
+
+    runtime = _CoreRuntime()
+    runtime.tools[0]["outputSchema"] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "array",
+        "prefixItems": [{"const": 7}],
+        "items": False,
+    }
+    runtime.tool_result = [7]
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer)
+    await _initialize_legacy(connection, writer, version=version)
+
+    await connection.receive(_legacy_request(1, "tools/list"))
+    await connection.wait_for_idle()
+    assert "outputSchema" not in writer.values.pop()["result"]["tools"][0]
+
+    await connection.receive(
+        _legacy_request(2, "tools/call", {"name": "echo", "arguments": {"value": 7}})
+    )
+    await connection.wait_for_idle()
+
+    result = writer.values.pop()["result"]
+    assert result["content"] == [{"type": "text", "text": "[7]"}]
+    assert "structuredContent" not in result
+
+
+@pytest.mark.asyncio
+async def test_current_arbitrary_root_accepts_declared_modern_schema_dialect() -> None:
+    """The current revision must keep validating declared 2020-12 arbitrary roots."""
+
+    runtime = _CoreRuntime()
+    runtime.tools[0]["outputSchema"] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "array",
+        "prefixItems": [{"type": "integer"}],
+        "items": False,
+    }
+    runtime.tool_result = [7]
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(_modern_request(1, "tools/call", {"name": "echo", "arguments": {"value": 7}}))
+    await connection.wait_for_idle()
+
+    assert writer.values.pop()["result"]["structuredContent"] == [7]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "array",
+        },
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "array",
+            "prefixItems": "invalid",
+        },
+    ],
+    ids=["unsupported-dialect", "invalid-schema"],
+)
+async def test_legacy_arbitrary_root_fallback_rejects_unsafe_declared_schema(
+    schema: dict[str, Any],
+) -> None:
+    """Fallback must reject unsupported dialects and malformed supported schemas."""
+
+    runtime = _CoreRuntime()
+    runtime.tools[0]["outputSchema"] = schema
+    runtime.tool_result = [7]
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer)
+    await _initialize_legacy(connection, writer, version="2025-06-18")
+
+    await connection.receive(
+        _legacy_request(1, "tools/call", {"name": "echo", "arguments": {"value": 7}})
+    )
+    await connection.wait_for_idle()
+
+    assert writer.values.pop() == _error(1, -32603, "Internal error")
+
+
+@pytest.mark.asyncio
+async def test_legacy_object_root_does_not_bypass_negotiated_schema_dialect() -> None:
+    """Published legacy object schemas remain constrained to the negotiated dialect."""
+
+    runtime = _CoreRuntime()
+    runtime.tools[0]["outputSchema"] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+    }
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer)
+    await _initialize_legacy(connection, writer, version="2025-06-18")
+
+    await connection.receive(_legacy_request(1, "tools/list"))
+    await connection.wait_for_idle()
+
+    assert writer.values.pop() == _error(1, -32603, "Internal error")
+
+
+@pytest.mark.asyncio
 async def test_result_and_envelope_byte_limits_return_safe_bounded_errors() -> None:
     """Unchecked aggregate/application bytes must allow oversized runtime output."""
 
@@ -1229,6 +1338,25 @@ async def test_oversized_unsupported_version_keeps_32022_without_echo() -> None:
         )
     ]
     assert "2099-private" not in json.dumps(writer.values)
+
+
+@pytest.mark.asyncio
+async def test_output_limit_prefers_compact_correlated_error_before_null_id() -> None:
+    """A fitting correlated error must win over a richer null-ID replacement."""
+
+    limits = replace(
+        GatewayLimits(),
+        max_output_line_bytes=206,
+        max_result_bytes=206,
+    )
+    writer = _MemoryWriter()
+    connection = _new_connection(_CoreRuntime(), writer, limits=limits)
+
+    await connection.receive(_modern_request("correlated", "server/discover", version="2099-01-01"))
+    await connection.wait_for_idle()
+
+    assert writer.values == [_error("correlated", -32022, "Unsupported protocol version")]
+    assert len(json.dumps(writer.values[0], sort_keys=True, separators=(",", ":")).encode()) + 1 <= 206
 
 
 @pytest.mark.asyncio

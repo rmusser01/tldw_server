@@ -53,6 +53,12 @@ PUBLISH_TARGET_REPOSITORIES = {
     "pypi": "https://upload.pypi.org/legacy/",
 }
 USER_GUIDE_UAT_SCRIPT = Path("Helper_Scripts") / "Testing-related" / "mcp_standalone_user_guide_uat.py"
+OFFICIAL_SDK_SMOKE_SCRIPT = Path("Helper_Scripts") / "Testing-related" / "mcp_official_sdk_stdio_smoke.py"
+OFFICIAL_SDK_REQUIREMENT = "mcp==2.0.0"
+OFFICIAL_SDK_TIER = "Tier 1"
+OFFICIAL_SDK_TAG_COMMIT = "6f69a37"
+OFFICIAL_SDK_RELEASE_URL = "https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.0.0"
+OFFICIAL_SDK_INDEX_URL = "https://modelcontextprotocol.io/docs/sdk"
 PROTOCOL_ARTIFACT_CONSUMER_TEST = (
     Path("tldw_Server_API") / "app" / "core" / "MCP_unified" / "tests" / "test_gateway_protocol_artifact_consumer.py"
 )
@@ -716,6 +722,15 @@ def run_all(paths: RcPaths) -> int:
     return _write_and_report(recorder)
 
 
+def run_portable_gate(paths: RcPaths) -> int:
+    """Build artifacts and run only the installed package protocol gates."""
+
+    recorder = _new_recorder(paths)
+    _run_build(paths, recorder)
+    _run_artifact_gate(paths, recorder)
+    return _write_and_report(recorder)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser."""
 
@@ -738,6 +753,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cli-uat",
         "smoke-uat",
         "evidence",
+        "portable-gate",
         "all",
     ):
         subparsers.add_parser(name, help=f"Run the {name} RC phase.")
@@ -785,6 +801,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_smoke_uat(paths)
     if args.command == "evidence":
         return run_evidence(paths)
+    if args.command == "portable-gate":
+        return run_portable_gate(paths)
     if args.command == "publish-plan":
         return run_publish_plan(
             paths,
@@ -931,24 +949,12 @@ def _run_artifact_gate(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
             artifact=sdists[0],
             kind="sdist",
         )
-
-    consumer_result = run_command(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(PROTOCOL_ARTIFACT_CONSUMER_TEST),
-            "-q",
-        ],
-        cwd=paths.repo_root,
-        timeout=1_200,
-    )
-    _record_command_result(
-        recorder,
-        phase="artifact_gate",
-        name="installed_artifact_consumer",
-        result=consumer_result,
-    )
+        _run_installed_artifact_consumer(
+            paths,
+            recorder,
+            wheel=wheels[0],
+            sdist=sdists[0],
+        )
 
 
 def _distribution_metadata(artifact: Path, *, kind: str) -> Message:
@@ -1083,7 +1089,14 @@ def _run_installed_protocol_suites(
             return
         python_path = _venv_executable(venv_dir, "python")
         install_result = run_command(
-            [str(python_path), "-m", "pip", "install", f"{artifact}[dev]"],
+            [
+                str(python_path),
+                "-m",
+                "pip",
+                "install",
+                f"{artifact}[dev]",
+                OFFICIAL_SDK_REQUIREMENT,
+            ],
             cwd=temp_dir,
             timeout=600,
             env={"PIP_NO_CACHE_DIR": "1", "PYTHONNOUSERSITE": "1"},
@@ -1146,6 +1159,78 @@ def _run_installed_protocol_suites(
             name=f"{kind}_installed_protocol_suites",
             result=suite_result,
         )
+        if suite_result.returncode != 0:
+            return
+        sdk_result = run_command(
+            [str(python_path), str(test_root / OFFICIAL_SDK_SMOKE_SCRIPT)],
+            cwd=test_root,
+            timeout=60,
+            env={
+                "MCP_UNIFIED_FORBIDDEN_CHECKOUT": str(paths.repo_root),
+                "PYTHONNOUSERSITE": "1",
+            },
+        )
+        if sdk_result.returncode == 0 and (
+            sdk_result.stdout != "MCP_UNIFIED_OFFICIAL_SDK_STDIO_OK\n" or sdk_result.stderr
+        ):
+            sdk_result.returncode = 1
+            sdk_result.stderr = "official SDK smoke did not emit only its success marker"
+        _record_command_result(
+            recorder,
+            phase="artifact_gate",
+            name=f"{kind}_official_sdk_stdio_interop",
+            result=sdk_result,
+            details={
+                "requirement": OFFICIAL_SDK_REQUIREMENT,
+                "sdk_index": OFFICIAL_SDK_INDEX_URL,
+                "tier": OFFICIAL_SDK_TIER,
+                "release": OFFICIAL_SDK_RELEASE_URL,
+                "tag_commit": OFFICIAL_SDK_TAG_COMMIT,
+                "import_provenance": "mcp and mcp_unified resolved beneath the clean virtualenv purelib",
+            },
+        )
+
+
+def _run_installed_artifact_consumer(
+    paths: RcPaths,
+    recorder: RcEvidenceRecorder,
+    *,
+    wheel: Path,
+    sdist: Path,
+) -> None:
+    """Run the downstream wheel/sdist consumer only from a mirrored test tree."""
+
+    with tempfile.TemporaryDirectory(prefix="mcp-unified-rc-consumer-") as temp_name:
+        temp_dir = Path(temp_name)
+        test_root, _ = _prepare_installed_protocol_test_tree(paths, temp_dir)
+        local_dist = test_root / "dist"
+        local_dist.mkdir()
+        for artifact in (wheel, sdist):
+            shutil.copy2(artifact, local_dist / artifact.name)
+        consumer_result = run_command(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-c",
+                str(test_root / "pytest-artifact-gate.ini"),
+                "--noconftest",
+                str(test_root / PROTOCOL_ARTIFACT_CONSUMER_TEST),
+                "-q",
+            ],
+            cwd=test_root,
+            timeout=1_200,
+            env={
+                "MCP_UNIFIED_TEST_DIST_DIR": str(local_dist),
+                "PYTHONNOUSERSITE": "1",
+            },
+        )
+        _record_command_result(
+            recorder,
+            phase="artifact_gate",
+            name="installed_artifact_consumer",
+            result=consumer_result,
+        )
 
 
 def _prepare_installed_protocol_test_tree(
@@ -1163,6 +1248,16 @@ def _prepare_installed_protocol_test_tree(
         shutil.copy2(paths.repo_root / relative_path, target)
         installed_suites.append(target)
 
+    for relative_path in (
+        PROTOCOL_ARTIFACT_CONSUMER_TEST,
+        PROTOCOL_ARTIFACT_CONSUMER_TEST.with_name("mcp_unified_artifact_test_utils.py"),
+        Path("Helper_Scripts") / "mcp_unified_rc.py",
+        OFFICIAL_SDK_SMOKE_SCRIPT,
+    ):
+        target = test_root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(paths.repo_root / relative_path, target)
+
     fixture_source = paths.repo_root / PROTOCOL_FIXTURE_ROOT
     fixture_target = test_dir / "fixtures" / "mcp_protocol"
     for relative_path in _validated_protocol_fixture_files(fixture_source):
@@ -1176,6 +1271,12 @@ def _prepare_installed_protocol_test_tree(
     shutil.copy2(
         paths.package_project / "pytest-artifact-gate.ini",
         test_root / "pytest-artifact-gate.ini",
+    )
+    package_config = test_root / "apps" / "mcp-unified" / "pytest-artifact-gate.ini"
+    package_config.parent.mkdir(parents=True)
+    shutil.copy2(
+        paths.package_project / "pytest-artifact-gate.ini",
+        package_config,
     )
     workflow_target = test_root / ".github" / "workflows" / "mcp-unified-rc.yml"
     workflow_target.parent.mkdir(parents=True)

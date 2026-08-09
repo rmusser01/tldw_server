@@ -25,6 +25,16 @@ Run the full internal release candidate gate from the repository root:
 make mcp-unified-rc
 ```
 
+The RC installs the exact official Tier 1 Python SDK pin `mcp==2.0.0`
+separately with the wheel and sdist, then verifies automatic `2026-07-28`
+stdio negotiation, tool discovery, and one tool call. The pin is the official
+Python SDK
+[`v2.0.0`](https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.0.0)
+release at tag commit `6f69a37`. These are the package's explicit official-SDK
+stdio scenarios. The URL-oriented official conformance server harness is not
+applicable to this stdio-only strict surface, so the evidence does not claim
+full transport or modern HTTP conformance.
+
 Generate a TestPyPI publish plan without uploading artifacts:
 
 ```bash

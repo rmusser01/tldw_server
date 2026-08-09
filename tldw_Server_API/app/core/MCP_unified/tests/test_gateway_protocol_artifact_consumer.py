@@ -26,6 +26,7 @@ PROTOCOL_SUITES = (
     "test_gateway_protocol_connection.py",
     "test_gateway_protocol_stdio.py",
 )
+OFFICIAL_SDK_SMOKE = Path("Helper_Scripts/Testing-related/mcp_official_sdk_stdio_smoke.py")
 FIXTURE_COMMIT = "5f5440bb26a62e2cf3440b92da5a667efa03b267"
 FIXTURE_SHA256 = {
     "2026-07-28": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203",
@@ -329,6 +330,14 @@ def standalone_protocol_distributions(
 ) -> tuple[Path, Path]:
     """Build one wheel and one sdist for installed downstream checks."""
 
+    supplied_dist = os.environ.get("MCP_UNIFIED_TEST_DIST_DIR")
+    if supplied_dist:
+        dist_dir = Path(supplied_dist).resolve(strict=True)
+        wheels = sorted((*dist_dir.glob("mcp_unified-*.whl"), *dist_dir.glob("mcp-unified-*.whl")))
+        sdists = sorted((*dist_dir.glob("mcp_unified-*.tar.gz"), *dist_dir.glob("mcp-unified-*.tar.gz")))
+        if len(wheels) != 1 or len(sdists) != 1:
+            raise AssertionError("supplied artifact directory must contain exactly one wheel and one sdist")
+        return wheels[0], sdists[0]
     return _build_standalone_distributions(tmp_path_factory.mktemp("mcp_unified_protocol_artifacts"))
 
 
@@ -400,8 +409,7 @@ def test_installed_artifact_supports_strict_downstream_consumer(
     _run_checked([str(python), "-m", "pip", "install", str(artifact)], cwd=work_dir, env=env)
     result = _run_checked([str(python), str(script)], cwd=work_dir, env=env)
 
-    assert result.stdout == f"{SUCCESS_MARKER}\n"  # nosec B101
-    assert result.stderr == ""  # nosec B101
+    _assert_strict_consumer_output(result, SUCCESS_MARKER)
 
 
 def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
@@ -432,11 +440,16 @@ def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
         env: dict[str, str] | None = None,
     ) -> mcp_unified_rc.RcCommandResult:
         calls.append({"command": command, "cwd": cwd, "timeout": timeout, "env": env})
+        stdout = (
+            "MCP_UNIFIED_OFFICIAL_SDK_STDIO_OK\n"
+            if any(str(argument).endswith(OFFICIAL_SDK_SMOKE.as_posix()) for argument in command)
+            else ""
+        )
         return mcp_unified_rc.RcCommandResult(
             command=command,
             cwd=str(cwd),
             returncode=0,
-            stdout="",
+            stdout=stdout,
             stderr="",
             duration_ms=0,
         )
@@ -467,6 +480,8 @@ def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
     assert results["wheel_installed_protocol_import"]["status"] == "passed"
     assert results["sdist_installed_protocol_import"]["status"] == "passed"
     assert results["installed_artifact_consumer"]["status"] == "passed"
+    assert results["wheel_official_sdk_stdio_interop"]["status"] == "passed"
+    assert results["sdist_official_sdk_stdio_interop"]["status"] == "passed"
 
     protocol_calls = [
         call
@@ -484,12 +499,16 @@ def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
     install_calls = [call for call in calls if call["command"][2:4] == ["pip", "install"]]
     assert len(install_calls) == 2
     assert all((call["env"] or {}).get("PIP_NO_CACHE_DIR") == "1" for call in install_calls)
+    assert all("mcp==2.0.0" in call["command"] for call in install_calls)
     consumer_calls = [
         call
         for call in calls
         if any(str(argument).endswith("test_gateway_protocol_artifact_consumer.py") for argument in call["command"])
     ]
     assert len(consumer_calls) == 1
+    assert consumer_calls[0]["cwd"] != REPO_ROOT
+    assert not (consumer_calls[0]["env"] or {}).get("PYTHONPATH")
+    assert (consumer_calls[0]["env"] or {}).get("PYTHONNOUSERSITE") == "1"
 
 
 def test_strict_consumer_output_rejects_noisy_stderr() -> None:
@@ -720,6 +739,12 @@ def test_protocol_fixture_confinement_accepts_and_copies_only_exact_tree(tmp_pat
 
     assert copied_files == {path.as_posix() for path in validated}
     assert (test_root / ".github" / "license-first-paths.json").is_file()
+    copied_test_dir = test_root / "tldw_Server_API" / "app" / "core" / "MCP_unified" / "tests"
+    assert (copied_test_dir / "test_gateway_protocol_artifact_consumer.py").is_file()
+    assert (copied_test_dir / "mcp_unified_artifact_test_utils.py").is_file()
+    assert (test_root / "Helper_Scripts" / "mcp_unified_rc.py").is_file()
+    assert (test_root / OFFICIAL_SDK_SMOKE).is_file()
+    assert not list(test_root.rglob("__init__.py"))
     for revision, expected_hash in FIXTURE_SHA256.items():
         assert mcp_unified_rc.sha256_file(copied_root / revision / "schema.json") == expected_hash
 
@@ -736,3 +761,39 @@ def test_artifact_build_utility_import_has_no_package_or_path_side_effects() -> 
     assert callable(namespace["build_standalone_distributions"])
     assert sys.path == previous_path
     assert sys.modules.get("mcp_unified", sentinel) is previous_package
+
+
+def test_official_sdk_interop_pin_and_provenance_are_exact() -> None:
+    """The pre-publication interop gate must use the reviewed official SDK pin."""
+
+    assert mcp_unified_rc.OFFICIAL_SDK_REQUIREMENT == "mcp==2.0.0"
+    assert mcp_unified_rc.OFFICIAL_SDK_TIER == "Tier 1"
+    assert mcp_unified_rc.OFFICIAL_SDK_TAG_COMMIT == "6f69a37"
+    assert mcp_unified_rc.OFFICIAL_SDK_INDEX_URL == "https://modelcontextprotocol.io/docs/sdk"
+    assert mcp_unified_rc.OFFICIAL_SDK_RELEASE_URL == (
+        "https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.0.0"
+    )
+    assert (REPO_ROOT / OFFICIAL_SDK_SMOKE).is_file()
+
+
+def test_protected_portable_gate_uses_isolated_rc_command_and_exact_routing() -> None:
+    """Path-only changes must route to a checkout-independent package RC command."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-rc.yml"
+    workflow_text = workflow_path.read_text(encoding="utf-8")
+    assert "python Helper_Scripts/mcp_unified_rc.py portable-gate" in workflow_text
+    assert "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py" not in workflow_text.split(
+        "- name: Run installed protocol and portable stdio contracts",
+        1,
+    )[1]
+
+    import yaml
+
+    workflow = yaml.load(workflow_text, Loader=yaml.BaseLoader)
+    pull_request_paths = workflow["on"]["pull_request"]["paths"]
+    route_manifest = json.loads((REPO_ROOT / ".github" / "license-first-paths.json").read_text(encoding="utf-8"))
+    admission_paths = route_manifest["mcp-unified-rc.yml"]["patterns"]
+    assert len(pull_request_paths) == len(set(pull_request_paths))
+    assert len(admission_paths) == len(set(admission_paths))
+    assert set(pull_request_paths) == set(admission_paths)
+    assert OFFICIAL_SDK_SMOKE.as_posix() in set(pull_request_paths)

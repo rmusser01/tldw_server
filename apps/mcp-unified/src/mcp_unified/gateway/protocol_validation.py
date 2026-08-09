@@ -8,6 +8,7 @@ import math
 import multiprocessing
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from multiprocessing.connection import Connection
 from typing import Any, Literal, TypeAlias
 from urllib.parse import unquote, urldefrag, urljoin
@@ -593,6 +594,37 @@ class GatewaySchemaValidationManager:
         instance_json = _preflight_instance(instance, self._limits, instance_role)
 
         await self._run_worker(schema_json, instance_json, profile.schema_dialect)
+
+    async def validate_declared_dialect(
+        self,
+        schema: dict[str, GatewayJSONValue] | bool,
+        instance: GatewayJSONValue,
+        *,
+        profile: GatewayProtocolProfile,
+        root_mode: SchemaRootMode = "any",
+        instance_role: SchemaInstanceRole = "input",
+    ) -> None:
+        """Validate with a supported schema-declared dialect or the profile default."""
+
+        declared = schema.get("$schema") if isinstance(schema, dict) else None
+        if declared is not None and not isinstance(declared, str):
+            raise _validation_error(
+                "schema_dialect_unsupported",
+                "Schema dialect is not supported for this protocol revision",
+            )
+        dialect = declared or profile.schema_dialect
+        if dialect not in _VALIDATORS:
+            raise _validation_error(
+                "schema_dialect_unsupported",
+                "Schema dialect is not supported for this protocol revision",
+            )
+        await self.validate(
+            schema,
+            instance,
+            profile=replace(profile, schema_dialect=dialect),
+            root_mode=root_mode,
+            instance_role=instance_role,
+        )
 
     async def _run_worker(
         self,

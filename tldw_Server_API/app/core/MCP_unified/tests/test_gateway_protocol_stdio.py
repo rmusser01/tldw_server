@@ -751,13 +751,11 @@ def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> No
     setup_python = next(step for step in job["steps"] if step["name"] == "Setup Python")
     assert setup_python["with"]["python-version"] == "${{ matrix.python }}"
     run_blocks = "\n".join(step["run"] for step in job["steps"] if "run" in step)
-    assert 'python -m pip install "./apps/mcp-unified[dev]"' in run_blocks
-    assert "test_gateway_protocol_contracts.py" in run_blocks
-    assert "test_gateway_protocol_connection.py" in run_blocks
-    assert "test_gateway_protocol_stdio.py" in run_blocks
-    assert "test_gateway_protocol_artifact_consumer.py" in run_blocks
-    assert "--noconftest" in run_blocks
-    assert "-c apps/mcp-unified/pyproject.toml" in run_blocks
+    assert 'python -m pip install "./apps/mcp-unified[dev]"' not in run_blocks
+    assert "python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit" in run_blocks
+    assert '"jsonschema>=4.23,<5"' in run_blocks
+    assert "python Helper_Scripts/mcp_unified_rc.py portable-gate" in run_blocks
+    assert "tldw_Server_API/app/core/MCP_unified/tests/" not in run_blocks
     assert (
         "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py"
         in workflow["on"]["pull_request"]["paths"]
@@ -779,6 +777,7 @@ def test_rc_workflow_and_license_admission_route_every_release_input() -> None:
         "Makefile",
         "Helper_Scripts/mcp_unified_rc.py",
         "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py",
+        "Helper_Scripts/Testing-related/mcp_official_sdk_stdio_smoke.py",
         ".github/tests/test_mcp_unified_artifact_gate.py",
         "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py",
         "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_validation.py",
