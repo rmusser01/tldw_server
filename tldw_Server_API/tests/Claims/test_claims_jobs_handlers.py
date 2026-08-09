@@ -1,3 +1,4 @@
+import errno
 import json
 import sqlite3
 import threading
@@ -624,22 +625,47 @@ async def test_analytics_export_handler_preserves_safe_domain_failure(
     assert excinfo.value.failure_code == code
 
 
+class _PostgresFailure(Exception):
+    def __init__(self, sqlstate: str, message: str) -> None:
+        super().__init__(message)
+        self.sqlstate = sqlstate
+
+
+def _caused_by(outer: Exception, cause: Exception) -> Exception:
+    outer.__cause__ = cause
+    return outer
+
+
 @pytest.mark.parametrize(
-    "error_type",
+    "error",
     [
-        sqlite3.OperationalError,
-        BackendDatabaseError,
-        MediaDatabaseError,
-        OSError,
-        TimeoutError,
+        sqlite3.OperationalError("database is locked"),
+        _caused_by(
+            BackendDatabaseError("backend query failed"),
+            sqlite3.OperationalError("database is busy"),
+        ),
+        _caused_by(
+            MediaDatabaseError("media query failed"),
+            _PostgresFailure("40001", "serialization failure"),
+        ),
+        _caused_by(
+            MediaDatabaseError("media query failed"),
+            _PostgresFailure("08006", "connection failure"),
+        ),
+        _caused_by(
+            MediaDatabaseError("media query failed"),
+            _PostgresFailure("40P01", "deadlock detected"),
+        ),
+        OSError(errno.EBUSY, "resource busy"),
+        TimeoutError("connection timed out"),
     ],
 )
-async def test_analytics_export_handler_redacts_transient_storage_failure(monkeypatch, error_type) -> None:
+async def test_analytics_export_handler_redacts_transient_storage_failure(monkeypatch, error: Exception) -> None:
     secret = "/private/customer.db?token=secret-value"
 
     @contextmanager
     def _locked_database(**_kwargs):
-        raise error_type(f"database is locked: {secret}")
+        raise error
         yield
 
     monkeypatch.setattr(claims_job_handlers, "managed_media_database", _locked_database)
@@ -660,6 +686,14 @@ async def test_analytics_export_handler_redacts_transient_storage_failure(monkey
     [
         sqlite3.DatabaseError("non-operational database failure"),
         sqlite3.IntegrityError("constraint failed"),
+        sqlite3.OperationalError("no such table: claims_analytics_exports"),
+        BackendDatabaseError("invalid backend configuration"),
+        MediaDatabaseError("missing required schema"),
+        _caused_by(
+            MediaDatabaseError("constraint failure"),
+            _PostgresFailure("23505", "token=secret-value"),
+        ),
+        PermissionError(errno.EACCES, "permission denied"),
         ValueError("invalid value"),
         TypeError("bad type"),
         KeyError("missing"),
@@ -691,6 +725,40 @@ async def test_analytics_export_handler_redacts_and_does_not_retry_nontransient_
     assert excinfo.value.retryable is False
     assert excinfo.value.failure_code == "claims_export_failed"
     assert excinfo.value.__cause__ is error
+
+
+async def test_analytics_export_handler_logs_sanitized_unexpected_failure_context(monkeypatch) -> None:
+    secret = "token=secret-value"
+    logged: list[tuple[str, tuple[object, ...]]] = []
+
+    @contextmanager
+    def _failing_database(**_kwargs):
+        raise RuntimeError(secret)
+        yield
+
+    class _Logger:
+        def warning(self, message: str, *args: object) -> None:
+            logged.append((message, args))
+
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _failing_database)
+    monkeypatch.setattr(claims_job_handlers, "logger", _Logger())
+
+    with pytest.raises(ClaimsJobError):
+        await claims_job_handlers.process_claims_job(_analytics_export_job())
+
+    assert logged == [
+        (
+            "Claims analytics export worker failed: operation={} export_id={} job_id={} error_code={} error_type={}",
+            (
+                "process_analytics_export",
+                "a" * 32,
+                81,
+                "claims_export_failed",
+                "RuntimeError",
+            ),
+        )
+    ]
+    assert secret not in repr(logged)
 
 
 async def test_unsupported_claims_job_type_remains_terminal() -> None:

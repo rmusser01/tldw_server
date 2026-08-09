@@ -3,23 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import sqlite3
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import (
-    NotSupportedError,
-)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.DB_Management.media_db.errors import (
-    ConflictError,
-    InputError,
-    SchemaError,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
@@ -49,11 +44,45 @@ from .claims_notifications import deliver_claim_review_notifications_now
 from .claims_rebuild_service import rebuild_claims_for_media
 
 _CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
-_CLAIMS_EXPORT_TRANSIENT_STORAGE_EXCEPTIONS: tuple[type[BaseException], ...] = (
+_CLAIMS_EXPORT_STORAGE_ERROR_TYPES: tuple[type[BaseException], ...] = (
     sqlite3.OperationalError,
     BackendDatabaseError,
     MediaDatabaseError,
     OSError,
+)
+_TRANSIENT_SQLITE_CODES = frozenset({sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED})
+_TRANSIENT_SQLITE_MESSAGES = (
+    "database is busy",
+    "database is locked",
+    "database schema is locked",
+    "database table is locked",
+)
+_TRANSIENT_POSTGRES_SQLSTATES = frozenset(
+    {
+        "40001",  # serialization_failure
+        "40P01",  # deadlock_detected
+        "53300",  # too_many_connections
+        "55P03",  # lock_not_available
+        "57P01",  # admin_shutdown
+        "57P02",  # crash_shutdown
+        "57P03",  # cannot_connect_now
+    }
+)
+_TRANSIENT_OS_ERRNOS = frozenset(
+    code
+    for name in (
+        "EAGAIN",
+        "EBUSY",
+        "ECONNABORTED",
+        "ECONNRESET",
+        "EHOSTUNREACH",
+        "EINTR",
+        "ENETDOWN",
+        "ENETUNREACH",
+        "ETIMEDOUT",
+        "EWOULDBLOCK",
+    )
+    if (code := getattr(errno, name, None)) is not None
 )
 
 
@@ -128,6 +157,44 @@ def _positive_job_id(value: Any) -> int:
             failure_code="claims_invalid_payload",
         )
     return value
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    """Return a cycle-safe explicit/context exception chain."""
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__
+        if current is None and not chain[-1].__suppress_context__:
+            current = chain[-1].__context__
+    return chain
+
+
+def _is_transient_export_storage_error(exc: BaseException) -> bool:
+    """Classify only explicit temporary database and storage failures."""
+    if not isinstance(exc, _CLAIMS_EXPORT_STORAGE_ERROR_TYPES):
+        return False
+
+    for current in _exception_chain(exc):
+        if isinstance(current, (ConnectionError, TimeoutError)):
+            return True
+        if isinstance(current, sqlite3.OperationalError):
+            code = getattr(current, "sqlite_errorcode", None)
+            if isinstance(code, int) and (code & 0xFF) in _TRANSIENT_SQLITE_CODES:
+                return True
+            if any(marker in str(current).lower() for marker in _TRANSIENT_SQLITE_MESSAGES):
+                return True
+
+        sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+        if isinstance(sqlstate, str) and (sqlstate.startswith("08") or sqlstate in _TRANSIENT_POSTGRES_SQLSTATES):
+            return True
+
+        if isinstance(current, OSError) and current.errno in _TRANSIENT_OS_ERRNOS:
+            return True
+    return False
 
 
 def _db_path(owner_user_id: Any) -> str:
@@ -264,23 +331,26 @@ def _process_analytics_export(
             retryable=exc.retryable,
             failure_code=exc.code,
         ) from exc
-    except (ConflictError, InputError, NotSupportedError, SchemaError) as exc:
+    except Exception as exc:  # noqa: BLE001 - translate worker failures without leaking raw text.
+        retryable = _is_transient_export_storage_error(exc)
+        failure_code = "claims_export_storage_unavailable" if retryable else "claims_export_failed"
+        public_message = (
+            "Claims analytics export storage is temporarily unavailable."
+            if retryable
+            else "Claims analytics export failed."
+        )
+        logger.warning(
+            "Claims analytics export worker failed: operation={} export_id={} job_id={} error_code={} error_type={}",
+            "process_analytics_export",
+            export_id,
+            job_id,
+            failure_code,
+            type(exc).__name__,
+        )
         raise ClaimsJobError(
-            "Claims analytics export failed.",
-            retryable=False,
-            failure_code="claims_export_failed",
-        ) from exc
-    except _CLAIMS_EXPORT_TRANSIENT_STORAGE_EXCEPTIONS as exc:
-        raise ClaimsJobError(
-            "Claims analytics export storage is temporarily unavailable.",
-            retryable=True,
-            failure_code="claims_export_storage_unavailable",
-        ) from exc
-    except Exception as exc:  # noqa: BLE001 - prevent raw worker failures from leaking or retrying.
-        raise ClaimsJobError(
-            "Claims analytics export failed.",
-            retryable=False,
-            failure_code="claims_export_failed",
+            public_message,
+            retryable=retryable,
+            failure_code=failure_code,
         ) from exc
 
 
