@@ -4,7 +4,7 @@ title: Implement Claims Jobs Stage 2A analytics exports
 status: In Progress
 assignee: []
 created_date: 2026-08-08 21:36
-updated_date: 2026-08-09 02:46
+updated_date: 2026-08-09 03:03
 labels:
 - claims
 - jobs
@@ -79,4 +79,5 @@ Task 4 complete at aecf18e29d: canonical request normalization, fixed snapshot s
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 5 complete at 8d94ca2cd6 with review fixes 7127cc38d9, 60ec088543, and 74ebc0d8a8: retry-safe artifact creation/processing, ready-monotonic race recovery, real JobManager row compatibility, one-call status hydration, exact owner-scoped reconciliation, conservative lifecycle-aware cleanup, SQL-filtered maintenance candidates, and rotating bounded failed-artifact scans. Independent verification: 226 focused tests passed; Ruff, compile, diff checks, and Bandit (zero findings) passed; specification and quality reviews approved.
+Task 6 complete at fbb072326f with review fix b0386083a0: strict three-field analytics export payload, dual producer flags, exact Jobs admission metadata, direct create-result return without refresh, and retry settings constrained to the Jobs schema range. Verification: 116 Claims Jobs contract/producer/handler/worker tests passed; Ruff, compile, diff checks, and Bandit passed; specification and quality reviews approved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
