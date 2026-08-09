@@ -506,11 +506,45 @@ async def test_revoke_user_key_sanitizes_backend_failure_log(monkeypatch):
     monkeypatch.setattr(service.admin_scope_service, "enforce_admin_user_scope", allow_scope)
 
     await _assert_byok_operation_log_sanitized(
-        lambda: service.revoke_user_key(_principal(), 42, "openai"),
+        lambda: service.revoke_user_key(_principal(), 42, "anthropic"),
         expected_detail="Failed to revoke user BYOK key",
         expected_log="Failed to revoke user BYOK key",
         raw_marker="user BYOK revoke failed",
     )
+
+
+@pytest.mark.asyncio
+async def test_upsert_shared_key_maps_alias_conflict_to_409(monkeypatch):
+    class _AliasConflictRepo:
+        async def upsert_secret(self, **_kwargs):
+            raise ProviderCredentialAliasConflictError("sensitive alias detail")
+
+    async def get_shared_repo():
+        return _AliasConflictRepo()
+
+    async def pass_provider_test(**_kwargs):
+        return "gpt-test"
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+    monkeypatch.setattr(service, "normalize_credential_fields", lambda _provider, _fields: {})
+    monkeypatch.setattr(service, "test_provider_credentials", pass_provider_test)
+    monkeypatch.setattr(service, "encrypt_byok_payload", lambda _payload: {"ciphertext": "sealed"})
+    monkeypatch.setattr(service, "dumps_envelope", lambda _envelope: "sealed-envelope")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.upsert_shared_key(
+            _principal(),
+            SharedProviderKeyUpsertRequest(
+                scope_type="org",
+                scope_id=42,
+                provider="openai",
+                api_key="sk-test",
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Conflicting provider credential aliases"
 
 
 @pytest.mark.asyncio

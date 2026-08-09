@@ -7,12 +7,18 @@ and role assignment into one atomic provisioning operation.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.exceptions import DuplicateUserError
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthorizationError,
+    MembershipTargetNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.tenant_provisioning import provision_tenant as create_tenant_records
 
@@ -31,10 +37,9 @@ class TenantProvisionRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     org_name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field(
+    role: Literal["owner"] = Field(
         default="owner",
-        pattern=r"^(owner|admin|lead|member)$",
-        description="Role to assign the user within the new org.",
+        description="The initial tenant user is always the organization owner.",
     )
 
 
@@ -69,6 +74,11 @@ async def provision_tenant(
     2. Create organisation
     3. Add user as org member with requested role
     """
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to provision tenants",
+        )
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
@@ -107,6 +117,11 @@ async def provision_tenant(
             role=payload.role,
         )
 
+    except (MembershipAuthorizationError, MembershipTargetNotFound):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to provision tenants",
+        ) from None
     except HTTPException:
         raise
     except Exception as exc:

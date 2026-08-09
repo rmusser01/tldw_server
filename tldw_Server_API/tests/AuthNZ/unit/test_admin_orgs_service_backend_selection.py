@@ -5,13 +5,25 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
+    OrganizationCreateRequest,
     OrganizationSTTSettingsUpdate,
     OrganizationWatchlistsSettingsUpdate,
+    OrgMemberAddRequest,
+    OrgMemberRoleUpdateRequest,
+    TeamMemberAddRequest,
+    TeamMemberRoleUpdateRequest,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.services import admin_orgs_service
+from tldw_Server_API.app.services import admin_e2e_support_service, admin_orgs_service
 
 
 class _CursorStub:
@@ -101,6 +113,231 @@ def _admin_principal() -> AuthPrincipal:
         org_ids=[],
         team_ids=[],
     )
+
+
+@pytest.mark.asyncio
+async def test_admin_e2e_org_seed_atomically_assigns_requested_owner() -> None:
+    captured: dict[str, Any] = {}
+
+    class _Repo:
+        async def list_organizations(self, **_kwargs):
+            return [], 0
+
+        async def create_organization_with_owner_membership(self, **kwargs):
+            captured.update(kwargs)
+            return {"id": 55, "owner_user_id": kwargs["owner_user_id"]}
+
+    organization = await admin_e2e_support_service._ensure_org(
+        orgs_repo=_Repo(),  # type: ignore[arg-type]
+        owner_user_id=23,
+    )
+
+    assert organization["owner_user_id"] == 23
+    assert captured["owner_user_id"] == 23
+    assert captured["context"] is admin_e2e_support_service._E2E_MEMBERSHIP_CONTEXT
+
+
+@pytest.mark.asyncio
+async def test_create_org_with_owner_uses_atomic_owner_membership_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _atomic_create(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "id": 55,
+            "name": "Atomic Org",
+            "slug": "atomic-org",
+            "owner_user_id": 9,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    monkeypatch.setattr(
+        admin_orgs_service,
+        "core_create_organization_with_owner_membership",
+        _atomic_create,
+        raising=False,
+    )
+
+    response = await admin_orgs_service.create_org(
+        OrganizationCreateRequest(
+            name="Atomic Org",
+            slug="atomic-org",
+            owner_user_id=9,
+        ),
+        _admin_principal(),
+    )
+
+    assert response.owner_user_id == 9
+    assert captured["owner_user_id"] == 9
+    assert captured["context"].actor_user_id == 1
+    assert (
+        captured["context"].required_authority
+        is admin_orgs_service.MembershipAuthority.PLATFORM_ADMIN
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_org_without_owner_uses_actor_authorized_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _authorized_create(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "id": 55,
+            "name": "Ownerless Org",
+            "slug": "ownerless-org",
+            "owner_user_id": None,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    async def _unexpected_unchecked_create(**_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("admin creation must reauthorize the persisted actor")
+
+    monkeypatch.setattr(
+        admin_orgs_service,
+        "core_create_organization_as_actor",
+        _authorized_create,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        admin_orgs_service,
+        "core_create_organization",
+        _unexpected_unchecked_create,
+        raising=False,
+    )
+
+    response = await admin_orgs_service.create_org(
+        OrganizationCreateRequest(
+            name="Ownerless Org",
+            slug="ownerless-org",
+        ),
+        _admin_principal(),
+    )
+
+    assert response.owner_user_id is None
+    assert captured["context"].actor_user_id == 1
+    assert (
+        captured["context"].required_authority
+        is admin_orgs_service.MembershipAuthority.PLATFORM_ADMIN
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_org_with_owner_rejects_admin_without_persisted_actor_id() -> None:
+    principal = AuthPrincipal(
+        kind="service",
+        user_id=None,
+        roles=["admin"],
+        is_admin=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_orgs_service.create_org(
+            OrganizationCreateRequest(
+                name="Atomic Org",
+                slug="atomic-org",
+                owner_user_id=9,
+            ),
+            principal,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Not authorized to manage memberships"
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (MembershipAuthorizationError(), 403),
+        (MembershipScopeNotFound(), 404),
+        (MembershipTargetNotFound(), 404),
+        (MembershipPreflightChanged(), 409),
+    ],
+)
+def test_membership_control_error_http_mapping(error: Exception, expected_status: int) -> None:
+    mapped = admin_orgs_service._membership_control_http_error(error)
+
+    assert mapped.status_code == expected_status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service_name", "core_name"),
+    [
+        ("add_team_member", "core_add_team_member"),
+        ("remove_team_member", "core_remove_team_member"),
+        ("update_team_member_role", "core_update_team_member_role"),
+        ("add_org_member", "core_add_org_member"),
+        ("remove_org_member", "core_remove_org_member"),
+        ("update_org_member_role", "core_update_org_member_role"),
+    ],
+)
+async def test_admin_membership_writes_map_preflight_races_to_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    service_name: str,
+    core_name: str,
+) -> None:
+    async def _allow_team(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"org_id": 5}
+
+    async def _allow_org(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _preflight_changed(*_args: Any, **_kwargs: Any) -> Any:
+        raise MembershipPreflightChanged()
+
+    monkeypatch.setattr(
+        admin_orgs_service.admin_scope_service,
+        "get_scoped_team",
+        _allow_team,
+    )
+    monkeypatch.setattr(
+        admin_orgs_service.admin_scope_service,
+        "enforce_admin_org_access",
+        _allow_org,
+    )
+    monkeypatch.setattr(admin_orgs_service, core_name, _preflight_changed)
+
+    service = getattr(admin_orgs_service, service_name)
+    request = object()
+    principal = _admin_principal()
+    if service_name == "add_team_member":
+        call = service(11, TeamMemberAddRequest(user_id=7), request, principal)
+    elif service_name == "remove_team_member":
+        call = service(11, 7, request, principal)
+    elif service_name == "update_team_member_role":
+        call = service(
+            11,
+            7,
+            TeamMemberRoleUpdateRequest(role="lead"),
+            request,
+            principal,
+        )
+    elif service_name == "add_org_member":
+        call = service(5, OrgMemberAddRequest(user_id=7), request, principal)
+    elif service_name == "remove_org_member":
+        call = service(5, 7, request, principal)
+    else:
+        call = service(
+            5,
+            7,
+            OrgMemberRoleUpdateRequest(role="admin"),
+            request,
+            principal,
+        )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await call
+
+    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.asyncio

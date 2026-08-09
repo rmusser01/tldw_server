@@ -67,6 +67,7 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("BYOK_ENABLED", "1")
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
     monkeypatch.setenv("BYOK_ALLOWED_BASE_URL_PROVIDERS", "openai")
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_LOCK_DIR", str(tmp_path / "oauth-locks"))
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
     monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-4o-mini")
     monkeypatch.setenv("DEFAULT_MODEL_ANTHROPIC", "claude-3-haiku")
@@ -144,7 +145,7 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     await users_repo.assign_role_if_missing(user_id=int(admin["id"]), role_name="admin")
     await users_repo.assign_role_if_missing(user_id=int(user["id"]), role_name="user")
 
-    org = await create_organization(name="BYOK Org", owner_user_id=int(admin["id"]))
+    org = await create_organization(name="BYOK Org", owner_user_id=None)
     team = await create_team(org_id=int(org["id"]), name="BYOK Team")
 
     await add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)

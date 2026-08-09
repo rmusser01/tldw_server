@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.exceptions import UserRegistrationException
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    RollbackSignal,
+    UserRegistrationException,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _execute_membership_scope_sql,
+)
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
     ProfileVersionError,
     VersionedUserWriteGateway,
@@ -81,6 +87,10 @@ class MembershipPreflightChanged(MembershipWriteError):
         super().__init__("Membership write preconditions changed.")
 
 
+class _MembershipScopeDeletionRetry(RollbackSignal):
+    """Private signal forcing scope-deletion retry after transaction rollback."""
+
+
 class _ClosedMembershipEnum(str, Enum):
     @classmethod
     def _missing_(cls, value: object) -> None:
@@ -129,6 +139,7 @@ class MembershipMutationRelationship(_ClosedMembershipEnum):
     """Closed relationship between request-ordered membership mutations."""
 
     DEFAULT_TEAM_COMPANION = "default_team_companion"
+    ORGANIZATION_COMPANION = "organization_companion"
 
 
 class MembershipLockBackend(_ClosedMembershipEnum):
@@ -232,6 +243,15 @@ class MembershipMutation:
                 self.scope_type is not MembershipScopeType.TEAM
                 or self.kind
                 not in {MembershipMutationKind.ADD, MembershipMutationKind.REMOVE}
+                or (
+                    self.relationship
+                    is MembershipMutationRelationship.ORGANIZATION_COMPANION
+                    and self.kind
+                    not in {
+                        MembershipMutationKind.ADD,
+                        MembershipMutationKind.REMOVE,
+                    }
+                )
             ):
                 raise MembershipWriterContractError()
         role_required = self.kind in {
@@ -425,6 +445,33 @@ class MembershipRowLock:
 
 
 @dataclass(frozen=True, slots=True)
+class MembershipRowSnapshot:
+    """Complete persisted membership row captured during deletion discovery."""
+
+    scope_type: MembershipScopeType
+    scope_id: int
+    user_id: int
+    role: str
+    status: str
+
+    def __post_init__(self) -> None:
+        if type(self.scope_type) is not MembershipScopeType:
+            raise MembershipWriterContractError()
+        _require_positive_id(self.scope_id)
+        _require_positive_id(self.user_id)
+        if type(self.role) is not str or type(self.status) is not str:
+            raise MembershipWriterContractError()
+
+    @property
+    def identity(self) -> MembershipRowLock:
+        return MembershipRowLock(
+            scope_type=self.scope_type,
+            scope_id=self.scope_id,
+            user_id=self.user_id,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class TeamParentOrganization:
     """Immutable parent-organization data captured before lock planning."""
 
@@ -434,6 +481,82 @@ class TeamParentOrganization:
     def __post_init__(self) -> None:
         _require_positive_id(self.team_id)
         _require_positive_id(self.organization_id)
+
+
+@dataclass(frozen=True, slots=True)
+class MembershipScopeDeletionSnapshot:
+    """Frozen complete scope and membership set used by a deletion attempt."""
+
+    scope_type: MembershipScopeType
+    scope_id: int
+    organization_ids: tuple[int, ...]
+    team_parents: tuple[TeamParentOrganization, ...]
+    membership_rows: tuple[MembershipRowSnapshot, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.scope_type) is not MembershipScopeType:
+            raise MembershipWriterContractError()
+        _require_positive_id(self.scope_id)
+        _validate_sorted_unique_ids(self.organization_ids)
+        _require_exact_tuple(self.team_parents)
+        _require_exact_tuple(self.membership_rows)
+        if any(
+            type(item) is not TeamParentOrganization
+            for item in self.team_parents
+        ):
+            raise MembershipWriterContractError()
+        if any(
+            type(item) is not MembershipRowSnapshot
+            for item in self.membership_rows
+        ):
+            raise MembershipWriterContractError()
+
+        team_ids = tuple(item.team_id for item in self.team_parents)
+        if team_ids != tuple(sorted(set(team_ids))):
+            raise MembershipWriterContractError()
+        if any(
+            item.organization_id not in self.organization_ids
+            for item in self.team_parents
+        ):
+            raise MembershipWriterContractError()
+        row_identities = tuple(item.identity for item in self.membership_rows)
+        if row_identities != tuple(sorted(set(row_identities), key=_row_sort_key)):
+            raise MembershipWriterContractError()
+
+        if self.scope_type is MembershipScopeType.ORGANIZATION:
+            if self.organization_ids != (self.scope_id,):
+                raise MembershipWriterContractError()
+            if any(
+                row.scope_type is MembershipScopeType.ORGANIZATION
+                and row.scope_id != self.scope_id
+                for row in self.membership_rows
+            ):
+                raise MembershipWriterContractError()
+        else:
+            if len(self.organization_ids) != 1 or team_ids != (self.scope_id,):
+                raise MembershipWriterContractError()
+            if any(
+                row.scope_type is not MembershipScopeType.TEAM
+                or row.scope_id != self.scope_id
+                for row in self.membership_rows
+            ):
+                raise MembershipWriterContractError()
+
+        known_team_ids = set(team_ids)
+        if any(
+            row.scope_type is MembershipScopeType.TEAM
+            and row.scope_id not in known_team_ids
+            for row in self.membership_rows
+        ):
+            raise MembershipWriterContractError()
+
+    @property
+    def team_ids(self) -> tuple[int, ...]:
+        return tuple(item.team_id for item in self.team_parents)
+
+    @property
+    def affected_user_ids(self) -> tuple[int, ...]:
+        return tuple(sorted({row.user_id for row in self.membership_rows}))
 
 
 @dataclass(frozen=True, slots=True)
@@ -636,7 +759,10 @@ def _build_membership_lock_set(
     org_ids.update(team_to_org[team_id] for team_id in team_ids)
 
     for index, mutation in enumerate(mutations):
-        if mutation.relationship is not MembershipMutationRelationship.DEFAULT_TEAM_COMPANION:
+        if mutation.relationship not in {
+            MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
+            MembershipMutationRelationship.ORGANIZATION_COMPANION,
+        }:
             continue
         parent_org_id = team_to_org[mutation.scope_id]
         if not any(
@@ -880,6 +1006,48 @@ class MembershipWriter:
             else MembershipLockBackend.SQLITE
         )
 
+    async def authorize_organization_creation(
+        self,
+        *,
+        conn: Any,
+        context: MembershipWriteContext,
+        owner_user_id: int | None,
+    ) -> None:
+        """Lock and authorize user rows before inserting an organization."""
+
+        validate_membership_write_context(context, serving=True)
+        if owner_user_id is not None:
+            _require_positive_id(owner_user_id)
+        user_ids = {owner_user_id} if owner_user_id is not None else set()
+        if type(context) is ActorMembershipWriteContext:
+            user_ids.add(context.actor_user_id)
+
+        missing_user_ids: set[int] = set()
+        for user_id in sorted(user_ids):
+            if self._backend is MembershipLockBackend.POSTGRESQL:
+                row = await conn.fetchrow(_USER_LOCK_SQL, user_id)
+            else:
+                row = await self._read_user(conn, user_id)
+            if row is None:
+                missing_user_ids.add(user_id)
+
+        if type(context) is ActorMembershipWriteContext:
+            if context.actor_user_id in missing_user_ids:
+                raise MembershipAuthorizationError()
+            if context.required_authority is MembershipAuthority.PLATFORM_ADMIN:
+                await self._authorize_platform_admin_actor(
+                    conn,
+                    context.actor_user_id,
+                )
+            elif owner_user_id == context.actor_user_id:
+                actor = await self._read_user(conn, context.actor_user_id)
+                if actor is None or not _is_active(actor.get("is_active")):
+                    raise MembershipAuthorizationError()
+            else:
+                raise MembershipAuthorizationError()
+        if owner_user_id in missing_user_ids:
+            raise MembershipTargetNotFound()
+
     async def apply_membership_mutations(
         self,
         *,
@@ -950,7 +1118,7 @@ class MembershipWriter:
                     )
                 )
                 continue
-            if self._is_blocked_default_team_companion(
+            if self._is_blocked_team_companion(
                 mutation,
                 scopes,
                 blocked_org_removals,
@@ -962,7 +1130,7 @@ class MembershipWriter:
             if (
                 mutation.scope_type is MembershipScopeType.ORGANIZATION
                 and mutation.kind is MembershipMutationKind.REMOVE
-                and not result.changed
+                and result.error == "owner_required"
             ):
                 blocked_org_removals.add((mutation.scope_id, mutation.user_id))
 
@@ -1001,6 +1169,479 @@ class MembershipWriter:
             version_floors=tuple(floors),
         )
 
+    async def lock_provisioning_parent(
+        self,
+        *,
+        conn: Any,
+        context: MembershipWriteContext,
+        organization_id: int,
+        target_user_id: int,
+    ) -> None:
+        """Lock lower-order rows before creating a default team in this transaction."""
+
+        validate_membership_write_context(context, serving=True)
+        _require_positive_id(organization_id)
+        _require_positive_id(target_user_id)
+        if self._backend is MembershipLockBackend.SQLITE:
+            organization = await self._read_organization(conn, organization_id)
+            if organization is None or not _is_active(organization.get("is_active")):
+                raise MembershipScopeNotFound()
+            if await self._read_user(conn, target_user_id) is None:
+                raise MembershipTargetNotFound()
+            return
+
+        user_ids = {target_user_id}
+        if type(context) is ActorMembershipWriteContext:
+            user_ids.add(context.actor_user_id)
+        for user_id in sorted(user_ids):
+            row = await conn.fetchrow(_USER_LOCK_SQL, user_id)
+            if row is None:
+                raise MembershipTargetNotFound()
+        organization = await conn.fetchrow(_ORGANIZATION_LOCK_SQL, organization_id)
+        if organization is None:
+            raise MembershipScopeNotFound()
+        locked = await self._read_organization(conn, organization_id)
+        if locked is None or not _is_active(locked.get("is_active")):
+            raise MembershipScopeNotFound()
+
+    async def transfer_organization_ownership(
+        self,
+        *,
+        conn: Any,
+        context: ActorMembershipWriteContext,
+        organization_id: int,
+        current_owner_user_id: int,
+        new_owner_user_id: int,
+        anchor_ownership: AnchorOwnership,
+        operation_time: datetime,
+    ) -> tuple[MembershipMutationResult, MembershipMutationResult]:
+        """Transfer owner pointer and roles under the membership lock order."""
+
+        if type(context) is not ActorMembershipWriteContext:
+            raise MembershipWriterContractError()
+        validate_membership_write_context(context, serving=True)
+        _require_positive_id(organization_id)
+        _require_positive_id(current_owner_user_id)
+        _require_positive_id(new_owner_user_id)
+        if current_owner_user_id == new_owner_user_id:
+            raise MembershipWriterContractError()
+        if type(anchor_ownership) is not AnchorOwnership:
+            raise MembershipWriterContractError()
+        operation_time = _normalize_contract_time(operation_time)
+        mutations = (
+            MembershipMutation(
+                scope_type=MembershipScopeType.ORGANIZATION,
+                scope_id=organization_id,
+                user_id=new_owner_user_id,
+                kind=MembershipMutationKind.UPDATE_ROLE,
+                role="owner",
+            ),
+            MembershipMutation(
+                scope_type=MembershipScopeType.ORGANIZATION,
+                scope_id=organization_id,
+                user_id=current_owner_user_id,
+                kind=MembershipMutationKind.UPDATE_ROLE,
+                role="admin",
+            ),
+        )
+        before_lock = await self._read_organization(conn, organization_id)
+        if before_lock is None:
+            raise MembershipScopeNotFound()
+        if int(before_lock.get("owner_user_id") or 0) != current_owner_user_id:
+            raise MembershipPreflightChanged()
+
+        preflight = await self._read_preflight(conn, mutations)
+        plan = plan_membership_write(
+            context=context,
+            mutations=mutations,
+            preflight=preflight,
+        )
+        await self._execute_lock_plan(conn, plan)
+        await self._recheck_preflight(conn, plan)
+        scopes = await self._read_locked_scopes(conn, plan)
+        await self._authorize_context(conn, plan, scopes)
+        await self._require_targets_exist(conn, mutations)
+
+        locked_organization = scopes["organizations"][organization_id]
+        if (
+            int(locked_organization.get("owner_user_id") or 0)
+            != current_owner_user_id
+        ):
+            raise MembershipPreflightChanged()
+        scoped_actor = (
+            context
+            if type(context) is ActorMembershipWriteContext
+            and context.required_authority is MembershipAuthority.SCOPED_MEMBERSHIP
+            else None
+        )
+        if (
+            scoped_actor is not None
+            and scoped_actor.actor_user_id != current_owner_user_id
+        ):
+            raise MembershipAuthorizationError()
+        for user_id in (current_owner_user_id, new_owner_user_id):
+            user = await self._read_user(conn, user_id)
+            membership = await self._read_membership(
+                conn,
+                MembershipScopeType.ORGANIZATION,
+                organization_id,
+                user_id,
+            )
+            if user is None or not _is_active(user.get("is_active")):
+                raise MembershipPreflightChanged()
+            if not _is_active_membership(membership):
+                raise MembershipPreflightChanged()
+            if (
+                user_id == current_owner_user_id
+                and str(membership.get("role") or "").strip().lower() != "owner"
+            ):
+                if scoped_actor is not None:
+                    raise MembershipAuthorizationError()
+                raise MembershipPreflightChanged()
+
+        user_ids = tuple(sorted((current_owner_user_id, new_owner_user_id)))
+        version_gateway = VersionedUserWriteGateway(
+            "postgres"
+            if self._backend is MembershipLockBackend.POSTGRESQL
+            else "sqlite",
+            clock=lambda: operation_time,
+        )
+        pre_floors = {
+            user_id: await version_gateway.capture_floor(
+                conn,
+                user_id=user_id,
+                lock_user=False,
+            )
+            for user_id in user_ids
+        }
+        results = (
+            await self._apply_mutation(conn, mutations[0], scopes),
+            await self._apply_mutation(conn, mutations[1], scopes),
+        )
+        if not all(result.found for result in results):
+            raise MembershipPreflightChanged()
+        await self._update_organization_owner_pointer(
+            conn,
+            organization_id=organization_id,
+            new_owner_user_id=new_owner_user_id,
+        )
+        for user_id in user_ids:
+            post_floor = await version_gateway.capture_floor(
+                conn,
+                user_id=user_id,
+                lock_user=False,
+            )
+            if anchor_ownership is AnchorOwnership.WRITER_OWNS_ANCHOR:
+                await version_gateway.final_touch(
+                    conn,
+                    user_id=user_id,
+                    version_floor=max(pre_floors[user_id], post_floor),
+                )
+        return results
+
+    async def discover_scope_deletion(
+        self,
+        *,
+        conn: Any,
+        scope_type: MembershipScopeType,
+        scope_id: int,
+    ) -> MembershipScopeDeletionSnapshot | None:
+        """Read the complete affected set without opening a transaction."""
+
+        if type(scope_type) is not MembershipScopeType:
+            raise MembershipWriterContractError()
+        _require_positive_id(scope_id)
+
+        if scope_type is MembershipScopeType.ORGANIZATION:
+            organization = await self._read_organization(conn, scope_id)
+            if organization is None:
+                return None
+            team_parents = await self._read_child_team_parents(conn, scope_id)
+            membership_rows = await self._read_scope_membership_snapshots(
+                conn,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                team_ids=tuple(item.team_id for item in team_parents),
+            )
+            return MembershipScopeDeletionSnapshot(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                organization_ids=(scope_id,),
+                team_parents=team_parents,
+                membership_rows=membership_rows,
+            )
+
+        team = await self._read_team(conn, scope_id)
+        if team is None:
+            return None
+        organization_id = int(team["org_id"])
+        return MembershipScopeDeletionSnapshot(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            organization_ids=(organization_id,),
+            team_parents=(
+                TeamParentOrganization(
+                    team_id=scope_id,
+                    organization_id=organization_id,
+                ),
+            ),
+            membership_rows=await self._read_scope_membership_snapshots(
+                conn,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                team_ids=(scope_id,),
+            ),
+        )
+
+    async def apply_scope_deletion(
+        self,
+        *,
+        conn: Any,
+        context: MembershipWriteContext,
+        snapshot: MembershipScopeDeletionSnapshot,
+        anchor_ownership: AnchorOwnership,
+        operation_time: datetime,
+    ) -> MembershipWriteResult:
+        """Remove a frozen scope's memberships on one caller transaction."""
+
+        validate_membership_write_context(context, serving=True)
+        if type(snapshot) is not MembershipScopeDeletionSnapshot:
+            raise MembershipWriterContractError()
+        if type(anchor_ownership) is not AnchorOwnership:
+            raise MembershipWriterContractError()
+        operation_time = _normalize_contract_time(operation_time)
+
+        lock_set = self._build_scope_deletion_lock_set(
+            context=context,
+            snapshot=snapshot,
+        )
+        await self._execute_scope_deletion_locks(
+            conn,
+            context=context,
+            snapshot=snapshot,
+            lock_set=lock_set,
+        )
+        await self._require_deletion_scopes_exist(conn, snapshot)
+        await self._authorize_scope_deletion(conn, context, snapshot)
+
+        version_gateway = VersionedUserWriteGateway(
+            "postgres"
+            if self._backend is MembershipLockBackend.POSTGRESQL
+            else "sqlite",
+            clock=lambda: operation_time,
+        )
+        pre_floors = {
+            user_id: await version_gateway.capture_floor(
+                conn,
+                user_id=user_id,
+                lock_user=False,
+            )
+            for user_id in snapshot.affected_user_ids
+        }
+        team_to_org = {
+            item.team_id: item.organization_id
+            for item in snapshot.team_parents
+        }
+        results: list[MembershipMutationResult] = []
+        for row in snapshot.membership_rows:
+            mutation = MembershipMutation(
+                scope_type=row.scope_type,
+                scope_id=row.scope_id,
+                user_id=row.user_id,
+                kind=MembershipMutationKind.REMOVE,
+            )
+            await self._delete_membership(conn, mutation)
+            results.append(
+                MembershipMutationResult(
+                    mutation=mutation,
+                    changed=True,
+                    found=True,
+                    organization_id=(
+                        team_to_org[row.scope_id]
+                        if row.scope_type is MembershipScopeType.TEAM
+                        else None
+                    ),
+                )
+            )
+
+        floors: list[MembershipUserVersionFloor] = []
+        for user_id in snapshot.affected_user_ids:
+            floor = MembershipUserVersionFloor(
+                user_id=user_id,
+                pre_mutation_floor=pre_floors[user_id],
+                post_mutation_floor=await version_gateway.capture_floor(
+                    conn,
+                    user_id=user_id,
+                    lock_user=False,
+                ),
+            )
+            floors.append(floor)
+            if anchor_ownership is AnchorOwnership.WRITER_OWNS_ANCHOR:
+                await version_gateway.final_touch(
+                    conn,
+                    user_id=user_id,
+                    version_floor=floor.version_floor,
+                )
+
+        return MembershipWriteResult(
+            mutation_results=tuple(results),
+            affected_user_ids=snapshot.affected_user_ids,
+            version_floors=tuple(floors),
+        )
+
+    @staticmethod
+    def is_scope_deletion_retry(exc: BaseException) -> bool:
+        """Identify only the writer's private transaction-control signal."""
+
+        return type(exc) is _MembershipScopeDeletionRetry
+
+    def _build_scope_deletion_lock_set(
+        self,
+        *,
+        context: MembershipWriteContext,
+        snapshot: MembershipScopeDeletionSnapshot,
+    ) -> MembershipLockSet:
+        user_ids = set(snapshot.affected_user_ids)
+        membership_rows = {row.identity for row in snapshot.membership_rows}
+        owner_rows = {
+            row.identity
+            for row in snapshot.membership_rows
+            if snapshot.scope_type is MembershipScopeType.ORGANIZATION
+            and row.scope_type is MembershipScopeType.ORGANIZATION
+            and row.role.strip().lower() == "owner"
+            and row.status.strip().lower() == "active"
+        }
+        if type(context) is ActorMembershipWriteContext:
+            user_ids.add(context.actor_user_id)
+            if context.required_authority is MembershipAuthority.SCOPED_MEMBERSHIP:
+                membership_rows.add(
+                    MembershipRowLock(
+                        scope_type=MembershipScopeType.ORGANIZATION,
+                        scope_id=snapshot.organization_ids[0],
+                        user_id=context.actor_user_id,
+                    )
+                )
+        membership_rows.difference_update(owner_rows)
+        return MembershipLockSet(
+            user_ids=tuple(sorted(user_ids)),
+            org_ids=snapshot.organization_ids,
+            team_ids=snapshot.team_ids,
+            membership_rows=tuple(sorted(membership_rows, key=_row_sort_key)),
+            owner_rows=tuple(sorted(owner_rows, key=_row_sort_key)),
+        )
+
+    async def _execute_scope_deletion_locks(
+        self,
+        conn: Any,
+        *,
+        context: MembershipWriteContext,
+        snapshot: MembershipScopeDeletionSnapshot,
+        lock_set: MembershipLockSet,
+    ) -> None:
+        del context
+        if self._backend is MembershipLockBackend.SQLITE:
+            await self._recheck_scope_deletion_snapshot(conn, snapshot)
+            return
+
+        for user_id in lock_set.user_ids:
+            await conn.fetchrow(_USER_LOCK_SQL, user_id)
+        for org_id in lock_set.org_ids:
+            await conn.fetchrow(_ORGANIZATION_LOCK_SQL, org_id)
+        if snapshot.scope_type is MembershipScopeType.ORGANIZATION:
+            await self._recheck_scope_deletion_snapshot(conn, snapshot)
+        for team_id in lock_set.team_ids:
+            await conn.fetchrow(_TEAM_LOCK_SQL, team_id)
+        if snapshot.scope_type is MembershipScopeType.TEAM:
+            await self._recheck_scope_deletion_snapshot(conn, snapshot)
+        for row in lock_set.membership_rows:
+            statement = _membership_statement(
+                row,
+                MembershipLockPhase.MEMBERSHIP_ROWS,
+            )
+            await conn.fetchrow(statement.sql, *statement.parameters)
+        for row in lock_set.owner_rows:
+            statement = _membership_statement(row, MembershipLockPhase.OWNER_ROWS)
+            await conn.fetchrow(statement.sql, *statement.parameters)
+
+    async def _recheck_scope_deletion_snapshot(
+        self,
+        conn: Any,
+        snapshot: MembershipScopeDeletionSnapshot,
+    ) -> None:
+        current = await self.discover_scope_deletion(
+            conn=conn,
+            scope_type=snapshot.scope_type,
+            scope_id=snapshot.scope_id,
+        )
+        if current != snapshot:
+            raise _MembershipScopeDeletionRetry()
+
+    async def _require_deletion_scopes_exist(
+        self,
+        conn: Any,
+        snapshot: MembershipScopeDeletionSnapshot,
+    ) -> None:
+        for organization_id in snapshot.organization_ids:
+            organization = await self._read_organization(conn, organization_id)
+            if organization is None:
+                raise MembershipScopeNotFound()
+        team_to_org = {
+            item.team_id: item.organization_id
+            for item in snapshot.team_parents
+        }
+        for team_id in snapshot.team_ids:
+            team = await self._read_team(conn, team_id)
+            if (
+                team is None
+                or int(team.get("org_id") or 0) != team_to_org[team_id]
+            ):
+                raise MembershipScopeNotFound()
+
+    async def _authorize_scope_deletion(
+        self,
+        conn: Any,
+        context: MembershipWriteContext,
+        snapshot: MembershipScopeDeletionSnapshot,
+    ) -> None:
+        if type(context) is TrustedMembershipWriteContext:
+            return
+        actor = await self._read_user(conn, context.actor_user_id)
+        if actor is None or not _is_active(actor.get("is_active")):
+            raise MembershipAuthorizationError()
+        if context.required_authority is MembershipAuthority.PLATFORM_ADMIN:
+            role = str(actor.get("role") or "").strip().lower()
+            if bool(actor.get("is_superuser")) or role in {
+                "owner",
+                "super_admin",
+                "admin",
+            }:
+                return
+            if await self._has_persisted_platform_admin(conn, context.actor_user_id):
+                return
+            raise MembershipAuthorizationError()
+
+        organization_id = snapshot.organization_ids[0]
+        membership = await self._read_membership(
+            conn,
+            MembershipScopeType.ORGANIZATION,
+            organization_id,
+            context.actor_user_id,
+        )
+        if snapshot.scope_type is MembershipScopeType.ORGANIZATION:
+            organization = await self._read_organization(conn, organization_id)
+            if (
+                organization is not None
+                and int(organization.get("owner_user_id") or 0)
+                == context.actor_user_id
+                and _is_active_membership(membership)
+                and str(membership.get("role") or "").strip().lower() == "owner"
+            ):
+                return
+            raise MembershipAuthorizationError()
+        if _is_active_membership_admin(membership):
+            return
+        raise MembershipAuthorizationError()
+
     async def _team_add_parent_preconditions(
         self,
         conn: Any,
@@ -1023,11 +1664,10 @@ class MembershipWriter:
             )
             if _is_active_membership(membership):
                 continue
-            if (
-                membership is None
-                and mutation.relationship
-                is MembershipMutationRelationship.DEFAULT_TEAM_COMPANION
-            ):
+            if membership is None and mutation.relationship in {
+                MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
+                MembershipMutationRelationship.ORGANIZATION_COMPANION,
+            }:
                 continue
             blocked.add(index)
         return blocked
@@ -1137,17 +1777,11 @@ class MembershipWriter:
         if actor is None or not _is_active(actor.get("is_active")):
             raise MembershipAuthorizationError()
         if context.required_authority is MembershipAuthority.PLATFORM_ADMIN:
-            role = str(actor.get("role") or "").strip().lower()
-            legacy_admin = bool(actor.get("is_superuser")) or role in {
-                "owner",
-                "super_admin",
-                "admin",
-            }
-            if not legacy_admin and not await self._has_persisted_platform_admin(
+            await self._authorize_platform_admin_actor(
                 conn,
                 context.actor_user_id,
-            ):
-                raise MembershipAuthorizationError()
+                actor=actor,
+            )
             return
 
         organization_mutation_ids = sorted(
@@ -1201,6 +1835,28 @@ class MembershipWriter:
                 scopes["organizations"][organization_id],
             ):
                 continue
+            raise MembershipAuthorizationError()
+
+    async def _authorize_platform_admin_actor(
+        self,
+        conn: Any,
+        actor_user_id: int,
+        *,
+        actor: dict[str, Any] | None = None,
+    ) -> None:
+        actor = actor or await self._read_user(conn, actor_user_id)
+        if actor is None or not _is_active(actor.get("is_active")):
+            raise MembershipAuthorizationError()
+        role = str(actor.get("role") or "").strip().lower()
+        legacy_admin = bool(actor.get("is_superuser")) or role in {
+            "owner",
+            "super_admin",
+            "admin",
+        }
+        if not legacy_admin and not await self._has_persisted_platform_admin(
+            conn,
+            actor_user_id,
+        ):
             raise MembershipAuthorizationError()
 
     async def _has_persisted_platform_admin(
@@ -1332,6 +1988,16 @@ class MembershipWriter:
         return bool(role_names & {"owner", "super_admin", "admin"}) or bool(
             permissions & {"*", "system.configure"}
         )
+
+    async def has_persisted_platform_admin(
+        self,
+        conn: Any,
+        user_id: int,
+    ) -> bool:
+        """Return persisted global authority after the caller locks the user."""
+
+        _require_positive_id(user_id)
+        return await self._has_persisted_platform_admin(conn, user_id)
 
     @staticmethod
     def _is_self_owner_bootstrap(
@@ -1473,7 +2139,7 @@ class MembershipWriter:
         )
 
     @staticmethod
-    def _is_blocked_default_team_companion(
+    def _is_blocked_team_companion(
         mutation: MembershipMutation,
         scopes: dict[str, dict[int, dict[str, Any]]],
         blocked_org_removals: set[tuple[int, int]],
@@ -1482,7 +2148,10 @@ class MembershipWriter:
             mutation.scope_type is not MembershipScopeType.TEAM
             or mutation.kind is not MembershipMutationKind.REMOVE
             or mutation.relationship
-            is not MembershipMutationRelationship.DEFAULT_TEAM_COMPANION
+            not in {
+                MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
+                MembershipMutationRelationship.ORGANIZATION_COMPANION,
+            }
         ):
             return False
         team = scopes["teams"][mutation.scope_id]
@@ -1552,6 +2221,90 @@ class MembershipWriter:
             "org_id": _row_value(row, "org_id", 1),
             "is_active": _row_value(row, "is_active", 2),
         }
+
+    async def _read_child_team_parents(
+        self,
+        conn: Any,
+        organization_id: int,
+    ) -> tuple[TeamParentOrganization, ...]:
+        if self._backend is MembershipLockBackend.POSTGRESQL:
+            rows = await conn.fetch(
+                "SELECT id, org_id FROM public.teams WHERE org_id = $1 ORDER BY id",
+                organization_id,
+            )
+        else:
+            rows = await _sqlite_fetchall(
+                conn,
+                "SELECT id, org_id FROM main.teams WHERE org_id = ? ORDER BY id",
+                (organization_id,),
+            )
+        return tuple(
+            TeamParentOrganization(
+                team_id=int(_row_value(row, "id", 0)),
+                organization_id=int(_row_value(row, "org_id", 1)),
+            )
+            for row in rows
+        )
+
+    async def _read_scope_membership_snapshots(
+        self,
+        conn: Any,
+        *,
+        scope_type: MembershipScopeType,
+        scope_id: int,
+        team_ids: tuple[int, ...],
+    ) -> tuple[MembershipRowSnapshot, ...]:
+        rows: list[MembershipRowSnapshot] = []
+        if scope_type is MembershipScopeType.ORGANIZATION:
+            if self._backend is MembershipLockBackend.POSTGRESQL:
+                organization_rows = await conn.fetch(
+                    "SELECT user_id, role, status FROM public.org_members "
+                    "WHERE org_id = $1 ORDER BY user_id",
+                    scope_id,
+                )
+            else:
+                organization_rows = await _sqlite_fetchall(
+                    conn,
+                    "SELECT user_id, role, status FROM main.org_members "
+                    "WHERE org_id = ? ORDER BY user_id",
+                    (scope_id,),
+                )
+            rows.extend(
+                MembershipRowSnapshot(
+                    scope_type=MembershipScopeType.ORGANIZATION,
+                    scope_id=scope_id,
+                    user_id=int(_row_value(row, "user_id", 0)),
+                    role=str(_row_value(row, "role", 1) or ""),
+                    status=str(_row_value(row, "status", 2) or ""),
+                )
+                for row in organization_rows
+            )
+
+        for team_id in team_ids:
+            if self._backend is MembershipLockBackend.POSTGRESQL:
+                team_rows = await conn.fetch(
+                    "SELECT user_id, role, status FROM public.team_members "
+                    "WHERE team_id = $1 ORDER BY user_id",
+                    team_id,
+                )
+            else:
+                team_rows = await _sqlite_fetchall(
+                    conn,
+                    "SELECT user_id, role, status FROM main.team_members "
+                    "WHERE team_id = ? ORDER BY user_id",
+                    (team_id,),
+                )
+            rows.extend(
+                MembershipRowSnapshot(
+                    scope_type=MembershipScopeType.TEAM,
+                    scope_id=team_id,
+                    user_id=int(_row_value(row, "user_id", 0)),
+                    role=str(_row_value(row, "role", 1) or ""),
+                    status=str(_row_value(row, "status", 2) or ""),
+                )
+                for row in team_rows
+            )
+        return tuple(sorted(rows, key=lambda row: _row_sort_key(row.identity)))
 
     async def _read_user(self, conn: Any, user_id: int) -> dict[str, Any] | None:
         if self._backend is MembershipLockBackend.POSTGRESQL:
@@ -1639,33 +2392,41 @@ class MembershipWriter:
         is_org = mutation.scope_type is MembershipScopeType.ORGANIZATION
         if self._backend is MembershipLockBackend.POSTGRESQL:
             if is_org:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "INSERT INTO public.org_members (org_id, user_id, role) "
                     "VALUES ($1, $2, $3)",
                     mutation.scope_id,
                     mutation.user_id,
                     mutation.role,
+                    backend="postgres",
                 )
             else:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "INSERT INTO public.team_members (team_id, user_id, role) "
                     "VALUES ($1, $2, $3)",
                     mutation.scope_id,
                     mutation.user_id,
                     mutation.role,
+                    backend="postgres",
                 )
         else:
             if is_org:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "INSERT INTO main.org_members (org_id, user_id, role) "
                     "VALUES (?, ?, ?)",
                     (mutation.scope_id, mutation.user_id, mutation.role),
+                    backend="sqlite",
                 )
             else:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "INSERT INTO main.team_members (team_id, user_id, role) "
                     "VALUES (?, ?, ?)",
                     (mutation.scope_id, mutation.user_id, mutation.role),
+                    backend="sqlite",
                 )
 
     async def _update_membership_role(
@@ -1676,34 +2437,63 @@ class MembershipWriter:
         is_org = mutation.scope_type is MembershipScopeType.ORGANIZATION
         if self._backend is MembershipLockBackend.POSTGRESQL:
             if is_org:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "UPDATE public.org_members SET role = $3 "
                     "WHERE org_id = $1 AND user_id = $2",
                     mutation.scope_id,
                     mutation.user_id,
                     mutation.role,
+                    backend="postgres",
                 )
             else:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "UPDATE public.team_members SET role = $3 "
                     "WHERE team_id = $1 AND user_id = $2",
                     mutation.scope_id,
                     mutation.user_id,
                     mutation.role,
+                    backend="postgres",
                 )
         else:
             if is_org:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "UPDATE main.org_members SET role = ? "
                     "WHERE org_id = ? AND user_id = ?",
                     (mutation.role, mutation.scope_id, mutation.user_id),
+                    backend="sqlite",
                 )
             else:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "UPDATE main.team_members SET role = ? "
                     "WHERE team_id = ? AND user_id = ?",
                     (mutation.role, mutation.scope_id, mutation.user_id),
+                    backend="sqlite",
                 )
+
+    async def _update_organization_owner_pointer(
+        self,
+        conn: Any,
+        *,
+        organization_id: int,
+        new_owner_user_id: int,
+    ) -> None:
+        if self._backend is MembershipLockBackend.POSTGRESQL:
+            await conn.execute(
+                "UPDATE public.organizations SET owner_user_id = $1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+                new_owner_user_id,
+                organization_id,
+            )
+            return
+        await conn.execute(
+            "UPDATE main.organizations SET owner_user_id = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (new_owner_user_id, organization_id),
+        )
 
     async def _delete_membership(
         self,
@@ -1713,31 +2503,39 @@ class MembershipWriter:
         is_org = mutation.scope_type is MembershipScopeType.ORGANIZATION
         if self._backend is MembershipLockBackend.POSTGRESQL:
             if is_org:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "DELETE FROM public.org_members "
                     "WHERE org_id = $1 AND user_id = $2",
                     mutation.scope_id,
                     mutation.user_id,
+                    backend="postgres",
                 )
             else:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "DELETE FROM public.team_members "
                     "WHERE team_id = $1 AND user_id = $2",
                     mutation.scope_id,
                     mutation.user_id,
+                    backend="postgres",
                 )
         else:
             if is_org:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "DELETE FROM main.org_members "
                     "WHERE org_id = ? AND user_id = ?",
                     (mutation.scope_id, mutation.user_id),
+                    backend="sqlite",
                 )
             else:
-                await conn.execute(
+                await _execute_membership_scope_sql(
+                    conn,
                     "DELETE FROM main.team_members "
                     "WHERE team_id = ? AND user_id = ?",
                     (mutation.scope_id, mutation.user_id),
+                    backend="sqlite",
                 )
 
 
