@@ -41,6 +41,14 @@ _assert_strict_consumer_output = _ARTIFACT_UTILS["assert_strict_consumer_output"
 _build_standalone_distributions = _ARTIFACT_UTILS["build_standalone_distributions"]
 
 
+def test_official_sdk_smoke_prepares_windows_multiprocessing() -> None:
+    """The real stdio entrypoint must prepare nested schema workers on Windows."""
+
+    source = (REPO_ROOT / OFFICIAL_SDK_SMOKE).read_text(encoding="utf-8")
+
+    assert "multiprocessing.freeze_support()" in source
+
+
 _DOWNSTREAM_CONSUMER = r"""
 from __future__ import annotations
 

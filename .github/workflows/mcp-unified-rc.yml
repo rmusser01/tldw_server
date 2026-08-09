@@ -95,7 +95,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: mcp-unified-rc
-          path: .artifacts/mcp-unified-rc/**
+          path: |
+            .artifacts/mcp-unified-rc/**
+            apps/mcp-unified/dist/**
           if-no-files-found: error
 
   portable-stdio:
@@ -153,5 +155,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: mcp-unified-portable-${{ matrix.os }}-py${{ matrix.python }}
-          path: .artifacts/mcp-unified-rc/**
+          path: |
+            .artifacts/mcp-unified-rc/**
+            apps/mcp-unified/dist/**
           if-no-files-found: error
