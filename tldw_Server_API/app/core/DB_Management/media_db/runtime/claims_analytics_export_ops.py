@@ -26,6 +26,19 @@ _SUPPORTED_EXPORT_STATUSES = {"queued", "processing", "ready", "failed"}
 _EXPORT_DELETE_CHUNK_SIZE = 400
 
 
+def _canonicalize_claims_analytics_export_row(row: Any) -> dict[str, Any]:
+    export_row = dict(row)
+    for field in ("snapshot_at", "created_at", "updated_at"):
+        value = export_row.get(field)
+        if isinstance(value, datetime):
+            if value.tzinfo is None or value.utcoffset() is None:
+                value = value.replace(tzinfo=timezone.utc)
+            export_row[field] = value.astimezone(timezone.utc).isoformat(
+                timespec="milliseconds"
+            ).replace("+00:00", "Z")
+    return export_row
+
+
 def _affected_rows(cursor: Any) -> int:
     try:
         return max(int(getattr(cursor, "rowcount", 0) or 0), 0)
@@ -139,7 +152,7 @@ def get_claims_analytics_export(
         ),
         (str(export_id), str(user_id)),
     ).fetchone()
-    return dict(row) if row else {}
+    return _canonicalize_claims_analytics_export_row(row) if row else {}
 
 
 def attach_claims_analytics_export_job(
@@ -286,7 +299,7 @@ def list_claims_analytics_exports(
     )
     params.extend([limit, offset])
     rows = self.execute_query(query, tuple(params)).fetchall()
-    return [dict(row) for row in rows]
+    return [_canonicalize_claims_analytics_export_row(row) for row in rows]
 
 
 def list_claims_analytics_exports_for_maintenance(
@@ -346,7 +359,7 @@ def list_claims_analytics_exports_for_maintenance(
     )
     params.append(limit)
     rows = self.execute_query(query, tuple(params)).fetchall()
-    return [dict(row) for row in rows]
+    return [_canonicalize_claims_analytics_export_row(row) for row in rows]
 
 
 def count_claims_analytics_exports(

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import (
+    process_export_artifact,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
@@ -25,6 +30,9 @@ ALLOWED_EXPORT_TRANSITIONS = {
 GENERIC_STATUS_TRANSITIONS = ALLOWED_EXPORT_TRANSITIONS - {("processing", "ready")}
 
 EXPORT_STATUSES = ("queued", "processing", "ready", "failed")
+_CANONICAL_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"
+)
 
 
 def _make_db(tmp_path: Path, name: str) -> MediaDatabase:
@@ -59,6 +67,88 @@ def _seed_export(
         error_message=error_message,
         snapshot_at=snapshot_at,
     )
+
+
+def test_claims_analytics_export_row_projections_canonicalize_native_datetimes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _make_db(tmp_path, "claims-analytics-native-datetimes.db")
+
+    class _Cursor:
+        def __init__(
+            self,
+            *,
+            one: dict[str, object] | None = None,
+            rows: list[dict[str, object]] | None = None,
+        ) -> None:
+            self._one = one
+            self._rows = rows or []
+
+        def fetchone(self) -> dict[str, object] | None:
+            return self._one
+
+        def fetchall(self) -> list[dict[str, object]]:
+            return self._rows
+
+    aware = datetime(2026, 8, 8, 5, 6, 7, 987654, tzinfo=timezone(timedelta(hours=-7)))
+    naive = datetime(2026, 8, 8, 12, 6, 7, 123456)
+    get_row = {
+        "export_id": "exp-get-native-datetimes",
+        "user_id": "1",
+        "format": "json",
+        "status": "queued",
+        "payload_json": '{"events":[]}',
+        "snapshot_at": aware,
+        "created_at": naive,
+        "updated_at": "preserve-this-string",
+    }
+    list_row = {
+        "export_id": "exp-list-native-datetimes",
+        "user_id": "1",
+        "format": "json",
+        "status": "queued",
+        "snapshot_at": None,
+        "created_at": aware,
+        "updated_at": naive,
+    }
+    maintenance_row = {
+        "export_id": "exp-maintenance-native-datetimes",
+        "user_id": "1",
+        "format": "json",
+        "status": "queued",
+        "snapshot_at": "preserve-this-string",
+        "created_at": None,
+        "updated_at": aware,
+    }
+
+    def _execute_query(query: str | tuple[str, ...], *args: object, **kwargs: object) -> _Cursor:
+        sql = query[0] if isinstance(query, tuple) else query
+        if "LIMIT 1" in sql:
+            return _Cursor(one=get_row)
+        if "OFFSET ?" in sql:
+            return _Cursor(rows=[list_row])
+        return _Cursor(rows=[maintenance_row])
+
+    try:
+        monkeypatch.setattr(db, "execute_query", _execute_query)
+
+        fetched = db.get_claims_analytics_export("exp-get-native-datetimes", user_id="1")
+        listed = db.list_claims_analytics_exports("1")
+        maintenance = db.list_claims_analytics_exports_for_maintenance(user_id="1")
+
+        assert fetched["snapshot_at"] == "2026-08-08T12:06:07.987Z"
+        assert fetched["created_at"] == "2026-08-08T12:06:07.123Z"
+        assert fetched["updated_at"] == "preserve-this-string"
+        assert fetched["payload_json"] == '{"events":[]}'
+        assert listed[0]["snapshot_at"] is None
+        assert listed[0]["created_at"] == "2026-08-08T12:06:07.987Z"
+        assert listed[0]["updated_at"] == "2026-08-08T12:06:07.123Z"
+        assert maintenance[0]["snapshot_at"] == "preserve-this-string"
+        assert maintenance[0]["created_at"] is None
+        assert maintenance[0]["updated_at"] == "2026-08-08T12:06:07.987Z"
+    finally:
+        db.close_connection()
 
 
 def test_create_claims_analytics_export_returns_freshly_readable_row(tmp_path: Path) -> None:
@@ -929,15 +1019,22 @@ def test_claims_analytics_exports_postgres_owner_scoped_crud_and_v24_fields(
         assert created["job_id"] is None
         assert created["error_code"] is None
         assert created["snapshot_at"] == "2026-08-08T12:00:00.000Z"
-        assert created["created_at"]
-        assert created["updated_at"]
+        assert all(
+            isinstance(created[field], str)
+            and _CANONICAL_TIMESTAMP_RE.fullmatch(created[field])
+            for field in ("snapshot_at", "created_at", "updated_at")
+        )
 
         assert db.get_claims_analytics_export(
             "pg-crud-owner-1", user_id="owner-2"
         ) == {}
-        assert [row["export_id"] for row in db.list_claims_analytics_exports("owner-1")] == [
-            "pg-crud-owner-1"
-        ]
+        owner_one_rows = db.list_claims_analytics_exports("owner-1")
+        assert [row["export_id"] for row in owner_one_rows] == ["pg-crud-owner-1"]
+        assert all(
+            isinstance(owner_one_rows[0][field], str)
+            and _CANONICAL_TIMESTAMP_RE.fullmatch(owner_one_rows[0][field])
+            for field in ("snapshot_at", "created_at", "updated_at")
+        )
         assert [row["export_id"] for row in db.list_claims_analytics_exports("owner-2")] == [
             "pg-crud-owner-2"
         ]
@@ -959,6 +1056,37 @@ def test_claims_analytics_exports_postgres_owner_scoped_crud_and_v24_fields(
         assert db.get_claims_analytics_export(
             "pg-crud-owner-1", user_id="owner-1"
         )["job_id"] == 101
+
+        queued = db.create_claims_analytics_export(
+            export_id="a" * 32,
+            user_id="1",
+            format="json",
+            status="queued",
+            filters_json='{"end_time":"2026-08-08T12:00:00.000Z"}',
+            pagination_json='{"limit":10,"offset":0}',
+            snapshot_at="2026-08-08T12:00:00.000Z",
+        )
+        assert db.attach_claims_analytics_export_job(
+            export_id=queued["export_id"], user_id="1", job_id=102
+        ) is True
+
+        result = process_export_artifact(
+            db,
+            owner_user_id="1",
+            export_id=queued["export_id"],
+            job_id=102,
+        )
+        ready = db.get_claims_analytics_export(queued["export_id"], user_id="1")
+
+        assert result["outcome"] == "ok"
+        assert ready["status"] == "ready"
+        assert ready["job_id"] == 102
+        assert all(
+            isinstance(ready[field], str)
+            and _CANONICAL_TIMESTAMP_RE.fullmatch(ready[field])
+            for field in ("snapshot_at", "created_at", "updated_at")
+        )
+        assert ready["payload_json"] == '{"events":[],"filters":{"end_time":"2026-08-08T12:00:00.000Z"},"pagination":{"limit":10,"offset":0,"returned":0,"total":0}}'
     finally:
         db.close_connection()
 
