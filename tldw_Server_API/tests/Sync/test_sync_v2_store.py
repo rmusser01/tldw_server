@@ -4,12 +4,17 @@ import inspect
 import sqlite3
 import subprocess
 import sys
+from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 import tldw_Server_API.app.core.Sync.v2.store as store_module
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase, utcnow_iso
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncDatasetNotFoundError,
@@ -120,6 +125,68 @@ def _mutation_group_envelopes(
         )
         for step in range(3)
     ]
+
+
+class _PostgresUniqueDiagnostics:
+    constraint_name = "uq_sync_envelopes_dataset_mutation_group_step"
+
+
+class _PostgresMutationGroupUniqueViolation(Exception):
+    sqlstate = "23505"
+    diag = _PostgresUniqueDiagnostics()
+
+
+def _inject_postgres_mutation_group_race(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, int]:
+    original_list_group_rows = sync_store.db._list_mutation_group_rows
+    original_transaction = sync_store.db.backend.transaction
+    calls = {"list": 0, "transactions": 0}
+
+    def hide_group_until_race_rollback(
+        dataset_id: str,
+        mutation_group_id: str,
+        *,
+        connection=None,
+    ):
+        calls["list"] += 1
+        if calls["list"] == 1:
+            return []
+        return original_list_group_rows(
+            dataset_id,
+            mutation_group_id,
+            connection=connection,
+        )
+
+    @contextmanager
+    def track_transaction(connection=None):
+        calls["transactions"] += 1
+        with original_transaction(connection) as conn:
+            yield conn
+
+    def lose_group_step_unique_race(envelope, *, connection):
+        raise BackendDatabaseError("injected PostgreSQL unique race") from (
+            _PostgresMutationGroupUniqueViolation()
+        )
+
+    monkeypatch.setattr(
+        sync_store.db,
+        "_list_mutation_group_rows",
+        hide_group_until_race_rollback,
+    )
+    monkeypatch.setattr(
+        sync_store.db,
+        "_find_existing_envelope_for_idempotency",
+        lambda envelope, *, connection: None,
+    )
+    monkeypatch.setattr(
+        sync_store.db,
+        "_insert_envelope_in_transaction",
+        lose_group_step_unique_race,
+    )
+    monkeypatch.setattr(sync_store.db.backend, "transaction", track_transaction)
+    return calls
 
 
 def _conflict(**overrides) -> SyncConflictCreate:
@@ -1073,6 +1140,120 @@ def test_insert_envelopes_atomic_rejects_mutation_group_replay_drift(
         match="Sync mutation group idempotency key was reused with different content",
     ):
         sync_store.insert_envelopes_atomic(changed)
+
+
+@pytest.mark.parametrize(
+    "replay_factory",
+    [
+        pytest.param(lambda plan: plan[:2], id="missing-step"),
+        pytest.param(
+            lambda plan: [
+                *plan,
+                replace(
+                    plan[2],
+                    client_envelope_id="env-group-extra",
+                    object_id="note-extra",
+                    payload_hash="sha256:note-extra",
+                ),
+            ],
+            id="extra-duplicate-step",
+        ),
+        pytest.param(
+            lambda plan: [plan[0], plan[2], plan[1]],
+            id="reordered-steps",
+        ),
+    ],
+)
+def test_insert_envelopes_atomic_rejects_incomplete_mutation_group_replays_as_conflicts(
+    sync_store: SyncV2Store,
+    replay_factory,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    plan = _mutation_group_envelopes()
+    sync_store.insert_envelopes_atomic(plan)
+
+    with pytest.raises(
+        SyncIdempotencyConflictError,
+        match="Sync mutation group idempotency key was reused with different content",
+    ):
+        sync_store.insert_envelopes_atomic(replay_factory(plan))
+
+
+def test_insert_envelopes_atomic_keeps_shape_error_for_new_incomplete_mutation_group(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+
+    with pytest.raises(
+        SyncStoreError,
+        match="Sync mutation group steps must exactly match the ordered complete plan",
+    ):
+        sync_store.insert_envelopes_atomic(_mutation_group_envelopes()[:2])
+
+
+def test_insert_envelopes_atomic_returns_identical_postgres_mutation_group_race_winner(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    plan = _mutation_group_envelopes()
+    stored = sync_store.insert_envelopes_atomic(plan)
+    calls = _inject_postgres_mutation_group_race(sync_store, monkeypatch)
+
+    replay = sync_store.insert_envelopes_atomic(plan)
+
+    assert replay == stored
+    assert calls == {"list": 2, "transactions": 2}
+
+
+def test_insert_envelopes_atomic_rejects_drifted_postgres_mutation_group_race_winner(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    plan = _mutation_group_envelopes()
+    sync_store.insert_envelopes_atomic(plan)
+    changed = list(plan)
+    changed[1] = replace(changed[1], payload_hash="sha256:changed")
+    calls = _inject_postgres_mutation_group_race(sync_store, monkeypatch)
+
+    with pytest.raises(
+        SyncIdempotencyConflictError,
+        match="Sync mutation group idempotency key was reused with different content",
+    ):
+        sync_store.insert_envelopes_atomic(changed)
+
+    assert calls == {"list": 2, "transactions": 2}
+
+
+def test_insert_envelopes_atomic_does_not_swallow_unrelated_postgres_unique_failure(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OtherUniqueDiagnostics:
+        constraint_name = "sync_envelopes_dataset_id_client_envelope_id_key"
+
+    class OtherPostgresUniqueViolation(Exception):
+        sqlstate = "23505"
+        diag = OtherUniqueDiagnostics()
+
+    def fail_unrelated_unique_insert(envelope, *, connection):
+        raise BackendDatabaseError("unrelated PostgreSQL unique failure") from (
+            OtherPostgresUniqueViolation()
+        )
+
+    sync_store.enroll_dataset(_dataset())
+    monkeypatch.setattr(
+        sync_store.db,
+        "_insert_envelope_in_transaction",
+        fail_unrelated_unique_insert,
+    )
+
+    with pytest.raises(
+        BackendDatabaseError,
+        match="unrelated PostgreSQL unique failure",
+    ):
+        sync_store.insert_envelopes_atomic(_mutation_group_envelopes())
 
 
 def test_insert_envelopes_atomic_rolls_back_mutation_group_after_step_two_failure(

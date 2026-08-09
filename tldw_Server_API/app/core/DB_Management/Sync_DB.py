@@ -68,7 +68,13 @@ from tldw_Server_API.app.core.Sync.v2.models import (
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
-from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, QueryResult
+from .backends.base import (
+    BackendType,
+    DatabaseBackend,
+    DatabaseConfig,
+    QueryResult,
+)
+from .backends.base import DatabaseError as BackendDatabaseError
 from .backends.factory import DatabaseBackendFactory
 
 SYNC_DB_FILENAME = "Sync_v2.db"
@@ -83,6 +89,25 @@ _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "payload_hash",
     "availability",
 }
+
+
+def _is_mutation_group_step_unique_error(exc: BaseException) -> bool:
+    """Match PostgreSQL's named mutation-group step uniqueness violation."""
+
+    current: BaseException | None = exc
+    while current is not None:
+        sqlstate = getattr(current, "sqlstate", None) or getattr(
+            current, "pgcode", None
+        )
+        diagnostics = getattr(current, "diag", None)
+        if (
+            sqlstate == "23505"
+            and getattr(diagnostics, "constraint_name", None)
+            == "uq_sync_envelopes_dataset_mutation_group_step"
+        ):
+            return True
+        current = current.__cause__
+    return False
 
 SYNC_SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_devices (
@@ -3159,42 +3184,84 @@ class SyncDatabase:
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
-        plan = self._validate_mutation_group_plan(envelopes)
+        submitted_plan = list(envelopes)
+        try:
+            plan = self._validate_mutation_group_plan(submitted_plan)
+        except SyncStoreError as exc:
+            if self._has_existing_mutation_group(submitted_plan):
+                raise SyncIdempotencyConflictError(
+                    "Sync mutation group idempotency key was reused with different content"
+                ) from exc
+            raise
         first = plan[0]
         mutation_group_id = first.mutation_group_id
         if mutation_group_id is None:
             raise SyncStoreError("Atomic Sync append requires mutation group metadata")
 
-        with self.backend.transaction() as conn:
-            for envelope in plan:
-                self._require_dataset_domain(
-                    envelope.dataset_id,
-                    envelope.domain,
-                    connection=conn,
-                )
-
-            existing_rows = self._list_mutation_group_rows(
-                first.dataset_id,
-                mutation_group_id,
-                connection=conn,
-            )
-            if existing_rows:
-                return self._matched_mutation_group_replay(plan, existing_rows)
-
-            for envelope in plan:
-                existing = self._find_existing_envelope_for_idempotency(
-                    envelope,
-                    connection=conn,
-                )
-                if existing is not None:
-                    raise SyncIdempotencyConflictError(
-                        "Sync mutation group idempotency key was reused with different content"
+        try:
+            with self.backend.transaction() as conn:
+                for envelope in plan:
+                    self._require_dataset_domain(
+                        envelope.dataset_id,
+                        envelope.domain,
+                        connection=conn,
                     )
 
-            return [
-                self._insert_envelope_in_transaction(envelope, connection=conn)
-                for envelope in plan
-            ]
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+                if existing_rows:
+                    return self._matched_mutation_group_replay(plan, existing_rows)
+
+                for envelope in plan:
+                    existing = self._find_existing_envelope_for_idempotency(
+                        envelope,
+                        connection=conn,
+                    )
+                    if existing is not None:
+                        raise SyncIdempotencyConflictError(
+                            "Sync mutation group idempotency key was reused with different content"
+                        )
+
+                return [
+                    self._insert_envelope_in_transaction(envelope, connection=conn)
+                    for envelope in plan
+                ]
+        except BackendDatabaseError as exc:
+            if not _is_mutation_group_step_unique_error(exc):
+                raise
+            with self.backend.transaction() as conn:
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+            if not existing_rows:
+                raise
+            return self._matched_mutation_group_replay(plan, existing_rows)
+
+    def _has_existing_mutation_group(
+        self,
+        plan: Sequence[SyncEnvelopeCreate],
+    ) -> bool:
+        identities = {
+            (envelope.dataset_id, envelope.mutation_group_id)
+            for envelope in plan
+            if envelope.mutation_group_id is not None
+        }
+        if not identities:
+            return False
+        with self.backend.transaction() as conn:
+            return any(
+                self._list_mutation_group_rows(
+                    dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+                for dataset_id, mutation_group_id in identities
+            )
 
     def _validate_mutation_group_plan(
         self,
