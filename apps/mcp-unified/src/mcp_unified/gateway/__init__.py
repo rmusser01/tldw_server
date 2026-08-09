@@ -47,6 +47,7 @@ from .profiles import (
     GatewayProfileStoreMetadata,
 )
 from .protocol_cancellation import GatewayCancellationToken
+from .protocol_connection import GatewayProtocolConnection
 from .protocol_errors import (
     GatewayApplicationError,
     GatewayInvalidApplicationResult,
@@ -98,6 +99,7 @@ __all__ = [
     "GatewayJSONValue",
     "GatewayLimits",
     "GatewayPolicyDenied",
+    "GatewayProtocolConnection",
     "GatewayProtocolProfile",
     "GatewayResourceNotFound",
     "GatewayResourceTemplateRuntime",
