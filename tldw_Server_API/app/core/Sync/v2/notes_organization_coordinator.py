@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
@@ -28,6 +29,8 @@ from .server_origin_batch import (
     SyncServerOriginBatchIdempotencyConflictError,
     SyncServerOriginBatchMaterializationError,
     capture_server_origin_mutation_batch,
+    load_server_origin_mutation_batch_manifest,
+    server_origin_mutation_batch_group_id,
 )
 from .service import SyncV2Service
 
@@ -36,6 +39,7 @@ _RESOURCE_TABLES: dict[SyncDomain, tuple[str, str]] = {
     "notes.keyword_collection": ("keyword_collections", "name"),
     "notes.folder": ("note_folders", "name"),
 }
+_REQUEST_FINGERPRINT_KEY = "notes_organization_request_fingerprint"
 
 
 class NotesOrganizationDomainsIncompleteError(SyncStoreError):
@@ -63,6 +67,24 @@ class NotesOrganizationPreflightError(SyncStoreError):
     """A canonical organization plan was rejected before durable append."""
 
     error_code = "notes_organization_sync_preflight_failed"
+
+    def __init__(self) -> None:
+        super().__init__(self.error_code)
+
+
+class NotesOrganizationResourceNotFoundError(InputError):
+    """An owner-scoped local organization resource does not exist or is deleted."""
+
+    error_code = "notes_organization_resource_not_found"
+
+    def __init__(self) -> None:
+        super().__init__(self.error_code)
+
+
+class NotesOrganizationVersionConflictError(ConflictError):
+    """An organization resource failed its optimistic-version precondition."""
+
+    error_code = "notes_organization_version_conflict"
 
     def __init__(self) -> None:
         super().__init__(self.error_code)
@@ -142,6 +164,102 @@ class NotesOrganizationCoordinator:
             raise
         except SyncStoreError as exc:
             raise NotesOrganizationPreflightError() from exc
+
+    @staticmethod
+    def request_fingerprint(operation: str, fields: Mapping[str, object]) -> str:
+        """Hash immutable normalized request identity without retaining raw fields."""
+
+        encoded = json.dumps(
+            {"operation": operation, "fields": dict(fields)},
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def bind_request(
+        plan: PlannedNotesMutation,
+        request_fingerprint: str,
+    ) -> PlannedNotesMutation:
+        """Bind a privacy-safe request fingerprint to every plan step."""
+
+        return PlannedNotesMutation(
+            steps=tuple(
+                replace(
+                    step,
+                    routing_metadata={
+                        **dict(step.routing_metadata),
+                        _REQUEST_FINGERPRINT_KEY: request_fingerprint,
+                    },
+                )
+                for step in plan.steps
+            ),
+            load_result=plan.load_result,
+        )
+
+    def replay_request_plan(
+        self,
+        *,
+        source: str,
+        idempotency_key: str | None,
+        request_fingerprint: str,
+        result_domain: SyncDomain | None,
+        relationship_result: bool = False,
+    ) -> PlannedNotesMutation | None:
+        """Return an exact durable manifest before mutable projection checks."""
+
+        normalized_key = str(idempotency_key or "").strip()
+        if not normalized_key:
+            return None
+        dataset = self.require_ready()
+        manifest = load_server_origin_mutation_batch_manifest(
+            service=self.service,
+            dataset_id=dataset.dataset_id,
+            source=source,
+            idempotency_key=normalized_key,
+        )
+        if manifest is None:
+            return None
+        if any(
+            step.routing_metadata.get(_REQUEST_FINGERPRINT_KEY)
+            != request_fingerprint
+            for step in manifest
+        ):
+            raise SyncServerOriginBatchIdempotencyConflictError(
+                server_origin_mutation_batch_group_id(
+                    dataset_id=dataset.dataset_id,
+                    source=source,
+                    idempotency_key=normalized_key,
+                )
+            )
+        if result_domain is None:
+            def loader() -> object:
+                return None
+        else:
+            result_step = next(
+                (step for step in reversed(manifest) if step.domain == result_domain),
+                None,
+            )
+            if result_step is None:
+                raise SyncServerOriginBatchIdempotencyConflictError(
+                    server_origin_mutation_batch_group_id(
+                        dataset_id=dataset.dataset_id,
+                        source=source,
+                        idempotency_key=normalized_key,
+                    )
+                )
+            if relationship_result:
+                def loader() -> object:
+                    return self._relationship_present(
+                        result_domain, result_step.object_id
+                    )
+            else:
+                def loader() -> object:
+                    return self._load_resource_row(
+                        result_domain, result_step.object_id
+                    )
+        return PlannedNotesMutation(steps=manifest, load_result=loader)
 
     def plan_keyword_create(
         self,
@@ -265,9 +383,9 @@ class NotesOrganizationCoordinator:
         *,
         idempotency_key: str | None = None,
     ) -> PlannedNotesMutation:
-        """Plan missing folder segments in parent-before-child order."""
+        """Plan the canonical full folder path in parent-before-child order."""
 
-        normalized = self._normalize_folder_path(path)
+        normalized = self.normalize_folder_path(path)
         parent_sync_id: str | None = None
         steps: list[ServerOriginMutationStep] = []
         final_sync_id: str | None = None
@@ -277,18 +395,22 @@ class NotesOrganizationCoordinator:
             existing = self.note_db.get_note_folder_by_path(segment_path)
             if existing is not None:
                 final_sync_id = str(existing["sync_id"])
-                parent_sync_id = final_sync_id
-                continue
-            final_sync_id = self._create_sync_id(
-                "notes.folder",
-                f"{idempotency_key}:{segment_path}" if idempotency_key else None,
-            )
+                canonical_name = str(existing["name"])
+            else:
+                final_sync_id = self._create_sync_id(
+                    "notes.folder",
+                    f"{idempotency_key}:{segment_path}" if idempotency_key else None,
+                )
+                canonical_name = name
             steps.append(
                 ServerOriginMutationStep(
                     domain="notes.folder",
                     operation="upsert",
                     object_id=final_sync_id,
-                    payload={"name": name, "parent_sync_id": parent_sync_id},
+                    payload={
+                        "name": canonical_name,
+                        "parent_sync_id": parent_sync_id,
+                    },
                     parent_id=parent_sync_id,
                 )
             )
@@ -351,11 +473,24 @@ class NotesOrganizationCoordinator:
         except KeyError as exc:
             raise InputError("Organization relationship members are incomplete") from exc
         object_id = organization_link_id(domain, identity_members)
+        routing_metadata: dict[str, object] = {}
+        if present:
+            dataset = self.active_dataset()
+            current_head = self.service.store.get_current_head(
+                dataset.dataset_id,
+                domain,
+                object_id,
+            )
+            if current_head is not None and (
+                current_head.operation == "tombstone" or current_head.deleted
+            ):
+                routing_metadata["restore_intent"] = True
         step = ServerOriginMutationStep(
             domain=domain,
             operation="upsert" if present else "tombstone",
             object_id=object_id,
             payload=payload,
+            routing_metadata=routing_metadata,
         )
         return PlannedNotesMutation(
             steps=(step,),
@@ -455,7 +590,7 @@ class NotesOrganizationCoordinator:
             (local_id, False if self.note_db.backend_type.value == "postgresql" else 0),
         ).fetchone()
         if row is None:
-            raise InputError("Organization resource was not found")
+            raise NotesOrganizationResourceNotFoundError()
         return dict(row)
 
     def _load_resource_row(self, domain: SyncDomain, sync_id: str) -> dict[str, Any]:
@@ -489,15 +624,17 @@ class NotesOrganizationCoordinator:
 
     @staticmethod
     def _require_version(
-        row: Mapping[str, object], expected_version: int | None, label: str
+        row: Mapping[str, object], expected_version: int | None, _label: str
     ) -> None:
         if expected_version is None:
             return
         if int(row.get("version") or 0) != int(expected_version):
-            raise ConflictError(f"{label} version mismatch")
+            raise NotesOrganizationVersionConflictError()
 
     @staticmethod
-    def _normalize_folder_path(path: str) -> str:
+    def normalize_folder_path(path: str) -> str:
+        """Return the canonical identity used for folder-path requests."""
+
         text = str(path or "").strip().replace("\\", "/").strip("/")
         parts = [part.strip() for part in text.split("/") if part.strip() and part.strip() != "."]
         if not parts or any(part == ".." for part in parts):
@@ -519,5 +656,7 @@ __all__ = [
     "NotesOrganizationDomainsIncompleteError",
     "NotesOrganizationNotReadyError",
     "NotesOrganizationPreflightError",
+    "NotesOrganizationResourceNotFoundError",
+    "NotesOrganizationVersionConflictError",
     "PlannedNotesMutation",
 ]

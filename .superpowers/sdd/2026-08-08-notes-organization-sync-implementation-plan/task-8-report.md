@@ -142,3 +142,121 @@ rewriting unrelated code.
 
 No remaining correctness, security, privacy, compatibility, or Task 9 boundary
 concern was found in the scoped self-review.
+
+## Fix Round 1 — replay, restore, and route-contract hardening
+
+### Reviewer findings verified
+
+All four findings were reproduced against commit `050fa346` before their focused
+fixes:
+
+- Relationship replans emitted no `restore_intent` after the current Sync head had
+  become a tombstone.
+- Keyword and collection update/delete routes evaluated mutable projection rows and
+  versions before looking for an existing idempotency-group manifest.
+- Folder planning omitted already-applied ancestors, and collection membership
+  updates could recompute a smaller relationship delta after a materialized prefix.
+- Active-Sync missing/deleted keyword planning raised `InputError`, changing the
+  existing route contract to 400 instead of 404; version conflicts lacked a stable
+  typed error code.
+
+### Round 1 implementation
+
+- Relationship planners now inspect the owner-scoped current Sync head and attach
+  `restore_intent=true` only when an upsert restores a tombstoned relationship.
+- Added a privacy-safe SHA-256 fingerprint of canonical request identity to each
+  stored update/delete/folder plan. The fingerprint covers route operation, local
+  IDs, expected version, supplied-field identity, and normalized requested values;
+  no plaintext idempotency key or requested value is stored in routing metadata.
+- Existing Task 4 manifests are loaded and fingerprint-validated before mutable
+  product-row/version checks. Exact keyword rename/delete and collection
+  update/delete requests reuse the stored plan; changed requests return the stable
+  batch idempotency conflict. Deleted product rows are bypassed only after this
+  immutable manifest match.
+- Folder creation now plans the complete canonical root-to-leaf shape, including
+  existing segments. An active existing-path request establishes a durable group,
+  an exact replay keeps the original create response, and a different path under
+  the same key conflicts.
+- Added stable `NotesOrganizationResourceNotFoundError` and
+  `NotesOrganizationVersionConflictError` mappings to preserve 404/409 behavior
+  without exposing database details.
+- Task 4 batch code, inactive-Sync direct behavior, Task 9 boundaries, and public
+  note compound/merge behavior were not changed in this round.
+
+### Round 1 TDD evidence
+
+1. Relationship restore:
+   - RED: `1 failed, 17 deselected, 2 warnings in 9.84s`; all relinks had empty
+     routing metadata.
+   - GREEN: `1 passed, 17 deselected, 2 warnings in 9.94s`; note-keyword,
+     conversation-keyword, collection-keyword, and folder-link relinks all carry
+     restore intent and materialize present.
+2. Exact update/delete replay:
+   - RED: `1 failed, 18 deselected, 2 warnings in 10.32s`; an exact keyword rename
+     retry failed the now-mutable optimistic version check.
+   - GREEN: `1 passed, 18 deselected, 2 warnings in 10.32s`; exact and drift cases
+     cover keyword rename/delete and collection name/parent update/delete, including
+     exact delete replay after projection deletion.
+3. Folder applied-prefix replay:
+   - RED: `1 failed, 19 deselected, 2 warnings in 12.69s`; retry after
+     `Root=applied, Child=failed` recomputed only the child and returned the stable
+     409 plan conflict.
+   - GREEN: `1 passed, 19 deselected, 2 warnings in 11.51s`; the original two-step
+     IDs and shape resume, and an existing-path group rejects a different path under
+     the same key.
+4. Collection relationship-prefix replay:
+   - `1 passed, 20 deselected, 2 warnings in 11.17s`; a collection update that fails
+     after its first relationship applies resumes the stored manifest with identical
+     domain/operation/object-ID shape. This was already green after the earlier
+     update-manifest seam, so no additional production change was required.
+5. Missing/deleted/stale keyword status:
+   - RED: `1 failed, 21 deselected, 2 warnings in 10.76s`; never-existing rename and
+     delete both returned generic 400.
+   - GREEN: `1 passed, 21 deselected, 2 warnings in 10.65s`; missing/deleted are
+     stable 404, stale version is stable 409, and failed attempts append no product
+     mutation.
+
+Final Round 1 gates:
+
+```text
+pytest -q -p no:cacheprovider tldw_Server_API/tests/Notes/test_notes_organization_sync_api.py -k direct
+22 passed, 2 warnings in 20.54s
+
+pytest -q -p no:cacheprovider tldw_Server_API/tests/Notes/test_notes_api_integration.py -k "keyword or collection or folder"
+17 passed, 34 deselected, 3 warnings in 9.68s
+
+ruff check <coordinator, direct test>
+All checks passed!
+
+ruff check <legacy notes endpoint>
+Three unchanged baseline findings: I001, BLE001, F841. The same three findings
+are present in `git show HEAD:.../notes.py`; Round 1 adds none.
+
+bandit -q <two modified production files>
+exit 0; one informational unmatched-no-failed-test warning for the existing B608
+closed-table-map `nosec` resource query.
+
+git diff --check
+exit 0
+```
+
+The pytest warning identities remain the established Passlib `crypt` and FastAPI
+`on_event` deprecations described above. No warning affects assertions or exit
+status.
+
+### Round 1 self-review
+
+- Manifest lookup remains scoped to the authenticated user's active default
+  personal dataset; product-row lookup remains scoped to the per-user ChaCha DB.
+- Planners remain write-free. Relationship restore adds an owner-scoped Sync-head
+  read; all product and Sync mutations still occur only through capture/materialize.
+- Fingerprints are fixed-length digests. Neither the idempotency key nor raw
+  requested values are persisted in the added routing field.
+- Exact replay bypasses mutable projection preconditions only after the Task 4
+  manifest validates and every stored step matches the immutable request
+  fingerprint. Absent manifest, missing/deleted resources retain 404 and stale
+  versions retain 409.
+- Folder and collection failure tests prove stable mutation IDs, step shape,
+  durable prefix state, and resumability. Active paths have no direct-write fallback.
+- No new correctness, security, privacy, compatibility, or Task 9 boundary concern
+  remains after the Round 1 review.

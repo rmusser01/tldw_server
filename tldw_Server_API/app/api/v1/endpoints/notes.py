@@ -119,11 +119,14 @@ from tldw_Server_API.app.core.Personalization import (
     record_note_updated,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.models import SyncDomain
 from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationCoordinator,
     NotesOrganizationDomainsIncompleteError,
     NotesOrganizationNotReadyError,
     NotesOrganizationPreflightError,
+    NotesOrganizationResourceNotFoundError,
+    NotesOrganizationVersionConflictError,
     PlannedNotesMutation,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
@@ -239,6 +242,22 @@ def _ensure_note_exists_or_404(db: CharactersRAGDB, note_id: str) -> None:
 
 
 def _note_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, NotesOrganizationResourceNotFoundError):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": exc.error_code,
+                "message": "The Notes organization resource was not found.",
+            },
+        )
+    if isinstance(exc, NotesOrganizationVersionConflictError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": exc.error_code,
+                "message": "The Notes organization resource has changed; refresh and retry.",
+            },
+        )
     if isinstance(exc, NotesOrganizationDomainsIncompleteError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -405,6 +424,26 @@ def _require_notes_organization_ready(
 ) -> None:
     try:
         coordinator.require_ready()
+    except Exception as exc:  # noqa: BLE001 - all Sync failures receive a safe HTTP map.
+        raise _note_sync_http_error(exc) from exc
+
+
+def _replay_notes_organization_plan(
+    coordinator: NotesOrganizationCoordinator,
+    *,
+    idempotency_key: str | None,
+    request_fingerprint: str,
+    result_domain: SyncDomain | None,
+    relationship_result: bool = False,
+) -> PlannedNotesMutation | None:
+    try:
+        return coordinator.replay_request_plan(
+            source="notes-api",
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
+            result_domain=result_domain,
+            relationship_result=relationship_result,
+        )
     except Exception as exc:  # noqa: BLE001 - all Sync failures receive a safe HTTP map.
         raise _note_sync_http_error(exc) from exc
 
@@ -1278,6 +1317,14 @@ def _sync_collection_keywords(
 def handle_db_errors(e: Exception, entity_type: str = "resource"):
     if isinstance(e, HTTPException):  # If it's already an HTTPException, re-raise
         raise e
+    if isinstance(
+        e,
+        (
+            NotesOrganizationResourceNotFoundError,
+            NotesOrganizationVersionConflictError,
+        ),
+    ):
+        raise _note_sync_http_error(e)
 
     logger_func = logger.warning  # Default to warning for known DB operational errors
     http_status_code = status.HTTP_500_INTERNAL_SERVER_ERROR  # Default
@@ -1794,7 +1841,7 @@ async def create_note_folder(
         if coordinator is not None:
             _require_notes_organization_ready(coordinator)
         existing = await _run_db_call(db.get_note_folder_by_path, folder_in.path)
-        if existing is not None:
+        if coordinator is None and existing is not None:
             existing_response = NoteFolderResponse.model_validate(existing)
             return JSONResponse(
                 status_code=status.HTTP_200_OK,
@@ -1802,17 +1849,39 @@ async def create_note_folder(
             )
         if coordinator is not None:
             request_key = _organization_request_key(idempotency_key)
-            plan = coordinator.plan_folder_path(
-                folder_in.path,
-                idempotency_key=request_key,
+            normalized_path = coordinator.normalize_folder_path(folder_in.path)
+            request_fingerprint = coordinator.request_fingerprint(
+                "folder.create",
+                {"path": normalized_path},
             )
+            plan = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.folder",
+            )
+            replayed = plan is not None
+            if plan is None:
+                plan = coordinator.bind_request(
+                    coordinator.plan_folder_path(
+                        normalized_path,
+                        idempotency_key=request_key,
+                    ),
+                    request_fingerprint,
+                )
             folder = _capture_notes_organization_plan(
                 coordinator,
                 plan,
                 idempotency_key=request_key,
                 source="notes-api",
             )
-            return NoteFolderResponse.model_validate(folder)
+            folder_response = NoteFolderResponse.model_validate(folder)
+            if existing is not None and not replayed:
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content=jsonable_encoder(folder_response),
+                )
+            return folder_response
         try:
             folder = await _run_db_call(db.create_note_folder_path, folder_in.path)
         except ConflictError:
@@ -2697,10 +2766,6 @@ async def update_keyword_collection_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
 
-        current_collection = db.get_keyword_collection_by_id(collection_id=collection_id)
-        if not current_collection:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found")
-
         update_data: dict[str, Any] = {}
         if _field_supplied(collection_in, "name"):
             normalized_name = str(collection_in.name or "").strip()
@@ -2713,12 +2778,47 @@ async def update_keyword_collection_endpoint(
         keywords_supplied = _field_supplied(collection_in, "keywords")
         kw_list = collection_in.normalized_keywords if keywords_supplied else None
 
-        if not update_data and not keywords_supplied:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes provided.")
-
         coordinator = _active_notes_organization_coordinator(db, current_user)
         if coordinator is not None:
             request_key = _organization_request_key(idempotency_key)
+            request_fingerprint = coordinator.request_fingerprint(
+                "collection.update",
+                {
+                    "collection_id": collection_id,
+                    "expected_version": expected_version,
+                    "name_supplied": "name" in update_data,
+                    "name": update_data.get("name"),
+                    "parent_supplied": "parent_id" in update_data,
+                    "parent_id": update_data.get("parent_id"),
+                    "keywords_supplied": keywords_supplied,
+                    "keywords": kw_list,
+                },
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.keyword_collection",
+            )
+            if replay is not None:
+                updated_collection = _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                return _attach_collection_keywords_inline(
+                    db, dict(updated_collection)
+                )
+
+        if not update_data and not keywords_supplied:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes provided.")
+
+        current_collection = db.get_keyword_collection_by_id(collection_id=collection_id)
+        if not current_collection:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found")
+
+        if coordinator is not None:
             target_name = str(update_data.get("name", current_collection["name"]))
             target_parent = (
                 update_data["parent_id"]
@@ -2746,6 +2846,7 @@ async def update_keyword_collection_endpoint(
                     target_parent,
                     expected_version=version_to_use,
                 )
+            plan = coordinator.bind_request(plan, request_fingerprint)
             updated_collection = _capture_notes_organization_plan(
                 coordinator,
                 plan,
@@ -2812,6 +2913,31 @@ async def delete_keyword_collection_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
 
+        coordinator = _active_notes_organization_coordinator(db, current_user)
+        if coordinator is not None:
+            request_key = _organization_request_key(idempotency_key)
+            request_fingerprint = coordinator.request_fingerprint(
+                "collection.delete",
+                {
+                    "collection_id": collection_id,
+                    "expected_version": expected_version,
+                },
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain=None,
+            )
+            if replay is not None:
+                _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+
         current_collection = db.get_keyword_collection_by_id(collection_id=collection_id)
         if not current_collection:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found")
@@ -2821,14 +2947,13 @@ async def delete_keyword_collection_endpoint(
             if expected_version is not None
             else int(current_collection.get("version", 1))
         )
-        coordinator = _active_notes_organization_coordinator(db, current_user)
         if coordinator is not None:
-            request_key = _organization_request_key(idempotency_key)
             plan = coordinator.plan_resource_delete(
                 "notes.keyword_collection",
                 collection_id,
                 expected_version=version_to_use,
             )
+            plan = coordinator.bind_request(plan, request_fingerprint)
             _capture_notes_organization_plan(
                 coordinator,
                 plan,
@@ -5096,11 +5221,33 @@ async def rename_keyword(
         coordinator = _active_notes_organization_coordinator(db, current_user)
         if coordinator is not None:
             request_key = _organization_request_key(idempotency_key)
+            request_fingerprint = coordinator.request_fingerprint(
+                "keyword.rename",
+                {
+                    "keyword_id": keyword_id,
+                    "expected_version": expected_version,
+                    "keyword": str(keyword_in.keyword or "").strip(),
+                },
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.keyword",
+            )
+            if replay is not None:
+                return _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
             plan = coordinator.plan_keyword_rename(
                 keyword_id,
                 keyword_in.keyword,
                 expected_version=expected_version,
             )
+            plan = coordinator.bind_request(plan, request_fingerprint)
             return _capture_notes_organization_plan(
                 coordinator,
                 plan,
@@ -5200,11 +5347,33 @@ async def delete_keyword(
         coordinator = _active_notes_organization_coordinator(db, current_user)
         if coordinator is not None:
             request_key = _organization_request_key(idempotency_key)
+            request_fingerprint = coordinator.request_fingerprint(
+                "keyword.delete",
+                {
+                    "keyword_id": keyword_id,
+                    "expected_version": expected_version,
+                },
+            )
+            replay = _replay_notes_organization_plan(
+                coordinator,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain=None,
+            )
+            if replay is not None:
+                _capture_notes_organization_plan(
+                    coordinator,
+                    replay,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
             plan = coordinator.plan_resource_delete(
                 "notes.keyword",
                 keyword_id,
                 expected_version=expected_version,
             )
+            plan = coordinator.bind_request(plan, request_fingerprint)
             _capture_notes_organization_plan(
                 coordinator,
                 plan,

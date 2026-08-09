@@ -54,6 +54,28 @@ class _FailingOrganizationMaterializer:
         raise RuntimeError("secret backend value")
 
 
+class _FailingFolderChildMaterializer:
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+
+    def apply(self, envelope, *, store):
+        if envelope.payload.get("name") == "Child":
+            raise RuntimeError("secret child materialization value")
+        return self.delegate.apply(envelope, store=store)
+
+
+class _FailingSecondRelationshipMaterializer:
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+        self.applies = 0
+
+    def apply(self, envelope, *, store):
+        self.applies += 1
+        if self.applies == 2:
+            raise RuntimeError("secret second relationship value")
+        return self.delegate.apply(envelope, store=store)
+
+
 def _assert_canonical_group_lineage(envelopes) -> None:
     assert envelopes
     groups: dict[str, list] = {}
@@ -620,6 +642,123 @@ def test_direct_mid_group_materialization_failure_is_durable_blocked_and_resumab
     _assert_canonical_group_lineage(resumed_group)
 
 
+def test_direct_folder_retry_reuses_full_manifest_after_applied_ancestor(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    original = sync_service.materializers["notes.folder"]
+    sync_service.materializers["notes.folder"] = _FailingFolderChildMaterializer(
+        original
+    )
+    headers = {"Idempotency-Key": "folder-prefix-resume"}
+    body = {"path": "Root/Child"}
+
+    failed = client.post("/api/v1/notes/folders", headers=headers, json=body)
+
+    assert failed.status_code == 503
+    assert failed.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_materialization_failed"
+    )
+    assert chacha_db.get_note_folder_by_path("Root") is not None
+    assert chacha_db.get_note_folder_by_path("Root/Child") is None
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+    group = [
+        item
+        for item in sync_service.store.list_envelopes_after(
+            dataset_id, 0, domains=["notes.folder"], limit=20
+        )
+        if item.routing_metadata.get("source") == "notes-api"
+    ]
+    assert [item.payload["name"] for item in group] == ["Root", "Child"]
+    assert [item.apply_status for item in group] == ["applied", "failed"]
+
+    original_ids = [item.object_id for item in group]
+    sync_service.materializers["notes.folder"] = original
+    resumed = client.post("/api/v1/notes/folders", headers=headers, json=body)
+
+    assert resumed.status_code == 201, resumed.text
+    assert resumed.json()["path"] == "Root/Child"
+    resumed_group = sync_service.store.list_mutation_group(
+        dataset_id, group[0].mutation_group_id or ""
+    )
+    assert [item.object_id for item in resumed_group] == original_ids
+    _assert_canonical_group_lineage(resumed_group)
+
+    existing_headers = {"Idempotency-Key": "folder-existing-request"}
+    existing = client.post(
+        "/api/v1/notes/folders", headers=existing_headers, json=body
+    )
+    drift = client.post(
+        "/api/v1/notes/folders",
+        headers=existing_headers,
+        json={"path": "Root/Other"},
+    )
+    assert existing.status_code == 200, existing.text
+    assert drift.status_code == 409
+    assert drift.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_idempotency_conflict"
+    )
+
+
+def test_direct_collection_retry_reuses_manifest_after_applied_link(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    collection = client.post(
+        "/api/v1/notes/collections",
+        headers={"Idempotency-Key": "collection-link-base"},
+        json={"name": "Linked collection"},
+    ).json()
+    domain = "notes.keyword_collection_link"
+    original = sync_service.materializers[domain]
+    sync_service.materializers[domain] = _FailingSecondRelationshipMaterializer(
+        original
+    )
+    headers = {"Idempotency-Key": "collection-link-resume"}
+    headers["expected-version"] = str(collection["version"])
+    body = {"keywords": ["Alpha", "Beta"]}
+
+    failed = client.patch(
+        f"/api/v1/notes/collections/{collection['id']}",
+        headers=headers,
+        json=body,
+    )
+
+    assert failed.status_code == 503
+    assert failed.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_materialization_failed"
+    )
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+    envelopes = sync_service.store.list_envelopes_after(
+        dataset_id, 0, domains=list(NOTES_ORGANIZATION_DOMAINS), limit=20
+    )
+    failed_envelope = next(item for item in envelopes if item.apply_status == "failed")
+    group = sync_service.store.list_mutation_group(
+        dataset_id, failed_envelope.mutation_group_id or ""
+    )
+    assert [item.apply_status for item in group][-2:] == ["applied", "failed"]
+    original_shape = [
+        (item.domain, item.operation, item.object_id) for item in group
+    ]
+
+    sync_service.materializers[domain] = original
+    resumed = client.patch(
+        f"/api/v1/notes/collections/{collection['id']}",
+        headers=headers,
+        json=body,
+    )
+
+    assert resumed.status_code == 200, resumed.text
+    resumed_group = sync_service.store.list_mutation_group(
+        dataset_id, group[0].mutation_group_id or ""
+    )
+    assert [
+        (item.domain, item.operation, item.object_id) for item in resumed_group
+    ] == original_shape
+    _assert_canonical_group_lineage(resumed_group)
+
+
 def test_direct_active_sync_keyword_merge_remains_fail_closed(
     client: TestClient,
     chacha_db: CharactersRAGDB,
@@ -764,3 +903,289 @@ def test_direct_coordinator_covers_non_exposed_folder_and_folder_link_planners(
         idempotency_key="coordinator-folder-delete",
     )
     assert chacha_db.get_note_folder_by_path("Moved") is None
+
+
+def test_direct_relationship_relink_restores_current_tombstones(
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    coordinator = NotesOrganizationCoordinator(
+        service=sync_service,
+        note_db=chacha_db,
+        user_id="user-1",
+    )
+    note_id = "69721de7-7165-4088-b57a-0cb1a8c69a8d"
+    conversation_id = "relationship-restore-conversation"
+    keyword_id = "2d89ab39-23db-43d5-9f5e-a6be38edb474"
+    collection_id = "1aa34562-962b-4c3c-b14c-d5cecc44fbd9"
+    folder_id = "87327cd9-1a35-4270-a60c-d32c7dc9f568"
+    setup = [
+        ("notes.note", note_id, {"title": "Restore note", "content": "Body"}),
+        (
+            "chat.conversation",
+            conversation_id,
+            {
+                "title": "Restore conversation",
+                "assistant_kind": "persona",
+                "assistant_id": "assistant-1",
+                "scope_type": "global",
+            },
+        ),
+        ("notes.keyword", keyword_id, {"keyword": "Restore keyword"}),
+        (
+            "notes.keyword_collection",
+            collection_id,
+            {"name": "Restore collection", "parent_sync_id": None},
+        ),
+        (
+            "notes.folder",
+            folder_id,
+            {"name": "Restore folder", "parent_sync_id": None},
+        ),
+    ]
+    for domain, object_id, payload in setup:
+        capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain=domain,
+            operation="upsert",
+            object_id=object_id,
+            payload=payload,
+            source="relationship-restore-setup",
+        )
+    relationships = [
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": note_id,
+                "keyword_sync_id": keyword_id,
+            },
+        ),
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "conversation",
+                "subject_id": conversation_id,
+                "keyword_sync_id": keyword_id,
+            },
+        ),
+        (
+            "notes.keyword_collection_link",
+            {
+                "collection_sync_id": collection_id,
+                "keyword_sync_id": keyword_id,
+            },
+        ),
+        (
+            "notes.folder_link",
+            {"note_id": note_id, "folder_sync_id": folder_id},
+        ),
+    ]
+
+    for index, (domain, members) in enumerate(relationships):
+        linked = coordinator.plan_relationship(domain, members, True)
+        coordinator.capture(
+            steps=linked.steps,
+            source="relationship-restore-test",
+            idempotency_key=f"relationship-link-{index}",
+        )
+        unlinked = coordinator.plan_relationship(domain, members, False)
+        coordinator.capture(
+            steps=unlinked.steps,
+            source="relationship-restore-test",
+            idempotency_key=f"relationship-unlink-{index}",
+        )
+
+        relinked = coordinator.plan_relationship(domain, members, True)
+
+        assert relinked.steps[0].routing_metadata == {"restore_intent": True}
+        coordinator.capture(
+            steps=relinked.steps,
+            source="relationship-restore-test",
+            idempotency_key=f"relationship-relink-{index}",
+        )
+        assert relinked.load_result() is True
+
+
+def test_direct_update_and_delete_exact_requests_replay_before_mutable_preconditions(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    keyword = client.post(
+        "/api/v1/notes/keywords/",
+        headers={"Idempotency-Key": "round1-keyword-create"},
+        json={"keyword": "Before replay"},
+    ).json()
+    rename_headers = {
+        "expected-version": str(keyword["version"]),
+        "Idempotency-Key": "round1-keyword-rename",
+    }
+    renamed = client.patch(
+        f"/api/v1/notes/keywords/{keyword['id']}",
+        headers=rename_headers,
+        json={"keyword": "After replay"},
+    )
+    rename_replay = client.patch(
+        f"/api/v1/notes/keywords/{keyword['id']}",
+        headers=rename_headers,
+        json={"keyword": "After replay"},
+    )
+    rename_drift = client.patch(
+        f"/api/v1/notes/keywords/{keyword['id']}",
+        headers=rename_headers,
+        json={"keyword": "Changed request"},
+    )
+
+    assert renamed.status_code == 200, renamed.text
+    assert rename_replay.status_code == 200, rename_replay.text
+    assert rename_replay.json() == renamed.json()
+    assert rename_drift.status_code == 409
+    assert rename_drift.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_idempotency_conflict"
+    )
+
+    delete_headers = {
+        "expected-version": str(renamed.json()["version"]),
+        "Idempotency-Key": "round1-keyword-delete",
+    }
+    deleted = client.delete(
+        f"/api/v1/notes/keywords/{keyword['id']}", headers=delete_headers
+    )
+    delete_replay = client.delete(
+        f"/api/v1/notes/keywords/{keyword['id']}", headers=delete_headers
+    )
+    delete_drift = client.delete(
+        f"/api/v1/notes/keywords/{keyword['id']}",
+        headers={
+            "expected-version": str(renamed.json()["version"] + 1),
+            "Idempotency-Key": "round1-keyword-delete",
+        },
+    )
+
+    assert deleted.status_code == delete_replay.status_code == 204
+    assert delete_drift.status_code == 409
+    assert delete_drift.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_idempotency_conflict"
+    )
+    assert chacha_db.get_keyword_by_id(keyword["id"]) is None
+
+    parent = client.post(
+        "/api/v1/notes/collections",
+        headers={"Idempotency-Key": "round1-parent-create"},
+        json={"name": "Replay parent"},
+    ).json()
+    child = client.post(
+        "/api/v1/notes/collections",
+        headers={"Idempotency-Key": "round1-child-create"},
+        json={"name": "Replay child"},
+    ).json()
+    collection_headers = {
+        "expected-version": str(child["version"]),
+        "Idempotency-Key": "round1-collection-update",
+    }
+    collection_body = {"name": "Replay child moved", "parent_id": parent["id"]}
+    updated = client.patch(
+        f"/api/v1/notes/collections/{child['id']}",
+        headers=collection_headers,
+        json=collection_body,
+    )
+    update_replay = client.patch(
+        f"/api/v1/notes/collections/{child['id']}",
+        headers=collection_headers,
+        json=collection_body,
+    )
+    update_drift = client.patch(
+        f"/api/v1/notes/collections/{child['id']}",
+        headers=collection_headers,
+        json={"name": "Different child", "parent_id": parent["id"]},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert update_replay.status_code == 200, update_replay.text
+    assert update_replay.json() == updated.json()
+    assert update_drift.status_code == 409
+    assert update_drift.json()["detail"]["error_code"] == (
+        "sync_server_origin_batch_idempotency_conflict"
+    )
+
+    collection_delete_headers = {
+        "expected-version": str(updated.json()["version"]),
+        "Idempotency-Key": "round1-collection-delete",
+    }
+    collection_deleted = client.delete(
+        f"/api/v1/notes/collections/{child['id']}",
+        headers=collection_delete_headers,
+    )
+    collection_delete_replay = client.delete(
+        f"/api/v1/notes/collections/{child['id']}",
+        headers=collection_delete_headers,
+    )
+
+    assert collection_deleted.status_code == collection_delete_replay.status_code == 204
+    assert chacha_db.get_keyword_collection_by_id(child["id"]) is None
+
+
+def test_direct_missing_deleted_and_stale_keywords_keep_stable_route_statuses(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    missing_rename = client.patch(
+        "/api/v1/notes/keywords/999999",
+        headers={"expected-version": "1"},
+        json={"keyword": "Missing"},
+    )
+    missing_delete = client.delete(
+        "/api/v1/notes/keywords/999999",
+        headers={"expected-version": "1"},
+    )
+
+    assert missing_rename.status_code == missing_delete.status_code == 404
+    assert missing_rename.json()["detail"]["error_code"] == (
+        "notes_organization_resource_not_found"
+    )
+    assert missing_delete.json()["detail"]["error_code"] == (
+        "notes_organization_resource_not_found"
+    )
+
+    keyword = client.post(
+        "/api/v1/notes/keywords/",
+        headers={"Idempotency-Key": "status-keyword-create"},
+        json={"keyword": "Status keyword"},
+    ).json()
+    stale = client.patch(
+        f"/api/v1/notes/keywords/{keyword['id']}",
+        headers={"expected-version": str(keyword["version"] + 1)},
+        json={"keyword": "Stale rename"},
+    )
+    deleted = client.delete(
+        f"/api/v1/notes/keywords/{keyword['id']}",
+        headers={"expected-version": str(keyword["version"])},
+    )
+    deleted_again = client.delete(
+        f"/api/v1/notes/keywords/{keyword['id']}",
+        headers={"expected-version": str(keyword["version"])},
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["error_code"] == (
+        "notes_organization_version_conflict"
+    )
+    assert deleted.status_code == 204
+    assert deleted_again.status_code == 404
+    assert deleted_again.json()["detail"]["error_code"] == (
+        "notes_organization_resource_not_found"
+    )
+
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+    direct = [
+        item
+        for item in sync_service.store.list_envelopes_after(
+            dataset_id, 0, domains=["notes.keyword"], limit=20
+        )
+        if item.routing_metadata.get("source") == "notes-api"
+    ]
+    assert [(item.operation, item.payload) for item in direct] == [
+        ("upsert", {"keyword": "Status keyword"}),
+        ("tombstone", {}),
+    ]
