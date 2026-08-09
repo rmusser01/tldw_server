@@ -3,25 +3,21 @@ id: TASK-12993
 title: Implement Claims Jobs Stage 2A analytics exports
 status: In Progress
 assignee: []
-created_date: '2026-08-08 21:36'
-updated_date: '2026-08-09 01:33'
+created_date: 2026-08-08 21:36
+updated_date: 2026-08-09 02:46
 labels:
-  - claims
-  - jobs
-  - implementation
+- claims
+- jobs
+- implementation
 dependencies: []
 references:
-  - TASK-12989
-  - TASK-12990
-  - >-
-    Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
-  - >-
-    Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
+- TASK-12989
+- TASK-12990
+- Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
+- Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
-  - >-
-    Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
+- Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
+- Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
 priority: high
 ---
 
@@ -78,3 +74,9 @@ Task 4 complete at aecf18e29d: canonical request normalization, fixed snapshot s
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 5 complete at 8d94ca2cd6 with review fixes 7127cc38d9, 60ec088543, and 74ebc0d8a8: retry-safe artifact creation/processing, ready-monotonic race recovery, real JobManager row compatibility, one-call status hydration, exact owner-scoped reconciliation, conservative lifecycle-aware cleanup, SQL-filtered maintenance candidates, and rotating bounded failed-artifact scans. Independent verification: 226 focused tests passed; Ruff, compile, diff checks, and Bandit (zero findings) passed; specification and quality reviews approved.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
