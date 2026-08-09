@@ -2046,7 +2046,12 @@ def _write_and_report(recorder: RcEvidenceRecorder) -> int:
     logger.info("Wrote RC evidence JSON: {}", json_path)
     logger.info("Wrote RC evidence Markdown: {}", markdown_path)
     if recorder.has_required_failures():
-        logger.error("RC status: failed")
+        failed_checks = ", ".join(
+            f"{result['phase']}/{result['name']}"
+            for result in recorder.results
+            if result.get("required", True) and result["status"] == "failed"
+        )
+        logger.error("RC status: failed ({})", failed_checks)
         return 1
     logger.info("RC status: ok")
     return 0

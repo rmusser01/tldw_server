@@ -147,3 +147,11 @@ jobs:
 
       - name: Run installed protocol and portable stdio contracts
         run: python Helper_Scripts/mcp_unified_rc.py portable-gate
+
+      - name: Upload portable RC evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-unified-portable-${{ matrix.os }}-py${{ matrix.python }}
+          path: .artifacts/mcp-unified-rc/**
+          if-no-files-found: error
