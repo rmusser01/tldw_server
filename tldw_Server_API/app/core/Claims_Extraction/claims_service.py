@@ -3390,6 +3390,22 @@ def _claims_export_http_exception(error: claims_analytics_exports.ClaimsAnalytic
     )
 
 
+def _claims_export_storage_http_exception(*, operation: str, error: Exception) -> HTTPException:
+    logger.warning(
+        "Claims export storage unavailable: operation={} error_code={} error_type={}",
+        operation,
+        "claims_export_storage_unavailable",
+        type(error).__name__,
+    )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "claims_export_storage_unavailable",
+            "message": "Claims analytics export storage is temporarily unavailable.",
+        },
+    )
+
+
 def _claims_export_owner_error() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -3589,6 +3605,11 @@ def export_claims_analytics(
                 )
             except claims_analytics_exports.ClaimsAnalyticsExportError as exc:
                 raise _claims_export_http_exception(exc) from exc
+            except Exception as exc:  # noqa: BLE001 - storage failures need a safe API boundary.
+                raise _claims_export_storage_http_exception(
+                    operation="create_ready_artifact",
+                    error=exc,
+                ) from exc
             return (
                 _claims_export_response(
                     row=row,
@@ -3606,6 +3627,11 @@ def export_claims_analytics(
             )
         except claims_analytics_exports.ClaimsAnalyticsExportError as exc:
             raise _claims_export_http_exception(exc) from exc
+        except Exception as exc:  # noqa: BLE001 - storage failures need a safe API boundary.
+            raise _claims_export_storage_http_exception(
+                operation="create_queued_artifact",
+                error=exc,
+            ) from exc
 
         export_id = str(row["export_id"])
         try:
@@ -3616,14 +3642,6 @@ def export_claims_analytics(
             if job_manager is not None:
                 enqueue_kwargs["job_manager"] = job_manager
             accepted = claims_jobs.enqueue_claims_analytics_export(**enqueue_kwargs)
-            if not isinstance(accepted, dict):
-                raise ValueError("Jobs acceptance must be an object")
-            job_id = accepted.get("id")
-            if type(job_id) is not int or job_id <= 0:
-                raise ValueError("Jobs acceptance must include a positive integer ID")
-            accepted_status = accepted.get("status")
-            if not isinstance(accepted_status, str) or not accepted_status.strip():
-                raise ValueError("Jobs acceptance must include a non-empty status")
         except Exception as exc:  # noqa: BLE001 - cross-store enqueue failures need compensation.
             _mark_claims_export_enqueue_failed(
                 db=target_db,
@@ -3646,28 +3664,48 @@ def export_claims_analytics(
                 },
             ) from exc
 
-        try:
-            attached = target_db.attach_claims_analytics_export_job(
-                export_id=export_id,
-                user_id=owner_user_id,
-                job_id=job_id,
+        job_id: int | None = None
+        job_status: str | None = None
+        if isinstance(accepted, dict):
+            accepted_job_id = accepted.get("id")
+            if type(accepted_job_id) is int and accepted_job_id > 0:
+                job_id = accepted_job_id
+            accepted_status = accepted.get("status")
+            if isinstance(accepted_status, str) and accepted_status.strip():
+                job_status = accepted_status
+        if job_id is None or job_status is None:
+            logger.warning(
+                "Claims export Jobs acceptance projection incomplete: operation={} export_id={} "
+                "has_job_id={} has_job_status={}",
+                "project_jobs_acceptance",
+                export_id,
+                job_id is not None,
+                job_status is not None,
             )
-            if not attached:
+
+        if job_id is not None:
+            try:
+                attached = target_db.attach_claims_analytics_export_job(
+                    export_id=export_id,
+                    user_id=owner_user_id,
+                    job_id=job_id,
+                )
+                if not attached:
+                    logger.warning(
+                        "Claims export Job attachment deferred: operation={} export_id={} job_id={} error_type={}",
+                        "attach_claims_analytics_export_job",
+                        export_id,
+                        job_id,
+                        "AttachRejected",
+                    )
+            except Exception as exc:  # noqa: BLE001 - accepted Jobs are repaired asynchronously.
                 logger.warning(
                     "Claims export Job attachment deferred: operation={} export_id={} job_id={} error_type={}",
                     "attach_claims_analytics_export_job",
                     export_id,
                     job_id,
-                    "AttachRejected",
+                    type(exc).__name__,
                 )
-        except Exception as exc:  # noqa: BLE001 - accepted Jobs are repaired asynchronously.
-            logger.warning(
-                "Claims export Job attachment deferred: operation={} export_id={} job_id={} error_type={}",
-                "attach_claims_analytics_export_job",
-                export_id,
-                job_id,
-                type(exc).__name__,
-            )
 
         return (
             _claims_export_response(
@@ -3675,7 +3713,7 @@ def export_claims_analytics(
                 normalized=normalized,
                 workspace_id=workspace_id,
                 accepted_job_id=job_id,
-                job_status=accepted_status,
+                job_status=job_status,
             ),
             status.HTTP_202_ACCEPTED,
         )

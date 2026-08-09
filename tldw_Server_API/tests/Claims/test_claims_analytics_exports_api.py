@@ -348,7 +348,7 @@ def test_enqueue_failure_marks_artifact_failed_and_returns_503(monkeypatch: pyte
 
 
 @pytest.mark.parametrize("job_id", [None, 0, -1, True, "81"])
-def test_malformed_jobs_acceptance_is_compensated(
+def test_malformed_jobs_acceptance_id_remains_accepted_for_reconciliation(
     monkeypatch: pytest.MonkeyPatch,
     job_id: object,
 ) -> None:
@@ -365,16 +365,18 @@ def test_malformed_jobs_acceptance_is_compensated(
         lambda **_kwargs: {"id": job_id, "status": "queued"},
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        claims_service.export_claims_analytics(
-            payload={"format": "json"},
-            principal=_principal(),
-            current_user=_user(),
-            db=db,
-        )
+    body, response_status = claims_service.export_claims_analytics(
+        payload={"format": "json"},
+        principal=_principal(),
+        current_user=_user(),
+        db=db,
+    )
 
-    assert exc_info.value.status_code == 503
-    assert db.transition_calls[0]["error_code"] == "claims_export_enqueue_failed"
+    assert response_status == 202
+    assert body["job_id"] is None
+    assert body["job_status"] == "queued"
+    assert db.attach_calls == []
+    assert db.transition_calls == []
 
 
 @pytest.mark.parametrize(
@@ -387,7 +389,7 @@ def test_malformed_jobs_acceptance_is_compensated(
         {"id": 81, "status": 1},
     ],
 )
-def test_malformed_jobs_acceptance_status_is_compensated(
+def test_malformed_jobs_acceptance_status_remains_accepted_with_null_projection(
     monkeypatch: pytest.MonkeyPatch,
     accepted: dict[str, Any],
 ) -> None:
@@ -404,16 +406,50 @@ def test_malformed_jobs_acceptance_status_is_compensated(
         lambda **_kwargs: accepted,
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        claims_service.export_claims_analytics(
-            payload={"format": "json"},
-            principal=_principal(),
-            current_user=_user(),
-            db=db,
-        )
+    body, response_status = claims_service.export_claims_analytics(
+        payload={"format": "json"},
+        principal=_principal(),
+        current_user=_user(),
+        db=db,
+    )
 
-    assert exc_info.value.status_code == 503
-    assert db.transition_calls[0]["error_code"] == "claims_export_enqueue_failed"
+    assert response_status == 202
+    assert body["job_id"] == 81
+    assert body["job_status"] is None
+    assert db.attach_calls == [{"export_id": _EXPORT_ID, "user_id": "1", "job_id": 81}]
+    assert db.transition_calls == []
+
+
+@pytest.mark.parametrize("accepted", [None, [], "accepted", 81])
+def test_non_mapping_jobs_acceptance_remains_accepted_for_reconciliation(
+    monkeypatch: pytest.MonkeyPatch,
+    accepted: object,
+) -> None:
+    db = _FakeDb()
+    _patch_common(monkeypatch, enabled=True)
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "create_queued_artifact",
+        lambda *_args, **_kwargs: _row("1", status="queued"),
+    )
+    monkeypatch.setattr(
+        claims_jobs,
+        "enqueue_claims_analytics_export",
+        lambda **_kwargs: accepted,
+    )
+
+    body, response_status = claims_service.export_claims_analytics(
+        payload={"format": "json"},
+        principal=_principal(),
+        current_user=_user(),
+        db=db,
+    )
+
+    assert response_status == 202
+    assert body["job_id"] is None
+    assert body["job_status"] is None
+    assert db.attach_calls == []
+    assert db.transition_calls == []
 
 
 def test_attach_failure_after_jobs_acceptance_still_returns_202(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -518,6 +554,82 @@ def test_platform_admin_cross_owner_postgres_retains_shared_database(monkeypatch
     assert response_status == 200
     assert ready_calls == [(shared_db, "2")]
     assert body["download_url"].endswith("?workspace_id=2")
+
+
+def test_platform_admin_async_cross_owner_postgres_keeps_owner_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared_db = _FakeDb(BackendType.POSTGRESQL)
+    _patch_common(monkeypatch, enabled=True, expected_owner="2")
+    queued_calls: list[tuple[object, str]] = []
+    enqueue_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "create_queued_artifact",
+        lambda actual_db, *, owner_user_id, normalized: (
+            queued_calls.append((actual_db, owner_user_id)) or _row("2", status="queued")
+        ),
+    )
+    monkeypatch.setattr(
+        claims_jobs,
+        "enqueue_claims_analytics_export",
+        lambda **kwargs: enqueue_calls.append(kwargs) or {"id": 81, "status": "queued"},
+    )
+
+    body, response_status = claims_service.export_claims_analytics(
+        payload={"format": "json", "filters": {"workspace_id": "2"}},
+        principal=_principal(platform_admin=True),
+        current_user=_user(1),
+        db=shared_db,
+    )
+
+    assert response_status == 202
+    assert queued_calls == [(shared_db, "2")]
+    assert enqueue_calls[0]["owner_user_id"] == "2"
+    assert shared_db.attach_calls == [{"export_id": _EXPORT_ID, "user_id": "2", "job_id": 81}]
+    assert body["download_url"].endswith("?workspace_id=2")
+
+
+@pytest.mark.parametrize(
+    ("enabled", "operation"),
+    [(False, "create_ready_artifact"), (True, "create_queued_artifact")],
+)
+def test_artifact_storage_failures_return_sanitized_503(
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    operation: str,
+) -> None:
+    db = _FakeDb()
+    _patch_common(monkeypatch, enabled=enabled)
+    secret = "sqlite:///private/owner/media.db"
+    warning_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    def _fail_storage(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(claims_analytics_exports, operation, _fail_storage)
+    monkeypatch.setattr(
+        claims_service.logger,
+        "warning",
+        lambda message, *args: warning_calls.append((message, args)),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.export_claims_analytics(
+            payload={"format": "json"},
+            principal=_principal(),
+            current_user=_user(),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == {
+        "code": "claims_export_storage_unavailable",
+        "message": "Claims analytics export storage is temporarily unavailable.",
+    }
+    assert secret not in repr(exc_info.value.detail)
+    assert warning_calls
+    assert secret not in repr(warning_calls)
 
 
 def test_sync_oversize_maps_safe_413(monkeypatch: pytest.MonkeyPatch) -> None:
