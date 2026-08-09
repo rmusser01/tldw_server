@@ -6,7 +6,7 @@
 
 **Architecture:** Add a strict protocol stack beside the existing `GatewayStdioServer`: immutable revision profiles and public contracts feed bounded schema validation, descriptor/result projection, and cursor pagination; `GatewayProtocolConnection` owns lifecycle, in-flight work, rate limits, cancellation, and serialized output; `GatewayProtocolStdioServer` owns binary stream framing and shutdown. Existing `GatewayRuntime`, `GatewayStdioServer`, `handle_stdio_line`, FastAPI, and WebSocket paths remain on their current dispatch implementation.
 
-**Tech Stack:** Python 3.10-3.13, asyncio, multiprocessing `spawn`, Pydantic, `jsonschema>=4.23,<5`, pytest/pytest-asyncio, Bandit, setuptools/build/twine.
+**Tech Stack:** Python 3.10-3.13, asyncio, multiprocessing `spawn`, fixed-argument Windows subprocess workers, Pydantic, `jsonschema>=4.23,<5`, pytest/pytest-asyncio, Bandit, setuptools/build/twine.
 
 ## Global Constraints
 
@@ -289,7 +289,7 @@
 
   Parent-side preflight serializes with `allow_nan=False`, walks JSON iteratively, counts schema nodes/refs/pattern characters, and rejects network/unresolved external references before spawn. A module-level worker entrypoint constructs `Draft202012Validator`, returns only a bounded success/error tuple through a one-way pipe, and performs no network resolution.
 
-  The concrete manager stores `asyncio.Semaphore(limits.max_schema_validation_processes)` and a set of live `multiprocessing.Process` objects. Its `validate(schema, instance)` method performs preflight, acquires the semaphore, spawns exactly one worker, reads a bounded verdict under `schema_validation_timeout_seconds`, and calls one shared cleanup path. That cleanup terminates then kills when needed, joins the child, removes it from the live set, and only then releases the semaphore. `close()` rejects new work and applies the same cleanup to every live child. No executor thread may outlive `close()`.
+  The concrete manager stores `asyncio.Semaphore(limits.max_schema_validation_processes)` and exact live-child accounting. Its `validate(schema, instance)` method performs preflight, acquires the semaphore, spawns exactly one worker, reads a bounded verdict under `schema_validation_timeout_seconds`, and calls one shared cleanup path. POSIX uses a live `multiprocessing.Process` plus one-way pipe. Native Windows uses a fixed-argument `sys.executable -m mcp_unified._schema_worker` subprocess plus an exact-length owner-only temporary payload because the protected nested official-SDK stdio launch proved multiprocessing reconstruction unreliable there. That cleanup terminates then kills when needed, reaps the child, removes the private payload, removes it from the live set, and only then releases the semaphore. `close()` rejects new work and applies the same cleanup to every live child. No executor thread may outlive `close()`.
 
   ```python
   SchemaWorkerVerdict: TypeAlias = tuple[Literal["ok", "invalid", "internal"], str]

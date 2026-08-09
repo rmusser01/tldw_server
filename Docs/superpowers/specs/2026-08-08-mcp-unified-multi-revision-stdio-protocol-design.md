@@ -369,10 +369,16 @@ defaults:
 | `max_schema_refs` | `int` | `256` | `1..4_096` |
 | `max_schema_pattern_chars` | `int` | `4_096` | `1..65_536` |
 | `max_schema_validation_processes` | `int` | `4` | `1..32` |
-| `schema_validation_timeout_seconds` | `float` | `1.0` | finite and `(0, 10]` |
+| `schema_validation_timeout_seconds` | `float` | `5.0` | finite and `(0, 10]` |
 | `graceful_shutdown_timeout_seconds` | `float` | `5.0` | finite and `(0, 60]` |
 
 Integer fields reject booleans and values outside their accepted ranges.
+The validation timeout default was raised from `1.0` to `5.0` in `0.2.1`
+during protected Windows SDK diagnosis after clean child startup exceeded one
+second. The later root cause was nested multiprocessing reconstruction, now
+avoided by the Windows worker transport, but the five-second default remains a
+conservative cross-platform cold-start bound; the `10.0` second upper bound is
+unchanged.
 Cross-field relationships in the table are validated. Construction fails
 before serving; values are never silently clamped. `max_json_depth` applies to
 decoded requests, runtime results, and metadata; `max_schema_depth` separately
@@ -594,6 +600,19 @@ Queue admission remains bounded by the process limit and request cancellation;
 cancelled requests discard the verdict and reap their worker. Shutdown rejects
 new validation work, terminates any live validation children with the same
 bounded terminate/kill escalation, reaps them, and then releases their permits.
+
+The worker transport is platform-specific without changing those guarantees.
+POSIX uses `multiprocessing` with the `spawn` context and a one-way pipe.
+Native Windows uses `sys.executable -m mcp_unified._schema_worker` with fixed
+arguments and no shell because the protected official-SDK stdio gate proved
+that a nested multiprocessing child could not reconstruct reliably inside the
+already spawned server. The Windows parent writes only the preflighted schema
+and optional instance to an exact-length owner-only temporary binary payload,
+passes only its generated path and the allowlisted dialect, ignores child
+stderr, bounds stdout to the verdict ceiling, and removes the payload during
+the same terminate/kill/reap cleanup. No payload or path enters diagnostics.
+Explicit process-context/worker injections retain the multiprocessing backend
+for deterministic lifecycle tests on every platform.
 
 Dialect support does not loosen MCP descriptor shapes. Every tool
 `inputSchema` is a valid object schema with an object root. A `2026-07-28`

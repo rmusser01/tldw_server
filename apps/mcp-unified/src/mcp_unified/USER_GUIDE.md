@@ -5,9 +5,9 @@ Unified standalone gateway boundary. It focuses on profiles, external servers,
 credential grants, configuration snapshots, and remote runtime commands.
 
 The package status is `public-alpha`, and its publishing status is `published`.
-Version `0.2.0` remains a release candidate until the protected PyPI publish
-succeeds. The package is published on PyPI; the former internal/experimental
-phase applies only to earlier
+Released versions are published on PyPI; repository versions remain release
+candidates until their protected publish succeeds. The former
+internal/experimental phase applies only to earlier
 releases. The package CLI does not launch a supported end-user gateway server;
 remote runtime commands require an already running package-local gateway
 mounted by a host application.
@@ -15,9 +15,8 @@ mounted by a host application.
 ## Publishing Readiness
 
 The standalone package has publishing status `published` and package status
-`public-alpha`. New users can install the released package from PyPI;
-developers testing the `0.2.0` release candidate before its protected publish
-should install from the repository.
+`public-alpha`. New users can install released versions from PyPI; developers
+testing an unpublished repository version should install from the repository.
 
 Run the full internal release candidate gate from the repository root:
 
@@ -58,7 +57,7 @@ python -m pip install "mcp-unified[gateway]"
 Downstream applications should use a compatible-minor pin:
 
 ```bash
-python -m pip install "mcp-unified[gateway]~=0.2.0"
+python -m pip install "mcp-unified[gateway]~=0.2.1"
 ```
 
 From the repository root, when testing unpublished changes:
@@ -150,8 +149,17 @@ The exact `GatewayLimits` defaults are:
 | `request_burst` | 32 | `max_schema_bytes` | 262,144 |
 | `max_schema_depth` | 32 | `max_schema_subschemas` | 1,024 |
 | `max_schema_refs` | 256 | `max_schema_pattern_chars` | 4,096 |
-| `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 1.0 |
+| `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 5.0 |
 | `graceful_shutdown_timeout_seconds` | 5.0 | | |
+
+Schema compilation and instance validation run in disposable bounded child
+processes. On native Windows, the preflighted schema and complete validation
+instance are briefly stored in an owner-only file in the operating-system
+temporary directory so the nested stdio server can launch the child reliably.
+The file is never logged, is removed during the same bounded child cleanup,
+and is not retained after success, failure, timeout, cancellation, or shutdown.
+Applications handling data that must never touch temporary storage should
+account for this Windows behavior before enabling strict tool calls.
 
 The modern profile emits private, zero-TTL cache hints:
 `{"ttlMs": 0, "cacheScope": "private"}`. Legacy profiles omit those modern

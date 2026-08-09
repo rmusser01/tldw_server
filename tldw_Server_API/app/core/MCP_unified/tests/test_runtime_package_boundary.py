@@ -728,7 +728,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     pyproject = _load_standalone_pyproject()
     project = pyproject["project"]
 
-    assert pyproject["build-system"]["requires"] == ["setuptools>=61.0"]
+    assert pyproject["build-system"]["requires"] == ["setuptools>=79.0.1"]
     assert project["name"] == metadata.PACKAGE_NAME
     assert project["version"] == mcp_unified.__version__
     assert project["readme"] == "README.md"

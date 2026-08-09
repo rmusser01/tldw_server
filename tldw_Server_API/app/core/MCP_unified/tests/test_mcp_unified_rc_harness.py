@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import sys
+from email.parser import Parser
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -52,6 +53,19 @@ def test_default_paths_point_to_apps_package() -> None:
     assert paths.package_project == Path("/repo/apps/mcp-unified")  # nosec B101
     assert paths.package_src == Path("/repo/apps/mcp-unified/src/mcp_unified")  # nosec B101
     assert paths.evidence_dir == Path("/repo/.artifacts/mcp-unified-rc")  # nosec B101
+
+
+def test_jsonschema_dependency_accepts_duplicate_identical_metadata_headers() -> None:
+    """Equivalent repeated sdist headers must represent one semantic dependency."""
+
+    metadata = Parser().parsestr(
+        "Requires-Dist: jsonschema<5,>=4.23\n"
+        "Requires-Dist: jsonschema>=4.23,<5\n"
+        'Requires-Dist: jsonschema<5,>=4.23; extra == "dev"\n'
+        "\n"
+    )
+
+    assert mcp_unified_rc._jsonschema_base_dependency(metadata) == "jsonschema<5,>=4.23"
 
 
 def _create_publish_plan_artifacts(tmp_path: Path) -> mcp_unified_rc.RcPaths:
@@ -1061,6 +1075,8 @@ def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:
 
     assert "build" in dev_dependency_names  # nosec B101
     assert "tomli" in dev_dependency_names  # nosec B101
+    assert "setuptools>=79.0.1" in build_dependencies  # nosec B101
+    assert "setuptools>=79.0.1" in dev_dependencies  # nosec B101
     assert build_dependency_names.issubset(dev_dependency_names)  # nosec B101
     assert any(  # nosec B101
         "python_version" in dependency

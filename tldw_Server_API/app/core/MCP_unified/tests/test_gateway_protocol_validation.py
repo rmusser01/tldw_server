@@ -9,6 +9,7 @@ import json
 import multiprocessing
 import os
 import signal
+import sys
 import time
 from dataclasses import replace
 from functools import partial
@@ -174,6 +175,13 @@ class _FakeReceiver:
         self.closed = True
 
 
+class _BrokenPipeReceiver(_FakeReceiver):
+    """Model Windows reporting a crashed child as a broken named pipe."""
+
+    def poll(self, _timeout: float = 0) -> bool:
+        raise BrokenPipeError(109, "The pipe has been ended")
+
+
 class _FakeProcess:
     """Controllable process double for cleanup ordering and deadline tests."""
 
@@ -245,6 +253,22 @@ def test_validate_schema_exposes_the_compile_only_public_signature() -> None:
     assert list(signature.parameters) == ["self", "schema", "profile", "root_mode"]
     assert signature.parameters["profile"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["root_mode"].default == "any"
+
+
+@pytest.mark.asyncio
+async def test_receive_verdict_translates_a_broken_worker_pipe() -> None:
+    """A Windows named-pipe crash must become the bounded worker-failure verdict."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+    process = _FakeProcess()
+    process.alive = False
+    process.exitcode = 7
+
+    verdict = await manager._receive_verdict(process, _BrokenPipeReceiver())
+
+    assert verdict == ("internal", "schema_validation_worker_failed")
+    await manager.close()
 
 
 @pytest.mark.asyncio
@@ -967,6 +991,180 @@ def test_worker_registry_never_uses_default_url_retrieval(monkeypatch: pytest.Mo
     receiver.close()
     assert verdict[0] in {"invalid", "internal"}
     assert retrieved == []
+
+
+def test_default_worker_target_uses_lightweight_top_level_spawn_module() -> None:
+    """Windows spawn must not import the broad gateway package before worker entry."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+
+    assert manager._worker_target.__module__ == "mcp_unified._schema_worker"  # noqa: SLF001
+
+
+def test_parent_preloads_validator_classes_before_bounded_spawn() -> None:
+    """Windows workers should not pay a cold jsonschema import inside the timeout."""
+
+    api = _validation_api()
+
+    assert {validator.__name__ for validator in api._VALIDATORS.values()} == {  # noqa: SLF001
+        "Draft7Validator",
+        "Draft202012Validator",
+    }
+
+
+def test_worker_target_defers_validator_imports_until_after_spawn_reconstruction() -> None:
+    """The Windows child target module must remain stdlib-only while unpickling."""
+
+    api = _validation_api()
+    worker_globals = api._schema_validation_worker.__globals__  # noqa: SLF001
+
+    assert "Draft7Validator" not in worker_globals
+    assert "Draft202012Validator" not in worker_globals
+    assert "Registry" not in worker_globals
+    assert "NoSuchResource" not in worker_globals
+
+
+def test_windows_defaults_to_exec_worker_without_overriding_explicit_process_seams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows uses exec by default while injected process tests remain authoritative."""
+
+    api = _validation_api()
+    monkeypatch.setattr(api.os, "name", "nt")
+
+    default_manager = api.GatewaySchemaValidationManager()
+    injected_manager = api.GatewaySchemaValidationManager(process_context=multiprocessing.get_context("spawn"))
+
+    assert default_manager._use_exec_worker is True  # noqa: SLF001
+    assert injected_manager._use_exec_worker is False  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_exec_worker_backend_validates_and_removes_its_payload() -> None:
+    """The Windows backend must return verdicts and leave no process or payload."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager(_use_exec_worker=True)
+    try:
+        await manager.validate(
+            {"type": "integer"},
+            7,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+        with pytest.raises(GatewayApplicationError) as raised:
+            await manager.validate(
+                {"type": "integer"},
+                "wrong",
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        assert raised.value.reason_code == "schema_validation_failed"
+        assert manager.live_process_count == 0
+        assert manager._exec_payloads == {}  # noqa: SLF001
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_worker_backend_times_out_and_reaps_before_release() -> None:
+    """A stuck Windows subprocess must be killed, reaped, and cleaned."""
+
+    api = _validation_api()
+    limits = replace(
+        GatewayLimits(),
+        schema_validation_timeout_seconds=0.05,
+        graceful_shutdown_timeout_seconds=0.2,
+    )
+    manager = api.GatewaySchemaValidationManager(
+        limits=limits,
+        _use_exec_worker=True,
+        _exec_worker_command=(sys.executable, "-c", "import time; time.sleep(60)"),
+    )
+    try:
+        with pytest.raises(GatewayApplicationError) as raised:
+            await manager.validate_schema(
+                {"type": "integer"},
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        assert raised.value.reason_code == "schema_validation_timeout"
+        assert manager.live_process_count == 0
+        assert manager._exec_payloads == {}  # noqa: SLF001
+        assert manager._semaphore._value == 4  # noqa: SLF001
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_worker_backend_cancellation_reaps_and_cleans() -> None:
+    """Cancelling a Windows subprocess validation must not detach the child."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager(
+        limits=replace(GatewayLimits(), graceful_shutdown_timeout_seconds=0.2),
+        _use_exec_worker=True,
+        _exec_worker_command=(sys.executable, "-c", "import time; time.sleep(60)"),
+    )
+    task = asyncio.create_task(
+        manager.validate_schema(
+            {"type": "integer"},
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    )
+    for _ in range(200):
+        if manager.live_process_count == 1:
+            break
+        await asyncio.sleep(0.005)
+    else:
+        pytest.fail("exec validation worker did not start")
+    if os.name == "posix":
+        payload_path = next(iter(manager._exec_payloads.values()))  # noqa: SLF001
+        assert payload_path.stat().st_mode & 0o777 == 0o600
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert manager.live_process_count == 0
+    assert manager._exec_payloads == {}  # noqa: SLF001
+    manager._exec_worker_command = (  # noqa: SLF001
+        sys.executable,
+        "-m",
+        "mcp_unified._schema_worker",
+    )
+    await manager.validate_schema(
+        {"type": "integer"},
+        profile=PROTOCOL_PROFILES["2026-07-28"],
+    )
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_worker_backend_close_reaps_active_child_and_cleans() -> None:
+    """Closing the manager must synchronously account for an active exec child."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager(
+        limits=replace(GatewayLimits(), graceful_shutdown_timeout_seconds=0.2),
+        _use_exec_worker=True,
+        _exec_worker_command=(sys.executable, "-c", "import time; time.sleep(60)"),
+    )
+    task = asyncio.create_task(
+        manager.validate_schema(
+            {"type": "integer"},
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    )
+    for _ in range(200):
+        if manager.live_process_count == 1:
+            break
+        await asyncio.sleep(0.005)
+    else:
+        pytest.fail("exec validation worker did not start")
+
+    await manager.close()
+    with pytest.raises(GatewayApplicationError) as raised:
+        await task
+    assert raised.value.reason_code == "schema_validator_closed"
+    assert manager.live_process_count == 0
+    assert manager._exec_payloads == {}  # noqa: SLF001
 
 
 @pytest.mark.asyncio
