@@ -3024,6 +3024,8 @@ class SyncV2Service:
         self,
         dataset: SyncDataset,
         envelope: SyncEnvelopeCreate,
+        *,
+        context: SyncAdapterContext | None = None,
     ) -> AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred:
         if envelope.adapter_version not in self.adapters.get(envelope.domain).supported_adapter_versions:
             return AdapterRejected(
@@ -3036,15 +3038,16 @@ class SyncV2Service:
                 payload_ciphertext=envelope.payload_ciphertext,
                 payload_clear=envelope.payload_clear,
             )
-        context = SyncAdapterContext(
-            prior_envelopes=self.store.list_envelopes_for_entity(
-                dataset.dataset_id,
-                envelope.domain,
-                entity_id=envelope.entity_id,
-                stable_key=envelope.stable_key,
-                limit=100,
+        if context is None:
+            context = SyncAdapterContext(
+                prior_envelopes=self.store.list_envelopes_for_entity(
+                    dataset.dataset_id,
+                    envelope.domain,
+                    entity_id=envelope.entity_id,
+                    stable_key=envelope.stable_key,
+                    limit=100,
+                )
             )
-        )
         adapter = self.adapters.get(envelope.domain)
         return _call_adapter_evaluate(adapter, envelope, dataset=dataset, context=context)
 

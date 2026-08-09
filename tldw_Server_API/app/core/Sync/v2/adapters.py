@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Sync v2 domain adapter contracts and registry."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, cast
 
@@ -81,6 +81,9 @@ class AdapterDeferred:
 
 
 SyncAdapterOutcome = AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred
+SyncHead = SyncEnvelope | SyncEnvelopeCreate
+SyncHeadLookup = Callable[[SyncDomain, str], SyncHead | None]
+SyncDomainHeadLoader = Callable[[SyncDomain], Sequence[SyncHead]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +111,9 @@ class AttachmentRefValidationError(ValueError):
 class SyncAdapterContext:
     """Read-only Sync state provided to adapters during envelope evaluation."""
 
-    prior_envelopes: Sequence[SyncEnvelope] = field(default_factory=tuple)
+    prior_envelopes: Sequence[SyncHead] = field(default_factory=tuple)
+    get_head: SyncHeadLookup | None = None
+    list_heads: SyncDomainHeadLoader | None = None
 
 
 class SyncDomainAdapter(Protocol):
@@ -292,7 +297,7 @@ def extract_attachment_ref_metadata(
 
 
 def _same_attachment_ref_identity(
-    prior: SyncEnvelope,
+    prior: SyncHead,
     incoming: SyncEnvelopeCreate,
     incoming_metadata: AttachmentRefMetadata,
 ) -> bool:
@@ -347,6 +352,9 @@ __all__ = [
     "KNOWN_SYNC_DOMAINS",
     "StaticSyncAdapter",
     "SyncAdapterContext",
+    "SyncDomainHeadLoader",
+    "SyncHead",
+    "SyncHeadLookup",
     "SyncAdapterOutcome",
     "SyncAdapterRegistry",
     "SyncDomainAdapter",
