@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
     DEFAULT_BASE_TEAM_NAME,
     AuthnzOrgsTeamsRepo,
 )
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
-
 pytestmark = pytest.mark.integration
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.mark.asyncio
@@ -28,10 +34,16 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
     org_id = org["id"]
 
     owner_membership = await repo.add_org_member(
-        org_id=org_id, user_id=owner_id, role="owner"
+        org_id=org_id,
+        user_id=owner_id,
+        role="owner",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
     member_membership = await repo.add_org_member(
-        org_id=org_id, user_id=member_id, role="member"
+        org_id=org_id,
+        user_id=member_id,
+        role="member",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
 
     assert owner_membership["org_id"] == org_id
@@ -80,6 +92,7 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
         org_id=org_id,
         user_id=member_id,
         role="admin",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
     assert updated_member is not None
     assert updated_member["role"].lower() == "admin"
@@ -89,13 +102,18 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
         org_id=org_id,
         user_id=owner_id,
         role="member",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
     assert demote_owner is not None
     assert demote_owner["role"].lower() == "owner"
     assert demote_owner.get("error") == "owner_required"
 
     # Removing a non-owner should also remove them from the default team
-    remove_member = await repo.remove_org_member(org_id=org_id, user_id=member_id)
+    remove_member = await repo.remove_org_member(
+        org_id=org_id,
+        user_id=member_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert remove_member["removed"] is True
 
     remaining_members = await repo.list_org_members(org_id=org_id)
@@ -115,7 +133,11 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
     assert owner_team_count_after == 1
 
     # Removing the last owner should be blocked with owner_required
-    remove_owner = await repo.remove_org_member(org_id=org_id, user_id=owner_id)
+    remove_owner = await repo.remove_org_member(
+        org_id=org_id,
+        user_id=owner_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert remove_owner["removed"] is False
     assert remove_owner.get("error") == "owner_required"
 
@@ -153,10 +175,15 @@ async def test_authnz_orgs_teams_repo_list_organizations_for_user_variants_postg
     for name in ("PG Org One", "PG Org Two", "PG Org Three"):
         org = await repo.create_organization(name=name, owner_user_id=owner_id)
         org_ids.append(org["id"])
-        await repo.add_org_member(org_id=org["id"], user_id=owner_id, role="owner")
+        await repo.add_org_member(
+            org_id=org["id"],
+            user_id=owner_id,
+            role="owner",
+            context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+        )
 
-    await repo.add_org_member(org_id=org_ids[0], user_id=member_id, role="member")
-    await repo.add_org_member(org_id=org_ids[1], user_id=member_id, role="member")
+    await repo.add_org_member(org_id=org_ids[0], user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await repo.add_org_member(org_id=org_ids[1], user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     # Pagination: first page + second page should cover all orgs exactly once.
     page_1, total_1 = await repo.list_organizations_for_user(

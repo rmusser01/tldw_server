@@ -84,7 +84,8 @@ async def test_apply_mapped_grants_ignores_memberships_with_missing_ids(
                 {"org_id": 12, "team_name": provisioning_module.DEFAULT_BASE_TEAM_NAME},
             ]
 
-        async def remove_org_member(self, *, org_id: int, user_id: int):
+        async def remove_org_member(self, *, org_id: int, user_id: int, context):
+            assert context is provisioning_module._FEDERATION_MEMBERSHIP_CONTEXT
             return {"removed": True}
 
     class _StubUsersRepo:

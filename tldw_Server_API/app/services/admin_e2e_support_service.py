@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 import os
 import secrets
+import shutil
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
@@ -15,6 +15,10 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -41,6 +45,9 @@ _ORG_SLUG = "admin-e2e"
 _SEEDED_ALERT_MESSAGE = "CPU high"
 
 _SEEDED_PRINCIPALS: dict[str, dict[str, Any]] = {}
+_E2E_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def _seed_fixtures_payload(*, alerts: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -571,11 +578,19 @@ async def seed_admin_e2e_scenario(scenario: str) -> dict[str, Any]:
 
     org = await _ensure_org(orgs_repo=orgs_repo, owner_user_id=int(admin_user["id"]))
     org_id = int(org["id"])
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(admin_user["id"]), role="admin")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(owner_user["id"]), role="owner")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(super_admin_user["id"]), role="admin")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(member_user["id"]), role="member")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(requester_user["id"]), role="member")
+    for user, role in (
+        (admin_user, "admin"),
+        (owner_user, "owner"),
+        (super_admin_user, "admin"),
+        (member_user, "member"),
+        (requester_user, "member"),
+    ):
+        await orgs_repo.add_org_member(
+            org_id=org_id,
+            user_id=int(user["id"]),
+            role=role,
+            context=_E2E_MEMBERSHIP_CONTEXT,
+        )
 
     if scenario == "dsr_jwt_admin":
         await _seed_dsr_subject_store_data_async(user_id=int(requester_user["id"]))

@@ -13,6 +13,15 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
+
 
 def _b64_key(byte_char: bytes) -> str:
     return base64.b64encode(byte_char * 32).decode("ascii")
@@ -138,8 +147,8 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     org = await create_organization(name="BYOK Org", owner_user_id=int(admin["id"]))
     team = await create_team(org_id=int(org["id"]), name="BYOK Team")
 
-    await add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="lead")
-    await add_team_member(team_id=int(team["id"]), user_id=int(user["id"]), role="lead")
+    await add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=int(team["id"]), user_id=int(user["id"]), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     return {
         "pool": pool,
@@ -2058,8 +2067,8 @@ async def test_shared_keys_scoped_requires_manager_sqlite(tmp_path, monkeypatch)
     )
     member_id = int(member["id"])
     await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(user_id=member_id, role_name="user")
-    await add_org_member(org_id=org_id, user_id=member_id, role="member")
-    await add_team_member(team_id=team_id, user_id=member_id, role="member")
+    await add_org_member(org_id=org_id, user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=team_id, user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     from tldw_Server_API.app.main import app
 

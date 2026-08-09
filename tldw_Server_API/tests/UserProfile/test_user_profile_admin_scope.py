@@ -9,6 +9,10 @@ from fastapi import HTTPException
 from tldw_Server_API.app.api.v1.endpoints.admin import _load_bulk_user_candidates
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member,
     add_team_member,
@@ -49,6 +53,10 @@ async def test_profile_admin_scope_allows_single_user_principal_outside_enterpri
     principal = AuthPrincipal(kind="user", user_id=None, is_admin=False, subject="single_user")
     scope = await admin_profiles_service._get_profile_admin_scope(principal)
     assert scope.is_platform_admin is True
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.mark.asyncio
@@ -103,14 +111,14 @@ async def test_team_admin_scope_bulk_candidates(tmp_path, monkeypatch) -> None:
 
     org = await create_organization(name=f"Scope Org {suffix}", owner_user_id=None)
     org_id = int(org["id"])
-    await add_org_member(org_id=org_id, user_id=int(admin_id), role="member")
-    await add_org_member(org_id=org_id, user_id=int(member_id), role="member")
-    await add_org_member(org_id=org_id, user_id=int(outsider_id), role="member")
+    await add_org_member(org_id=org_id, user_id=int(admin_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_org_member(org_id=org_id, user_id=int(member_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_org_member(org_id=org_id, user_id=int(outsider_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     team = await create_team(org_id=org_id, name=f"Scope Team {suffix}")
     team_id = int(team["id"])
-    await add_team_member(team_id=team_id, user_id=int(admin_id), role="lead")
-    await add_team_member(team_id=team_id, user_id=int(member_id), role="member")
+    await add_team_member(team_id=team_id, user_id=int(admin_id), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=team_id, user_id=int(member_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     principal = AuthPrincipal(
         kind="user",

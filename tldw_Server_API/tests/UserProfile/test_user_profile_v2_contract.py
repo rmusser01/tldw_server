@@ -157,6 +157,58 @@ async def test_v2_profile_update_uses_injected_command_service_and_structured_er
 
 
 @pytest.mark.asyncio
+async def test_v2_forbidden_command_result_has_no_audit(monkeypatch) -> None:
+    async def _active_user(_principal):
+        return {"id": "7"}
+
+    audit_calls: list[dict[str, Any]] = []
+
+    async def _audit(*_args, **kwargs) -> None:
+        audit_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        user_profiles,
+        "_require_principal_active_verified",
+        _active_user,
+    )
+    monkeypatch.setattr(user_profiles, "_emit_user_profile_audit_event", _audit)
+    command_service = _FakeCommandService(
+        LegacyProfileCommandResult(
+            status_code=403,
+            error_code="profile_update_forbidden",
+            detail="Caller cannot edit one or more fields",
+            skipped=(
+                {"key": "memberships.teams.role", "message": "forbidden"},
+            ),
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await user_profiles.update_current_user_profile_v2(
+            payload=UserProfileUpdateRequest(
+                updates=[
+                    {
+                        "key": "memberships.teams.role",
+                        "value": {"team_id": 4, "role": "admin"},
+                    }
+                ]
+            ),
+            http_request=SimpleNamespace(),
+            principal=object(),
+            db=object(),
+            command_service=command_service,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == {
+        "error_code": "profile_update_forbidden",
+        "detail": "Caller cannot edit one or more fields",
+        "errors": [{"key": "memberships.teams.role", "message": "forbidden"}],
+    }
+    assert audit_calls == []
+
+
+@pytest.mark.asyncio
 async def test_v2_profile_update_logs_audit_failure_without_failing(monkeypatch) -> None:
     async def _active_user(_principal):
         return {"id": "7"}
