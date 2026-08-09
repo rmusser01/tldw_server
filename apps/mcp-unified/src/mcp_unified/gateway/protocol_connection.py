@@ -143,6 +143,132 @@ def _is_reserved_meta_key(key: str) -> bool:
     return len(labels) >= 2 and labels[1] in {"mcp", "modelcontextprotocol"}
 
 
+def _is_safe_protocol_version(value: str) -> bool:
+    """Return whether a date-shaped MCP version is bounded and safe to echo."""
+
+    digits = value.replace("-", "")
+    return len(value) == 10 and value[4] == "-" and value[7] == "-" and digits.isascii() and digits.isdigit()
+
+
+class _OutputLimiter:
+    """Serialize and bound application results and final JSON-RPC envelopes."""
+
+    def __init__(self, limits: GatewayLimits) -> None:
+        self._limits = limits
+
+    def bound(self, value: GatewayJSONValue) -> GatewayJSONValue | None:
+        """Return the original value or the smallest safe fitting error."""
+
+        if self._fits_output_line(value):
+            return value
+
+        request_id = self._response_id(value)
+        for candidate in self._semantic_error_candidates(value, request_id):
+            if self._fits_output_line(candidate):
+                return candidate
+        for candidate in self._result_too_large_candidates(request_id):
+            if self._fits_output_line(candidate):
+                return candidate
+        for candidate in (
+            _error_response(request_id, _INTERNAL_ERROR, "Internal error"),
+            _error_response(None, _INTERNAL_ERROR, "Internal error"),
+        ):
+            if self._fits_output_line(candidate):
+                return candidate
+        return None
+
+    def ensure_result_size(self, value: object) -> None:
+        """Reject a raw application result above its pre-envelope limit."""
+
+        try:
+            size = len(self._json_bytes(value))
+        except ValueError as exc:
+            raise GatewayInvalidApplicationResult() from exc
+        if size > self._limits.max_result_bytes:
+            raise GatewayResultTooLarge(limit_bytes=self._limits.max_result_bytes)
+
+    def _fits_output_line(self, value: GatewayJSONValue) -> bool:
+        try:
+            return len(self._json_bytes(value)) + 1 <= self._limits.max_output_line_bytes
+        except ValueError:
+            return False
+
+    def _semantic_error_candidates(
+        self,
+        value: GatewayJSONValue,
+        request_id: str | int | None,
+    ) -> tuple[_Response, ...]:
+        if not isinstance(value, dict):
+            return ()
+        raw_error = value.get("error")
+        if not isinstance(raw_error, dict):
+            return ()
+        code = raw_error.get("code")
+        message = raw_error.get("message")
+        if (
+            isinstance(code, bool)
+            or not isinstance(code, int)
+            or not isinstance(message, str)
+            or not message
+            or len(message) > 512
+        ):
+            return ()
+
+        candidates: list[_Response] = []
+        data = raw_error.get("data")
+        if data is not None:
+            candidates.append(_error_response(None, code, message, data=data))
+        candidates.append(_error_response(request_id, code, message))
+        if request_id is not None:
+            candidates.append(_error_response(None, code, message))
+        return tuple(candidates)
+
+    def _result_too_large_candidates(
+        self,
+        request_id: str | int | None,
+    ) -> tuple[_Response, ...]:
+        data: dict[str, GatewayJSONValue] = {
+            "reasonCode": "result_too_large",
+            "kind": "application",
+            "limitBytes": self._limits.max_output_line_bytes,
+        }
+        message = "Application result exceeds the configured limit"
+        return (
+            _error_response(request_id, -33001, message, data=data),
+            _error_response(None, -33001, message, data=data),
+            _error_response(request_id, -33001, message),
+            _error_response(None, -33001, message),
+        )
+
+    def _json_bytes(self, value: object) -> bytes:
+        try:
+            _validate_json_structure(value, max_depth=self._limits.max_json_depth)
+            return json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (
+            _JSONStructureError,
+            RecursionError,
+            TypeError,
+            ValueError,
+            UnicodeEncodeError,
+        ) as exc:
+            raise ValueError("value must be finite JSON") from exc
+
+    @staticmethod
+    def _response_id(value: GatewayJSONValue) -> str | int | None:
+        if not isinstance(value, dict):
+            return None
+        request_id = value.get("id")
+        if isinstance(request_id, (str, int)) and not isinstance(request_id, bool):
+            return request_id
+        return None
+
+
 class GatewayProtocolConnection:
     """Own one strict stdio connection's revision and request lifecycle."""
 
@@ -190,16 +316,16 @@ class GatewayProtocolConnection:
         self._server_meta: dict[str, GatewayJSONValue] = {
             _SERVER_INFO_KEY: {"name": runtime_name, "version": runtime_version}
         }
+        self._output_limiter = _OutputLimiter(limits)
         self._validator = _validation_manager or GatewaySchemaValidationManager(limits)
         self._paginator = GatewayCatalogPaginator(limits)
         self._writer_lock = asyncio.Lock()
         self._state_lock = asyncio.Lock()
         self._era: Literal["modern", "legacy"] | None = None
         self._legacy_profile: GatewayProtocolProfile | None = None
-        self._legacy_initialized = False
+        self._legacy_initializing: _RequestKey | None = None
         self._legacy_client_info: dict[str, GatewayJSONValue] | None = None
         self._legacy_client_capabilities: dict[str, GatewayJSONValue] = {}
-        self._initialized_notification_seen = False
         self._active: dict[_RequestKey, _ActiveRequest] = {}
         self._tasks: set[asyncio.Task[Any]] = set()
         self._task_errors: list[BaseException] = []
@@ -294,7 +420,7 @@ class GatewayProtocolConnection:
                 raise RuntimeError("connection is closed")
             prepared, immediate = self._prepare_locked(payload)
             if prepared is not None:
-                active, immediate = self._admit_locked(prepared, batch=False)
+                active, immediate = self._admit_locked(prepared)
                 if active is not None:
                     self._start_standalone_locked(active)
         if immediate is not None:
@@ -315,7 +441,6 @@ class GatewayProtocolConnection:
             elif (
                 len(payload) > self._limits.max_batch_items
                 or any(isinstance(item, dict) and item.get("method") == "initialize" for item in payload)
-                or not self._legacy_initialized
                 or self._legacy_profile is None
                 or not self._legacy_profile.accepts_batches
             ):
@@ -327,7 +452,7 @@ class GatewayProtocolConnection:
                     if prepared is None:
                         entries.append(_BatchEntry(response=response))
                         continue
-                    active, response = self._admit_locked(prepared, batch=True)
+                    active, response = self._admit_locked(prepared)
                     if active is None:
                         entries.append(_BatchEntry(response=response))
                     else:
@@ -391,9 +516,11 @@ class GatewayProtocolConnection:
                 _INVALID_REQUEST,
                 "Invalid request",
             )
+        if self._legacy_initializing is not None:
+            return None, self._admission_error(request_id)
         modern_marker = self._has_modern_marker(params)
         if method == "initialize":
-            if modern_marker or self._era == "modern" or self._legacy_initialized:
+            if modern_marker or self._era == "modern" or self._legacy_profile is not None:
                 return None, self._admission_error(request_id)
             return self._prepare_initialize(request_id, method, params)
 
@@ -402,7 +529,7 @@ class GatewayProtocolConnection:
                 return None, self._admission_error(request_id)
             return self._prepare_modern(request_id, method, params)
 
-        if self._legacy_initialized and self._legacy_profile is not None:
+        if self._legacy_profile is not None:
             return (
                 _PreparedRequest(
                     request_id=request_id,
@@ -462,14 +589,16 @@ class GatewayProtocolConnection:
             )
         self._era = "modern"
         if version not in SUPPORTED_MODERN_PROTOCOL_VERSIONS:
+            data: dict[str, GatewayJSONValue] = {
+                "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
+            }
+            if _is_safe_protocol_version(version):
+                data["requested"] = version
             return None, _error_response(
                 request_id,
                 _UNSUPPORTED_PROTOCOL_VERSION,
                 "Unsupported protocol version",
-                data={
-                    "requested": version,
-                    "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
-                },
+                data=data,
             )
 
         try:
@@ -548,8 +677,6 @@ class GatewayProtocolConnection:
     def _admit_locked(
         self,
         prepared: _PreparedRequest,
-        *,
-        batch: bool,
     ) -> tuple[_ActiveRequest | None, _Response | None]:
         request_id = prepared.request_id
         key = _request_key(request_id)
@@ -557,15 +684,6 @@ class GatewayProtocolConnection:
             return None, self._admission_error(request_id)
         if not self._consume_rate_token():
             return None, self._admission_error(request_id)
-
-        if prepared.initialize_result is not None:
-            self._era = "legacy"
-            self._legacy_profile = prepared.profile
-            self._legacy_initialized = True
-            self._legacy_client_info = (
-                self._clone_object(prepared.client_info) if prepared.client_info is not None else None
-            )
-            self._legacy_client_capabilities = self._clone_object(prepared.client_capabilities)
 
         active = _ActiveRequest(
             key=key,
@@ -575,6 +693,8 @@ class GatewayProtocolConnection:
         task = asyncio.create_task(self._dispatch_active(active))
         active.task = task
         self._active[key] = active
+        if prepared.initialize_result is not None:
+            self._legacy_initializing = key
         self._track_task(task)
         return active, None
 
@@ -587,9 +707,12 @@ class GatewayProtocolConnection:
             try:
                 response = await dispatch_task
                 if response is not None:
-                    await self._write_value(response, token=active.token)
+                    if active.prepared.initialize_result is None:
+                        await self._write_value(response, token=active.token)
+                    else:
+                        await self._write_initialize_response(active, response)
             finally:
-                self._active.pop(active.key, None)
+                await self._release_active(active)
 
         output_task = asyncio.create_task(emit())
         self._track_task(output_task)
@@ -613,7 +736,7 @@ class GatewayProtocolConnection:
                         if response is not None:
                             responses.append(response)
                 if responses:
-                    bounded = self._bound_output(responses)
+                    bounded = self._output_limiter.bound(responses)
                     if bounded is not None:
                         await self._write_locked(bounded)
         finally:
@@ -741,6 +864,7 @@ class GatewayProtocolConnection:
 
         descriptors = await self._runtime.list_tools(context)
         projected = await self._project_catalog("tool", descriptors, profile)
+        self._validate_complete_catalog("tools/list", projected, profile)
         for descriptor in projected:
             try:
                 await self._validator.validate_schema(
@@ -767,7 +891,27 @@ class GatewayProtocolConnection:
         context: GatewayRequestContext,
     ) -> list[dict[str, GatewayJSONValue]]:
         descriptors = await self._runtime.list_prompts(context)
-        return await self._project_catalog("prompt", descriptors, profile)
+        projected = await self._project_catalog("prompt", descriptors, profile)
+        self._validate_complete_catalog("prompts/list", projected, profile)
+        return projected
+
+    def _validate_complete_catalog(
+        self,
+        method: Literal["tools/list", "prompts/list"],
+        items: list[dict[str, GatewayJSONValue]],
+        profile: GatewayProtocolProfile,
+    ) -> None:
+        """Run Task 2 canonical identity and duplicate checks before lookup."""
+
+        try:
+            self._paginator.page(
+                method=method,
+                profile=profile,
+                items=items,
+                cursor=None,
+            )
+        except ValueError as exc:
+            raise GatewayInvalidApplicationResult() from exc
 
     async def _project_catalog(
         self,
@@ -775,7 +919,7 @@ class GatewayProtocolConnection:
         descriptors: object,
         profile: GatewayProtocolProfile,
     ) -> list[dict[str, GatewayJSONValue]]:
-        self._ensure_result_size(descriptors)
+        self._output_limiter.ensure_result_size(descriptors)
         if not isinstance(descriptors, list):
             raise GatewayInvalidApplicationResult()
         if len(descriptors) > self._limits.max_catalog_items:
@@ -868,7 +1012,7 @@ class GatewayProtocolConnection:
                 reserved_meta=self._server_meta,
                 limits=self._limits,
             )
-        self._ensure_result_size(raw_result)
+        self._output_limiter.ensure_result_size(raw_result)
 
         output_schema = raw_descriptor.get("outputSchema")
         if output_schema is not None:
@@ -907,7 +1051,7 @@ class GatewayProtocolConnection:
         except GatewayInvalidApplicationResult as exc:
             raise _ProtocolFailure(_INVALID_PARAMS, "Invalid params") from exc
         result = await self._runtime.read_resource(normalized_uri, context)
-        self._ensure_result_size(result)
+        self._output_limiter.ensure_result_size(result)
         return project_resource_result(
             result,
             prepared.profile,
@@ -928,7 +1072,7 @@ class GatewayProtocolConnection:
         if not any(prompt.get("name") == name for prompt in prompts):
             raise _ProtocolFailure(_INVALID_PARAMS, "Invalid params")
         result = await self._runtime.get_prompt(name, arguments, context)
-        self._ensure_result_size(result)
+        self._output_limiter.ensure_result_size(result)
         return project_prompt_result(
             result,
             prepared.profile,
@@ -988,8 +1132,6 @@ class GatewayProtocolConnection:
         params: dict[str, Any],
     ) -> None:
         if method == "notifications/initialized":
-            if self._legacy_initialized:
-                self._initialized_notification_seen = True
             return
         if method != "notifications/cancelled":
             return
@@ -1006,6 +1148,51 @@ class GatewayProtocolConnection:
         if active.task is not None:
             active.task.cancel()
 
+    async def _write_initialize_response(
+        self,
+        active: _ActiveRequest,
+        response: _Response,
+    ) -> None:
+        """Write initialize success before atomically publishing negotiated state."""
+
+        async with self._writer_lock:
+            if active.token.cancelled:
+                return
+            bounded = self._output_limiter.bound(response)
+            if bounded is not response:
+                if bounded is not None:
+                    await self._write_locked(bounded)
+                return
+            await self._write_locked(response)
+            if active.token.cancelled:
+                return
+            async with self._state_lock:
+                if (
+                    not self._closed
+                    and self._legacy_initializing == active.key
+                    and self._active.get(active.key) is active
+                ):
+                    self._commit_legacy_initialize_locked(active.prepared)
+
+    def _commit_legacy_initialize_locked(self, prepared: _PreparedRequest) -> None:
+        """Publish one successfully written initialize negotiation."""
+
+        self._era = "legacy"
+        self._legacy_profile = prepared.profile
+        self._legacy_client_info = (
+            self._clone_object(prepared.client_info) if prepared.client_info is not None else None
+        )
+        self._legacy_client_capabilities = self._clone_object(prepared.client_capabilities)
+        self._legacy_initializing = None
+
+    async def _release_active(self, active: _ActiveRequest) -> None:
+        """Remove one active request and roll back any unfinished initialize."""
+
+        async with self._state_lock:
+            self._active.pop(active.key, None)
+            if self._legacy_initializing == active.key:
+                self._legacy_initializing = None
+
     async def _write_value(
         self,
         value: GatewayJSONValue,
@@ -1015,65 +1202,12 @@ class GatewayProtocolConnection:
         async with self._writer_lock:
             if token is not None and token.cancelled:
                 return
-            bounded = self._bound_output(value)
+            bounded = self._output_limiter.bound(value)
             if bounded is not None:
                 await self._write_locked(bounded)
 
     async def _write_locked(self, value: GatewayJSONValue) -> None:
         await self._writer(value)
-
-    def _bound_output(self, value: GatewayJSONValue) -> GatewayJSONValue | None:
-        try:
-            size = len(self._json_bytes(value)) + 1
-        except ValueError:
-            return _error_response(None, _INTERNAL_ERROR, "Internal error")
-        if size <= self._limits.max_output_line_bytes:
-            return value
-        request_id: str | int | None = None
-        if isinstance(value, dict):
-            raw_id = value.get("id")
-            if isinstance(raw_id, (str, int)) and not isinstance(raw_id, bool):
-                request_id = raw_id
-        error = _error_response(
-            request_id,
-            -33001,
-            "Application result exceeds the configured limit",
-            data={
-                "reasonCode": "result_too_large",
-                "kind": "application",
-                "limitBytes": self._limits.max_output_line_bytes,
-            },
-        )
-        if len(self._json_bytes(error)) + 1 <= self._limits.max_output_line_bytes:
-            return error
-        return None
-
-    def _ensure_result_size(self, value: object) -> None:
-        try:
-            size = len(self._json_bytes(value))
-        except ValueError as exc:
-            raise GatewayInvalidApplicationResult() from exc
-        if size > self._limits.max_result_bytes:
-            raise GatewayResultTooLarge(limit_bytes=self._limits.max_result_bytes)
-
-    def _json_bytes(self, value: object) -> bytes:
-        try:
-            _validate_json_structure(value, max_depth=self._limits.max_json_depth)
-            return json.dumps(
-                value,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            ).encode("utf-8")
-        except (
-            _JSONStructureError,
-            RecursionError,
-            TypeError,
-            ValueError,
-            UnicodeEncodeError,
-        ) as exc:
-            raise ValueError("value must be finite JSON") from exc
 
     def _clone_metadata(
         self,

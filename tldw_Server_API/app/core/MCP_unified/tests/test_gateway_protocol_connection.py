@@ -25,10 +25,14 @@ class _MemoryWriter:
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
         self.release.set()
+        self.failures_remaining = 0
 
     async def __call__(self, value: Any) -> None:
         self.entered.set()
         await self.release.wait()
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            raise RuntimeError("writer failed")
         self.values.append(value)
 
     def block(self) -> None:
@@ -258,6 +262,24 @@ def _new_connection(
     return GatewayProtocolConnection(runtime, writer, **kwargs)
 
 
+def _legacy_initialize_request(
+    *,
+    request_id: str | int = "init",
+    version: str = "2025-11-25",
+    capabilities: dict[str, Any] | None = None,
+    client_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _legacy_request(
+        request_id,
+        "initialize",
+        {
+            "protocolVersion": version,
+            "capabilities": capabilities or {},
+            "clientInfo": client_info or {"name": "test-client", "version": "1.0"},
+        },
+    )
+
+
 async def _initialize_legacy(
     connection: Any,
     writer: _MemoryWriter,
@@ -267,14 +289,10 @@ async def _initialize_legacy(
     client_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     await connection.receive(
-        _legacy_request(
-            "init",
-            "initialize",
-            {
-                "protocolVersion": version,
-                "capabilities": capabilities or {},
-                "clientInfo": client_info or {"name": "test-client", "version": "1.0"},
-            },
+        _legacy_initialize_request(
+            version=version,
+            capabilities=capabilities,
+            client_info=client_info,
         )
     )
     await connection.wait_for_idle()
@@ -548,6 +566,133 @@ async def test_legacy_initialization_fallback_and_initialized_notification() -> 
 
 
 @pytest.mark.asyncio
+async def test_pipelined_legacy_work_is_rejected_until_initialize_is_written() -> None:
+    """Committing at admission must expose legacy methods before initialization output."""
+
+    runtime = _CoreRuntime()
+    writer = _MemoryWriter()
+    writer.block()
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(_legacy_initialize_request())
+    await writer.entered.wait()
+    pipelined = asyncio.create_task(connection.receive(_legacy_request(1, "tools/list")))
+    await asyncio.sleep(0)
+    runtime_entries_before_initialize_output = runtime.runtime_entries
+    writer.unblock()
+    await pipelined
+    await connection.wait_for_idle()
+
+    assert runtime_entries_before_initialize_output == 0
+    assert writer.values[-1] == _error(1, -32000, "Request rejected")
+
+
+@pytest.mark.asyncio
+async def test_pending_2025_03_initialize_does_not_open_the_batch_gate() -> None:
+    """Using negotiated state before output must admit a 2025-03 batch too early."""
+
+    runtime = _CoreRuntime()
+    writer = _MemoryWriter()
+    writer.block()
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(_legacy_initialize_request(version="2025-03-26"))
+    await writer.entered.wait()
+    pipelined = asyncio.create_task(connection.receive([_legacy_request(1, "tools/list")]))
+    await asyncio.sleep(0)
+    runtime_entries_before_initialize_output = runtime.runtime_entries
+    writer.unblock()
+    await pipelined
+    await connection.wait_for_idle()
+
+    assert runtime_entries_before_initialize_output == 0
+    assert writer.values[-1] == _error(None, -32000, "Request rejected")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_initialize_rolls_back_pending_legacy_state() -> None:
+    """Cancellation while initialize waits to write must not leave a usable profile."""
+
+    runtime = _CoreRuntime()
+    writer = _MemoryWriter()
+    writer.block()
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(_legacy_request("blocker", "ping"))
+    await writer.entered.wait()
+    await connection.receive(_legacy_initialize_request())
+    await asyncio.sleep(0)
+    await connection.receive(
+        _legacy_request(
+            None,
+            "notifications/cancelled",
+            {"requestId": "init"},
+            include_id=False,
+        )
+    )
+    writer.unblock()
+    await connection.wait_for_idle()
+    writer.values.clear()
+
+    await connection.receive(_legacy_request(1, "tools/list"))
+    await connection.wait_for_idle()
+
+    assert writer.values == [_error(1, -32000, "Request rejected")]
+    assert runtime.runtime_entries == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_initialize_write_rolls_back_pending_legacy_state() -> None:
+    """A writer failure after dispatch must not leave initialization committed."""
+
+    runtime = _CoreRuntime()
+    writer = _MemoryWriter()
+    writer.failures_remaining = 1
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(_legacy_initialize_request())
+    with pytest.raises(RuntimeError, match="writer failed"):
+        await connection.wait_for_idle()
+
+    await connection.receive(_legacy_request(1, "tools/list"))
+    await connection.wait_for_idle()
+
+    assert writer.values == [_error(1, -32000, "Request rejected")]
+    assert runtime.runtime_entries == 0
+
+
+@pytest.mark.asyncio
+async def test_replaced_initialize_output_does_not_commit_legacy_state() -> None:
+    """An initialize result replaced by a bounded error is not successful negotiation."""
+
+    limits = replace(
+        GatewayLimits(),
+        max_output_line_bytes=128,
+        max_result_bytes=128,
+    )
+    runtime = _CoreRuntime()
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer, limits=limits)
+
+    await connection.receive(_legacy_initialize_request())
+    await connection.wait_for_idle()
+    assert writer.values == [
+        _error(
+            "init",
+            -33001,
+            "Application result exceeds the configured limit",
+        )
+    ]
+    writer.values.clear()
+
+    await connection.receive(_legacy_request(1, "tools/list"))
+    await connection.wait_for_idle()
+
+    assert writer.values == [_error(1, -32000, "Request rejected")]
+    assert runtime.runtime_entries == 0
+
+
+@pytest.mark.asyncio
 async def test_preinitialize_second_initialize_and_era_mixing_are_admission_errors() -> None:
     """Lifecycle and era admission failures must use one payload-free code."""
 
@@ -790,6 +935,68 @@ async def test_tool_schemas_compile_and_input_output_roles_are_enforced() -> Non
 
 
 @pytest.mark.asyncio
+async def test_duplicate_tool_catalog_is_rejected_before_tool_dispatch() -> None:
+    """Looking up before full-catalog validation must dispatch a conflicting duplicate."""
+
+    runtime = _CoreRuntime()
+    runtime.tools.append(
+        {
+            "name": "echo",
+            "description": "Conflicting duplicate",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+            "outputSchema": {"type": "string"},
+        }
+    )
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(
+        _modern_request(
+            1,
+            "tools/call",
+            {"name": "echo", "arguments": {"value": 7}},
+        )
+    )
+    await connection.wait_for_idle()
+
+    assert writer.values == [_error(1, -32603, "Internal error")]
+    assert runtime.call_names == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_prompt_catalog_is_rejected_before_prompt_dispatch() -> None:
+    """Prompt lookup must not bypass complete catalog duplicate validation."""
+
+    runtime = _CoreRuntime()
+    runtime.prompts.append(
+        {
+            "name": "welcome",
+            "description": "Conflicting duplicate",
+            "arguments": [{"name": "topic", "required": False}],
+        }
+    )
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(
+        _modern_request(
+            1,
+            "prompts/get",
+            {"name": "welcome", "arguments": {"name": "Ada"}},
+        )
+    )
+    await connection.wait_for_idle()
+
+    assert writer.values == [_error(1, -32603, "Internal error")]
+    assert runtime.runtime_entries == 1
+
+
+@pytest.mark.asyncio
 async def test_current_arbitrary_output_and_legacy_object_output_use_correct_roots() -> None:
     """Forcing current outputs to objects or loosening legacy objects must fail."""
 
@@ -886,6 +1093,122 @@ async def test_result_and_envelope_byte_limits_return_safe_bounded_errors() -> N
         )
     ]
     assert "secret" not in json.dumps(writer.values)
+
+
+@pytest.mark.asyncio
+async def test_under_limit_result_with_over_limit_envelope_uses_output_limit_error() -> None:
+    """Only testing raw result bytes must leave the final-envelope branch uncovered."""
+
+    limits = replace(
+        GatewayLimits(),
+        max_output_line_bytes=128,
+        max_result_bytes=128,
+    )
+    runtime = _CoreRuntime()
+    runtime.resource_result = {"contents": [{"uri": "file:///guide.txt", "text": "x"}]}
+    writer = _MemoryWriter()
+    connection = _new_connection(runtime, writer, limits=limits)
+
+    await connection.receive(_modern_request(1, "resources/read", {"uri": "file:///guide.txt"}))
+    await connection.wait_for_idle()
+
+    assert writer.values == [
+        _error(
+            1,
+            -33001,
+            "Application result exceeds the configured limit",
+        )
+    ]
+    assert runtime.runtime_entries == 1
+
+
+@pytest.mark.asyncio
+async def test_oversized_request_id_falls_back_to_null_without_inventing_an_id() -> None:
+    """Retaining an oversized ID must suppress the only bounded error response."""
+
+    limits = replace(
+        GatewayLimits(),
+        max_output_line_bytes=128,
+        max_result_bytes=128,
+    )
+    oversized_id = "private-id-" + "x" * 1_000
+    writer = _MemoryWriter()
+    connection = _new_connection(_CoreRuntime(), writer, limits=limits)
+
+    await connection.receive(_modern_request(oversized_id, "ping"))
+    await connection.wait_for_idle()
+
+    assert writer.values == [
+        _error(
+            None,
+            -33001,
+            "Application result exceeds the configured limit",
+        )
+    ]
+    assert "private-id" not in json.dumps(writer.values)
+
+
+@pytest.mark.asyncio
+async def test_oversized_unsupported_version_keeps_32022_without_echo() -> None:
+    """Envelope replacement must not turn version negotiation into result-too-large."""
+
+    limits = replace(
+        GatewayLimits(),
+        max_output_line_bytes=2_048,
+        max_result_bytes=2_048,
+    )
+    requested = "2099-private-" + "x" * 1_000
+    writer = _MemoryWriter()
+    connection = _new_connection(_CoreRuntime(), writer, limits=limits)
+
+    await connection.receive(_modern_request(1, "server/discover", version=requested))
+    await connection.wait_for_idle()
+
+    assert writer.values == [
+        _error(
+            1,
+            -32022,
+            "Unsupported protocol version",
+            data={
+                "supported": [
+                    "2026-07-28",
+                    "2025-11-25",
+                    "2025-06-18",
+                    "2025-03-26",
+                    "2024-11-05",
+                ]
+            },
+        )
+    ]
+    assert "2099-private" not in json.dumps(writer.values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_output_line_bytes", "expected"),
+    [
+        (79, [_error(None, -32603, "Internal error")]),
+        (78, []),
+    ],
+)
+async def test_tiny_output_limit_has_an_exact_fixed_error_boundary(
+    max_output_line_bytes: int,
+    expected: list[dict[str, Any]],
+) -> None:
+    """Limits below the smallest fixed envelope must fail closed deterministically."""
+
+    limits = replace(
+        GatewayLimits(),
+        max_output_line_bytes=max_output_line_bytes,
+        max_result_bytes=max_output_line_bytes,
+    )
+    writer = _MemoryWriter()
+    connection = _new_connection(_CoreRuntime(), writer, limits=limits)
+
+    await connection.receive(_modern_request("x" * 1_000, "ping"))
+    await connection.wait_for_idle()
+
+    assert writer.values == expected
 
 
 class _Clock:
