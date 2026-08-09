@@ -178,7 +178,9 @@ async def test_claims_analytics_export_retry_recovers_and_late_failure_cannot_ov
     db = MediaDatabase(db_path=str(media_path), client_id="claims-export-retry")
     app = _app(db)
     real_ready = MediaDatabase.mark_claims_analytics_export_ready
+    real_transition = MediaDatabase.transition_claims_analytics_export_status
     ready_attempts = 0
+    transition_calls: list[tuple[tuple[str, ...], str, bool]] = []
     try:
         monkeypatch.setenv("CLAIMS_JOBS_ENABLED", "1")
         monkeypatch.setenv("CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED", "1")
@@ -201,6 +203,23 @@ async def test_claims_analytics_export_retry_recovers_and_late_failure_cannot_ov
             MediaDatabase,
             "mark_claims_analytics_export_ready",
             fail_once_after_processing,
+        )
+
+        def record_transition(media_db: MediaDatabase, **kwargs: Any) -> bool:
+            transitioned = real_transition(media_db, **kwargs)
+            transition_calls.append(
+                (
+                    tuple(kwargs["from_statuses"]),
+                    str(kwargs["to_status"]),
+                    transitioned,
+                )
+            )
+            return transitioned
+
+        monkeypatch.setattr(
+            MediaDatabase,
+            "transition_claims_analytics_export_status",
+            record_transition,
         )
 
         with TestClient(app) as client:
@@ -243,6 +262,7 @@ async def test_claims_analytics_export_retry_recovers_and_late_failure_cannot_ov
             ready = db.get_claims_analytics_export(export_id, user_id="1")
             assert ready["status"] == "ready"
             assert ready_attempts == 2
+            assert (("failed",), "processing", True) in transition_calls
             assert db.transition_claims_analytics_export_status(
                 export_id=export_id,
                 user_id="1",
