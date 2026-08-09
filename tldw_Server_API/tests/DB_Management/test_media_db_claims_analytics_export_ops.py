@@ -1086,7 +1086,7 @@ def test_claims_analytics_exports_postgres_owner_scoped_crud_and_v24_fields(
             and _CANONICAL_TIMESTAMP_RE.fullmatch(ready[field])
             for field in ("snapshot_at", "created_at", "updated_at")
         )
-        assert ready["payload_json"] == '{"events":[],"filters":{"end_time":"2026-08-08T12:00:00.000Z"},"pagination":{"limit":10,"offset":0,"returned":0,"total":0}}'
+        assert ready["payload_json"] == '{"events":[],"filters":{"end_time":"2026-08-08T12:00:00.000Z"},"pagination":{"limit":10,"offset":0,"total":0}}'
     finally:
         db.close_connection()
 
