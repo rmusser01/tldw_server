@@ -974,6 +974,7 @@ class SyncRestoreOrderedAction(BaseModel):
 
     plan_index: int = Field(..., ge=0)
     action: SyncRestoreOrderedActionKind
+    dataset_id: str
     domain: SyncDomain
     object_id: str
     operation: SyncOperation

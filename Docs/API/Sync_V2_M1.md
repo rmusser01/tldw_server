@@ -773,12 +773,14 @@ restore of the same identity. A contradictory dependency or chronology graph
 fails closed with `sync_restore_plan_invalid`.
 
 `ordered_actions` is the only executable object-action sequence. Its zero-based
-`plan_index` values are stable for the returned plan. Each row contains only
-`plan_index`, `action`, `domain`, `object_id`, `operation`, `server_cursor`, optional
+`plan_index` values are stable across the complete returned multi-dataset plan.
+Each row contains only `plan_index`, `action`, `dataset_id`, `domain`, `object_id`,
+`operation`, `server_cursor`, optional
 `mutation_group_id`/`mutation_step`/`mutation_step_count`, and an optional stable
-`code`. It never contains payload data, labels, content, local paths or keys, raw
-errors, or routing metadata. Complete group steps have the same opaque group ID and
-step count and remain adjacent in ascending step order.
+`code`. The required `dataset_id` disambiguates identical domain/object identities
+in different datasets. A row never contains payload data, labels, content, local
+paths or keys, raw errors, or routing metadata. Complete group steps have the same
+opaque group ID and step count and remain adjacent in ascending step order.
 
 The action is `apply`, `tombstone`, `noop`, or `conflict`. A conflict's safe `code`
 describes its category and blocks execution of the plan. `safe_applies`,
@@ -790,7 +792,10 @@ Classification simulates the local inventory sequentially without changing produ
 state. An earlier planned tombstone therefore changes the state used to classify a
 later exact restore. If the initial inventory already matches that later live head,
 the later action is still `apply`, not `noop`, because the preceding tombstone would
-otherwise undo the final state. For example:
+otherwise undo the final state. Likewise, when the initial inventory matches the
+final planned live head, earlier historical live revisions remain executable
+`apply` actions and the final head is reapplied. A divergent local object that does
+not match the final planned state remains a conflict. For example:
 
 ```json
 {
@@ -798,6 +803,7 @@ otherwise undo the final state. For example:
     {
       "plan_index": 0,
       "action": "tombstone",
+      "dataset_id": "dataset-example-1",
       "domain": "notes.keyword",
       "object_id": "11111111-1111-4111-8111-111111111111",
       "operation": "tombstone",
@@ -810,6 +816,7 @@ otherwise undo the final state. For example:
     {
       "plan_index": 1,
       "action": "tombstone",
+      "dataset_id": "dataset-example-1",
       "domain": "notes.folder",
       "object_id": "22222222-2222-4222-8222-222222222222",
       "operation": "tombstone",
@@ -822,6 +829,7 @@ otherwise undo the final state. For example:
     {
       "plan_index": 2,
       "action": "apply",
+      "dataset_id": "dataset-example-1",
       "domain": "notes.keyword",
       "object_id": "11111111-1111-4111-8111-111111111111",
       "operation": "upsert",

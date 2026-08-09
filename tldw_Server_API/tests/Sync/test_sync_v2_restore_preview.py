@@ -1204,6 +1204,7 @@ def test_restore_preview_endpoint_exposes_one_safe_canonical_ordered_plan(
     assert set(body["ordered_actions"][0]) == {
         "plan_index",
         "action",
+        "dataset_id",
         "domain",
         "object_id",
         "operation",
@@ -1219,6 +1220,215 @@ def test_restore_preview_endpoint_exposes_one_safe_canonical_ordered_plan(
     assert len(body["object_conflicts"]) == 1
     assert len(body["tombstones"]) == 2
     assert "Synthetic keyword" not in str(body["ordered_actions"])
+
+
+def test_restore_preview_round5_distinguishes_same_object_across_datasets(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-2",
+        domains=list(M1_SYNC_DOMAINS),
+    )
+    first = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-dataset-one-shared")
+    )
+    second = sync_service.store.insert_envelope(
+        _note_envelope(
+            dataset_id="dataset-2",
+            client_envelope_id="env-dataset-two-shared",
+            payload_hash="sha256:dataset-two-shared",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1", "dataset-2"],
+        domains=["notes.note"],
+        local_inventory=[],
+    )
+
+    assert [
+        (
+            item.plan_index,
+            item.dataset_id,
+            item.domain,
+            item.object_id,
+            item.server_cursor,
+        )
+        for item in preview.ordered_actions
+    ] == [
+        (0, "dataset-1", "notes.note", "note-1", first.server_cursor),
+        (1, "dataset-2", "notes.note", "note-1", second.server_cursor),
+    ]
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1", "dataset-2"],
+            "domains": ["notes.note"],
+            "local_inventory": [],
+        },
+    )
+    assert response.status_code == 200
+    public_actions = response.json()["ordered_actions"]
+    assert [
+        (item["plan_index"], item["dataset_id"], item["domain"], item["object_id"])
+        for item in public_actions
+    ] == [
+        (0, "dataset-1", "notes.note", "note-1"),
+        (1, "dataset-2", "notes.note", "note-1"),
+    ]
+    assert set(public_actions[0]) == {
+        "plan_index",
+        "action",
+        "dataset_id",
+        "domain",
+        "object_id",
+        "operation",
+        "server_cursor",
+        "mutation_group_id",
+        "mutation_step",
+        "mutation_step_count",
+        "code",
+    }
+    assert "Research note" not in str(public_actions)
+
+
+def test_restore_preview_round5_replays_historical_live_group_before_matching_head(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    note_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    keyword_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    note = sync_service.store.insert_envelope(
+        _note_envelope(client_envelope_id="env-round5-note", object_id=note_id)
+    )
+    historical_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-round5-history",
+            _organization_envelope(
+                client_envelope_id="env-round5-keyword-v1",
+                object_id=keyword_id,
+                payload_hash="sha256:round5-keyword-v1",
+            ),
+            _keyword_link_envelope(
+                note_id=note_id,
+                keyword_id=keyword_id,
+                client_envelope_id="env-round5-keyword-link",
+            ),
+        )
+    )
+    latest = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-round5-keyword-v2",
+            object_id=keyword_id,
+            object_revision=2,
+            base_server_cursor=historical_group[0].server_cursor,
+            base_object_revision=1,
+            base_object_hash=historical_group[0].payload_hash,
+            payload={"keyword": "Synthetic keyword v2"},
+            payload_hash="sha256:round5-keyword-v2",
+        )
+    )
+    local_inventory = [
+        {
+            "dataset_id": "dataset-1",
+            "domain": "notes.keyword",
+            "object_id": keyword_id,
+            "object_revision": 2,
+            "object_hash": latest.payload_hash,
+            "deleted": False,
+        }
+    ]
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+        local_inventory=local_inventory,
+    )
+
+    assert [item.server_cursor for item in preview.ordered_actions] == [
+        note.server_cursor,
+        historical_group[0].server_cursor,
+        historical_group[1].server_cursor,
+        latest.server_cursor,
+    ]
+    assert [item.action for item in preview.ordered_actions] == [
+        "apply",
+        "apply",
+        "apply",
+        "apply",
+    ]
+    assert [item.dataset_id for item in preview.ordered_actions] == ["dataset-1"] * 4
+    assert [
+        (item.mutation_group_id, item.mutation_step, item.mutation_step_count)
+        for item in preview.ordered_actions[1:3]
+    ] == [
+        ("server-origin-round5-history", 0, 2),
+        ("server-origin-round5-history", 1, 2),
+    ]
+    assert preview.object_conflicts == []
+    assert [
+        (item.server_cursor, item.action)
+        for item in preview.safe_applies
+        if item.domain == "notes.keyword"
+    ] == [
+        (historical_group[0].server_cursor, "apply"),
+        (latest.server_cursor, "apply"),
+    ]
+
+    simulated_cursor: dict[tuple[str, str, str], int | None] = {}
+    for item in preview.ordered_actions:
+        key = (item.dataset_id, item.domain, item.object_id)
+        simulated_cursor[key] = None if item.action == "tombstone" else item.server_cursor
+    assert simulated_cursor[("dataset-1", "notes.keyword", keyword_id)] == latest.server_cursor
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "domains": ["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+            "local_inventory": local_inventory,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["object_conflicts"] == []
+    assert [
+        (item["dataset_id"], item["action"], item["server_cursor"])
+        for item in body["ordered_actions"]
+    ] == [
+        ("dataset-1", "apply", note.server_cursor),
+        ("dataset-1", "apply", historical_group[0].server_cursor),
+        ("dataset-1", "apply", historical_group[1].server_cursor),
+        ("dataset-1", "apply", latest.server_cursor),
+    ]
+    assert "Synthetic keyword v2" not in str(body["ordered_actions"])
+
+    divergent = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
+        local_inventory=[
+            {
+                "dataset_id": "dataset-1",
+                "domain": "notes.keyword",
+                "object_id": keyword_id,
+                "object_revision": 9,
+                "object_hash": "sha256:divergent-local-keyword",
+                "deleted": False,
+            }
+        ],
+    )
+    assert [
+        item.server_cursor
+        for item in divergent.object_conflicts
+        if item.domain == "notes.keyword"
+    ] == [historical_group[0].server_cursor, latest.server_cursor]
 
 
 def test_tombstone_graph_keeps_unrelated_live_before_latest_tombstone_group(

@@ -515,6 +515,7 @@ class SyncRestoreOrderedAction:
 
     plan_index: int
     action: str
+    dataset_id: str
     domain: SyncDomain
     object_id: str
     operation: SyncOperation
@@ -1809,7 +1810,9 @@ class SyncV2Service:
                 ordered_restore_envelopes = order_restore_envelopes(restore_envelopes)
             except (RestorePlanningError, StoredMutationGroupValidationError) as exc:
                 raise SyncStoreError("sync_restore_plan_invalid") from exc
-            for envelope in ordered_restore_envelopes:
+            restore_fingerprints: list[tuple[int | None, str | None, bool]] = []
+            final_plan_index_by_identity: dict[tuple[SyncDomain, str], int] = {}
+            for plan_index, envelope in enumerate(ordered_restore_envelopes):
                 domain = envelope.domain
                 object_id = envelope.object_id
                 object_state = self.store.get_object_state(dataset.dataset_id, domain, object_id)
@@ -1830,6 +1833,32 @@ class SyncV2Service:
                     if object_state is not None and object_state.latest_server_cursor == envelope.server_cursor
                     else envelope.operation == "tombstone" or envelope.deleted
                 )
+                restore_fingerprints.append((server_revision, server_hash, deleted))
+                final_plan_index_by_identity[(domain, object_id)] = plan_index
+
+            initially_matching_final_keys: set[tuple[str, SyncDomain, str]] = set()
+            for (domain, object_id), plan_index in final_plan_index_by_identity.items():
+                local_item = find_local_inventory_item(
+                    local_index,
+                    dataset_id=dataset.dataset_id,
+                    domain=domain,
+                    object_id=object_id,
+                )
+                server_revision, server_hash, deleted = restore_fingerprints[plan_index]
+                if local_item is not None and local_inventory_matches(
+                    local_item,
+                    object_revision=server_revision,
+                    object_hash=server_hash,
+                    deleted=deleted,
+                ):
+                    initially_matching_final_keys.add(
+                        (dataset.dataset_id, domain, object_id)
+                    )
+
+            for plan_index, envelope in enumerate(ordered_restore_envelopes):
+                domain = envelope.domain
+                object_id = envelope.object_id
+                server_revision, server_hash, deleted = restore_fingerprints[plan_index]
                 local_item = find_local_inventory_item(
                     local_index,
                     dataset_id=dataset.dataset_id,
@@ -1851,6 +1880,7 @@ class SyncV2Service:
                         SyncRestoreOrderedAction(
                             plan_index=len(ordered_actions),
                             action="tombstone",
+                            dataset_id=envelope.dataset_id,
                             domain=domain,
                             object_id=object_id,
                             operation=envelope.operation,
@@ -1894,6 +1924,11 @@ class SyncV2Service:
                     local_item is None
                     or local_matches
                     or inventory_key in planned_inventory_keys
+                    or (
+                        inventory_key in initially_matching_final_keys
+                        and plan_index
+                        < final_plan_index_by_identity[(domain, object_id)]
+                    )
                 ):
                     action = (
                         "noop"
@@ -1908,6 +1943,7 @@ class SyncV2Service:
                         SyncRestoreOrderedAction(
                             plan_index=len(ordered_actions),
                             action="noop" if action == "noop" else "apply",
+                            dataset_id=envelope.dataset_id,
                             domain=domain,
                             object_id=object_id,
                             operation=envelope.operation,
@@ -1968,6 +2004,7 @@ class SyncV2Service:
                     SyncRestoreOrderedAction(
                         plan_index=len(ordered_actions),
                         action="conflict",
+                        dataset_id=envelope.dataset_id,
                         domain=domain,
                         object_id=object_id,
                         operation=envelope.operation,
