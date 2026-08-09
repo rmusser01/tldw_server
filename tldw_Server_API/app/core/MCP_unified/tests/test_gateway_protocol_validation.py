@@ -1001,6 +1001,17 @@ def test_default_worker_target_uses_lightweight_top_level_spawn_module() -> None
     assert manager._worker_target.__module__ == "mcp_unified._schema_worker"  # noqa: SLF001
 
 
+def test_parent_preloads_validator_classes_before_bounded_spawn() -> None:
+    """Windows workers should not pay a cold jsonschema import inside the timeout."""
+
+    api = _validation_api()
+
+    assert {validator.__name__ for validator in api._VALIDATORS.values()} == {  # noqa: SLF001
+        "Draft7Validator",
+        "Draft202012Validator",
+    }
+
+
 @pytest.mark.asyncio
 async def test_schema_keywords_inside_instance_payload_keywords_are_not_traversed() -> None:
     """Annotation payloads named like schema keywords must not consume schema limits."""

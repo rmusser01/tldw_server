@@ -13,6 +13,7 @@ from multiprocessing.connection import Connection
 from typing import Any, Literal, TypeAlias
 from urllib.parse import unquote, urldefrag, urljoin
 
+from jsonschema import Draft7Validator, Draft202012Validator
 from referencing.jsonschema import DRAFT7 as REFERENCING_DRAFT7
 from referencing.jsonschema import DRAFT202012 as REFERENCING_DRAFT202012
 
@@ -28,7 +29,10 @@ SchemaInstanceRole: TypeAlias = Literal["input", "output"]
 _SCHEMA_WORKER_MAX_VERDICT_BYTES = 4_096
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DRAFT_7 = "http://json-schema.org/draft-07/schema#"
-_VALIDATORS = frozenset({_DRAFT_2020_12, _DRAFT_7})
+_VALIDATORS = {
+    _DRAFT_2020_12: Draft202012Validator,
+    _DRAFT_7: Draft7Validator,
+}
 _WORKER_INVALID_CODES = frozenset({"invalid_schema", "schema_validation_failed"})
 _SPECIFICATIONS = {
     _DRAFT_2020_12: REFERENCING_DRAFT202012,
