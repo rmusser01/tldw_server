@@ -260,3 +260,85 @@ status.
   durable prefix state, and resumability. Active paths have no direct-write fallback.
 - No new correctness, security, privacy, compatibility, or Task 9 boundary concern
   remains after the Round 1 review.
+
+## Fix Round 2 — relationship replay and immutable folder status
+
+### Findings verified and fixed
+
+- Relationship relink planning used the mutable current head to decide
+  `restore_intent` before checking an existing request manifest. After the first
+  relink applied, an exact same-key replan therefore lost restore intent and could
+  change the canonical plan.
+- Folder replay chose its dynamic 200/201 result from current projection existence.
+  A path that was preexisting for the first request returned 200, but its exact
+  replay fell through to the route decorator's 201 response.
+
+Relationship planning now accepts the request source and idempotency key, hashes a
+canonical relationship request identity, and resolves a validated stored manifest
+before inspecting the current Sync head. All six exposed note/conversation/
+collection link and unlink routes use this seam; non-exposed folder links use the
+same coordinator API. Same-key relationship drift still raises the stable batch
+idempotency conflict.
+
+`PlannedNotesMutation` now carries an optional dynamic response status. Folder plans
+persist only the safe integer marker `200` or `201` in routing metadata, and manifest
+replay validates and restores that marker. No raw idempotency key or folder path is
+added to routing metadata. Newly created paths remain 201 on exact replay;
+preexisting paths remain 200 on exact replay.
+
+### Round 2 TDD evidence
+
+1. Relationship restore replay:
+   - RED: `1 failed, 21 deselected, 2 warnings in 9.90s`; the coordinator lacked a
+     request-aware relationship planning seam and could only recalculate from the
+     now-active head.
+   - GREEN: `1 passed, 21 deselected, 2 warnings in 9.74s`; note-keyword,
+     conversation-keyword, collection-keyword, and folder-link relinks reuse the
+     stored restore plan with stable object IDs and applied group status. A
+     same-key present/absent drift conflicts.
+2. Existing-folder response replay:
+   - RED: `1 failed, 21 deselected, 2 warnings in 9.91s`; the preexisting-path first
+     response was 200 and its exact replay was 201.
+   - GREEN: `1 passed, 21 deselected, 2 warnings in 11.48s`; preexisting 200 and
+     newly-created 201 statuses are stable across exact replay, different-path drift
+     remains 409, and routing contains only the safe status marker and hashed
+     request identity.
+
+Final Round 2 gates:
+
+```text
+pytest -q -p no:cacheprovider tldw_Server_API/tests/Notes/test_notes_organization_sync_api.py -k direct
+22 passed, 2 warnings in 19.72s
+
+pytest -q -p no:cacheprovider tldw_Server_API/tests/Notes/test_notes_api_integration.py -k "keyword or collection or folder"
+17 passed, 34 deselected, 2 warnings in 10.06s
+
+ruff check <coordinator, direct test>
+All checks passed!
+
+ruff check <legacy notes endpoint>
+Only the same verified baseline I001, BLE001, and F841 findings; Round 2 adds none.
+
+bandit -q <two modified production files>
+exit 0; only the established informational B608 closed-table-map `nosec` warning.
+
+git diff --check
+exit 0
+```
+
+The two pytest warnings are the established Passlib `crypt` and FastAPI lifecycle
+deprecations. No warning affects assertions or exit status.
+
+### Round 2 self-review
+
+- Manifest lookup is still owner-scoped to the authenticated active personal
+  dataset, and occurs before the relationship current-head read.
+- Relationship members, operation, domain, and presence are bound into the hashed
+  fingerprint; plaintext request keys are not persisted.
+- Stored response status accepts only 200 or 201. Missing markers remain compatible
+  with older non-folder manifests; mixed or invalid stored markers fail closed as an
+  idempotency conflict.
+- Planners remain read-only, active Sync has no direct-write fallback, inactive Sync
+  behavior is unchanged, and no Task 9 note compound/merge path changed.
+- No remaining scoped correctness, security, privacy, compatibility, or boundary
+  concern was found.

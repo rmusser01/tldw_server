@@ -37,6 +37,9 @@ from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin import capture_server_origin_mutation
+from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+    SyncServerOriginBatchIdempotencyConflictError,
+)
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
@@ -679,6 +682,11 @@ def test_direct_folder_retry_reuses_full_manifest_after_applied_ancestor(
 
     assert resumed.status_code == 201, resumed.text
     assert resumed.json()["path"] == "Root/Child"
+    created_replay = client.post(
+        "/api/v1/notes/folders", headers=headers, json=body
+    )
+    assert created_replay.status_code == 201, created_replay.text
+    assert created_replay.json() == resumed.json()
     resumed_group = sync_service.store.list_mutation_group(
         dataset_id, group[0].mutation_group_id or ""
     )
@@ -689,15 +697,38 @@ def test_direct_folder_retry_reuses_full_manifest_after_applied_ancestor(
     existing = client.post(
         "/api/v1/notes/folders", headers=existing_headers, json=body
     )
+    existing_replay = client.post(
+        "/api/v1/notes/folders", headers=existing_headers, json=body
+    )
     drift = client.post(
         "/api/v1/notes/folders",
         headers=existing_headers,
         json={"path": "Root/Other"},
     )
     assert existing.status_code == 200, existing.text
+    assert existing_replay.status_code == 200, existing_replay.text
+    assert existing_replay.json() == existing.json()
     assert drift.status_code == 409
     assert drift.json()["detail"]["error_code"] == (
         "sync_server_origin_batch_idempotency_conflict"
+    )
+
+    direct = [
+        item
+        for item in sync_service.store.list_envelopes_after(
+            dataset_id, 0, domains=["notes.folder"], limit=20
+        )
+        if item.routing_metadata.get("source") == "notes-api"
+    ]
+    assert {
+        item.routing_metadata["notes_organization_response_status"]
+        for item in direct
+    } == {200, 201}
+    assert all(
+        "Root/Child" not in repr(item.routing_metadata)
+        and "folder-prefix-resume" not in repr(item.routing_metadata)
+        and "folder-existing-request" not in repr(item.routing_metadata)
+        for item in direct
     )
 
 
@@ -997,15 +1028,62 @@ def test_direct_relationship_relink_restores_current_tombstones(
             idempotency_key=f"relationship-unlink-{index}",
         )
 
-        relinked = coordinator.plan_relationship(domain, members, True)
+        relink_key = f"relationship-relink-{index}"
+        relinked = coordinator.plan_relationship(
+            domain,
+            members,
+            True,
+            source="relationship-restore-test",
+            idempotency_key=relink_key,
+        )
 
-        assert relinked.steps[0].routing_metadata == {"restore_intent": True}
-        coordinator.capture(
+        assert relinked.steps[0].routing_metadata["restore_intent"] is True
+        first_result = coordinator.capture(
             steps=relinked.steps,
             source="relationship-restore-test",
-            idempotency_key=f"relationship-relink-{index}",
+            idempotency_key=relink_key,
         )
         assert relinked.load_result() is True
+
+        replayed = coordinator.plan_relationship(
+            domain,
+            members,
+            True,
+            source="relationship-restore-test",
+            idempotency_key=relink_key,
+        )
+        assert [
+            (step.domain, step.operation, step.object_id, step.payload)
+            for step in replayed.steps
+        ] == [
+            (step.domain, step.operation, step.object_id, step.payload)
+            for step in relinked.steps
+        ]
+        assert replayed.steps[0].routing_metadata["restore_intent"] is True
+        assert replayed.steps[0].routing_metadata[
+            "notes_organization_request_fingerprint"
+        ] == relinked.steps[0].routing_metadata[
+            "notes_organization_request_fingerprint"
+        ]
+        replay_result = coordinator.capture(
+            steps=replayed.steps,
+            source="relationship-restore-test",
+            idempotency_key=relink_key,
+        )
+        assert [item.object_id for item in replay_result.envelopes] == [
+            item.object_id for item in first_result.envelopes
+        ]
+        assert {item.apply_status for item in replay_result.envelopes} == {"applied"}
+        assert replayed.load_result() is True
+
+        with pytest.raises(SyncServerOriginBatchIdempotencyConflictError):
+            coordinator.plan_relationship(
+                domain,
+                members,
+                False,
+                source="relationship-restore-test",
+                idempotency_key=relink_key,
+            )
 
 
 def test_direct_update_and_delete_exact_requests_replay_before_mutable_preconditions(

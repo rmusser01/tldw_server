@@ -1860,14 +1860,18 @@ async def create_note_folder(
                 request_fingerprint=request_fingerprint,
                 result_domain="notes.folder",
             )
-            replayed = plan is not None
             if plan is None:
-                plan = coordinator.bind_request(
-                    coordinator.plan_folder_path(
-                        normalized_path,
-                        idempotency_key=request_key,
+                plan = coordinator.bind_response_status(
+                    coordinator.bind_request(
+                        coordinator.plan_folder_path(
+                            normalized_path,
+                            idempotency_key=request_key,
+                        ),
+                        request_fingerprint,
                     ),
-                    request_fingerprint,
+                    status.HTTP_200_OK
+                    if existing is not None
+                    else status.HTTP_201_CREATED,
                 )
             folder = _capture_notes_organization_plan(
                 coordinator,
@@ -1876,7 +1880,7 @@ async def create_note_folder(
                 source="notes-api",
             )
             folder_response = NoteFolderResponse.model_validate(folder)
-            if existing is not None and not replayed:
+            if plan.response_status == status.HTTP_200_OK:
                 return JSONResponse(
                     status_code=status.HTTP_200_OK,
                     content=jsonable_encoder(folder_response),
@@ -3014,6 +3018,8 @@ async def link_collection_to_keyword_endpoint(
                     "keyword_sync_id": str(keyword["sync_id"]),
                 },
                 True,
+                source="notes-api",
+                idempotency_key=idempotency_key,
             )
             _capture_notes_organization_plan(
                 coordinator,
@@ -3075,6 +3081,8 @@ async def unlink_collection_from_keyword_endpoint(
                     "keyword_sync_id": str(keyword["sync_id"]),
                 },
                 False,
+                source="notes-api",
+                idempotency_key=idempotency_key,
             )
             present = _capture_notes_organization_plan(
                 coordinator,
@@ -3266,6 +3274,8 @@ async def link_conversation_to_keyword_endpoint(
                     "keyword_sync_id": str(keyword["sync_id"]),
                 },
                 True,
+                source="notes-api",
+                idempotency_key=idempotency_key,
             )
             _capture_notes_organization_plan(
                 coordinator,
@@ -3328,6 +3338,8 @@ async def unlink_conversation_from_keyword_endpoint(
                     "keyword_sync_id": str(keyword["sync_id"]),
                 },
                 False,
+                source="notes-api",
+                idempotency_key=idempotency_key,
             )
             present = _capture_notes_organization_plan(
                 coordinator,
@@ -5464,6 +5476,8 @@ async def link_note_to_keyword_endpoint(
                     "keyword_sync_id": str(keyword_data["sync_id"]),
                 },
                 True,
+                source="notes-api",
+                idempotency_key=idempotency_key,
             )
             _capture_notes_organization_plan(
                 coordinator,
@@ -5527,6 +5541,8 @@ async def unlink_note_from_keyword_endpoint(
                     "keyword_sync_id": str(keyword_data["sync_id"]),
                 },
                 False,
+                source="notes-api",
+                idempotency_key=idempotency_key,
             )
             present = _capture_notes_organization_plan(
                 coordinator,

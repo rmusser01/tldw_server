@@ -40,6 +40,7 @@ _RESOURCE_TABLES: dict[SyncDomain, tuple[str, str]] = {
     "notes.folder": ("note_folders", "name"),
 }
 _REQUEST_FINGERPRINT_KEY = "notes_organization_request_fingerprint"
+_RESPONSE_STATUS_KEY = "notes_organization_response_status"
 
 
 class NotesOrganizationDomainsIncompleteError(SyncStoreError):
@@ -96,6 +97,7 @@ class PlannedNotesMutation:
 
     steps: tuple[ServerOriginMutationStep, ...]
     load_result: Callable[[], object]
+    response_status: int | None = None
 
 
 @dataclass(slots=True)
@@ -196,6 +198,31 @@ class NotesOrganizationCoordinator:
                 for step in plan.steps
             ),
             load_result=plan.load_result,
+            response_status=plan.response_status,
+        )
+
+    @staticmethod
+    def bind_response_status(
+        plan: PlannedNotesMutation,
+        response_status: int,
+    ) -> PlannedNotesMutation:
+        """Persist a safe immutable dynamic response status with a plan."""
+
+        if response_status not in {200, 201}:
+            raise InputError("Unsupported Notes organization response status")
+        return PlannedNotesMutation(
+            steps=tuple(
+                replace(
+                    step,
+                    routing_metadata={
+                        **dict(step.routing_metadata),
+                        _RESPONSE_STATUS_KEY: response_status,
+                    },
+                )
+                for step in plan.steps
+            ),
+            load_result=plan.load_result,
+            response_status=response_status,
         )
 
     def replay_request_plan(
@@ -233,6 +260,24 @@ class NotesOrganizationCoordinator:
                     idempotency_key=normalized_key,
                 )
             )
+        response_statuses = {
+            step.routing_metadata.get(_RESPONSE_STATUS_KEY) for step in manifest
+        }
+        if response_statuses == {None}:
+            response_status = None
+        elif len(response_statuses) == 1 and next(iter(response_statuses)) in {
+            200,
+            201,
+        }:
+            response_status = int(next(iter(response_statuses)))
+        else:
+            raise SyncServerOriginBatchIdempotencyConflictError(
+                server_origin_mutation_batch_group_id(
+                    dataset_id=dataset.dataset_id,
+                    source=source,
+                    idempotency_key=normalized_key,
+                )
+            )
         if result_domain is None:
             def loader() -> object:
                 return None
@@ -259,7 +304,11 @@ class NotesOrganizationCoordinator:
                     return self._load_resource_row(
                         result_domain, result_step.object_id
                     )
-        return PlannedNotesMutation(steps=manifest, load_result=loader)
+        return PlannedNotesMutation(
+            steps=manifest,
+            load_result=loader,
+            response_status=response_status,
+        )
 
     def plan_keyword_create(
         self,
@@ -456,6 +505,9 @@ class NotesOrganizationCoordinator:
         domain: SyncDomain,
         members: Mapping[str, str],
         present: bool,
+        *,
+        source: str | None = None,
+        idempotency_key: str | None = None,
     ) -> PlannedNotesMutation:
         """Plan a deterministic relationship upsert or tombstone."""
 
@@ -473,6 +525,27 @@ class NotesOrganizationCoordinator:
         except KeyError as exc:
             raise InputError("Organization relationship members are incomplete") from exc
         object_id = organization_link_id(domain, identity_members)
+        request_fingerprint: str | None = None
+        if source is not None:
+            request_fingerprint = self.request_fingerprint(
+                "relationship.set",
+                {
+                    "domain": domain,
+                    "members": {
+                        name: payload[name] for name in member_order[domain]
+                    },
+                    "present": present,
+                },
+            )
+            replay = self.replay_request_plan(
+                source=source,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                result_domain=domain,
+                relationship_result=True,
+            )
+            if replay is not None:
+                return replay
         routing_metadata: dict[str, object] = {}
         if present:
             dataset = self.active_dataset()
@@ -492,10 +565,13 @@ class NotesOrganizationCoordinator:
             payload=payload,
             routing_metadata=routing_metadata,
         )
-        return PlannedNotesMutation(
+        plan = PlannedNotesMutation(
             steps=(step,),
             load_result=lambda: self._relationship_present(domain, object_id),
         )
+        if request_fingerprint is not None:
+            return self.bind_request(plan, request_fingerprint)
+        return plan
 
     def plan_collection_with_keywords(
         self,
