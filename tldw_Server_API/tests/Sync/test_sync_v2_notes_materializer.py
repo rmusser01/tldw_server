@@ -792,6 +792,27 @@ def test_restore_intent_upsert_cannot_create_a_missing_note(
     assert chacha_db.get_note_by_id("note-1", include_deleted=True) is None
 
 
+def test_remote_ingestion_version_precondition_is_ignored(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    result = _push_one(
+        sync_service,
+        _note_envelope(
+            routing_metadata={
+                "source": "notes-ingestion",
+                "origin": "server",
+                "server_device_id": "server-origin",
+                "server_owner_user_id": "server-user-1",
+                "notes_ingestion_expected_product_version": 999,
+            },
+        ),
+    )
+
+    assert [item.client_envelope_id for item in result.accepted] == ["env-create"]
+    assert chacha_db.get_note_by_id("note-1")["title"] == "Trip notes"
+
+
 def test_apply_failure_marks_accepted_envelope_failed_and_replayable(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,

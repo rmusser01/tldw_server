@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import sqlite3
 from typing import TYPE_CHECKING, Any
@@ -396,6 +398,48 @@ class KeywordStore:
                 "relationships": tuple(relationships),
                 "has_unsynchronized_dependency": bool(flashcard_dependency),
             }
+
+    @staticmethod
+    def _relationship_set_hash(relationships: list[tuple[str, str]]) -> str:
+        encoded = json.dumps(
+            sorted(relationships),
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @classmethod
+    def empty_synchronized_relationship_set_hash(cls) -> str:
+        """Return the opaque token for a keyword with no dependent relationships."""
+
+        return cls._relationship_set_hash([])
+
+    def synchronized_relationship_set_hash(
+        self,
+        keyword_id: int,
+        *,
+        conn: Any | None = None,
+    ) -> str:
+        """Hash all synchronized and unsynchronized keyword relationships."""
+
+        def _locked(connection: Any) -> str:
+            relationships: list[tuple[str, str]] = []
+            for tag, table, column in (
+                ("note", "note_keywords", "note_id"),
+                ("conversation", "conversation_keywords", "conversation_id"),
+                ("collection", "collection_keywords", "collection_id"),
+                ("flashcard", "flashcard_keywords", "card_id"),
+            ):
+                rows = connection.execute(
+                    f"SELECT {column} FROM {table} WHERE keyword_id = ?",  # nosec B608
+                    (keyword_id,),
+                ).fetchall()
+                relationships.extend((tag, str(row[column])) for row in rows)
+            return self._relationship_set_hash(relationships)
+
+        if conn is not None:
+            return _locked(conn)
+        with self._db.transaction() as transaction:
+            return _locked(transaction)
 
     def merge_keywords(
         self,

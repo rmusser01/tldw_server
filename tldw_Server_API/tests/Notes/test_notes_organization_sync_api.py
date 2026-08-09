@@ -45,6 +45,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import capture_server_origin
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     ServerOriginMutationStep,
     SyncServerOriginBatchIdempotencyConflictError,
+    SyncServerOriginBatchMaterializationError,
     server_origin_mutation_batch_group_id,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
@@ -2398,6 +2399,128 @@ def test_inline_folder_omission_preserves_and_empty_list_removes_relationships(
     assert removed.json()["folders"] == []
 
 
+def test_inline_manual_folder_intent_survives_final_source_removal(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    note_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/notes/",
+        json={
+            "id": note_id,
+            "title": "Source folder",
+            "content": "Body",
+            "folder_paths": ["Sources/Shared"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    folder = chacha_db.get_note_folder_by_path("Sources/Shared")
+    assert folder is not None
+    chacha_db.sync_note_folders(note_id, [])
+    chacha_db.sync_note_source_folders(note_id, 41, [folder["path"]])
+
+    saved = client.patch(
+        f"/api/v1/notes/{note_id}",
+        headers={
+            "expected-version": str(created.json()["version"]),
+            "Idempotency-Key": "inline-manual-over-source",
+        },
+        json={"folder_paths": [folder["path"]]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    with chacha_db.transaction() as conn:
+        manual_count = conn.execute(
+            "SELECT COUNT(*) FROM note_folder_memberships "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0]
+    assert manual_count == 1
+
+    chacha_db.sync_note_source_folders(note_id, 41, [])
+
+    assert [row["path"] for row in chacha_db.get_note_folders_for_note(note_id)] == [
+        "Sources",
+        "Sources/Shared",
+    ]
+
+
+def test_source_folder_read_set_race_preserves_concurrent_manual_membership(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    note_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/notes/",
+        json={
+            "id": note_id,
+            "title": "Source race",
+            "content": "Body",
+            "folder_paths": ["Race"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    folder = chacha_db.get_note_folder_by_path("Race")
+    assert folder is not None
+    chacha_db.sync_note_folders(note_id, [])
+    coordinator = NotesOrganizationCoordinator(
+        service=sync_service,
+        user_id="user-1",
+        note_db=chacha_db,
+    )
+    source_add = coordinator.plan_source_folder_change(
+        note_id=note_id,
+        source_id=73,
+        folder_id=int(folder["id"]),
+        present=True,
+    )
+    coordinator.capture(
+        steps=source_add.steps,
+        source="notes-ingestion",
+        idempotency_key="source-race-add",
+    )
+
+    stale_remove = coordinator.plan_source_folder_change(
+        note_id=note_id,
+        source_id=73,
+        folder_id=int(folder["id"]),
+        present=False,
+    )
+    provenance = stale_remove.steps[0].routing_metadata[
+        "notes_folder_origin_provenance"
+    ]
+    assert set(provenance) == {"operation", "source_id", "read_set_hash"}
+    assert len(str(provenance["read_set_hash"])) == 64
+    assert set(str(provenance["read_set_hash"])) <= set("0123456789abcdef")
+    assert "Race" not in repr(stale_remove.steps[0].routing_metadata)
+    chacha_db.sync_note_folders(note_id, [folder["path"]])
+
+    with pytest.raises(SyncServerOriginBatchMaterializationError):
+        coordinator.capture(
+            steps=stale_remove.steps,
+            source="notes-ingestion",
+            idempotency_key="source-race-remove",
+        )
+
+    with chacha_db.transaction() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_memberships "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
+            (note_id, 73, folder["id"]),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_sync_suppressions "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 0
+
+
 @pytest.mark.parametrize("folder_paths", [["/private/note"], ["C:\\private\\note"], "a,b"])
 def test_inline_folder_paths_reject_absolute_or_comma_delimited_input(
     client: TestClient,
@@ -2583,6 +2706,64 @@ def test_merge_sync_rejects_dormant_flashcard_dependency_before_append(
     )
     assert _notes_api_group(sync_service, "sync-merge-flashcard") == []
     assert chacha_db.get_keyword_by_id(source["id"]) is not None
+
+
+def test_merge_relationship_set_race_blocks_final_source_tombstone(
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+) -> None:
+    source, target = _setup_sync_merge(chacha_db, sync_service, suffix="race")
+    coordinator = NotesOrganizationCoordinator(sync_service, chacha_db, "user-1")
+    stale_merge = coordinator.plan_keyword_merge(
+        source_keyword_id=int(source["id"]),
+        target_keyword_id=int(target["id"]),
+        expected_source_version=int(source["version"]),
+        expected_target_version=int(target["version"]),
+    )
+    final_guard = stale_merge.steps[-1].routing_metadata[
+        "notes_keyword_merge_precondition"
+    ]
+    assert set(final_guard) == {"relationship_set_hash"}
+    assert len(str(final_guard["relationship_set_hash"])) == 64
+    assert set(str(final_guard["relationship_set_hash"])) <= set(
+        "0123456789abcdef"
+    )
+    late_note_id = str(uuid.uuid4())
+    capture_server_origin_mutation(
+        sync_service,
+        user_id="user-1",
+        domain="notes.note",
+        operation="upsert",
+        object_id=late_note_id,
+        payload={"title": "Late merge link", "content": "Body"},
+        source="sync-merge-race-late-note",
+    )
+    late_link = coordinator.plan_relationship(
+        "notes.keyword_link",
+        {
+            "subject_type": "note",
+            "subject_id": late_note_id,
+            "keyword_sync_id": str(source["sync_id"]),
+        },
+        True,
+    )
+    coordinator.capture(
+        steps=late_link.steps,
+        source="sync-merge-race-late-link",
+        idempotency_key="late-link",
+    )
+
+    with pytest.raises(SyncServerOriginBatchMaterializationError):
+        coordinator.capture(
+            steps=stale_merge.steps,
+            source="notes-api",
+            idempotency_key="sync-merge-race",
+        )
+
+    assert chacha_db.get_keyword_by_id(source["id"]) is not None
+    assert [
+        row["sync_id"] for row in chacha_db.get_keywords_for_note(late_note_id)
+    ] == [source["sync_id"]]
 
 
 def test_merge_sync_interruption_resumes_before_source_keyword_tombstone(

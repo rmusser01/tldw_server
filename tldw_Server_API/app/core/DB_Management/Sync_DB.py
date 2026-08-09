@@ -280,6 +280,8 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+    ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
@@ -644,6 +646,8 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+    ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
@@ -6262,6 +6266,10 @@ class SyncDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
                 ON sync_envelopes(dataset_id, domain, entity_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+                ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence)
             """,
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step

@@ -40,6 +40,7 @@ _RESOURCE_DOMAINS = frozenset(
 )
 _ERROR_CODE = "notes_organization_projection_failed"
 _FOLDER_PROVENANCE_KEY = "notes_folder_origin_provenance"
+_KEYWORD_MERGE_PRECONDITION_KEY = "notes_keyword_merge_precondition"
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
 
 
@@ -59,7 +60,10 @@ def _trusted_folder_origin_provenance(
     ):
         return None
     raw = routing.get(_FOLDER_PROVENANCE_KEY)
-    if not isinstance(raw, Mapping) or set(raw) != {"operation", "source_id"}:
+    if not isinstance(raw, Mapping) or set(raw) not in (
+        {"operation", "source_id"},
+        {"operation", "source_id", "read_set_hash"},
+    ):
         return None
     operation = raw.get("operation")
     source_id = raw.get("source_id")
@@ -67,7 +71,49 @@ def _trusted_folder_origin_provenance(
         return None
     if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
         return None
-    return {"operation": operation, "source_id": source_id}
+    provenance: dict[str, object] = {"operation": operation, "source_id": source_id}
+    read_set_hash = raw.get("read_set_hash")
+    if read_set_hash is not None:
+        if (
+            not isinstance(read_set_hash, str)
+            or len(read_set_hash) != 64
+            or any(character not in "0123456789abcdef" for character in read_set_hash)
+        ):
+            return None
+        provenance["read_set_hash"] = read_set_hash
+    return provenance
+
+
+def _trusted_keyword_merge_precondition(
+    envelope: SyncEnvelope,
+    note_db: CharactersRAGDB,
+) -> str | None:
+    """Return an owner-bound local merge-final relationship token."""
+
+    routing = envelope.routing_metadata
+    if (
+        envelope.domain != "notes.keyword"
+        or envelope.operation != "tombstone"
+        or envelope.device_id != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("origin") != "server"
+        or routing.get("server_device_id") != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("server_owner_user_id") != str(note_db.client_id)
+    ):
+        return None
+    raw = routing.get(_KEYWORD_MERGE_PRECONDITION_KEY)
+    if not isinstance(raw, Mapping) or set(raw) != {"relationship_set_hash"}:
+        return None
+    relationship_set_hash = raw.get("relationship_set_hash")
+    if (
+        not isinstance(relationship_set_hash, str)
+        or len(relationship_set_hash) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in relationship_set_hash
+        )
+    ):
+        return None
+    return relationship_set_hash
 
 
 @dataclass(slots=True)
@@ -133,6 +179,9 @@ class NotesOrganizationMaterializer:
                     object_id=envelope.object_id,
                     operation=envelope.operation,
                     payload=payload,
+                    merge_relationship_set_hash=(
+                        _trusted_keyword_merge_precondition(envelope, self.note_db)
+                    ),
                 )
             else:
                 projection.apply_relationship(

@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     ServerOriginMutationStep,
 )
 
+_INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
+
 
 def _title_from_text(relative_path: str, text: str) -> str:
     for line in text.splitlines():
@@ -109,6 +111,28 @@ def _capture_ingestion_note(
     request_key: str,
     expected_version: int | None = None,
 ) -> None:
+    request_fingerprint = coordinator.request_fingerprint(
+        "ingestion.note.upsert",
+        {
+            "note_id": note_id,
+            "title": title,
+            "content": content,
+            "expected_version": expected_version,
+        },
+    )
+    replay = coordinator.replay_request_plan(
+        source="notes-ingestion",
+        idempotency_key=request_key,
+        request_fingerprint=request_fingerprint,
+        result_domain="notes.note",
+    )
+    if replay is not None:
+        _capture_source_folder_steps(
+            coordinator,
+            steps=replay.steps,
+            request_key=request_key,
+        )
+        return
     existing = coordinator.note_db.get_note_by_id(note_id) or {}
     current_version = existing.get("version")
     if (
@@ -135,11 +159,17 @@ def _capture_ingestion_note(
                 "conversation_id": existing.get("conversation_id"),
                 "message_id": existing.get("message_id"),
             },
+            routing_metadata={
+                _INGESTION_EXPECTED_VERSION_KEY: (
+                    int(current_version) if current_version is not None else 0
+                )
+            },
             stable_key=request_key,
         ),
         keywords=None,
         folder_paths=None,
     )
+    plan = coordinator.bind_request(plan, request_fingerprint)
     _capture_source_folder_steps(
         coordinator,
         steps=plan.steps,
@@ -211,6 +241,14 @@ def _sync_source_folders_with_coordinator(
             present=present,
         )
         if plan.steps:
+            provenance = plan.steps[0].routing_metadata.get(
+                "notes_folder_origin_provenance", {}
+            )
+            read_set_hash = (
+                provenance.get("read_set_hash")
+                if isinstance(provenance, dict)
+                else None
+            )
             _capture_source_folder_steps(
                 coordinator,
                 steps=plan.steps,
@@ -221,6 +259,7 @@ def _sync_source_folders_with_coordinator(
                     folder_id,
                     present,
                     note_version,
+                    read_set_hash,
                 ),
             )
         else:
@@ -274,6 +313,7 @@ def apply_notes_change(
     if binding:
         note_id = str(binding["note_id"])
         if coordinator is not None:
+            expected_version = _expected_version(binding)
             _capture_ingestion_note(
                 coordinator,
                 note_id=note_id,
@@ -285,8 +325,9 @@ def apply_notes_change(
                     note_id,
                     title,
                     body,
+                    expected_version,
                 ),
-                expected_version=_expected_version(binding),
+                expected_version=expected_version,
             )
         else:
             notes_db.update_note(

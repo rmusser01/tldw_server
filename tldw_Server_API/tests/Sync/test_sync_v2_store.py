@@ -569,6 +569,12 @@ def test_sync_envelope_mutation_group_schema_contains_m1_columns_and_indexes(
         row["name"]
         for row in sync_store.db.execute("PRAGMA index_list(sync_envelopes)").rows
     }
+    history_index_columns = [
+        row["name"]
+        for row in sync_store.db.execute(
+            "PRAGMA index_info(idx_sync_envelopes_dataset_domain_entity_status_sequence)"
+        ).rows
+    ]
 
     assert {
         "client_sequence",
@@ -612,7 +618,15 @@ def test_sync_envelope_mutation_group_schema_contains_m1_columns_and_indexes(
         "idx_sync_envelopes_failed_apply",
         "uq_sync_envelopes_dataset_mutation_group_step",
         "idx_sync_envelopes_dataset_mutation_group_step",
+        "idx_sync_envelopes_dataset_domain_entity_status_sequence",
     }.issubset(indexes)
+    assert history_index_columns == [
+        "dataset_id",
+        "domain",
+        "entity_id",
+        "status",
+        "server_sequence",
+    ]
 
 
 def test_sync_database_migrates_pre_m1_sqlite_schema_for_mutation_groups_before_index_creation(
@@ -668,6 +682,7 @@ def test_sync_database_migrates_pre_m1_sqlite_schema_for_mutation_groups_before_
     assert "idx_sync_envelopes_failed_apply" in indexes
     assert "uq_sync_envelopes_dataset_mutation_group_step" in indexes
     assert "idx_sync_envelopes_dataset_mutation_group_step" in indexes
+    assert "idx_sync_envelopes_dataset_domain_entity_status_sequence" in indexes
 
 
 def test_sync_timestamps_are_timezone_aware_utc():

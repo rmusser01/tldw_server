@@ -44,6 +44,7 @@ _RESPONSE_STATUS_KEY = "notes_organization_response_status"
 _NOTE_RESPONSE_KEY = "notes_organization_note_response"
 _FOLDER_PROVENANCE_KEY = "notes_folder_origin_provenance"
 _KEYWORD_MERGE_RESPONSE_KEY = "notes_keyword_merge_response"
+_KEYWORD_MERGE_PRECONDITION_KEY = "notes_keyword_merge_precondition"
 
 
 class NotesOrganizationDomainsIncompleteError(SyncStoreError):
@@ -716,6 +717,11 @@ class NotesOrganizationCoordinator:
             if existing_note is not None
             else []
         )
+        manual_folder_ids = (
+            NotesOrganizationSyncStore(self.note_db).manual_folder_sync_ids(note_id)
+            if existing_note is not None
+            else set()
+        )
         result_keyword_ids = [str(row["sync_id"]) for row in current_keywords]
         result_folder_ids = [str(row["sync_id"]) for row in current_folders]
         steps: list[ServerOriginMutationStep] = [note_step]
@@ -832,7 +838,7 @@ class NotesOrganizationCoordinator:
                     ).steps
                 )
             for _, sync_id in desired_folders:
-                if sync_id in current_folder_ids:
+                if sync_id in current_folder_ids and sync_id in manual_folder_ids:
                     continue
                 steps.extend(
                     self.plan_relationship(
@@ -883,9 +889,9 @@ class NotesOrganizationCoordinator:
 
         folder = self._resource_row("notes.folder", folder_id)
         folder_sync_id = str(folder["sync_id"])
-        transition = NotesOrganizationSyncStore(
+        transition, read_set_hash = NotesOrganizationSyncStore(
             self.note_db
-        ).source_folder_transition(
+        ).source_folder_transition_plan(
             note_id=note_id,
             source_id=source_id,
             folder_sync_id=folder_sync_id,
@@ -901,6 +907,7 @@ class NotesOrganizationCoordinator:
         provenance = {
             "operation": "source_upsert" if present else "source_delete",
             "source_id": source_id,
+            "read_set_hash": read_set_hash,
         }
         return PlannedNotesMutation(
             steps=tuple(
@@ -990,6 +997,13 @@ class NotesOrganizationCoordinator:
                 operation="tombstone",
                 object_id=source_sync_id,
                 payload={},
+                routing_metadata={
+                    _KEYWORD_MERGE_PRECONDITION_KEY: {
+                        "relationship_set_hash": (
+                            self.note_db.keyword_store.empty_synchronized_relationship_set_hash()
+                        )
+                    }
+                },
             )
         )
         response: dict[str, object] = {

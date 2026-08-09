@@ -137,18 +137,8 @@ def test_notes_sink_syncs_source_managed_folders_from_relative_path(fake_notes_d
     ]
 
 
-@pytest.mark.unit
-def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
-    tmp_path,
-    monkeypatch,
-):
-    from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
-        NotesOrganizationSyncStore,
-    )
-    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-        CharactersRAGDB,
-        ConflictError,
-    )
+def _active_sync_stack(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
     from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
     from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
@@ -228,6 +218,21 @@ def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
         lambda user_id: service,
         raising=False,
     )
+    return notes_db, sync_store, service
+
+
+@pytest.mark.unit
+def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+        NotesOrganizationSyncStore,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
+
+    notes_db, sync_store, _service = _active_sync_stack(tmp_path, monkeypatch)
 
     def _direct_source_folder_write(*args, **kwargs):
         raise AssertionError("active-ready Sync must not use the legacy direct path")
@@ -264,11 +269,13 @@ def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
         if envelope.domain == "notes.folder_link"
     ]
     assert len(folder_links) == 2
-    assert all(
-        envelope.routing_metadata["notes_folder_origin_provenance"]
-        == {"operation": "source_upsert", "source_id": 91}
-        for envelope in folder_links
-    )
+    for envelope in folder_links:
+        folder_provenance = envelope.routing_metadata[
+            "notes_folder_origin_provenance"
+        ]
+        assert folder_provenance["operation"] == "source_upsert"
+        assert folder_provenance["source_id"] == 91
+        assert len(folder_provenance["read_set_hash"]) == 64
     assert len(NotesOrganizationSyncStore(notes_db).snapshot().relationships) == 2
 
     envelope_count = len(sync_store.list_envelopes_after("dataset-1", 0))
@@ -289,4 +296,104 @@ def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
             policy="canonical",
         )
     assert len(sync_store.list_envelopes_after("dataset-1", 0)) == envelope_count
+    notes_db.close_connection()
+
+
+@pytest.mark.unit
+def test_notes_sink_active_ready_duplicate_unbound_delivery_replays_manifest(
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
+
+    notes_db, sync_store, _service = _active_sync_stack(tmp_path, monkeypatch)
+    change = {
+        "event_type": "created",
+        "relative_path": "a.md",
+        "text": "# A\n\nBody",
+        "source_id": 91,
+    }
+
+    first = notes_sink.apply_notes_change(
+        notes_db,
+        binding=None,
+        change=change,
+        policy="canonical",
+    )
+    envelope_count = len(sync_store.list_envelopes_after("dataset-1", 0))
+    replay = notes_sink.apply_notes_change(
+        notes_db,
+        binding=None,
+        change=change,
+        policy="canonical",
+    )
+
+    assert replay == first
+    assert len(sync_store.list_envelopes_after("dataset-1", 0)) == envelope_count
+    assert notes_db.get_note_by_id(str(first["note_id"]))["version"] == 1
+    notes_db.close_connection()
+
+
+@pytest.mark.unit
+def test_notes_sink_active_ready_version_change_after_precheck_does_not_overwrite(
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
+    from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+        SyncServerOriginBatchMaterializationError,
+    )
+
+    notes_db, _sync_store, service = _active_sync_stack(tmp_path, monkeypatch)
+    created = notes_sink.apply_notes_change(
+        notes_db,
+        binding=None,
+        change={
+            "event_type": "created",
+            "relative_path": "race.md",
+            "text": "# Before\n\nBody",
+            "source_id": 91,
+        },
+        policy="canonical",
+    )
+    note_id = str(created["note_id"])
+    delegate = service.materializers["notes.note"]
+
+    class _ConcurrentNoteMutation:
+        def __init__(self) -> None:
+            self.mutated = False
+
+        def apply(self, envelope, *, store):
+            if envelope.object_id == note_id and not self.mutated:
+                self.mutated = True
+                notes_db.update_note(
+                    note_id,
+                    {"title": "Concurrent", "content": "Preserve me"},
+                    expected_version=1,
+                )
+            return delegate.apply(envelope, store=store)
+
+    service.materializers["notes.note"] = _ConcurrentNoteMutation()
+
+    with pytest.raises(SyncServerOriginBatchMaterializationError):
+        notes_sink.apply_notes_change(
+            notes_db,
+            binding={
+                "note_id": note_id,
+                "current_version": 1,
+                "sync_status": "sync_managed",
+            },
+            change={
+                "event_type": "changed",
+                "relative_path": "race.md",
+                "text": "# Upstream\n\nOverwrite",
+                "source_id": 91,
+            },
+            policy="canonical",
+        )
+
+    current = notes_db.get_note_by_id(note_id)
+    assert current["title"] == "Concurrent"
+    assert current["content"] == "Preserve me"
+    assert current["version"] == 2
     notes_db.close_connection()

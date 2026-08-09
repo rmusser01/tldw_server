@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """Backend-neutral ChaCha projection seam for Notes organization Sync domains."""
 
+import hashlib
+import json
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -397,6 +399,7 @@ class NotesOrganizationSyncStore:
         object_id: str,
         operation: SyncOperation,
         payload: Mapping[str, object],
+        merge_relationship_set_hash: str | None = None,
     ) -> OrganizationResource:
         """Apply one resource envelope in a ChaCha transaction."""
 
@@ -407,6 +410,19 @@ class NotesOrganizationSyncStore:
             if operation == "tombstone":
                 if existing is None:
                     raise InputError("Cannot tombstone an unknown organization resource")
+                if merge_relationship_set_hash is not None:
+                    if domain != "notes.keyword":
+                        raise InputError("Keyword merge precondition domain is invalid")
+                    if (
+                        self._db.keyword_store.synchronized_relationship_set_hash(
+                            existing.local_id,
+                            conn=conn,
+                        )
+                        != merge_relationship_set_hash
+                    ):
+                        raise ConflictError(
+                            "Keyword relationships changed after merge planning"
+                        )
                 if existing.deleted:
                     return existing
                 conn.execute(
@@ -523,8 +539,11 @@ class NotesOrganizationSyncStore:
     @staticmethod
     def _source_provenance_values(
         provenance: Mapping[str, object],
-    ) -> tuple[str, int]:
-        if set(provenance) != {"operation", "source_id"}:
+    ) -> tuple[str, int, str | None]:
+        if set(provenance) not in (
+            {"operation", "source_id"},
+            {"operation", "source_id", "read_set_hash"},
+        ):
             raise InputError("Folder source provenance fields are invalid")
         operation = provenance.get("operation")
         source_id = provenance.get("source_id")
@@ -532,7 +551,60 @@ class NotesOrganizationSyncStore:
             raise InputError("Folder source provenance operation is invalid")
         if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
             raise InputError("Folder source provenance identifier is invalid")
-        return str(operation), source_id
+        read_set_hash = provenance.get("read_set_hash")
+        if read_set_hash is not None and (
+            not isinstance(read_set_hash, str)
+            or len(read_set_hash) != 64
+            or any(character not in "0123456789abcdef" for character in read_set_hash)
+        ):
+            raise InputError("Folder source provenance read set is invalid")
+        return str(operation), source_id, read_set_hash
+
+    @staticmethod
+    def _source_folder_read_set_hash(
+        *,
+        manual: bool,
+        source_ids: set[int],
+        suppressed: bool,
+    ) -> str:
+        encoded = json.dumps(
+            {
+                "manual": manual,
+                "source_ids": sorted(source_ids),
+                "suppressed": suppressed,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _source_folder_read_set_locked(
+        self,
+        conn: Any,
+        *,
+        note_id: str,
+        folder_id: int,
+    ) -> tuple[bool, set[int], bool]:
+        manual = bool(
+            conn.execute(
+                "SELECT 1 FROM note_folder_memberships "
+                "WHERE note_id = ? AND folder_id = ?",
+                (note_id, folder_id),
+            ).fetchone()
+        )
+        source_rows = conn.execute(
+            "SELECT source_id FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder_id),
+        ).fetchall()
+        suppressed = bool(
+            conn.execute(
+                "SELECT 1 FROM note_folder_sync_suppressions "
+                "WHERE note_id = ? AND folder_id = ?",
+                (note_id, folder_id),
+            ).fetchone()
+        )
+        return manual, {int(row["source_id"]) for row in source_rows}, suppressed
 
     def _folder_relationship_rows(
         self,
@@ -565,7 +637,24 @@ class NotesOrganizationSyncStore:
     ) -> SyncOperation | None:
         """Return the canonical transition for one prospective source delta."""
 
-        _, validated_source_id = self._source_provenance_values(
+        return self.source_folder_transition_plan(
+            note_id=note_id,
+            source_id=source_id,
+            folder_sync_id=folder_sync_id,
+            present=present,
+        )[0]
+
+    def source_folder_transition_plan(
+        self,
+        *,
+        note_id: str,
+        source_id: int,
+        folder_sync_id: str,
+        present: bool,
+    ) -> tuple[SyncOperation | None, str]:
+        """Return a source transition and its opaque origin-local read set."""
+
+        _, validated_source_id, _ = self._source_provenance_values(
             {
                 "operation": "source_upsert" if present else "source_delete",
                 "source_id": source_id,
@@ -579,24 +668,18 @@ class NotesOrganizationSyncStore:
                 require_active=True,
             )
             folder_id = int(folder["id"])
-            suppressed = conn.execute(
-                "SELECT 1 FROM note_folder_sync_suppressions "
-                "WHERE note_id = ? AND folder_id = ?",
-                (note_id, folder_id),
-            ).fetchone()
+            manual, source_ids, suppressed = self._source_folder_read_set_locked(
+                conn,
+                note_id=note_id,
+                folder_id=folder_id,
+            )
+            read_set_hash = self._source_folder_read_set_hash(
+                manual=manual,
+                source_ids=source_ids,
+                suppressed=suppressed,
+            )
             if suppressed:
-                return None
-            manual = conn.execute(
-                "SELECT 1 FROM note_folder_memberships "
-                "WHERE note_id = ? AND folder_id = ?",
-                (note_id, folder_id),
-            ).fetchone()
-            source_rows = conn.execute(
-                "SELECT source_id FROM note_folder_source_memberships "
-                "WHERE note_id = ? AND folder_id = ?",
-                (note_id, folder_id),
-            ).fetchall()
-            source_ids = {int(row["source_id"]) for row in source_rows}
+                return None, read_set_hash
             before = bool(manual or source_ids)
             if present:
                 source_ids.add(validated_source_id)
@@ -604,8 +687,20 @@ class NotesOrganizationSyncStore:
                 source_ids.discard(validated_source_id)
             after = bool(manual or source_ids)
             if before == after:
-                return None
-            return "upsert" if after else "tombstone"
+                return None, read_set_hash
+            return ("upsert" if after else "tombstone"), read_set_hash
+
+    def manual_folder_sync_ids(self, note_id: str) -> set[str]:
+        """Return active folders explicitly owned by the note's manual membership set."""
+
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                "SELECT folder.sync_id FROM note_folder_memberships membership "
+                "JOIN note_folders folder ON folder.id = membership.folder_id "
+                "WHERE membership.note_id = ? AND folder.deleted = ?",
+                (note_id, self._deleted_value(False)),
+            ).fetchall()
+        return {str(row["sync_id"]) for row in rows}
 
     def _apply_source_folder_provenance_locked(
         self,
@@ -673,7 +768,7 @@ class NotesOrganizationSyncStore:
     ) -> None:
         """Apply provenance-only bookkeeping without changing canonical visibility."""
 
-        normalized_operation, normalized_source_id = self._source_provenance_values(
+        normalized_operation, normalized_source_id, _ = self._source_provenance_values(
             {"operation": operation, "source_id": source_id}
         )
         with self._db.transaction() as conn:
@@ -759,7 +854,7 @@ class NotesOrganizationSyncStore:
 
             if domain == "notes.folder_link":
                 if origin_provenance is not None:
-                    provenance_operation, provenance_source_id = (
+                    provenance_operation, provenance_source_id, read_set_hash = (
                         self._source_provenance_values(origin_provenance)
                     )
                     expected_operation = (
@@ -769,6 +864,22 @@ class NotesOrganizationSyncStore:
                         raise InputError(
                             "Folder source provenance does not match canonical operation"
                         )
+                    if read_set_hash is not None:
+                        manual, source_ids, suppressed = (
+                            self._source_folder_read_set_locked(
+                                conn,
+                                note_id=str(values[0]),
+                                folder_id=int(folder["id"]),
+                            )
+                        )
+                        if self._source_folder_read_set_hash(
+                            manual=manual,
+                            source_ids=source_ids,
+                            suppressed=suppressed,
+                        ) != read_set_hash:
+                            raise ConflictError(
+                                "Folder source membership changed after planning"
+                            )
                     self._apply_source_folder_provenance_locked(
                         conn,
                         note_id=str(values[0]),

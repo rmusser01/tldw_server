@@ -13,6 +13,36 @@ from ..models import SyncEnvelope, SyncObjectState, validate_notes_note_upsert_p
 from ..store import SyncV2Store
 from .base import MaterializationResult
 
+_INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
+_SERVER_ORIGIN_DEVICE_ID = "server-origin"
+
+
+def _trusted_ingestion_expected_version(
+    envelope: SyncEnvelope,
+    note_db: CharactersRAGDB,
+) -> int | None:
+    """Return an owner-bound local ingestion projection precondition."""
+
+    routing = envelope.routing_metadata
+    if (
+        envelope.domain != "notes.note"
+        or envelope.operation != "upsert"
+        or envelope.device_id != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("source") != "notes-ingestion"
+        or routing.get("origin") != "server"
+        or routing.get("server_device_id") != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("server_owner_user_id") != str(note_db.client_id)
+    ):
+        return None
+    expected_version = routing.get(_INGESTION_EXPECTED_VERSION_KEY)
+    if (
+        isinstance(expected_version, bool)
+        or not isinstance(expected_version, int)
+        or expected_version < 0
+    ):
+        return None
+    return expected_version
+
 
 @dataclass(slots=True)
 class NotesMaterializer:
@@ -94,6 +124,10 @@ class NotesMaterializer:
                     sync_client_id=_projection_client_id(envelope),
                     object_revision=object_revision,
                     object_hash=object_hash,
+                    expected_product_version=_trusted_ingestion_expected_version(
+                        envelope,
+                        self.note_db,
+                    ),
                 )
                 deleted = False
             elif envelope.operation == "tombstone":
