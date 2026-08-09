@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from inspect import signature
+
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
@@ -11,9 +13,11 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipLockSet,
     MembershipMutation,
     MembershipMutationKind,
+    MembershipMutationRelationship,
     MembershipPlanningPreflight,
     MembershipRowLock,
     MembershipScopeType,
+    MembershipWriter,
     MembershipWriterContractError,
     OrganizationOwnerPreflight,
     TeamParentOrganization,
@@ -32,6 +36,7 @@ def _mutation(
     user_id: int,
     kind: MembershipMutationKind,
     role: str | None = None,
+    relationship: MembershipMutationRelationship | None = None,
 ) -> MembershipMutation:
     return MembershipMutation(
         scope_type=scope_type,
@@ -39,6 +44,7 @@ def _mutation(
         user_id=user_id,
         kind=kind,
         role=role,
+        relationship=relationship,
     )
 
 
@@ -130,7 +136,10 @@ def test_complete_lock_set_is_unique_sorted_and_fully_scoped() -> None:
     assert plan.lock_set.membership_rows == (
         _row(MembershipScopeType.ORGANIZATION, 3, 4),
         _row(MembershipScopeType.ORGANIZATION, 5, 4),
+        _row(MembershipScopeType.ORGANIZATION, 5, 9),
+        _row(MembershipScopeType.TEAM, 10, 4),
         _row(MembershipScopeType.TEAM, 10, 8),
+        _row(MembershipScopeType.TEAM, 20, 4),
         _row(MembershipScopeType.TEAM, 20, 9),
     )
     assert plan.lock_set.owner_rows == (
@@ -208,8 +217,80 @@ def test_team_parent_organizations_drive_scoped_actor_authorization() -> None:
     assert plan.lock_set.team_ids == (20,)
     assert plan.lock_set.membership_rows == (
         _row(MembershipScopeType.ORGANIZATION, 5, 4),
+        _row(MembershipScopeType.ORGANIZATION, 5, 9),
+        _row(MembershipScopeType.TEAM, 20, 4),
         _row(MembershipScopeType.TEAM, 20, 9),
     )
+
+
+def test_default_team_companion_requires_matching_earlier_parent_mutation() -> None:
+    actor = ActorMembershipWriteContext(
+        actor_user_id=4,
+        required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+    )
+    companion = _mutation(
+        MembershipScopeType.TEAM,
+        20,
+        9,
+        MembershipMutationKind.REMOVE,
+        relationship=MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
+    )
+    parent = TeamParentOrganization(team_id=20, organization_id=5)
+
+    with pytest.raises(MembershipWriterContractError):
+        plan_membership_write(
+            context=actor,
+            mutations=(companion,),
+            preflight=MembershipPlanningPreflight(team_parents=(parent,)),
+        )
+    with pytest.raises(MembershipWriterContractError):
+        plan_membership_write(
+            context=actor,
+            mutations=(
+                companion,
+                _mutation(
+                    MembershipScopeType.ORGANIZATION,
+                    5,
+                    9,
+                    MembershipMutationKind.REMOVE,
+                ),
+            ),
+            preflight=MembershipPlanningPreflight(
+                team_parents=(parent,),
+                organization_owners=(_owner_coverage(5, (7,)),),
+            ),
+        )
+
+
+def test_default_team_companion_accepts_matching_earlier_parent_mutation() -> None:
+    actor = ActorMembershipWriteContext(
+        actor_user_id=4,
+        required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+    )
+    org_remove = _mutation(
+        MembershipScopeType.ORGANIZATION,
+        5,
+        9,
+        MembershipMutationKind.REMOVE,
+    )
+    companion = _mutation(
+        MembershipScopeType.TEAM,
+        20,
+        9,
+        MembershipMutationKind.REMOVE,
+        relationship=MembershipMutationRelationship.DEFAULT_TEAM_COMPANION,
+    )
+
+    plan = plan_membership_write(
+        context=actor,
+        mutations=(org_remove, companion),
+        preflight=MembershipPlanningPreflight(
+            team_parents=(TeamParentOrganization(team_id=20, organization_id=5),),
+            organization_owners=(_owner_coverage(5, (7,)),),
+        ),
+    )
+
+    assert plan.mutations == (org_remove, companion)
 
 
 def test_missing_or_conflicting_team_parent_preflight_fails_closed() -> None:
@@ -826,7 +907,10 @@ def test_postgresql_statements_follow_the_total_lock_phase_order() -> None:
         (MembershipLockPhase.TEAM_ROWS, (20,)),
         (MembershipLockPhase.MEMBERSHIP_ROWS, (3, 4)),
         (MembershipLockPhase.MEMBERSHIP_ROWS, (5, 4)),
+        (MembershipLockPhase.MEMBERSHIP_ROWS, (5, 9)),
+        (MembershipLockPhase.MEMBERSHIP_ROWS, (10, 4)),
         (MembershipLockPhase.MEMBERSHIP_ROWS, (10, 8)),
+        (MembershipLockPhase.MEMBERSHIP_ROWS, (20, 4)),
         (MembershipLockPhase.MEMBERSHIP_ROWS, (20, 9)),
         (MembershipLockPhase.OWNER_ROWS, (3, 6)),
         (MembershipLockPhase.OWNER_ROWS, (5, 7)),
@@ -842,7 +926,32 @@ def test_postgresql_statements_follow_the_total_lock_phase_order() -> None:
         in {MembershipLockPhase.MEMBERSHIP_ROWS, MembershipLockPhase.OWNER_ROWS}
     )
     assert "org_members" in statements[7].sql
-    assert "team_members" in statements[9].sql
+    assert "team_members" in statements[10].sql
+
+
+def test_writer_contract_cannot_suppress_canonical_user_row_locks() -> None:
+    actor, mutations, preflight = _complex_inputs()
+    plan = plan_membership_write(
+        context=actor,
+        mutations=mutations,
+        preflight=preflight,
+    )
+
+    assert "prelocked_user_ids" not in signature(
+        plan_membership_lock_statements
+    ).parameters
+    assert "prelocked_user_ids" not in signature(
+        MembershipWriter.apply_membership_mutations
+    ).parameters
+
+    statements = plan_membership_lock_statements(
+        plan,
+        backend=MembershipLockBackend.POSTGRESQL,
+    )
+
+    user_statements = statements[: len(plan.lock_set.user_ids)]
+    assert all(item.phase is MembershipLockPhase.USER_ROWS for item in user_statements)
+    assert tuple(item.parameters[0] for item in user_statements) == plan.lock_set.user_ids
 
 
 def test_postgresql_statements_use_canonical_public_relations() -> None:
@@ -879,6 +988,9 @@ def test_postgresql_statements_use_canonical_public_relations() -> None:
         team_sql,
         org_member_sql,
         org_member_sql,
+        org_member_sql,
+        team_member_sql,
+        team_member_sql,
         team_member_sql,
         team_member_sql,
         org_member_sql,

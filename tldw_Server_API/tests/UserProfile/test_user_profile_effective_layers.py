@@ -7,6 +7,10 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member,
     add_team_member,
@@ -26,6 +30,10 @@ from tldw_Server_API.app.core.UserProfiles.overrides_repo import (
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.version_gateway import ProfileVersionGateway
 from tldw_Server_API.app.main import app
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def _run_async(coro):
@@ -96,9 +104,9 @@ def test_effective_config_layering(auth_headers, tmp_path, monkeypatch) -> None:
 
             async def _setup_overrides():
                 org = await create_organization(name=f"Config Org {suffix}", owner_user_id=None)
-                await add_org_member(org_id=int(org["id"]), user_id=user_id, role="member")
+                await add_org_member(org_id=int(org["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
                 team = await create_team(org_id=int(org["id"]), name=f"Config Team {suffix}")
-                await add_team_member(team_id=int(team["id"]), user_id=user_id, role="member")
+                await add_team_member(team_id=int(team["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
                 pool = await get_db_pool()
                 org_repo = OrgProfileOverridesRepo(pool)
@@ -180,7 +188,7 @@ def test_effective_config_layering(auth_headers, tmp_path, monkeypatch) -> None:
 
             async def _add_second_org_override():
                 org = await create_organization(name=f"Config Org 2 {suffix}", owner_user_id=None)
-                await add_org_member(org_id=int(org["id"]), user_id=user_id, role="member")
+                await add_org_member(org_id=int(org["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
                 pool = await get_db_pool()
                 org_repo = OrgProfileOverridesRepo(pool)
                 await org_repo.ensure_tables()
@@ -240,11 +248,13 @@ def test_inactive_memberships_do_not_contribute_inherited_overrides(
                     org_id=active_org_id,
                     user_id=user_id,
                     role="member",
+                    context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
                 )
                 await add_org_member(
                     org_id=inactive_org_id,
                     user_id=user_id,
                     role="member",
+                    context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
                 )
 
                 active_team = await create_team(
@@ -261,11 +271,13 @@ def test_inactive_memberships_do_not_contribute_inherited_overrides(
                     team_id=active_team_id,
                     user_id=user_id,
                     role="member",
+                    context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
                 )
                 await add_team_member(
                     team_id=inactive_team_id,
                     user_id=user_id,
                     role="member",
+                    context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
                 )
 
                 pool = await get_db_pool()

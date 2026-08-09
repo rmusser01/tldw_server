@@ -4,6 +4,7 @@ import threading
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import MembershipWriteContext
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
 _PG_CORE_TABLES_ENSURED: set[int] = set()
@@ -124,14 +125,25 @@ async def create_team(
     )
 
 
-async def add_team_member(*, team_id: int, user_id: int, role: str = "member") -> dict[str, Any]:
+async def add_team_member(
+    *,
+    team_id: int,
+    user_id: int,
+    context: MembershipWriteContext,
+    role: str = "member",
+) -> dict[str, Any]:
     """
     Add a user to a team (idempotent).
 
     If the user is already a member, returns the existing membership row.
     """
     repo = await _get_orgs_teams_repo()
-    return await repo.add_team_member(team_id=team_id, user_id=user_id, role=role)
+    return await repo.add_team_member(
+        team_id=team_id,
+        user_id=user_id,
+        context=context,
+        role=role,
+    )
 
 
 async def list_team_members(team_id: int) -> list[dict[str, Any]]:
@@ -181,7 +193,13 @@ async def list_active_team_memberships_for_user(user_id: int) -> list[dict[str, 
 # Organization membership APIs
 # ============================
 
-async def add_org_member(*, org_id: int, user_id: int, role: str = "member") -> dict[str, Any]:
+async def add_org_member(
+    *,
+    org_id: int,
+    user_id: int,
+    context: MembershipWriteContext,
+    role: str = "member",
+) -> dict[str, Any]:
     """
     Add a user to an organization (idempotent).
 
@@ -194,7 +212,12 @@ async def add_org_member(*, org_id: int, user_id: int, role: str = "member") -> 
         A dict describing the membership row (for example, containing ``org_id``, ``user_id``, and ``role``).
     """
     repo = await _get_orgs_teams_repo()
-    return await repo.add_org_member(org_id=org_id, user_id=user_id, role=role)
+    return await repo.add_org_member(
+        org_id=org_id,
+        user_id=user_id,
+        context=context,
+        role=role,
+    )
 
 
 async def list_org_members(
@@ -223,7 +246,12 @@ async def list_org_members(
     )
 
 
-async def remove_org_member(*, org_id: int, user_id: int) -> dict[str, Any]:
+async def remove_org_member(
+    *,
+    org_id: int,
+    user_id: int,
+    context: MembershipWriteContext,
+) -> dict[str, Any]:
     """
     Remove a user from an organization.
 
@@ -237,10 +265,20 @@ async def remove_org_member(*, org_id: int, user_id: int) -> dict[str, Any]:
         last remaining owner cannot be removed).
     """
     repo = await _get_orgs_teams_repo()
-    return await repo.remove_org_member(org_id=org_id, user_id=user_id)
+    return await repo.remove_org_member(
+        org_id=org_id,
+        user_id=user_id,
+        context=context,
+    )
 
 
-async def update_org_member_role(*, org_id: int, user_id: int, role: str) -> dict[str, Any] | None:
+async def update_org_member_role(
+    *,
+    org_id: int,
+    user_id: int,
+    role: str,
+    context: MembershipWriteContext,
+) -> dict[str, Any] | None:
     """
     Update an organization member's role.
 
@@ -256,10 +294,21 @@ async def update_org_member_role(*, org_id: int, user_id: int, role: str) -> dic
         does not exist.
     """
     repo = await _get_orgs_teams_repo()
-    return await repo.update_org_member_role(org_id=org_id, user_id=user_id, role=role)
+    return await repo.update_org_member_role(
+        org_id=org_id,
+        user_id=user_id,
+        role=role,
+        context=context,
+    )
 
 
-async def update_team_member_role(*, team_id: int, user_id: int, role: str) -> dict[str, Any] | None:
+async def update_team_member_role(
+    *,
+    team_id: int,
+    user_id: int,
+    role: str,
+    context: MembershipWriteContext,
+) -> dict[str, Any] | None:
     """
     Update a team member's role.
 
@@ -272,7 +321,12 @@ async def update_team_member_role(*, team_id: int, user_id: int, role: str) -> d
         A dict describing the updated membership (team_id, user_id, role), or ``None`` when missing.
     """
     repo = await _get_orgs_teams_repo()
-    return await repo.update_team_member_role(team_id=team_id, user_id=user_id, role=role)
+    return await repo.update_team_member_role(
+        team_id=team_id,
+        user_id=user_id,
+        role=role,
+        context=context,
+    )
 
 
 async def list_org_memberships_for_user(user_id: int) -> list[dict[str, Any]]:
@@ -289,7 +343,12 @@ async def list_org_memberships_for_user(user_id: int) -> list[dict[str, Any]]:
     return await repo.list_org_memberships_for_user(user_id)
 
 
-async def remove_team_member(*, team_id: int, user_id: int) -> dict[str, Any]:
+async def remove_team_member(
+    *,
+    team_id: int,
+    user_id: int,
+    context: MembershipWriteContext,
+) -> dict[str, Any]:
     """
     Remove a user from a team.
 
@@ -301,4 +360,8 @@ async def remove_team_member(*, team_id: int, user_id: int) -> dict[str, Any]:
         A dict with removal status fields: ``team_id``, ``user_id``, and ``removed``.
     """
     repo = await _get_orgs_teams_repo()
-    return await repo.remove_team_member(team_id=team_id, user_id=user_id)
+    return await repo.remove_team_member(
+        team_id=team_id,
+        user_id=user_id,
+        context=context,
+    )

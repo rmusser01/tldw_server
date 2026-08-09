@@ -5,6 +5,9 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthorizationError,
+)
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileUpdateCommand
 from tldw_Server_API.app.core.UserProfiles.response_mappers import (
@@ -16,6 +19,7 @@ from tldw_Server_API.app.core.UserProfiles.update_service import UpdateResult
 class _ProfileService:
     def __init__(self) -> None:
         self.calls: list[tuple[Any, bool]] = []
+        self.lock_calls: list[tuple[Any, tuple[int, ...]]] = []
         self.initial = datetime(2026, 1, 1, tzinfo=timezone.utc)
         self.locked = datetime(2026, 1, 2, tzinfo=timezone.utc)
         self.after_write = datetime(2026, 1, 3, tzinfo=timezone.utc)
@@ -27,6 +31,10 @@ class _ProfileService:
             return self.locked
         self._unlocked_calls += 1
         return self.initial if self._unlocked_calls == 1 else self.after_write
+
+    async def lock_profile_users(self, *, user_ids: tuple[int, ...], db_conn):
+        self.lock_calls.append((db_conn, user_ids))
+        return dict.fromkeys(user_ids, self.locked)
 
     def versions_match(self, current, expected) -> bool:
         return current == expected
@@ -55,6 +63,11 @@ class _Executor:
         return UpdateResult(applied=["preferences.ui.theme"])
 
 
+class _RecordingConnection:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+
 @pytest.mark.asyncio
 async def test_command_service_rechecks_version_before_apply() -> None:
     profile_service = _ProfileService()
@@ -80,6 +93,79 @@ async def test_command_service_rechecks_version_before_apply() -> None:
     assert result.status_code == 409
     assert result.error_code == "profile_version_mismatch"
     assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_locks_actor_and_target_once_in_canonical_order() -> None:
+    profile_service = _ProfileService()
+    profile_service.locked = profile_service.initial
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=profile_service,
+        planner=_Planner(),
+        executor=executor,
+    )
+    write_conn = _RecordingConnection()
+    command = ProfileUpdateCommand(
+        actor_user_id=9,
+        target_user_id=7,
+        updates=(("memberships.orgs.role", {"org_id": 3, "role": "admin"}),),
+        roles=frozenset({"admin"}),
+        dry_run=False,
+        expected_profile_version=profile_service.initial,
+    )
+
+    result = await command_service.apply(command, db_conn=write_conn, scope=object())
+
+    assert result.status_code == 200
+    assert profile_service.lock_calls == [(write_conn, (7, 9))]
+    assert all(lock_user is False for _conn, lock_user in profile_service.calls)
+    assert "prelocked_user_ids" not in executor.calls[0]
+    assert write_conn.events == []
+
+
+@pytest.mark.asyncio
+async def test_versionless_mixed_membership_command_locks_before_executor() -> None:
+    events: list[str] = []
+
+    class _OrderedProfileService(_ProfileService):
+        async def lock_profile_users(self, *, user_ids: tuple[int, ...], db_conn):
+            events.append(f"lock:{user_ids}")
+            return await super().lock_profile_users(user_ids=user_ids, db_conn=db_conn)
+
+    class _OrderedExecutor(_Executor):
+        async def apply_updates(self, **kwargs):
+            events.append("executor")
+            return await super().apply_updates(**kwargs)
+
+    profile_service = _OrderedProfileService()
+    executor = _OrderedExecutor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=profile_service,
+        planner=_Planner(),
+        executor=executor,
+    )
+    write_conn = _RecordingConnection()
+    command = ProfileUpdateCommand(
+        actor_user_id=9,
+        target_user_id=7,
+        updates=(
+            ("preferences.ui.theme", "paper"),
+            ("memberships.orgs.role", {"org_id": 3, "role": "admin"}),
+        ),
+        roles=frozenset({"admin"}),
+        dry_run=False,
+    )
+
+    result = await command_service.apply(command, db_conn=write_conn, scope=object())
+
+    assert result.status_code == 200
+    assert profile_service.lock_calls == [(write_conn, (7, 9))]
+    assert events == ["lock:(7, 9)", "executor"]
+    assert "prelocked_user_ids" not in executor.calls[0]
+    assert write_conn.events == []
 
 
 @pytest.mark.asyncio
@@ -202,6 +288,74 @@ async def test_command_service_forbidden_skip_maps_to_legacy_forbidden() -> None
         {"key": "limits.storage_quota_mb", "message": "forbidden"},
     )
     assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_maps_writer_authorization_drift_without_savepoint() -> None:
+    class _AuthorizationDriftExecutor:
+        async def apply_updates(self, **kwargs):
+            kwargs["db_conn"].events.append("executor")
+            raise MembershipAuthorizationError()
+
+    write_conn = _RecordingConnection()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=_ProfileService(),
+        planner=_Planner(),
+        executor=_AuthorizationDriftExecutor(),
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=9,
+        target_user_id=7,
+        updates=(
+            ("preferences.ui.theme", "paper"),
+            ("memberships.orgs.role", {"org_id": 3, "role": "admin"}),
+        ),
+        roles=frozenset({"admin"}),
+        dry_run=False,
+    )
+
+    result = await command_service.apply(command, db_conn=write_conn, scope=object())
+
+    assert result.status_code == 403
+    assert result.error_code == "profile_update_forbidden"
+    assert result.detail == "Caller cannot edit one or more fields"
+    assert result.applied == ()
+    assert result.skipped == (
+        {"key": "memberships.orgs.role", "message": "forbidden"},
+    )
+    assert write_conn.events == ["executor"]
+
+
+@pytest.mark.asyncio
+async def test_command_service_preserves_non_authorization_executor_errors() -> None:
+    class _FailingExecutor:
+        async def apply_updates(self, **kwargs):
+            kwargs["db_conn"].events.append("executor")
+            raise RuntimeError("database failure")
+
+    write_conn = _RecordingConnection()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=_ProfileService(),
+        planner=_Planner(),
+        executor=_FailingExecutor(),
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=9,
+        target_user_id=7,
+        updates=(
+            ("preferences.ui.theme", "paper"),
+            ("memberships.orgs.role", {"org_id": 3, "role": "admin"}),
+        ),
+        roles=frozenset({"admin"}),
+        dry_run=False,
+    )
+
+    with pytest.raises(RuntimeError, match="database failure"):
+        await command_service.apply(command, db_conn=write_conn, scope=object())
+
+    assert write_conn.events == ["executor"]
 
 
 @pytest.mark.asyncio
