@@ -65,6 +65,12 @@ from .protocol_profiles import (
     SUPPORTED_PROTOCOL_VERSIONS,
     GatewayProtocolProfile,
 )
+from .protocol_stdio import (
+    GatewayAsyncByteReader,
+    GatewayAsyncByteWriter,
+    GatewayProtocolStdioServer,
+    serve_stdio,
+)
 from .runtime import (
     GatewayCoreRuntime,
     GatewayJSONValue,
@@ -93,6 +99,8 @@ __all__ = [
     "SUPPORTED_MODERN_PROTOCOL_VERSIONS",
     "SUPPORTED_PROTOCOL_VERSIONS",
     "GatewayApplicationError",
+    "GatewayAsyncByteReader",
+    "GatewayAsyncByteWriter",
     "GatewayCancellationToken",
     "GatewayCoreRuntime",
     "GatewayInvalidApplicationResult",
@@ -101,6 +109,7 @@ __all__ = [
     "GatewayPolicyDenied",
     "GatewayProtocolConnection",
     "GatewayProtocolProfile",
+    "GatewayProtocolStdioServer",
     "GatewayResourceNotFound",
     "GatewayResourceTemplateRuntime",
     "GatewayResultTooLarge",
@@ -149,6 +158,7 @@ __all__ = [
     "credential_grant_manager_from_storage",
     "handle_stdio_line",
     "load_gateway_profile_bootstrap_config",
+    "serve_stdio",
 ]
 
 
