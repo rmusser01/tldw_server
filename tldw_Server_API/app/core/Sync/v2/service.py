@@ -95,6 +95,7 @@ from .restore import (
     build_local_inventory_index,
     find_local_inventory_item,
     local_inventory_matches,
+    order_restore_envelopes,
     restore_action_for_domain,
 )
 from .security import (
@@ -1769,10 +1770,11 @@ class SyncV2Service:
                     if selected_object_id_set and envelope.object_id not in selected_object_id_set:
                         continue
                     latest_object_envelopes[(domain, envelope.object_id)] = envelope
-            for (domain, object_id), envelope in sorted(
-                latest_object_envelopes.items(),
-                key=lambda item: item[1].server_cursor or 0,
+            for envelope in order_restore_envelopes(
+                list(latest_object_envelopes.values())
             ):
+                domain = envelope.domain
+                object_id = envelope.object_id
                 object_state = self.store.get_object_state(dataset.dataset_id, domain, object_id)
                 server_revision = (
                     object_state.object_revision

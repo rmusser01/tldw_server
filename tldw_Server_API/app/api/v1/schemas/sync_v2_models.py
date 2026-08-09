@@ -7,6 +7,8 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.core.Sync.v2.models import (
+    NOTES_ORGANIZATION_DOMAINS,
+    NOTES_ORGANIZATION_SYNC_OPERATIONS,
     sync_v2_domain_schemas,
     validate_notes_note_upsert_payload,
 )
@@ -110,12 +112,14 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(WORKSPACE_SYNC_DOMAINS)
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
+    + list(NOTES_ORGANIZATION_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
+    **NOTES_ORGANIZATION_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [

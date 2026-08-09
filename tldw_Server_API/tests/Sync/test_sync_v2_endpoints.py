@@ -14,6 +14,9 @@ from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
+    NotesOrganizationDomainAdapter,
+)
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -61,6 +64,10 @@ def _not_ready_encryption():
 def _registry() -> SyncAdapterRegistry:
     return SyncAdapterRegistry(
         [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
+        + [
+            NotesOrganizationDomainAdapter(domain=domain)
+            for domain in NOTES_ORGANIZATION_DOMAINS
+        ]
     )
 
 
@@ -166,6 +173,87 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
         "operation": "upsert",
         "routing_metadata": {"restore_intent": True},
         "requires_current_base": True,
+    }
+    assert {
+        domain: body["domain_schemas"][domain]
+        for domain in NOTES_ORGANIZATION_DOMAINS
+    } == {
+        "notes.keyword": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["keyword"],
+                "properties": {"keyword": {"type": "string", "max_length": 100}},
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_link": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["subject_type", "subject_id", "keyword_sync_id"],
+                "properties": {
+                    "subject_type": {"enum": ["note", "conversation"]},
+                    "subject_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_collection": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 255},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_collection_link": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["collection_sync_id", "keyword_sync_id"],
+                "properties": {
+                    "collection_sync_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.folder": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 500},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.folder_link": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["note_id", "folder_sync_id"],
+                "properties": {
+                    "note_id": {"type": "string"},
+                    "folder_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
     }
     assert body["warnings"] == []
 

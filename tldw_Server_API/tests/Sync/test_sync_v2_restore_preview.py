@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,12 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    SyncEnvelopeCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
@@ -227,6 +233,37 @@ def _push(service: SyncV2Service, *envelopes: SyncEnvelopeCreate) -> None:
     assert [item.client_envelope_id for item in result.accepted] == [
         envelope.client_envelope_id for envelope in envelopes
     ]
+
+
+def _enable_ready_notes_organization(service: SyncV2Service) -> None:
+    service.store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ? "
+        "WHERE dataset_id = ?",
+        (
+            json.dumps([*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]),
+            json.dumps({"notes_organization_v1": {"state": "ready"}}),
+            "dataset-1",
+        ),
+    )
+
+
+def _organization_envelope(**overrides: Any) -> SyncEnvelopeCreate:
+    payload: dict[str, Any] = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-organization",
+        "domain": "notes.keyword",
+        "operation": "upsert",
+        "object_id": "11111111-1111-4111-8111-111111111111",
+        "device_id": "server-origin",
+        "object_revision": 1,
+        "payload": {"keyword": "Synthetic keyword"},
+        "payload_hash": "sha256:organization",
+        "payload_size_bytes": 32,
+        "created_at_client": "2026-05-23T18:06:00+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
 
 
 def test_restore_preview_empty_inventory_returns_safe_applies_ranges_counts_and_key_status(
@@ -511,6 +548,170 @@ def test_restore_preview_includes_media_metadata_and_local_conflicts(
         (item.domain, item.object_id, item.conflict_type)
         for item in divergent_inventory.object_conflicts
     ] == [("media.item", "media-1", "stable_id_conflict")]
+
+
+def test_notes_organization_restore_preview_counts_and_orders_complete_state(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    collection_id = "22222222-2222-4222-8222-222222222222"
+    parent_folder_id = "33333333-3333-4333-8333-333333333333"
+    child_folder_id = "44444444-4444-4444-8444-444444444444"
+    note_id = "55555555-5555-4555-8555-555555555555"
+    keyword_link_id = organization_link_id(
+        "notes.keyword_link", ["note", note_id, keyword_id]
+    )
+    collection_link_id = organization_link_id(
+        "notes.keyword_collection_link", [collection_id, keyword_id]
+    )
+    folder_link_id = organization_link_id(
+        "notes.folder_link", [note_id, child_folder_id]
+    )
+
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-keyword-link",
+            domain="notes.keyword_link",
+            object_id=keyword_link_id,
+            payload={
+                "subject_type": "note",
+                "subject_id": note_id,
+                "keyword_sync_id": keyword_id,
+            },
+            payload_hash="sha256:keyword-link",
+        )
+    )
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-folder-child",
+            domain="notes.folder",
+            object_id=child_folder_id,
+            payload={"name": "Child", "parent_sync_id": parent_folder_id},
+            payload_hash="sha256:folder-child",
+        )
+    )
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-folder-link",
+            domain="notes.folder_link",
+            object_id=folder_link_id,
+            payload={"note_id": note_id, "folder_sync_id": child_folder_id},
+            payload_hash="sha256:folder-link",
+        )
+    )
+    group = [
+        _organization_envelope(
+            client_envelope_id="env-collection",
+            domain="notes.keyword_collection",
+            object_id=collection_id,
+            payload={"name": "Synthetic collection", "parent_sync_id": None},
+            payload_hash="sha256:collection",
+            mutation_group_id="server-origin-group-restore",
+            mutation_step=0,
+            mutation_step_count=2,
+            mutation_plan_hash="0" * 64,
+        ),
+        _organization_envelope(
+            client_envelope_id="env-collection-link",
+            domain="notes.keyword_collection_link",
+            object_id=collection_link_id,
+            payload={
+                "collection_sync_id": collection_id,
+                "keyword_sync_id": keyword_id,
+            },
+            payload_hash="sha256:collection-link",
+            mutation_group_id="server-origin-group-restore",
+            mutation_step=1,
+            mutation_step_count=2,
+            mutation_plan_hash="0" * 64,
+        ),
+    ]
+    sync_service.store.insert_envelopes_atomic(group)
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-keyword",
+            object_id=keyword_id,
+            payload_hash="sha256:keyword",
+        )
+    )
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-folder-parent",
+            domain="notes.folder",
+            object_id=parent_folder_id,
+            payload={"name": "Parent", "parent_sync_id": None},
+            payload_hash="sha256:folder-parent",
+        )
+    )
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-keyword-tombstone",
+            operation="tombstone",
+            object_id=keyword_id,
+            object_revision=2,
+            payload={},
+            payload_hash="sha256:keyword-tombstone",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        local_inventory=[],
+    )
+
+    assert preview.total_counts == {
+        "notes.folder": 2,
+        "notes.folder_link": 1,
+        "notes.keyword": 2,
+        "notes.keyword_collection": 1,
+        "notes.keyword_collection_link": 1,
+        "notes.keyword_link": 1,
+    }
+    assert {
+        detail.domain: (
+            detail.safe_apply_count,
+            detail.tombstone_count,
+        )
+        for detail in preview.domain_details
+    } == {
+        "notes.keyword": (0, 1),
+        "notes.keyword_link": (1, 0),
+        "notes.keyword_collection": (1, 0),
+        "notes.keyword_collection_link": (1, 0),
+        "notes.folder": (2, 0),
+        "notes.folder_link": (1, 0),
+    }
+    ordered = [item.server_cursor for item in preview.safe_applies]
+    collection_cursor = next(
+        item.server_cursor
+        for item in preview.safe_applies
+        if item.object_id == collection_id
+    )
+    collection_link_cursor = next(
+        item.server_cursor
+        for item in preview.safe_applies
+        if item.object_id == collection_link_id
+    )
+    assert ordered.index(collection_link_cursor) == ordered.index(collection_cursor) + 1
+    assert ordered.index(
+        next(item.server_cursor for item in preview.safe_applies if item.object_id == parent_folder_id)
+    ) < ordered.index(
+        next(item.server_cursor for item in preview.safe_applies if item.object_id == child_folder_id)
+    )
+    assert ordered.index(
+        next(item.server_cursor for item in preview.safe_applies if item.object_id == child_folder_id)
+    ) < ordered.index(
+        next(item.server_cursor for item in preview.safe_applies if item.object_id == folder_link_id)
+    )
+    assert [(item.domain, item.object_id) for item in preview.tombstones] == [
+        ("notes.keyword", keyword_id)
+    ]
+    assert any(item.object_id == keyword_link_id for item in preview.safe_applies)
+    assert "Synthetic keyword" not in str(preview)
+    assert "Synthetic collection" not in str(preview)
 
 
 def test_restore_preview_endpoint_blocks_requested_cross_user_dataset(

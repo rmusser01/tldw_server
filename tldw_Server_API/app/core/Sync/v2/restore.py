@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
-from .models import SyncDomain
+from .models import NOTES_ORGANIZATION_DOMAINS, SyncDomain, SyncEnvelope
 
 WHOLE_OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
     {"notes.note", "chat.conversation"}
@@ -20,9 +20,9 @@ OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
         "media.item",
         "media.keyword",
         "media.keyword_link",
+        *NOTES_ORGANIZATION_DOMAINS,
     }
 )
-
 
 @dataclass(frozen=True, slots=True)
 class LocalRestoreInventoryItem:
@@ -37,6 +37,144 @@ class LocalRestoreInventoryItem:
 
 
 LocalInventoryIndex = dict[tuple[str | None, SyncDomain, str], LocalRestoreInventoryItem]
+
+
+def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvelope]:
+    """Order restore candidates without splitting complete mutation groups."""
+
+    units = _restore_units(envelopes)
+    unit_by_identity = {
+        (envelope.domain, envelope.object_id): unit_index
+        for unit_index, unit in enumerate(units)
+        for envelope in unit
+        if envelope.operation != "tombstone"
+    }
+    edges: dict[int, set[int]] = {index: set() for index in range(len(units))}
+
+    for unit_index, unit in enumerate(units):
+        positions = {
+            (envelope.domain, envelope.object_id): position
+            for position, envelope in enumerate(unit)
+            if envelope.operation != "tombstone"
+        }
+        for position, envelope in enumerate(unit):
+            for dependency in _restore_dependencies(envelope):
+                dependency_unit = unit_by_identity.get(dependency)
+                if dependency_unit is None:
+                    continue
+                if dependency_unit == unit_index:
+                    if positions[dependency] >= position:
+                        raise ValueError(
+                            "Mutation group ordering conflicts with restore dependencies"
+                        )
+                    continue
+                edges[dependency_unit].add(unit_index)
+
+    live_units = {
+        index
+        for index, unit in enumerate(units)
+        if any(envelope.operation != "tombstone" for envelope in unit)
+    }
+    tombstone_units = {
+        index
+        for index, unit in enumerate(units)
+        if all(envelope.operation == "tombstone" for envelope in unit)
+    }
+    for live_unit in live_units:
+        edges[live_unit].update(tombstone_units)
+
+    ordered_units: list[int] = []
+    remaining = set(range(len(units)))
+    while remaining:
+        ready = [
+            index
+            for index in remaining
+            if not any(index in targets for source, targets in edges.items() if source in remaining)
+        ]
+        if not ready:
+            raise ValueError("Restore dependencies contain a cycle")
+        selected = min(
+            ready,
+            key=lambda index: min(envelope.server_cursor or 0 for envelope in units[index]),
+        )
+        ordered_units.append(selected)
+        remaining.remove(selected)
+
+    return [envelope for index in ordered_units for envelope in units[index]]
+
+
+def _restore_units(envelopes: Sequence[SyncEnvelope]) -> list[list[SyncEnvelope]]:
+    grouped: dict[str, list[SyncEnvelope]] = {}
+    for envelope in envelopes:
+        if envelope.mutation_group_id:
+            grouped.setdefault(envelope.mutation_group_id, []).append(envelope)
+
+    complete_groups = {
+        group_id
+        for group_id, group in grouped.items()
+        if _is_complete_restore_group(group)
+    }
+    emitted: set[str] = set()
+    units: list[list[SyncEnvelope]] = []
+    for envelope in sorted(envelopes, key=lambda item: item.server_cursor or 0):
+        group_id = envelope.mutation_group_id
+        if group_id not in complete_groups:
+            units.append([envelope])
+            continue
+        if group_id in emitted:
+            continue
+        units.append(sorted(grouped[group_id], key=lambda item: item.mutation_step or 0))
+        emitted.add(group_id)
+    return units
+
+
+def _is_complete_restore_group(group: Sequence[SyncEnvelope]) -> bool:
+    if not group or group[0].mutation_step_count != len(group):
+        return False
+    expected_count = group[0].mutation_step_count
+    return expected_count is not None and {
+        envelope.mutation_step for envelope in group
+    } == set(range(expected_count)) and all(
+        envelope.mutation_step_count == expected_count for envelope in group
+    )
+
+
+def _restore_dependencies(envelope: SyncEnvelope) -> list[tuple[SyncDomain, str]]:
+    if envelope.operation == "tombstone":
+        return []
+    payload = envelope.payload
+    dependencies: list[tuple[SyncDomain, str]] = []
+    if envelope.domain in {"notes.keyword_collection", "notes.folder"}:
+        parent_id = payload.get("parent_sync_id")
+        if isinstance(parent_id, str) and parent_id:
+            dependencies.append((envelope.domain, parent_id))
+    elif envelope.domain == "notes.keyword_link":
+        subject_domain: SyncDomain = (
+            "notes.note"
+            if payload.get("subject_type") == "note"
+            else "chat.conversation"
+        )
+        dependencies.extend(
+            [
+                (subject_domain, str(payload.get("subject_id"))),
+                ("notes.keyword", str(payload.get("keyword_sync_id"))),
+            ]
+        )
+    elif envelope.domain == "notes.keyword_collection_link":
+        dependencies.extend(
+            [
+                ("notes.keyword_collection", str(payload.get("collection_sync_id"))),
+                ("notes.keyword", str(payload.get("keyword_sync_id"))),
+            ]
+        )
+    elif envelope.domain == "notes.folder_link":
+        dependencies.extend(
+            [
+                ("notes.note", str(payload.get("note_id"))),
+                ("notes.folder", str(payload.get("folder_sync_id"))),
+            ]
+        )
+    return dependencies
 
 
 def build_local_inventory_index(
@@ -191,5 +329,6 @@ __all__ = [
     "build_local_inventory_index",
     "find_local_inventory_item",
     "local_inventory_matches",
+    "order_restore_envelopes",
     "restore_action_for_domain",
 ]

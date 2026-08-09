@@ -284,7 +284,7 @@ def test_append_failure_appends_nothing_and_never_projects(
 
     monkeypatch.setattr(service.store, "insert_envelopes_atomic", fail_append)
 
-    with pytest.raises(SyncStoreError, match="injected append failure"):
+    with pytest.raises(SyncStoreError, match="sync_server_origin_batch_append_failed"):
         _capture(service, [_step("folder-1"), _step("folder-2")])
 
     assert service.store.list_envelopes_after("dataset-1", 0, limit=100) == []

@@ -43,7 +43,13 @@ NOTES_ORGANIZATION_DOMAINS = (
     "notes.folder",
     "notes.folder_link",
 )
-SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS + MEDIA_DOMAINS
+SUPPORTED_DOMAINS = (
+    M1_DOMAINS
+    + WORKSPACE_DOMAINS
+    + SOURCE_CACHE_DOMAINS
+    + MEDIA_DOMAINS
+    + list(NOTES_ORGANIZATION_DOMAINS)
+)
 
 
 def _encryption_policy_model_classes():
@@ -104,6 +110,12 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "media.item": ["upsert", "tombstone"],
         "media.keyword": ["upsert", "tombstone"],
         "media.keyword_link": ["upsert", "tombstone"],
+        "notes.keyword": ["upsert", "tombstone"],
+        "notes.keyword_link": ["upsert", "tombstone"],
+        "notes.keyword_collection": ["upsert", "tombstone"],
+        "notes.keyword_collection_link": ["upsert", "tombstone"],
+        "notes.folder": ["upsert", "tombstone"],
+        "notes.folder_link": ["upsert", "tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True

@@ -22,7 +22,7 @@ from tldw_Server_API.app.core.Sync.v2.materializers import (
     MaterializationResult,
     NotesMaterializer,
 )
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncEnvelope
+from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, M1_SYNC_OPERATIONS, SyncEnvelope
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -206,6 +206,8 @@ def sync_service(tmp_path: Path, chacha_db: CharactersRAGDB) -> SyncV2Service:
         clock=lambda: "2026-05-23T18:12:00+00:00",
         id_factory=lambda prefix: f"{prefix}-generated",
         settings=SyncV2Settings(
+            supported_domains=list(M1_SYNC_DOMAINS),
+            operations={domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()},
             server_trusted_encryption=_ready_encryption(),
         ),
     )
@@ -469,7 +471,12 @@ def test_append_failure_prevents_server_projection(tmp_path: Path, chacha_db: Ch
             server_trusted_encryption=_ready_encryption(),
         ),
     )
-    service.bootstrap_profile(user_id="user-1", mode="server_frontend", device_id="frontend-device")
+    service.bootstrap_profile(
+        user_id="user-1",
+        mode="server_frontend",
+        device_id="frontend-device",
+        requested_domains=["notes.note"],
+    )
 
     with pytest.raises(SyncStoreError):
         capture_server_origin_mutation(
@@ -784,7 +791,7 @@ def test_normal_chat_message_api_reports_client_private_server_frontend_limitati
     ) == []
 
 
-def test_active_sync_note_keywords_are_rejected_without_direct_mutation(
+def test_active_sync_m1_only_note_keywords_fail_closed_without_direct_mutation(
     monkeypatch: pytest.MonkeyPatch,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -800,8 +807,11 @@ def test_active_sync_note_keywords_are_rejected_without_direct_mutation(
             "keywords": ["alpha"],
         },
     )
-    assert create_with_keywords.status_code == 400
-    assert create_with_keywords.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
+    assert create_with_keywords.status_code == 409
+    assert (
+        create_with_keywords.json()["detail"]["error_code"]
+        == "notes_organization_sync_domains_incomplete"
+    )
     assert chacha_db.get_note_by_id("note-keywords-create") is None
     assert sync_service.store.list_envelopes_after(
         sync_service.profile(user_id="user-1").active_dataset_id or "",
@@ -809,43 +819,6 @@ def test_active_sync_note_keywords_are_rejected_without_direct_mutation(
         domains=["notes.note"],
         limit=10,
     ) == []
-
-    create_response = client.post(
-        "/api/v1/notes/",
-        json={
-            "id": "note-keywords-update",
-            "title": "Plain note",
-            "content": "Created without keywords.",
-        },
-    )
-    assert create_response.status_code == 201
-    update_keywords_only = client.put(
-        "/api/v1/notes/note-keywords-update",
-        headers={"expected-version": str(create_response.json()["version"])},
-        json={"keywords": ["beta"]},
-    )
-    assert update_keywords_only.status_code == 400
-    assert update_keywords_only.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
-    assert chacha_db.get_keywords_for_note("note-keywords-update") == []
-
-    patch_keywords = client.patch(
-        "/api/v1/notes/note-keywords-update",
-        headers={"expected-version": str(create_response.json()["version"])},
-        json={"keywords": ["gamma"]},
-    )
-    assert patch_keywords.status_code == 400
-    assert patch_keywords.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
-    assert chacha_db.get_keywords_for_note("note-keywords-update") == []
-    envelopes = sync_service.store.list_envelopes_after(
-        sync_service.profile(user_id="user-1").active_dataset_id or "",
-        0,
-        domains=["notes.note"],
-        limit=10,
-    )
-    assert [(item.operation, item.object_id) for item in envelopes] == [
-        ("upsert", "note-keywords-update")
-    ]
-
 
 def test_inactive_sync_note_keywords_keep_existing_direct_behavior(
     monkeypatch: pytest.MonkeyPatch,
@@ -1034,7 +1007,7 @@ def test_active_sync_note_create_idempotency_key_replays_and_rejects_conflicts(
     ) == 1
 
 
-def test_active_sync_note_import_bulk_and_keyword_links_do_not_bypass_sync(
+def test_active_sync_m1_only_import_bulk_and_keyword_links_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -1055,33 +1028,12 @@ def test_active_sync_note_import_bulk_and_keyword_links_do_not_bypass_sync(
             ],
         },
     )
-    assert import_response.status_code == 200
-    assert import_response.json()["created_count"] == 1
-    assert chacha_db.get_note_by_id("import-sync-1")["client_id"] == "user-1"
-
-    import_keywords = client.post(
-        "/api/v1/notes/import",
-        json={
-            "items": [
-                {
-                    "format": "json",
-                    "content": json.dumps(
-                        [
-                            {
-                                "id": "import-keyword-reject",
-                                "title": "Keywords",
-                                "content": "Rejected.",
-                                "keywords": ["alpha"],
-                            }
-                        ]
-                    ),
-                }
-            ],
-        },
+    assert import_response.status_code == 409
+    assert (
+        import_response.json()["detail"]["error_code"]
+        == "notes_organization_sync_domains_incomplete"
     )
-    assert import_keywords.status_code == 400
-    assert import_keywords.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
-    assert chacha_db.get_note_by_id("import-keyword-reject") is None
+    assert chacha_db.get_note_by_id("import-sync-1") is None
 
     bulk_response = client.post(
         "/api/v1/notes/bulk",
@@ -1091,7 +1043,7 @@ def test_active_sync_note_import_bulk_and_keyword_links_do_not_bypass_sync(
     assert bulk_response.json()["created_count"] == 1
     assert chacha_db.get_note_by_id("bulk-sync-1")["client_id"] == "user-1"
 
-    bulk_keywords = client.post(
+    bulk_organization = client.post(
         "/api/v1/notes/bulk",
         json={
             "notes": [
@@ -1104,21 +1056,35 @@ def test_active_sync_note_import_bulk_and_keyword_links_do_not_bypass_sync(
             ]
         },
     )
-    assert bulk_keywords.status_code == 400
-    assert bulk_keywords.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
+    assert bulk_organization.status_code == 207
+    assert bulk_organization.json()["created_count"] == 0
+    assert bulk_organization.json()["failed_count"] == 1
     assert chacha_db.get_note_by_id("bulk-keyword-reject") is None
 
+    direct_client = _notes_app(monkeypatch, chacha_db=chacha_db, sync_service=None)
+    direct_response = direct_client.post(
+        "/api/v1/notes/",
+        json={"id": "link-target", "title": "Link target", "content": "Fixture note."},
+    )
+    assert direct_response.status_code == 201
+    client = _notes_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
     keyword_id = chacha_db.add_keyword("linked")
     assert keyword_id is not None
-    link_response = client.post(f"/api/v1/notes/import-sync-1/keywords/{keyword_id}")
-    assert link_response.status_code == 400
-    assert link_response.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
-    assert chacha_db.get_keywords_for_note("import-sync-1") == []
-    chacha_db.link_note_to_keyword("import-sync-1", keyword_id)
-    unlink_response = client.delete(f"/api/v1/notes/import-sync-1/keywords/{keyword_id}")
-    assert unlink_response.status_code == 400
-    assert unlink_response.json()["detail"]["error_code"] == "sync_v2_keywords_not_supported"
-    assert [item["keyword"] for item in chacha_db.get_keywords_for_note("import-sync-1")] == ["linked"]
+    link_response = client.post(f"/api/v1/notes/link-target/keywords/{keyword_id}")
+    assert link_response.status_code == 409
+    assert (
+        link_response.json()["detail"]["error_code"]
+        == "notes_organization_sync_domains_incomplete"
+    )
+    assert chacha_db.get_keywords_for_note("link-target") == []
+    chacha_db.link_note_to_keyword("link-target", keyword_id)
+    unlink_response = client.delete(f"/api/v1/notes/link-target/keywords/{keyword_id}")
+    assert unlink_response.status_code == 409
+    assert (
+        unlink_response.json()["detail"]["error_code"]
+        == "notes_organization_sync_domains_incomplete"
+    )
+    assert [item["keyword"] for item in chacha_db.get_keywords_for_note("link-target")] == ["linked"]
 
     dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
     envelopes = sync_service.store.list_envelopes_after(
@@ -1128,8 +1094,7 @@ def test_active_sync_note_import_bulk_and_keyword_links_do_not_bypass_sync(
         limit=10,
     )
     assert [(item.operation, item.object_id) for item in envelopes] == [
-        ("upsert", "import-sync-1"),
-        ("upsert", "bulk-sync-1"),
+        ("upsert", "bulk-sync-1")
     ]
 
 

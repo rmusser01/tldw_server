@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -9,15 +11,29 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+    NotesOrganizationSyncStore,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
+    NotesOrganizationDomainAdapter,
+)
+from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.materializers.chat import (
     ChatConversationMaterializer,
     ChatMessageMaterializer,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
+    NotesOrganizationMaterializer,
+)
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    SyncEnvelopeCreate,
+)
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
@@ -85,6 +101,10 @@ def repair_client(repair_service: SyncV2Service) -> TestClient:
 def _registry() -> SyncAdapterRegistry:
     return SyncAdapterRegistry(
         [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
+        + [
+            NotesOrganizationDomainAdapter(domain=domain)
+            for domain in NOTES_ORGANIZATION_DOMAINS
+        ]
     )
 
 
@@ -201,6 +221,59 @@ def _push(service: SyncV2Service, *envelopes: SyncEnvelopeCreate) -> None:
     assert [item.client_envelope_id for item in result.accepted] == [
         envelope.client_envelope_id for envelope in envelopes
     ]
+
+
+def _enable_ready_notes_organization(store: SyncV2Store) -> None:
+    store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ? "
+        "WHERE dataset_id = ?",
+        (
+            json.dumps([*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]),
+            json.dumps({"notes_organization_v1": {"state": "ready"}}),
+            "dataset-1",
+        ),
+    )
+
+
+def _keyword_group(
+    *,
+    group_id: str,
+    count: int = 3,
+) -> list[SyncEnvelopeCreate]:
+    return [
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id=f"env-keyword-{index}",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=f"{index + 1:08d}-1111-4111-8111-111111111111",
+            device_id="server-origin",
+            object_revision=1,
+            payload={"keyword": f"Synthetic {index}"},
+            payload_hash=f"sha256:keyword-{index}",
+            payload_size_bytes=32,
+            encryption_metadata={"policy": "server_trusted_v1"},
+            mutation_group_id=group_id,
+            mutation_step=index,
+            mutation_step_count=count,
+            mutation_plan_hash="0" * 64,
+        )
+        for index in range(count)
+    ]
+
+
+class _RecordingGroupMaterializer:
+    def __init__(self) -> None:
+        self.steps: list[int] = []
+
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        assert envelope.mutation_step is not None
+        self.steps.append(envelope.mutation_step)
+        store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="applied",
+        )
+        return MaterializationResult(status="applied")
 
 
 def test_repair_rebuilds_note_projection_from_accepted_envelopes(
@@ -376,3 +449,152 @@ def test_repair_endpoint_requires_owned_dataset_and_returns_status(
     assert chacha_db.get_note_by_id("note-1") is not None
     assert forbidden.status_code == 404
     assert forbidden.json()["detail"]["error_code"] == "sync_resource_not_found"
+
+
+def test_notes_organization_repair_resumes_failed_group_without_skipping_pending_suffix(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-group-retry")
+    )
+    sync_store.mark_envelope_apply_status(stored[0].server_cursor, apply_status="applied")
+    sync_store.mark_envelope_apply_status(
+        stored[1].server_cursor,
+        apply_status="failed",
+        apply_error_code="notes_organization_projection_failed",
+        apply_error_message="Synthetic label /private/path raw database error",
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert materializer.steps == [1, 2]
+    assert result.attempted_count == 2
+    assert result.applied_count == 2
+    assert result.failed_count == 0
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-group-retry",
+            "failing_step": None,
+            "error_code": None,
+            "retry_result": "applied",
+            "state": "applied",
+        }
+    ]
+    serialized = str(asdict(result))
+    assert "Synthetic label" not in serialized
+    assert "/private/path" not in serialized
+    assert "raw database error" not in serialized
+
+
+def test_notes_organization_repair_reports_blocked_group_without_applying_later_steps(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-group-blocked")
+    )
+    sync_store.mark_envelope_apply_status(stored[0].server_cursor, apply_status="applied")
+    sync_store.mark_envelope_apply_status(
+        stored[1].server_cursor,
+        apply_status="conflict",
+        apply_error_code="notes_organization_base_conflict",
+        apply_error_message="Secret label /private/path idempotency-key-plaintext",
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+    )
+
+    assert materializer.steps == []
+    assert result.attempted_count == 0
+    assert result.conflict_count == 1
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-group-blocked",
+            "failing_step": 1,
+            "error_code": "notes_organization_base_conflict",
+            "retry_result": "blocked",
+            "state": "conflict",
+        }
+    ]
+    serialized = str(asdict(result))
+    assert "Secret label" not in serialized
+    assert "/private/path" not in serialized
+    assert "idempotency-key-plaintext" not in serialized
+
+
+def test_notes_organization_repair_exact_post_state_finishes_bookkeeping_once(
+    sync_store: SyncV2Store,
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    materializer = NotesOrganizationMaterializer(chacha_db, "notes.keyword")
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-group-bookkeeping", count=1)
+    )[0]
+    product_writes = 0
+    projection = NotesOrganizationSyncStore.apply_resource
+    original_mark = sync_store.mark_envelope_apply_status
+    fail_once = True
+
+    def _count_product_write(*args: Any, **kwargs: Any):
+        nonlocal product_writes
+        product_writes += 1
+        return projection(*args, **kwargs)
+
+    def _fail_first_applied_status(*args: Any, **kwargs: Any):
+        nonlocal fail_once
+        if kwargs.get("apply_status") == "applied" and fail_once:
+            fail_once = False
+            raise RuntimeError("Sync bookkeeping unavailable")
+        return original_mark(*args, **kwargs)
+
+    monkeypatch.setattr(
+        NotesOrganizationSyncStore,
+        "apply_resource",
+        _count_product_write,
+    )
+    monkeypatch.setattr(sync_store, "mark_envelope_apply_status", _fail_first_applied_status)
+    first = materializer.apply(stored, store=sync_store)
+    assert first.status == "failed"
+    assert product_writes == 1
+    monkeypatch.setattr(sync_store, "mark_envelope_apply_status", original_mark)
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert result.applied_count == 1
+    assert product_writes == 1
+    assert sync_store.list_mutation_group(
+        "dataset-1", "server-origin-group-bookkeeping"
+    )[0].apply_status == "applied"
