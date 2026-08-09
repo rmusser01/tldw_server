@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
 from pydantic import ValidationError
 
 pytestmark = pytest.mark.unit
@@ -34,6 +36,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
 REPO_ROOT = Path(__file__).resolve().parents[5]
 ROOT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 STANDALONE_PROJECT_ROOT = REPO_ROOT / "apps" / "mcp-unified"
+_ARTIFACT_UTILS = runpy.run_path(
+    str(Path(__file__).with_name("mcp_unified_artifact_test_utils.py"))
+)
+_build_standalone_distributions = _ARTIFACT_UTILS["build_standalone_distributions"]
 STANDALONE_SRC_ROOT = STANDALONE_PROJECT_ROOT / "src"
 PACKAGE_ROOT = STANDALONE_SRC_ROOT / "mcp_unified"
 STANDALONE_PYPROJECT = STANDALONE_PROJECT_ROOT / "pyproject.toml"
@@ -60,6 +66,30 @@ def test_mcp_unified_package_project_lives_under_apps() -> None:
     assert STANDALONE_PYPROJECT.is_file()  # nosec B101
     assert PACKAGE_ROOT.is_dir()  # nosec B101
     assert not (REPO_ROOT / "mcp_unified").exists()  # nosec B101
+
+
+def test_pinned_protocol_schemas_are_checked_out_with_lf_endings() -> None:
+    """Pinned byte-for-byte schema fixtures must not receive Windows CRLF conversion."""
+
+    fixture_root = Path(__file__).with_name("fixtures") / "mcp_protocol"
+    schema_paths = sorted(fixture_root.glob("*/schema.json"))
+    relative_paths = [path.relative_to(REPO_ROOT).as_posix() for path in schema_paths]
+    result = subprocess.run(
+        ["git", "check-attr", "text", "eol", "--", *relative_paths],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    resolved = {
+        (path, attribute): value
+        for line in result.stdout.splitlines()
+        for path, attribute, value in [line.split(": ", 2)]
+    }
+
+    assert len(schema_paths) == 5  # nosec B101
+    assert all(resolved[(path, "text")] == "set" for path in relative_paths)  # nosec B101
+    assert all(resolved[(path, "eol")] == "lf" for path in relative_paths)  # nosec B101
 
 
 def _dependency_package_name(dependency: str) -> str:
@@ -172,19 +202,6 @@ def _require_offline_build_tools() -> None:
         )
 
 
-def _assert_artifact_gate_build_tools_available() -> None:
-    """Assert the mandatory artifact gate build tools are available."""
-
-    details = _offline_build_tool_issues()
-    if importlib.util.find_spec("build") is None:
-        details.append("missing: build")
-    if details:
-        raise AssertionError(
-            "Standalone artifact gate requires preinstalled build tools; "
-            f"{'; '.join(details)}."
-        )
-
-
 def _assert_subprocess_succeeded(
     result: subprocess.CompletedProcess[str],
     command_label: str,
@@ -224,66 +241,6 @@ def _subprocess_env_with_standalone_src(
     return env
 
 
-def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
-    """Build standalone MCP Unified wheel and sdist into a temporary directory."""
-
-    _assert_artifact_gate_build_tools_available()
-
-    package_source = tmp_path / "mcp_unified_source"
-    shutil.copytree(
-        STANDALONE_PROJECT_ROOT,
-        package_source,
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            "build",
-            "dist",
-            "*.egg-info",
-        ),
-    )
-    dist_dir = tmp_path / "dist"
-    dist_dir.mkdir()
-
-    result = subprocess.run(  # nosec B603
-        [
-            sys.executable,
-            "-m",
-            "build",
-            "--wheel",
-            "--sdist",
-            "--no-isolation",
-            "--outdir",
-            str(dist_dir),
-            str(package_source),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=_subprocess_env(
-            {
-                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-                "PIP_NO_INDEX": "1",
-            }
-        ),
-    )
-    _assert_subprocess_succeeded(result, "python -m build")
-
-    wheels = sorted(
-        [
-            *dist_dir.glob("mcp_unified-*.whl"),
-            *dist_dir.glob("mcp-unified-*.whl"),
-        ]
-    )
-    sdists = sorted(
-        [
-            *dist_dir.glob("mcp_unified-*.tar.gz"),
-            *dist_dir.glob("mcp-unified-*.tar.gz"),
-        ]
-    )
-    assert len(wheels) == 1  # nosec B101
-    assert len(sdists) == 1  # nosec B101
-    return wheels[0], sdists[0]
-
-
 def _read_wheel_metadata(wheel: Path) -> Message:
     """Read the wheel distribution metadata."""
 
@@ -297,6 +254,39 @@ def _read_wheel_metadata(wheel: Path) -> Message:
         raw_metadata = archive.read(metadata_members[0]).decode("utf-8")
 
     return Parser().parsestr(raw_metadata)
+
+
+def _read_sdist_metadata(sdist: Path) -> Message:
+    """Read the source distribution PKG-INFO metadata."""
+
+    with tarfile.open(sdist, "r:gz") as archive:
+        metadata_members = [
+            member
+            for member in archive.getmembers()
+            if member.name.endswith("/PKG-INFO")
+            and len(Path(member.name).parts) == 2
+        ]
+        assert len(metadata_members) == 1  # nosec B101
+        extracted = archive.extractfile(metadata_members[0])
+        assert extracted is not None  # nosec B101
+        raw_metadata = extracted.read().decode("utf-8")
+
+    return Parser().parsestr(raw_metadata)
+
+
+def _base_requirement(metadata: Message, distribution_name: str) -> Requirement:
+    """Return one unmarked base requirement from distribution metadata."""
+
+    normalized_name = distribution_name.lower().replace("_", "-")
+    matches = [
+        requirement
+        for value in metadata.get_all("Requires-Dist") or []
+        if (requirement := Requirement(value)).name.lower().replace("_", "-")
+        == normalized_name
+        and requirement.marker is None
+    ]
+    assert len(matches) == 1  # nosec B101
+    return matches[0]
 
 
 def _read_wheel_entry_points(wheel: Path) -> configparser.ConfigParser:
@@ -477,9 +467,10 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     metadata = importlib.import_module("mcp_unified.package_metadata")
 
     assert metadata.PACKAGE_NAME == "mcp-unified"
-    assert metadata.PACKAGE_STATUS == "internal-experimental"
+    assert metadata.PACKAGE_STATUS == "public-alpha"
     assert metadata.PUBLISHING_STATUS == "published"
     assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
+    assert "jsonschema" in metadata.PROJECT_DEPENDENCIES
 
     extras = metadata.OPTIONAL_EXTRAS
     assert set(extras) == {  # nosec B101
@@ -545,7 +536,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     }
 
 
-def test_mcp_unified_publish_metadata_is_ready_but_internal() -> None:
+def test_mcp_unified_publish_metadata_is_ready_for_public_alpha() -> None:
     """Standalone package metadata should be published but still experimental."""
 
     metadata = importlib.import_module("mcp_unified.package_metadata")
@@ -585,7 +576,7 @@ def test_mcp_unified_publish_metadata_is_ready_but_internal() -> None:
 
     summary = metadata.package_metadata_summary()
     assert summary["publishing_status"] == "published"  # nosec B101
-    assert summary["package_status"] == "internal-experimental"  # nosec B101
+    assert summary["package_status"] == "public-alpha"  # nosec B101
     assert summary["authors"] == list(metadata.PACKAGE_AUTHORS)  # nosec B101
     assert summary["maintainers"] == list(metadata.PACKAGE_MAINTAINERS)  # nosec B101
     assert summary["keywords"] == list(metadata.PACKAGE_KEYWORDS)  # nosec B101
@@ -769,6 +760,8 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     }
 
     assert _dependency_names(project["dependencies"]) == set(metadata.PROJECT_DEPENDENCIES)
+    assert "jsonschema>=4.23,<5" in project["dependencies"]
+    assert "jsonschema>=4.23,<5" in _load_root_pyproject()["project"]["dependencies"]
 
     optional_dependencies = project["optional-dependencies"]
     assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)
@@ -901,6 +894,20 @@ def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     assert forbidden_dependency_names.isdisjoint(
         _wheel_declared_dependency_names(distribution_metadata)
     )  # nosec B101
+
+
+def test_mcp_unified_artifacts_declare_bounded_jsonschema_base_dependency(
+    standalone_distributions: tuple[Path, Path],
+) -> None:
+    """Wheel and sdist metadata must carry the validator as a base dependency."""
+
+    wheel, sdist = standalone_distributions
+    for distribution_metadata in (
+        _read_wheel_metadata(wheel),
+        _read_sdist_metadata(sdist),
+    ):
+        requirement = _base_requirement(distribution_metadata, "jsonschema")
+        assert str(requirement.specifier) == "<5,>=4.23"  # nosec B101
 
 
 def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
@@ -1127,6 +1134,22 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
         step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
         for step in pypi_job["steps"]
     )
+
+
+def test_mcp_unified_publish_workflow_installs_direct_validator_dependency() -> None:
+    """RC and upload build jobs must install the direct schema dependency."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-publish.yml"
+    workflow = _load_workflow(workflow_path)
+    install_blocks = [
+        str(step["run"])
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Install packaging tools"
+    ]
+
+    assert len(install_blocks) == 2  # nosec B101
+    assert all('"jsonschema>=4.23,<5"' in block for block in install_blocks)  # nosec B101
 
 
 def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:

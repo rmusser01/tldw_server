@@ -3,10 +3,11 @@
 MCP Unified is the standalone package boundary for the Model Context Protocol
 runtime and gateway being extracted from `tldw-server`.
 
-The package is currently internal/experimental. It is built and tested inside
-the `tldw-server` repository and published on PyPI as the early standalone
-package boundary. Treat this directory as the supported package-local
-integration surface for early standalone gateway work.
+The package status is `public-alpha`, and the publishing status is `published`.
+Version `0.2.0` remains a release candidate until the protected PyPI publish
+succeeds. The package is published on PyPI and built and tested inside the
+`tldw-server` repository; the
+former internal/experimental phase remains relevant only to earlier releases.
 
 This package does not currently ship an end-user standalone gateway server
 launcher. `mcp-unified-gateway` commands manage local configuration or talk to
@@ -49,7 +50,7 @@ mcp-unified-gateway package-info
 
 Expected current status:
 
-- package status: `internal-experimental`
+- package status: `public-alpha`
 - publishing status: `published`
 - license expression: `GPL-3.0-only`
 
@@ -58,15 +59,25 @@ recognize the inline type annotations when consuming built artifacts.
 
 ## Publishing Readiness
 
-Standalone package publishing is live but still guarded. The package metadata
-is PyPI-shaped, and the runtime metadata remains `internal-experimental` while
-reporting the PyPI publishing state as `published`.
+Standalone package publishing is live but guarded. Package metadata reports
+`public-alpha` and publishing state `published`; the `0.2.0` build is a release
+candidate until the protected publish succeeds.
 
 Run the full internal release candidate gate:
 
 ```bash
 make mcp-unified-rc
 ```
+
+For each clean wheel and sdist environment, that gate also installs the exact
+official Tier 1 Python SDK pin `mcp==2.0.0` and exercises automatic strict
+stdio negotiation at `2026-07-28`, tool discovery, and one tool call. The pin
+is the official Python SDK
+[`v2.0.0`](https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.0.0)
+release at tag commit `6f69a37`. This is explicit stdio interoperability
+evidence, not a claim of full transport conformance: the official conformance
+server harness is URL-oriented, and this package does not add a modern HTTP
+transport for that harness.
 
 Build artifacts and generate the TestPyPI upload plan without uploading:
 
@@ -89,6 +100,12 @@ Install the published package boundary with the gateway extras:
 
 ```bash
 python -m pip install "mcp-unified[gateway]"
+```
+
+Downstream applications should use a compatible-minor pin:
+
+```bash
+python -m pip install "mcp-unified[gateway]~=0.2.0"
 ```
 
 For development tooling, install the optional development extras:
@@ -115,6 +132,75 @@ python -m pip install -e "apps/mcp-unified[gateway,dev]"
 The package dependency groups intentionally stay small. Heavy `tldw-server`
 runtime stacks such as media ingestion, transcription, RAG, and WebUI
 dependencies are outside this package boundary.
+
+## Strict Stdio Protocol
+
+The public `mcp_unified.gateway` API implements five pinned MCP revisions over
+newline-delimited binary stdio:
+
+| Revision | Lifecycle | Batch requests |
+| --- | --- | --- |
+| `2026-07-28` | Per-request `_meta`; no initialize session | Rejected |
+| `2025-11-25` | `initialize`, then operations | Rejected |
+| `2025-06-18` | `initialize`, then operations | Rejected |
+| `2025-03-26` | Standalone `initialize`, then operations | Accepted only after initialization |
+| `2024-11-05` | `initialize`, then operations | Rejected |
+
+The strict surface owns revision negotiation, validation, projection,
+pagination, cancellation, limits, and stdio framing. Existing HTTP/WebSocket
+routes are compatibility surfaces with their existing contracts; this release
+does not claim modern MCP conformance for HTTP.
+
+Embed strict stdio with caller-owned binary streams, or omit them to use the
+process binary adapters:
+
+```python
+import asyncio
+
+from mcp_unified.gateway import GatewayLimits, serve_stdio
+
+raise SystemExit(
+    asyncio.run(
+        serve_stdio(runtime, limits=GatewayLimits(max_in_flight=1))
+    )
+)
+```
+
+The injected runtime and host application own catalogs, authorization, policy,
+audit, local files and databases, content, and privacy decisions. The protocol
+layer does not expose or duplicate application-local data and never treats
+self-reported client identity as authorization.
+
+`GatewayLimits` has these exact defaults:
+
+| Limit | Default | Limit | Default |
+| --- | ---: | --- | ---: |
+| `max_input_line_bytes` | 1,048,576 | `max_output_line_bytes` | 1,048,576 |
+| `max_result_bytes` | 786,432 | `max_json_depth` | 64 |
+| `max_in_flight` | 16 | `default_catalog_page_size` | 50 |
+| `max_catalog_page_size` | 100 | `max_catalog_items` | 10,000 |
+| `max_batch_items` | 100 | `max_requests_per_minute` | 600 |
+| `request_burst` | 32 | `max_schema_bytes` | 262,144 |
+| `max_schema_depth` | 32 | `max_schema_subschemas` | 1,024 |
+| `max_schema_refs` | 256 | `max_schema_pattern_chars` | 4,096 |
+| `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 1.0 |
+| `graceful_shutdown_timeout_seconds` | 5.0 | | |
+
+Modern responses use conservative private cache hints
+`{"ttlMs": 0, "cacheScope": "private"}`; legacy projections omit modern cache
+fields. Errors expose only stable, allowlisted classifications and safe limit
+metadata, never raw payloads, paths, credentials, schemas, exception strings,
+or private result sizes. If an oversized response cannot fit, the fixed generic
+internal-error line is exactly 79 bytes including its newline: an output limit
+of 79 emits that one line, while 78 emits nothing rather than truncating data.
+
+Cancellation stops pending asynchronous work and propagates request
+cancellation to the runtime. Shutdown is bounded by
+`graceful_shutdown_timeout_seconds` and reports incomplete input, output, or
+cleanup work on stderr without corrupting protocol stdout. Python cannot kill a
+non-returning worker thread; hosts must bound synchronous work, and clients must
+escalate from stream close to process terminate and then kill when a child does
+not exit within its grace period.
 
 ## Quick CLI Check
 
@@ -170,7 +256,7 @@ mcp-unified-gateway validate-config ./gateway.json
 
 When a host application mounts the package gateway, `GET /mcp/status` returns
 best-effort readiness metadata for that package-local mount. It includes package
-status (`internal-experimental`, `published`), runtime name/version,
+status (`public-alpha`, `published`), runtime name/version,
 profile store persistence, default profile state, admin-auth configured state,
 external server counts, warnings, and next actions. It is not the embedded TLDW
 Server status endpoint; embedded users should call `/api/v1/mcp/status`.

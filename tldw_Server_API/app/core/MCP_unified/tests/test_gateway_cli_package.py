@@ -2464,7 +2464,7 @@ def test_gateway_cli_package_info_reports_release_gate(
     assert captured.err == ""
     assert payload["ok"] is True
     assert payload["package_name"] == "mcp-unified"
-    assert payload["package_status"] == "internal-experimental"
+    assert payload["package_status"] == "public-alpha"
     assert payload["publishing_status"] == "published"
     assert payload["license_expression"] == "GPL-3.0-only"
     assert payload["dependency_version_policy"] == "names-only"
