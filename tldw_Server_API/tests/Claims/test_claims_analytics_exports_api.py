@@ -6,7 +6,10 @@ import pytest
 from fastapi import HTTPException, Response
 
 from tldw_Server_API.app.api.v1.endpoints import claims as claims_endpoint
-from tldw_Server_API.app.api.v1.schemas.claims_schemas import ClaimsAnalyticsExportRequest
+from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
+    ClaimsAnalyticsExportFilters,
+    ClaimsAnalyticsExportRequest,
+)
 from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Claims_Extraction import claims_analytics_exports, claims_jobs, claims_service
@@ -135,6 +138,47 @@ def test_sync_create_returns_ready_without_job(monkeypatch: pytest.MonkeyPatch) 
         "snapshot_at": _SNAPSHOT,
     }
     assert calls and calls[0]["owner_user_id"] == "1"
+
+
+@pytest.mark.parametrize(
+    "export_request",
+    [
+        ClaimsAnalyticsExportRequest(format="json", filters=None, pagination=None),
+        ClaimsAnalyticsExportRequest(
+            format="json",
+            filters=ClaimsAnalyticsExportFilters(workspace_id=None),
+        ),
+    ],
+)
+def test_explicit_null_optional_request_fields_are_treated_as_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+    export_request: ClaimsAnalyticsExportRequest,
+) -> None:
+    db = _FakeDb()
+    normalized_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(claims_jobs, "claims_analytics_export_jobs_enabled", lambda: False)
+    monkeypatch.setattr(claims_analytics_exports, "reconcile_export_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(claims_analytics_exports, "cleanup_export_artifacts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: object())
+
+    def _create_ready(_db: Any, *, normalized: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        normalized_calls.append(normalized)
+        return _row("1", status="ready")
+
+    monkeypatch.setattr(claims_analytics_exports, "create_ready_artifact", _create_ready)
+
+    body, response_status = claims_service.export_claims_analytics(
+        payload=export_request.model_dump(exclude_unset=True),
+        principal=_principal(),
+        current_user=_user(),
+        db=db,
+    )
+
+    assert response_status == 200
+    assert body["status"] == "ready"
+    assert normalized_calls[0]["owner_user_id"] == "1"
+    assert normalized_calls[0]["pagination"] == {"limit": 1000, "offset": 0}
+    assert "workspace_id" not in normalized_calls[0]["filters"]
 
 
 @pytest.mark.parametrize(
@@ -319,6 +363,45 @@ def test_malformed_jobs_acceptance_is_compensated(
         claims_jobs,
         "enqueue_claims_analytics_export",
         lambda **_kwargs: {"id": job_id, "status": "queued"},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.export_claims_analytics(
+            payload={"format": "json"},
+            principal=_principal(),
+            current_user=_user(),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert db.transition_calls[0]["error_code"] == "claims_export_enqueue_failed"
+
+
+@pytest.mark.parametrize(
+    "accepted",
+    [
+        {"id": 81},
+        {"id": 81, "status": None},
+        {"id": 81, "status": ""},
+        {"id": 81, "status": "   "},
+        {"id": 81, "status": 1},
+    ],
+)
+def test_malformed_jobs_acceptance_status_is_compensated(
+    monkeypatch: pytest.MonkeyPatch,
+    accepted: dict[str, Any],
+) -> None:
+    db = _FakeDb()
+    _patch_common(monkeypatch, enabled=True)
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "create_queued_artifact",
+        lambda *_args, **_kwargs: _row("1", status="queued"),
+    )
+    monkeypatch.setattr(
+        claims_jobs,
+        "enqueue_claims_analytics_export",
+        lambda **_kwargs: accepted,
     )
 
     with pytest.raises(HTTPException) as exc_info:

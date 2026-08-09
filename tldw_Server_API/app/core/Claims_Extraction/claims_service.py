@@ -3430,14 +3430,19 @@ def _claims_export_request_owner(
     request_payload = dict(payload)
     raw_filters = request_payload.get("filters")
     workspace_id: str | None = None
-    if isinstance(raw_filters, dict) and "workspace_id" in raw_filters:
-        workspace_id = _canonical_claims_export_owner_id(raw_filters["workspace_id"])
-        if workspace_id != owner_user_id and not _principal_has_platform_admin_claims(principal):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-        owner_user_id = workspace_id
+    if raw_filters is None:
+        request_payload.pop("filters", None)
+    elif isinstance(raw_filters, dict) and "workspace_id" in raw_filters:
         filters = dict(raw_filters)
-        filters.pop("workspace_id", None)
+        raw_workspace_id = filters.pop("workspace_id")
         request_payload["filters"] = filters
+        if raw_workspace_id is not None:
+            workspace_id = _canonical_claims_export_owner_id(raw_workspace_id)
+            if workspace_id != owner_user_id and not _principal_has_platform_admin_claims(principal):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+            owner_user_id = workspace_id
+    if request_payload.get("pagination") is None:
+        request_payload.pop("pagination", None)
     return owner_user_id, workspace_id, request_payload
 
 
@@ -3616,6 +3621,9 @@ def export_claims_analytics(
             job_id = accepted.get("id")
             if type(job_id) is not int or job_id <= 0:
                 raise ValueError("Jobs acceptance must include a positive integer ID")
+            accepted_status = accepted.get("status")
+            if not isinstance(accepted_status, str) or not accepted_status.strip():
+                raise ValueError("Jobs acceptance must include a non-empty status")
         except Exception as exc:  # noqa: BLE001 - cross-store enqueue failures need compensation.
             _mark_claims_export_enqueue_failed(
                 db=target_db,
@@ -3661,15 +3669,13 @@ def export_claims_analytics(
                 type(exc).__name__,
             )
 
-        accepted_status = accepted.get("status")
-        job_status = accepted_status if isinstance(accepted_status, str) and accepted_status else "queued"
         return (
             _claims_export_response(
                 row=row,
                 normalized=normalized,
                 workspace_id=workspace_id,
                 accepted_job_id=job_id,
-                job_status=job_status,
+                job_status=accepted_status,
             ),
             status.HTTP_202_ACCEPTED,
         )
