@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 
 from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+    NotesOrganizationValidationError,
     new_organization_sync_id,
     organization_link_id,
     parse_notes_organization_payload,
@@ -11,6 +12,8 @@ from tldw_Server_API.app.core.Sync.v2.notes_organization import (
     validate_resource_sync_id,
 )
 from tldw_Server_API.app.core.Sync.v2.models import SyncDomain
+
+CANONICAL_SYNC_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def test_organization_link_ids_use_canonical_domain_tagged_vectors() -> None:
@@ -88,8 +91,10 @@ def test_notes_organization_payloads_are_strict_and_normalized() -> None:
     ) == {"keyword": "research"}
     assert parse_notes_organization_payload("notes.keyword", "tombstone", {}) == {}
     assert parse_notes_organization_payload(
-        "notes.folder_link", "tombstone", {"note_id": "note-1", "folder_sync_id": "folder-1"}
-    ) == {"note_id": "note-1", "folder_sync_id": "folder-1"}
+        "notes.folder_link",
+        "tombstone",
+        {"note_id": CANONICAL_SYNC_ID, "folder_sync_id": CANONICAL_SYNC_ID},
+    ) == {"note_id": CANONICAL_SYNC_ID, "folder_sync_id": CANONICAL_SYNC_ID}
 
     with pytest.raises(ValueError):
         parse_notes_organization_payload("notes.keyword", "upsert", {"keyword": "research", "extra": True})
@@ -97,3 +102,45 @@ def test_notes_organization_payloads_are_strict_and_normalized() -> None:
         parse_notes_organization_payload("notes.keyword", "tombstone", {"keyword": "research"})
     with pytest.raises(ValueError):
         parse_notes_organization_payload("notes.folder_link", "tombstone", {})
+
+
+@pytest.mark.parametrize(
+    ("domain", "payload"),
+    [
+        (
+            "notes.keyword_link",
+            {"subject_type": "note", "subject_id": "1", "keyword_sync_id": CANONICAL_SYNC_ID},
+        ),
+        (
+            "notes.keyword_link",
+            {"subject_type": "conversation", "subject_id": "conversation-1", "keyword_sync_id": "1"},
+        ),
+        ("notes.keyword_collection", {"name": "Research", "parent_sync_id": "1"}),
+        (
+            "notes.keyword_collection_link",
+            {"collection_sync_id": "1", "keyword_sync_id": CANONICAL_SYNC_ID},
+        ),
+        (
+            "notes.keyword_collection_link",
+            {"collection_sync_id": CANONICAL_SYNC_ID, "keyword_sync_id": "1"},
+        ),
+        ("notes.folder", {"name": "Research", "parent_sync_id": "1"}),
+        ("notes.folder_link", {"note_id": "1", "folder_sync_id": CANONICAL_SYNC_ID}),
+        ("notes.folder_link", {"note_id": CANONICAL_SYNC_ID, "folder_sync_id": "1"}),
+    ],
+)
+def test_notes_organization_payload_rejects_noncanonical_resource_references(
+    domain: SyncDomain,
+    payload: dict[str, str],
+) -> None:
+    with pytest.raises(NotesOrganizationValidationError) as exc_info:
+        parse_notes_organization_payload(domain, "upsert", payload)
+
+    assert exc_info.value.error_code == "notes_organization_resource_sync_id_invalid"
+
+
+def test_notes_organization_validation_errors_expose_stable_error_codes() -> None:
+    with pytest.raises(NotesOrganizationValidationError) as exc_info:
+        parse_notes_organization_payload("notes.keyword", "upsert", {"keyword": "research", "extra": True})
+
+    assert exc_info.value.error_code == "notes_organization_payload_invalid"
