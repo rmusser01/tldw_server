@@ -368,6 +368,11 @@ Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
 JSON or CSV output is bounded by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; the default
 configured limit is 10 MiB (10,485,760 UTF-8 bytes). Any configured positive
 integer value overrides that default, while invalid or non-positive values use 10 MiB.
+At artifact acceptance, Claims also records an internal owner-scoped monitoring
+event-ID high-water. Rendering and retries apply that high-water with the
+timestamp cutoff so events added later with equal or backdated timestamps are
+excluded. This internal value is not exposed in the API or Jobs contracts; the
+matching `(user_id, created_at, id)` index is present on SQLite and PostgreSQL.
 Synchronous requests that exceed the configured byte limit return HTTP 413 with
 the stable `claims_export_too_large` code; asynchronous requests expose the safe
 failed artifact through the normal status APIs.

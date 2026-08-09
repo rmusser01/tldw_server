@@ -211,6 +211,9 @@ The existing `claims_analytics_exports` table gains nullable fields:
 - `job_id`: SQLite integer or PostgreSQL bigint linking the active Jobs row.
 - `error_code`: stable, non-sensitive Claims domain error code.
 - `snapshot_at`: UTC request snapshot cutoff.
+- `snapshot_event_id`: nullable owner-scoped monitoring-event high-water captured
+  with the artifact. It is internal storage metadata and is not exposed through
+  Jobs payloads/results or the export lifecycle API.
 
 `job_status` is not a table field. It is projected at read time from Jobs so
 Claims does not maintain a second lifecycle state machine.
@@ -219,8 +222,10 @@ Claims does not maintain a second lifecycle state machine.
 sanitized public message. Raw exceptions are never persisted.
 
 Fresh schemas and upgrade migrations must add the same fields for SQLite and
-PostgreSQL. Add an index on `job_id` and retain owner-based indexes. Migration
-tests cover both a fresh database and upgrade from the current schema.
+PostgreSQL. Add an index on `job_id`, retain owner-based indexes, and keep the
+`claims_monitoring_events(user_id, created_at, id)` scan index identical across
+backends. Migration tests cover both a fresh database and upgrade from the
+current schema.
 
 ### Artifact Status
 
@@ -288,7 +293,8 @@ When both producer flags are enabled:
    SQLite uses that owner's database path.
 4. It performs bounded, best-effort terminal cleanup and orphan reconciliation.
 5. It creates a queued export row with a generated `export_id`, normalized
-   filters, normalized pagination, format, and `snapshot_at`.
+   filters, normalized pagination, format, `snapshot_at`, and an owner-scoped
+   monitoring-event ID high-water.
 6. It enqueues one Claims Job.
 7. It conditionally attaches the returned `job_id` to the export row.
 8. It returns HTTP 202 with the export and Job identifiers.

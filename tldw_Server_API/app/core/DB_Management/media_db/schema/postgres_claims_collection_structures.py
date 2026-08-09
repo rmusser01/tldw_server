@@ -420,6 +420,11 @@ def ensure_postgres_claims_extensions(
             connection=conn,
         )
         backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user_created_id')} "
+            f"ON {ident('claims_monitoring_events')} ({ident('user_id')}, {ident('created_at')}, {ident('id')})",
+            connection=conn,
+        )
+        backend.execute(
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_type')} "
             f"ON {ident('claims_monitoring_events')} ({ident('event_type')})",
             connection=conn,
@@ -466,6 +471,7 @@ def ensure_postgres_claims_extensions(
                 "job_id BIGINT, "
                 "error_code TEXT, "
                 "snapshot_at TIMESTAMPTZ, "
+                "snapshot_event_id BIGINT, "
                 "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             ),
@@ -484,6 +490,11 @@ def ensure_postgres_claims_extensions(
         backend.execute(
             f"ALTER TABLE {ident('claims_analytics_exports')} "
             f"ADD COLUMN IF NOT EXISTS {ident('snapshot_at')} TIMESTAMPTZ",
+            connection=conn,
+        )
+        backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('snapshot_event_id')} BIGINT",
             connection=conn,
         )
         backend.execute(

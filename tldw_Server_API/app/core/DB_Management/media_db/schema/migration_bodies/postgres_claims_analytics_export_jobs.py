@@ -50,8 +50,17 @@ def run_postgres_migrate_to_v24(
             f"ADD COLUMN IF NOT EXISTS {ident('snapshot_at')} TIMESTAMPTZ"
         ),
         (
+            f"ALTER TABLE {table} "
+            f"ADD COLUMN IF NOT EXISTS {ident('snapshot_event_id')} BIGINT"
+        ),
+        (
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_analytics_exports_job_id')} "
             f"ON {table} ({ident('job_id')})"
+        ),
+        (
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user_created_id')} "
+            f"ON {ident('claims_monitoring_events')} "
+            f"({ident('user_id')}, {ident('created_at')}, {ident('id')})"
         ),
     ]
 

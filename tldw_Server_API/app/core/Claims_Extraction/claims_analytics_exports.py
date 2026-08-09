@@ -398,6 +398,7 @@ def _scan_events(
     owner_user_id: str,
     filters: dict[str, Any],
     pagination: dict[str, int],
+    snapshot_event_id: int | None,
 ) -> tuple[list[dict[str, Any]], int]:
     selected: list[dict[str, Any]] = []
     total = 0
@@ -416,6 +417,7 @@ def _scan_events(
             end_time=filters["end_time"],
             after_created_at=after_created_at,
             after_id=after_id,
+            max_event_id=snapshot_event_id,
             limit=EXPORT_SCAN_PAGE_SIZE,
         )
         if not isinstance(page, list) or len(page) > EXPORT_SCAN_PAGE_SIZE:
@@ -494,12 +496,22 @@ def render_export(
     pagination: dict[str, int],
     snapshot_at: str,
     max_bytes: int,
+    snapshot_event_id: int | None = None,
 ) -> dict[str, Any]:
     """Render one owner-scoped export through bounded keyset database pages."""
     owner = _canonical_owner_id(owner_user_id)
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
         raise _invalid_payload_error()
     snapshot = _parse_iso8601(snapshot_at)
+    if (
+        snapshot_event_id is not None
+        and (
+            isinstance(snapshot_event_id, bool)
+            or not isinstance(snapshot_event_id, int)
+            or snapshot_event_id < 0
+        )
+    ):
+        raise _invalid_payload_error()
     normalized = normalize_export_request(
         {
             "format": format,
@@ -515,6 +527,7 @@ def render_export(
         owner_user_id=owner,
         filters=normalized["filters"],
         pagination=normalized["pagination"],
+        snapshot_event_id=snapshot_event_id,
     )
     pagination_meta = {
         "limit": normalized["pagination"]["limit"],
@@ -613,6 +626,7 @@ def _create_artifact(
         owner_user_id=owner,
         persisted=False,
     )
+    snapshot_event_id = db.get_claims_monitoring_event_high_water(user_id=owner)
     return db.create_claims_analytics_export(
         export_id=uuid4().hex,
         user_id=owner,
@@ -621,6 +635,7 @@ def _create_artifact(
         filters_json=_compact_json(request["filters"]),
         pagination_json=_compact_json(request["pagination"]),
         snapshot_at=request["snapshot_at"],
+        snapshot_event_id=snapshot_event_id,
     )
 
 
@@ -709,6 +724,7 @@ def _render_normalized(
     *,
     owner_user_id: str,
     normalized: dict[str, Any],
+    snapshot_event_id: int | None = None,
 ) -> dict[str, Any]:
     return render_export(
         db,
@@ -718,6 +734,7 @@ def _render_normalized(
         pagination=normalized["pagination"],
         snapshot_at=normalized["snapshot_at"],
         max_bytes=export_max_bytes(),
+        snapshot_event_id=snapshot_event_id,
     )
 
 
@@ -746,6 +763,7 @@ def create_ready_artifact(
             db,
             owner_user_id=owner,
             normalized=request,
+            snapshot_event_id=row.get("snapshot_event_id"),
         )
         if not _mark_rendered_ready(
             db,
@@ -886,6 +904,7 @@ def process_export_artifact(
             db,
             owner_user_id=owner,
             normalized=normalized,
+            snapshot_event_id=row.get("snapshot_event_id"),
         )
         if _mark_rendered_ready(
             db,

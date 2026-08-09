@@ -92,6 +92,7 @@ class FakeMonitoringDB:
         end_time: str | None = None,
         after_created_at: Any = None,
         after_id: int | None = None,
+        max_event_id: int | None = None,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         assert user_id == self.expected_owner
@@ -106,6 +107,7 @@ class FakeMonitoringDB:
                 "end_time": end_time,
                 "after_created_at": after_created_at,
                 "after_id": after_id,
+                "max_event_id": max_event_id,
                 "limit": limit,
             }
         )
@@ -121,6 +123,8 @@ class FakeMonitoringDB:
         if end_time is not None:
             end = _parse_time(end_time)
             rows = [row for row in rows if _parse_time(str(row["created_at"])) <= end]
+        if max_event_id is not None:
+            rows = [row for row in rows if int(row["id"]) <= max_event_id]
 
         rows.sort(key=lambda row: (_parse_time(str(row["created_at"])), int(row["id"])))
         if after_created_at is not None and after_id is not None:
@@ -150,6 +154,7 @@ class ScriptedPageDB:
         end_time: str | None = None,
         after_created_at: Any = None,
         after_id: int | None = None,
+        max_event_id: int | None = None,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         assert user_id == self.expected_owner
@@ -164,6 +169,7 @@ class ScriptedPageDB:
                 "end_time": end_time,
                 "after_created_at": after_created_at,
                 "after_id": after_id,
+                "max_event_id": max_event_id,
                 "limit": limit,
             }
         )
@@ -182,6 +188,10 @@ class ArtifactDB(FakeMonitoringDB):
         self.failure_transition_hook: Any = None
         self.force_wrong_owner_get = False
 
+    def get_claims_monitoring_event_high_water(self, *, user_id: str) -> int:
+        assert user_id == self.expected_owner
+        return max((int(row["id"]) for row in self.rows), default=0)
+
     def create_claims_analytics_export(self, **values: Any) -> dict[str, Any]:
         row = {
             "payload_json": None,
@@ -192,6 +202,7 @@ class ArtifactDB(FakeMonitoringDB):
             "job_id": None,
             "error_code": None,
             "snapshot_at": None,
+            "snapshot_event_id": None,
             "created_at": FIXED_SNAPSHOT,
             "updated_at": FIXED_SNAPSHOT,
             **values,
@@ -858,6 +869,24 @@ def test_render_fixed_snapshot_ignores_rows_inserted_between_equivalent_calls() 
 
     assert first == second
     assert [event["id"] for event in json.loads(second["payload_json"])["events"]] == [1]
+
+
+def test_worker_retry_excludes_same_millisecond_events_added_after_artifact_acceptance() -> None:
+    db = ArtifactDB([_event(1, created_at=FIXED_SNAPSHOT)])
+    artifact = create_queued_artifact(db, owner_user_id="7", normalized=_normalized())
+    db.rows.append(_event(2, created_at=FIXED_SNAPSHOT))
+
+    result = process_export_artifact(
+        db,
+        owner_user_id="7",
+        export_id=artifact["export_id"],
+        job_id=42,
+    )
+
+    assert result["outcome"] == "ok"
+    payload = json.loads(db.artifacts[artifact["export_id"]]["payload_json"])
+    assert artifact["snapshot_event_id"] == 1
+    assert [event["id"] for event in payload["events"]] == [1]
 
 
 def test_render_is_deterministic_for_sync_and_worker_equivalent_calls() -> None:

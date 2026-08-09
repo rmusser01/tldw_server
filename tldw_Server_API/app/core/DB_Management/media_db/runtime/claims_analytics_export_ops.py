@@ -52,6 +52,14 @@ def _validate_job_id(job_id: Any) -> int:
     return job_id
 
 
+def _validate_snapshot_event_id(snapshot_event_id: Any) -> int | None:
+    if snapshot_event_id is None:
+        return None
+    if type(snapshot_event_id) is not int or snapshot_event_id < 0:
+        raise ValueError("snapshot_event_id must be a non-negative integer or null")
+    return snapshot_event_id
+
+
 def _validate_claims_analytics_export_create(
     *,
     format: str,
@@ -97,6 +105,7 @@ def create_claims_analytics_export(
     job_id: int | None = None,
     error_code: str | None = None,
     snapshot_at: str | None = None,
+    snapshot_event_id: int | None = None,
 ) -> dict[str, Any]:
     normalized_format = str(format)
     normalized_status = str(status)
@@ -109,13 +118,14 @@ def create_claims_analytics_export(
         error_message=error_message,
     )
     validated_job_id = None if job_id is None else _validate_job_id(job_id)
+    validated_snapshot_event_id = _validate_snapshot_event_id(snapshot_event_id)
     now = self._get_current_utc_timestamp_str()
     self.execute_query(
         (
             "INSERT INTO claims_analytics_exports "
             "(export_id, user_id, format, status, payload_json, payload_csv, filters_json, "
-            "pagination_json, error_message, job_id, error_code, snapshot_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "pagination_json, error_message, job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ),
         (
             str(export_id),
@@ -130,6 +140,7 @@ def create_claims_analytics_export(
             validated_job_id,
             error_code,
             snapshot_at,
+            validated_snapshot_event_id,
             now,
             now,
         ),
@@ -147,7 +158,7 @@ def get_claims_analytics_export(
     row = self.execute_query(
         (
             "SELECT export_id, user_id, format, status, payload_json, payload_csv, filters_json, "
-            "pagination_json, error_message, job_id, error_code, snapshot_at, created_at, updated_at "
+            "pagination_json, error_message, job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at "
             "FROM claims_analytics_exports WHERE export_id = ? AND user_id = ? LIMIT 1"
         ),
         (str(export_id), str(user_id)),
@@ -292,10 +303,10 @@ def list_claims_analytics_exports(
         params.append(str(format))
     query = (
         "SELECT export_id, user_id, format, status, filters_json, pagination_json, error_message, "  # nosec B608
-        "job_id, error_code, snapshot_at, created_at, updated_at "
+        "job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at "
         "FROM claims_analytics_exports WHERE "
         + " AND ".join(conditions)
-        + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        + " ORDER BY created_at DESC, export_id DESC LIMIT ? OFFSET ?"
     )
     params.extend([limit, offset])
     rows = self.execute_query(query, tuple(params)).fetchall()
@@ -352,7 +363,7 @@ def list_claims_analytics_exports_for_maintenance(
     )
     query = (
         "SELECT export_id, user_id, format, status, filters_json, pagination_json, "  # nosec B608
-        "error_message, job_id, error_code, snapshot_at, created_at, updated_at "
+        "error_message, job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at "
         "FROM claims_analytics_exports WHERE "
         + " AND ".join(conditions)
         + f" ORDER BY {order_by} LIMIT ?"

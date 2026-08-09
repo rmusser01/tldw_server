@@ -81,6 +81,10 @@ def ensure_sqlite_claims_extensions(db: Any, conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered "
             "ON claims_monitoring_events(delivered_at);"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id "
+            "ON claims_monitoring_events(user_id, created_at, id);"
+        )
     except sqlite3.Error as exc:
         logger.warning(f"Could not ensure delivered_at for claims_monitoring_events: {exc}")
 

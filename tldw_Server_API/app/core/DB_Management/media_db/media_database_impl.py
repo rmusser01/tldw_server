@@ -114,6 +114,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_c
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     get_claims_monitoring_event,
+    get_claims_monitoring_event_high_water,
     get_latest_claims_monitoring_event_delivery,
     has_successful_claims_monitoring_event_delivery,
     insert_claims_monitoring_event,
@@ -1096,6 +1097,7 @@ class MediaDatabase:
         delivered_at DATETIME
     );
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user ON claims_monitoring_events(user_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id ON claims_monitoring_events(user_id, created_at, id);
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_type ON claims_monitoring_events(event_type);
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered ON claims_monitoring_events(delivered_at);
 
@@ -1170,6 +1172,7 @@ class MediaDatabase:
         job_id INTEGER,
         error_code TEXT,
         snapshot_at TEXT,
+        snapshot_event_id INTEGER,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -2104,6 +2107,7 @@ MediaDatabase.get_claims_monitoring_health = get_claims_monitoring_health
 MediaDatabase.upsert_claims_monitoring_health = upsert_claims_monitoring_health
 MediaDatabase.insert_claims_monitoring_event = insert_claims_monitoring_event
 MediaDatabase.get_claims_monitoring_event = get_claims_monitoring_event
+MediaDatabase.get_claims_monitoring_event_high_water = get_claims_monitoring_event_high_water
 MediaDatabase.list_claims_monitoring_events = list_claims_monitoring_events
 MediaDatabase.list_claims_monitoring_events_page = list_claims_monitoring_events_page
 MediaDatabase.list_undelivered_claims_monitoring_events = (

@@ -1,18 +1,19 @@
 import importlib
 import sqlite3
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
+
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.core.DB_Management.media_db.schema.bootstrap import ensure_media_schema
 from tldw_Server_API.app.core.DB_Management.media_db.schema import bootstrap as bootstrap_module
 from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import postgres as postgres_backend_module
 from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import sqlite as sqlite_backend_module
+from tldw_Server_API.app.core.DB_Management.media_db.schema.bootstrap import ensure_media_schema
 
 
 @pytest.mark.unit
@@ -2141,6 +2142,11 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
                 "ON claims_monitoring_events(delivered_at);"
             ):
                 return None
+            if query == (
+                "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id "
+                "ON claims_monitoring_events(user_id, created_at, id);"
+            ):
+                return None
             raise AssertionError(f"unexpected query {query!r}")
 
         def executescript(self, script: str) -> None:
@@ -2156,6 +2162,7 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
         "PRAGMA table_info(Claims)",
         "PRAGMA table_info(claims_monitoring_events)",
         "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered ON claims_monitoring_events(delivered_at);",
+        "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id ON claims_monitoring_events(user_id, created_at, id);",
     ]
     assert conn.scripts == [
         "\n".join(
@@ -2829,6 +2836,7 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
+        assert columns["snapshot_event_id"] == {"type": "INTEGER", "notnull": 0}
         assert "job_status" not in columns
         assert "idx_claims_analytics_exports_job_id" in indexes
     finally:
@@ -2904,6 +2912,12 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                     "PRAGMA index_list(claims_analytics_exports)"
                 ).fetchall()
             }
+            monitoring_index_columns = [
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA index_info(idx_claims_monitoring_events_user_created_id)"
+                ).fetchall()
+            ]
             version = conn.execute(
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
@@ -2912,8 +2926,10 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
+        assert columns["snapshot_event_id"] == {"type": "INTEGER", "notnull": 0}
         assert "job_status" not in columns
         assert "idx_claims_analytics_exports_job_id" in indexes
+        assert monitoring_index_columns == ["user_id", "created_at", "id"]
 
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -2921,7 +2937,7 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                 conn.execute(
                     """
                     SELECT export_id, user_id, format, status, payload_json,
-                           filters_json, job_id, error_code, snapshot_at
+                           filters_json, job_id, error_code, snapshot_at, snapshot_event_id
                     FROM claims_analytics_exports
                     WHERE export_id = 'export-existing'
                     """
@@ -2937,7 +2953,33 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
             "job_id": None,
             "error_code": None,
             "snapshot_at": None,
+            "snapshot_event_id": None,
         }
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_current_v24_sqlite_bootstrap_restores_claims_monitoring_event_snapshot_index(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "media_v24_claims_events.sqlite"
+    db = MediaDatabase(str(db_path), client_id="claims-event-snapshot-index")
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("DROP INDEX idx_claims_monitoring_events_user_created_id")
+
+        db._initialize_schema()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            columns = [
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA index_info(idx_claims_monitoring_events_user_created_id)"
+                ).fetchall()
+            ]
+        assert columns == ["user_id", "created_at", "id"]
     finally:
         db.close_connection()
 
@@ -3070,6 +3112,12 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
                     "PRAGMA index_list(claims_analytics_exports)"
                 ).fetchall()
             }
+            monitoring_index_columns = [
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA index_info(idx_claims_monitoring_events_user_created_id)"
+                ).fetchall()
+            ]
             version = conn.execute(
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
@@ -3085,7 +3133,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
             export_row = dict(
                 conn.execute(
                     """
-                    SELECT export_id, payload_json, job_id, error_code, snapshot_at
+                    SELECT export_id, payload_json, job_id, error_code, snapshot_at, snapshot_event_id
                     FROM claims_analytics_exports
                     WHERE export_id = 'export-recovery'
                     """
@@ -3096,7 +3144,9 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
+        assert columns["snapshot_event_id"] == {"type": "INTEGER", "notnull": 0}
         assert "idx_claims_analytics_exports_job_id" in indexes
+        assert monitoring_index_columns == ["user_id", "created_at", "id"]
         assert migration_row == {
             "version": 24,
             "name": "claims_analytics_export_jobs",
@@ -3108,6 +3158,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
             "job_id": None,
             "error_code": None,
             "snapshot_at": None,
+            "snapshot_event_id": None,
         }
     finally:
         db.close_connection()

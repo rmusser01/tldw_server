@@ -310,6 +310,15 @@ ALLOWED_EXPORT_TRANSITIONS = {
 
 The SQL must include `WHERE export_id = ? AND user_id = ?` followed by a generated, parameterized `status IN` placeholder list. `mark_claims_analytics_export_ready` writes exactly one of `payload_json` or `payload_csv`, clears safe error fields, updates `updated_at`, and only succeeds from `processing`. All list projections include `job_id`, `error_code`, and `snapshot_at`; payload bodies remain excluded from list results.
 
+Task 12 batch 1 extends the persisted artifact projection with nullable internal
+`snapshot_event_id`. Capture the owner's non-negative event-ID high-water when
+creating either sync or async artifacts; retries and synchronous rendering pass
+it to monitoring-event scans as `id <= snapshot_event_id`. Legacy null rows
+retain time-cutoff-only behavior. Keep this field out of Jobs contracts and
+public lifecycle responses, order export history by `created_at DESC, export_id
+DESC`, and maintain `claims_monitoring_events(user_id, created_at, id)` in fresh
+SQLite/PostgreSQL schemas and both v24 upgrade paths.
+
 - [ ] **Step 5: Implement bounded monitoring-event pages**
 
 Add:

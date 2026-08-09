@@ -59,6 +59,23 @@ def get_claims_monitoring_event(self, event_id: int) -> dict[str, Any]:
     return dict(row) if row else {}
 
 
+def get_claims_monitoring_event_high_water(self, *, user_id: str) -> int:
+    """Return the owner's greatest persisted monitoring-event ID, or zero."""
+    row = self.execute_query(
+        "SELECT COALESCE(MAX(id), 0) AS event_id FROM claims_monitoring_events WHERE user_id = ?",
+        (str(user_id),),
+    ).fetchone()
+    if not row:
+        return 0
+    try:
+        return max(int(row["event_id"] or 0), 0)
+    except _MEDIA_NONCRITICAL_EXCEPTIONS:
+        try:
+            return max(int(row[0] or 0), 0)
+        except _MEDIA_NONCRITICAL_EXCEPTIONS:
+            return 0
+
+
 def list_claims_monitoring_events(
     self,
     *,
@@ -105,6 +122,7 @@ def list_claims_monitoring_events_page(
     end_time: str | None = None,
     after_created_at: Any = None,
     after_id: int | None = None,
+    max_event_id: int | None = None,
     limit: int = 1000,
 ) -> list[dict[str, Any]]:
     if (after_created_at is None) != (after_id is None):
@@ -129,6 +147,11 @@ def list_claims_monitoring_events_page(
     if end_time:
         conditions.append("created_at <= ?")
         params.append(str(end_time))
+    if max_event_id is not None:
+        if isinstance(max_event_id, bool) or not isinstance(max_event_id, int) or max_event_id < 0:
+            raise ValueError("max_event_id must be a non-negative integer")
+        conditions.append("id <= ?")
+        params.append(max_event_id)
     if after_created_at is not None and after_id is not None:
         conditions.append("(created_at > ? OR (created_at = ? AND id > ?))")
         params.extend([after_created_at, after_created_at, int(after_id)])

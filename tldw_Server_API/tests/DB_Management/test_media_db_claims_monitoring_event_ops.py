@@ -8,6 +8,9 @@ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
     MediaDatabase,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import (
+    claims_monitoring_event_ops,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     get_claims_monitoring_event as helper_get_claims_monitoring_event,
 )
@@ -28,9 +31,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_e
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     mark_claims_monitoring_events_delivered as helper_mark_claims_monitoring_events_delivered,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime import (
-    claims_monitoring_event_ops,
 )
 
 pytestmark = pytest.mark.unit
@@ -94,6 +94,21 @@ def test_insert_claims_monitoring_event_returns_inserted_row_and_gets_by_id(
         assert loaded["severity"] == "warning"
         assert loaded["payload_json"] == '{"alert_id":9}'
         assert loaded["delivered_at"] is None
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_high_water_is_owner_scoped(tmp_path: Path) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-high-water.db")
+    try:
+        assert db.get_claims_monitoring_event_high_water(user_id="1") == 0
+        first = db.insert_claims_monitoring_event(user_id="1", event_type="first")
+        second = db.insert_claims_monitoring_event(user_id="2", event_type="other")
+        third = db.insert_claims_monitoring_event(user_id="1", event_type="last")
+
+        assert db.get_claims_monitoring_event_high_water(user_id="1") == third["id"]
+        assert db.get_claims_monitoring_event_high_water(user_id="2") == second["id"]
+        assert first["id"] < third["id"]
     finally:
         db.close_connection()
 

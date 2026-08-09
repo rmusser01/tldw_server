@@ -186,6 +186,7 @@ def _stored_row(
         "error_code": error_code,
         "error_message": "A safe stored message.",
         "snapshot_at": _SNAPSHOT,
+        "snapshot_event_id": 19,
         "filters_json": '{"event_type":"unsupported_ratio","end_time":"2026-08-08T12:00:00.000Z"}',
         "pagination_json": '{"limit":10,"offset":0}',
         "filters": {"workspace_id": "999"},
@@ -900,6 +901,7 @@ def test_list_is_owner_scoped_and_batches_nullable_job_status_hydration(
     assert result["exports"][0]["job_id"] == 81
     assert result["exports"][0]["error_code"] is None
     assert result["exports"][0]["snapshot_at"] == _SNAPSHOT
+    assert "snapshot_event_id" not in result["exports"][0]
     assert result["exports"][0]["filters"] == {
         "event_type": "unsupported_ratio",
         "end_time": _SNAPSHOT,

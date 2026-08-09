@@ -101,6 +101,7 @@ def test_claims_analytics_export_row_projections_canonicalize_native_datetimes(
         "status": "queued",
         "payload_json": '{"events":[]}',
         "snapshot_at": aware,
+        "snapshot_event_id": 19,
         "created_at": naive,
         "updated_at": "preserve-this-string",
     }
@@ -110,6 +111,7 @@ def test_claims_analytics_export_row_projections_canonicalize_native_datetimes(
         "format": "json",
         "status": "queued",
         "snapshot_at": None,
+        "snapshot_event_id": None,
         "created_at": aware,
         "updated_at": naive,
     }
@@ -119,6 +121,7 @@ def test_claims_analytics_export_row_projections_canonicalize_native_datetimes(
         "format": "json",
         "status": "queued",
         "snapshot_at": "preserve-this-string",
+        "snapshot_event_id": None,
         "created_at": None,
         "updated_at": aware,
     }
@@ -139,13 +142,16 @@ def test_claims_analytics_export_row_projections_canonicalize_native_datetimes(
         maintenance = db.list_claims_analytics_exports_for_maintenance(user_id="1")
 
         assert fetched["snapshot_at"] == "2026-08-08T12:06:07.987Z"
+        assert fetched["snapshot_event_id"] == 19
         assert fetched["created_at"] == "2026-08-08T12:06:07.123Z"
         assert fetched["updated_at"] == "preserve-this-string"
         assert fetched["payload_json"] == '{"events":[]}'
         assert listed[0]["snapshot_at"] is None
+        assert listed[0]["snapshot_event_id"] is None
         assert listed[0]["created_at"] == "2026-08-08T12:06:07.987Z"
         assert listed[0]["updated_at"] == "2026-08-08T12:06:07.123Z"
         assert maintenance[0]["snapshot_at"] == "preserve-this-string"
+        assert maintenance[0]["snapshot_event_id"] is None
         assert maintenance[0]["created_at"] is None
         assert maintenance[0]["updated_at"] == "2026-08-08T12:06:07.987Z"
     finally:
@@ -165,6 +171,7 @@ def test_create_claims_analytics_export_returns_freshly_readable_row(tmp_path: P
             pagination_json='{"limit":10}',
             job_id=37,
             snapshot_at="2026-08-08T12:00:00.000Z",
+            snapshot_event_id=19,
         )
 
         assert row["export_id"] == "exp-create-1"
@@ -177,6 +184,7 @@ def test_create_claims_analytics_export_returns_freshly_readable_row(tmp_path: P
         assert row["job_id"] == 37
         assert row["error_code"] is None
         assert row["snapshot_at"] == "2026-08-08T12:00:00.000Z"
+        assert row["snapshot_event_id"] == 19
         assert row["created_at"]
         assert row["updated_at"]
     finally:
@@ -265,6 +273,7 @@ def test_claims_analytics_export_list_projects_job_fields_without_payloads(tmp_p
             job_id=41,
             error_code="claims_export_safe_code",
             snapshot_at="2026-08-08T12:00:00.000Z",
+            snapshot_event_id=19,
         )
 
         rows = db.list_claims_analytics_exports("1")
@@ -274,8 +283,29 @@ def test_claims_analytics_export_list_projects_job_fields_without_payloads(tmp_p
         assert rows[0]["job_id"] == 41
         assert rows[0]["error_code"] == "claims_export_safe_code"
         assert rows[0]["snapshot_at"] == "2026-08-08T12:00:00.000Z"
+        assert rows[0]["snapshot_event_id"] == 19
         assert "payload_json" not in rows[0]
         assert "payload_csv" not in rows[0]
+    finally:
+        db.close_connection()
+
+
+def test_claims_analytics_export_list_is_stable_for_tied_creation_timestamps(tmp_path: Path) -> None:
+    db = _make_db(tmp_path, "claims-analytics-tied-list.db")
+    try:
+        for export_id in ("exp-a", "exp-c", "exp-b"):
+            _seed_export(db, export_id=export_id)
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET created_at = ? WHERE user_id = ?",
+            ("2026-08-08T12:00:00.000Z", "1"),
+            commit=True,
+        )
+
+        first_page = db.list_claims_analytics_exports("1", limit=2, offset=0)
+        second_page = db.list_claims_analytics_exports("1", limit=2, offset=2)
+
+        assert [row["export_id"] for row in first_page] == ["exp-c", "exp-b"]
+        assert [row["export_id"] for row in second_page] == ["exp-a"]
     finally:
         db.close_connection()
 
@@ -715,7 +745,13 @@ def test_claims_analytics_export_maintenance_list_is_owner_scoped_and_determinis
 
         assert [row["export_id"] for row in rows] == ["exp-a", "exp-b", "exp-c"]
         assert all(row["user_id"] == "1" for row in rows)
-        assert all("job_id" in row and "error_code" in row and "snapshot_at" in row for row in rows)
+        assert all(
+            "job_id" in row
+            and "error_code" in row
+            and "snapshot_at" in row
+            and "snapshot_event_id" in row
+            for row in rows
+        )
         assert all("payload_json" not in row and "payload_csv" not in row for row in rows)
     finally:
         db.close_connection()
@@ -1003,6 +1039,7 @@ def test_claims_analytics_exports_postgres_owner_scoped_crud_and_v24_fields(
             filters_json='{"severity":"high"}',
             pagination_json='{"limit":25,"offset":0}',
             snapshot_at="2026-08-08T12:00:00.000Z",
+            snapshot_event_id=19,
         )
         db.create_claims_analytics_export(
             export_id="pg-crud-owner-2",
@@ -1020,6 +1057,7 @@ def test_claims_analytics_exports_postgres_owner_scoped_crud_and_v24_fields(
         assert created["job_id"] is None
         assert created["error_code"] is None
         assert created["snapshot_at"] == "2026-08-08T12:00:00.000Z"
+        assert created["snapshot_event_id"] == 19
         assert all(
             isinstance(created[field], str)
             and _CANONICAL_TIMESTAMP_RE.fullmatch(created[field])

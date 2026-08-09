@@ -2,12 +2,12 @@ import uuid
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
 def _column_exists(backend, conn, table: str, column: str) -> bool:
@@ -799,6 +799,10 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                 connection=conn,
             )
             backend.execute(
+                "DROP INDEX IF EXISTS idx_claims_monitoring_events_user_created_id",
+                connection=conn,
+            )
+            backend.execute(
                 "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS job_id",
                 connection=conn,
             )
@@ -808,6 +812,10 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
             )
             backend.execute(
                 "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS snapshot_at",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS snapshot_event_id",
                 connection=conn,
             )
             backend.execute(
@@ -826,7 +834,7 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
             export_rows = backend.execute(
                 """
                 SELECT export_id, user_id, format, status, payload_json, filters_json,
-                       job_id, error_code, snapshot_at
+                       job_id, error_code, snapshot_at, snapshot_event_id
                 FROM claims_analytics_exports
                 WHERE export_id = %s
                 """,
@@ -844,11 +852,17 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
             assert _column_definition(
                 backend, conn, "claims_analytics_exports", "snapshot_at"
             ) == {"data_type": "timestamp with time zone", "is_nullable": "YES"}
+            assert _column_definition(
+                backend, conn, "claims_analytics_exports", "snapshot_event_id"
+            ) == {"data_type": "bigint", "is_nullable": "YES"}
             assert not _column_exists(
                 backend, conn, "claims_analytics_exports", "job_status"
             )
             assert _index_exists(
                 backend, conn, "idx_claims_analytics_exports_job_id"
+            )
+            assert _index_exists(
+                backend, conn, "idx_claims_monitoring_events_user_created_id"
             )
             assert [dict(row) for row in export_rows] == [
                 {
@@ -861,6 +875,7 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                     "job_id": None,
                     "error_code": None,
                     "snapshot_at": None,
+                    "snapshot_event_id": None,
                 }
             ]
     finally:
