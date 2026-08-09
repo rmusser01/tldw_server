@@ -3,76 +3,73 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from numbers import Real
+from types import MappingProxyType
 from typing import Any
 
-METRIC_LABEL_CONTRACT: dict[str, dict[str, frozenset[str]]] = {
-    "article_extracted": {"success": frozenset({"true", "false"})},
-    "extraction_cluster_cache_total": {
-        "cache": frozenset({"embedding"}),
-        "result": frozenset({"hit", "miss"}),
-    },
-    "extraction_cluster_total": {"status": frozenset({"started", "no_blocks", "no_clusters", "empty", "success"})},
-    "extraction_content_length_bytes": {
-        "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"})
-    },
-    "extraction_retry_total": {
-        "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}),
-        "attempt": frozenset({"1", "2", "3", "4_plus"}),
-    },
-    "extraction_strategy_duration_seconds": {
-        "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}),
-        "status": frozenset({"skipped", "failed", "success", "enriched"}),
-    },
-    "extraction_strategy_total": {
-        "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}),
-        "status": frozenset({"skipped", "failed", "success", "enriched"}),
-    },
-    "llm_tokens_used_total": {
-        "provider": frozenset(
-            {
-                "openai",
-                "anthropic",
-                "cohere",
-                "deepseek",
-                "google",
-                "groq",
-                "huggingface",
-                "mistral",
-                "openrouter",
-                "qwen",
-                "moonshot",
-                "zai",
-                "other",
-            }
-        ),
-        "model": frozenset({"configured"}),
-        "type": frozenset({"prompt", "completion"}),
-    },
-    "llm_tokens_used_total_by_operation": {
-        "provider": frozenset(
-            {
-                "openai",
-                "anthropic",
-                "cohere",
-                "deepseek",
-                "google",
-                "groq",
-                "huggingface",
-                "mistral",
-                "openrouter",
-                "qwen",
-                "moonshot",
-                "zai",
-                "other",
-            }
-        ),
-        "model": frozenset({"configured"}),
-        "type": frozenset({"prompt", "completion"}),
-        "operation": frozenset({"extraction"}),
-    },
-}
+LLM_PROVIDER_LABEL_VALUES = frozenset(
+    {
+        "openai",
+        "anthropic",
+        "cohere",
+        "deepseek",
+        "google",
+        "groq",
+        "huggingface",
+        "mistral",
+        "openrouter",
+        "qwen",
+        "moonshot",
+        "zai",
+        "other",
+    }
+)
+
+
+def _freeze_label_contract(
+    contract: Mapping[str, Mapping[str, frozenset[str]]],
+) -> Mapping[str, Mapping[str, frozenset[str]]]:
+    return MappingProxyType({name: MappingProxyType(dict(labels)) for name, labels in contract.items()})
+
+
+METRIC_LABEL_CONTRACT = _freeze_label_contract(
+    {
+        "article_extracted": {"success": frozenset({"true", "false"})},
+        "extraction_cluster_cache_total": {
+            "cache": frozenset({"embedding"}),
+            "result": frozenset({"hit", "miss"}),
+        },
+        "extraction_cluster_total": {"status": frozenset({"started", "no_blocks", "no_clusters", "empty", "success"})},
+        "extraction_content_length_bytes": {
+            "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"})
+        },
+        "extraction_retry_total": {
+            "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}),
+            "attempt": frozenset({"1", "2", "3", "4_plus"}),
+        },
+        "extraction_strategy_duration_seconds": {
+            "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}),
+            "status": frozenset({"skipped", "failed", "success", "enriched"}),
+        },
+        "extraction_strategy_total": {
+            "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}),
+            "status": frozenset({"skipped", "failed", "success", "enriched"}),
+        },
+        "llm_tokens_used_total": {
+            "provider": LLM_PROVIDER_LABEL_VALUES,
+            "model": frozenset({"configured"}),
+            "type": frozenset({"prompt", "completion"}),
+        },
+        "llm_tokens_used_total_by_operation": {
+            "provider": LLM_PROVIDER_LABEL_VALUES,
+            "model": frozenset({"configured"}),
+            "type": frozenset({"prompt", "completion"}),
+            "operation": frozenset({"extraction"}),
+        },
+    }
+)
 
 _METRICS_REQUIRING_VALUE = frozenset(
     {
@@ -82,6 +79,14 @@ _METRICS_REQUIRING_VALUE = frozenset(
         "llm_tokens_used_total_by_operation",
     }
 )
+
+
+@contextmanager
+def _isolated_metric_emission() -> Iterator[None]:
+    try:
+        yield
+    except Exception:  # noqa: BLE001 - observability must not replace extraction behavior
+        return
 
 
 def validate_metric(
@@ -115,12 +120,13 @@ def emit_counter(
     labels: Mapping[str, str],
     value: Real | None = None,
 ) -> None:
-    """Validate and forward a counter through the injected extraction sink."""
-    validate_metric(name, labels=labels, value=value)
-    if value is None:
-        dependencies.increment_counter(name, labels=dict(labels))
-    else:
-        dependencies.increment_counter(name, value, labels=dict(labels))
+    """Validate and best-effort forward a counter through the injected sink."""
+    with _isolated_metric_emission():
+        validate_metric(name, labels=labels, value=value)
+        if value is None:
+            dependencies.increment_counter(name, labels=dict(labels))
+        else:
+            dependencies.increment_counter(name, value, labels=dict(labels))
 
 
 def emit_histogram(
@@ -130,9 +136,10 @@ def emit_histogram(
     *,
     labels: Mapping[str, str],
 ) -> None:
-    """Validate and forward a histogram through the injected extraction sink."""
-    validate_metric(name, labels=labels, value=value)
-    dependencies.observe_histogram(name, value, labels=dict(labels))
+    """Validate and best-effort forward a histogram through the injected sink."""
+    with _isolated_metric_emission():
+        validate_metric(name, labels=labels, value=value)
+        dependencies.observe_histogram(name, value, labels=dict(labels))
 
 
 def emit_log_counter(
@@ -142,12 +149,13 @@ def emit_log_counter(
     labels: Mapping[str, str],
     value: Real | None = None,
 ) -> None:
-    """Validate and forward the legacy log-backed counter through dependencies."""
-    validate_metric(name, labels=labels, value=value)
-    if value is None:
-        dependencies.log_counter(name, labels=dict(labels))
-    else:
-        dependencies.log_counter(name, labels=dict(labels), value=value)
+    """Validate and best-effort forward the legacy log-backed counter."""
+    with _isolated_metric_emission():
+        validate_metric(name, labels=labels, value=value)
+        if value is None:
+            dependencies.log_counter(name, labels=dict(labels))
+        else:
+            dependencies.log_counter(name, labels=dict(labels), value=value)
 
 
 def emit_callback_counter(
@@ -156,9 +164,10 @@ def emit_callback_counter(
     *,
     labels: Mapping[str, str],
 ) -> None:
-    """Validate cache forwarding before invoking its caller-owned callback."""
-    validate_metric(name, labels=labels)
-    counter(name, labels=dict(labels))
+    """Validate and best-effort invoke a caller-owned counter callback."""
+    with _isolated_metric_emission():
+        validate_metric(name, labels=labels)
+        counter(name, labels=dict(labels))
 
 
 def emit_global_counter(
@@ -167,14 +176,15 @@ def emit_global_counter(
     labels: Mapping[str, str],
     value: Real | None = None,
 ) -> None:
-    """Validate and emit the Trafilatura metric through the legacy global sink."""
-    validate_metric(name, labels=labels, value=value)
-    from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
+    """Validate and best-effort emit through the legacy global counter sink."""
+    with _isolated_metric_emission():
+        validate_metric(name, labels=labels, value=value)
+        from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 
-    if value is None:
-        log_counter(name, labels=dict(labels))
-    else:
-        log_counter(name, labels=dict(labels), value=value)
+        if value is None:
+            log_counter(name, labels=dict(labels))
+        else:
+            log_counter(name, labels=dict(labels), value=value)
 
 
 def default_increment_counter(

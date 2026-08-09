@@ -13,7 +13,7 @@ from loguru import logger
 from ...observability import bounded_code, bounded_stage, sanitized_host
 from .. import throttles
 from ..dependencies import ExtractionDependencies, build_default_dependencies
-from ..metrics import emit_counter
+from ..metrics import LLM_PROVIDER_LABEL_VALUES, emit_counter
 
 _NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -32,20 +32,6 @@ _NONCRITICAL_EXCEPTIONS = (
     ValueError,
     UnicodeDecodeError,
 )
-_METRIC_PROVIDERS = {
-    "anthropic",
-    "cohere",
-    "deepseek",
-    "google",
-    "groq",
-    "huggingface",
-    "mistral",
-    "moonshot",
-    "openai",
-    "openrouter",
-    "qwen",
-    "zai",
-}
 
 
 def _load_app_config() -> Optional[dict[str, Any]]:
@@ -126,7 +112,7 @@ def _retry_settings() -> tuple[int, float, float]:
 
 def _metric_provider(provider: str) -> str:
     normalized = provider.strip().lower()
-    return normalized if normalized in _METRIC_PROVIDERS else "other"
+    return normalized if normalized in LLM_PROVIDER_LABEL_VALUES else "other"
 
 
 def _metric_attempt(attempt: int) -> str:

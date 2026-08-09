@@ -128,94 +128,278 @@ def _called_names(node: ast.AST) -> set[str]:
     }
 
 
+@dataclasses.dataclass(frozen=True)
+class _CancellationBinding:
+    name: str
+    order: int
+    owner: _CancellationScope
+    kind: str
+    value: ast.expr | None = None
+    imported_name: str | None = None
+    operation: ast.operator | None = None
+
+
 class _CancellationScope:
-    def __init__(self, parent: _CancellationScope | None = None) -> None:
+    def __init__(self, parent: _CancellationScope | None = None, *, kind: str) -> None:
         self.parent = parent
-        self.assignments: dict[str, ast.expr] = {}
-        self.imports: dict[str, str] = {"asyncio": "asyncio"} if parent is None else {}
+        self.kind = kind
+        self.bindings: dict[str, list[_CancellationBinding]] = {}
+        self.local_names: set[str] = set()
 
-    def resolve_name(self, name: str) -> tuple[str, ast.expr | None] | None:
-        if name in self.imports:
-            return self.imports[name], None
-        if name in self.assignments:
-            return "assignment", self.assignments[name]
-        return self.parent.resolve_name(name) if self.parent else None
+    def bind(
+        self,
+        name: str,
+        order: int,
+        *,
+        kind: str,
+        value: ast.expr | None = None,
+        imported_name: str | None = None,
+        operation: ast.operator | None = None,
+    ) -> None:
+        self.bindings.setdefault(name, []).append(
+            _CancellationBinding(
+                name=name,
+                order=order,
+                owner=self,
+                kind=kind,
+                value=value,
+                imported_name=imported_name,
+                operation=operation,
+            )
+        )
+
+    def resolve_name(self, name: str, *, before_order: int) -> _CancellationBinding | None:
+        for binding in reversed(self.bindings.get(name, [])):
+            if binding.order < before_order:
+                return binding
+        if self.kind == "function" and name in self.local_names:
+            return None
+        return self.parent.resolve_name(name, before_order=before_order) if self.parent else None
 
 
-def _scope_for_nodes(tree: ast.Module) -> dict[ast.AST, _CancellationScope]:
-    scopes: dict[ast.AST, _CancellationScope] = {}
+@dataclasses.dataclass(frozen=True)
+class _CancellationContext:
+    scope: _CancellationScope
+    order: int
 
-    def record_binding(node: ast.AST, scope: _CancellationScope) -> None:
-        if isinstance(node, ast.Import):
-            for imported in node.names:
-                if imported.name in {"asyncio", "asyncio.exceptions"}:
-                    scope.imports[imported.asname or imported.name.split(".")[0]] = imported.name
-        elif isinstance(node, ast.ImportFrom) and node.module in {"asyncio", "asyncio.exceptions"}:
-            for imported in node.names:
-                if imported.name == "CancelledError":
-                    scope.imports[imported.asname or imported.name] = "asyncio.CancelledError"
-                elif node.module == "asyncio" and imported.name == "exceptions":
-                    scope.imports[imported.asname or imported.name] = "asyncio.exceptions"
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    scope.assignments[target.id] = node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
-            scope.assignments[node.target.id] = node.value
 
-    def populate(node: ast.AST, scope: _CancellationScope) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                child_scope = _CancellationScope(scope)
-                scopes[child] = child_scope
-                populate(child, child_scope)
+class _FunctionLocalCollector(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Store):
+            self.names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        self.names.update(imported.asname or imported.name.split(".")[0] for imported in node.names)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self.names.update(imported.asname or imported.name for imported in node.names if imported.name != "*")
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.names.add(node.name)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        return
+
+    visit_SetComp = visit_ListComp
+    visit_DictComp = visit_ListComp
+    visit_GeneratorExp = visit_ListComp
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name:
+            self.names.add(node.name)
+        self.generic_visit(node)
+
+
+def _parameter_names(arguments: ast.arguments) -> list[str]:
+    parameters = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
+    names = [parameter.arg for parameter in parameters]
+    if arguments.vararg:
+        names.append(arguments.vararg.arg)
+    if arguments.kwarg:
+        names.append(arguments.kwarg.arg)
+    return names
+
+
+class _CancellationScopeBuilder(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.order = 0
+        self.scope = _CancellationScope(kind="module")
+        self.contexts: dict[ast.ExceptHandler, _CancellationContext] = {}
+
+    def next_order(self) -> int:
+        self.order += 1
+        return self.order
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for imported in node.names:
+            bound_name = imported.asname or imported.name.split(".")[0]
+            imported_name = imported.name if imported.asname else imported.name.split(".")[0]
+            self.scope.bind(bound_name, self.next_order(), kind="import", imported_name=imported_name)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        module = node.module or ""
+        for imported in node.names:
+            if imported.name == "*":
                 continue
-            record_binding(child, scope)
-            if isinstance(child, ast.ExceptHandler):
-                scopes[child] = scope
-            populate(child, scope)
+            imported_name = f"{module}.{imported.name}" if module else imported.name
+            self.scope.bind(
+                imported.asname or imported.name,
+                self.next_order(),
+                kind="import",
+                imported_name=imported_name,
+            )
 
-    root = _CancellationScope()
-    populate(tree, root)
-    return scopes
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self.scope.bind(target.id, self.next_order(), kind="assignment", value=node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if isinstance(node.target, ast.Name) and node.value is not None:
+            self.scope.bind(node.target.id, self.next_order(), kind="assignment", value=node.value)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        if isinstance(node.target, ast.Name):
+            self.scope.bind(
+                node.target.id,
+                self.next_order(),
+                kind="augmented_assignment",
+                value=node.value,
+                operation=node.op,
+            )
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self.scope.bind(node.name, self.next_order(), kind="shadow")
+        lexical_parent = self.scope
+        while lexical_parent.kind == "class" and lexical_parent.parent is not None:
+            lexical_parent = lexical_parent.parent
+        function_scope = _CancellationScope(lexical_parent, kind="function")
+        collector = _FunctionLocalCollector()
+        for statement in node.body:
+            collector.visit(statement)
+        parameter_names = _parameter_names(node.args)
+        function_scope.local_names.update(collector.names | set(parameter_names))
+
+        previous_scope = self.scope
+        self.scope = function_scope
+        for name in parameter_names:
+            self.scope.bind(name, self.next_order(), kind="shadow")
+        for statement in node.body:
+            self.visit(statement)
+        self.scope = previous_scope
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.scope.bind(node.name, self.next_order(), kind="shadow")
+        class_scope = _CancellationScope(self.scope, kind="class")
+        previous_scope = self.scope
+        self.scope = class_scope
+        for statement in node.body:
+            self.visit(statement)
+        self.scope = previous_scope
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        context_order = self.next_order()
+        self.contexts[node] = _CancellationContext(self.scope, context_order)
+        if node.name:
+            self.scope.bind(node.name, self.next_order(), kind="shadow")
+        for statement in node.body:
+            self.visit(statement)
 
 
-def _dotted_name(expression: ast.expr, scope: _CancellationScope) -> str | None:
+def _scope_for_nodes(tree: ast.Module) -> dict[ast.ExceptHandler, _CancellationContext]:
+    builder = _CancellationScopeBuilder()
+    builder.visit(tree)
+    return builder.contexts
+
+
+def _dotted_name(
+    expression: ast.expr,
+    scope: _CancellationScope,
+    before_order: int,
+    seen: set[int],
+) -> str | None:
     if isinstance(expression, ast.Name):
-        resolved = scope.resolve_name(expression.id)
-        return resolved[0] if resolved and resolved[1] is None else None
+        binding = scope.resolve_name(expression.id, before_order=before_order)
+        if binding is None or id(binding) in seen:
+            return None
+        if binding.imported_name is not None:
+            return binding.imported_name
+        if binding.kind == "assignment" and binding.value is not None:
+            return _dotted_name(binding.value, binding.owner, binding.order, seen | {id(binding)})
+        return None
     if not isinstance(expression, ast.Attribute):
         return None
-    parent = _dotted_name(expression.value, scope)
+    parent = _dotted_name(expression.value, scope, before_order, seen)
     return f"{parent}.{expression.attr}" if parent else None
 
 
 def _resolve_exception_expression(
     expression: ast.expr,
     scope: _CancellationScope,
-    seen: set[tuple[int, str]],
+    before_order: int,
+    seen: set[int],
 ) -> tuple[bool, bool]:
     """Return whether an exception expression contains cancellation and is tuple-shaped."""
-    dotted = _dotted_name(expression, scope)
+    dotted = _dotted_name(expression, scope, before_order, seen)
     if dotted in {"asyncio.CancelledError", "asyncio.exceptions.CancelledError"}:
         return True, False
     if isinstance(expression, ast.Name):
-        resolved = scope.resolve_name(expression.id)
-        if resolved and resolved[0] == "assignment" and resolved[1] is not None:
-            key = (id(scope), expression.id)
-            if key not in seen:
-                return _resolve_exception_expression(resolved[1], scope, seen | {key})
+        binding = scope.resolve_name(expression.id, before_order=before_order)
+        if binding is not None and id(binding) not in seen:
+            binding_seen = seen | {id(binding)}
+            if binding.kind == "assignment" and binding.value is not None:
+                return _resolve_exception_expression(binding.value, binding.owner, binding.order, binding_seen)
+            if (
+                binding.kind == "augmented_assignment"
+                and isinstance(binding.operation, ast.Add)
+                and binding.value is not None
+            ):
+                previous = binding.owner.resolve_name(binding.name, before_order=binding.order)
+                previous_contains = (
+                    _resolve_exception_expression(
+                        ast.Name(id=binding.name, ctx=ast.Load()),
+                        binding.owner,
+                        binding.order,
+                        binding_seen,
+                    )[0]
+                    if previous is not None
+                    else False
+                )
+                added_contains = _resolve_exception_expression(
+                    binding.value,
+                    binding.owner,
+                    binding.order,
+                    binding_seen,
+                )[0]
+                return previous_contains or added_contains, True
     if isinstance(expression, ast.Starred):
-        contains_cancelled, _ = _resolve_exception_expression(expression.value, scope, seen)
+        contains_cancelled, _ = _resolve_exception_expression(expression.value, scope, before_order, seen)
         return contains_cancelled, True
     if isinstance(expression, ast.Tuple):
         return (
-            any(_resolve_exception_expression(item, scope, seen)[0] for item in expression.elts),
+            any(_resolve_exception_expression(item, scope, before_order, seen)[0] for item in expression.elts),
             True,
         )
     if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Add):
-        left_contains, _ = _resolve_exception_expression(expression.left, scope, seen)
-        right_contains, _ = _resolve_exception_expression(expression.right, scope, seen)
+        left_contains, _ = _resolve_exception_expression(expression.left, scope, before_order, seen)
+        right_contains, _ = _resolve_exception_expression(expression.right, scope, before_order, seen)
         return left_contains or right_contains, True
     return False, False
 
@@ -230,12 +414,18 @@ def _is_unconditional_bare_reraise(handler: ast.ExceptHandler) -> bool:
 
 
 def _recoverable_cancelled_error_violations(tree: ast.Module) -> list[str]:
-    scopes = _scope_for_nodes(tree)
+    contexts = _scope_for_nodes(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.ExceptHandler) or node.type is None:
             continue
-        contains_cancelled, is_tuple = _resolve_exception_expression(node.type, scopes[node], set())
+        context = contexts[node]
+        contains_cancelled, is_tuple = _resolve_exception_expression(
+            node.type,
+            context.scope,
+            context.order,
+            set(),
+        )
         if contains_cancelled and (is_tuple or not _is_unconditional_bare_reraise(node)):
             violations.append(ast.unparse(node.type))
     return violations
@@ -654,6 +844,25 @@ def test_phase4b_metric_contract_rejects_sensitive_or_high_cardinality_values() 
             metrics.validate_metric(name, labels=labels)
 
 
+def test_phase4b_llm_provider_labels_have_one_frozen_contract() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.extraction import metrics
+    from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import llm
+
+    contract = metrics.METRIC_LABEL_CONTRACT
+    provider_labels = metrics.LLM_PROVIDER_LABEL_VALUES
+
+    assert contract["llm_tokens_used_total"]["provider"] is provider_labels
+    assert contract["llm_tokens_used_total_by_operation"]["provider"] is provider_labels
+    assert llm.LLM_PROVIDER_LABEL_VALUES is provider_labels
+    assert {llm._metric_provider(provider) for provider in provider_labels} == provider_labels
+    assert llm._metric_provider("future-provider") == "other"
+
+    with pytest.raises(TypeError):
+        contract["future_metric"] = {}  # type: ignore[index]
+    with pytest.raises(TypeError):
+        contract["llm_tokens_used_total"]["provider"] = frozenset({"other"})  # type: ignore[index]
+
+
 def test_phase4b_only_the_canonical_metric_boundary_owns_metric_sinks() -> None:
     assert METRICS_PATH.is_file()
     assert _metric_boundary_bypasses(sorted(EXTRACTION_ROOT.rglob("*.py"))) == []
@@ -1030,6 +1239,155 @@ def extract():
         pass
 """,
             ["recoverable"],
+        ),
+        "augmented_tuple": (
+            """
+import asyncio
+_RECOVERABLE = (ValueError,)
+_RECOVERABLE += (asyncio.CancelledError,)
+try:
+    pass
+except _RECOVERABLE:
+    pass
+""",
+            ["_RECOVERABLE"],
+        ),
+        "annotated_tuple": (
+            """
+from asyncio import CancelledError
+_RECOVERABLE: tuple[type[BaseException], ...] = (ValueError, CancelledError)
+try:
+    pass
+except _RECOVERABLE:
+    pass
+""",
+            ["_RECOVERABLE"],
+        ),
+        "module_annotation_without_value_does_not_rebind": (
+            """
+from asyncio import CancelledError as CE
+CE: type[BaseException]
+try:
+    pass
+except CE:
+    pass
+""",
+            ["CE"],
+        ),
+        "function_annotation_without_value_shadows_global": (
+            """
+from asyncio import CancelledError as CE
+def extract():
+    CE: type[BaseException]
+    try:
+        pass
+    except CE:
+        pass
+""",
+            [],
+        ),
+        "import_rebound_before_handler": (
+            """
+import asyncio
+asyncio = object()
+try:
+    pass
+except asyncio.CancelledError:
+    pass
+""",
+            [],
+        ),
+        "class_rebound_before_handler": (
+            """
+from asyncio import CancelledError
+CancelledError = ValueError
+try:
+    pass
+except CancelledError:
+    pass
+""",
+            [],
+        ),
+        "alias_captures_import_before_rebinding": (
+            """
+import asyncio
+_RECOVERABLE = (asyncio.CancelledError,)
+asyncio = object()
+try:
+    pass
+except _RECOVERABLE:
+    pass
+""",
+            ["_RECOVERABLE"],
+        ),
+        "rebound_after_handler": (
+            """
+from asyncio import CancelledError as CE
+try:
+    pass
+except CE:
+    pass
+CE = ValueError
+""",
+            ["CE"],
+        ),
+        "absent_asyncio_import": (
+            """
+try:
+    pass
+except asyncio.CancelledError:
+    pass
+""",
+            [],
+        ),
+        "parameter_shadows_module": (
+            """
+import asyncio
+def extract(asyncio):
+    try:
+        pass
+    except asyncio.CancelledError:
+        pass
+""",
+            [],
+        ),
+        "parameter_shadows_imported_class": (
+            """
+from asyncio import CancelledError as CE
+def extract(CE):
+    try:
+        pass
+    except CE:
+        pass
+""",
+            [],
+        ),
+        "method_skips_class_only_alias": (
+            """
+class Extractor:
+    from asyncio import CancelledError as CE
+
+    def extract(self):
+        try:
+            pass
+        except CE:
+            pass
+""",
+            [],
+        ),
+        "method_skips_class_shadow_for_module_alias": (
+            """
+from asyncio import CancelledError as CE
+class Extractor:
+    CE = ValueError
+
+    def extract(self):
+        try:
+            pass
+        except CE:
+            pass
+""",
+            ["CE"],
         ),
         "inline_tuple": (
             """
