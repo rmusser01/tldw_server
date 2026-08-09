@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Claims_Extraction import claims_analytics_exports as exports
 from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import (
     CSV_COLUMNS,
     DEFAULT_EXPORT_MAX_BYTES,
@@ -514,6 +515,43 @@ def test_export_max_bytes_reads_mapping_or_attributes_with_safe_fallback(
     expected: int,
 ) -> None:
     assert export_max_bytes(settings_obj) == expected
+
+
+@pytest.mark.parametrize(
+    ("key", "resolver", "env_value", "expected"),
+    [
+        ("CLAIMS_ANALYTICS_EXPORT_MAX_BYTES", export_max_bytes, "2048", 2048),
+        ("CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", orphan_grace_seconds, "30", 30),
+        ("CLAIMS_ANALYTICS_EXPORT_MAX_BYTES", export_max_bytes, "", DEFAULT_EXPORT_MAX_BYTES),
+        ("CLAIMS_ANALYTICS_EXPORT_MAX_BYTES", export_max_bytes, "true", DEFAULT_EXPORT_MAX_BYTES),
+        ("CLAIMS_ANALYTICS_EXPORT_MAX_BYTES", export_max_bytes, "0", DEFAULT_EXPORT_MAX_BYTES),
+        (
+            "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC",
+            orphan_grace_seconds,
+            "-1",
+            DEFAULT_EXPORT_ORPHAN_GRACE_SEC,
+        ),
+    ],
+)
+def test_export_settings_read_environment_before_cached_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    resolver: Any,
+    env_value: str,
+    expected: int,
+) -> None:
+    monkeypatch.setitem(exports.settings, key, "999")
+    monkeypatch.setenv(key, env_value)
+
+    assert resolver() == expected
+
+
+def test_explicit_export_settings_override_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAIMS_ANALYTICS_EXPORT_MAX_BYTES", "2048")
+
+    assert export_max_bytes({"CLAIMS_ANALYTICS_EXPORT_MAX_BYTES": 4096}) == 4096
 
 
 @pytest.mark.parametrize(

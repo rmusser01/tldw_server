@@ -3533,7 +3533,7 @@ def _claims_export_maintenance(
             db,
             owner_user_id=owner_user_id,
             job_manager=job_manager,
-            retention_hours=settings.get("CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS", 24),
+            retention_hours=claims_analytics_exports.export_retention_hours(),
             limit=100,
         )
     except Exception as exc:  # noqa: BLE001 - create must survive maintenance failures.

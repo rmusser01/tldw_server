@@ -818,6 +818,41 @@ def _patch_export_read_maintenance(
     return calls
 
 
+@pytest.mark.parametrize(
+    ("env_value", "expected_retention_hours"),
+    [
+        ("2", 2),
+        ("", 24),
+        ("true", 24),
+        ("0", 24),
+        ("-1", 24),
+    ],
+)
+def test_export_maintenance_uses_validated_environment_retention_hours(
+    monkeypatch: pytest.MonkeyPatch,
+    env_value: str,
+    expected_retention_hours: int,
+) -> None:
+    manager = object()
+    retention_hours: list[Any] = []
+    monkeypatch.setitem(claims_service.settings, "CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS", 999)
+    monkeypatch.setenv("CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS", env_value)
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: manager)
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "reconcile_export_artifacts",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "cleanup_export_artifacts",
+        lambda *_args, **kwargs: retention_hours.append(kwargs["retention_hours"]),
+    )
+
+    assert claims_service._claims_export_maintenance(db=object(), owner_user_id="1") is manager
+    assert retention_hours == [expected_retention_hours]
+
+
 def test_list_is_owner_scoped_and_batches_nullable_job_status_hydration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

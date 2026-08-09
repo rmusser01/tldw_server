@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import math
+import os
 import re
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.config import settings
 
 DEFAULT_EXPORT_MAX_BYTES = 10_485_760
 DEFAULT_EXPORT_ORPHAN_GRACE_SEC = 300
+DEFAULT_EXPORT_RETENTION_HOURS = 24
 CLEANUP_ROTATION_SECONDS = 300
 EXPORT_SCAN_PAGE_SIZE = 1000
 EXPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -170,7 +172,13 @@ def _coerce_pagination_int(value: Any, default: int) -> int:
 
 
 def _setting_value(settings_obj: Any, key: str) -> Any:
-    source = settings if settings_obj is None else settings_obj
+    if settings_obj is None:
+        env_value = os.getenv(key)
+        if env_value is not None:
+            return env_value
+        source = settings
+    else:
+        source = settings_obj
     try:
         if isinstance(source, Mapping):
             return source.get(key)
@@ -294,6 +302,15 @@ def orphan_grace_seconds(settings_obj: Any = None) -> int:
         settings_obj,
         "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC",
         DEFAULT_EXPORT_ORPHAN_GRACE_SEC,
+    )
+
+
+def export_retention_hours(settings_obj: Any = None) -> int:
+    """Resolve the positive completed-export retention period in hours."""
+    return _positive_int_setting(
+        settings_obj,
+        "CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS",
+        DEFAULT_EXPORT_RETENTION_HOURS,
     )
 
 
