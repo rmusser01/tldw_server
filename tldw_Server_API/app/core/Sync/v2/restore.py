@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Helpers for building Sync v2 restore preview plans."""
 
+import heapq
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
@@ -44,23 +45,15 @@ class LocalRestoreInventoryItem:
 LocalInventoryIndex = dict[tuple[str | None, SyncDomain, str], LocalRestoreInventoryItem]
 
 
-def _unit_path_exists(edges: Mapping[int, set[int]], source: int, target: int) -> bool:
-    pending = [source]
-    seen: set[int] = set()
-    while pending:
-        current = pending.pop()
-        if current == target:
-            return True
-        if current in seen:
-            continue
-        seen.add(current)
-        pending.extend(sorted(edges.get(current, set()) - seen, reverse=True))
-    return False
-
-
-def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvelope]:
+def order_restore_envelopes(
+    envelopes: Sequence[SyncEnvelope],
+    *,
+    max_actions: int = 10_000,
+) -> list[SyncEnvelope]:
     """Order restore candidates without splitting complete mutation groups."""
 
+    if len(envelopes) > max_actions:
+        raise RestorePlanningError("sync_restore_action_limit_exceeded")
     units = _restore_units(envelopes)
     units_by_identity: dict[tuple[SyncDomain, str], list[tuple[int, int, SyncEnvelope]]] = {}
     for unit_index, unit in enumerate(units):
@@ -115,37 +108,43 @@ def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvel
                         continue
                     edges[unit_index].add(tombstone_unit)
 
-    live_units = {
-        index
-        for index, unit in enumerate(units)
-        if any(envelope.operation != "tombstone" for envelope in unit)
-    }
-    tombstone_units = {
-        index
-        for index, unit in enumerate(units)
-        if all(envelope.operation == "tombstone" for envelope in unit)
-    }
-    for live_unit in sorted(live_units):
-        for tombstone_unit in sorted(tombstone_units):
-            if not _unit_path_exists(edges, tombstone_unit, live_unit):
-                edges[live_unit].add(tombstone_unit)
-
-    ordered_units: list[int] = []
-    remaining = set(range(len(units)))
-    while remaining:
-        ready = [
-            index
-            for index in remaining
-            if not any(index in targets for source, targets in edges.items() if source in remaining)
-        ]
-        if not ready:
-            raise RestorePlanningError("Restore dependencies contain a cycle")
-        selected = min(
-            ready,
-            key=lambda index: min(envelope.server_cursor or 0 for envelope in units[index]),
+    indegree = [0] * len(units)
+    for targets in edges.values():
+        for target in targets:
+            indegree[target] += 1
+    ready = [
+        (
+            all(envelope.operation == "tombstone" for envelope in units[index]),
+            min(envelope.server_cursor or 0 for envelope in units[index]),
+            index,
         )
+        for index, degree in enumerate(indegree)
+        if degree == 0
+    ]
+    heapq.heapify(ready)
+    ordered_units: list[int] = []
+    while ready:
+        _, _, selected = heapq.heappop(ready)
         ordered_units.append(selected)
-        remaining.remove(selected)
+        for target in sorted(edges[selected]):
+            indegree[target] -= 1
+            if indegree[target] == 0:
+                heapq.heappush(
+                    ready,
+                    (
+                        all(
+                            envelope.operation == "tombstone"
+                            for envelope in units[target]
+                        ),
+                        min(
+                            envelope.server_cursor or 0
+                            for envelope in units[target]
+                        ),
+                        target,
+                    ),
+                )
+    if len(ordered_units) != len(units):
+        raise RestorePlanningError("Restore dependencies contain a cycle")
 
     return [envelope for index in ordered_units for envelope in units[index]]
 

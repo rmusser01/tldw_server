@@ -179,6 +179,9 @@ class SyncV2Settings:
         default_factory=server_trusted_encryption_status_from_env
     )
     restore_manifest_scan_limit: int = 10_000
+    restore_preview_candidate_limit: int = 50_000
+    restore_preview_action_limit: int = 10_000
+    restore_max_group_size: int = 1_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -1707,6 +1710,12 @@ class SyncV2Service:
         selected_attachment_id_set = _normalize_selection_set(selected_attachment_ids)
         local_index = build_local_inventory_index(local_inventory)
         datasets = self._accessible_datasets(user_id=user_id, dataset_ids=dataset_ids)
+        if self.settings.restore_preview_candidate_limit < 1:
+            raise SyncStoreError("sync_restore_candidate_limit_invalid")
+        if self.settings.restore_preview_action_limit < 1:
+            raise SyncStoreError("sync_restore_action_limit_invalid")
+        if self.settings.restore_max_group_size < 1:
+            raise SyncStoreError("sync_restore_group_limit_invalid")
 
         preview_datasets: list[SyncRestorePreviewDataset] = []
         ordered_actions: list[SyncRestoreOrderedAction] = []
@@ -1721,6 +1730,8 @@ class SyncV2Service:
         key_status: dict[str, dict[str, bool]] = {}
         warnings: list[SyncRestorePreviewWarning] = []
         planned_inventory_keys: set[tuple[str, SyncDomain, str]] = set()
+        candidate_count = 0
+        planned_action_count = 0
 
         for dataset in datasets:
             dataset_domains = [
@@ -1747,13 +1758,18 @@ class SyncV2Service:
                 )
             for domain, count in stats.approximate_counts.items():
                 total_counts[domain] = total_counts.get(domain, 0) + count
-            domain_envelopes = {
-                domain: self._list_restore_preview_domain_envelopes(
+            domain_envelopes: dict[SyncDomain, list[SyncEnvelope]] = {}
+            for domain in dataset_domains:
+                envelopes = self._list_restore_preview_domain_envelopes(
                     dataset_id=dataset.dataset_id,
                     domain=domain,
+                    max_candidates=(
+                        self.settings.restore_preview_candidate_limit
+                        - candidate_count
+                    ),
                 )
-                for domain in dataset_domains
-            }
+                candidate_count += len(envelopes)
+                domain_envelopes[domain] = envelopes
             latest_cursors: dict[str, int] = {}
             dataset_ranges: list[SyncRestorePreviewEnvelopeRange] = []
             for domain, envelopes in domain_envelopes.items():
@@ -1791,8 +1807,6 @@ class SyncV2Service:
                 if domain not in OBJECT_RESTORE_DOMAINS:
                     continue
                 for envelope in domain_envelopes.get(domain, []):
-                    if envelope.apply_status == "conflict":
-                        continue
                     latest_object_envelopes[(domain, envelope.object_id)] = envelope
             selected_envelopes = [
                 envelope
@@ -1807,7 +1821,16 @@ class SyncV2Service:
                     selected_domains=selected_domains,
                     selected_object_ids=selected_object_id_set,
                 )
-                ordered_restore_envelopes = order_restore_envelopes(restore_envelopes)
+                remaining_actions = (
+                    self.settings.restore_preview_action_limit - planned_action_count
+                )
+                if len(restore_envelopes) > remaining_actions:
+                    raise SyncStoreError("sync_restore_action_limit_exceeded")
+                ordered_restore_envelopes = order_restore_envelopes(
+                    restore_envelopes,
+                    max_actions=remaining_actions,
+                )
+                planned_action_count += len(ordered_restore_envelopes)
             except (RestorePlanningError, StoredMutationGroupValidationError) as exc:
                 raise SyncStoreError("sync_restore_plan_invalid") from exc
             restore_fingerprints: list[tuple[int | None, str | None, bool]] = []
@@ -1875,6 +1898,113 @@ class SyncV2Service:
                     )
                 )
                 inventory_key = (dataset.dataset_id, domain, object_id)
+                if envelope.apply_status == "conflict":
+                    conflict_type = "stored_apply_conflict"
+                    object_conflicts.append(
+                        SyncRestorePreviewObjectConflict(
+                            dataset_id=dataset.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            conflict_type=conflict_type,
+                            server_revision=server_revision,
+                            server_hash=server_hash,
+                            server_cursor=envelope.server_cursor,
+                            server_deleted=deleted,
+                            local_revision=(
+                                local_item.object_revision
+                                if local_item is not None
+                                else None
+                            ),
+                            local_hash=(
+                                local_item.object_hash
+                                if local_item is not None
+                                else None
+                            ),
+                            local_deleted=(
+                                local_item.deleted if local_item is not None else False
+                            ),
+                            message="Stored restore candidate is blocked by an apply conflict.",
+                        )
+                    )
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="conflict",
+                            dataset_id=envelope.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                            code="sync_restore_stored_apply_conflict",
+                        )
+                    )
+                    continue
+                local_matches_tombstone_base = (
+                    deleted
+                    and local_item is not None
+                    and (
+                        envelope.base_object_revision is not None
+                        or envelope.base_object_hash is not None
+                    )
+                    and local_inventory_matches(
+                        local_item,
+                        object_revision=envelope.base_object_revision,
+                        object_hash=envelope.base_object_hash,
+                        deleted=False,
+                    )
+                )
+                can_apply = (
+                    local_item is None
+                    or local_matches
+                    or local_matches_tombstone_base
+                    or inventory_key in planned_inventory_keys
+                    or (
+                        inventory_key in initially_matching_final_keys
+                        and plan_index
+                        < final_plan_index_by_identity[(domain, object_id)]
+                    )
+                )
+                if not can_apply:
+                    conflict_type = (
+                        "whole_object_conflict"
+                        if domain in WHOLE_OBJECT_RESTORE_DOMAINS
+                        else "stable_id_conflict"
+                    )
+                    object_conflicts.append(
+                        SyncRestorePreviewObjectConflict(
+                            dataset_id=dataset.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            conflict_type=conflict_type,
+                            server_revision=server_revision,
+                            server_hash=server_hash,
+                            server_cursor=envelope.server_cursor,
+                            server_deleted=deleted,
+                            local_revision=local_item.object_revision,
+                            local_hash=local_item.object_hash,
+                            local_deleted=local_item.deleted,
+                            message="Local object differs from the server restore candidate.",
+                        )
+                    )
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="conflict",
+                            dataset_id=envelope.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                            code=conflict_type,
+                        )
+                    )
+                    continue
                 if deleted:
                     ordered_actions.append(
                         SyncRestoreOrderedAction(
@@ -1920,16 +2050,7 @@ class SyncV2Service:
                     )
                     planned_inventory_keys.add(inventory_key)
                     continue
-                if (
-                    local_item is None
-                    or local_matches
-                    or inventory_key in planned_inventory_keys
-                    or (
-                        inventory_key in initially_matching_final_keys
-                        and plan_index
-                        < final_plan_index_by_identity[(domain, object_id)]
-                    )
-                ):
+                if can_apply:
                     action = (
                         "noop"
                         if local_matches
@@ -1979,42 +2100,6 @@ class SyncV2Service:
                     )
                     planned_inventory_keys.add(inventory_key)
                     continue
-                conflict_type = (
-                    "whole_object_conflict"
-                    if domain in WHOLE_OBJECT_RESTORE_DOMAINS
-                    else "stable_id_conflict"
-                )
-                object_conflicts.append(
-                    SyncRestorePreviewObjectConflict(
-                        dataset_id=dataset.dataset_id,
-                        domain=domain,
-                        object_id=object_id,
-                        conflict_type=conflict_type,
-                        server_revision=server_revision,
-                        server_hash=server_hash,
-                        server_cursor=envelope.server_cursor,
-                        server_deleted=False,
-                        local_revision=local_item.object_revision,
-                        local_hash=local_item.object_hash,
-                        local_deleted=local_item.deleted,
-                        message="Local object differs from the server restore candidate.",
-                    )
-                )
-                ordered_actions.append(
-                    SyncRestoreOrderedAction(
-                        plan_index=len(ordered_actions),
-                        action="conflict",
-                        dataset_id=envelope.dataset_id,
-                        domain=domain,
-                        object_id=object_id,
-                        operation=envelope.operation,
-                        server_cursor=envelope.server_cursor or 0,
-                        mutation_group_id=envelope.mutation_group_id,
-                        mutation_step=envelope.mutation_step,
-                        mutation_step_count=envelope.mutation_step_count,
-                        code=conflict_type,
-                    )
-                )
 
             seen_refs: set[tuple[str, str]] = set()
             latest_attachment_envelopes: dict[str, SyncEnvelope] = {}
@@ -2184,6 +2269,8 @@ class SyncV2Service:
             raise SyncStoreError("Invalid sync cursor: repair since_cursor must be non-negative")
         if limit is not None and limit < 1:
             raise SyncStoreError("Sync repair limit must be greater than zero")
+        if self.settings.restore_max_group_size < 1:
+            raise SyncStoreError("sync_restore_group_limit_invalid")
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
@@ -2202,6 +2289,7 @@ class SyncV2Service:
             materialize=_repair_materialize,
             snapshot=self._envelope_snapshot,
             scan_limit=self.settings.restore_manifest_scan_limit,
+            max_group_size=self.settings.restore_max_group_size,
         ).run(
             dataset_id=dataset.dataset_id,
             domains=selected_domains,
@@ -3989,6 +4077,8 @@ class SyncV2Service:
             if not group_id or group_id in processed_groups:
                 continue
             group = self.store.list_mutation_group(dataset_id, group_id)
+            if len(group) > self.settings.restore_max_group_size:
+                raise SyncStoreError("sync_restore_group_limit_exceeded")
             validate_stored_mutation_group(
                 group,
                 dataset_id=dataset_id,
@@ -4019,6 +4109,7 @@ class SyncV2Service:
         *,
         dataset_id: str,
         domain: SyncDomain,
+        max_candidates: int,
     ) -> list[SyncEnvelope]:
         page_limit = self.settings.restore_manifest_scan_limit
         if page_limit < 1:
@@ -4026,21 +4117,27 @@ class SyncV2Service:
         envelopes: list[SyncEnvelope] = []
         since_sequence = 0
         while True:
+            request_limit = min(
+                page_limit,
+                max(1, max_candidates - len(envelopes) + 1),
+            )
             page = self.store.list_envelopes_after(
                 dataset_id,
                 since_sequence,
-                limit=page_limit,
+                limit=request_limit,
                 domains=[domain],
                 status="accepted",
             )
             if not page:
                 break
             envelopes.extend(page)
+            if len(envelopes) > max_candidates:
+                raise SyncStoreError("sync_restore_candidate_limit_exceeded")
             next_sequence = max(envelope.server_sequence for envelope in page)
             if next_sequence <= since_sequence:
                 raise SyncStoreError("Sync restore manifest cursor did not advance")
             since_sequence = next_sequence
-            if len(page) < page_limit:
+            if len(page) < request_limit:
                 break
         return envelopes
 

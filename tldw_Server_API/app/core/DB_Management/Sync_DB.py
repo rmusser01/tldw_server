@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncKeyRotationEnvelopeRange,
     SyncObjectState,
     SyncRestoreManifestStats,
+    normalize_sync_timestamp,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
@@ -887,11 +888,7 @@ def _manifest_attachment_size_class(size_bytes: int) -> str:
 
 
 def _timestamp_to_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
+    return normalize_sync_timestamp(value)
 
 
 def _optional_int_from_storage(value: Any) -> int | None:
@@ -1130,11 +1127,15 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
         mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
         mutation_plan_hash=row.get("mutation_plan_hash"),
         stable_key=row.get("stable_key"),
-        created_at_client=row.get("created_at_client") or row.get("client_timestamp"),
+        created_at_client=_timestamp_to_string(
+            row.get("created_at_client") or row.get("client_timestamp")
+        ),
         received_at_server=_timestamp_to_string(
             row.get("received_at_server") or row.get("server_timestamp")
         ),
-        client_timestamp=row.get("client_timestamp") or row.get("created_at_client"),
+        client_timestamp=_timestamp_to_string(
+            row.get("client_timestamp") or row.get("created_at_client")
+        ),
         server_timestamp=_timestamp_to_string(
             row.get("server_timestamp") or row.get("received_at_server")
         ),
@@ -1386,7 +1387,7 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
         "device_id": envelope.device_id,
         "client_profile_id": envelope.client_profile_id,
         "client_sequence": envelope.client_sequence,
-        "created_at_client": envelope.created_at_client,
+        "created_at_client": normalize_sync_timestamp(envelope.created_at_client),
         "base_server_cursor": envelope.base_server_cursor,
         "base_object_revision": envelope.base_object_revision,
         "base_object_hash": envelope.base_object_hash,
@@ -1433,7 +1434,9 @@ def _envelope_fingerprint_from_row(
             if row.get("client_sequence") is not None
             else None
         ),
-        "created_at_client": row.get("created_at_client") or row.get("client_timestamp"),
+        "created_at_client": _timestamp_to_string(
+            row.get("created_at_client") or row.get("client_timestamp")
+        ),
         "base_server_cursor": (
             int(row["base_server_cursor"])
             if row.get("base_server_cursor") is not None

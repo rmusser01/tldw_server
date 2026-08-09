@@ -7,7 +7,7 @@ import json
 from collections.abc import Sequence
 
 from .errors import SyncIdempotencyConflictError
-from .models import SyncEnvelope, SyncEnvelopeCreate
+from .models import SyncEnvelope, SyncEnvelopeCreate, normalize_sync_timestamp
 
 
 class StoredMutationGroupValidationError(SyncIdempotencyConflictError):
@@ -46,7 +46,9 @@ def mutation_group_plan_hash(
                 "payload_ciphertext": envelope.payload_ciphertext,
                 "payload_hash": envelope.payload_hash,
                 "payload_size_bytes": envelope.payload_size_bytes,
-                "created_at_client": envelope.created_at_client,
+                "created_at_client": normalize_sync_timestamp(
+                    envelope.created_at_client
+                ),
                 "deleted": envelope.deleted,
                 "encryption_metadata": envelope.encryption_metadata,
                 "status": envelope.status,

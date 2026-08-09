@@ -220,6 +220,23 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     ),
                 },
             )
+        restore_limit_messages = {
+            "sync_restore_candidate_limit_exceeded": (
+                "Sync restore preview exceeds the server candidate limit."
+            ),
+            "sync_restore_action_limit_exceeded": (
+                "Sync restore preview exceeds the server action limit."
+            ),
+            "sync_restore_group_limit_exceeded": (
+                "Sync restore mutation group exceeds the server size limit."
+            ),
+        }
+        for error_code, message in restore_limit_messages.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail={"error_code": error_code, "message": message},
+                )
         if "attachment payload exceeds" in lowered:
             return HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,

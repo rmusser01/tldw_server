@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from .errors import SyncStoreError
 from .materializers import MaterializationResult, SyncMaterializer
 from .models import SyncDomain, SyncEnvelope
 from .mutation_group_validation import (
@@ -98,12 +99,14 @@ class SyncReplayRepairer:
         materialize: Callable[[SyncEnvelope], MaterializationResult],
         snapshot: Callable[[SyncEnvelope], SyncEnvelope],
         scan_limit: int,
+        max_group_size: int,
     ) -> None:
         self.store = store
         self.materializers = materializers
         self.materialize = materialize
         self.snapshot = snapshot
         self.scan_limit = max(1, scan_limit)
+        self.max_group_size = max_group_size
 
     def run(
         self,
@@ -148,6 +151,8 @@ class SyncReplayRepairer:
                     if group_id in processed_groups:
                         continue
                     group = self.store.list_mutation_group(dataset_id, group_id)
+                    if len(group) > self.max_group_size:
+                        raise SyncStoreError("sync_restore_group_limit_exceeded")
                     processed_groups.add(group_id)
                     for member in group:
                         if member.domain not in result_domains:
@@ -191,7 +196,10 @@ class SyncReplayRepairer:
                 if remaining is not None and remaining <= 0:
                     break
 
-            next_cursor = max((item.server_cursor or cursor for item in page), default=cursor)
+            next_cursor = max(
+                cursor,
+                max((item.server_cursor or cursor for item in page), default=cursor),
+            )
             if next_cursor <= page_start_cursor:
                 break
             cursor = next_cursor

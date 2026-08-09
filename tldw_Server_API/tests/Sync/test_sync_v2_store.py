@@ -15,7 +15,13 @@ import tldw_Server_API.app.core.Sync.v2.store as store_module
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase, utcnow_iso
+from tldw_Server_API.app.core.DB_Management.Sync_DB import (
+    SyncDatabase,
+    _envelope_fingerprint_from_create,
+    _envelope_fingerprint_from_row,
+    _envelope_from_row,
+    utcnow_iso,
+)
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncDatasetNotFoundError,
     SyncIdempotencyConflictError,
@@ -38,6 +44,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceUpsert,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    mutation_group_plan_hash,
+    validate_stored_mutation_group,
 )
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
@@ -1132,6 +1142,44 @@ def test_insert_envelopes_atomic_returns_identical_mutation_group_replay(
 
     assert replay == first
     assert sync_store.list_envelopes_after("dataset-1", 0) == first
+
+
+def test_code_quality_i2_native_postgres_timestamp_preserves_group_fingerprint(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    placeholder = _mutation_group_envelopes(mutation_plan_hash="0" * 64)
+    plan_hash = mutation_group_plan_hash(placeholder)
+    plan = [replace(envelope, mutation_plan_hash=plan_hash) for envelope in placeholder]
+    sync_store.insert_envelopes_atomic(plan)
+    rows = sync_store.db.execute(
+        "SELECT * FROM sync_envelopes WHERE mutation_group_id = ? "
+        "ORDER BY mutation_step ASC",
+        ("mutation-group-1",),
+    ).rows
+    native_timestamp = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    native_rows = [
+        {
+            **row,
+            "created_at_client": native_timestamp,
+            "client_timestamp": native_timestamp,
+        }
+        for row in rows
+    ]
+
+    restored = [_envelope_from_row(row) for row in native_rows]
+
+    assert [envelope.created_at_client for envelope in restored] == [
+        "2026-05-10T00:00:00+00:00"
+    ] * 3
+    assert _envelope_fingerprint_from_row(native_rows[0]) == (
+        _envelope_fingerprint_from_create(plan[0])
+    )
+    validate_stored_mutation_group(
+        restored,
+        dataset_id="dataset-1",
+        mutation_group_id="mutation-group-1",
+    )
 
 
 def test_insert_envelopes_atomic_rejects_mutation_group_replay_drift(

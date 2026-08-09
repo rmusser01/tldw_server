@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAda
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.materializers.chat import (
     ChatConversationMaterializer,
@@ -536,6 +537,58 @@ def test_notes_organization_repair_resumes_failed_group_without_skipping_pending
     assert "Synthetic label" not in serialized
     assert "/private/path" not in serialized
     assert "raw database error" not in serialized
+
+
+def test_code_quality_i4_repair_limit_is_soft_for_one_complete_group(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-soft-repair-limit")
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        limit=1,
+    )
+
+    assert materializer.steps == [0, 1, 2]
+    assert result.scanned_count == 3
+    assert result.to_cursor == stored[-1].server_cursor
+
+
+def test_code_quality_i4_repair_rejects_group_over_explicit_maximum(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    service.settings = replace(service.settings, restore_max_group_size=2)
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-oversized-repair-group")
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_restore_group_limit_exceeded"):
+        service.repair(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            domains=["notes.keyword"],
+            limit=1,
+        )
+
+    assert materializer.steps == []
 
 
 def test_spec_fix_repair_blocks_per_step_plan_hash_mismatch(

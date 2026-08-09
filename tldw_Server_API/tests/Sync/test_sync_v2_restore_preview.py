@@ -415,6 +415,80 @@ def test_restore_preview_paginates_past_scan_limit_without_truncating_domain(
     assert preview.key_status == {"dataset-1": {"key_recovery_available": False}}
 
 
+@pytest.mark.parametrize(
+    ("setting_name", "error_code"),
+    [
+        ("restore_preview_candidate_limit", "sync_restore_candidate_limit_exceeded"),
+        ("restore_preview_action_limit", "sync_restore_action_limit_exceeded"),
+    ],
+)
+def test_code_quality_i4_restore_preview_limits_fail_closed_with_stable_codes(
+    sync_service: SyncV2Service,
+    setting_name: str,
+    error_code: str,
+) -> None:
+    sync_service.settings = replace(
+        sync_service.settings,
+        **{setting_name: 2},
+    )
+    _push(
+        sync_service,
+        _note_envelope(client_envelope_id="env-limit-1", object_id="note-limit-1"),
+        _note_envelope(
+            client_envelope_id="env-limit-2",
+            object_id="note-limit-2",
+            client_sequence=2,
+        ),
+        _note_envelope(
+            client_envelope_id="env-limit-3",
+            object_id="note-limit-3",
+            client_sequence=3,
+        ),
+    )
+
+    with pytest.raises(SyncStoreError, match=error_code):
+        sync_service.restore_preview(
+            user_id="user-1",
+            dataset_ids=["dataset-1"],
+            domains=["notes.note"],
+            local_inventory=[],
+        )
+
+
+def test_code_quality_i4_endpoint_returns_safe_candidate_limit_failure(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.settings = replace(
+        sync_service.settings,
+        restore_preview_candidate_limit=1,
+    )
+    _push(
+        sync_service,
+        _note_envelope(client_envelope_id="env-public-limit-1"),
+        _note_envelope(
+            client_envelope_id="env-public-limit-2",
+            object_id="note-public-limit-2",
+            client_sequence=2,
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "domains": ["notes.note"],
+            "local_inventory": [],
+        },
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == {
+        "error_code": "sync_restore_candidate_limit_exceeded",
+        "message": "Sync restore preview exceeds the server candidate limit.",
+    }
+
+
 def test_restore_preview_matching_local_inventory_is_safe_noop(
     sync_service: SyncV2Service,
 ) -> None:
@@ -1113,6 +1187,222 @@ def test_restore_preview_ordered_actions_simulate_historical_tombstones_before_r
         (2, "apply", restored.server_cursor),
     ]
     assert response.json()["safe_applies"][0]["action"] == "apply"
+
+
+def test_code_quality_i1_divergent_local_blocks_historical_tombstone_simulation(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    folder_id = "22222222-2222-4222-8222-222222222222"
+    tombstone_group = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-divergent-tombstones",
+            _organization_tombstone(
+                client_envelope_id="env-divergent-keyword-tombstone",
+                domain="notes.keyword",
+                object_id=keyword_id,
+            ),
+            _organization_tombstone(
+                client_envelope_id="env-divergent-folder-tombstone",
+                domain="notes.folder",
+                object_id=folder_id,
+            ),
+        )
+    )
+    restored = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-divergent-keyword-restore",
+            object_id=keyword_id,
+            object_revision=3,
+            base_server_cursor=tombstone_group[0].server_cursor,
+            base_object_revision=2,
+            base_object_hash=tombstone_group[0].payload_hash,
+            routing_metadata={"restore_intent": True},
+            payload_hash="sha256:divergent-keyword-restore",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        local_inventory=[
+            {
+                "dataset_id": "dataset-1",
+                "domain": "notes.keyword",
+                "object_id": keyword_id,
+                "object_revision": 9,
+                "object_hash": "sha256:local-divergent-keyword",
+                "deleted": False,
+            }
+        ],
+    )
+
+    assert [
+        (item.server_cursor, item.action, item.code)
+        for item in preview.ordered_actions
+    ] == [
+        (tombstone_group[0].server_cursor, "conflict", "stable_id_conflict"),
+        (tombstone_group[1].server_cursor, "tombstone", None),
+        (restored.server_cursor, "conflict", "stable_id_conflict"),
+    ]
+    assert [item.server_cursor for item in preview.tombstones] == [
+        tombstone_group[1].server_cursor
+    ]
+    assert [item.server_cursor for item in preview.object_conflicts] == [
+        tombstone_group[0].server_cursor,
+        restored.server_cursor,
+    ]
+
+
+def test_code_quality_i1_endpoint_reports_divergent_tombstone_as_safe_conflict(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    tombstone = sync_service.store.insert_envelope(
+        _organization_tombstone(
+            client_envelope_id="env-public-divergent-tombstone",
+            domain="notes.keyword",
+            object_id=keyword_id,
+        )
+    )
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "domains": list(NOTES_ORGANIZATION_DOMAINS),
+            "local_inventory": [
+                {
+                    "dataset_id": "dataset-1",
+                    "domain": "notes.keyword",
+                    "object_id": keyword_id,
+                    "object_revision": 9,
+                    "object_hash": "sha256:public-local-divergence",
+                    "deleted": False,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [
+        (item["server_cursor"], item["action"], item["code"])
+        for item in body["ordered_actions"]
+    ] == [(tombstone.server_cursor, "conflict", "stable_id_conflict")]
+    assert body["tombstones"] == []
+    assert body["restore_status"] == "blocked_by_conflicts"
+    assert "public-local-divergence" not in str(body["ordered_actions"])
+
+
+def test_code_quality_i3_stored_conflict_group_blocks_restore_without_older_head(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    folder_id = "22222222-2222-4222-8222-222222222222"
+    older = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-stored-conflict-keyword-v1",
+            object_id=keyword_id,
+            payload_hash="sha256:stored-conflict-v1",
+        )
+    )
+    group_plan = _organization_group(
+        "server-origin-stored-conflict",
+        _organization_envelope(
+            client_envelope_id="env-stored-conflict-keyword-v2",
+            object_id=keyword_id,
+            object_revision=2,
+            payload_hash="sha256:stored-conflict-v2",
+        ),
+        _organization_envelope(
+            client_envelope_id="env-stored-conflict-folder",
+            domain="notes.folder",
+            object_id=folder_id,
+            payload={"name": "Synthetic folder", "parent_sync_id": None},
+            payload_hash="sha256:stored-conflict-folder",
+        ),
+    )
+    group_plan[0] = replace(
+        group_plan[0],
+        apply_status="conflict",
+        apply_error_code="unsafe-private-product-code",
+        apply_error_message="private product details",
+    )
+    stored_group = sync_service.store.insert_envelopes_atomic(group_plan)
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        local_inventory=[],
+    )
+
+    assert [item.server_cursor for item in preview.ordered_actions] == [
+        stored_group[0].server_cursor,
+        stored_group[1].server_cursor,
+    ]
+    assert [item.action for item in preview.ordered_actions] == ["conflict", "apply"]
+    assert preview.ordered_actions[0].code == "sync_restore_stored_apply_conflict"
+    assert preview.ordered_actions[0].mutation_group_id == (
+        "server-origin-stored-conflict"
+    )
+    assert [item.server_cursor for item in preview.object_conflicts] == [
+        stored_group[0].server_cursor
+    ]
+    assert older.server_cursor not in {
+        item.server_cursor for item in preview.safe_applies
+    }
+    assert "unsafe-private-product-code" not in str(preview.ordered_actions)
+    assert "private product details" not in str(preview.ordered_actions)
+    assert preview.restore_status == "blocked_by_conflicts"
+
+
+def test_code_quality_i3_endpoint_surfaces_singleton_stored_conflict_safely(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    conflicted = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-public-stored-conflict",
+            apply_status="conflict",
+            apply_error_code="unsafe-private-code",
+            apply_error_message="private content detail",
+        )
+    )
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "domains": list(NOTES_ORGANIZATION_DOMAINS),
+            "local_inventory": [],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [
+        (item["server_cursor"], item["action"], item["code"])
+        for item in body["ordered_actions"]
+    ] == [
+        (
+            conflicted.server_cursor,
+            "conflict",
+            "sync_restore_stored_apply_conflict",
+        )
+    ]
+    assert body["safe_applies"] == []
+    assert len(body["object_conflicts"]) == 1
+    assert body["restore_status"] == "blocked_by_conflicts"
+    assert "unsafe-private-code" not in str(body)
+    assert "private content detail" not in str(body)
 
 
 def test_restore_preview_endpoint_exposes_one_safe_canonical_ordered_plan(

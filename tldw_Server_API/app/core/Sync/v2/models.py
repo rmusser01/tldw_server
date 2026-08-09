@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 SyncDomain = Literal[
@@ -45,6 +46,26 @@ SyncBlobAvailabilityStatus = Literal[
     "quarantined",
     "deleted",
 ]
+
+
+def normalize_sync_timestamp(value: object | None) -> str | None:
+    """Normalize backend-native and ISO timestamps to the canonical UTC string."""
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value)
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 SyncBlobUploadStatus = Literal[
     "created",
     "uploading",
@@ -730,10 +751,11 @@ class SyncEnvelopeCreate:
         object.__setattr__(self, "payload_clear", payload_clear)
         object.__setattr__(self, "schema_version", self.schema_version or self.adapter_version)
         object.__setattr__(self, "adapter_version", self.adapter_version or self.schema_version)
-        if self.created_at_client is None and self.client_timestamp is not None:
-            object.__setattr__(self, "created_at_client", self.client_timestamp)
-        if self.client_timestamp is None and self.created_at_client is not None:
-            object.__setattr__(self, "client_timestamp", self.created_at_client)
+        created_at_client = normalize_sync_timestamp(
+            self.created_at_client or self.client_timestamp
+        )
+        object.__setattr__(self, "created_at_client", created_at_client)
+        object.__setattr__(self, "client_timestamp", created_at_client)
         if self.received_at_server is None and self.server_timestamp is not None:
             object.__setattr__(self, "received_at_server", self.server_timestamp)
         if self.server_timestamp is None and self.received_at_server is not None:
@@ -813,10 +835,11 @@ class SyncEnvelope:
         object.__setattr__(self, "payload_clear", payload_clear)
         object.__setattr__(self, "schema_version", self.schema_version or self.adapter_version)
         object.__setattr__(self, "adapter_version", self.adapter_version or self.schema_version)
-        if self.created_at_client is None and self.client_timestamp is not None:
-            object.__setattr__(self, "created_at_client", self.client_timestamp)
-        if self.client_timestamp is None and self.created_at_client is not None:
-            object.__setattr__(self, "client_timestamp", self.created_at_client)
+        created_at_client = normalize_sync_timestamp(
+            self.created_at_client or self.client_timestamp
+        )
+        object.__setattr__(self, "created_at_client", created_at_client)
+        object.__setattr__(self, "client_timestamp", created_at_client)
         if self.received_at_server is None and self.server_timestamp is not None:
             object.__setattr__(self, "received_at_server", self.server_timestamp)
         if self.server_timestamp is None and self.received_at_server is not None:

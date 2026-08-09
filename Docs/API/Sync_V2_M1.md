@@ -331,6 +331,11 @@ Whole-object domains require `base_server_cursor`, `base_object_revision`, and
 fields. The server assigns canonical `server_cursor` and `object_revision`
 values.
 
+Client timestamps are normalized to one UTC ISO-8601 representation before
+persistence and mutation-group hashing. This includes native timezone-aware
+timestamps returned by PostgreSQL `TIMESTAMPTZ`, so reloading a stored group does
+not change its immutable plan fingerprint. A `Z` suffix remains valid input.
+
 `chat.message` append envelopes dedupe by stable message `object_id` plus
 `payload_hash`. Matching duplicates are idempotent. A duplicate message ID with
 a different payload hash creates a conflict.
@@ -772,6 +777,14 @@ history: an immutable historical tombstone group remains before a later exact
 restore of the same identity. A contradictory dependency or chronology graph
 fails closed with `sync_restore_plan_invalid`.
 
+The planner enforces hard chronology, dependency, and complete-group edges, then
+uses a deterministic ready-unit priority that chooses compatible live work before
+an otherwise-ready tombstone. Preview is bounded to 50,000 scanned candidates,
+10,000 ordered actions, and 1,000 members in any expanded mutation group. Exceeding
+one of those ceilings returns HTTP 413 with
+`sync_restore_candidate_limit_exceeded`, `sync_restore_action_limit_exceeded`, or
+`sync_restore_group_limit_exceeded` respectively.
+
 `ordered_actions` is the only executable object-action sequence. Its zero-based
 `plan_index` values are stable across the complete returned multi-dataset plan.
 Each row contains only `plan_index`, `action`, `dataset_id`, `domain`, `object_id`,
@@ -795,7 +808,19 @@ the later action is still `apply`, not `noop`, because the preceding tombstone w
 otherwise undo the final state. Likewise, when the initial inventory matches the
 final planned live head, earlier historical live revisions remain executable
 `apply` actions and the final head is reapplied. A divergent local object that does
-not match the final planned state remains a conflict. For example:
+not match the final planned state remains a conflict. In particular, a tombstone
+may advance simulation only when the local identity is absent, already matches the
+tombstone, matches the tombstone's explicit live base, was produced by an earlier
+planned action, or initially matches the later final action for that same dataset
+and identity. Otherwise the tombstone is a conflict and does not make later work
+appear safe.
+
+An accepted envelope whose stored apply status is `conflict` is also retained in
+`ordered_actions` as a blocking `conflict` with safe code
+`sync_restore_stored_apply_conflict`. A complete stored group is expanded before
+classification, so neither a conflicted singleton nor a conflicted group can be
+silently replaced by an older executable head. Stored raw error text is never
+returned. For example:
 
 ```json
 {
@@ -1197,6 +1222,13 @@ materializers. `failed_only=true` selects accepted work that is not yet applied,
 including pending-only mutation groups and single envelopes. A group resumes at
 its first unapplied step and processes only its required ordered suffix.
 `since_cursor` is inclusive of work after that cursor and must be non-negative.
+The optional `limit` is a soft envelope limit over complete replay units: once a
+mutation group is admitted, its required suffix is kept intact even if that one
+group makes the response exceed `limit`. No group may exceed 1,000 members; an
+oversized group fails closed with HTTP 413 and
+`sync_restore_group_limit_exceeded`. `to_cursor` includes every member processed
+from an admitted group, including members beyond the page cursor that discovered
+the group.
 
 ### Response
 
