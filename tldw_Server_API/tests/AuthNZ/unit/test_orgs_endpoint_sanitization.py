@@ -132,6 +132,85 @@ def test_membership_route_openapi_contract_has_no_new_parameters():
 
 
 @pytest.mark.asyncio
+async def test_create_org_uses_one_atomic_owner_provisioning_boundary(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
+        OrgSelfCreateRequest,
+    )
+
+    captured: dict[str, object] = {}
+
+    class _Repo:
+        def __init__(self, db_pool) -> None:
+            captured["db_pool"] = db_pool
+
+        async def create_organization_with_owner_membership(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "id": 9,
+                "name": kwargs["name"],
+                "slug": kwargs["slug"],
+                "owner_user_id": kwargs["owner_user_id"],
+                "is_active": True,
+                "created_at": None,
+                "updated_at": None,
+            }
+
+        async def create_organization(self, **_kwargs):
+            raise AssertionError("organization row must not commit separately")
+
+        async def add_org_member(self, **_kwargs):
+            raise AssertionError("owner membership must not use a second transaction")
+
+    async def _pool():
+        return object()
+
+    monkeypatch.setattr(orgs, "get_db_pool", _pool)
+    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _Repo)
+
+    response = await orgs.create_org(
+        body=OrgSelfCreateRequest(name="Example", slug="example"),
+        principal=SimpleNamespace(user_id=17),
+    )
+
+    assert response.id == 9
+    assert captured["owner_user_id"] == 17
+    assert captured["context"].actor_user_id == 17
+
+
+@pytest.mark.parametrize(
+    ("failure_type", "expected_status"),
+    (
+        ("scope", 404),
+        ("target", 404),
+        ("preflight", 409),
+    ),
+)
+def test_membership_race_failures_have_sanitized_http_mappings(
+    failure_type: str,
+    expected_status: int,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+        MembershipPreflightChanged,
+        MembershipScopeNotFound,
+        MembershipTargetNotFound,
+    )
+
+    failures = {
+        "scope": MembershipScopeNotFound(),
+        "target": MembershipTargetNotFound(),
+        "preflight": MembershipPreflightChanged(),
+    }
+    mapped = orgs._membership_control_http_exception(failures[failure_type])
+
+    assert mapped.status_code == expected_status
+    assert "Membership write" in str(mapped.detail) or "not found" in str(
+        mapped.detail
+    ).lower()
+
+
+@pytest.mark.asyncio
 async def test_update_org_budgets_upsert_failure_log_is_sanitized(monkeypatch):
     from fastapi import HTTPException
 
@@ -220,12 +299,19 @@ async def test_delete_org_subscription_lookup_warning_log_is_sanitized(monkeypat
 
     class _FakeOrgsRepo:
         deleted_org_id: int | None = None
+        deleted_context = None
 
         def __init__(self, db_pool) -> None:  # noqa: ARG002
             pass
 
-        async def delete_organization_with_provider_secrets(self, org_id: int) -> None:
+        async def delete_organization_with_provider_secrets(
+            self,
+            *,
+            org_id: int,
+            context,
+        ) -> None:
             type(self).deleted_org_id = org_id
+            type(self).deleted_context = context
 
     async def _fake_get_subscription_service():
         return _FailingSubscriptionService()
@@ -239,14 +325,165 @@ async def test_delete_org_subscription_lookup_warning_log_is_sanitized(monkeypat
     monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _FakeOrgsRepo)
     monkeypatch.setattr(orgs, "logger", logger_stub)
 
-    response = await orgs.delete_org(ctx=OrgContext(org_id=9, role="owner"))
+    response = await orgs.delete_org(
+        ctx=OrgContext(org_id=9, role="owner"),
+        principal=SimpleNamespace(user_id=17),
+    )
 
     assert response.status_code == 204
     assert _FakeOrgsRepo.deleted_org_id == 9
+    assert _FakeOrgsRepo.deleted_context.actor_user_id == 17
     assert logger_stub.warnings == ["delete_org: failed to load subscription"]
     assert "subscription backend exploded" not in str(logger_stub.warnings)
     assert "/private/subscriptions.db" not in str(logger_stub.warnings)
     assert "org 9" not in str(logger_stub.warnings)
+
+
+@pytest.mark.asyncio
+async def test_transfer_ownership_missing_organization_maps_existing_404(
+    monkeypatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.API_Deps.org_deps import OrgContext
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
+        OwnershipTransferRequest,
+    )
+
+    class _FakeOrgsRepo:
+        def __init__(self, db_pool) -> None:  # noqa: ARG002
+            pass
+
+        async def get_org_member(self, org_id: int, user_id: int):
+            assert (org_id, user_id) == (9, 23)
+            return {"org_id": org_id, "user_id": user_id, "role": "member"}
+
+        async def transfer_organization_ownership(self, **kwargs):
+            assert kwargs["context"].actor_user_id == 17
+            return None
+
+    async def _fake_get_db_pool():
+        return object()
+
+    monkeypatch.setattr(orgs, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _FakeOrgsRepo)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await orgs.transfer_ownership(
+            body=OwnershipTransferRequest(new_owner_user_id=23),
+            ctx=OrgContext(org_id=9, role="owner"),
+            principal=SimpleNamespace(user_id=17),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Organization not found"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ("delete_org", "transfer_ownership", "delete_team"),
+)
+@pytest.mark.parametrize(
+    ("error_kind", "expected_status", "expected_detail"),
+    (
+        (
+            "authorization",
+            403,
+            "Not authorized to manage memberships",
+        ),
+        (
+            "preflight",
+            409,
+            "Membership write conflicted; retry the request",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_scope_control_errors_map_to_sanitized_http_contracts(
+    monkeypatch,
+    operation: str,
+    error_kind: str,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.API_Deps.org_deps import OrgContext
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
+        OwnershipTransferRequest,
+    )
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+        MembershipAuthorizationError,
+        MembershipPreflightChanged,
+    )
+
+    failure = (
+        MembershipAuthorizationError()
+        if error_kind == "authorization"
+        else MembershipPreflightChanged()
+    )
+
+    class _SubscriptionService:
+        async def get_subscription(self, org_id: int):  # noqa: ARG002
+            return None
+
+    class _FailingRepo:
+        def __init__(self, db_pool) -> None:  # noqa: ARG002
+            pass
+
+        async def get_org_member(self, org_id: int, user_id: int):
+            return {"org_id": org_id, "user_id": user_id, "role": "member"}
+
+        async def get_team(self, team_id: int):
+            return {"id": team_id, "org_id": 9}
+
+        async def delete_organization_with_provider_secrets(self, **kwargs):
+            raise failure
+
+        async def transfer_organization_ownership(self, **kwargs):
+            raise failure
+
+        async def delete_team_with_provider_secrets(self, **kwargs):
+            raise failure
+
+    async def _fake_get_subscription_service():
+        return _SubscriptionService()
+
+    async def _fake_get_db_pool():
+        return object()
+
+    monkeypatch.setattr(
+        orgs,
+        "get_subscription_service",
+        _fake_get_subscription_service,
+    )
+    monkeypatch.setattr(orgs, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _FailingRepo)
+
+    with pytest.raises(HTTPException) as exc_info:
+        if operation == "delete_org":
+            await orgs.delete_org(
+                ctx=OrgContext(org_id=9, role="owner"),
+                principal=SimpleNamespace(user_id=17),
+            )
+        elif operation == "transfer_ownership":
+            await orgs.transfer_ownership(
+                body=OwnershipTransferRequest(new_owner_user_id=23),
+                ctx=OrgContext(org_id=9, role="owner"),
+                principal=SimpleNamespace(user_id=17),
+            )
+        else:
+            await orgs.delete_team(
+                team_id=31,
+                ctx=OrgContext(org_id=9, role="admin"),
+                principal=SimpleNamespace(user_id=17),
+            )
+
+    assert exc_info.value.status_code == expected_status
+    assert exc_info.value.detail == expected_detail
+    assert str(failure) not in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio

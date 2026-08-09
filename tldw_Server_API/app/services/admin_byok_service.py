@@ -288,6 +288,11 @@ async def upsert_shared_key(
             created_by=principal.user_id,
             updated_by=principal.user_id,
         )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Conflicting provider credential aliases",
+        ) from exc
     except Exception as exc:
         logger.error("Failed to store shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to store shared BYOK key") from exc

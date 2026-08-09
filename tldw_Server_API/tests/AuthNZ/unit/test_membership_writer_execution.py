@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
+from typing import get_type_hints
 
 import pytest
 
@@ -18,6 +19,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipScopeType,
     MembershipUserVersionFloor,
     MembershipWriter,
+    MembershipWriterContractError,
     MembershipWriteResult,
     OfflineMigrationContextRejected,
     TrustedMembershipReason,
@@ -402,6 +404,37 @@ async def test_writer_rejects_offline_context_before_connection_access() -> None
             ),
             mutations=(_mutation(),),
             anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+            operation_time=BASE,
+        )
+
+
+@pytest.mark.parametrize(
+    "reason",
+    (TrustedMembershipReason.REGISTRATION, TrustedMembershipReason.BOOTSTRAP),
+)
+@pytest.mark.asyncio
+async def test_ownership_transfer_rejects_trusted_context_before_connection_access(
+    reason: TrustedMembershipReason,
+) -> None:
+    class _Connection:
+        def __getattr__(self, name: str):
+            raise AssertionError(f"unexpected connection access: {name}")
+
+    class _Pool:
+        pool = None
+
+    assert (
+        get_type_hints(MembershipWriter.transfer_organization_ownership)["context"]
+        is ActorMembershipWriteContext
+    )
+    with pytest.raises(MembershipWriterContractError):
+        await MembershipWriter(_Pool()).transfer_organization_ownership(
+            conn=_Connection(),
+            context=TrustedMembershipWriteContext(trusted_reason=reason),
+            organization_id=3,
+            current_owner_user_id=11,
+            new_owner_user_id=22,
+            anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
             operation_time=BASE,
         )
 
@@ -1043,6 +1076,201 @@ async def test_writer_path_rejects_claim_only_platform_admin(monkeypatch, postgr
         await _apply_as_persisted_platform_admin(
             monkeypatch,
             postgres=postgres,
+        )
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("actor_state", ["missing", "inactive"])
+@pytest.mark.asyncio
+async def test_organization_creation_authorization_rejects_unusable_actor(
+    postgres: bool,
+    actor_state: str,
+) -> None:
+    class _Cursor:
+        def __init__(self, row) -> None:
+            self._row = row
+
+        async def fetchone(self):
+            return self._row
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def _actor_row(self):
+            if actor_state == "missing":
+                return None
+            return {
+                "id": 11,
+                "is_active": False,
+                "is_superuser": True,
+                "role": "admin",
+            }
+
+        async def fetchrow(self, sql, *_parameters):
+            self.statements.append(str(sql))
+            return self._actor_row()
+
+        async def execute(self, sql, _parameters):
+            self.statements.append(str(sql))
+            return _Cursor(self._actor_row())
+
+    pool = type("Pool", (), {"pool": object() if postgres else None})()
+    conn = _Connection()
+
+    with pytest.raises(MembershipAuthorizationError):
+        await MembershipWriter(pool).authorize_organization_creation(
+            conn=conn,
+            context=ActorMembershipWriteContext(
+                actor_user_id=11,
+                required_authority=MembershipAuthority.PLATFORM_ADMIN,
+            ),
+            owner_user_id=None,
+        )
+
+    assert any("users" in statement for statement in conn.statements)
+    if postgres:
+        assert "FOR UPDATE" in conn.statements[0]
+
+
+@pytest.mark.asyncio
+async def test_organization_creation_authorization_locks_actor_and_owner_in_order(
+) -> None:
+    class _Connection:
+        def __init__(self) -> None:
+            self.locked_user_ids: list[int] = []
+
+        async def fetchrow(self, sql, user_id):
+            if "FOR UPDATE" in str(sql):
+                self.locked_user_ids.append(user_id)
+            return {
+                "id": user_id,
+                "is_active": True,
+                "is_superuser": user_id == 11,
+                "role": "admin" if user_id == 11 else "user",
+            }
+
+    pool = type("Pool", (), {"pool": object()})()
+    conn = _Connection()
+
+    await MembershipWriter(pool).authorize_organization_creation(
+        conn=conn,
+        context=ActorMembershipWriteContext(
+            actor_user_id=11,
+            required_authority=MembershipAuthority.PLATFORM_ADMIN,
+        ),
+        owner_user_id=7,
+    )
+
+    assert conn.locked_user_ids == [7, 11]
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.asyncio
+async def test_organization_creation_missing_actor_takes_precedence_over_owner(
+    postgres: bool,
+) -> None:
+    class _Cursor:
+        async def fetchone(self):
+            return None
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.read_user_ids: list[int] = []
+
+        async def fetchrow(self, _sql, user_id):
+            self.read_user_ids.append(user_id)
+            return None
+
+        async def execute(self, _sql, parameters):
+            self.read_user_ids.append(parameters[0])
+            return _Cursor()
+
+    pool = type("Pool", (), {"pool": object() if postgres else None})()
+    conn = _Connection()
+
+    with pytest.raises(MembershipAuthorizationError):
+        await MembershipWriter(pool).authorize_organization_creation(
+            conn=conn,
+            context=ActorMembershipWriteContext(
+                actor_user_id=11,
+                required_authority=MembershipAuthority.PLATFORM_ADMIN,
+            ),
+            owner_user_id=7,
+        )
+
+    assert conn.read_user_ids == [7, 11]
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.asyncio
+async def test_scoped_actor_can_create_self_owned_organization(
+    postgres: bool,
+) -> None:
+    class _Cursor:
+        async def fetchone(self):
+            return (11, 1, 0, "user")
+
+    class _Connection:
+        async def fetchrow(self, _sql, user_id):
+            return {
+                "id": user_id,
+                "is_active": True,
+                "is_superuser": False,
+                "role": "user",
+            }
+
+        async def execute(self, _sql, _parameters):
+            return _Cursor()
+
+    pool = type("Pool", (), {"pool": object() if postgres else None})()
+
+    await MembershipWriter(pool).authorize_organization_creation(
+        conn=_Connection(),
+        context=ActorMembershipWriteContext(
+            actor_user_id=11,
+            required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+        ),
+        owner_user_id=11,
+    )
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("owner_user_id", [None, 7])
+@pytest.mark.asyncio
+async def test_scoped_actor_cannot_create_ownerless_or_different_owner_organization(
+    postgres: bool,
+    owner_user_id: int | None,
+) -> None:
+    class _Cursor:
+        def __init__(self, user_id: int) -> None:
+            self._user_id = user_id
+
+        async def fetchone(self):
+            return (self._user_id, 1, 0, "user")
+
+    class _Connection:
+        async def fetchrow(self, _sql, user_id):
+            return {
+                "id": user_id,
+                "is_active": True,
+                "is_superuser": False,
+                "role": "user",
+            }
+
+        async def execute(self, _sql, parameters):
+            return _Cursor(parameters[0])
+
+    pool = type("Pool", (), {"pool": object() if postgres else None})()
+
+    with pytest.raises(MembershipAuthorizationError):
+        await MembershipWriter(pool).authorize_organization_creation(
+            conn=_Connection(),
+            context=ActorMembershipWriteContext(
+                actor_user_id=11,
+                required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+            ),
+            owner_user_id=owner_user_id,
         )
 
 
