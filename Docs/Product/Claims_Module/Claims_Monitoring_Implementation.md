@@ -290,6 +290,7 @@ Response schema:
   "status": "queued|processing|ready|failed",
   "job_id": "integer|null",
   "job_status": "queued|processing|completed|failed|cancelled|quarantined|null",
+  "error_code": "string|null",
   "snapshot_at": "string",
   "download_url": "string|null",
   "created_at": "string"
@@ -314,7 +315,7 @@ Query params:
 {
   "limit": 100,                       // optional, max 1000
   "offset": 0,                        // optional
-  "status": "queued|ready|failed",    // optional
+  "status": "queued|processing|ready|failed", // optional
   "format": "csv|json",               // optional
   "workspace_id": "string|null"       // optional, admin-only filter; non-admins are scoped to their workspace_id
 }
@@ -332,6 +333,7 @@ Response schema:
       "status": "queued|processing|ready|failed",
       "job_id": "integer|null",
       "job_status": "queued|processing|completed|failed|cancelled|quarantined|null",
+      "error_code": "string|null",
       "snapshot_at": "string|null",
       "download_url": "string|null",
       "created_at": "string",
@@ -350,9 +352,9 @@ Response schema:
 Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
 JSON or CSV output is also capped at 10 MiB (10,485,760 UTF-8 bytes), configured
 by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; invalid or non-positive settings use the
-10 MiB default. Synchronous requests that exceed the byte limit fail during the
-request; asynchronous requests expose the safe failed artifact through the
-normal status APIs.
+10 MiB default. Synchronous requests that exceed the byte limit return HTTP 413
+with the stable `claims_export_too_large` code; asynchronous requests expose the
+safe failed artifact through the normal status APIs.
 
 CSV downloads use UTF-8, standard CSV quoting, and spreadsheet-formula
 protection. String cells beginning with `=`, `+`, `-`, `@`, tab, or carriage
@@ -384,8 +386,10 @@ when its Jobs row is unavailable or still completing.
 
 State transitions:
 - queued -> processing -> ready: a worker completes payload generation.
-- queued/processing -> failed: a non-retryable artifact or reconciliation error.
-- failed -> processing: a later Jobs retry runs the same artifact.
+- queued -> failed: enqueue compensation or reconciliation proves no accepted
+  Job exists.
+- processing -> failed: any worker attempt fails, including a retryable failure.
+- failed -> processing: Jobs later retries the same artifact.
 
 Client guidance:
 - Poll `GET /api/v1/claims/analytics/export/{export_id}` with exponential backoff
@@ -485,14 +489,17 @@ Roll out in this order:
 
 Roll back in this order:
 
-1. Disable the producer flags first so new requests use the synchronous path.
-2. Keep workers running to drain accepted Jobs and repair accepted artifacts.
+1. Disable `CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED` first so new analytics export
+   requests use the synchronous path.
+2. Keep `CLAIMS_JOBS_ENABLED` unchanged unless separately rolling back all Claims
+   Jobs workloads, because it also controls Stage 1. Keep workers running to
+   drain accepted Jobs and repair accepted artifacts.
 3. Disable workers only after the accepted Jobs have drained. Use the existing
    Jobs admin endpoints for any required pause, cancel, retry, quarantine, or
    drain action.
 
-Disabling workers before producers can strand accepted artifacts and is not the
-supported rollback sequence.
+Disabling workers before the analytics export producer can strand accepted
+artifacts and is not the supported rollback sequence.
 
 ## Testing
 - API tests for config CRUD and rebuild health response shape.
