@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     SYNC_V2_SUPPORTED_OPERATIONS,
     WORKSPACE_SYNC_DOMAINS,
@@ -1845,6 +1846,21 @@ class SyncDatabase:
             )
         )
 
+    def _get_dataset_row_for_update(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any] | None:
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        return _first(
+            self.execute(
+                "SELECT * FROM sync_datasets WHERE dataset_id = ?" + suffix,  # nosec B608
+                (dataset_id,),
+                connection=connection,
+            )
+        )
+
     def _require_dataset(
         self,
         dataset_id: str,
@@ -1869,6 +1885,32 @@ class SyncDatabase:
                 f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
             )
         return row
+
+    def _require_notes_organization_write_ready(
+        self,
+        row: Mapping[str, Any],
+        domain: SyncDomain,
+        *,
+        trusted_bootstrap_id: str | None = None,
+    ) -> None:
+        if domain not in NOTES_ORGANIZATION_DOMAINS:
+            return
+        if set(NOTES_ORGANIZATION_DOMAINS).difference(_dataset_domains_from_row(dict(row))):
+            raise SyncStoreError("notes_organization_sync_domains_incomplete")
+        metadata = decode_json(row.get("metadata_json"), default={}).get(
+            "notes_organization_v1"
+        )
+        if not isinstance(metadata, Mapping):
+            raise SyncStoreError("notes_organization_sync_not_ready")
+        if metadata.get("state") == "ready":
+            return
+        if (
+            trusted_bootstrap_id is not None
+            and metadata.get("state") == "initializing"
+            and metadata.get("bootstrap_id") == trusted_bootstrap_id
+        ):
+            return
+        raise SyncStoreError("notes_organization_sync_not_ready")
 
     def _get_device_row(
         self,
@@ -1924,7 +1966,11 @@ class SyncDatabase:
         if dataset.scope_type == "personal":
             if dataset.workspace_id is not None:
                 raise SyncStoreError("Personal sync datasets must not include workspace_id")
-            allowed_domains = set(M1_SYNC_DOMAINS).union(SOURCE_CACHE_SYNC_DOMAINS, MEDIA_SYNC_DOMAINS)
+            allowed_domains = set(M1_SYNC_DOMAINS).union(
+                SOURCE_CACHE_SYNC_DOMAINS,
+                MEDIA_SYNC_DOMAINS,
+                NOTES_ORGANIZATION_DOMAINS,
+            )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
                 raise SyncStoreError("Workspace sync datasets require workspace_id")
@@ -1937,6 +1983,18 @@ class SyncDatabase:
                 f"Sync v2 dataset scope {dataset.scope_type} contains unsupported domains: "
                 + ", ".join(invalid_domains)
             )
+        organization_domains = set(dataset.domains).intersection(NOTES_ORGANIZATION_DOMAINS)
+        if organization_domains and organization_domains != set(NOTES_ORGANIZATION_DOMAINS):
+            raise SyncInvalidDomainError("notes_organization_sync_domains_incomplete")
+        if organization_domains:
+            organization_metadata = dataset.metadata.get("notes_organization_v1")
+            state = (
+                organization_metadata.get("state")
+                if isinstance(organization_metadata, Mapping)
+                else None
+            )
+            if state not in {"initializing", "ready", "failed"}:
+                raise SyncStoreError("notes_organization_sync_not_ready")
 
     def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate) -> None:
         if envelope.domain not in SYNC_V2_SUPPORTED_OPERATIONS:
@@ -2982,6 +3040,139 @@ class SyncDatabase:
             )
         )
 
+    def begin_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Atomically enroll the complete organization group in initializing state."""
+
+        if not bootstrap_id.strip():
+            raise SyncStoreError("Notes organization bootstrap ID is required")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if (
+                row is None
+                or row.get("owner_user_id") != owner_user_id
+                or row.get("scope_type") != "personal"
+            ):
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_organization_v1")
+            if isinstance(current, Mapping) and current.get("state") in {
+                "initializing",
+                "ready",
+            }:
+                return _dataset_from_row(row)
+
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            for domain in NOTES_ORGANIZATION_DOMAINS:
+                if domain not in enrolled:
+                    enrolled.append(domain)
+            metadata["notes_organization_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "captured_count": 0,
+                "expected_count": 0,
+                "error_code": None,
+            }
+            now = utcnow_iso()
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    now,
+                    dataset_id,
+                ),
+                connection=conn,
+            )
+            for domain in NOTES_ORGANIZATION_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=conn,
+                )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset bootstrap update was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable Notes organization bootstrap transition."""
+
+        if expected_state not in {"initializing", "ready", "failed"} or state not in {
+            "initializing",
+            "ready",
+            "failed",
+        }:
+            raise SyncStoreError("Notes organization bootstrap state is invalid")
+        if captured_count < 0 or expected_count < 0:
+            raise SyncStoreError("Notes organization bootstrap counts are invalid")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if row is None:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_organization_v1")
+            if not isinstance(current, Mapping) or (
+                current.get("bootstrap_id") != bootstrap_id
+                or current.get("state") != expected_state
+            ):
+                raise SyncStoreError("notes_organization_bootstrap_compare_and_set_failed")
+            domains = set(_dataset_domains_from_row(row))
+            if set(NOTES_ORGANIZATION_DOMAINS).difference(domains):
+                raise SyncStoreError("notes_organization_sync_domains_incomplete")
+            if state == "ready":
+                if captured_count != expected_count or ready_verifier is None or not ready_verifier():
+                    raise SyncStoreError("notes_organization_bootstrap_verification_failed")
+                placeholders = ", ".join("?" for _ in NOTES_ORGANIZATION_DOMAINS)
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? "
+                        f"AND domain IN ({placeholders}) "  # nosec B608
+                        "AND status = 'accepted' AND apply_status <> 'applied'",
+                        (dataset_id, *NOTES_ORGANIZATION_DOMAINS),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_organization_bootstrap_verification_failed")
+                error_code = None
+            metadata["notes_organization_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? WHERE dataset_id = ?",
+                (encode_json(metadata, default={}), utcnow_iso(), dataset_id),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
     def _find_existing_envelope_for_idempotency(
         self,
         envelope: SyncEnvelopeCreate,
@@ -3051,11 +3242,12 @@ class SyncDatabase:
     ) -> SyncEnvelope | None:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
-            self._require_dataset_domain(
+            dataset_row = self._require_dataset_domain(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
             )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
                 connection=conn,
@@ -3067,11 +3259,12 @@ class SyncDatabase:
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
-            self._require_dataset_domain(
+            dataset_row = self._require_dataset_domain(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
             )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
 
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
@@ -3225,6 +3418,8 @@ class SyncDatabase:
     def insert_envelopes_atomic(
         self,
         envelopes: Sequence[SyncEnvelopeCreate],
+        *,
+        trusted_notes_organization_bootstrap_id: str | None = None,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
@@ -3245,10 +3440,15 @@ class SyncDatabase:
         try:
             with self.backend.transaction() as conn:
                 for envelope in plan:
-                    self._require_dataset_domain(
+                    dataset_row = self._require_dataset_domain(
                         envelope.dataset_id,
                         envelope.domain,
                         connection=conn,
+                    )
+                    self._require_notes_organization_write_ready(
+                        dataset_row,
+                        envelope.domain,
+                        trusted_bootstrap_id=trusted_notes_organization_bootstrap_id,
                     )
 
                 existing_rows = self._list_mutation_group_rows(
@@ -3722,6 +3922,74 @@ class SyncDatabase:
         if row is None:
             raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
         return _envelope_from_row(row)
+
+    def mark_bootstrap_envelope_verified(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+    ) -> SyncEnvelope:
+        """Atomically record a source-verified bootstrap step without product replay."""
+
+        with self.backend.transaction() as conn:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
+            dataset_row = self._require_dataset_domain(
+                str(row["dataset_id"]), row["domain"], connection=conn
+            )
+            self._require_notes_organization_write_ready(
+                dataset_row,
+                row["domain"],
+                trusted_bootstrap_id=bootstrap_id,
+            )
+            now = utcnow_iso()
+            self.execute(
+                """
+                INSERT INTO sync_object_state (
+                    dataset_id, domain, object_id, object_revision, object_hash,
+                    latest_server_cursor, deleted, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, domain, object_id)
+                DO UPDATE SET
+                    object_revision = excluded.object_revision,
+                    object_hash = excluded.object_hash,
+                    latest_server_cursor = excluded.latest_server_cursor,
+                    deleted = excluded.deleted,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    row["dataset_id"],
+                    row["domain"],
+                    row["entity_id"],
+                    row.get("object_revision") or 1,
+                    row.get("payload_hash") or "",
+                    server_cursor,
+                    1 if row.get("operation") == "tombstone" else 0,
+                    now,
+                ),
+                connection=conn,
+            )
+            self.execute(
+                "UPDATE sync_envelopes SET apply_status = 'applied', apply_error_code = NULL, "
+                "apply_error_message = NULL, applied_at = ? WHERE server_sequence = ?",
+                (now, server_cursor),
+                connection=conn,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+        return _envelope_from_row(updated)
 
     def list_failed_applies(
         self,

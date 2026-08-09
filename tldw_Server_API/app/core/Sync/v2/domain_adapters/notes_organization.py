@@ -91,9 +91,14 @@ class NotesOrganizationDomainAdapter:
                 "bootstrap_capture is valid only for relationship domains",
             )
         bootstrap_authorized = bootstrap_capture is True and _bootstrap_authorized(
-            envelope, payload, context
+            envelope, payload, dataset, context
         )
-        readiness = _readiness_error(dataset, bootstrap_authorized=bootstrap_authorized)
+        readiness = _readiness_error(
+            dataset,
+            bootstrap_authorized=(
+                bootstrap_authorized or _trusted_bootstrap_context(dataset, context)
+            ),
+        )
         if readiness is not None:
             return _rejected(envelope, "notes_organization_domain_not_ready", readiness)
         if bootstrap_capture is True and not bootstrap_authorized:
@@ -175,16 +180,36 @@ def _readiness_error(dataset: SyncDataset, *, bootstrap_authorized: bool) -> str
 def _bootstrap_authorized(
     envelope: SyncEnvelopeCreate,
     payload: dict[str, object],
+    dataset: SyncDataset,
     context: SyncAdapterContext | None,
 ) -> bool:
+    metadata = dataset.metadata.get("notes_organization_v1")
+    bootstrap_id = metadata.get("bootstrap_id") if isinstance(metadata, dict) else None
     return bool(
         context is not None
         and context.trusted_server_origin
         and context.organization_group_state == "initializing"
+        and bootstrap_id is not None
+        and context.organization_bootstrap_id == bootstrap_id
         and context.bootstrap_relationship_verifier is not None
         and context.bootstrap_relationship_verifier(
             envelope.domain, envelope.object_id, payload
         )
+    )
+
+
+def _trusted_bootstrap_context(
+    dataset: SyncDataset,
+    context: SyncAdapterContext | None,
+) -> bool:
+    metadata = dataset.metadata.get("notes_organization_v1")
+    return bool(
+        context is not None
+        and context.trusted_server_origin
+        and context.organization_group_state == "initializing"
+        and isinstance(metadata, dict)
+        and isinstance(metadata.get("bootstrap_id"), str)
+        and context.organization_bootstrap_id == metadata.get("bootstrap_id")
     )
 
 

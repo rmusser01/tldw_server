@@ -119,6 +119,7 @@ class SyncAdapterContext:
     list_heads: SyncDomainHeadLoader | None = None
     trusted_server_origin: bool = False
     organization_group_state: str | None = None
+    organization_bootstrap_id: str | None = None
     bootstrap_relationship_verifier: BootstrapRelationshipVerifier | None = None
 
 

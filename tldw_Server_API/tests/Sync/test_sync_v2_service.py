@@ -25,8 +25,11 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
+    M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SyncConflictCreate,
     SyncDataset,
+    SyncDatasetCreate,
     SyncDeviceCursor,
     SyncDeviceUpsert,
     SyncDomain,
@@ -3834,6 +3837,101 @@ def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     assert first_pull.next_cursor == "1"
     assert second_pull.envelopes == []
     assert second_pull.next_cursor == "1"
+
+
+def test_implicit_pull_isolates_legacy_device_and_rejects_explicit_unsupported_domain(
+    sync_store: SyncV2Store,
+) -> None:
+    registry = SyncAdapterRegistry(
+        [
+            StaticSyncAdapter(domain=domain, supported_adapter_versions={1})
+            for domain in [*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]
+        ]
+    )
+    service = SyncV2Service(store=sync_store, adapters=registry, clock=_clock)
+    legacy_domains = list(M1_SYNC_DOMAINS)
+    upgraded_domains = [*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]
+    service.register_device(
+        user_id="user-1",
+        display_name="Legacy",
+        client_type="chatbook",
+        device_id="legacy-device",
+        capabilities={"requested_domains": legacy_domains},
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Upgraded",
+        client_type="chatbook",
+        device_id="upgraded-device",
+        capabilities={"requested_domains": upgraded_domains},
+    )
+    sync_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            domains=upgraded_domains,
+            metadata={
+                "notes_organization_v1": {
+                    "bootstrap_id": "internal-bootstrap-id",
+                    "state": "ready",
+                    "captured_count": 1,
+                    "expected_count": 1,
+                    "error_code": None,
+                }
+            },
+        )
+    )
+    sync_store.insert_envelope(
+        _m1_note_envelope(
+            dataset_id="dataset-1",
+            client_envelope_id="core-note",
+            object_id="note-core",
+            device_id="upgraded-device",
+        )
+    )
+    sync_store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id="organization-keyword",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id="11111111-1111-4111-8111-111111111111",
+            device_id="upgraded-device",
+            object_revision=1,
+            payload={"keyword": "Research"},
+            payload_hash="sha256:organization-keyword",
+        )
+    )
+
+    legacy = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="legacy-device",
+        cursor=0,
+        include_own_changes=True,
+    )
+    upgraded = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="upgraded-device",
+        cursor=0,
+        include_own_changes=True,
+    )
+
+    assert [item.domain for item in legacy.envelopes] == ["notes.note"]
+    assert {item.domain for item in upgraded.envelopes} == {
+        "notes.note",
+        "notes.keyword",
+    }
+    with pytest.raises(SyncStoreError, match="sync_device_domain_not_supported"):
+        service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="legacy-device",
+            cursor=0,
+            domains=["notes.keyword"],
+            include_own_changes=True,
+        )
 
 
 def test_pull_does_not_persist_empty_explicit_high_cursor(sync_service: SyncV2Service):

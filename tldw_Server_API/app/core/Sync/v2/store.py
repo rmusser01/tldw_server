@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Core-facing Sync v2 store facade."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 
@@ -182,16 +182,57 @@ class SyncV2Store:
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         return self.db.get_or_create_default_personal_dataset(user_id)
 
+    def begin_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        return self.db.begin_notes_organization_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+        )
+
+    def transition_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        return self.db.transition_notes_organization_bootstrap(
+            dataset_id,
+            bootstrap_id=bootstrap_id,
+            expected_state=expected_state,
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            error_code=error_code,
+            ready_verifier=ready_verifier,
+        )
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope)
 
     def insert_envelopes_atomic(
         self,
         envelopes: Sequence[SyncEnvelopeCreate],
+        *,
+        trusted_notes_organization_bootstrap_id: str | None = None,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
-        return self.db.insert_envelopes_atomic(envelopes)
+        return self.db.insert_envelopes_atomic(
+            envelopes,
+            trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+        )
 
     def list_mutation_group(
         self,
@@ -302,6 +343,18 @@ class SyncV2Store:
             apply_status=apply_status,
             apply_error_code=apply_error_code,
             apply_error_message=apply_error_message,
+        )
+
+    def mark_bootstrap_envelope_verified(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+    ) -> SyncEnvelope:
+        """Record a verified bootstrap step as applied without product replay."""
+
+        return self.db.mark_bootstrap_envelope_verified(
+            server_cursor, bootstrap_id=bootstrap_id
         )
 
     def list_failed_applies(

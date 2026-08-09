@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from .adapters import (
@@ -84,6 +84,10 @@ def capture_server_origin_mutation_batch(
     steps: Sequence[ServerOriginMutationStep],
     source: str,
     idempotency_key: str,
+    trusted_notes_organization_bootstrap_id: str | None = None,
+    bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
+    | None = None,
+    bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None = None,
 ) -> ServerOriginBatchResult:
     """Preflight, atomically append, and ordered-materialize one complete plan."""
 
@@ -95,7 +99,11 @@ def capture_server_origin_mutation_batch(
         raise SyncStoreError("Sync server-origin mutation batch requires an idempotency key")
 
     dataset = _active_default_personal_dataset(service, user_id)
-    _require_batch_write_ready(dataset, {step.domain for step in plan})
+    _require_batch_write_ready(
+        dataset,
+        {step.domain for step in plan},
+        trusted_bootstrap_id=trusted_notes_organization_bootstrap_id,
+    )
     if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
         raise SyncServerOriginMutationNotSupportedError(dataset, plan[0].domain)
 
@@ -120,7 +128,13 @@ def capture_server_origin_mutation_batch(
             )
         except SyncIdempotencyConflictError as exc:
             raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
-        return _materialize_group(service=service, dataset=dataset, envelopes=existing)
+        return _materialize_group(
+            service=service,
+            dataset=dataset,
+            envelopes=existing,
+            bootstrap_id=trusted_notes_organization_bootstrap_id,
+            bootstrap_step_verifier=bootstrap_step_verifier,
+        )
 
     envelopes = _evaluate_plan(
         service=service,
@@ -128,12 +142,26 @@ def capture_server_origin_mutation_batch(
         canonical_steps=canonical_steps,
         mutation_group_id=mutation_group_id,
         mutation_plan_hash=mutation_plan_hash,
+        bootstrap_id=trusted_notes_organization_bootstrap_id,
+        bootstrap_relationship_verifier=bootstrap_relationship_verifier,
     )
     try:
-        inserted = service.store.insert_envelopes_atomic(envelopes)
+        if trusted_notes_organization_bootstrap_id is None:
+            inserted = service.store.insert_envelopes_atomic(envelopes)
+        else:
+            inserted = service.store.insert_envelopes_atomic(
+                envelopes,
+                trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+            )
     except SyncIdempotencyConflictError as exc:
         raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
-    return _materialize_group(service=service, dataset=dataset, envelopes=inserted)
+    return _materialize_group(
+        service=service,
+        dataset=dataset,
+        envelopes=inserted,
+        bootstrap_id=trusted_notes_organization_bootstrap_id,
+        bootstrap_step_verifier=bootstrap_step_verifier,
+    )
 
 
 def resume_server_origin_mutation_group(
@@ -166,6 +194,9 @@ def _evaluate_plan(
     canonical_steps: Sequence[ServerOriginMutationStep],
     mutation_group_id: str,
     mutation_plan_hash: str,
+    bootstrap_id: str | None = None,
+    bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
+    | None = None,
 ) -> list[SyncEnvelopeCreate]:
     overlay: dict[tuple[SyncDomain, str], SyncEnvelopeCreate] = {}
     stored: dict[tuple[SyncDomain, str], SyncEnvelope | None] = {}
@@ -248,6 +279,10 @@ def _evaluate_plan(
             prior_envelopes=(*history, *((planned_prior,) if planned_prior else ())),
             get_head=get_head,
             list_heads=list_heads,
+            trusted_server_origin=bootstrap_id is not None,
+            organization_group_state=("initializing" if bootstrap_id is not None else None),
+            organization_bootstrap_id=bootstrap_id,
+            bootstrap_relationship_verifier=bootstrap_relationship_verifier,
         )
         outcome = service._evaluate_envelope(dataset, envelope, context=context)
         if isinstance(outcome, AdapterRejected | AdapterDeferred):
@@ -267,6 +302,8 @@ def _materialize_group(
     service: SyncV2Service,
     dataset: SyncDataset,
     envelopes: Sequence[SyncEnvelope],
+    bootstrap_id: str | None = None,
+    bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None = None,
 ) -> ServerOriginBatchResult:
     group = list(envelopes)
     _validate_stored_group(
@@ -280,6 +317,18 @@ def _materialize_group(
             continue
         if envelope.apply_status == "conflict":
             raise _materialization_error(dataset, group, retryable=False)
+        if bootstrap_id is not None and bootstrap_step_verifier is not None:
+            if envelope.server_cursor is None or not bootstrap_step_verifier(envelope):
+                raise _materialization_error(dataset, group, retryable=True)
+            service.store.mark_bootstrap_envelope_verified(
+                envelope.server_cursor,
+                bootstrap_id=bootstrap_id,
+            )
+            group = service.store.list_mutation_group(
+                dataset.dataset_id,
+                envelope.mutation_group_id or "",
+            )
+            continue
         materialization = service._materialize_envelope(envelope)
         group = service.store.list_mutation_group(
             dataset.dataset_id,
@@ -536,6 +585,8 @@ def _active_default_personal_dataset(
 def _require_batch_write_ready(
     dataset: SyncDataset,
     domains: set[SyncDomain],
+    *,
+    trusted_bootstrap_id: str | None = None,
 ) -> None:
     missing = sorted(domains.difference(dataset.domains))
     if missing:
@@ -545,10 +596,17 @@ def _require_batch_write_ready(
     if not domains.intersection(NOTES_ORGANIZATION_DOMAINS):
         return
     metadata = dataset.metadata.get("notes_organization_v1")
-    if metadata is None:
-        return
     state = metadata.get("state") if isinstance(metadata, Mapping) else None
-    if state != "ready":
+    current_bootstrap_id = (
+        metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
+    )
+    if state == "ready":
+        return
+    if (
+        state != "initializing"
+        or trusted_bootstrap_id is None
+        or current_bootstrap_id != trusted_bootstrap_id
+    ):
         raise SyncStoreError("notes_organization_sync_not_ready")
 
 

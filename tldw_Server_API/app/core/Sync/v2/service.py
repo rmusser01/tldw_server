@@ -34,6 +34,7 @@ from .materializers import MaterializationResult, SyncMaterializer
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_ENCRYPTION_POLICIES,
     SYNC_V2_SUPPORTED_DOMAINS,
     SYNC_V2_SUPPORTED_OPERATIONS,
@@ -554,6 +555,7 @@ class SyncV2Service:
         blob_store: LocalSyncBlobStore | None = None,
         settings: SyncV2Settings | None = None,
         workspace_access_checker: WorkspaceAccessChecker | None = None,
+        dataset_bootstrapper: object | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -563,6 +565,7 @@ class SyncV2Service:
         self.blob_store = blob_store
         self.settings = settings or SyncV2Settings()
         self.workspace_access_checker = workspace_access_checker
+        self.dataset_bootstrapper = dataset_bootstrapper
 
     def capabilities(self) -> SyncV2Capabilities:
         blob_transfer: dict[str, object] = {"supported": False}
@@ -1550,12 +1553,12 @@ class SyncV2Service:
         page_size: int | None = None,
         include_own_changes: bool = False,
     ) -> SyncPullResult:
-        self._require_registered_device(user_id, device_id)
+        device = self._require_registered_device(user_id, device_id)
         if page_size is not None and page_size < 1:
             raise SyncStoreError("Sync pull page_size must be greater than zero")
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
 
-        selected_domains = self._selected_domains(dataset, domains)
+        selected_domains = self._selected_pull_domains(dataset, device, domains)
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
         raw_envelopes, visible = self._scan_pull_page(
@@ -3714,12 +3717,37 @@ class SyncV2Service:
         requested = list(domains or dataset.domains)
         return [domain for domain in requested if domain in allowed and self.adapters.has_domain(domain)]
 
+    def _selected_pull_domains(
+        self,
+        dataset: SyncDataset,
+        device: SyncDevice,
+        domains: Sequence[SyncDomain] | None,
+    ) -> list[SyncDomain]:
+        requested_by_device = _device_requested_domains(device)
+        device_set = set(requested_by_device)
+        if domains is not None:
+            unsupported = sorted(set(domains).difference(device_set))
+            if unsupported:
+                raise SyncStoreError("sync_device_domain_not_supported")
+            requested = list(domains)
+        else:
+            requested = requested_by_device
+        selected = self._selected_domains(dataset, requested)
+        if set(selected).intersection(NOTES_ORGANIZATION_DOMAINS):
+            metadata = dataset.metadata.get("notes_organization_v1")
+            state = metadata.get("state") if isinstance(metadata, Mapping) else None
+            if state != "ready":
+                raise SyncStoreError("notes_organization_sync_not_ready")
+        return selected
+
     def _profile_manager(self) -> SyncV2ProfileManager:
         return SyncV2ProfileManager(
             store=self.store,
             capabilities_factory=self.capabilities,
             id_factory=self.id_factory,
             scan_limit=self.settings.restore_manifest_scan_limit,
+            service=self,
+            dataset_bootstrapper=self.dataset_bootstrapper,
         )
 
     def _update_cursors(
@@ -4184,6 +4212,21 @@ def _append_warning_once(
     if code and any(item.get("code") == code for item in warnings):
         return warnings
     return [*warnings, warning]
+
+
+def _device_requested_domains(device: SyncDevice) -> list[SyncDomain]:
+    raw_requested = device.capabilities.get("requested_domains")
+    requested = (
+        [item for item in raw_requested if isinstance(item, str)]
+        if isinstance(raw_requested, list)
+        else list(M1_SYNC_DOMAINS)
+    )
+    raw_supported = device.capabilities.get("supported_domains")
+    if isinstance(raw_supported, list):
+        supported = {item for item in raw_supported if isinstance(item, str)}
+        requested = [item for item in requested if item in supported]
+    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    return [item for item in requested if item in known]
 
 
 def _call_adapter_evaluate(

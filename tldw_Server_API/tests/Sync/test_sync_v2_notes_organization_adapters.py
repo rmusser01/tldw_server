@@ -56,7 +56,12 @@ def _dataset(
             *NOTES_ORGANIZATION_DOMAINS,
         ],
         workspace_id=None,
-        metadata={"notes_organization_v1": {"state": organization_state}},
+        metadata={
+            "notes_organization_v1": {
+                "state": organization_state,
+                "bootstrap_id": "bootstrap-1",
+            }
+        },
         created_at="2026-08-08T00:00:00+00:00",
         updated_at="2026-08-08T00:00:00+00:00",
     )
@@ -868,11 +873,24 @@ def test_bootstrap_capture_is_fail_closed_without_all_structural_attestations() 
             keyword,
             trusted_server_origin=True,
             organization_group_state="initializing",
+            organization_bootstrap_id="bootstrap-1",
             bootstrap_relationship_verifier=lambda domain, object_id, payload: (
                 domain == envelope.domain
                 and object_id == envelope.object_id
                 and dict(payload) == envelope.payload
             ),
+        ),
+    )
+    wrong_bootstrap = adapter.evaluate_envelope(
+        envelope,
+        dataset=initializing,
+        context=_context(
+            dependency,
+            keyword,
+            trusted_server_origin=True,
+            organization_group_state="initializing",
+            organization_bootstrap_id="bootstrap-stale",
+            bootstrap_relationship_verifier=lambda *_args: True,
         ),
     )
 
@@ -881,6 +899,8 @@ def test_bootstrap_capture_is_fail_closed_without_all_structural_attestations() 
     assert isinstance(unverified, AdapterRejected)
     assert unverified.error_code == "notes_organization_domain_not_ready"
     assert isinstance(authorized, AdapterAccepted)
+    assert isinstance(wrong_bootstrap, AdapterRejected)
+    assert wrong_bootstrap.error_code == "notes_organization_domain_not_ready"
 
 
 def test_bootstrap_capture_is_relationship_only_and_bound_to_exact_payload() -> None:
@@ -894,6 +914,7 @@ def test_bootstrap_capture_is_relationship_only_and_bound_to_exact_payload() -> 
     trusted = {
         "trusted_server_origin": True,
         "organization_group_state": "initializing",
+        "organization_bootstrap_id": "bootstrap-1",
     }
 
     resource_outcome = NotesOrganizationDomainAdapter("notes.keyword").evaluate_envelope(

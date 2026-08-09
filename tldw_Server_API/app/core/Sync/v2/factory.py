@@ -41,6 +41,7 @@ from .models import (
     WORKSPACE_SYNC_DOMAINS,
     SyncDomain,
 )
+from .notes_organization_bootstrap import NotesOrganizationBootstrapper
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
 from .store import SyncV2Store
@@ -105,6 +106,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         blob_store=_sync_v2_blob_store_for_user(user_id),
         settings=settings,
         workspace_access_checker=_workspace_access_checker,
+        dataset_bootstrapper=NotesOrganizationBootstrapper(note_db),
     )
 
 
