@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
     MediaDatabase,
 )
@@ -887,5 +889,223 @@ def test_cleanup_claims_analytics_exports_rejects_invalid_retention(
             retention_hours=retention_hours,  # type: ignore[arg-type]
         ) == 0
         assert db.count_claims_analytics_exports("1") == 1
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_claims_analytics_exports_postgres_owner_scoped_crud_and_v24_fields(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="claims-analytics-postgres-crud",
+        backend=backend,
+    )
+    try:
+        created = db.create_claims_analytics_export(
+            export_id="pg-crud-owner-1",
+            user_id="owner-1",
+            format="csv",
+            status="queued",
+            filters_json='{"severity":"high"}',
+            pagination_json='{"limit":25,"offset":0}',
+            snapshot_at="2026-08-08T12:00:00.000Z",
+        )
+        db.create_claims_analytics_export(
+            export_id="pg-crud-owner-2",
+            user_id="owner-2",
+            format="json",
+            status="queued",
+            payload_json=None,
+            snapshot_at="2026-08-08T12:00:00.000Z",
+        )
+
+        assert created["export_id"] == "pg-crud-owner-1"
+        assert created["user_id"] == "owner-1"
+        assert created["filters_json"] == '{"severity":"high"}'
+        assert created["pagination_json"] == '{"limit":25,"offset":0}'
+        assert created["job_id"] is None
+        assert created["error_code"] is None
+        assert created["snapshot_at"] == "2026-08-08T12:00:00.000Z"
+        assert created["created_at"]
+        assert created["updated_at"]
+
+        assert db.get_claims_analytics_export(
+            "pg-crud-owner-1", user_id="owner-2"
+        ) == {}
+        assert [row["export_id"] for row in db.list_claims_analytics_exports("owner-1")] == [
+            "pg-crud-owner-1"
+        ]
+        assert [row["export_id"] for row in db.list_claims_analytics_exports("owner-2")] == [
+            "pg-crud-owner-2"
+        ]
+        assert db.count_claims_analytics_exports("owner-1") == 1
+        assert db.count_claims_analytics_exports("owner-2") == 1
+
+        assert db.attach_claims_analytics_export_job(
+            export_id="pg-crud-owner-1", user_id="owner-2", job_id=101
+        ) is False
+        assert db.attach_claims_analytics_export_job(
+            export_id="pg-crud-owner-1", user_id="owner-1", job_id=101
+        ) is True
+        assert db.attach_claims_analytics_export_job(
+            export_id="pg-crud-owner-1", user_id="owner-1", job_id=101
+        ) is True
+        assert db.attach_claims_analytics_export_job(
+            export_id="pg-crud-owner-1", user_id="owner-1", job_id=102
+        ) is False
+        assert db.get_claims_analytics_export(
+            "pg-crud-owner-1", user_id="owner-1"
+        )["job_id"] == 101
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_claims_analytics_exports_postgres_transitions_stay_ready_and_delete_by_updated_at(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="claims-analytics-postgres-lifecycle",
+        backend=backend,
+    )
+    try:
+        _seed_export(db, export_id="pg-lifecycle", user_id="owner-1")
+        assert db.transition_claims_analytics_export_status(
+            export_id="pg-lifecycle",
+            user_id="owner-1",
+            from_statuses=("queued",),
+            to_status="ready",
+        ) is False
+        assert db.transition_claims_analytics_export_status(
+            export_id="pg-lifecycle",
+            user_id="owner-2",
+            from_statuses=("queued",),
+            to_status="processing",
+        ) is False
+        assert db.transition_claims_analytics_export_status(
+            export_id="pg-lifecycle",
+            user_id="owner-1",
+            from_statuses=("queued",),
+            to_status="processing",
+        ) is True
+        assert db.mark_claims_analytics_export_ready(
+            export_id="pg-lifecycle",
+            user_id="owner-1",
+            payload_json='{"events":[]}',
+            payload_csv=None,
+        ) is True
+        ready = db.get_claims_analytics_export("pg-lifecycle", user_id="owner-1")
+
+        assert db.transition_claims_analytics_export_status(
+            export_id="pg-lifecycle",
+            user_id="owner-1",
+            from_statuses=("processing",),
+            to_status="failed",
+            error_code="late_failure",
+        ) is False
+        assert db.mark_claims_analytics_export_ready(
+            export_id="pg-lifecycle",
+            user_id="owner-1",
+            payload_json=None,
+            payload_csv="replacement\n",
+        ) is False
+        after_late_attempt = db.get_claims_analytics_export(
+            "pg-lifecycle", user_id="owner-1"
+        )
+        assert after_late_attempt["status"] == "ready"
+        assert after_late_attempt["payload_json"] == ready["payload_json"]
+        assert after_late_attempt["updated_at"] == ready["updated_at"]
+
+        _seed_export(db, export_id="pg-delete-equal", user_id="owner-1", status="ready")
+        _seed_export(db, export_id="pg-delete-old", user_id="owner-1", status="ready")
+        _seed_export(db, export_id="pg-delete-other-owner", user_id="owner-2", status="ready")
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET updated_at = ? WHERE export_id IN (?, ?, ?)",
+            (
+                "2026-08-08T12:00:00.000Z",
+                "pg-delete-equal",
+                "pg-delete-old",
+                "pg-delete-other-owner",
+            ),
+            commit=True,
+        )
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET updated_at = ? WHERE export_id = ?",
+            ("2026-08-08T11:59:59.999Z", "pg-delete-old"),
+            commit=True,
+        )
+
+        assert db.delete_claims_analytics_exports(
+            user_id="owner-1",
+            export_ids=[
+                "pg-delete-equal",
+                "pg-delete-old",
+                "pg-delete-other-owner",
+            ],
+            updated_before="2026-08-08T12:00:00.000Z",
+        ) == 1
+        assert db.get_claims_analytics_export("pg-delete-equal", user_id="owner-1")
+        assert db.get_claims_analytics_export("pg-delete-old", user_id="owner-1") == {}
+        assert db.get_claims_analytics_export(
+            "pg-delete-other-owner", user_id="owner-2"
+        )
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_claims_monitoring_event_postgres_pages_are_bounded_with_equal_timestamps(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="claims-analytics-postgres-events",
+        backend=backend,
+    )
+    try:
+        event_ids = [
+            int(
+                db.insert_claims_monitoring_event(
+                    user_id="owner-1",
+                    event_type="unsupported_ratio",
+                    severity="high",
+                    payload_json="{}",
+                )["id"]
+            )
+            for _ in range(5)
+        ]
+        equal_timestamp = "2026-08-08T12:00:00.000Z"
+        db.execute_query(
+            "UPDATE claims_monitoring_events SET created_at = ? WHERE id IN (?, ?, ?, ?, ?)",
+            (equal_timestamp, *event_ids),
+            commit=True,
+        )
+
+        first_page = db.list_claims_monitoring_events_page(
+            user_id="owner-1", limit=2
+        )
+        second_page = db.list_claims_monitoring_events_page(
+            user_id="owner-1",
+            after_created_at=first_page[-1]["created_at"],
+            after_id=int(first_page[-1]["id"]),
+            limit=2,
+        )
+        third_page = db.list_claims_monitoring_events_page(
+            user_id="owner-1",
+            after_created_at=second_page[-1]["created_at"],
+            after_id=int(second_page[-1]["id"]),
+            limit=2,
+        )
+
+        assert [row["id"] for row in first_page] == event_ids[:2]
+        assert [row["id"] for row in second_page] == event_ids[2:4]
+        assert [row["id"] for row in third_page] == event_ids[4:]
+        assert len({row["id"] for row in first_page + second_page + third_page}) == 5
     finally:
         db.close_connection()
