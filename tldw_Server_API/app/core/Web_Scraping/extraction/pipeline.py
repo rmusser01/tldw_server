@@ -49,6 +49,7 @@ _STRATEGY_ALIASES = {
     "clustering": "cluster",
 }
 _KNOWN_STRATEGIES = set(DEFAULT_EXTRACTION_STRATEGY_ORDER)
+_METRIC_UNKNOWN_STRATEGY = "unknown"
 _PIPELINE_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
     AttributeError,
@@ -71,6 +72,14 @@ _PIPELINE_NONCRITICAL_EXCEPTIONS = (
 
 def _copy_result(result: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(result)
+
+
+def _metric_strategy(strategy: str) -> str:
+    return strategy if strategy in _KNOWN_STRATEGIES else _METRIC_UNKNOWN_STRATEGY
+
+
+def _metric_attempt(attempt: int) -> str:
+    return str(attempt) if attempt <= 3 else "4_plus"
 
 
 def _ignore_metric_failure() -> None:
@@ -120,7 +129,10 @@ def _trace_entry(
     detail: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
-        dependencies.log_counter("extraction_strategy_total", labels={"strategy": strategy, "status": status})
+        dependencies.log_counter(
+            "extraction_strategy_total",
+            labels={"strategy": _metric_strategy(strategy), "status": status},
+        )
     except _PIPELINE_NONCRITICAL_EXCEPTIONS:
         _ignore_metric_failure()
     entry = {"strategy": strategy, "status": status, "reason": reason}
@@ -140,7 +152,7 @@ def _record_strategy_metrics(
         dependencies.observe_histogram(
             "extraction_strategy_duration_seconds",
             duration_s,
-            labels={"strategy": strategy, "status": status},
+            labels={"strategy": _metric_strategy(strategy), "status": status},
         )
     except _PIPELINE_NONCRITICAL_EXCEPTIONS:
         _ignore_metric_failure()
@@ -152,7 +164,7 @@ def _record_strategy_metrics(
             dependencies.observe_histogram(
                 "extraction_content_length_bytes",
                 len(content.encode("utf-8", errors="ignore")),
-                labels={"strategy": strategy},
+                labels={"strategy": _metric_strategy(strategy)},
             )
         except _PIPELINE_NONCRITICAL_EXCEPTIONS:
             _ignore_metric_failure()
@@ -261,7 +273,7 @@ def _run_with_retries(
             try:
                 dependencies.increment_counter(
                     "extraction_retry_total",
-                    labels={"strategy": strategy, "attempt": str(attempts)},
+                    labels={"strategy": _metric_strategy(strategy), "attempt": _metric_attempt(attempts)},
                 )
             except _PIPELINE_NONCRITICAL_EXCEPTIONS:
                 _ignore_metric_failure()

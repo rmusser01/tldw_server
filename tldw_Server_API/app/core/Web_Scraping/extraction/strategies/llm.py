@@ -31,6 +31,20 @@ _NONCRITICAL_EXCEPTIONS = (
     ValueError,
     UnicodeDecodeError,
 )
+_METRIC_PROVIDERS = {
+    "anthropic",
+    "cohere",
+    "deepseek",
+    "google",
+    "groq",
+    "huggingface",
+    "mistral",
+    "moonshot",
+    "openai",
+    "openrouter",
+    "qwen",
+    "zai",
+}
 
 
 def _load_app_config() -> Optional[dict[str, Any]]:
@@ -109,6 +123,15 @@ def _retry_settings() -> tuple[int, float, float]:
     )
 
 
+def _metric_provider(provider: str) -> str:
+    normalized = provider.strip().lower()
+    return normalized if normalized in _METRIC_PROVIDERS else "other"
+
+
+def _metric_attempt(attempt: int) -> str:
+    return str(attempt) if attempt <= 3 else "4_plus"
+
+
 def _log_provider_failure(exc: Exception, *, stage: str, url: str) -> None:
     fields = {
         "code": bounded_code("provider_error"),
@@ -159,7 +182,7 @@ def call_llm_provider(
             attempt += 1
             dependencies.increment_counter(
                 "extraction_retry_total",
-                labels={"strategy": "llm", "attempt": str(attempt)},
+                labels={"strategy": "llm", "attempt": _metric_attempt(attempt)},
             )
             delay_s = (base_delay_ms / 1000.0) * (2 ** (attempt - 1))
             if jitter_ms:
@@ -240,7 +263,7 @@ def record_llm_usage_metrics(
 ) -> None:
     for token_type, value in (("prompt", usage.get("prompt_tokens")), ("completion", usage.get("completion_tokens"))):
         if value:
-            labels = {"provider": provider, "model": model, "type": token_type}
+            labels = {"provider": _metric_provider(provider), "model": "configured", "type": token_type}
             dependencies.increment_counter("llm_tokens_used_total", float(value), labels=labels)
             dependencies.increment_counter(
                 "llm_tokens_used_total_by_operation",

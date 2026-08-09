@@ -37,6 +37,10 @@ def _changed_from_to(expected: str, actual: str) -> Callable[[Difference], bool]
     return lambda difference: (difference.expected == expected and difference.actual == actual)
 
 
+def _unknown_strategy_metric_is_bounded(difference: Difference) -> bool:
+    return isinstance(difference.expected, str) and difference.actual == "unknown"
+
+
 _CHANGE_4_PREDECESSOR_PROFILE = {"outcome": "regex_error", "value": None}
 _CHANGE_4_CURRENT_PROFILE = {
     "outcome": "returned",
@@ -115,6 +119,18 @@ DIFFERENCE_CONTRACTS = {
             ),
         ),
         allow_predecessor_equality=True,
+    ),
+    "change_10_unknown_strategy_metric": DifferenceContract(
+        behavior_change=10,
+        rules=(
+            DifferenceRule(
+                identifier="unknown_strategy_metric",
+                path=("metrics", ANY_PATH, "labels", "strategy"),
+                description="unknown extraction strategies use the bounded metric label",
+                validator=_unknown_strategy_metric_is_bounded,
+                minimum_count=1,
+            ),
+        ),
     ),
     "change_11_response_too_large": DifferenceContract(
         behavior_change=11,

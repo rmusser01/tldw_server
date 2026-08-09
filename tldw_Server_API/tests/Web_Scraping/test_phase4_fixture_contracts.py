@@ -732,6 +732,35 @@ def test_change_1_contract_rejects_unknown_downstream_strategy_with_profile_diag
         _validate_change_1_profile(actual, expected)
 
 
+def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label() -> None:
+    expected = {
+        "metrics": [
+            {
+                "labels": {"strategy": "mystery", "status": "skipped"},
+                "name": "extraction_strategy_total",
+            }
+        ]
+    }
+    actual = deepcopy(expected)
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+
+    assert_predecessor_behavior(
+        actual,
+        expected,
+        behavior_change=10,
+        difference_contract="change_10_unknown_strategy_metric",
+    )
+
+    actual["metrics"][0]["labels"]["strategy"] = "https://example.com/raw"
+    with pytest.raises(AssertionError, match="bounded metric label"):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+
 def test_change_1_contract_rejects_missing_required_paired_metric() -> None:
     actual, expected = _coherent_change_1_profile()
     metrics = actual["metrics"]

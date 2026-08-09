@@ -95,6 +95,10 @@ def _load_fixture_set(
 
 _FIXTURE_MANIFEST, _FIXTURE_CASES, _FIXTURE_RAW_FILES = _load_fixture_set()
 
+_CURRENT_FIXTURE_DIFFERENCE_CONTRACTS = {
+    "unknown_strategy_is_traced": (10, "change_10_unknown_strategy_metric"),
+}
+
 
 def _load_manifest() -> dict[str, Any]:
     return _FIXTURE_MANIFEST
@@ -105,12 +109,16 @@ def _load_cases(category: str) -> list[dict[str, Any]]:
 
 
 def _assert_case(case: Mapping[str, Any], actual: object) -> None:
+    behavior_change, difference_contract = _CURRENT_FIXTURE_DIFFERENCE_CONTRACTS.get(
+        case["name"],
+        (case.get("behavior_change"), case.get("difference_contract")),
+    )
     try:
         assert_predecessor_behavior(
             actual,
             case["expected"],
-            behavior_change=case.get("behavior_change"),
-            difference_contract=case.get("difference_contract"),
+            behavior_change=behavior_change,
+            difference_contract=difference_contract,
         )
     except AssertionError as exc:
         raise AssertionError(f"Predecessor case failed: {case['name']}") from exc
@@ -460,6 +468,9 @@ def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:
             4,
             "change_4_selector_regex_failure_returns_original",
         ),
+    }
+    assert _CURRENT_FIXTURE_DIFFERENCE_CONTRACTS == {
+        "unknown_strategy_is_traced": (10, "change_10_unknown_strategy_metric"),
     }
 
 
