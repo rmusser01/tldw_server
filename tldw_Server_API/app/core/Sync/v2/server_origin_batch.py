@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .adapters import (
     AdapterAccepted,
@@ -116,7 +116,7 @@ def capture_server_origin_mutation_batch(
                 existing,
                 dataset_id=dataset.dataset_id,
                 mutation_group_id=mutation_group_id,
-                expected_plan_hash=mutation_plan_hash,
+                expected_steps=canonical_steps,
             )
         except SyncIdempotencyConflictError as exc:
             raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
@@ -252,7 +252,8 @@ def _evaluate_plan(
             raise SyncStoreError("Sync server-origin mutation was not accepted")
         overlay[(step.domain, step.object_id)] = envelope
         envelopes.append(envelope)
-    return envelopes
+    stored_plan_hash = _materialization_plan_hash(envelopes)
+    return [replace(envelope, mutation_plan_hash=stored_plan_hash) for envelope in envelopes]
 
 
 def _materialize_group(
@@ -267,15 +268,10 @@ def _materialize_group(
         dataset_id=dataset.dataset_id,
         mutation_group_id=group[0].mutation_group_id or "",
     )
-    blocked = False
+    _validate_apply_status_vector(group)
     for index, envelope in enumerate(group):
         if envelope.apply_status == "applied":
-            if blocked:
-                raise SyncIdempotencyConflictError(
-                    "Sync stored mutation group contains a non-prefix applied step"
-                )
             continue
-        blocked = True
         if envelope.apply_status == "conflict":
             raise _materialization_error(dataset, group, retryable=False)
         materialization = service._materialize_envelope(envelope)
@@ -320,12 +316,23 @@ def _materialize_group(
                 current.mutation_group_id or "",
             )
             raise _materialization_error(dataset, group, retryable=True)
-        blocked = False
     return ServerOriginBatchResult(
         dataset=dataset,
         envelopes=tuple(group),
         fully_applied=all(envelope.apply_status == "applied" for envelope in group),
     )
+
+
+def _validate_apply_status_vector(envelopes: Sequence[SyncEnvelope]) -> None:
+    seen_non_applied = False
+    for envelope in envelopes:
+        if envelope.apply_status == "applied":
+            if seen_non_applied:
+                raise SyncIdempotencyConflictError(
+                    "Sync stored mutation group contains a non-prefix applied step"
+                )
+            continue
+        seen_non_applied = True
 
 
 def _materialization_error(
@@ -349,7 +356,7 @@ def _validate_stored_group(
     *,
     dataset_id: str,
     mutation_group_id: str,
-    expected_plan_hash: str | None = None,
+    expected_steps: Sequence[ServerOriginMutationStep] | None = None,
 ) -> None:
     if not envelopes:
         raise SyncIdempotencyConflictError("Sync stored mutation group is empty")
@@ -369,12 +376,11 @@ def _validate_stored_group(
         )
     ):
         raise SyncIdempotencyConflictError("Sync stored mutation group shape is invalid")
-    stored_hash = _mutation_plan_hash(
+    stored_hash = _materialization_plan_hash(envelopes)
+    expected_plan_matches = expected_steps is None or _mutation_plan_hash(
         tuple(_canonical_step_from_envelope(envelope) for envelope in envelopes)
-    )
-    if stored_hash != plan_hash or (
-        expected_plan_hash is not None and expected_plan_hash != plan_hash
-    ):
+    ) == _mutation_plan_hash(expected_steps)
+    if stored_hash != plan_hash or not expected_plan_matches:
         raise SyncIdempotencyConflictError(
             "Sync stored mutation group fingerprint does not match its plan hash"
         )
@@ -436,6 +442,52 @@ def _mutation_plan_hash(steps: Sequence[ServerOriginMutationStep]) -> str:
         separators=(",", ":"),
         default=str,
     ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _materialization_plan_hash(envelopes: Sequence[SyncHead]) -> str:
+    encoded = json.dumps(
+        [
+            {
+                "dataset_id": envelope.dataset_id,
+                "client_envelope_id": envelope.client_envelope_id,
+                "domain": envelope.domain,
+                "operation": envelope.operation,
+                "object_id": envelope.object_id,
+                "device_id": envelope.device_id,
+                "client_profile_id": envelope.client_profile_id,
+                "client_sequence": envelope.client_sequence,
+                "base_server_cursor": envelope.base_server_cursor,
+                "base_object_revision": envelope.base_object_revision,
+                "base_object_hash": envelope.base_object_hash,
+                "object_revision": envelope.object_revision,
+                "parent_id": envelope.parent_id,
+                "schema_version": envelope.schema_version,
+                "payload": envelope.payload,
+                "payload_clear": envelope.payload_clear,
+                "payload_ciphertext": envelope.payload_ciphertext,
+                "payload_hash": envelope.payload_hash,
+                "payload_size_bytes": envelope.payload_size_bytes,
+                "created_at_client": envelope.created_at_client,
+                "deleted": envelope.deleted,
+                "encryption_metadata": envelope.encryption_metadata,
+                "status": envelope.status,
+                "stable_key": envelope.stable_key,
+                "dependencies": envelope.dependencies,
+                "routing_metadata": envelope.routing_metadata,
+                "adapter_version": envelope.adapter_version,
+                "base_version": envelope.base_version,
+                "entity_version": envelope.entity_version,
+                "mutation_group_id": envelope.mutation_group_id,
+                "mutation_step": envelope.mutation_step,
+                "mutation_step_count": envelope.mutation_step_count,
+            }
+            for envelope in envelopes
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 

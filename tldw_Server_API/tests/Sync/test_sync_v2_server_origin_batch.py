@@ -347,6 +347,39 @@ def test_conflicted_step_blocks_itself_and_every_later_step(
     assert materializer.calls == [0, 1]
 
 
+@pytest.mark.parametrize(
+    "statuses",
+    [
+        ("pending", "applied", "pending"),
+        ("applied", "conflict", "applied"),
+    ],
+)
+def test_resume_rejects_non_prefix_applied_status_before_materializing(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+    statuses: tuple[str, str, str],
+) -> None:
+    service, materializer = batch_service
+    result = _capture(service, [_step(f"folder-{index}") for index in range(3)])
+    group_id = result.envelopes[0].mutation_group_id
+    assert group_id is not None
+    for step, status in enumerate(statuses):
+        service.store.db.execute(
+            "UPDATE sync_envelopes SET apply_status = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            (status, group_id, step),
+        )
+    materializer.calls.clear()
+
+    with pytest.raises(SyncIdempotencyConflictError, match="non-prefix applied"):
+        resume_server_origin_mutation_group(
+            service=service,
+            dataset_id="dataset-1",
+            mutation_group_id=group_id,
+        )
+
+    assert materializer.calls == []
+
+
 def test_same_idempotency_key_replays_group_and_changed_plan_conflicts(
     batch_service: tuple[SyncV2Service, _RecordingMaterializer],
 ) -> None:
@@ -406,3 +439,85 @@ def test_resume_revalidates_stored_plan_fingerprint(
             dataset_id="dataset-1",
             mutation_group_id=group_id,
         )
+
+
+@pytest.mark.parametrize(
+    ("tamper_sql", "tampered_value"),
+    [
+        (
+            "UPDATE sync_envelopes SET client_envelope_id = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            "tampered-envelope-id",
+        ),
+        (
+            "UPDATE sync_envelopes SET payload_hash = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        ),
+        (
+            "UPDATE sync_envelopes SET payload_size_bytes = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            999,
+        ),
+        (
+            "UPDATE sync_envelopes SET object_revision = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            99,
+        ),
+        (
+            "UPDATE sync_envelopes SET base_server_cursor = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            88,
+        ),
+        (
+            "UPDATE sync_envelopes SET base_object_revision = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            88,
+        ),
+        (
+            "UPDATE sync_envelopes SET base_object_hash = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        ),
+        (
+            "UPDATE sync_envelopes SET device_id = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            "tampered-device",
+        ),
+        (
+            "UPDATE sync_envelopes SET schema_version = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            2,
+        ),
+        (
+            "UPDATE sync_envelopes SET encryption_metadata_json = ? "
+            "WHERE mutation_group_id = ? AND mutation_step = ?",
+            '{"policy":"tampered"}',
+        ),
+    ],
+)
+def test_resume_rejects_materialization_fingerprint_tampering_before_apply(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+    tamper_sql: str,
+    tampered_value: object,
+) -> None:
+    service, materializer = batch_service
+    result = _capture(service, [_step("folder-1"), _step("folder-1")])
+    group_id = result.envelopes[0].mutation_group_id
+    assert group_id is not None
+    service.store.db.execute(tamper_sql, (tampered_value, group_id, 1))
+    service.store.db.execute(
+        "UPDATE sync_envelopes SET apply_status = ? "
+        "WHERE mutation_group_id = ? AND mutation_step = ?",
+        ("pending", group_id, 1),
+    )
+    materializer.calls.clear()
+
+    with pytest.raises(SyncIdempotencyConflictError, match="fingerprint"):
+        resume_server_origin_mutation_group(
+            service=service,
+            dataset_id="dataset-1",
+            mutation_group_id=group_id,
+        )
+
+    assert materializer.calls == []
