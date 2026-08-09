@@ -121,6 +121,8 @@ def _envelope(
     base_object_revision: int | None = None,
     base_object_hash: str | None = None,
     object_revision: int | None = 1,
+    base_version: int | str | None = None,
+    entity_version: int | str | None = None,
     routing_metadata: dict[str, object] | None = None,
 ) -> SyncEnvelopeCreate:
     canonical_payload = dict(_payload(domain) if payload is None else payload)
@@ -141,6 +143,8 @@ def _envelope(
         base_object_revision=base_object_revision,
         base_object_hash=base_object_hash,
         object_revision=object_revision,
+        base_version=base_version,
+        entity_version=entity_version,
         schema_version=1,
         payload=canonical_payload,
         payload_hash=f"hash:{client_envelope_id}",
@@ -321,7 +325,13 @@ def test_exact_resource_base_and_idempotent_replay_are_accepted() -> None:
     )
     replay = adapter.evaluate_envelope(
         replace(
-            _envelope("notes.keyword", client_envelope_id="replay", object_revision=3),
+            _envelope(
+                "notes.keyword",
+                client_envelope_id="replay",
+                object_revision=3,
+                base_object_revision=3,
+                base_object_hash="hash:head",
+            ),
             payload_hash="hash:head",
         ),
         dataset=_dataset(),
@@ -330,6 +340,63 @@ def test_exact_resource_base_and_idempotent_replay_are_accepted() -> None:
 
     assert isinstance(update, AdapterAccepted)
     assert isinstance(replay, AdapterAccepted)
+
+
+def test_base_version_is_canonical_lineage_for_updates_and_equivalent_replays() -> None:
+    head = _stored(
+        replace(
+            _envelope(
+                "notes.keyword",
+                client_envelope_id="versioned-head",
+                object_revision=3,
+                entity_version="v3",
+            ),
+            payload_hash="hash:versioned-head",
+        ),
+        sequence=7,
+    )
+    adapter = NotesOrganizationDomainAdapter("notes.keyword")
+
+    correct = adapter.evaluate_envelope(
+        _envelope(
+            "notes.keyword",
+            payload={"keyword": "Renamed"},
+            base_version="v3",
+            base_object_hash="hash:versioned-head",
+        ),
+        dataset=_dataset(),
+        context=_context(head),
+    )
+    stale = adapter.evaluate_envelope(
+        _envelope(
+            "notes.keyword",
+            payload={"keyword": "Renamed"},
+            base_version="v2",
+            base_object_hash="hash:versioned-head",
+        ),
+        dataset=_dataset(),
+        context=_context(head),
+    )
+    divergent_duplicate = adapter.evaluate_envelope(
+        replace(
+            _envelope(
+                "notes.keyword",
+                client_envelope_id="divergent-duplicate",
+                object_revision=3,
+                base_version="v2",
+                base_object_hash="hash:versioned-head",
+            ),
+            payload_hash="hash:versioned-head",
+        ),
+        dataset=_dataset(),
+        context=_context(head),
+    )
+
+    assert isinstance(correct, AdapterAccepted)
+    assert isinstance(stale, AdapterConflict)
+    assert stale.conflict_type == "notes_organization_base_conflict"
+    assert isinstance(divergent_duplicate, AdapterConflict)
+    assert divergent_duplicate.conflict_type == "notes_organization_base_conflict"
 
 
 def test_restore_requires_exact_current_tombstone_lineage() -> None:
@@ -539,6 +606,48 @@ def test_collection_hierarchy_rejects_self_parent_and_preexisting_cycle() -> Non
     assert corrupt.conflict_type == "notes_organization_hierarchy_cycle"
 
 
+def test_deleted_ancestor_does_not_invalidate_retained_descendants_or_other_mutations() -> None:
+    parent = _stored(
+        _envelope(
+            "notes.folder",
+            object_id=FOLDER_ID,
+            payload={"name": "Archived", "parent_sync_id": None},
+            client_envelope_id="parent-active",
+        ),
+        sequence=1,
+    )
+    deleted_parent = _stored(
+        _envelope(
+            "notes.folder",
+            operation="tombstone",
+            object_id=FOLDER_ID,
+            client_envelope_id="parent-deleted",
+        ),
+        sequence=2,
+    )
+    child = _stored(
+        _envelope(
+            "notes.folder",
+            object_id=OTHER_FOLDER_ID,
+            payload={"name": "Retained", "parent_sync_id": FOLDER_ID},
+            client_envelope_id="retained-child",
+        ),
+        sequence=3,
+    )
+
+    outcome = NotesOrganizationDomainAdapter("notes.folder").evaluate_envelope(
+        _envelope(
+            "notes.folder",
+            object_id="88888888-8888-4888-8888-888888888888",
+            payload={"name": "Unrelated", "parent_sync_id": None},
+        ),
+        dataset=_dataset(),
+        context=_context(parent, deleted_parent, child),
+    )
+
+    assert isinstance(outcome, AdapterAccepted)
+
+
 def test_folder_rejects_cycle_duplicate_derived_path_and_long_path() -> None:
     parent = _stored(
         _envelope(
@@ -610,12 +719,21 @@ def test_relationship_duplicate_upserts_and_tombstones_are_idempotent(domain: Sy
     adapter = NotesOrganizationDomainAdapter(domain)
 
     duplicate_upsert = adapter.evaluate_envelope(
-        _envelope(domain),
+        _envelope(
+            domain,
+            base_object_revision=active.object_revision,
+            base_object_hash=active.payload_hash,
+        ),
         dataset=_dataset(),
         context=_context(*dependencies, active),
     )
     duplicate_delete = adapter.evaluate_envelope(
-        _envelope(domain, operation="tombstone"),
+        _envelope(
+            domain,
+            operation="tombstone",
+            base_object_revision=tombstone.object_revision,
+            base_object_hash=tombstone.payload_hash,
+        ),
         dataset=_dataset(),
         context=_context(*dependencies, tombstone),
     )
@@ -649,7 +767,7 @@ def test_bootstrap_capture_is_fail_closed_without_all_structural_attestations() 
             keyword,
             trusted_server_origin=False,
             organization_group_state="initializing",
-            bootstrap_relationship_verified=True,
+            bootstrap_relationship_verifier=lambda *_args: True,
         ),
     )
     unverified = adapter.evaluate_envelope(
@@ -660,7 +778,6 @@ def test_bootstrap_capture_is_fail_closed_without_all_structural_attestations() 
             keyword,
             trusted_server_origin=True,
             organization_group_state="initializing",
-            bootstrap_relationship_verified=False,
         ),
     )
     authorized = adapter.evaluate_envelope(
@@ -671,7 +788,11 @@ def test_bootstrap_capture_is_fail_closed_without_all_structural_attestations() 
             keyword,
             trusted_server_origin=True,
             organization_group_state="initializing",
-            bootstrap_relationship_verified=True,
+            bootstrap_relationship_verifier=lambda domain, object_id, payload: (
+                domain == envelope.domain
+                and object_id == envelope.object_id
+                and dict(payload) == envelope.payload
+            ),
         ),
     )
 
@@ -680,6 +801,49 @@ def test_bootstrap_capture_is_fail_closed_without_all_structural_attestations() 
     assert isinstance(unverified, AdapterRejected)
     assert unverified.error_code == "notes_organization_domain_not_ready"
     assert isinstance(authorized, AdapterAccepted)
+
+
+def test_bootstrap_capture_is_relationship_only_and_bound_to_exact_payload() -> None:
+    resource = _envelope(
+        "notes.keyword", routing_metadata={"bootstrap_capture": True}
+    )
+    relationship = _envelope(
+        "notes.keyword_link", routing_metadata={"bootstrap_capture": True}
+    )
+    initializing = _dataset(organization_state="initializing")
+    trusted = {
+        "trusted_server_origin": True,
+        "organization_group_state": "initializing",
+    }
+
+    resource_outcome = NotesOrganizationDomainAdapter("notes.keyword").evaluate_envelope(
+        resource,
+        dataset=initializing,
+        context=_context(
+            bootstrap_relationship_verifier=lambda *_args: True,
+            **trusted,
+        ),
+    )
+    mismatched = NotesOrganizationDomainAdapter(
+        "notes.keyword_link"
+    ).evaluate_envelope(
+        relationship,
+        dataset=initializing,
+        context=_context(
+            *_active_dependencies("notes.keyword_link"),
+            bootstrap_relationship_verifier=lambda domain, object_id, payload: (
+                domain == relationship.domain
+                and object_id == relationship.object_id
+                and dict(payload) == {"different": True}
+            ),
+            **trusted,
+        ),
+    )
+
+    assert isinstance(resource_outcome, AdapterRejected)
+    assert resource_outcome.error_code == "notes_organization_payload_invalid"
+    assert isinstance(mismatched, AdapterRejected)
+    assert mismatched.error_code == "notes_organization_domain_not_ready"
 
 
 def test_current_head_store_queries_are_owner_scoped_and_bounded(tmp_path: Path) -> None:
@@ -730,3 +894,98 @@ def test_current_head_store_queries_are_owner_scoped_and_bounded(tmp_path: Path)
     assert len(second_page) == 1
     assert first_page[0].object_id != second_page[0].object_id
     assert store.get_current_head("dataset-foreign", "notes.note", NOTE_ID) is None
+
+
+def test_nonaccepted_envelope_never_advances_or_repairs_as_current_head(
+    tmp_path: Path,
+) -> None:
+    store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note"],
+            metadata={},
+        )
+    )
+    accepted = store.insert_envelope(
+        _envelope(
+            "notes.note",
+            payload={"title": "Accepted", "content": "Body"},
+            object_id=NOTE_ID,
+            client_envelope_id="accepted-head",
+        )
+    )
+    conflict = store.insert_envelope(
+        replace(
+            _envelope(
+                "notes.note",
+                payload={"title": "Conflict", "content": "Body"},
+                object_id=NOTE_ID,
+                client_envelope_id="conflict-head",
+                base_server_cursor=accepted.server_cursor,
+                base_object_revision=1,
+                base_object_hash=accepted.payload_hash,
+                object_revision=2,
+            ),
+            status="conflict",
+        )
+    )
+
+    store.db.execute(
+        "UPDATE sync_current_heads SET latest_server_cursor = ? "
+        "WHERE dataset_id = ? AND domain = ? AND object_id = ?",
+        (conflict.server_cursor, "dataset-1", "notes.note", NOTE_ID),
+    )
+    store.db.ensure_schema()
+
+    head = store.get_current_head("dataset-1", "notes.note", NOTE_ID)
+    assert head is not None
+    assert head.client_envelope_id == "accepted-head"
+
+
+def test_current_head_history_backfill_runs_only_when_projection_is_created(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note"],
+            metadata={},
+        )
+    )
+    store.insert_envelope(
+        _envelope(
+            "notes.note",
+            object_id=NOTE_ID,
+            payload={"title": "Accepted", "content": "Body"},
+            client_envelope_id="accepted-for-upgrade",
+        )
+    )
+    with store.db.backend.transaction() as connection:
+        store.db.execute("DROP TABLE sync_current_heads", connection=connection)
+    store.db.ensure_schema()
+    upgraded_head = store.get_current_head("dataset-1", "notes.note", NOTE_ID)
+    assert upgraded_head is not None
+    assert upgraded_head.client_envelope_id == "accepted-for-upgrade"
+
+    statements: list[str] = []
+    original_execute = store.db.execute
+
+    def record_execute(sql: str, *args: object, **kwargs: object) -> object:
+        statements.append(" ".join(sql.split()))
+        return original_execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(store.db, "execute", record_execute)
+    store.db.ensure_schema()
+
+    assert not any(
+        "GROUP BY dataset_id, domain, entity_id" in statement
+        for statement in statements
+    )

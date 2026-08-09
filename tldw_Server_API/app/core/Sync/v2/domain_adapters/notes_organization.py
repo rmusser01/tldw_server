@@ -84,7 +84,15 @@ class NotesOrganizationDomainAdapter:
                 "notes_organization_payload_invalid",
                 "bootstrap_capture must be the boolean true when supplied",
             )
-        bootstrap_authorized = bootstrap_capture is True and _bootstrap_authorized(context)
+        if bootstrap_capture is True and envelope.domain not in _RELATIONSHIP_DOMAINS:
+            return _rejected(
+                envelope,
+                "notes_organization_payload_invalid",
+                "bootstrap_capture is valid only for relationship domains",
+            )
+        bootstrap_authorized = bootstrap_capture is True and _bootstrap_authorized(
+            envelope, payload, context
+        )
         readiness = _readiness_error(dataset, bootstrap_authorized=bootstrap_authorized)
         if readiness is not None:
             return _rejected(envelope, "notes_organization_domain_not_ready", readiness)
@@ -99,7 +107,7 @@ class NotesOrganizationDomainAdapter:
         equivalent = head is not None and _equivalent_state(head, envelope.operation, payload)
         if head is None and _has_base(envelope):
             return _base_conflict(envelope, "The referenced base head does not exist")
-        if head is not None and not equivalent and not _exact_base(envelope, head):
+        if head is not None and not _exact_base(envelope, head):
             return _base_conflict(envelope, "The incoming base does not match the current head")
 
         restore_intent = envelope.routing_metadata.get("restore_intent")
@@ -161,12 +169,19 @@ def _readiness_error(dataset: SyncDataset, *, bootstrap_authorized: bool) -> str
     return "The Notes organization domain group is not ready"
 
 
-def _bootstrap_authorized(context: SyncAdapterContext | None) -> bool:
+def _bootstrap_authorized(
+    envelope: SyncEnvelopeCreate,
+    payload: dict[str, object],
+    context: SyncAdapterContext | None,
+) -> bool:
     return bool(
         context is not None
         and context.trusted_server_origin
         and context.organization_group_state == "initializing"
-        and context.bootstrap_relationship_verified
+        and context.bootstrap_relationship_verifier is not None
+        and context.bootstrap_relationship_verifier(
+            envelope.domain, envelope.object_id, payload
+        )
     )
 
 
@@ -319,17 +334,23 @@ def _validate_hierarchy(
             chain: list[str] = []
             seen: set[str] = set()
             cursor: str | None = start_id
+            hidden_by_deleted_ancestor = False
             while cursor is not None and cursor not in paths:
-                if cursor in seen or len(chain) > len(active):
+                if cursor in seen or len(chain) > len(heads):
                     raise ValueError("cycle")
-                head = active.get(cursor)
+                head = heads.get(cursor)
                 if head is None:
                     raise KeyError(cursor)
+                if _is_deleted(head):
+                    hidden_by_deleted_ancestor = True
+                    break
                 seen.add(cursor)
                 chain.append(cursor)
                 raw_parent = head.payload.get("parent_sync_id")
                 cursor = cast(str, raw_parent) if raw_parent is not None else None
 
+            if hidden_by_deleted_ancestor:
+                continue
             prefix = paths.get(cursor, "") if cursor is not None else ""
             while chain:
                 object_id = chain.pop()
@@ -384,16 +405,28 @@ def _has_base(envelope: SyncEnvelopeCreate) -> bool:
 
 
 def _exact_base(envelope: SyncEnvelopeCreate, head: SyncHead) -> bool:
+    revision_matches = (
+        envelope.base_object_revision is None
+        or envelope.base_object_revision == head.object_revision
+    )
+    head_version = head.entity_version if head.entity_version is not None else head.object_revision
+    version_matches = (
+        envelope.base_version is None
+        or str(envelope.base_version) == str(head_version)
+    )
+    has_version_token = (
+        envelope.base_object_revision is not None or envelope.base_version is not None
+    )
+    if head.server_cursor is None:
+        cursor_matches = envelope.base_server_cursor in {None, 0}
+    else:
+        cursor_matches = envelope.base_server_cursor in {None, head.server_cursor}
     return bool(
-        envelope.base_object_revision is not None
-        and envelope.base_object_hash is not None
-        and envelope.base_object_revision == head.object_revision
+        has_version_token
         and envelope.base_object_hash == head.payload_hash
-        and (
-            envelope.base_server_cursor is None
-            or head.server_cursor is None
-            or envelope.base_server_cursor in {0, head.server_cursor}
-        )
+        and revision_matches
+        and version_matches
+        and cursor_matches
     )
 
 

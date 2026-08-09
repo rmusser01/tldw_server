@@ -1786,6 +1786,9 @@ class SyncDatabase:
             else SYNC_SQLITE_SCHEMA
         )
         with self.backend.transaction() as conn:
+            current_heads_existed = self.backend.table_exists(
+                "sync_current_heads", connection=conn
+            )
             if self.backend.table_exists("sync_envelopes", connection=conn):
                 self._ensure_envelope_m1_columns(connection=conn)
             if self.backend.table_exists("sync_key_records", connection=conn):
@@ -1797,7 +1800,9 @@ class SyncDatabase:
             self._ensure_background_sync_tables(connection=conn)
             self._ensure_envelope_m1_columns(connection=conn)
             self._ensure_sync_object_state_table(connection=conn)
-            self._ensure_sync_current_heads_table(connection=conn)
+            self._ensure_sync_current_heads_table(
+                connection=conn, projection_exists=current_heads_existed
+            )
             self._ensure_envelope_m1_indexes(connection=conn)
             self._ensure_key_record_user_id_column(connection=conn)
             self._ensure_key_record_rotation_columns(connection=conn)
@@ -3190,23 +3195,24 @@ class SyncDatabase:
                 "Sync envelope idempotency key was reused with different content"
             )
         inserted = _envelope_from_row(row)
-        self.execute(
-            """
-            INSERT INTO sync_current_heads (
-                dataset_id, domain, object_id, latest_server_cursor
-            ) VALUES (?, ?, ?, ?)
-            ON CONFLICT (dataset_id, domain, object_id)
-            DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
-             WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
-            """,
-            (
-                inserted.dataset_id,
-                inserted.domain,
-                inserted.object_id,
-                inserted.server_cursor,
-            ),
-            connection=connection,
-        )
+        if inserted.status == "accepted":
+            self.execute(
+                """
+                INSERT INTO sync_current_heads (
+                    dataset_id, domain, object_id, latest_server_cursor
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT (dataset_id, domain, object_id)
+                DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+                 WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+                """,
+                (
+                    inserted.dataset_id,
+                    inserted.domain,
+                    inserted.object_id,
+                    inserted.server_cursor,
+                ),
+                connection=connection,
+            )
         self._ensure_domain_state(
             dataset_id=inserted.dataset_id,
             domain=inserted.domain,
@@ -5763,7 +5769,9 @@ class SyncDatabase:
             connection=connection,
         )
 
-    def _ensure_sync_current_heads_table(self, *, connection: Any) -> None:
+    def _ensure_sync_current_heads_table(
+        self, *, connection: Any, projection_exists: bool
+    ) -> None:
         cursor_type = "BIGINT" if self.backend_type == BackendType.POSTGRESQL else "INTEGER"
         self.backend.create_tables(
             f"""
@@ -5784,21 +5792,74 @@ class SyncDatabase:
             """,
             connection=connection,
         )
-        self.execute(
+        invalid_heads = self.execute(
             """
-            INSERT INTO sync_current_heads (
-                dataset_id, domain, object_id, latest_server_cursor
-            )
-            SELECT dataset_id, domain, entity_id, MAX(server_sequence)
-              FROM sync_envelopes
-             WHERE status = 'accepted'
-             GROUP BY dataset_id, domain, entity_id
-            ON CONFLICT (dataset_id, domain, object_id)
-            DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
-             WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+            SELECT heads.dataset_id, heads.domain, heads.object_id
+              FROM sync_current_heads AS heads
+              LEFT JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = heads.latest_server_cursor
+               AND envelope.dataset_id = heads.dataset_id
+               AND envelope.domain = heads.domain
+               AND envelope.entity_id = heads.object_id
+             WHERE envelope.server_sequence IS NULL OR envelope.status <> 'accepted'
             """,
             connection=connection,
-        )
+        ).rows
+        for head in invalid_heads:
+            latest = _first(
+                self.execute(
+                    """
+                    SELECT server_sequence
+                      FROM sync_envelopes
+                     WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                       AND status = 'accepted'
+                     ORDER BY server_sequence DESC
+                     LIMIT 1
+                    """,
+                    (head["dataset_id"], head["domain"], head["object_id"]),
+                    connection=connection,
+                )
+            )
+            if latest is None:
+                self.execute(
+                    """
+                    DELETE FROM sync_current_heads
+                     WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                    """,
+                    (head["dataset_id"], head["domain"], head["object_id"]),
+                    connection=connection,
+                )
+                continue
+            self.execute(
+                """
+                UPDATE sync_current_heads
+                   SET latest_server_cursor = ?
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                """,
+                (
+                    latest["server_sequence"],
+                    head["dataset_id"],
+                    head["domain"],
+                    head["object_id"],
+                ),
+                connection=connection,
+            )
+        if not projection_exists:
+            self.execute(
+                """
+                INSERT INTO sync_current_heads (
+                    dataset_id, domain, object_id, latest_server_cursor
+                )
+                SELECT dataset_id, domain, entity_id, MAX(server_sequence)
+                  FROM sync_envelopes
+                 WHERE status = 'accepted'
+                 GROUP BY dataset_id, domain, entity_id
+                ON CONFLICT (dataset_id, domain, object_id)
+                DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+                 WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+                """,
+                connection=connection,
+            )
 
     def _ensure_envelope_m1_indexes(self, *, connection: Any) -> None:
         statements = [

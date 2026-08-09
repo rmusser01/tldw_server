@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Sync.v2.domain_adapters.workspaces import Workspac
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     WORKSPACE_SYNC_DOMAINS,
     SyncDataset,
@@ -1196,7 +1197,10 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
 def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_domains():
     registry = sync_endpoint._default_sync_v2_registry()
 
-    assert registry.supported_domains == sorted(SYNC_V2_SUPPORTED_DOMAINS)
+    expected_domains = set(SYNC_V2_SUPPORTED_DOMAINS).difference(
+        NOTES_ORGANIZATION_DOMAINS
+    )
+    assert registry.supported_domains == sorted(expected_domains)
     for domain in M1_SYNC_DOMAINS:
         if domain == "attachment.ref":
             assert isinstance(registry.get(domain), AttachmentRefAdapter)
@@ -1209,6 +1213,9 @@ def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_dom
     assert isinstance(registry.get("source_cache.entry"), SourceCacheAdapter)
     for domain in ("media.item", "media.keyword", "media.keyword_link"):
         assert isinstance(registry.get(domain), MediaMetadataAdapter)
+    for domain in NOTES_ORGANIZATION_DOMAINS:
+        with pytest.raises(KeyError):
+            registry.get(domain)
     with pytest.raises(KeyError):
         registry.get("source_cache")
     with pytest.raises(KeyError):

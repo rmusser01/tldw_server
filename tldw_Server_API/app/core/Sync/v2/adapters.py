@@ -84,6 +84,9 @@ SyncAdapterOutcome = AdapterAccepted | AdapterRejected | AdapterConflict | Adapt
 SyncHead = SyncEnvelope | SyncEnvelopeCreate
 SyncHeadLookup = Callable[[SyncDomain, str], SyncHead | None]
 SyncDomainHeadLoader = Callable[[SyncDomain], Sequence[SyncHead]]
+BootstrapRelationshipVerifier = Callable[
+    [SyncDomain, str, Mapping[str, object]], bool
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +119,7 @@ class SyncAdapterContext:
     list_heads: SyncDomainHeadLoader | None = None
     trusted_server_origin: bool = False
     organization_group_state: str | None = None
-    bootstrap_relationship_verified: bool = False
+    bootstrap_relationship_verifier: BootstrapRelationshipVerifier | None = None
 
 
 class SyncDomainAdapter(Protocol):
