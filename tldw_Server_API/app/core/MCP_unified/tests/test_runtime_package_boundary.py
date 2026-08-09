@@ -68,6 +68,30 @@ def test_mcp_unified_package_project_lives_under_apps() -> None:
     assert not (REPO_ROOT / "mcp_unified").exists()  # nosec B101
 
 
+def test_pinned_protocol_schemas_are_checked_out_with_lf_endings() -> None:
+    """Pinned byte-for-byte schema fixtures must not receive Windows CRLF conversion."""
+
+    fixture_root = Path(__file__).with_name("fixtures") / "mcp_protocol"
+    schema_paths = sorted(fixture_root.glob("*/schema.json"))
+    relative_paths = [path.relative_to(REPO_ROOT).as_posix() for path in schema_paths]
+    result = subprocess.run(
+        ["git", "check-attr", "text", "eol", "--", *relative_paths],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    resolved = {
+        (path, attribute): value
+        for line in result.stdout.splitlines()
+        for path, attribute, value in [line.split(": ", 2)]
+    }
+
+    assert len(schema_paths) == 5  # nosec B101
+    assert all(resolved[(path, "text")] == "set" for path in relative_paths)  # nosec B101
+    assert all(resolved[(path, "eol")] == "lf" for path in relative_paths)  # nosec B101
+
+
 def _dependency_package_name(dependency: str) -> str:
     """Return a normalized package name from a dependency declaration."""
 
