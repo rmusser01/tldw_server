@@ -350,11 +350,12 @@ Response schema:
 ```
 
 Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
-JSON or CSV output is also capped at 10 MiB (10,485,760 UTF-8 bytes), configured
-by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; invalid or non-positive settings use the
-10 MiB default. Synchronous requests that exceed the byte limit return HTTP 413
-with the stable `claims_export_too_large` code; asynchronous requests expose the
-safe failed artifact through the normal status APIs.
+JSON or CSV output is bounded by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; the default
+configured limit is 10 MiB (10,485,760 UTF-8 bytes). Any positive configured
+value overrides that default, while invalid or non-positive values use 10 MiB.
+Synchronous requests that exceed the configured byte limit return HTTP 413 with
+the stable `claims_export_too_large` code; asynchronous requests expose the safe
+failed artifact through the normal status APIs.
 
 CSV downloads use UTF-8, standard CSV quoting, and spreadsheet-formula
 protection. String cells beginning with `=`, `+`, `-`, `@`, tab, or carriage
@@ -401,10 +402,11 @@ Cleanup:
   during existing Claims create/list activity. They use
   `CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS` (default 24) and
   `CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC` (default 300).
-- Cleanup is lifecycle-aware: it may remove eligible ready artifacts and proven
-  terminal orphans, but preserves queued, processing, retrying, and uncertain
-  non-ready artifacts. If Jobs cannot be read, uncertain non-ready artifacts are
-  left unchanged.
+- Once retention eligibility is reached, lifecycle-aware cleanup may delete aged
+  ready artifacts, aged failed artifacts whose Jobs state is terminal, and
+  reconciled failed artifacts with no Job. It preserves queued, processing,
+  retrying, and uncertain non-ready artifacts. If Jobs cannot be read, uncertain
+  non-ready artifacts are left unchanged.
 - This is request-time maintenance, not a scheduled Claims cleanup job,
   scheduler, daemon, lease loop, or retry engine. Clients should download before
   expiry.
@@ -422,8 +424,16 @@ All endpoints return consistent error payloads:
 ```
 Status codes: 400 for validation failures, 401/403 for auth/permissions, 404 for
 missing or wrong-owner exports, 409 for non-ready or failed download conflicts,
-429 for rate limits, 500 for unexpected errors.
+429 for rate limits, 500 for unexpected errors, and 503 when Claims cannot create
+or obtain acceptance for the shared Job.
 Error code guidance: `invalid_channels` when all alert channels are false (400).
+
+When asynchronous mode is enabled, failure to create or obtain acceptance for
+the shared Job returns HTTP 503 with the stable
+`claims_export_enqueue_failed` code. Once Jobs has accepted the work, any later
+failure to attach the Job association does not change the accepted response:
+Claims still returns HTTP 202, and the worker or bounded reconciliation repairs
+the association. Claims does not return HTTP 503 after accepted Job creation.
 
 Download behavior is explicit: a non-ready or failed artifact returns HTTP 409
 with artifact status, nullable `job_status`, and a stable public error code:
