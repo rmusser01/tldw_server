@@ -780,6 +780,12 @@ def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> No
     assert '"jsonschema>=4.23,<5"' in run_blocks
     assert "python Helper_Scripts/mcp_unified_rc.py portable-gate" in run_blocks
     assert "tldw_Server_API/app/core/MCP_unified/tests/" not in run_blocks
+    upload = next(step for step in job["steps"] if step["name"] == "Upload portable RC evidence")
+    assert upload["if"] == "always()"
+    assert re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", upload["uses"])
+    assert upload["with"]["name"] == "mcp-unified-portable-${{ matrix.os }}-py${{ matrix.python }}"
+    assert upload["with"]["path"] == ".artifacts/mcp-unified-rc/**"
+    assert upload["with"]["if-no-files-found"] == "error"
     assert (
         "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py"
         in workflow["on"]["pull_request"]["paths"]
