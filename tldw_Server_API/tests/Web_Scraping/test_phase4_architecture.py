@@ -129,6 +129,9 @@ def _called_names(node: ast.AST) -> set[str]:
 
 
 _FORBIDDEN_CANCELLATION_NAMES = {"BaseException", "CancelledError"}
+_TYPE_PARAMETER_NODES = tuple(
+    getattr(ast, name) for name in ("ParamSpec", "TypeVar", "TypeVarTuple") if hasattr(ast, name)
+)
 
 
 def _forbidden_cancellation_reference(node: ast.AST) -> str | None:
@@ -137,6 +140,33 @@ def _forbidden_cancellation_reference(node: ast.AST) -> str | None:
     if isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_CANCELLATION_NAMES:
         return ast.unparse(node)
     return None
+
+
+def _forbidden_bound_identifier(node: ast.AST) -> str | None:
+    candidate: str | None = None
+    if isinstance(node, ast.alias):
+        candidate = node.asname
+    elif isinstance(node, ast.arg):
+        candidate = node.arg
+    elif isinstance(
+        node,
+        (
+            ast.FunctionDef,
+            ast.AsyncFunctionDef,
+            ast.ClassDef,
+            ast.ExceptHandler,
+            ast.MatchAs,
+            ast.MatchStar,
+        ),
+    ):
+        candidate = node.name
+    elif isinstance(node, ast.MatchMapping):
+        candidate = node.rest
+    elif isinstance(node, (ast.Global, ast.Nonlocal)):
+        candidate = next((name for name in node.names if name in _FORBIDDEN_CANCELLATION_NAMES), None)
+    elif _TYPE_PARAMETER_NODES and isinstance(node, _TYPE_PARAMETER_NODES):
+        candidate = node.name
+    return candidate if candidate in _FORBIDDEN_CANCELLATION_NAMES else None
 
 
 def _forbidden_cancellation_violations(tree: ast.Module) -> list[str]:
@@ -151,7 +181,11 @@ def _forbidden_cancellation_violations(tree: ast.Module) -> list[str]:
                 if imported.name.rsplit(".", 1)[-1] in _FORBIDDEN_CANCELLATION_NAMES:
                     violation = f"import {imported.name.rsplit('.', 1)[-1]}"
                     break
-        else:
+        if violation is None:
+            bound_identifier = _forbidden_bound_identifier(node)
+            if bound_identifier is not None:
+                violation = f"bound identifier {bound_identifier}"
+        if violation is None:
             reference = _forbidden_cancellation_reference(node)
             if reference is not None:
                 violation = f"reference {reference}"
@@ -885,6 +919,81 @@ def extract(error_type=asyncio.CancelledError):
 """,
             ["reference asyncio.CancelledError"],
         ),
+        (
+            """
+import asyncio as CancelledError
+""",
+            ["bound identifier CancelledError"],
+        ),
+        (
+            """
+def BaseException():
+    pass
+""",
+            ["bound identifier BaseException"],
+        ),
+        (
+            """
+class CancelledError:
+    pass
+""",
+            ["bound identifier CancelledError"],
+        ),
+        (
+            """
+def extract(BaseException):
+    return BaseException
+""",
+            ["bound identifier BaseException", "reference BaseException"],
+        ),
+        (
+            """
+try:
+    operation()
+except ValueError as BaseException:
+    recover()
+""",
+            ["bound identifier BaseException"],
+        ),
+        (
+            """
+match value:
+    case BaseException:
+        pass
+""",
+            ["bound identifier BaseException"],
+        ),
+        (
+            """
+match value:
+    case [*CancelledError]:
+        pass
+""",
+            ["bound identifier CancelledError"],
+        ),
+        (
+            """
+match value:
+    case {"error": _, **BaseException}:
+        pass
+""",
+            ["bound identifier BaseException"],
+        ),
+        (
+            """
+def extract():
+    global CancelledError
+""",
+            ["bound identifier CancelledError"],
+        ),
+        pytest.param(
+            """
+def extract[CancelledError]():
+    pass
+""",
+            ["bound identifier CancelledError"],
+            marks=pytest.mark.skipif(sys.version_info < (3, 12), reason="type-parameter syntax requires Python 3.12"),
+        ),
     ],
     ids=(
         "ordinary-exception",
@@ -901,6 +1010,16 @@ def extract(error_type=asyncio.CancelledError):
         "module-alias-handler",
         "shadowed-cancelled-error-handler",
         "default-argument-alias",
+        "import-bound-name",
+        "function-bound-name",
+        "class-bound-name",
+        "parameter-bound-name",
+        "exception-target-bound-name",
+        "match-capture-bound-name",
+        "match-star-bound-name",
+        "match-mapping-bound-name",
+        "global-bound-name",
+        "type-parameter-bound-name",
     ),
 )
 def test_phase4b_cancellation_guard_enforces_strict_package_rule(
