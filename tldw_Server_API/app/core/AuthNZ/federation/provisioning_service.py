@@ -9,6 +9,10 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.federated_identity_repo import FederatedIdentityRepo
 from tldw_Server_API.app.core.AuthNZ.repos.federated_managed_grant_repo import FederatedManagedGrantRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
@@ -16,6 +20,10 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
     AuthnzOrgsTeamsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+_FEDERATION_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def _claims_hash(claims: dict[str, Any]) -> str:
@@ -468,6 +476,7 @@ class FederationProvisioningService:
                             org_id=int(org_id),
                             user_id=int(user_id),
                             role="member",
+                            context=_FEDERATION_MEMBERSHIP_CONTEXT,
                         )
                     await managed_repo.upsert_grant(
                         identity_provider_id=provider_id,
@@ -496,6 +505,7 @@ class FederationProvisioningService:
                             team_id=int(team_id),
                             user_id=int(user_id),
                             role="member",
+                            context=_FEDERATION_MEMBERSHIP_CONTEXT,
                         )
                     await managed_repo.upsert_grant(
                         identity_provider_id=provider_id,
@@ -592,7 +602,11 @@ class FederationProvisioningService:
                                 target_ref=target_ref,
                             )
                             continue
-                        removal = await orgs_repo.remove_team_member(team_id=team_id, user_id=int(user_id))
+                        removal = await orgs_repo.remove_team_member(
+                            team_id=team_id,
+                            user_id=int(user_id),
+                            context=_FEDERATION_MEMBERSHIP_CONTEXT,
+                        )
                         await managed_repo.delete_grant(
                             identity_provider_id=provider_id,
                             user_id=int(user_id),
@@ -655,7 +669,11 @@ class FederationProvisioningService:
                                 target_ref=target_ref,
                             )
                             continue
-                        removal = await orgs_repo.remove_org_member(org_id=org_id, user_id=int(user_id))
+                        removal = await orgs_repo.remove_org_member(
+                            org_id=org_id,
+                            user_id=int(user_id),
+                            context=_FEDERATION_MEMBERSHIP_CONTEXT,
+                        )
                         await managed_repo.delete_grant(
                             identity_provider_id=provider_id,
                             user_id=int(user_id),

@@ -185,6 +185,10 @@ async def test_get_db_transaction_adapter_uses_pool_backend_for_postgres(
     agen = auth_deps.get_db_transaction()
     adapter = await agen.__anext__()
     try:
+        assert not hasattr(adapter, "transaction")
+        assert not hasattr(adapter, "create_savepoint")
+        assert not hasattr(adapter, "rollback_savepoint")
+        assert not hasattr(adapter, "release_savepoint")
         await adapter.execute("SELECT $1", 1)
         conn = adapter._conn  # noqa: SLF001 - test verifies adapter behavior
         assert conn.execute_calls == [("SELECT $1", (1,))]
