@@ -7,11 +7,16 @@ from typing import Any, cast
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, QueryResult
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
+    DatabaseConfig,
+    QueryResult,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
     NotesOrganizationMaterializer,
 )
@@ -40,6 +45,31 @@ class _PostgresMigrationBackend:
         if normalized.startswith("SELECT COUNT(*)"):
             return QueryResult(rows=[{"count": 0}], rowcount=1)
         return QueryResult(rows=[], rowcount=1)
+
+
+class _PostgresDatasetLockBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        return QueryResult(
+            rows=[
+                {
+                    "dataset_id": "dataset-1",
+                    "domain_set_json": '["notes.keyword"]',
+                }
+            ],
+            rowcount=1,
+        )
 
 
 class _CursorResult:
@@ -352,6 +382,28 @@ def _pg_projection_is_active(db: CharactersRAGDB, domain: SyncDomain) -> bool:
 def _assert_product_commit_precedes_sync_state(events: list[str]) -> None:
     assert events.index("product:commit") < events.index("sync:write-state")
     assert events.index("sync:write-state") < events.index("sync:mark-applied")
+
+
+def test_postgres_append_gate_uses_dataset_row_for_update_sql() -> None:
+    backend = _PostgresDatasetLockBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    connection = object()
+
+    row = db._require_dataset_domain_for_update(
+        "dataset-1",
+        "notes.keyword",
+        connection=connection,
+    )
+
+    assert row["dataset_id"] == "dataset-1"
+    assert backend.calls == [
+        (
+            "SELECT * FROM sync_datasets WHERE dataset_id = ? FOR UPDATE",
+            ("dataset-1",),
+            connection,
+        )
+    ]
 
 
 def test_postgres_v55_migration_uses_transactional_nullable_backfill_validation_and_constraints() -> None:

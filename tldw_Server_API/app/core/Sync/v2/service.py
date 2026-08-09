@@ -1274,6 +1274,17 @@ class SyncV2Service:
         workspace_id: str | None = None,
         metadata: dict[str, object] | None = None,
     ) -> SyncDatasetEnrollment:
+        requested_domains = set(domains or ())
+        requested_metadata = dict(metadata or {})
+        reserved_metadata = {
+            "notes_organization_v1",
+            "default_personal",
+            "client_family",
+        }
+        if requested_domains.intersection(NOTES_ORGANIZATION_DOMAINS) or reserved_metadata.intersection(
+            requested_metadata
+        ):
+            raise SyncStoreError("sync_reserved_dataset_enrollment")
         self._require_server_trusted_encryption_ready()
         if scope_type == "workspace":
             self._require_workspace_sync_access(user_id=user_id, workspace_id=workspace_id)
@@ -1288,7 +1299,7 @@ class SyncV2Service:
                 encryption_policy=encryption_policy,
                 domains=enrolled_domains,
                 workspace_id=workspace_id,
-                metadata=dict(metadata or {}),
+                metadata=requested_metadata,
             )
         )
         return SyncDatasetEnrollment(

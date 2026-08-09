@@ -1886,6 +1886,22 @@ class SyncDatabase:
             )
         return row
 
+    def _require_dataset_domain_for_update(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        row = self._get_dataset_row_for_update(dataset_id, connection=connection)
+        if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        if domain not in _dataset_domains_from_row(row):
+            raise SyncInvalidDomainError(
+                f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
+            )
+        return row
+
     def _require_notes_organization_write_ready(
         self,
         row: Mapping[str, Any],
@@ -3259,7 +3275,7 @@ class SyncDatabase:
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
-            dataset_row = self._require_dataset_domain(
+            dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
@@ -3440,7 +3456,7 @@ class SyncDatabase:
         try:
             with self.backend.transaction() as conn:
                 for envelope in plan:
-                    dataset_row = self._require_dataset_domain(
+                    dataset_row = self._require_dataset_domain_for_update(
                         envelope.dataset_id,
                         envelope.domain,
                         connection=conn,

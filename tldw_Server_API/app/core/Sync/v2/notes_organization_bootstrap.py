@@ -18,6 +18,7 @@ from .errors import SyncStoreError
 from .models import NOTES_ORGANIZATION_DOMAINS, SyncDataset, SyncDomain, SyncEnvelope
 from .server_origin_batch import (
     ServerOriginMutationStep,
+    SyncServerOriginBatchMaterializationError,
     capture_server_origin_mutation_batch,
 )
 from .service import SyncV2Service
@@ -26,6 +27,9 @@ _RESOURCE_DOMAINS: tuple[SyncDomain, ...] = (
     "notes.keyword",
     "notes.keyword_collection",
     "notes.folder",
+)
+_RELATIONSHIP_DOMAINS: tuple[SyncDomain, ...] = tuple(
+    domain for domain in NOTES_ORGANIZATION_DOMAINS if domain not in _RESOURCE_DOMAINS
 )
 _SAFE_SOURCE_ERROR = "notes_organization_bootstrap_source_invalid"
 _SAFE_CAPTURE_ERROR = "notes_organization_bootstrap_capture_failed"
@@ -94,7 +98,17 @@ class NotesOrganizationBootstrapper:
         try:
             self._drain_preexisting_heads(service, dataset)
             snapshot = self._projection.snapshot()
-            steps = self._plan(snapshot)
+            removed_relationships = self._captured_relationship_removals(
+                service,
+                dataset,
+                snapshot,
+                bootstrap_id=bootstrap_id,
+            )
+            steps = self._plan(
+                snapshot,
+                bootstrap_id=bootstrap_id,
+                removed_relationships=removed_relationships,
+            )
             expected_count = len(snapshot.resources) + len(snapshot.relationships)
             dataset = service.store.transition_notes_organization_bootstrap(
                 dataset.dataset_id,
@@ -119,6 +133,9 @@ class NotesOrganizationBootstrapper:
                     ),
                     trusted_notes_organization_bootstrap_id=bootstrap_id,
                     bootstrap_relationship_verifier=self._relationship_matches_source,
+                    bootstrap_relationship_absence_verifier=(
+                        self._relationship_absent_from_source
+                    ),
                     bootstrap_step_verifier=self._step_matches_source,
                 )
                 captured_count = min(expected_count, offset + len(batch))
@@ -143,10 +160,31 @@ class NotesOrganizationBootstrapper:
                 state="ready",
                 captured_count=expected_count,
                 expected_count=expected_count,
-                ready_verifier=lambda: _snapshot_hash(self._projection.snapshot()) == snapshot_hash,
+                ready_verifier=lambda: self._ready_snapshot_matches(
+                    service,
+                    dataset.dataset_id,
+                    snapshot_hash,
+                ),
             )
         except NotesOrganizationBootstrapInterrupted:
             raise
+        except SyncServerOriginBatchMaterializationError as exc:
+            if exc.retryable:
+                return self._pause_retryable(
+                    service,
+                    dataset,
+                    bootstrap_id=bootstrap_id,
+                    captured_count=captured_count,
+                    expected_count=expected_count,
+                )
+            return self._fail(
+                service,
+                dataset,
+                bootstrap_id=bootstrap_id,
+                captured_count=captured_count,
+                expected_count=expected_count,
+                error_code=_SAFE_CAPTURE_ERROR,
+            )
         except _SourceInvalidError:
             return self._fail(
                 service,
@@ -166,7 +204,13 @@ class NotesOrganizationBootstrapper:
                 error_code=_SAFE_CAPTURE_ERROR,
             )
 
-    def _plan(self, snapshot: OrganizationSnapshot) -> list[ServerOriginMutationStep]:
+    def _plan(
+        self,
+        snapshot: OrganizationSnapshot,
+        *,
+        bootstrap_id: str,
+        removed_relationships: Sequence[SyncEnvelope],
+    ) -> list[ServerOriginMutationStep]:
         ordered_resources = _parents_before_children(snapshot.resources)
         steps = [self._resource_step(resource, operation="upsert") for resource in ordered_resources]
         steps.extend(
@@ -175,10 +219,27 @@ class NotesOrganizationBootstrapper:
                 operation="upsert",
                 object_id=relationship.object_id,
                 payload=dict(relationship.payload),
-                routing_metadata={"bootstrap_capture": True},
+                routing_metadata={
+                    "bootstrap_capture": True,
+                    "bootstrap_id": bootstrap_id,
+                },
                 stable_key=f"{relationship.domain}:{relationship.object_id}",
             )
             for relationship in snapshot.relationships
+        )
+        steps.extend(
+            ServerOriginMutationStep(
+                domain=envelope.domain,
+                operation="tombstone",
+                object_id=envelope.object_id,
+                payload=dict(envelope.payload),
+                routing_metadata={
+                    "bootstrap_removal": True,
+                    "bootstrap_id": bootstrap_id,
+                },
+                stable_key=f"{envelope.domain}:{envelope.object_id}",
+            )
+            for envelope in removed_relationships
         )
         steps.extend(
             self._resource_step(resource, operation="tombstone")
@@ -220,15 +281,29 @@ class NotesOrganizationBootstrapper:
             for item in self._projection.snapshot().relationships
         )
 
+    def _relationship_absent_from_source(
+        self,
+        domain: SyncDomain,
+        object_id: str,
+        payload: Mapping[str, object],
+    ) -> bool:
+        return not any(
+            item.domain == domain
+            and item.object_id == object_id
+            and dict(item.payload) == dict(payload)
+            for item in self._projection.snapshot().relationships
+        )
+
     def _step_matches_source(self, envelope: SyncEnvelope) -> bool:
         snapshot = self._projection.snapshot()
         if envelope.domain not in _RESOURCE_DOMAINS:
-            return any(
+            present = any(
                 item.domain == envelope.domain
                 and item.object_id == envelope.object_id
                 and dict(item.payload) == dict(envelope.payload)
                 for item in snapshot.relationships
             )
+            return not present if envelope.operation == "tombstone" else present
         resource = next(
             (
                 item
@@ -249,7 +324,64 @@ class NotesOrganizationBootstrapper:
         return dict(envelope.payload) == expected
 
     @staticmethod
-    def _drain_preexisting_heads(service: SyncV2Service, dataset: SyncDataset) -> None:
+    def _captured_relationship_removals(
+        service: SyncV2Service,
+        dataset: SyncDataset,
+        snapshot: OrganizationSnapshot,
+        *,
+        bootstrap_id: str,
+    ) -> list[SyncEnvelope]:
+        current = {
+            (relationship.domain, relationship.object_id)
+            for relationship in snapshot.relationships
+        }
+        removed: list[SyncEnvelope] = []
+        for domain in _RELATIONSHIP_DOMAINS:
+            offset = 0
+            while True:
+                heads = service.store.list_current_heads(
+                    dataset.dataset_id,
+                    domain,
+                    limit=200,
+                    offset=offset,
+                )
+                if not heads:
+                    break
+                removed.extend(
+                    envelope
+                    for envelope in heads
+                    if envelope.operation == "upsert"
+                    and envelope.routing_metadata.get("source")
+                    == "notes-organization-bootstrap"
+                    and envelope.routing_metadata.get("bootstrap_capture") is True
+                    and envelope.routing_metadata.get("bootstrap_id") == bootstrap_id
+                    and (envelope.domain, envelope.object_id) not in current
+                )
+                offset += len(heads)
+        return removed
+
+    def _ready_snapshot_matches(
+        self,
+        service: SyncV2Service,
+        dataset_id: str,
+        snapshot_hash: str,
+    ) -> bool:
+        fresh = self._projection.snapshot()
+        return _snapshot_hash(fresh) == snapshot_hash and _heads_match_snapshot(
+            service,
+            dataset_id,
+            fresh,
+        )
+
+    def _drain_preexisting_heads(
+        self,
+        service: SyncV2Service,
+        dataset: SyncDataset,
+    ) -> None:
+        metadata = dataset.metadata.get("notes_organization_v1")
+        bootstrap_id = metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
+        if not isinstance(bootstrap_id, str) or not bootstrap_id:
+            raise SyncStoreError("notes_organization_sync_not_ready")
         for domain in NOTES_ORGANIZATION_DOMAINS:
             offset = 0
             while True:
@@ -262,11 +394,41 @@ class NotesOrganizationBootstrapper:
                     if envelope.apply_status == "applied":
                         continue
                     if envelope.routing_metadata.get("source") == "notes-organization-bootstrap":
+                        if envelope.server_cursor is None:
+                            raise SyncStoreError(
+                                "Stored bootstrap step has no server cursor"
+                            )
+                        # The step was structurally source-attested before its atomic
+                        # append. Mark that historical capture verified; the fresh plan
+                        # below exact-verifies and supersedes it when source has changed.
+                        service.store.mark_bootstrap_envelope_verified(
+                            envelope.server_cursor,
+                            bootstrap_id=bootstrap_id,
+                        )
                         continue
                     result = service._materialize_envelope(envelope)
                     if result.status != "applied":
                         raise SyncStoreError("Notes organization pre-bootstrap projection failed")
                 offset += len(heads)
+
+    @staticmethod
+    def _pause_retryable(
+        service: SyncV2Service,
+        dataset: SyncDataset,
+        *,
+        bootstrap_id: str,
+        captured_count: int,
+        expected_count: int,
+    ) -> SyncDataset:
+        return service.store.transition_notes_organization_bootstrap(
+            dataset.dataset_id,
+            bootstrap_id=bootstrap_id,
+            expected_state="initializing",
+            state="initializing",
+            captured_count=min(captured_count, expected_count),
+            expected_count=expected_count,
+            error_code=_SAFE_CAPTURE_ERROR,
+        )
 
     @staticmethod
     def _fail(
@@ -287,6 +449,64 @@ class NotesOrganizationBootstrapper:
             expected_count=expected_count,
             error_code=error_code,
         )
+
+
+def _heads_match_snapshot(
+    service: SyncV2Service,
+    dataset_id: str,
+    snapshot: OrganizationSnapshot,
+) -> bool:
+    expected: dict[tuple[SyncDomain, str], tuple[str, dict[str, object]]] = {}
+    for resource in snapshot.resources:
+        operation = "tombstone" if resource.deleted else "upsert"
+        if operation == "tombstone":
+            payload: dict[str, object] = {}
+        elif resource.domain == "notes.keyword":
+            payload = {"keyword": resource.name}
+        else:
+            payload = {
+                "name": resource.name,
+                "parent_sync_id": resource.parent_sync_id,
+            }
+        expected[(resource.domain, resource.sync_id)] = (operation, payload)
+    expected.update(
+        {
+            (relationship.domain, relationship.object_id): (
+                "upsert",
+                dict(relationship.payload),
+            )
+            for relationship in snapshot.relationships
+        }
+    )
+
+    seen: set[tuple[SyncDomain, str]] = set()
+    for domain in NOTES_ORGANIZATION_DOMAINS:
+        offset = 0
+        while True:
+            heads = service.store.list_current_heads(
+                dataset_id,
+                domain,
+                limit=200,
+                offset=offset,
+            )
+            if not heads:
+                break
+            for envelope in heads:
+                key = (envelope.domain, envelope.object_id)
+                wanted = expected.get(key)
+                if wanted is None:
+                    if envelope.operation != "tombstone":
+                        return False
+                    continue
+                if (
+                    envelope.apply_status != "applied"
+                    or envelope.operation != wanted[0]
+                    or dict(envelope.payload) != wanted[1]
+                ):
+                    return False
+                seen.add(key)
+            offset += len(heads)
+    return seen == set(expected)
 
 
 def _parents_before_children(

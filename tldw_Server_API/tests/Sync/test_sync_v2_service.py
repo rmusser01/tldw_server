@@ -777,6 +777,38 @@ def test_dataset_enrollment_rejects_cross_user_dataset_takeover(sync_service: Sy
         sync_service.enroll_dataset(user_id="user-2", dataset_id="shared-dataset")
 
 
+def test_public_dataset_enrollment_rejects_notes_organization_and_reserved_metadata(
+    sync_service: SyncV2Service,
+) -> None:
+    forged_metadata = {
+        "default_personal": True,
+        "client_family": "chatbook",
+        "notes_organization_v1": {
+            "state": "ready",
+            "bootstrap_id": "client-forged",
+            "captured_count": 1,
+            "expected_count": 1,
+        },
+    }
+
+    with pytest.raises(SyncStoreError, match="sync_reserved_dataset_enrollment"):
+        sync_service.enroll_dataset(
+            user_id="user-1",
+            dataset_id="forged-org",
+            domains=[*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS],
+            metadata=forged_metadata,
+        )
+    with pytest.raises(SyncStoreError, match="sync_reserved_dataset_enrollment"):
+        sync_service.enroll_dataset(
+            user_id="user-1",
+            dataset_id="forged-markers",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata=forged_metadata,
+        )
+
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+
+
 def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
     registry: SyncAdapterRegistry,
 ):

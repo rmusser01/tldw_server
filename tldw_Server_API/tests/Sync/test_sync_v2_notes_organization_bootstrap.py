@@ -214,6 +214,68 @@ def test_bootstrap_resumes_stable_groups_and_reconciles_a_changed_snapshot(
     note_db.close_connection()
 
 
+def test_bootstrap_resume_tombstones_a_captured_relationship_removed_from_source(
+    tmp_path: Path,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = _seed_source(note_db, store)
+    link_id = organization_link_id(
+        "notes.keyword_link", ["note", NOTE_ID, DELETED_KEYWORD_ID]
+    )
+    link_payload = {
+        "subject_type": "note",
+        "subject_id": NOTE_ID,
+        "keyword_sync_id": DELETED_KEYWORD_ID,
+    }
+    interrupted = False
+
+    def interrupt_once(_completed_groups: int) -> None:
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise NotesOrganizationBootstrapInterrupted("injected interruption")
+
+    bootstrapper = NotesOrganizationBootstrapper(
+        note_db,
+        batch_size=7,
+        after_group=interrupt_once,
+    )
+    with pytest.raises(NotesOrganizationBootstrapInterrupted):
+        bootstrapper.bootstrap(
+            service=service,
+            user_id="user-1",
+            dataset=store.get_dataset("dataset-1"),
+        )
+    captured = store.get_current_head("dataset-1", "notes.keyword_link", link_id)
+    assert captured is not None
+    assert captured.operation == "upsert"
+    assert captured.apply_status == "applied"
+
+    projection.apply_relationship(
+        domain="notes.keyword_link",
+        object_id=link_id,
+        operation="tombstone",
+        payload=link_payload,
+        routing_metadata={},
+    )
+    assert projection.snapshot().relationships == ()
+
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    removed = store.get_current_head("dataset-1", "notes.keyword_link", link_id)
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert removed is not None
+    assert removed.operation == "tombstone"
+    assert removed.apply_status == "applied"
+    assert removed.routing_metadata["bootstrap_removal"] is True
+    assert projection.snapshot().relationships == ()
+    note_db.close_connection()
+
+
 def test_bootstrap_resume_of_unchanged_snapshot_reuses_history_without_duplicates(
     tmp_path: Path,
 ) -> None:
@@ -260,6 +322,65 @@ def test_bootstrap_resume_of_unchanged_snapshot_reuses_history_without_duplicate
     assert prior_ids.issubset(client_ids)
     assert len(envelopes) == expected_steps
     assert len(client_ids) == len(set(client_ids))
+    note_db.close_connection()
+
+
+def test_retryable_verification_failure_reuses_bootstrap_group_and_repairs_to_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    _seed_source(note_db, store)
+    bootstrapper = NotesOrganizationBootstrapper(note_db, batch_size=2)
+    original_verifier = bootstrapper._step_matches_source
+    failed_once = False
+
+    def fail_once(envelope) -> bool:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            return False
+        return original_verifier(envelope)
+
+    monkeypatch.setattr(bootstrapper, "_step_matches_source", fail_once)
+    paused = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    paused_metadata = paused.metadata["notes_organization_v1"]
+    assert paused_metadata["bootstrap_id"] == "bootstrap-1"
+    assert paused_metadata["state"] == "initializing"
+    assert paused_metadata["error_code"] == "notes_organization_bootstrap_capture_failed"
+    prior = _organization_envelopes(store)
+    assert prior
+    assert any(envelope.apply_status != "applied" for envelope in prior)
+    prior_ids = {envelope.client_envelope_id for envelope in prior}
+    projection = NotesOrganizationSyncStore(note_db)
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=KEYWORD_ID,
+        operation="upsert",
+        payload={"keyword": "Renamed during repair"},
+    )
+
+    ready = bootstrapper.bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=paused,
+    )
+
+    envelopes = _organization_envelopes(store)
+    client_ids = [envelope.client_envelope_id for envelope in envelopes]
+    assert ready.metadata["notes_organization_v1"]["bootstrap_id"] == "bootstrap-1"
+    assert ready.metadata["notes_organization_v1"]["state"] == "ready"
+    assert prior_ids.issubset(client_ids)
+    assert len(client_ids) == len(set(client_ids))
+    assert all(envelope.apply_status == "applied" for envelope in envelopes)
+    keyword_head = store.get_current_head("dataset-1", "notes.keyword", KEYWORD_ID)
+    assert keyword_head is not None
+    assert keyword_head.payload == {"keyword": "Renamed during repair"}
     note_db.close_connection()
 
 

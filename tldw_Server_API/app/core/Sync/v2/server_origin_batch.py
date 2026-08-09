@@ -87,6 +87,10 @@ def capture_server_origin_mutation_batch(
     trusted_notes_organization_bootstrap_id: str | None = None,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
+    bootstrap_relationship_absence_verifier: Callable[
+        [SyncDomain, str, Mapping[str, object]], bool
+    ]
+    | None = None,
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None = None,
 ) -> ServerOriginBatchResult:
     """Preflight, atomically append, and ordered-materialize one complete plan."""
@@ -144,6 +148,9 @@ def capture_server_origin_mutation_batch(
         mutation_plan_hash=mutation_plan_hash,
         bootstrap_id=trusted_notes_organization_bootstrap_id,
         bootstrap_relationship_verifier=bootstrap_relationship_verifier,
+        bootstrap_relationship_absence_verifier=(
+            bootstrap_relationship_absence_verifier
+        ),
     )
     try:
         if trusted_notes_organization_bootstrap_id is None:
@@ -196,6 +203,10 @@ def _evaluate_plan(
     mutation_plan_hash: str,
     bootstrap_id: str | None = None,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
+    | None = None,
+    bootstrap_relationship_absence_verifier: Callable[
+        [SyncDomain, str, Mapping[str, object]], bool
+    ]
     | None = None,
 ) -> list[SyncEnvelopeCreate]:
     overlay: dict[tuple[SyncDomain, str], SyncEnvelopeCreate] = {}
@@ -283,6 +294,9 @@ def _evaluate_plan(
             organization_group_state=("initializing" if bootstrap_id is not None else None),
             organization_bootstrap_id=bootstrap_id,
             bootstrap_relationship_verifier=bootstrap_relationship_verifier,
+            bootstrap_relationship_absence_verifier=(
+                bootstrap_relationship_absence_verifier
+            ),
         )
         outcome = service._evaluate_envelope(dataset, envelope, context=context)
         if isinstance(outcome, AdapterRejected | AdapterDeferred):

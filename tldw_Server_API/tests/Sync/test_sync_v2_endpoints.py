@@ -14,14 +14,15 @@ from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     SyncDeviceUpsert,
     SyncObjectState,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -471,6 +472,71 @@ def test_profile_bootstrap_endpoint_idempotently_creates_dataset_and_device(
     assert len(sync_service.store.list_devices_for_user("user-1")) == 1
 
 
+def test_profile_endpoint_exposes_only_typed_notes_organization_summary(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    dataset = sync_service.store.get_or_create_default_personal_dataset("user-1")
+    bootstrap_id = "private-bootstrap-id"
+    sync_service.store.begin_notes_organization_bootstrap(
+        dataset.dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id=bootstrap_id,
+    )
+
+    initializing = client.get("/api/v1/sync/profile")
+    assert initializing.status_code == 200
+    assert initializing.json()["dataset"]["domains"] == [
+        *M1_SYNC_DOMAINS,
+        *NOTES_ORGANIZATION_DOMAINS,
+    ]
+    assert initializing.json()["dataset"]["notes_organization"] == {
+        "state": "initializing",
+        "captured_count": 0,
+        "expected_count": 0,
+        "error_code": None,
+    }
+
+    sync_service.store.transition_notes_organization_bootstrap(
+        dataset.dataset_id,
+        bootstrap_id=bootstrap_id,
+        expected_state="initializing",
+        state="ready",
+        captured_count=0,
+        expected_count=0,
+        ready_verifier=lambda: True,
+    )
+    ready = client.get("/api/v1/sync/profile")
+    assert ready.status_code == 200
+    assert ready.json()["dataset"]["notes_organization"] == {
+        "state": "ready",
+        "captured_count": 0,
+        "expected_count": 0,
+        "error_code": None,
+    }
+
+    sync_service.store.transition_notes_organization_bootstrap(
+        dataset.dataset_id,
+        bootstrap_id=bootstrap_id,
+        expected_state="ready",
+        state="failed",
+        captured_count=3,
+        expected_count=4,
+        error_code="notes_organization_bootstrap_source_invalid",
+    )
+    failed = client.get("/api/v1/sync/profile")
+    assert failed.status_code == 200
+    assert failed.json()["dataset"]["notes_organization"] == {
+        "state": "failed",
+        "captured_count": 3,
+        "expected_count": 4,
+        "error_code": "notes_organization_bootstrap_source_invalid",
+    }
+    serialized = failed.text
+    assert bootstrap_id not in serialized
+    assert "notes_organization_v1" not in serialized
+
+
 def test_profile_bootstrap_endpoint_reuses_omitted_device_by_client_profile_id(
     tmp_path: Path,
 ) -> None:
@@ -613,7 +679,7 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
             "scope_type": "personal",
             "domains": list(M1_SYNC_DOMAINS),
             "encryption_policy": "server_trusted_v1",
-            "metadata": {"default_personal": True, "client_family": "chatbook"},
+            "metadata": {"label": "internal-caller"},
         },
     )
 
@@ -626,6 +692,42 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
     assert enrolled.json()["encryption_policy"] == "server_trusted_v1"
     assert enrolled.json()["domains"] == list(M1_SYNC_DOMAINS)
     assert enrolled.json()["key_setup_required"] is False
+    assert enrolled.json()["metadata"] == {"label": "internal-caller"}
+
+
+def test_dataset_enroll_endpoint_rejects_and_never_echoes_forged_server_metadata(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    forged = {
+        "default_personal": True,
+        "client_family": "chatbook",
+        "notes_organization_v1": {
+            "state": "ready",
+            "bootstrap_id": "client-forged",
+            "captured_count": 1,
+            "expected_count": 1,
+        },
+    }
+
+    response = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "forged-dataset",
+            "scope_type": "personal",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+            "metadata": forged,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_reserved_dataset_enrollment",
+        "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+    }
+    assert "client-forged" not in response.text
+    assert sync_service.store.list_datasets_for_user("user-1") == []
 
 
 def test_key_recovery_bundle_validation_error_does_not_expose_wrapped_material(

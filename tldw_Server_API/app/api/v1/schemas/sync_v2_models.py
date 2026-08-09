@@ -22,6 +22,12 @@ SyncDomain = Literal[
     "media.item",
     "media.keyword",
     "media.keyword_link",
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -752,6 +758,17 @@ class SyncProfileDeviceStatusResponse(BaseModel):
     client_version: str | None = None
 
 
+class SyncNotesOrganizationStatusResponse(BaseModel):
+    """Safe Notes organization bootstrap progress exposed to clients."""
+
+    state: Literal["initializing", "ready", "failed"]
+    captured_count: int = Field(0, ge=0)
+    expected_count: int = Field(0, ge=0)
+    error_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncProfileDatasetStatusResponse(BaseModel):
     """Default personal dataset metadata in profile responses."""
 
@@ -765,6 +782,7 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     server_frontend_mutation_enabled: bool = True
     server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
+    notes_organization: SyncNotesOrganizationStatusResponse | None = None
 
 
 class SyncProfileDomainStatusResponse(BaseModel):
@@ -1762,6 +1780,7 @@ __all__ = [
     "SyncProfileBootstrapMode",
     "SyncProfileBootstrapRequest",
     "SyncProfileBootstrapResponse",
+    "SyncNotesOrganizationStatusResponse",
     "SyncProfileDatasetStatusResponse",
     "SyncProfileDeviceStatusResponse",
     "SyncProfileDomainStatusResponse",

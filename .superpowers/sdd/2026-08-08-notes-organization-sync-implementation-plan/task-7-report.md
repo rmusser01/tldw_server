@@ -43,6 +43,53 @@ Implemented and verified against the Task 7 brief. ADR-032 and ADR-033 remain th
 
 Focused pytest runs emit repository-baseline dependency deprecations and test-environment `system_log_buffer` permission messages. They are unrelated to Task 7 and do not change test outcomes. No open Task 7 contract blocker remains.
 
+## Fix Round 1
+
+Reviewer findings were verified against the implementation before changes. All five findings were confirmed and fixed with focused RED/GREEN coverage.
+
+### Changes
+
+- Generic dataset enrollment now rejects every Notes organization domain and the reserved server-owned metadata keys `notes_organization_v1`, `default_personal`, and `client_family`. The HTTP route returns only `sync_reserved_dataset_enrollment` and a fixed safe message; forged metadata is never echoed.
+- Single-envelope and atomic-group appends lock the dataset row used by readiness/final CAS before the readiness check and insert. PostgreSQL emits `SELECT ... FOR UPDATE`; SQLite retains its transactional equivalent.
+- Resume compares the fresh source snapshot with bootstrap-captured relationship heads and emits an exact source-absence-attested tombstone only for captured links that disappeared. Pre-history links are never inferred as removals.
+- Final ready verification now compares canonical applied resource/relationship heads, operations, and payloads with a final fresh source snapshot and rejects extra active organization heads.
+- Retryable post-append verification failures remain `initializing` under the same bootstrap ID and stable safe error code. Repair explicitly reconciles the already preflight-attested historical step and uses a new deterministic plan to supersede it when source changed, without product replay or duplicate envelope IDs.
+- The HTTP profile schema now has a typed, extra-forbidden `notes_organization` summary containing only state, non-negative captured/expected counts, and a safe error code. Bootstrap IDs and raw metadata remain excluded.
+- API domain typing now includes the six Notes organization domains so profile capabilities/status can represent them; public enrollment remains blocked at the service boundary.
+
+### Focused RED/GREEN evidence
+
+- Forged enrollment service RED: `1 failed, 93 deselected, 2 warnings`; generic enrollment accepted organization/reserved capabilities. GREEN: `1 passed, 93 deselected, 2 warnings`.
+- Forged enrollment endpoint RED: `1 failed, 26 deselected, 2 warnings`; HTTP returned 200 and echoed forged metadata. GREEN: `1 passed, 26 deselected, 2 warnings`.
+- Transaction lock-order RED: `1 failed, 3 deselected, 2 warnings`; append called readiness and insert without the row-lock seam. GREEN: `1 passed, 4 deselected, 2 warnings`, proving `lock -> readiness -> insert` for single and grouped paths.
+- PostgreSQL SQL-intent contract: `1 passed, 20 deselected, 2 warnings`, asserting the exact dataset-row `FOR UPDATE` query. The complete server-free contract file is `21 passed, 2 warnings`.
+- Optional real concurrent PostgreSQL regression: `1 skipped, 4 deselected, 7 warnings`; PostgreSQL was not reachable/configured, and Docker fallback was intentionally disabled for the availability probe.
+- Changed-snapshot relationship removal RED: `1 failed, 4 deselected, 2 warnings`; the dataset became ready with a stale relationship upsert head. GREEN: `1 passed, 4 deselected, 2 warnings` with exact tombstone/no-stale-head assertions.
+- Retryable verification RED: `1 failed, 5 deselected, 2 warnings`; retryable failure transitioned to failed. Initial GREEN was strengthened with source drift; strengthened RED was `1 failed, 5 deselected, 2 warnings` because the pending old step stranded repair. Final GREEN: `1 passed, 5 deselected, 2 warnings`, same bootstrap/group IDs, fresh superseding plan, no duplicates, and every accepted organization envelope applied.
+- Typed HTTP profile RED: `1 failed, 27 deselected, 2 warnings`; API typing rejected the organization domains and dropped the safe summary. GREEN: `1 passed, 27 deselected, 2 warnings` across initializing, ready, and failed states with no bootstrap ID/raw metadata.
+
+### Final focused gates
+
+- Task 7 profile core selector: `3 passed, 9 deselected, 2 warnings`.
+- Bootstrap file: `6 passed, 2 warnings`.
+- Non-live transaction gate file: `4 passed, 1 deselected, 2 warnings`.
+- PostgreSQL server-free contract file: `21 passed, 2 warnings`.
+- Forged enrollment plus device isolation: `2 passed, 92 deselected, 2 warnings`.
+- Forged endpoint plus typed profile lifecycle: `2 passed, 26 deselected, 2 warnings`.
+- Task 4 coordinator compatibility: `20 passed, 2 warnings`.
+- Task 5 exact bootstrap attestation: `2 passed, 35 deselected, 2 warnings`.
+- Scoped Ruff: `All checks passed!`.
+- Scoped Bandit: exit 0 with no findings.
+- `git diff --check`: exit 0, no output.
+
+### Warning disposition and self-review
+
+- Pytest's two recurring warnings are repository/runtime deprecations outside the Task 7 paths; repeated `system_log_buffer append failed: PermissionError` messages are test-environment logging noise and never changed an assertion or exit status.
+- The optional PostgreSQL probe emitted seven baseline/runtime warnings before the fixture skipped because no server was configured.
+- Bandit emitted informational unmatched-`nosec` warnings for pre-existing B608 annotations at `endpoints/sync.py:1995, 2025, 2104, 2158` (twice), `2163`, `2194` (twice), and `Sync_DB.py:3164`. Bandit reported no security finding; the warning locations are existing parameterized dynamic-SQL annotations, not new dependency code.
+- Self-review found and fixed one additional repair edge: a retryable pending capture whose source changed before retry is now historically reconciled and deterministically superseded rather than left as an accepted-unapplied readiness blocker.
+- No Task 8/9 behavior, Task 4 general planning semantics, Task 5 attestation requirements, or Task 6 product materializers were changed. No open blocker remains; live PostgreSQL concurrency remains environment-skipped but has deterministic server-free SQL/ordering coverage.
+
 ## Files
 
 - `tldw_Server_API/app/core/DB_Management/Sync_DB.py`

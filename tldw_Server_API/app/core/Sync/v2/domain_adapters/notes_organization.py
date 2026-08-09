@@ -78,6 +78,7 @@ class NotesOrganizationDomainAdapter:
             return _rejected(envelope, code, str(exc))
 
         bootstrap_capture = envelope.routing_metadata.get("bootstrap_capture")
+        bootstrap_removal = envelope.routing_metadata.get("bootstrap_removal")
         if bootstrap_capture not in {None, True}:
             return _rejected(
                 envelope,
@@ -90,13 +91,34 @@ class NotesOrganizationDomainAdapter:
                 "notes_organization_payload_invalid",
                 "bootstrap_capture is valid only for relationship domains",
             )
+        if bootstrap_removal not in {None, True}:
+            return _rejected(
+                envelope,
+                "notes_organization_payload_invalid",
+                "bootstrap_removal must be the boolean true when supplied",
+            )
+        if bootstrap_removal is True and (
+            envelope.domain not in _RELATIONSHIP_DOMAINS
+            or envelope.operation != "tombstone"
+        ):
+            return _rejected(
+                envelope,
+                "notes_organization_payload_invalid",
+                "bootstrap_removal is valid only for relationship tombstones",
+            )
         bootstrap_authorized = bootstrap_capture is True and _bootstrap_authorized(
             envelope, payload, dataset, context
+        )
+        bootstrap_removal_authorized = (
+            bootstrap_removal is True
+            and _bootstrap_removal_authorized(envelope, payload, dataset, context)
         )
         readiness = _readiness_error(
             dataset,
             bootstrap_authorized=(
-                bootstrap_authorized or _trusted_bootstrap_context(dataset, context)
+                bootstrap_authorized
+                or bootstrap_removal_authorized
+                or _trusted_bootstrap_context(dataset, context)
             ),
         )
         if readiness is not None:
@@ -106,6 +128,12 @@ class NotesOrganizationDomainAdapter:
                 envelope,
                 "notes_organization_domain_not_ready",
                 "Dormant relationship bootstrap was not structurally authorized",
+            )
+        if bootstrap_removal is True and not bootstrap_removal_authorized:
+            return _rejected(
+                envelope,
+                "notes_organization_domain_not_ready",
+                "Relationship bootstrap removal was not structurally authorized",
             )
 
         head = _get_head(envelope, context)
@@ -152,7 +180,7 @@ class NotesOrganizationDomainAdapter:
             payload,
             dataset=dataset,
             context=context,
-            allow_deleted=bootstrap_authorized,
+            allow_deleted=bootstrap_authorized or bootstrap_removal_authorized,
         )
         if dependency_error is not None:
             return dependency_error
@@ -193,6 +221,27 @@ def _bootstrap_authorized(
         and context.organization_bootstrap_id == bootstrap_id
         and context.bootstrap_relationship_verifier is not None
         and context.bootstrap_relationship_verifier(
+            envelope.domain, envelope.object_id, payload
+        )
+    )
+
+
+def _bootstrap_removal_authorized(
+    envelope: SyncEnvelopeCreate,
+    payload: dict[str, object],
+    dataset: SyncDataset,
+    context: SyncAdapterContext | None,
+) -> bool:
+    metadata = dataset.metadata.get("notes_organization_v1")
+    bootstrap_id = metadata.get("bootstrap_id") if isinstance(metadata, dict) else None
+    return bool(
+        context is not None
+        and context.trusted_server_origin
+        and context.organization_group_state == "initializing"
+        and bootstrap_id is not None
+        and context.organization_bootstrap_id == bootstrap_id
+        and context.bootstrap_relationship_absence_verifier is not None
+        and context.bootstrap_relationship_absence_verifier(
             envelope.domain, envelope.object_id, payload
         )
     )

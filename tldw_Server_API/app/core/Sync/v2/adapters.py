@@ -121,6 +121,7 @@ class SyncAdapterContext:
     organization_group_state: str | None = None
     organization_bootstrap_id: str | None = None
     bootstrap_relationship_verifier: BootstrapRelationshipVerifier | None = None
+    bootstrap_relationship_absence_verifier: BootstrapRelationshipVerifier | None = None
 
 
 class SyncDomainAdapter(Protocol):

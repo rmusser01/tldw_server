@@ -18,7 +18,6 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
-    Response,
     status,
 )
 from fastapi.responses import StreamingResponse
@@ -26,6 +25,10 @@ from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
+    ALLOWED_SYNC_OPERATIONS,
+    ALLOWED_SYNC_SEND_ENTITIES,
+)
 
 #
 # Local Imports
@@ -88,10 +91,6 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRetentionDryRunRequest,
     SyncRetentionDryRunResponse,
     SyncV2Envelope,
-)
-from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
-    ALLOWED_SYNC_OPERATIONS,
-    ALLOWED_SYNC_SEND_ENTITIES,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
@@ -186,6 +185,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "sync_reserved_dataset_enrollment" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_reserved_dataset_enrollment",
+                    "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+                },
+            )
         if "sync_blob_transfer_not_supported" in lowered:
             return HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
