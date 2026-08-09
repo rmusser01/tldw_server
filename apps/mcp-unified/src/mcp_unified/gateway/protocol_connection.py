@@ -1164,8 +1164,6 @@ class GatewayProtocolConnection:
                     await self._write_locked(bounded)
                 return
             await self._write_locked(response)
-            if active.token.cancelled:
-                return
             async with self._state_lock:
                 if (
                     not self._closed

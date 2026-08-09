@@ -45,6 +45,20 @@ class _MemoryWriter:
         self.release.set()
 
 
+class _VisibleThenBlockingWriter:
+    """Make one value visible before its successful write await returns."""
+
+    def __init__(self) -> None:
+        self.values: list[Any] = []
+        self.visible = asyncio.Event()
+        self.return_release = asyncio.Event()
+
+    async def __call__(self, value: Any) -> None:
+        self.values.append(value)
+        self.visible.set()
+        await self.return_release.wait()
+
+
 class _CoreRuntime:
     """Small in-memory core runtime with no package-specific module aliases."""
 
@@ -639,6 +653,40 @@ async def test_cancelled_initialize_rolls_back_pending_legacy_state() -> None:
 
     assert writer.values == [_error(1, -32000, "Request rejected")]
     assert runtime.runtime_entries == 0
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_visible_initialize_write_still_commits_state() -> None:
+    """Rechecking cancellation after visible output must contradict emitted success."""
+
+    runtime = _CoreRuntime()
+    writer = _VisibleThenBlockingWriter()
+    connection = _new_connection(runtime, writer)
+
+    await connection.receive(_legacy_initialize_request())
+    await writer.visible.wait()
+    assert len(writer.values) == 1
+    assert writer.values[0]["id"] == "init"
+    assert writer.values[0]["result"]["protocolVersion"] == "2025-11-25"
+
+    await connection.receive(
+        _legacy_request(
+            None,
+            "notifications/cancelled",
+            {"requestId": "init", "reason": "too-late"},
+            include_id=False,
+        )
+    )
+    writer.return_release.set()
+    await connection.wait_for_idle()
+
+    await connection.receive(_legacy_request("init", "tools/list"))
+    await connection.wait_for_idle()
+
+    assert len(writer.values) == 2
+    assert writer.values[1]["id"] == "init"
+    assert writer.values[1]["result"]["tools"][0]["name"] == "echo"
+    assert runtime.runtime_entries == 1
 
 
 @pytest.mark.asyncio
