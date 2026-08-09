@@ -17,6 +17,12 @@ SyncDomain = Literal[
     "media.item",
     "media.keyword",
     "media.keyword_link",
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -69,6 +75,17 @@ M1_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "chat.message": ["append", "tombstone"],
     "attachment.ref": ["upsert", "tombstone"],
 }
+NOTES_ORGANIZATION_DOMAINS: tuple[SyncDomain, ...] = (
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+)
+NOTES_ORGANIZATION_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in NOTES_ORGANIZATION_DOMAINS
+}
 WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
     "workspaces.workspace",
     "workspaces.source_ref",
@@ -96,12 +113,14 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(WORKSPACE_SYNC_DOMAINS)
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
+    + list(NOTES_ORGANIZATION_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
+    **NOTES_ORGANIZATION_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
@@ -163,7 +182,83 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
                 "routing_metadata": {"restore_intent": True},
                 "requires_current_base": True,
             },
-        }
+        },
+        "notes.keyword": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["keyword"],
+                "properties": {"keyword": {"type": "string", "max_length": 100}},
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["subject_type", "subject_id", "keyword_sync_id"],
+                "properties": {
+                    "subject_type": {"enum": ["note", "conversation"]},
+                    "subject_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_collection": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 255},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_collection_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["collection_sync_id", "keyword_sync_id"],
+                "properties": {
+                    "collection_sync_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.folder": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 500},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.folder_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["note_id", "folder_sync_id"],
+                "properties": {
+                    "note_id": {"type": "string"},
+                    "folder_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
     }
 
 
@@ -1212,6 +1307,8 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "NOTES_ORGANIZATION_DOMAINS",
+    "NOTES_ORGANIZATION_SYNC_OPERATIONS",
     "NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS",
     "NOTES_NOTE_CONTENT_MAX_CHARS",
     "NOTES_NOTE_TITLE_MAX_CHARS",

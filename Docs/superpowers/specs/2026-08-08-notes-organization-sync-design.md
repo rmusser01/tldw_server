@@ -140,6 +140,15 @@ The member tuples are:
 - `notes.keyword_collection_link`: `[collection_sync_id, keyword_sync_id]`
 - `notes.folder_link`: `[note_id, folder_sync_id]`
 
+The normative test vectors for the algorithm are:
+
+- `notes.keyword_link` with `["note", "note-123", "kw-456"]`:
+  `notes.keyword_link:sha256:10f9eab3be80b6e439ce1bcf8fae952527bde7d7e026d0e227f0a87ada963be0`
+- `notes.keyword_collection_link` with `["collection-123", "kw-456"]`:
+  `notes.keyword_collection_link:sha256:e9427c2d8bc4cfa8586130bc1fcc54cf432ca6dbb3df77bab3e65033b6148199`
+- `notes.folder_link` with `["note-123", "folder-456"]`:
+  `notes.folder_link:sha256:9076b60d9d8476f852736928ef3661cb06d9ba55696dd4504657c753f414b670`
+
 Domain tagging and canonical JSON avoid delimiter ambiguity and prevent identical
 member strings in different relationship types from sharing an ID.
 

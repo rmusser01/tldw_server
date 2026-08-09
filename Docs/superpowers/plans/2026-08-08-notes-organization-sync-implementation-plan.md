@@ -112,13 +112,13 @@ Test all three required vectors verbatim:
 ```python
 assert organization_link_id(
     "notes.keyword_link", ["note", "note-123", "kw-456"]
-) == "notes.keyword_link:sha256:5c135a053523a5c90cf764d8263fbf13014faac6713e9f756b9ac64ae44560ef"
+) == "notes.keyword_link:sha256:10f9eab3be80b6e439ce1bcf8fae952527bde7d7e026d0e227f0a87ada963be0"
 assert organization_link_id(
     "notes.keyword_collection_link", ["collection-123", "kw-456"]
-) == "notes.keyword_collection_link:sha256:6ab11f2b80f4ea3870ca30abe5c0661d1b1b66324c9aaba682929dcc28f65e7b"
+) == "notes.keyword_collection_link:sha256:e9427c2d8bc4cfa8586130bc1fcc54cf432ca6dbb3df77bab3e65033b6148199"
 assert organization_link_id(
     "notes.folder_link", ["note-123", "folder-456"]
-) == "notes.folder_link:sha256:8322ebc5e49e3d1fbfbc917fe477423968a63a77e9eca0354643644ee9b82640"
+) == "notes.folder_link:sha256:9076b60d9d8476f852736928ef3661cb06d9ba55696dd4504657c753f414b670"
 ```
 
 Also reject a wrong member count, unsupported relationship domain, uppercase digest, truncated digest, and a payload whose members do not reproduce `object_id`.

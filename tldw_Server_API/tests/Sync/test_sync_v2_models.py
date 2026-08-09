@@ -35,6 +35,14 @@ M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref
 WORKSPACE_DOMAINS = ["workspaces.workspace", "workspaces.source_ref"]
 SOURCE_CACHE_DOMAINS = ["source_cache.entry"]
 MEDIA_DOMAINS = ["media.item", "media.keyword", "media.keyword_link"]
+NOTES_ORGANIZATION_DOMAINS = (
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+)
 SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS + MEDIA_DOMAINS
 
 
@@ -122,6 +130,18 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         },
     }
     assert "client_private_v1" not in capabilities.model_dump_json()
+
+
+@pytest.mark.parametrize("domain", NOTES_ORGANIZATION_DOMAINS)
+def test_notes_organization_schema_is_server_trusted_v1(domain: str) -> None:
+    assert domain in core_sync_models.SyncDomain.__args__
+    schema = core_sync_models.sync_v2_domain_schemas()[domain]
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert {"upsert", "tombstone"}.issubset(schema)
+
+    capability_schema = SyncCapabilitiesResponse().domain_schemas[domain]
+    assert capability_schema == schema
 
 
 @pytest.mark.parametrize(
