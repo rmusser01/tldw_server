@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import ast
-import io
 import re
 import sqlite3
 import textwrap
-import tokenize
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -60,12 +58,29 @@ DIRECT_MEMBERSHIP_PROXY_CALLS = frozenset(
 )
 SERVING_MEMBERSHIP_CONTEXT_CATEGORIES = {
     "tldw_Server_API/app/api/v1/endpoints/auth.py": "trusted",
+    "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py": "actor",
     "tldw_Server_API/app/api/v1/endpoints/orgs.py": "actor",
     "tldw_Server_API/app/services/admin_e2e_support_service.py": "trusted",
     "tldw_Server_API/app/services/admin_orgs_service.py": "actor",
+    "tldw_Server_API/app/services/registration_service.py": "trusted",
     "tldw_Server_API/app/services/org_invite_service.py": "trusted",
     "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py": "trusted",
     "tldw_Server_API/app/core/AuthNZ/orgs_teams.py": "passthrough",
+}
+EXPECTED_TRUSTED_MEMBERSHIP_REASONS = {
+    "tldw_Server_API/app/api/v1/endpoints/auth.py": frozenset({"BOOTSTRAP"}),
+    "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py": frozenset(
+        {"BOOTSTRAP"}
+    ),
+    "tldw_Server_API/app/services/admin_e2e_support_service.py": frozenset(
+        {"BOOTSTRAP"}
+    ),
+    "tldw_Server_API/app/services/org_invite_service.py": frozenset(
+        {"REGISTRATION"}
+    ),
+    "tldw_Server_API/app/services/registration_service.py": frozenset(
+        {"REGISTRATION"}
+    ),
 }
 ACTOR_MEMBERSHIP_CONTEXT_FACTORIES = frozenset(
     {"_membership_context", "_membership_write_context"}
@@ -83,20 +98,18 @@ SQL_CALL_NAMES = frozenset(
         "fetchval",
         "execute_query",
         "_execute_compat",
+        "_execute_membership_scope_sql",
+        "_mint_membership_scope_sql",
     }
 )
-_SQL_CALL_IDENTIFIER_RE = re.compile(
-    rf"\b(?:{'|'.join(sorted(map(re.escape, SQL_CALL_NAMES)))})\b"
-)
-_IGNORED_CALL_TOKENS = frozenset(
+PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS = frozenset(
     {
-        tokenize.NL,
-        tokenize.NEWLINE,
-        tokenize.INDENT,
-        tokenize.DEDENT,
-        tokenize.COMMENT,
+        "_execute_membership_scope_sql",
+        "_mint_membership_scope_sql",
     }
 )
+_DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL = "<dynamic_membership_scope_sql>"
+_WRAPPED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL = "<wrapped_membership_scope_sql>"
 OFFLINE_MIGRATION_PATHS = frozenset(
     {
         "tldw_Server_API/app/core/AuthNZ/migrations.py",
@@ -104,13 +117,6 @@ OFFLINE_MIGRATION_PATHS = frozenset(
         "tldw_Server_API/app/core/AuthNZ/migrate_to_multiuser.py",
     }
 )
-UNRELATED_CONTENT_DATABASE_PATHS = frozenset(
-    {
-        "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
-        "tldw_Server_API/app/core/DB_Management/Prompts_DB.py",
-    }
-)
-
 _WRITE_RE = re.compile(
     r"\b(?P<verb>INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM)\s+"
     r"(?P<table>(?:[A-Za-z_]\w*\.)?[\"`\[]?[A-Za-z_]\w*[\"`\]]?)",
@@ -158,36 +164,6 @@ class ObservedWrite:
 
 EXPECTED_MEMBERSHIP_WRITES = (
     ExpectedWrite(
-        "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py",
-        "provision_tenant",
-        "INSERT org_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py",
-        "provision_tenant",
-        "INSERT org_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo._ensure_user_in_default_team",
-        "INSERT team_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo._ensure_user_in_default_team",
-        "INSERT team_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo._remove_user_from_default_team",
-        "DELETE team_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo._remove_user_from_default_team",
-        "DELETE team_members",
-    ),
-    ExpectedWrite(
         "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
         "MembershipWriter._insert_membership",
         "INSERT org_members",
@@ -228,26 +204,6 @@ EXPECTED_MEMBERSHIP_WRITES = (
         "DELETE team_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.transfer_organization_ownership",
-        "UPDATE org_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.transfer_organization_ownership",
-        "UPDATE org_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.transfer_organization_ownership",
-        "UPDATE org_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
-        "AuthnzOrgsTeamsRepo.transfer_organization_ownership",
-        "UPDATE org_members",
-    ),
-    ExpectedWrite(
         "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
         "MembershipWriter._update_membership_role",
         "UPDATE org_members",
@@ -266,26 +222,6 @@ EXPECTED_MEMBERSHIP_WRITES = (
         "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
         "MembershipWriter._update_membership_role",
         "UPDATE team_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService._ensure_org_membership",
-        "INSERT org_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService._ensure_org_membership",
-        "INSERT org_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService._ensure_org_membership",
-        "INSERT team_members",
-    ),
-    ExpectedWrite(
-        "tldw_Server_API/app/services/registration_service.py",
-        "RegistrationService._ensure_org_membership",
-        "INSERT team_members",
     ),
 )
 
@@ -310,6 +246,75 @@ EXPECTED_PARENT_SCOPE_DELETES = (
         "AuthnzOrgsTeamsRepo.delete_team_with_provider_secrets",
         "DELETE teams",
     ),
+)
+
+EXPECTED_MEMBERSHIP_SCOPE_SQL_HELPER_CALLERS = (
+    *(
+        (
+            "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+            "MembershipWriter._insert_membership",
+        )
+        for _ in range(4)
+    ),
+    *(
+        (
+            "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+            "MembershipWriter._update_membership_role",
+        )
+        for _ in range(4)
+    ),
+    *(
+        (
+            "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+            "MembershipWriter._delete_membership",
+        )
+        for _ in range(4)
+    ),
+    *(
+        (
+            "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
+            "AuthnzOrgsTeamsRepo.delete_organization_with_provider_secrets",
+        )
+        for _ in range(2)
+    ),
+    *(
+        (
+            "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
+            "AuthnzOrgsTeamsRepo.delete_team_with_provider_secrets",
+        )
+        for _ in range(2)
+    ),
+)
+EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS = (
+    *(
+        ("_execute_membership_scope_sql", path, function)
+        for path, function in EXPECTED_MEMBERSHIP_SCOPE_SQL_HELPER_CALLERS
+    ),
+    (
+        "_mint_membership_scope_sql",
+        "tldw_Server_API/app/core/AuthNZ/profile_user_write_guard.py",
+        "_execute_membership_scope_sql",
+    ),
+)
+APPROVED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS = frozenset(
+    EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS
+)
+EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_IMPORTS = (
+    (
+        "_execute_membership_scope_sql",
+        "_execute_membership_scope_sql",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "<module>",
+    ),
+    (
+        "_execute_membership_scope_sql",
+        "_execute_membership_scope_sql",
+        "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
+        "<module>",
+    ),
+)
+APPROVED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_IMPORTS = frozenset(
+    EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_IMPORTS
 )
 
 EXPECTED_EXCLUDED_WRITES = (
@@ -630,6 +635,482 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
+def _privileged_membership_scope_sql_import_aliases(
+    nodes: Iterable[ast.AST],
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in nodes:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        for imported in node.names:
+            if imported.name not in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS:
+                continue
+            aliases[imported.asname or imported.name] = imported.name
+    return aliases
+
+
+def _profile_user_write_guard_module_aliases(
+    nodes: Iterable[ast.AST],
+) -> frozenset[str]:
+    aliases: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                if imported.name.endswith(".profile_user_write_guard"):
+                    aliases.add(imported.asname or imported.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom) and (
+            node.module or ""
+        ).endswith(".AuthNZ"):
+            for imported in node.names:
+                if imported.name == "profile_user_write_guard":
+                    aliases.add(imported.asname or imported.name)
+    return frozenset(aliases)
+
+
+def _privileged_wrapper_import_aliases(
+    nodes: Iterable[ast.AST],
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in nodes:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = node.module or ""
+        for imported in node.names:
+            if module == "functools" and imported.name == "partial":
+                aliases[imported.asname or imported.name] = "partial"
+            elif module == "builtins" and imported.name == "getattr":
+                aliases[imported.asname or imported.name] = "getattr"
+            elif module == "builtins" and imported.name == "vars":
+                aliases[imported.asname or imported.name] = "vars"
+            elif module == "builtins" and imported.name == "__import__":
+                aliases[imported.asname or imported.name] = "__import__"
+            elif module == "importlib" and imported.name == "import_module":
+                aliases[imported.asname or imported.name] = "import_module"
+            elif module == "operator" and imported.name == "attrgetter":
+                aliases[imported.asname or imported.name] = "attrgetter"
+    return aliases
+
+
+def _resolve_privileged_wrapper_call_names(
+    expression: ast.AST,
+    assignments: dict[str, list[ast.AST]],
+    globals_: dict[str, list[ast.AST]],
+    aliases: dict[str, str],
+    global_aliases: dict[str, str],
+    seen: frozenset[str] = frozenset(),
+) -> set[str]:
+    if isinstance(expression, ast.Call):
+        return _resolve_privileged_wrapper_call_names(
+            expression.func,
+            assignments,
+            globals_,
+            aliases,
+            global_aliases,
+            seen,
+        )
+    if isinstance(expression, ast.Attribute):
+        return (
+            {expression.attr}
+            if expression.attr
+            in {
+                "__getattribute__",
+                "__import__",
+                "getattr",
+                "attrgetter",
+                "partial",
+                "import_module",
+                "vars",
+            }
+            else set()
+        )
+    if not isinstance(expression, ast.Name) or expression.id in seen:
+        return set()
+
+    resolved: set[str] = set()
+    if expression.id in {
+        "__getattribute__",
+        "__import__",
+        "getattr",
+        "attrgetter",
+        "partial",
+        "import_module",
+        "vars",
+    }:
+        resolved.add(expression.id)
+    imported_name = aliases.get(expression.id) or global_aliases.get(expression.id)
+    if imported_name is not None:
+        resolved.add(imported_name)
+    for value in assignments.get(expression.id) or globals_.get(expression.id) or []:
+        resolved.update(
+            _resolve_privileged_wrapper_call_names(
+                value,
+                assignments,
+                globals_,
+                aliases,
+                global_aliases,
+                seen | {expression.id},
+            )
+        )
+    return resolved
+
+
+def _resolve_attrgetter_attribute_names(
+    expression: ast.AST,
+    assignments: dict[str, list[ast.AST]],
+    globals_: dict[str, list[ast.AST]],
+    aliases: dict[str, str],
+    global_aliases: dict[str, str],
+    seen: frozenset[str] = frozenset(),
+) -> tuple[bool, set[str]]:
+    if isinstance(expression, ast.Call):
+        wrapper_names = _resolve_privileged_wrapper_call_names(
+            expression.func,
+            assignments,
+            globals_,
+            aliases,
+            global_aliases,
+        )
+        if "attrgetter" not in wrapper_names:
+            return False, set()
+        if not expression.args:
+            return True, set()
+        attribute_names: set[str] = set()
+        for argument in expression.args:
+            resolved = _resolve_strings(argument, assignments, globals_)
+            if not resolved:
+                attribute_names.add(_DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL)
+            attribute_names.update(resolved)
+        return True, attribute_names
+    if not isinstance(expression, ast.Name) or expression.id in seen:
+        return False, set()
+
+    matched = False
+    attribute_names: set[str] = set()
+    for value in assignments.get(expression.id) or globals_.get(expression.id) or []:
+        value_matched, value_names = _resolve_attrgetter_attribute_names(
+            value,
+            assignments,
+            globals_,
+            aliases,
+            global_aliases,
+            seen | {expression.id},
+        )
+        matched = matched or value_matched
+        attribute_names.update(value_names)
+    return matched, attribute_names
+
+
+def _privileged_membership_scope_sql_imports(
+    tree: ast.AST,
+    *,
+    relative_path: str,
+    parents: dict[ast.AST, ast.AST],
+) -> tuple[tuple[tuple[str, str, str, str], int], ...]:
+    imports: list[tuple[tuple[str, str, str, str], int]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        for imported in node.names:
+            if imported.name not in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS:
+                continue
+            imports.append(
+                (
+                    (
+                        imported.name,
+                        imported.asname or imported.name,
+                        relative_path,
+                        _qualified_scope(node, parents),
+                    ),
+                    node.lineno,
+                )
+            )
+    return tuple(sorted(imports))
+
+
+def _is_profile_user_write_guard_module(
+    expression: ast.AST,
+    aliases: frozenset[str],
+    global_aliases: frozenset[str],
+    assignments: dict[str, list[ast.AST]],
+    globals_: dict[str, list[ast.AST]],
+    wrapper_aliases: dict[str, str],
+    global_wrapper_aliases: dict[str, str],
+    seen: frozenset[str] = frozenset(),
+) -> bool:
+    if isinstance(expression, ast.Name):
+        if expression.id in aliases or expression.id in global_aliases:
+            return True
+        if expression.id in seen:
+            return False
+        return any(
+            _is_profile_user_write_guard_module(
+                value,
+                aliases,
+                global_aliases,
+                assignments,
+                globals_,
+                wrapper_aliases,
+                global_wrapper_aliases,
+                seen | {expression.id},
+            )
+            for value in assignments.get(expression.id)
+            or globals_.get(expression.id)
+            or []
+        )
+    if isinstance(expression, ast.Call) and expression.args:
+        call_names = _resolve_privileged_wrapper_call_names(
+            expression.func,
+            assignments,
+            globals_,
+            wrapper_aliases,
+            global_wrapper_aliases,
+        )
+        if call_names & {"__import__", "import_module"}:
+            module_names = _resolve_strings(
+                expression.args[0],
+                assignments,
+                globals_,
+            )
+            return bool(module_names) and all(
+                name.endswith(".profile_user_write_guard")
+                for name in module_names
+            )
+    return (
+        isinstance(expression, ast.Attribute)
+        and expression.attr == "profile_user_write_guard"
+    )
+
+
+def _resolve_privileged_membership_scope_sql_entrypoints(
+    expression: ast.AST,
+    assignments: dict[str, list[ast.AST]],
+    globals_: dict[str, list[ast.AST]],
+    aliases: dict[str, str],
+    global_aliases: dict[str, str],
+    module_aliases: frozenset[str],
+    global_module_aliases: frozenset[str],
+    wrapper_aliases: dict[str, str],
+    global_wrapper_aliases: dict[str, str],
+    seen: frozenset[str] = frozenset(),
+) -> set[str]:
+    def _is_guard_namespace(candidate: ast.AST) -> bool:
+        if (
+            isinstance(candidate, ast.Attribute)
+            and candidate.attr == "__dict__"
+        ):
+            return _is_profile_user_write_guard_module(
+                candidate.value,
+                module_aliases,
+                global_module_aliases,
+                assignments,
+                globals_,
+                wrapper_aliases,
+                global_wrapper_aliases,
+            )
+        if isinstance(candidate, ast.Call) and candidate.args:
+            call_names = _resolve_privileged_wrapper_call_names(
+                candidate.func,
+                assignments,
+                globals_,
+                wrapper_aliases,
+                global_wrapper_aliases,
+            )
+            return "vars" in call_names and _is_profile_user_write_guard_module(
+                candidate.args[0],
+                module_aliases,
+                global_module_aliases,
+                assignments,
+                globals_,
+                wrapper_aliases,
+                global_wrapper_aliases,
+            )
+        return False
+
+    if isinstance(expression, ast.Subscript):
+        mapping = expression.value
+        if _is_guard_namespace(mapping):
+            attribute_names = _resolve_strings(
+                expression.slice,
+                assignments,
+                globals_,
+            )
+            if not attribute_names:
+                return {_DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL}
+            return {
+                attribute_name
+                for attribute_name in attribute_names
+                if attribute_name in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS
+            }
+        return set()
+    if isinstance(expression, ast.Attribute):
+        if expression.attr in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS:
+            return {expression.attr}
+        return set()
+    if isinstance(expression, ast.Call):
+        if (
+            isinstance(expression.func, ast.Attribute)
+            and expression.func.attr == "get"
+            and expression.args
+            and _is_guard_namespace(expression.func.value)
+        ):
+            attribute_names = _resolve_strings(
+                expression.args[0],
+                assignments,
+                globals_,
+            )
+            if not attribute_names:
+                return {_DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL}
+            return {
+                attribute_name
+                for attribute_name in attribute_names
+                if attribute_name in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS
+            }
+        wrapper_call_names = _resolve_privileged_wrapper_call_names(
+            expression.func,
+            assignments,
+            globals_,
+            wrapper_aliases,
+            global_wrapper_aliases,
+        )
+        is_attrgetter, attrgetter_names = _resolve_attrgetter_attribute_names(
+            expression.func,
+            assignments,
+            globals_,
+            wrapper_aliases,
+            global_wrapper_aliases,
+        )
+        if (
+            is_attrgetter
+            and expression.args
+            and _is_profile_user_write_guard_module(
+                expression.args[0],
+                module_aliases,
+                global_module_aliases,
+                assignments,
+                globals_,
+                wrapper_aliases,
+                global_wrapper_aliases,
+            )
+        ):
+            attrgetter_segments = {
+                segment
+                for attribute_name in attrgetter_names
+                for segment in attribute_name.split(".")
+                if segment
+            }
+            if (
+                not attrgetter_names
+                or _DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL in attrgetter_names
+                or attrgetter_segments & {"__dict__", "__getattribute__"}
+            ):
+                return {_DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL}
+            return attrgetter_segments & PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS
+        getattribute_name_index: int | None = None
+        if "__getattribute__" in wrapper_call_names and expression.args:
+            if (
+                isinstance(expression.func, ast.Attribute)
+                and _is_profile_user_write_guard_module(
+                    expression.func.value,
+                    module_aliases,
+                    global_module_aliases,
+                    assignments,
+                    globals_,
+                    wrapper_aliases,
+                    global_wrapper_aliases,
+                )
+            ):
+                getattribute_name_index = 0
+            elif len(expression.args) >= 2 and _is_profile_user_write_guard_module(
+                expression.args[0],
+                module_aliases,
+                global_module_aliases,
+                assignments,
+                globals_,
+                wrapper_aliases,
+                global_wrapper_aliases,
+            ):
+                getattribute_name_index = 1
+        if getattribute_name_index is not None:
+            attribute_names = _resolve_strings(
+                expression.args[getattribute_name_index],
+                assignments,
+                globals_,
+            )
+            if not attribute_names:
+                return {_DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL}
+            return {
+                attribute_name
+                for attribute_name in attribute_names
+                if attribute_name in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS
+            }
+        if (
+            "getattr" in wrapper_call_names
+            and len(expression.args) >= 2
+            and _is_profile_user_write_guard_module(
+                expression.args[0],
+                module_aliases,
+                global_module_aliases,
+                assignments,
+                globals_,
+                wrapper_aliases,
+                global_wrapper_aliases,
+            )
+        ):
+            attribute_names = _resolve_strings(
+                expression.args[1],
+                assignments,
+                globals_,
+            )
+            if not attribute_names:
+                return {_DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL}
+            return {
+                attribute_name
+                for attribute_name in attribute_names
+                if attribute_name in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS
+            }
+        if "partial" in wrapper_call_names and expression.args:
+            wrapped = _resolve_privileged_membership_scope_sql_entrypoints(
+                expression.args[0],
+                assignments,
+                globals_,
+                aliases,
+                global_aliases,
+                module_aliases,
+                global_module_aliases,
+                wrapper_aliases,
+                global_wrapper_aliases,
+                seen,
+            )
+            if wrapped:
+                return wrapped | {_WRAPPED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL}
+        return set()
+    if not isinstance(expression, ast.Name) or expression.id in seen:
+        return set()
+
+    resolved: set[str] = set()
+    if expression.id in PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS:
+        resolved.add(expression.id)
+    imported_name = aliases.get(expression.id) or global_aliases.get(expression.id)
+    if imported_name is not None:
+        resolved.add(imported_name)
+    for value in assignments.get(expression.id) or globals_.get(expression.id) or []:
+        resolved.update(
+            _resolve_privileged_membership_scope_sql_entrypoints(
+                value,
+                assignments,
+                globals_,
+                aliases,
+                global_aliases,
+                module_aliases,
+                global_module_aliases,
+                wrapper_aliases,
+                global_wrapper_aliases,
+                seen | {expression.id},
+            )
+        )
+    return resolved
+
+
 def _direct_membership_import_aliases(tree: ast.AST) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -660,6 +1141,31 @@ def _trusted_membership_context_symbols(tree: ast.AST) -> frozenset[str]:
     return frozenset(symbols)
 
 
+def _trusted_membership_reasons(tree: ast.AST) -> frozenset[str]:
+    reasons: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _call_name(node) != "TrustedMembershipWriteContext":
+            continue
+        reason_keywords = [
+            keyword for keyword in node.keywords if keyword.arg == "trusted_reason"
+        ]
+        if len(reason_keywords) != 1:
+            reasons.add("<missing>")
+            continue
+        expression = reason_keywords[0].value
+        if (
+            isinstance(expression, ast.Attribute)
+            and isinstance(expression.value, ast.Name)
+            and expression.value.id == "TrustedMembershipReason"
+        ):
+            reasons.add(expression.attr)
+        else:
+            reasons.add("<dynamic>")
+    return frozenset(reasons)
+
+
 def _membership_context_category(
     expression: ast.AST,
     *,
@@ -674,7 +1180,9 @@ def _membership_context_category(
     if not isinstance(expression, ast.Call):
         return None
     call_name = _call_name(expression)
-    if call_name in ACTOR_MEMBERSHIP_CONTEXT_FACTORIES:
+    if call_name in ACTOR_MEMBERSHIP_CONTEXT_FACTORIES or call_name == (
+        "ActorMembershipWriteContext"
+    ):
         return "actor"
     if call_name == "TrustedMembershipWriteContext" and any(
         keyword.arg == "trusted_reason" for keyword in expression.keywords
@@ -689,25 +1197,11 @@ def _attribute_base_name(node: ast.Call) -> str:
     return ""
 
 
-def _contains_sql_call_candidate(source: str) -> bool:
-    if _SQL_CALL_IDENTIFIER_RE.search(source) is None:
-        return False
-    pending_call_name = False
-    for token in tokenize.generate_tokens(io.StringIO(source).readline):
-        if pending_call_name:
-            if token.type in _IGNORED_CALL_TOKENS or (
-                token.type == tokenize.OP and token.string == ")"
-            ):
-                continue
-            if token.type == tokenize.OP and token.string == "(":
-                return True
-            pending_call_name = False
-        if token.type == tokenize.NAME and token.string in SQL_CALL_NAMES:
-            pending_call_name = True
-    return False
-
-
-def _query_arguments(node: ast.Call) -> tuple[ast.AST, ...]:
+def _query_arguments(
+    node: ast.Call,
+    *,
+    call_name: str,
+) -> tuple[ast.AST, ...]:
     keyword_arguments = tuple(
         keyword.value
         for keyword in node.keywords
@@ -715,7 +1209,11 @@ def _query_arguments(node: ast.Call) -> tuple[ast.AST, ...]:
     )
     if keyword_arguments:
         return keyword_arguments
-    argument_index = 1 if _call_name(node) == "_execute_compat" else 0
+    argument_index = (
+        1
+        if call_name in {"_execute_compat", "_execute_membership_scope_sql"}
+        else 0
+    )
     return tuple(node.args[argument_index : argument_index + 1])
 
 
@@ -989,23 +1487,103 @@ def _scan_python_tree(
     relative_path = _relative_path(path, repo_root)
     grouped, parents = _nodes_in_scope_and_parents(tree)
     module_assignments: dict[str, list[ast.AST]] = defaultdict(list)
-    for node in grouped.get(tree, []):
+    module_nodes = grouped.get(tree, [])
+    module_aliases = _privileged_membership_scope_sql_import_aliases(module_nodes)
+    module_guard_aliases = _profile_user_write_guard_module_aliases(module_nodes)
+    module_wrapper_aliases = _privileged_wrapper_import_aliases(module_nodes)
+    for node in module_nodes:
         for name, value in _assignment_targets(node):
             module_assignments[name].append(value)
+            exported_entrypoints = (
+                _resolve_privileged_membership_scope_sql_entrypoints(
+                    value,
+                    module_assignments,
+                    module_assignments,
+                    module_aliases,
+                    module_aliases,
+                    module_guard_aliases,
+                    module_guard_aliases,
+                    module_wrapper_aliases,
+                    module_wrapper_aliases,
+                )
+            )
+            if exported_entrypoints:
+                raise AssertionError(
+                    "Membership-scope SQL capabilities must not be re-exported "
+                    f"at {relative_path}:{node.lineno}: {name} resolves to "
+                    f"{sorted(exported_entrypoints)}."
+                )
 
     for scope, nodes in grouped.items():
         assignments: dict[str, list[ast.AST]] = defaultdict(list)
+        aliases = _privileged_membership_scope_sql_import_aliases(nodes)
+        guard_aliases = _profile_user_write_guard_module_aliases(nodes)
+        wrapper_aliases = _privileged_wrapper_import_aliases(nodes)
         for node in nodes:
             for name, value in _assignment_targets(node):
                 assignments[name].append(value)
         for node in nodes:
             if not isinstance(node, ast.Call):
                 continue
-            call_name = _call_name(node)
+            privileged_entrypoints = (
+                _resolve_privileged_membership_scope_sql_entrypoints(
+                    node.func,
+                    assignments,
+                    module_assignments,
+                    aliases,
+                    module_aliases,
+                    guard_aliases,
+                    module_guard_aliases,
+                    wrapper_aliases,
+                    module_wrapper_aliases,
+                )
+            )
+            privileged_entrypoints.update(
+                _resolve_privileged_membership_scope_sql_entrypoints(
+                    node,
+                    assignments,
+                    module_assignments,
+                    aliases,
+                    module_aliases,
+                    guard_aliases,
+                    module_guard_aliases,
+                    wrapper_aliases,
+                    module_wrapper_aliases,
+                )
+            )
+            function = _qualified_scope(scope, parents)
+            indirect_entrypoints = privileged_entrypoints & {
+                _DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL,
+                _WRAPPED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL,
+            }
+            if indirect_entrypoints:
+                raise AssertionError(
+                    "Indirect membership-scope SQL capability caller at "
+                    f"{relative_path}:{node.lineno} in {function}: "
+                    f"{sorted(indirect_entrypoints)}."
+                )
+            if len(privileged_entrypoints) > 1:
+                raise AssertionError(
+                    "Ambiguous membership-scope SQL capability caller at "
+                    f"{relative_path}:{node.lineno} in {function}: "
+                    f"{sorted(privileged_entrypoints)}."
+                )
+            privileged_entrypoint = next(iter(privileged_entrypoints), None)
+            call_name = privileged_entrypoint or _call_name(node)
             if call_name not in SQL_CALL_NAMES:
                 continue
+            if privileged_entrypoint is not None and (
+                privileged_entrypoint,
+                relative_path,
+                function,
+            ) not in APPROVED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS:
+                raise AssertionError(
+                    "Unapproved membership-scope SQL capability caller "
+                    f"{privileged_entrypoint} at {relative_path}:{node.lineno} "
+                    f"in {function}."
+                )
             sql_values: set[str] = set()
-            for argument in _query_arguments(node):
+            for argument in _query_arguments(node, call_name=call_name):
                 resolved = _resolve_strings(
                     argument,
                     assignments,
@@ -1016,7 +1594,6 @@ def _scan_python_tree(
                     assignments,
                     module_assignments,
                 ):
-                    function = _qualified_scope(scope, parents)
                     raise AssertionError(
                         "Unable to statically resolve SQL expression at "
                         f"{relative_path}:{node.lineno} in {function} "
@@ -1054,6 +1631,18 @@ def _scan_python_tree(
                         ),
                     )
             observed.extend(call_observed.values())
+    for imported, line in _privileged_membership_scope_sql_imports(
+        tree,
+        relative_path=relative_path,
+        parents=parents,
+    ):
+        if imported not in APPROVED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_IMPORTS:
+            entrypoint, local_name, _, function = imported
+            raise AssertionError(
+                "Unapproved membership-scope SQL capability import "
+                f"{entrypoint} as {local_name} at {relative_path}:{line} "
+                f"in {function}."
+            )
     return tuple(sorted(observed))
 
 
@@ -1069,16 +1658,115 @@ def _scan_python_source(
 
 @cache
 def _scan_sql_calls() -> tuple[ObservedWrite, ...]:
+    return _scan_python_root(app_root=APP_ROOT, repo_root=REPO_ROOT)
+
+
+def _scan_python_root(
+    *,
+    app_root: Path,
+    repo_root: Path,
+) -> tuple[ObservedWrite, ...]:
     observed: list[ObservedWrite] = []
-    for path in sorted(APP_ROOT.rglob("*.py")):
+    for path in sorted(app_root.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        if not _contains_sql_call_candidate(source):
-            continue
         observed.extend(
             _scan_python_source(
                 path=path,
                 source=source,
-                repo_root=REPO_ROOT,
+                repo_root=repo_root,
+            )
+        )
+    return tuple(sorted(observed))
+
+
+def _membership_scope_sql_helper_callers() -> tuple[tuple[str, str, str], ...]:
+    observed: list[tuple[str, str, str]] = []
+    for path in sorted(APP_ROOT.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        grouped, parents = _nodes_in_scope_and_parents(tree)
+        relative_path = _relative_path(path)
+        module_nodes = grouped.get(tree, [])
+        module_aliases = _privileged_membership_scope_sql_import_aliases(
+            module_nodes
+        )
+        module_guard_aliases = _profile_user_write_guard_module_aliases(
+            module_nodes
+        )
+        module_wrapper_aliases = _privileged_wrapper_import_aliases(module_nodes)
+        module_assignments: dict[str, list[ast.AST]] = defaultdict(list)
+        for node in module_nodes:
+            for name, value in _assignment_targets(node):
+                module_assignments[name].append(value)
+        for scope, nodes in grouped.items():
+            assignments: dict[str, list[ast.AST]] = defaultdict(list)
+            aliases = _privileged_membership_scope_sql_import_aliases(nodes)
+            guard_aliases = _profile_user_write_guard_module_aliases(nodes)
+            wrapper_aliases = _privileged_wrapper_import_aliases(nodes)
+            for node in nodes:
+                for name, value in _assignment_targets(node):
+                    assignments[name].append(value)
+            for node in nodes:
+                if not isinstance(node, ast.Call):
+                    continue
+                entrypoints = _resolve_privileged_membership_scope_sql_entrypoints(
+                    node.func,
+                    assignments,
+                    module_assignments,
+                    aliases,
+                    module_aliases,
+                    guard_aliases,
+                    module_guard_aliases,
+                    wrapper_aliases,
+                    module_wrapper_aliases,
+                )
+                entrypoints.update(
+                    _resolve_privileged_membership_scope_sql_entrypoints(
+                        node,
+                        assignments,
+                        module_assignments,
+                        aliases,
+                        module_aliases,
+                        guard_aliases,
+                        module_guard_aliases,
+                        wrapper_aliases,
+                        module_wrapper_aliases,
+                    )
+                )
+                indirect_entrypoints = entrypoints & {
+                    _DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL,
+                    _WRAPPED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL,
+                }
+                if indirect_entrypoints:
+                    raise AssertionError(
+                        "Indirect membership-scope SQL capability caller at "
+                        f"{relative_path}:{node.lineno} in "
+                        f"{_qualified_scope(scope, parents)}: "
+                        f"{sorted(indirect_entrypoints)}."
+                    )
+                observed.extend(
+                    (
+                        entrypoint,
+                        relative_path,
+                        _qualified_scope(scope, parents),
+                    )
+                    for entrypoint in entrypoints
+                )
+    return tuple(sorted(observed))
+
+
+def _membership_scope_sql_helper_imports() -> tuple[tuple[str, str, str, str], ...]:
+    observed: list[tuple[str, str, str, str]] = []
+    for path in sorted(APP_ROOT.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        _, parents = _nodes_in_scope_and_parents(tree)
+        observed.extend(
+            imported
+            for imported, _line in _privileged_membership_scope_sql_imports(
+                tree,
+                relative_path=_relative_path(path),
+                parents=parents,
             )
         )
     return tuple(sorted(observed))
@@ -1087,9 +1775,7 @@ def _scan_sql_calls() -> tuple[ObservedWrite, ...]:
 def _partition_inventory() -> dict[str, tuple[ObservedWrite, ...]]:
     groups: dict[str, list[ObservedWrite]] = defaultdict(list)
     for write in _scan_sql_calls():
-        if write.path in (
-            OFFLINE_MIGRATION_PATHS | UNRELATED_CONTENT_DATABASE_PATHS
-        ):
+        if write.path in OFFLINE_MIGRATION_PATHS:
             groups["excluded"].append(write)
         elif any(
             write.operation.startswith(f"{verb} users")
@@ -1167,6 +1853,18 @@ def test_membership_dml_inventory_is_frozen() -> None:
     )
 
 
+def test_membership_scope_sql_capability_callers_are_frozen() -> None:
+    assert Counter(_membership_scope_sql_helper_callers()) == Counter(
+        EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS
+    )
+
+
+def test_membership_scope_sql_capability_imports_are_frozen() -> None:
+    assert Counter(_membership_scope_sql_helper_imports()) == Counter(
+        EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_IMPORTS
+    )
+
+
 def test_direct_membership_callers_supply_explicit_context() -> None:
     missing_context: list[str] = []
     wrong_context_category: list[str] = []
@@ -1219,6 +1917,78 @@ def test_direct_membership_callers_supply_explicit_context() -> None:
     )
 
 
+def test_shared_membership_writer_calls_supply_complete_explicit_contract() -> None:
+    incomplete: list[str] = []
+    required_keywords = {
+        "conn",
+        "context",
+        "mutations",
+        "anchor_ownership",
+        "operation_time",
+    }
+    for path in sorted(APP_ROOT.rglob("*.py")):
+        relative_path = _relative_path(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _call_name(node) != "apply_membership_mutations":
+                continue
+            supplied = {keyword.arg for keyword in node.keywords}
+            missing = sorted(required_keywords - supplied)
+            if missing:
+                incomplete.append(
+                    f"{relative_path}:{node.lineno} missing {', '.join(missing)}"
+                )
+    assert not incomplete, (
+        "Shared membership writer calls must supply the complete explicit contract:\n  "
+        + "\n  ".join(incomplete)
+    )
+
+
+def test_runtime_trusted_membership_reasons_are_exact_and_path_owned() -> None:
+    observed: dict[str, frozenset[str]] = {}
+    for path in sorted(APP_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        reasons = _trusted_membership_reasons(tree)
+        if reasons:
+            observed[_relative_path(path)] = reasons
+
+    assert observed == EXPECTED_TRUSTED_MEMBERSHIP_REASONS
+
+
+def test_task8_membership_paths_do_not_import_work_package3_pipeline() -> None:
+    task8_paths = (
+        APP_ROOT / "core/AuthNZ/membership_writer.py",
+        APP_ROOT / "core/AuthNZ/repos/orgs_teams_repo.py",
+        APP_ROOT / "core/AuthNZ/federation/provisioning_service.py",
+        APP_ROOT / "services/registration_service.py",
+        APP_ROOT / "services/org_invite_service.py",
+        APP_ROOT / "api/v1/endpoints/admin/admin_tenant_provisioning.py",
+    )
+    forbidden_modules = {
+        "tldw_Server_API.app.core.UserProfiles.contracts",
+        "tldw_Server_API.app.core.UserProfiles.effects",
+        "tldw_Server_API.app.core.UserProfiles.executor",
+        "tldw_Server_API.app.core.UserProfiles.planner",
+    }
+    leaked: list[str] = []
+    for path in task8_paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module in forbidden_modules:
+                leaked.append(f"{_relative_path(path)}:{node.lineno} {node.module}")
+            elif isinstance(node, ast.Import):
+                for imported in node.names:
+                    if imported.name in forbidden_modules:
+                        leaked.append(
+                            f"{_relative_path(path)}:{node.lineno} {imported.name}"
+                        )
+    assert not leaked, "Work Package 3 imports leaked into Task 8:\n  " + "\n  ".join(
+        leaked
+    )
+
+
 def test_parent_scope_delete_inventory_is_frozen() -> None:
     inventory = _partition_inventory()
     _assert_inventory(
@@ -1228,14 +1998,11 @@ def test_parent_scope_delete_inventory_is_frozen() -> None:
     )
 
 
-def test_only_offline_migrations_or_content_databases_are_excluded() -> None:
+def test_only_offline_migrations_are_excluded() -> None:
     inventory = _partition_inventory()
     excluded = inventory.get("excluded", ())
     for write in excluded:
-        assert (
-            write.path in OFFLINE_MIGRATION_PATHS
-            or write.path in UNRELATED_CONTENT_DATABASE_PATHS
-        ), write.diagnostic()
+        assert write.path in OFFLINE_MIGRATION_PATHS, write.diagnostic()
     _assert_inventory(
         label="Excluded offline/content-database write",
         observed=excluded,
@@ -1302,6 +2069,23 @@ def _scan_fixture_source(
         source=textwrap.dedent(source).lstrip(),
         repo_root=tmp_path,
     )
+
+
+def _scan_fixture_files(
+    tmp_path: Path,
+    sources: dict[str, str],
+) -> tuple[ObservedWrite, ...]:
+    fixture_root = tmp_path / "fixture_app"
+    observed: list[ObservedWrite] = []
+    for relative_path, source in sorted(sources.items()):
+        observed.extend(
+            _scan_python_source(
+                path=fixture_root / relative_path,
+                source=textwrap.dedent(source).lstrip(),
+                repo_root=tmp_path,
+            )
+        )
+    return tuple(sorted(observed))
 
 
 def _assert_all_write_families(observed: tuple[ObservedWrite, ...]) -> None:
@@ -1447,6 +2231,470 @@ def test_plain_unresolved_query_parameter_is_delegated_to_runtime_guard(
             connection_identity=object(),
             operation="execute",
         )
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
+            backend="sqlite",
+            connection_identity=object(),
+            operation="execute",
+        )
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            "DELETE FROM organizations WHERE id = ?",
+            backend="sqlite",
+            connection_identity=object(),
+            operation="execute",
+        )
+
+
+def test_unapproved_membership_scope_sql_capability_caller_is_rejected(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(AssertionError) as exc_info:
+        _scan_fixture_source(
+            tmp_path,
+            """
+            from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+                _execute_membership_scope_sql,
+            )
+
+            async def unapproved_writer(conn, statement):
+                await _execute_membership_scope_sql(
+                    conn,
+                    statement,
+                    backend="sqlite",
+                )
+            """,
+        )
+
+    diagnostic = str(exc_info.value)
+    assert "fixture_app/scanner_case.py:6" in diagnostic
+    assert "unapproved_writer" in diagnostic
+    assert "Unapproved membership-scope SQL capability caller" in diagnostic
+
+
+@pytest.mark.parametrize(
+    ("source", "line", "entrypoint"),
+    (
+        (
+            """
+            from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _execute_membership_scope_sql as execute_alias
+
+            async def unapproved_writer(conn, statement):
+                await execute_alias(conn, statement, backend="sqlite")
+            """,
+            4,
+            "_execute_membership_scope_sql",
+        ),
+        (
+            """
+            from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _execute_membership_scope_sql
+
+            async def unapproved_writer(conn, statement):
+                local_execute = _execute_membership_scope_sql
+                await local_execute(conn, statement, backend="sqlite")
+            """,
+            5,
+            "_execute_membership_scope_sql",
+        ),
+        (
+            """
+            from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _mint_membership_scope_sql
+
+            def unapproved_writer(statement, connection):
+                return _mint_membership_scope_sql(statement, backend="sqlite", connection_identity=connection, execution_mode="execute")
+            """,
+            4,
+            "_mint_membership_scope_sql",
+        ),
+        (
+            """
+            from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _mint_membership_scope_sql as mint_alias
+
+            def unapproved_writer(statement, connection):
+                return mint_alias(statement, backend="sqlite", connection_identity=connection, execution_mode="execute")
+            """,
+            4,
+            "_mint_membership_scope_sql",
+        ),
+        (
+            """
+            from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _mint_membership_scope_sql
+
+            def unapproved_writer(statement, connection):
+                local_mint = _mint_membership_scope_sql
+                return local_mint(statement, backend="sqlite", connection_identity=connection, execution_mode="execute")
+            """,
+            5,
+            "_mint_membership_scope_sql",
+        ),
+    ),
+)
+def test_privileged_membership_scope_sql_aliases_are_rejected(
+    tmp_path: Path,
+    source: str,
+    line: int,
+    entrypoint: str,
+) -> None:
+    with pytest.raises(AssertionError) as exc_info:
+        _scan_fixture_source(tmp_path, source)
+
+    diagnostic = str(exc_info.value)
+    assert f"fixture_app/scanner_case.py:{line}" in diagnostic
+    assert "unapproved_writer" in diagnostic
+    assert entrypoint in diagnostic
+
+
+def test_privileged_membership_scope_sql_renamed_reexport_is_rejected(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(AssertionError) as exc_info:
+        _scan_fixture_files(
+            tmp_path,
+            {
+                "bridge.py": """
+                    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+                        _execute_membership_scope_sql as forwarded_write,
+                    )
+                """,
+                "consumer.py": """
+                    from fixture_app.bridge import forwarded_write
+
+                    async def unapproved_writer(conn, statement):
+                        await forwarded_write(conn, statement, backend="sqlite")
+                """,
+            },
+        )
+
+    diagnostic = str(exc_info.value)
+    assert "fixture_app/bridge.py:1" in diagnostic
+    assert "_execute_membership_scope_sql" in diagnostic
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = getattr(guard, "_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            helper = getattr(guard, attribute_name)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            guard_alias = guard
+            helper = getattr(guard_alias, attribute_name)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import functools
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = functools.partial(
+                guard._execute_membership_scope_sql,
+                conn,
+            )
+            await helper(statement, backend="sqlite")
+        """,
+        """
+        from functools import partial as bind
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = bind(guard._execute_membership_scope_sql, conn)
+            await helper(statement, backend="sqlite")
+        """,
+        """
+        from builtins import getattr as lookup
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            helper = lookup(guard, attribute_name)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = guard.__dict__["_execute_membership_scope_sql"]
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = vars(guard)["_execute_membership_scope_sql"]
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = guard.__dict__.get("_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        from importlib import import_module
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            guard = import_module(
+                "tldw_Server_API.app.core.AuthNZ.profile_user_write_guard"
+            )
+            helper = getattr(guard, attribute_name)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        async def unapproved_writer(conn, statement):
+            guard = __import__(
+                "tldw_Server_API.app.core.AuthNZ.profile_user_write_guard",
+                fromlist=["_execute_membership_scope_sql"],
+            )
+            helper = getattr(guard, "_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        async def unapproved_writer(conn, statement):
+            importer = __import__
+            guard = importer(
+                "tldw_Server_API.app.core.AuthNZ.profile_user_write_guard",
+                fromlist=["_execute_membership_scope_sql"],
+            )
+            helper = getattr(guard, "_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = guard.__getattribute__("_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            helper = guard.__getattribute__(attribute_name)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = object.__getattribute__(
+                guard,
+                "_execute_membership_scope_sql",
+            )
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            helper = object.__getattribute__(guard, attribute_name)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = type(guard).__getattribute__(
+                guard,
+                "_execute_membership_scope_sql",
+            )
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = operator.attrgetter("_execute_membership_scope_sql")(guard)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        from operator import attrgetter as select_attribute
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            selector = select_attribute("_execute_membership_scope_sql")
+            helper = selector(guard)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            helper = operator.attrgetter(attribute_name)(guard)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            _, helper = operator.attrgetter(
+                "__name__",
+                "_execute_membership_scope_sql",
+            )(guard)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement, attribute_name):
+            _, helper = operator.attrgetter("__name__", attribute_name)(guard)
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            namespace = operator.attrgetter("__dict__")(guard)
+            helper = namespace["_execute_membership_scope_sql"]
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        from operator import attrgetter as select_attribute
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            namespace_selector = select_attribute("__dict__")
+            namespace = namespace_selector(guard)
+            helper = namespace["_execute_membership_scope_sql"]
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            _, namespace = operator.attrgetter("__name__", "__dict__")(guard)
+            helper = namespace["_execute_membership_scope_sql"]
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            lookup = operator.attrgetter("__dict__.get")(guard)
+            helper = lookup("_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        from operator import attrgetter as select_attribute
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            selector = select_attribute("__dict__.get")
+            lookup = selector(guard)
+            helper = lookup("_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            _, lookup = operator.attrgetter("__name__", "__dict__.get")(guard)
+            helper = lookup("_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            lookup = operator.attrgetter("__getattribute__")(guard)
+            helper = lookup("_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        from operator import attrgetter as select_attribute
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            selector = select_attribute("__getattribute__")
+            lookup = selector(guard)
+            helper = lookup("_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            _, lookup = operator.attrgetter(
+                "__name__",
+                "__class__.__getattribute__",
+            )(guard)
+            helper = lookup(guard, "_execute_membership_scope_sql")
+            await helper(conn, statement, backend="sqlite")
+        """,
+        """
+        import operator
+        import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard
+
+        async def unapproved_writer(conn, statement):
+            helper = operator.attrgetter(
+                "_execute_membership_scope_sql.__call__"
+            )(guard)
+            await helper(conn, statement, backend="sqlite")
+        """,
+    ),
+)
+def test_privileged_membership_scope_sql_dynamic_wrappers_are_rejected(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    with pytest.raises(AssertionError) as exc_info:
+        _scan_fixture_source(tmp_path, source)
+
+    diagnostic = str(exc_info.value)
+    assert "fixture_app/scanner_case.py" in diagnostic
+    assert "unapproved_writer" in diagnostic
+
+
+def test_global_scanner_rejects_split_dynamic_guard_and_helper_names(
+    tmp_path: Path,
+) -> None:
+    fixture_root = tmp_path / "fixture_app"
+    fixture_root.mkdir()
+    (fixture_root / "split_dynamic.py").write_text(
+        textwrap.dedent(
+            """
+            from importlib import import_module
+
+            async def unapproved_writer(conn, statement):
+                module_name = (
+                    "tldw_Server_API.app.core.AuthNZ.profile_user_"
+                    + "write_guard"
+                )
+                helper_name = "_execute_membership_" + "scope_sql"
+                guard = import_module(module_name)
+                helper = getattr(guard, helper_name)
+                await helper(conn, statement, backend="sqlite")
+            """
+        ).lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AssertionError):
+        _scan_python_root(app_root=fixture_root, repo_root=tmp_path)
 
 
 def test_scanner_fails_closed_through_container_alias_and_cycle(

@@ -7,13 +7,27 @@ and role assignment into one atomic provisioning operation.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    AnchorOwnership,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipTargetNotFound,
+    MembershipWriter,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
+    AuthnzOrgsTeamsRepo,
+)
 
 router = APIRouter(prefix="/provisioning", tags=["admin-provisioning"])
 
@@ -30,10 +44,9 @@ class TenantProvisionRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     org_name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field(
+    role: Literal["owner"] = Field(
         default="owner",
-        pattern=r"^(owner|admin|lead|member)$",
-        description="Role to assign the user within the new org.",
+        description="The initial tenant user is always the organization owner.",
     )
 
 
@@ -68,6 +81,11 @@ async def provision_tenant(
     2. Create organisation
     3. Add user as org member with requested role
     """
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to provision tenants",
+        )
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
@@ -112,6 +130,16 @@ async def provision_tenant(
             )
             user_id = insert_result.affected_user_ids[0]
 
+            creation_context = ActorMembershipWriteContext(
+                actor_user_id=principal.user_id,
+                required_authority=MembershipAuthority.PLATFORM_ADMIN,
+            )
+            await MembershipWriter(pool).authorize_organization_creation(
+                conn=conn,
+                context=creation_context,
+                owner_user_id=user_id,
+            )
+
             # 2. Create organization owned by the new user.
             if is_postgres:
                 row = await conn.fetchrow(
@@ -123,24 +151,26 @@ async def provision_tenant(
                 if not row:
                     raise RuntimeError("Tenant organization insert returned no id")
                 org_id = int(row["id"])
-                await conn.execute(
-                    "INSERT INTO public.org_members (org_id, user_id, role) "
-                    "VALUES ($1, $2, $3)",
-                    org_id,
-                    user_id,
-                    payload.role,
-                )
             else:
                 cur = await conn.execute(
                     "INSERT INTO main.organizations (name, owner_user_id) VALUES (?, ?)",
                     (payload.org_name, user_id),
                 )
                 org_id = int(cur.lastrowid)
-                await conn.execute(
-                    "INSERT INTO main.org_members (org_id, user_id, role) "
-                    "VALUES (?, ?, ?)",
-                    (org_id, user_id, payload.role),
-                )
+            await AuthnzOrgsTeamsRepo(
+                pool
+            ).provision_org_membership_on_connection(
+                conn=conn,
+                org_id=org_id,
+                user_id=user_id,
+                org_role=payload.role,
+                team_id=None,
+                team_role=None,
+                team_failure_is_best_effort=False,
+                context=creation_context,
+                anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+                operation_time=datetime.now(timezone.utc),
+            )
 
         logger.info(
             "Tenant provisioned: user_id={}, org_id={}, role={}, by admin={}",
@@ -158,6 +188,11 @@ async def provision_tenant(
             role=payload.role,
         )
 
+    except (MembershipAuthorizationError, MembershipTargetNotFound):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to provision tenants",
+        ) from None
     except HTTPException:
         raise
     except Exception as exc:

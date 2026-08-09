@@ -21,6 +21,9 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
         TrustedMembershipWriteContext,
     )
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
     from tldw_Server_API.app.core.AuthNZ.profile_version import (
         VersionedUserWriteGateway,
     )
@@ -105,17 +108,21 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
-
-    # Create organization and add members
-    org = await repo.create_organization(name="Acme Corp", owner_user_id=owner_id)
-    org_id = org["id"]
+    bootstrap_context = TrustedMembershipWriteContext(
+        trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+    )
     owner_context = ActorMembershipWriteContext(
         actor_user_id=owner_id,
         required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
     )
-    bootstrap_context = TrustedMembershipWriteContext(
-        trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+
+    # Create organization and add members
+    org = await repo.create_organization_with_owner_membership(
+        name="Acme Corp",
+        owner_user_id=owner_id,
+        context=owner_context,
     )
+    org_id = org["id"]
 
     updated_org = await repo.update_organization(
         org_id=org_id,
@@ -128,7 +135,12 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
     assert updated_org["slug"] == "acme-corp-updated"
     assert updated_org.get("updated_at") is not None
 
-    await repo.create_organization(name="Other Org", owner_user_id=owner_id, slug="other-org")
+    await repo.create_organization_with_owner_membership(
+        name="Other Org",
+        owner_user_id=owner_id,
+        slug="other-org",
+        context=bootstrap_context,
+    )
     with pytest.raises(DuplicateOrganizationError):
         await repo.update_organization(org_id=org_id, slug="other-org")
 
@@ -139,7 +151,7 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
         role="owner",
         context=owner_context,
     )
-    assert touch_calls == [owner_id]
+    assert touch_calls == []
     before_member_add = await ProfileVersionGateway(pool).read(member_id)
     touch_calls.clear()
     member_membership = await repo.add_org_member(
@@ -292,6 +304,12 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
         "user_id": member_id,
         "removed": False,
     }
+    await repo.add_team_member(
+        team_id=team_id,
+        user_id=member_id,
+        role="member",
+        context=owner_context,
+    )
 
     # Update non-owner role
     updated_member = await repo.update_org_member_role(
@@ -357,6 +375,31 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
     )
     assert member_team_count_after == 0
     assert owner_team_count_after == 1
+    assert await pool.fetchval(
+        "SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?",
+        (team_id, member_id),
+    ) == 0
+
+    await repo.add_org_member(
+        org_id=org_id,
+        user_id=member_id,
+        role="member",
+        context=bootstrap_context,
+    )
+    await repo.add_team_member(
+        team_id=team_id,
+        user_id=member_id,
+        role="member",
+        context=bootstrap_context,
+    )
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            "DELETE FROM main.org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, member_id),
+            backend="sqlite",
+        )
+    assert await repo.list_active_team_memberships_for_user(member_id) == []
 
     # Removing the last owner should be blocked with owner_required
     touch_calls.clear()
@@ -372,9 +415,10 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
 
     for owner_status in ("inactive", None):
         status_label = owner_status or "null"
-        inactive_owner_org = await repo.create_organization(
+        inactive_owner_org = await repo.create_organization_with_owner_membership(
             name=f"Inactive Owner {status_label}",
             owner_user_id=outsider_id,
+            context=bootstrap_context,
         )
         inactive_owner_org_id = int(inactive_owner_org["id"])
         await repo.add_org_member(
@@ -390,9 +434,12 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
             context=bootstrap_context,
         )
         async with pool.transaction() as conn:
-            await conn.execute(
-                "UPDATE org_members SET status = ? WHERE org_id = ? AND user_id = ?",
+            await _execute_membership_scope_sql(
+                conn,
+                "UPDATE main.org_members SET status = ? "
+                "WHERE org_id = ? AND user_id = ?",
                 (owner_status, inactive_owner_org_id, outsider_id),
+                backend="sqlite",
             )
 
         touch_calls.clear()
@@ -408,10 +455,12 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
         }
         assert touch_calls == [outsider_id]
 
-    mismatched_owner_org = await repo.create_organization(
-        name="Mismatched Owner",
-        owner_user_id=member_id,
-    )
+    async with pool.transaction() as conn:
+        mismatched_owner_org = await repo._create_organization_on_connection(  # noqa: SLF001
+            conn,
+            name="Mismatched Owner",
+            owner_user_id=member_id,
+        )
     with pytest.raises(MembershipAuthorizationError):
         await repo.add_org_member(
             org_id=int(mismatched_owner_org["id"]),

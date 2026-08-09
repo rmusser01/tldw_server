@@ -90,7 +90,11 @@ async def test_org_rbac_scoped_permissions_require_active_sqlite(tmp_path, monke
     user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", ("alice",))
 
     repo = AuthnzOrgsTeamsRepo(pool)
-    org = await repo.create_organization(name="Acme", owner_user_id=user_id)
+    org = await repo.create_organization_with_owner_membership(
+        name="Acme",
+        owner_user_id=user_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     org_id = org["id"]
     await repo.add_org_member(org_id=org_id, user_id=user_id, role="owner", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
@@ -170,7 +174,7 @@ async def test_org_rbac_scoped_permissions_endpoint_allows_media_read(tmp_path, 
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
-    org = await repo.create_organization(name="Scoped Org", owner_user_id=user_id)
+    org = await repo.create_organization(name="Scoped Org", owner_user_id=None)
     await repo.add_org_member(org_id=org["id"], user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     api_key_mgr = APIKeyManager()
@@ -231,7 +235,7 @@ async def test_org_rbac_scoped_permissions_denylist_blocks_admin(tmp_path, monke
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
-    org = await repo.create_organization(name="Deny Org", owner_user_id=user_id)
+    org = await repo.create_organization(name="Deny Org", owner_user_id=None)
     await repo.add_org_member(org_id=org["id"], user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     async with pool.transaction() as conn:
@@ -312,7 +316,7 @@ async def test_org_rbac_scoped_permissions_team_denylist_blocks_admin(tmp_path, 
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
-    org = await repo.create_organization(name="Deny Team Org", owner_user_id=user_id)
+    org = await repo.create_organization(name="Deny Team Org", owner_user_id=None)
     org_id = org["id"]
     await repo.add_org_member(org_id=org_id, user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
@@ -398,7 +402,7 @@ async def test_org_rbac_scoped_permissions_allows_tools_execute(tmp_path, monkey
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
-    org = await repo.create_organization(name="Tool Org", owner_user_id=user_id)
+    org = await repo.create_organization(name="Tool Org", owner_user_id=None)
     org_id = org["id"]
     await repo.add_org_member(org_id=org_id, user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
@@ -486,8 +490,8 @@ async def test_org_rbac_scoped_permissions_jwt_active_org_claims(tmp_path, monke
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
-    org_alpha = await repo.create_organization(name="Org Alpha", owner_user_id=int(user["id"]))
-    org_beta = await repo.create_organization(name="Org Beta", owner_user_id=int(user["id"]))
+    org_alpha = await repo.create_organization(name="Org Alpha", owner_user_id=None)
+    org_beta = await repo.create_organization(name="Org Beta", owner_user_id=None)
     await repo.add_org_member(org_id=org_alpha["id"], user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
     await repo.add_org_member(org_id=org_beta["id"], user_id=int(user["id"]), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
@@ -577,10 +581,10 @@ async def test_org_rbac_scoped_permissions_active_org_includes_team_perms(tmp_pa
 
     repo = AuthnzOrgsTeamsRepo(pool)
     org_primary = await repo.create_organization(
-        name="Org Primary", owner_user_id=int(user["id"])
+        name="Org Primary", owner_user_id=None
     )
     org_secondary = await repo.create_organization(
-        name="Org Secondary", owner_user_id=int(user["id"])
+        name="Org Secondary", owner_user_id=None
     )
     await repo.add_org_member(org_id=org_primary["id"], user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
     await repo.add_org_member(org_id=org_secondary["id"], user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
@@ -678,7 +682,7 @@ async def test_org_rbac_scoped_permissions_jwt_active_team_derives_org(tmp_path,
 
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(
-        name="Team Derive Org", owner_user_id=int(user["id"])
+        name="Team Derive Org", owner_user_id=None
     )
     team = await repo.create_team(org_id=int(org["id"]), name="Team A")
     await repo.add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
@@ -758,7 +762,7 @@ async def test_org_rbac_scoped_permissions_jwt_require_active_fallback(tmp_path,
 
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(
-        name="Fallback Org", owner_user_id=int(user["id"])
+        name="Fallback Org", owner_user_id=None
     )
     await repo.add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 

@@ -46,13 +46,17 @@ async def test_orgs_teams_crud_sqlite(tmp_path, authnz_schema_ready):
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         add_org_member,
         add_team_member,
-        create_organization,
+        create_organization_with_owner_membership,
         create_team,
         list_organizations,
         list_team_members,
     )
 
-    org = await create_organization(name="Acme Corp", owner_user_id=user_id)
+    org = await create_organization_with_owner_membership(
+        name="Acme Corp",
+        owner_user_id=user_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert org['id'] > 0 and org['name'] == 'Acme Corp'
 
     orgs = await list_organizations()

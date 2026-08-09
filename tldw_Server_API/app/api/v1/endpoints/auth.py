@@ -952,34 +952,34 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
             TrustedMembershipReason,
             TrustedMembershipWriteContext,
         )
-        from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
         from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
+        pool = await get_db_pool()
+        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+        context = TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        )
         org = None
         for attempt in range(3):
             name = base_name if attempt == 0 else f"{base_name}-{secrets.token_hex(2)}"
             try:
-                org = await create_organization(name=name, owner_user_id=int(user_id))
+                org = await repo.create_organization_with_owner_membership(
+                    name=name,
+                    owner_user_id=int(user_id),
+                    context=context,
+                )
                 break
             except DuplicateOrganizationError:
                 continue
 
         if not org:
             return
-
-        pool = await get_db_pool()
-        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-        await repo.add_org_member(
-            org_id=org["id"],
-            user_id=int(user_id),
-            role="owner",
-            context=TrustedMembershipWriteContext(
-                trusted_reason=TrustedMembershipReason.BOOTSTRAP,
-            ),
-        )
     except Exception as exc:
         # Best-effort bootstrap: org creation failures must not block login flows.
-        logger.warning("Org bootstrap failed for user {}: {}", user_id, exc)
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Org bootstrap failed for user_id={}",
+            user_id,
+        )
 
 def _is_pytest_context() -> bool:
     """Return True when running under pytest or explicit test-mode flags."""

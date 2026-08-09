@@ -122,6 +122,9 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.profile_version import (
+        VersionedUserWriteGateway,
+    )
     from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
         AuthnzUserProviderSecretsRepo,
     )
@@ -192,13 +195,27 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
         include_revoked=True,
     )
     assert active_owner_row is not None
-    await pool.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+    async with pool.transaction() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=user_id,
+            profile_visible_fields=("is_active",),
+            statement="UPDATE users SET is_active = ? WHERE id = ?",
+            parameters=(False, user_id),
+        )
     assert await repo.fetch_secret_for_active_user(
         user_id,
         "openai",
         include_revoked=True,
     ) is None
-    await pool.execute("UPDATE users SET is_active = 1 WHERE id = ?", (user_id,))
+    async with pool.transaction() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=user_id,
+            profile_visible_fields=("is_active",),
+            statement="UPDATE users SET is_active = ? WHERE id = ?",
+            parameters=(True, user_id),
+        )
 
     items = await repo.list_secrets_for_user(user_id)
     assert len(items) == 1

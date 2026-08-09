@@ -648,7 +648,7 @@ def _guard_postgres_copy_target(table_name: Any) -> None:
     target = table_name.strip().rsplit(".", 1)[-1]
     if len(target) >= 2 and target[0] == target[-1] and target[0] in {'"', "'"}:
         target = target[1:-1]
-    if target.lower() == "users":
+    if target.lower() in {"users", "org_members", "team_members"}:
         raise ProfileUserWriteRejected()
 
 
