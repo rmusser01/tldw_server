@@ -300,9 +300,14 @@ When either `CLAIMS_JOBS_ENABLED` or `CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED` is
 disabled, the request runs synchronously and returns HTTP 200 with a ready
 artifact and null Job fields. When both producer flags are enabled, the request
 returns HTTP 202 with a queued artifact, `job_id`, `job_status`, and
-`snapshot_at`; the same response also includes the owner-scoped `download_url`.
-The producer does not require `CLAIMS_JOBS_WORKER_ENABLED`, because dedicated
-worker processes may run the WorkerSDK service separately.
+`snapshot_at`; these additive fields remain nullable in the response contract.
+If the enqueue call returns without a complete Job ID/status projection, Claims
+still returns HTTP 202 because the Job may already be accepted. The worker and
+bounded reconciliation repair the artifact association. HTTP 503 with
+`claims_export_enqueue_failed` applies only when enqueue raises before returning
+acceptance, never after accepted Job creation. The producer does not require
+`CLAIMS_JOBS_WORKER_ENABLED`, because dedicated worker processes may run the
+WorkerSDK service separately.
 
 Download endpoint: `GET /api/v1/claims/analytics/export/{export_id}` returns the
 export payload (JSON) or CSV body only when the artifact is ready.
@@ -345,7 +350,17 @@ Response schema:
   ],
   "total": 0,
   "limit": 100,
-  "offset": 0
+  "offset": 0,
+  "pagination": {
+    "mode": "offset",
+    "limit": 100,
+    "offset": 0,
+    "total": 0,
+    "has_more": false,
+    "next_offset": null
+  },
+  "has_more": false,
+  "next_offset": null
 }
 ```
 
@@ -404,36 +419,60 @@ Cleanup:
   `CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC` (default 300).
 - Once retention eligibility is reached, lifecycle-aware cleanup may delete aged
   ready artifacts, aged failed artifacts whose Jobs state is terminal, and
-  reconciled failed artifacts with no Job. It preserves queued, processing,
-  retrying, and uncertain non-ready artifacts. If Jobs cannot be read, uncertain
-  non-ready artifacts are left unchanged.
+  reconciled failed artifacts with no Job. A failed artifact that still retains
+  `job_id` becomes deletion-eligible only after retention plus orphan grace when
+  a successful owner-scoped lookup of active and archived Jobs returns no row,
+  proving that the Job was pruned or is missing. Queued, processing, retrying,
+  and uncertain non-ready artifacts are preserved. A Jobs lookup failure or
+  owner/domain/type mismatch remains uncertainty and preserves the artifact.
 - This is request-time maintenance, not a scheduled Claims cleanup job,
   scheduler, daemon, lease loop, or retry engine. Clients should download before
   expiry.
 
 ### Error Handling
-All endpoints return consistent error payloads:
+
+Claims analytics export endpoints use FastAPI `detail` responses. These shapes
+apply only to the analytics export endpoints and do not redefine unrelated
+Claims endpoint errors.
+
+A missing or wrong-owner export returns the same generic HTTP 404 response:
+
 ```json
 {
-  "error": {
-    "code": "string",
-    "message": "string",
-    "details": "object|null"
+  "detail": "Export not found"
+}
+```
+
+Non-ready and failed downloads return HTTP 409:
+
+```json
+{
+  "detail": {
+    "code": "claims_export_not_ready",
+    "status": "queued",
+    "job_status": null
   }
 }
 ```
-Status codes: 400 for validation failures, 401/403 for auth/permissions, 404 for
-missing or wrong-owner exports, 409 for non-ready or failed download conflicts,
-429 for rate limits, 500 for unexpected errors, and 503 when Claims cannot create
-or obtain acceptance for the shared Job.
-Error code guidance: `invalid_channels` when all alert channels are false (400).
 
-When asynchronous mode is enabled, failure to create or obtain acceptance for
-the shared Job returns HTTP 503 with the stable
-`claims_export_enqueue_failed` code. Once Jobs has accepted the work, any later
-failure to attach the Job association does not change the accepted response:
-Claims still returns HTTP 202, and the worker or bounded reconciliation repairs
-the association. Claims does not return HTTP 503 after accepted Job creation.
+When asynchronous mode is enabled, an enqueue exception before acceptance
+returns HTTP 503:
+
+```json
+{
+  "detail": {
+    "code": "claims_export_enqueue_failed",
+    "message": "Claims analytics export could not be queued."
+  }
+}
+```
+
+An incomplete projection returned by enqueue is not a 503 condition. Claims
+returns HTTP 202 because the Job may already be accepted, and the worker or
+bounded reconciliation repairs the association. Claims never returns HTTP 503
+after accepted Job creation. Unrelated Claims endpoint behavior is unchanged;
+for example, alert validation still uses `invalid_channels` when all channels
+are false.
 
 Download behavior is explicit: a non-ready or failed artifact returns HTTP 409
 with artifact status, nullable `job_status`, and a stable public error code:
@@ -444,9 +483,8 @@ with artifact status, nullable `job_status`, and a stable public error code:
 - A failed artifact uses its stored safe `error_code`, or
   `claims_export_failed` when no safe stored code is available.
 
-A missing or wrong-owner export returns the same generic HTTP 404
-`"Export not found"` response, without revealing whether another owner has that
-ID.
+The generic 404 response does not reveal whether another owner has the requested
+export ID.
 
 Webhook delivery:
 - Retry strategy: exponential backoff with jitter.
