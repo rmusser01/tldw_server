@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
+    SourceFolderTransitionPlan,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -111,6 +112,7 @@ class PlannedNotesMutation:
     steps: tuple[ServerOriginMutationStep, ...]
     load_result: Callable[[], object]
     response_status: int | None = None
+    source_transition: SourceFolderTransitionPlan | None = None
 
 
 @dataclass(slots=True)
@@ -212,6 +214,7 @@ class NotesOrganizationCoordinator:
             ),
             load_result=plan.load_result,
             response_status=plan.response_status,
+            source_transition=plan.source_transition,
         )
 
     @staticmethod
@@ -236,6 +239,7 @@ class NotesOrganizationCoordinator:
             ),
             load_result=plan.load_result,
             response_status=response_status,
+            source_transition=plan.source_transition,
         )
 
     def replay_request_plan(
@@ -884,30 +888,44 @@ class NotesOrganizationCoordinator:
         source_id: int,
         folder_id: int,
         present: bool,
+        idempotency_key: str,
+        source: str = "notes-ingestion",
     ) -> PlannedNotesMutation:
         """Plan only a prospective effective source-folder transition."""
 
         folder = self._resource_row("notes.folder", folder_id)
         folder_sync_id = str(folder["sync_id"])
-        transition, read_set_hash = NotesOrganizationSyncStore(
+        dataset = self.require_ready()
+        transition_identity = server_origin_mutation_batch_group_id(
+            dataset_id=dataset.dataset_id,
+            source=source,
+            idempotency_key=idempotency_key,
+        )
+        transition = NotesOrganizationSyncStore(
             self.note_db
         ).source_folder_transition_plan(
             note_id=note_id,
             source_id=source_id,
             folder_sync_id=folder_sync_id,
             present=present,
+            transition_identity=transition_identity,
         )
-        if transition is None:
-            return PlannedNotesMutation(steps=(), load_result=lambda: None)
+        if transition.operation is None:
+            return PlannedNotesMutation(
+                steps=(),
+                load_result=lambda: None,
+                source_transition=transition,
+            )
         relationship = self.plan_relationship(
             "notes.folder_link",
             {"note_id": note_id, "folder_sync_id": folder_sync_id},
-            transition == "upsert",
+            transition.operation == "upsert",
         )
         provenance = {
             "operation": "source_upsert" if present else "source_delete",
             "source_id": source_id,
-            "read_set_hash": read_set_hash,
+            "pre_state_hash": transition.pre_state_hash,
+            "post_state_hash": transition.post_state_hash,
         }
         return PlannedNotesMutation(
             steps=tuple(
@@ -921,6 +939,7 @@ class NotesOrganizationCoordinator:
                 for step in relationship.steps
             ),
             load_result=relationship.load_result,
+            source_transition=transition,
         )
 
     def apply_source_folder_provenance_only(
@@ -930,16 +949,20 @@ class NotesOrganizationCoordinator:
         source_id: int,
         folder_id: int,
         present: bool,
-    ) -> None:
+        transition: SourceFolderTransitionPlan,
+    ) -> bool:
         """Apply a non-visible source delta only after Sync readiness succeeds."""
 
         self.require_ready()
         folder = self._resource_row("notes.folder", folder_id)
-        NotesOrganizationSyncStore(self.note_db).apply_source_folder_provenance(
+        return NotesOrganizationSyncStore(self.note_db).apply_source_folder_provenance(
             note_id=note_id,
             folder_sync_id=str(folder["sync_id"]),
             operation="source_upsert" if present else "source_delete",
             source_id=source_id,
+            pre_state_hash=transition.pre_state_hash,
+            post_state_hash=transition.post_state_hash,
+            transition_identity=transition.transition_identity,
         )
 
     def plan_keyword_merge(

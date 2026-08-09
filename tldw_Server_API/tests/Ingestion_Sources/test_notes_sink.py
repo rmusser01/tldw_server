@@ -112,6 +112,39 @@ def test_notes_sink_soft_deletes_note_for_canonical_upstream_delete(fake_notes_d
 
 
 @pytest.mark.unit
+def test_notes_sink_inactive_bound_update_preserves_direct_path(fake_notes_db):
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks.notes_sink import apply_notes_change
+
+    result = apply_notes_change(
+        fake_notes_db,
+        binding={
+            "note_id": "n-1",
+            "current_version": 3,
+            "sync_status": "sync_managed",
+        },
+        change={
+            "event_type": "changed",
+            "relative_path": "notes/a.md",
+            "text": "# Updated\n\nBody",
+        },
+        policy="canonical",
+    )
+
+    assert result == {
+        "action": "updated",
+        "note_id": "n-1",
+        "sync_status": "sync_managed",
+    }
+    assert fake_notes_db.updated_calls == [
+        {
+            "note_id": "n-1",
+            "update_data": {"title": "Updated", "content": "# Updated\n\nBody"},
+            "expected_version": 3,
+        }
+    ]
+
+
+@pytest.mark.unit
 def test_notes_sink_syncs_source_managed_folders_from_relative_path(fake_notes_db):
     from tldw_Server_API.app.core.Ingestion_Sources.sinks.notes_sink import apply_notes_change
 
@@ -275,7 +308,8 @@ def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
         ]
         assert folder_provenance["operation"] == "source_upsert"
         assert folder_provenance["source_id"] == 91
-        assert len(folder_provenance["read_set_hash"]) == 64
+        assert len(folder_provenance["pre_state_hash"]) == 64
+        assert len(folder_provenance["post_state_hash"]) == 64
     assert len(NotesOrganizationSyncStore(notes_db).snapshot().relationships) == 2
 
     envelope_count = len(sync_store.list_envelopes_after("dataset-1", 0))
@@ -331,6 +365,38 @@ def test_notes_sink_active_ready_duplicate_unbound_delivery_replays_manifest(
     assert replay == first
     assert len(sync_store.list_envelopes_after("dataset-1", 0)) == envelope_count
     assert notes_db.get_note_by_id(str(first["note_id"]))["version"] == 1
+    notes_db.close_connection()
+
+
+@pytest.mark.unit
+def test_notes_sink_active_ready_bound_missing_note_conflicts_without_append(
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
+
+    notes_db, sync_store, _service = _active_sync_stack(tmp_path, monkeypatch)
+
+    with pytest.raises(ConflictError, match="missing"):
+        notes_sink.apply_notes_change(
+            notes_db,
+            binding={
+                "note_id": "missing-bound-note",
+                "current_version": 4,
+                "sync_status": "sync_managed",
+            },
+            change={
+                "event_type": "changed",
+                "relative_path": "missing.md",
+                "text": "# Missing\n\nDo not recreate",
+                "source_id": 91,
+            },
+            policy="canonical",
+        )
+
+    assert notes_db.get_note_by_id("missing-bound-note", include_deleted=True) is None
+    assert sync_store.list_envelopes_after("dataset-1", 0) == []
     notes_db.close_connection()
 
 
@@ -396,4 +462,107 @@ def test_notes_sink_active_ready_version_change_after_precheck_does_not_overwrit
     assert current["title"] == "Concurrent"
     assert current["content"] == "Preserve me"
     assert current["version"] == 2
+    notes_db.close_connection()
+
+
+@pytest.mark.unit
+def test_notes_sink_active_ready_product_commit_retry_completes_bookkeeping(
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
+    from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+        SyncServerOriginBatchMaterializationError,
+    )
+
+    notes_db, sync_store, _service = _active_sync_stack(tmp_path, monkeypatch)
+    created = notes_sink.apply_notes_change(
+        notes_db,
+        binding=None,
+        change={
+            "event_type": "created",
+            "relative_path": "retry.md",
+            "text": "# Before\n\nBody",
+            "source_id": 91,
+        },
+        policy="canonical",
+    )
+    note_id = str(created["note_id"])
+    delegate_upsert_object_state = sync_store.upsert_object_state
+    failed_once = False
+
+    def _fail_bookkeeping_once(state):
+        nonlocal failed_once
+        if state.object_id == note_id and state.object_revision == 2 and not failed_once:
+            failed_once = True
+            raise RuntimeError("sync bookkeeping unavailable")
+        return delegate_upsert_object_state(state)
+
+    monkeypatch.setattr(sync_store, "upsert_object_state", _fail_bookkeeping_once)
+    binding = {
+        "note_id": note_id,
+        "current_version": 1,
+        "sync_status": "sync_managed",
+    }
+    change = {
+        "event_type": "changed",
+        "relative_path": "retry.md",
+        "text": "# After\n\nExact intended body",
+        "source_id": 91,
+    }
+
+    with pytest.raises(SyncServerOriginBatchMaterializationError):
+        notes_sink.apply_notes_change(
+            notes_db,
+            binding=binding,
+            change=change,
+            policy="canonical",
+        )
+
+    after_product_commit = notes_db.get_note_by_id(note_id)
+    assert after_product_commit["title"] == "After"
+    assert after_product_commit["content"] == "# After\n\nExact intended body"
+    assert after_product_commit["version"] == 2
+    envelopes_after_failure = sync_store.list_envelopes_after("dataset-1", 0)
+    update_envelope = next(
+        envelope
+        for envelope in envelopes_after_failure
+        if envelope.domain == "notes.note" and envelope.object_revision == 2
+    )
+    assert update_envelope.apply_status == "failed"
+    update_identity = (
+        update_envelope.client_envelope_id,
+        update_envelope.mutation_group_id,
+    )
+
+    retried = notes_sink.apply_notes_change(
+        notes_db,
+        binding=binding,
+        change=change,
+        policy="canonical",
+    )
+
+    after_retry = notes_db.get_note_by_id(note_id)
+    assert retried == {
+        "action": "updated",
+        "note_id": note_id,
+        "sync_status": "sync_managed",
+    }
+    assert after_retry == after_product_commit
+    envelopes_after_retry = sync_store.list_envelopes_after("dataset-1", 0)
+    assert len(envelopes_after_retry) == len(envelopes_after_failure)
+    replayed_update = next(
+        envelope
+        for envelope in envelopes_after_retry
+        if envelope.domain == "notes.note" and envelope.object_revision == 2
+    )
+    assert (
+        replayed_update.client_envelope_id,
+        replayed_update.mutation_group_id,
+    ) == update_identity
+    assert replayed_update.apply_status == "applied"
+    object_state = sync_store.get_object_state("dataset-1", "notes.note", note_id)
+    assert object_state is not None
+    assert object_state.object_revision == 2
+    assert object_state.latest_server_cursor == replayed_update.server_cursor
     notes_db.close_connection()

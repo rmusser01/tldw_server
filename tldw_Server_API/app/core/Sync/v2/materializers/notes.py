@@ -115,6 +115,23 @@ class NotesMaterializer:
         try:
             if envelope.operation == "upsert":
                 payload = _note_payload(envelope.payload)
+                expected_product_version = _trusted_ingestion_expected_version(
+                    envelope,
+                    self.note_db,
+                )
+                projection_timestamp = None
+                if expected_product_version is not None:
+                    if object_revision != expected_product_version + 1:
+                        raise ValueError(
+                            "Trusted ingestion product revision is inconsistent"
+                        )
+                    projection_timestamp = (
+                        envelope.server_timestamp or envelope.received_at_server
+                    )
+                    if not projection_timestamp:
+                        raise ValueError(
+                            "Trusted ingestion envelope is missing a server timestamp"
+                        )
                 self.note_db.upsert_note_from_sync(
                     note_id=envelope.object_id,
                     title=payload["title"],
@@ -124,10 +141,8 @@ class NotesMaterializer:
                     sync_client_id=_projection_client_id(envelope),
                     object_revision=object_revision,
                     object_hash=object_hash,
-                    expected_product_version=_trusted_ingestion_expected_version(
-                        envelope,
-                        self.note_db,
-                    ),
+                    expected_product_version=expected_product_version,
+                    projection_timestamp=projection_timestamp,
                 )
                 deleted = False
             elif envelope.operation == "tombstone":

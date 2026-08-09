@@ -11,7 +11,11 @@ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+    InputError,
+)
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 
 pytestmark = pytest.mark.unit
@@ -537,3 +541,149 @@ def test_effective_sync_union_provenance_only_change_preserves_suppression(
             "WHERE note_id = ? AND folder_id = ?",
             (note_id, folder["id"]),
         ).fetchone()[0] == 1
+
+
+def test_source_folder_transition_guard_rejects_interleaved_noop_removals(
+    db: CharactersRAGDB,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    note_id = str(uuid.uuid4())
+    db.add_note(title="Interleaved sources", content="Body", note_id=note_id)
+    folder = db.create_note_folder_path("Interleaved/Sources")
+    db.sync_note_source_folders(note_id, 71, [folder["path"]])
+    db.sync_note_source_folders(note_id, 72, [folder["path"]])
+
+    remove_71 = store.source_folder_transition_plan(
+        note_id=note_id,
+        source_id=71,
+        folder_sync_id=folder["sync_id"],
+        present=False,
+        transition_identity="request-remove-71",
+    )
+    remove_72 = store.source_folder_transition_plan(
+        note_id=note_id,
+        source_id=72,
+        folder_sync_id=folder["sync_id"],
+        present=False,
+        transition_identity="request-remove-72",
+    )
+
+    assert remove_71.operation is None
+    assert remove_72.operation is None
+    assert store.apply_source_folder_provenance(
+        note_id=note_id,
+        folder_sync_id=folder["sync_id"],
+        operation="source_delete",
+        source_id=71,
+        pre_state_hash=remove_71.pre_state_hash,
+        post_state_hash=remove_71.post_state_hash,
+        transition_identity=remove_71.transition_identity,
+    ) is True
+    with pytest.raises(ConflictError, match="changed after planning"):
+        store.apply_source_folder_provenance(
+            note_id=note_id,
+            folder_sync_id=folder["sync_id"],
+            operation="source_delete",
+            source_id=72,
+            pre_state_hash=remove_72.pre_state_hash,
+            post_state_hash=remove_72.post_state_hash,
+            transition_identity=remove_72.transition_identity,
+        )
+
+    with db.transaction() as conn:
+        remaining = conn.execute(
+            "SELECT source_id FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND folder_id = ? ORDER BY source_id",
+            (note_id, folder["id"]),
+        ).fetchall()
+    assert [int(row["source_id"]) for row in remaining] == [72]
+    assert [row["path"] for row in db.get_note_folders_for_note(note_id)] == [
+        "Interleaved",
+        "Interleaved/Sources",
+    ]
+
+
+def test_source_folder_transition_guard_accepts_provenance_only_post_state_retry(
+    db: CharactersRAGDB,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    note_id = str(uuid.uuid4())
+    db.add_note(title="Provenance retry", content="Body", note_id=note_id)
+    folder = db.create_note_folder_path("Retry/Provenance")
+    db.sync_note_source_folders(note_id, 81, [folder["path"]])
+    db.sync_note_source_folders(note_id, 82, [folder["path"]])
+    transition = store.source_folder_transition_plan(
+        note_id=note_id,
+        source_id=81,
+        folder_sync_id=folder["sync_id"],
+        present=False,
+        transition_identity="request-provenance-retry",
+    )
+
+    kwargs = {
+        "note_id": note_id,
+        "folder_sync_id": folder["sync_id"],
+        "operation": "source_delete",
+        "source_id": 81,
+        "pre_state_hash": transition.pre_state_hash,
+        "post_state_hash": transition.post_state_hash,
+        "transition_identity": transition.transition_identity,
+    }
+    assert store.apply_source_folder_provenance(**kwargs) is True
+    assert store.apply_source_folder_provenance(**kwargs) is False
+
+    with db.transaction() as conn:
+        remaining = conn.execute(
+            "SELECT source_id FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND folder_id = ? ORDER BY source_id",
+            (note_id, folder["id"]),
+        ).fetchall()
+    assert [int(row["source_id"]) for row in remaining] == [82]
+
+
+def test_source_folder_transition_guard_accepts_visible_post_state_retry(
+    db: CharactersRAGDB,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    note_id = str(uuid.uuid4())
+    db.add_note(title="Visible retry", content="Body", note_id=note_id)
+    folder = db.create_note_folder_path("Retry/Visible")
+    transition = store.source_folder_transition_plan(
+        note_id=note_id,
+        source_id=91,
+        folder_sync_id=folder["sync_id"],
+        present=True,
+        transition_identity="group-visible-retry",
+    )
+    payload = {"note_id": note_id, "folder_sync_id": folder["sync_id"]}
+    provenance = {
+        "operation": "source_upsert",
+        "source_id": 91,
+        "pre_state_hash": transition.pre_state_hash,
+        "post_state_hash": transition.post_state_hash,
+    }
+    kwargs = {
+        "domain": "notes.folder_link",
+        "object_id": organization_link_id(
+            "notes.folder_link", [note_id, folder["sync_id"]]
+        ),
+        "operation": "upsert",
+        "payload": payload,
+        "routing_metadata": {},
+        "origin_provenance": provenance,
+        "source_transition_identity": transition.transition_identity,
+    }
+
+    assert store.apply_relationship(**kwargs) is True
+    assert store.apply_relationship(**kwargs) is False
+    with db.transaction() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
+            (note_id, 91, folder["id"]),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_memberships "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 0

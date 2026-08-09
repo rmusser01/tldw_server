@@ -133,7 +133,14 @@ def _capture_ingestion_note(
             request_key=request_key,
         )
         return
-    existing = coordinator.note_db.get_note_by_id(note_id) or {}
+    existing = coordinator.note_db.get_note_by_id(note_id)
+    if expected_version is not None and existing is None:
+        raise ConflictError(
+            f"Note ID {note_id} update failed: note is missing.",
+            entity="notes",
+            entity_id=note_id,
+        )
+    existing = existing or {}
     current_version = existing.get("version")
     if (
         expected_version is not None
@@ -161,7 +168,7 @@ def _capture_ingestion_note(
             },
             routing_metadata={
                 _INGESTION_EXPECTED_VERSION_KEY: (
-                    int(current_version) if current_version is not None else 0
+                    int(expected_version) if expected_version is not None else 0
                 )
             },
             stable_key=request_key,
@@ -234,40 +241,36 @@ def _sync_source_folders_with_coordinator(
         for folder_id in sorted(desired_folder_ids - current_folder_ids)
     )
     for folder_id, present in changes:
+        request_key = _source_folder_request_key(
+            "source-folder",
+            source_id,
+            note_id,
+            folder_id,
+            present,
+            note_version,
+        )
         plan = coordinator.plan_source_folder_change(
             note_id=note_id,
             source_id=source_id,
             folder_id=folder_id,
             present=present,
+            idempotency_key=request_key,
         )
         if plan.steps:
-            provenance = plan.steps[0].routing_metadata.get(
-                "notes_folder_origin_provenance", {}
-            )
-            read_set_hash = (
-                provenance.get("read_set_hash")
-                if isinstance(provenance, dict)
-                else None
-            )
             _capture_source_folder_steps(
                 coordinator,
                 steps=plan.steps,
-                request_key=_source_folder_request_key(
-                    "source-folder",
-                    source_id,
-                    note_id,
-                    folder_id,
-                    present,
-                    note_version,
-                    read_set_hash,
-                ),
+                request_key=request_key,
             )
         else:
+            if plan.source_transition is None:
+                raise SyncStoreError("Notes ingestion source transition is missing")
             coordinator.apply_source_folder_provenance_only(
                 note_id=note_id,
                 source_id=source_id,
                 folder_id=folder_id,
                 present=present,
+                transition=plan.source_transition,
             )
 
 

@@ -634,6 +634,100 @@ def test_client_push_routing_cannot_activate_local_folder_origin_provenance(
     assert rows == []
 
 
+def test_trusted_folder_origin_product_commit_retry_completes_bookkeeping(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+        NotesOrganizationSyncStore,
+    )
+
+    _seed_dependencies(note_db, "notes.folder_link")
+    projection = NotesOrganizationSyncStore(note_db)
+    group_id = "source-folder-visible-retry-group"
+    transition = projection.source_folder_transition_plan(
+        note_id=NOTE_ID,
+        source_id=71,
+        folder_sync_id=FOLDER_ID,
+        present=True,
+        transition_identity=group_id,
+    )
+    assert transition.operation == "upsert"
+    stored = _stored_envelope(
+        sync_store,
+        "notes.folder_link",
+        routing_metadata={
+            "origin": "server",
+            "server_device_id": "server-origin",
+            "server_owner_user_id": "owner-1",
+            "notes_folder_origin_provenance": {
+                "operation": "source_upsert",
+                "source_id": 71,
+                "pre_state_hash": transition.pre_state_hash,
+                "post_state_hash": transition.post_state_hash,
+            },
+        },
+    )
+    envelope = replace(
+        stored,
+        device_id="server-origin",
+        mutation_group_id=group_id,
+        mutation_step=0,
+        mutation_step_count=1,
+        mutation_plan_hash="a" * 64,
+    )
+    original_apply = NotesOrganizationSyncStore.apply_relationship
+    product_writes: list[bool] = []
+
+    def _record_guard_result(self, **kwargs):
+        result = original_apply(self, **kwargs)
+        product_writes.append(result)
+        return result
+
+    monkeypatch.setattr(
+        NotesOrganizationSyncStore,
+        "apply_relationship",
+        _record_guard_result,
+    )
+    original_upsert_state = sync_store.upsert_object_state
+    failed_once = False
+
+    def _fail_bookkeeping_once(state):
+        nonlocal failed_once
+        if state.object_id == envelope.object_id and not failed_once:
+            failed_once = True
+            raise RuntimeError("sync bookkeeping unavailable")
+        return original_upsert_state(state)
+
+    monkeypatch.setattr(sync_store, "upsert_object_state", _fail_bookkeeping_once)
+    materializer = NotesOrganizationMaterializer(note_db, "notes.folder_link")
+
+    assert materializer.apply(envelope, store=sync_store).status == "failed"
+    product_after_commit = projection.snapshot()
+    assert product_writes == [True]
+    assert materializer.apply(envelope, store=sync_store).status == "applied"
+
+    assert product_writes == [True, False]
+    assert projection.snapshot() == product_after_commit
+    stored_after_retry = sync_store.list_envelopes_for_entity(
+        "dataset-1",
+        "notes.folder_link",
+        entity_id=envelope.object_id,
+        limit=10,
+    )
+    assert [(item.client_envelope_id, item.apply_status) for item in stored_after_retry] == [
+        (stored.client_envelope_id, "applied")
+    ]
+    state = sync_store.get_object_state(
+        "dataset-1",
+        "notes.folder_link",
+        envelope.object_id,
+    )
+    assert state is not None
+    assert state.latest_server_cursor == envelope.server_cursor
+
+
 def test_folder_link_tombstone_suppresses_source_membership_and_restore_ignores_remote_provenance(
     note_db: CharactersRAGDB,
     sync_store: SyncV2Store,

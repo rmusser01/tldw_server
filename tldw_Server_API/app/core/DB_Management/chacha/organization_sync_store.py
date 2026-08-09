@@ -50,6 +50,16 @@ class OrganizationSnapshot:
     relationships: tuple[OrganizationRelationship, ...]
 
 
+@dataclass(frozen=True)
+class SourceFolderTransitionPlan:
+    """One request-bound source delta and its exact product pre/post states."""
+
+    operation: SyncOperation | None
+    pre_state_hash: str
+    post_state_hash: str
+    transition_identity: str
+
+
 _RESOURCE_TABLES: dict[SyncDomain, tuple[str, str]] = {
     "notes.keyword": ("keywords", "keyword"),
     "notes.keyword_collection": ("keyword_collections", "name"),
@@ -539,10 +549,11 @@ class NotesOrganizationSyncStore:
     @staticmethod
     def _source_provenance_values(
         provenance: Mapping[str, object],
-    ) -> tuple[str, int, str | None]:
+    ) -> tuple[str, int, str | None, str | None]:
         if set(provenance) not in (
             {"operation", "source_id"},
             {"operation", "source_id", "read_set_hash"},
+            {"operation", "source_id", "pre_state_hash", "post_state_hash"},
         ):
             raise InputError("Folder source provenance fields are invalid")
         operation = provenance.get("operation")
@@ -551,27 +562,45 @@ class NotesOrganizationSyncStore:
             raise InputError("Folder source provenance operation is invalid")
         if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
             raise InputError("Folder source provenance identifier is invalid")
-        read_set_hash = provenance.get("read_set_hash")
-        if read_set_hash is not None and (
-            not isinstance(read_set_hash, str)
-            or len(read_set_hash) != 64
-            or any(character not in "0123456789abcdef" for character in read_set_hash)
-        ):
-            raise InputError("Folder source provenance read set is invalid")
-        return str(operation), source_id, read_set_hash
+        pre_state_hash = provenance.get("pre_state_hash")
+        post_state_hash = provenance.get("post_state_hash")
+        legacy_read_set_hash = provenance.get("read_set_hash")
+        for state_hash in (pre_state_hash, post_state_hash, legacy_read_set_hash):
+            if state_hash is not None and (
+                not isinstance(state_hash, str)
+                or len(state_hash) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in state_hash
+                )
+            ):
+                raise InputError("Folder source provenance state is invalid")
+        if legacy_read_set_hash is not None:
+            pre_state_hash = legacy_read_set_hash
+        return str(operation), source_id, pre_state_hash, post_state_hash
 
     @staticmethod
-    def _source_folder_read_set_hash(
+    def _source_folder_state_hash(
         *,
+        note_id: str,
+        folder_sync_id: str,
+        source_id: int,
+        operation: str,
+        transition_identity: str,
         manual: bool,
         source_ids: set[int],
         suppressed: bool,
     ) -> str:
         encoded = json.dumps(
             {
+                "folder_sync_id": folder_sync_id,
                 "manual": manual,
+                "note_id": note_id,
+                "operation": operation,
+                "source_id": source_id,
                 "source_ids": sorted(source_ids),
                 "suppressed": suppressed,
+                "transition_identity": transition_identity,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -605,6 +634,61 @@ class NotesOrganizationSyncStore:
             ).fetchone()
         )
         return manual, {int(row["source_id"]) for row in source_rows}, suppressed
+
+    def _source_folder_state_hash_locked(
+        self,
+        conn: Any,
+        *,
+        note_id: str,
+        folder_id: int,
+        folder_sync_id: str,
+        source_id: int,
+        operation: str,
+        transition_identity: str,
+    ) -> str:
+        manual, source_ids, suppressed = self._source_folder_read_set_locked(
+            conn,
+            note_id=note_id,
+            folder_id=folder_id,
+        )
+        return self._source_folder_state_hash(
+            note_id=note_id,
+            folder_sync_id=folder_sync_id,
+            source_id=source_id,
+            operation=operation,
+            transition_identity=transition_identity,
+            manual=manual,
+            source_ids=source_ids,
+            suppressed=suppressed,
+        )
+
+    def _source_folder_transition_guard_locked(
+        self,
+        conn: Any,
+        *,
+        note_id: str,
+        folder_id: int,
+        folder_sync_id: str,
+        source_id: int,
+        operation: str,
+        transition_identity: str,
+        pre_state_hash: str,
+        post_state_hash: str,
+    ) -> bool:
+        current_hash = self._source_folder_state_hash_locked(
+            conn,
+            note_id=note_id,
+            folder_id=folder_id,
+            folder_sync_id=folder_sync_id,
+            source_id=source_id,
+            operation=operation,
+            transition_identity=transition_identity,
+        )
+        if current_hash == post_state_hash:
+            return False
+        if current_hash != pre_state_hash:
+            raise ConflictError("Folder source membership changed after planning")
+        return True
 
     def _folder_relationship_rows(
         self,
@@ -642,7 +726,11 @@ class NotesOrganizationSyncStore:
             source_id=source_id,
             folder_sync_id=folder_sync_id,
             present=present,
-        )[0]
+            transition_identity=(
+                f"source-folder-transition:{note_id}:{folder_sync_id}:"
+                f"{source_id}:{int(present)}"
+            ),
+        ).operation
 
     def source_folder_transition_plan(
         self,
@@ -651,12 +739,17 @@ class NotesOrganizationSyncStore:
         source_id: int,
         folder_sync_id: str,
         present: bool,
-    ) -> tuple[SyncOperation | None, str]:
-        """Return a source transition and its opaque origin-local read set."""
+        transition_identity: str,
+    ) -> SourceFolderTransitionPlan:
+        """Return one source transition with opaque exact pre/post states."""
 
-        _, validated_source_id, _ = self._source_provenance_values(
+        normalized_identity = str(transition_identity).strip()
+        if not normalized_identity:
+            raise InputError("Folder source transition identity is invalid")
+        operation = "source_upsert" if present else "source_delete"
+        _, validated_source_id, _, _ = self._source_provenance_values(
             {
-                "operation": "source_upsert" if present else "source_delete",
+                "operation": operation,
                 "source_id": source_id,
             }
         )
@@ -673,22 +766,49 @@ class NotesOrganizationSyncStore:
                 note_id=note_id,
                 folder_id=folder_id,
             )
-            read_set_hash = self._source_folder_read_set_hash(
+            pre_state_hash = self._source_folder_state_hash(
+                note_id=note_id,
+                folder_sync_id=folder_sync_id,
+                source_id=validated_source_id,
+                operation=operation,
+                transition_identity=normalized_identity,
                 manual=manual,
                 source_ids=source_ids,
                 suppressed=suppressed,
             )
-            if suppressed:
-                return None, read_set_hash
-            before = bool(manual or source_ids)
+            before = not suppressed and bool(manual or source_ids)
+            post_source_ids = set(source_ids)
             if present:
-                source_ids.add(validated_source_id)
+                post_source_ids.add(validated_source_id)
             else:
-                source_ids.discard(validated_source_id)
-            after = bool(manual or source_ids)
-            if before == after:
-                return None, read_set_hash
-            return ("upsert" if after else "tombstone"), read_set_hash
+                post_source_ids.discard(validated_source_id)
+            after = not suppressed and bool(manual or post_source_ids)
+            transition: SyncOperation | None = None
+            if before != after:
+                transition = "upsert" if after else "tombstone"
+            post_manual = manual
+            post_suppressed = suppressed
+            if transition == "upsert":
+                post_suppressed = False
+            elif transition == "tombstone":
+                post_manual = False
+                post_suppressed = True
+            post_state_hash = self._source_folder_state_hash(
+                note_id=note_id,
+                folder_sync_id=folder_sync_id,
+                source_id=validated_source_id,
+                operation=operation,
+                transition_identity=normalized_identity,
+                manual=post_manual,
+                source_ids=post_source_ids,
+                suppressed=post_suppressed,
+            )
+            return SourceFolderTransitionPlan(
+                operation=transition,
+                pre_state_hash=pre_state_hash,
+                post_state_hash=post_state_hash,
+                transition_identity=normalized_identity,
+            )
 
     def manual_folder_sync_ids(self, note_id: str) -> set[str]:
         """Return active folders explicitly owned by the note's manual membership set."""
@@ -765,11 +885,25 @@ class NotesOrganizationSyncStore:
         folder_sync_id: str,
         operation: str,
         source_id: int,
-    ) -> None:
+        pre_state_hash: str | None = None,
+        post_state_hash: str | None = None,
+        transition_identity: str | None = None,
+    ) -> bool:
         """Apply provenance-only bookkeeping without changing canonical visibility."""
 
-        normalized_operation, normalized_source_id, _ = self._source_provenance_values(
-            {"operation": operation, "source_id": source_id}
+        provenance: dict[str, object] = {
+            "operation": operation,
+            "source_id": source_id,
+        }
+        if pre_state_hash is not None or post_state_hash is not None:
+            provenance.update(
+                {
+                    "pre_state_hash": pre_state_hash,
+                    "post_state_hash": post_state_hash,
+                }
+            )
+        normalized_operation, normalized_source_id, normalized_pre, normalized_post = (
+            self._source_provenance_values(provenance)
         )
         with self._db.transaction() as conn:
             _, folder = self._folder_relationship_rows(
@@ -778,6 +912,23 @@ class NotesOrganizationSyncStore:
                 folder_sync_id=folder_sync_id,
                 require_active=True,
             )
+            if normalized_pre is not None and normalized_post is not None:
+                normalized_identity = str(transition_identity or "").strip()
+                if not normalized_identity:
+                    raise InputError("Folder source transition identity is invalid")
+                should_apply = self._source_folder_transition_guard_locked(
+                    conn,
+                    note_id=note_id,
+                    folder_id=int(folder["id"]),
+                    folder_sync_id=folder_sync_id,
+                    source_id=normalized_source_id,
+                    operation=normalized_operation,
+                    transition_identity=normalized_identity,
+                    pre_state_hash=normalized_pre,
+                    post_state_hash=normalized_post,
+                )
+                if not should_apply:
+                    return False
             self._apply_source_folder_provenance_locked(
                 conn,
                 note_id=note_id,
@@ -785,6 +936,18 @@ class NotesOrganizationSyncStore:
                 operation=normalized_operation,
                 source_id=normalized_source_id,
             )
+            if normalized_pre is not None and normalized_post is not None:
+                if self._source_folder_state_hash_locked(
+                    conn,
+                    note_id=note_id,
+                    folder_id=int(folder["id"]),
+                    folder_sync_id=folder_sync_id,
+                    source_id=normalized_source_id,
+                    operation=normalized_operation,
+                    transition_identity=str(transition_identity),
+                ) != normalized_post:
+                    raise ConflictError("Folder source membership changed during apply")
+            return True
 
     def apply_relationship(
         self,
@@ -795,7 +958,8 @@ class NotesOrganizationSyncStore:
         payload: Mapping[str, object],
         routing_metadata: Mapping[str, object],
         origin_provenance: Mapping[str, object] | None = None,
-    ) -> None:
+        source_transition_identity: str | None = None,
+    ) -> bool:
         """Apply one relationship envelope in a ChaCha transaction."""
 
         del routing_metadata
@@ -853,8 +1017,14 @@ class NotesOrganizationSyncStore:
                 raise InputError(f"Unsupported organization relationship domain: {domain}")
 
             if domain == "notes.folder_link":
+                guarded_post_state: tuple[str, int, str, str, str] | None = None
                 if origin_provenance is not None:
-                    provenance_operation, provenance_source_id, read_set_hash = (
+                    (
+                        provenance_operation,
+                        provenance_source_id,
+                        pre_state_hash,
+                        post_state_hash,
+                    ) = (
                         self._source_provenance_values(origin_provenance)
                     )
                     expected_operation = (
@@ -864,22 +1034,49 @@ class NotesOrganizationSyncStore:
                         raise InputError(
                             "Folder source provenance does not match canonical operation"
                         )
-                    if read_set_hash is not None:
-                        manual, source_ids, suppressed = (
-                            self._source_folder_read_set_locked(
-                                conn,
-                                note_id=str(values[0]),
-                                folder_id=int(folder["id"]),
-                            )
+                    if pre_state_hash is not None and post_state_hash is not None:
+                        normalized_identity = str(source_transition_identity or "").strip()
+                        if not normalized_identity:
+                            raise InputError("Folder source transition identity is invalid")
+                        should_apply = self._source_folder_transition_guard_locked(
+                            conn,
+                            note_id=str(values[0]),
+                            folder_id=int(folder["id"]),
+                            folder_sync_id=str(normalized["folder_sync_id"]),
+                            source_id=provenance_source_id,
+                            operation=provenance_operation,
+                            transition_identity=normalized_identity,
+                            pre_state_hash=pre_state_hash,
+                            post_state_hash=post_state_hash,
                         )
-                        if self._source_folder_read_set_hash(
-                            manual=manual,
-                            source_ids=source_ids,
-                            suppressed=suppressed,
-                        ) != read_set_hash:
-                            raise ConflictError(
-                                "Folder source membership changed after planning"
-                            )
+                        if not should_apply:
+                            return False
+                        guarded_post_state = (
+                            str(normalized["folder_sync_id"]),
+                            provenance_source_id,
+                            provenance_operation,
+                            normalized_identity,
+                            post_state_hash,
+                        )
+                    elif pre_state_hash is not None:
+                        manual, source_ids, suppressed = self._source_folder_read_set_locked(
+                            conn,
+                            note_id=str(values[0]),
+                            folder_id=int(folder["id"]),
+                        )
+                        legacy_hash = hashlib.sha256(
+                            json.dumps(
+                                {
+                                    "manual": manual,
+                                    "source_ids": sorted(source_ids),
+                                    "suppressed": suppressed,
+                                },
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ).encode("utf-8")
+                        ).hexdigest()
+                        if legacy_hash != pre_state_hash:
+                            raise ConflictError("Folder source membership changed after planning")
                     self._apply_source_folder_provenance_locked(
                         conn,
                         note_id=str(values[0]),
@@ -907,6 +1104,24 @@ class NotesOrganizationSyncStore:
                         ("note_id", "folder_id"),
                         values,
                     )
+                if guarded_post_state is not None:
+                    (
+                        guarded_folder_sync_id,
+                        guarded_source_id,
+                        guarded_operation,
+                        guarded_identity,
+                        guarded_post_hash,
+                    ) = guarded_post_state
+                    if self._source_folder_state_hash_locked(
+                        conn,
+                        note_id=str(values[0]),
+                        folder_id=int(folder["id"]),
+                        folder_sync_id=guarded_folder_sync_id,
+                        source_id=guarded_source_id,
+                        operation=guarded_operation,
+                        transition_identity=guarded_identity,
+                    ) != guarded_post_hash:
+                        raise ConflictError("Folder source membership changed during apply")
             elif operation == "upsert":
                 self._insert_link(conn, link_table, columns, values)
             else:
@@ -914,6 +1129,7 @@ class NotesOrganizationSyncStore:
                     f"DELETE FROM {link_table} WHERE {columns[0]} = ? AND {columns[1]} = ?",  # nosec B608
                     values,
                 )
+            return True
 
 
 __all__ = [
@@ -921,4 +1137,5 @@ __all__ = [
     "OrganizationRelationship",
     "OrganizationResource",
     "OrganizationSnapshot",
+    "SourceFolderTransitionPlan",
 ]

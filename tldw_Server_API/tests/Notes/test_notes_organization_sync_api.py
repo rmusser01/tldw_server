@@ -2474,6 +2474,7 @@ def test_source_folder_read_set_race_preserves_concurrent_manual_membership(
         source_id=73,
         folder_id=int(folder["id"]),
         present=True,
+        idempotency_key="source-race-add",
     )
     coordinator.capture(
         steps=source_add.steps,
@@ -2486,13 +2487,20 @@ def test_source_folder_read_set_race_preserves_concurrent_manual_membership(
         source_id=73,
         folder_id=int(folder["id"]),
         present=False,
+        idempotency_key="source-race-remove",
     )
     provenance = stale_remove.steps[0].routing_metadata[
         "notes_folder_origin_provenance"
     ]
-    assert set(provenance) == {"operation", "source_id", "read_set_hash"}
-    assert len(str(provenance["read_set_hash"])) == 64
-    assert set(str(provenance["read_set_hash"])) <= set("0123456789abcdef")
+    assert set(provenance) == {
+        "operation",
+        "source_id",
+        "pre_state_hash",
+        "post_state_hash",
+    }
+    for key in ("pre_state_hash", "post_state_hash"):
+        assert len(str(provenance[key])) == 64
+        assert set(str(provenance[key])) <= set("0123456789abcdef")
     assert "Race" not in repr(stale_remove.steps[0].routing_metadata)
     chacha_db.sync_note_folders(note_id, [folder["path"]])
 

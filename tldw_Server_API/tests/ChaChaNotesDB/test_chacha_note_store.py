@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -183,6 +185,58 @@ class TestNoteStoreSyncHelpers:
         assert after["client_id"] == "device-2"
         assert after["version"] == 2
         assert after["created_at"] == before["created_at"]
+
+    def test_ingestion_guard_accepts_exact_intended_postcondition(self, db):
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-guard",
+        )
+        kwargs = {
+            "note_id": "sync-note-guard",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": "2026-08-09T08:00:00+00:00",
+        }
+
+        assert db.upsert_note_from_sync(**kwargs) is True
+        after_product_commit = db.get_note_by_id("sync-note-guard")
+        assert db.upsert_note_from_sync(**kwargs) is False
+        assert db.get_note_by_id("sync-note-guard") == after_product_commit
+
+    def test_ingestion_guard_rejects_divergent_same_version_postcondition(self, db):
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-diverged",
+        )
+        kwargs = {
+            "note_id": "sync-note-diverged",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": "2026-08-09T08:00:00+00:00",
+        }
+        db.upsert_note_from_sync(**kwargs)
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET content = ? WHERE id = ?",
+                ("Diverged", "sync-note-diverged"),
+            )
+
+        with pytest.raises(ConflictError, match="changed after ingestion planning"):
+            db.upsert_note_from_sync(**kwargs)
 
     def test_tombstone_note_from_sync_soft_deletes_existing_note(self, db):
         db.upsert_note_from_sync(

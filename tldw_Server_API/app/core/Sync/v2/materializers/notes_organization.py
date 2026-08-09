@@ -63,6 +63,7 @@ def _trusted_folder_origin_provenance(
     if not isinstance(raw, Mapping) or set(raw) not in (
         {"operation", "source_id"},
         {"operation", "source_id", "read_set_hash"},
+        {"operation", "source_id", "pre_state_hash", "post_state_hash"},
     ):
         return None
     operation = raw.get("operation")
@@ -72,15 +73,17 @@ def _trusted_folder_origin_provenance(
     if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
         return None
     provenance: dict[str, object] = {"operation": operation, "source_id": source_id}
-    read_set_hash = raw.get("read_set_hash")
-    if read_set_hash is not None:
+    for key in ("read_set_hash", "pre_state_hash", "post_state_hash"):
+        state_hash = raw.get(key)
+        if state_hash is None:
+            continue
         if (
-            not isinstance(read_set_hash, str)
-            or len(read_set_hash) != 64
-            or any(character not in "0123456789abcdef" for character in read_set_hash)
+            not isinstance(state_hash, str)
+            or len(state_hash) != 64
+            or any(character not in "0123456789abcdef" for character in state_hash)
         ):
             return None
-        provenance["read_set_hash"] = read_set_hash
+        provenance[key] = state_hash
     return provenance
 
 
@@ -193,6 +196,7 @@ class NotesOrganizationMaterializer:
                     origin_provenance=_trusted_folder_origin_provenance(
                         envelope, self.note_db
                     ),
+                    source_transition_identity=envelope.mutation_group_id,
                 )
 
             object_revision = self._next_object_revision(envelope, current_state)
