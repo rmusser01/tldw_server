@@ -315,6 +315,16 @@ CREATE TABLE IF NOT EXISTS sync_object_state (
 CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
     ON sync_object_state(dataset_id, domain, object_id);
 
+CREATE TABLE IF NOT EXISTS sync_current_heads (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    latest_server_cursor INTEGER NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+    ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id);
+
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
     device_id TEXT NOT NULL,
@@ -668,6 +678,16 @@ CREATE TABLE IF NOT EXISTS sync_object_state (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
     ON sync_object_state(dataset_id, domain, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_current_heads (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    latest_server_cursor BIGINT NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+    ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id);
 
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
@@ -1777,6 +1797,7 @@ class SyncDatabase:
             self._ensure_background_sync_tables(connection=conn)
             self._ensure_envelope_m1_columns(connection=conn)
             self._ensure_sync_object_state_table(connection=conn)
+            self._ensure_sync_current_heads_table(connection=conn)
             self._ensure_envelope_m1_indexes(connection=conn)
             self._ensure_key_record_user_id_column(connection=conn)
             self._ensure_key_record_rotation_columns(connection=conn)
@@ -3169,6 +3190,23 @@ class SyncDatabase:
                 "Sync envelope idempotency key was reused with different content"
             )
         inserted = _envelope_from_row(row)
+        self.execute(
+            """
+            INSERT INTO sync_current_heads (
+                dataset_id, domain, object_id, latest_server_cursor
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT (dataset_id, domain, object_id)
+            DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+             WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+            """,
+            (
+                inserted.dataset_id,
+                inserted.domain,
+                inserted.object_id,
+                inserted.server_cursor,
+            ),
+            connection=connection,
+        )
         self._ensure_domain_state(
             dataset_id=inserted.dataset_id,
             domain=inserted.domain,
@@ -3541,6 +3579,58 @@ class SyncDatabase:
         if row is None:
             return None
         return _object_state_from_row(row)
+
+    def get_current_head(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+    ) -> SyncEnvelope | None:
+        """Return one canonical head through the maintained head projection."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT envelope.*
+                  FROM sync_current_heads AS head
+                  JOIN sync_envelopes AS envelope
+                    ON envelope.server_sequence = head.latest_server_cursor
+                 WHERE head.dataset_id = ?
+                   AND head.domain = ?
+                   AND head.object_id = ?
+                """,
+                (dataset_id, domain, object_id),
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
+    def list_current_heads(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[SyncEnvelope]:
+        """Return one bounded owner-scoped page from the head projection."""
+
+        if limit < 1 or limit > 1000:
+            raise SyncStoreError("Sync current-head limit must be between 1 and 1000")
+        if offset < 0:
+            raise SyncStoreError("Sync current-head offset must be non-negative")
+        rows = self.execute(
+            """
+            SELECT envelope.*
+              FROM sync_current_heads AS head
+              JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = head.latest_server_cursor
+             WHERE head.dataset_id = ? AND head.domain = ?
+             ORDER BY head.object_id ASC
+             LIMIT ? OFFSET ?
+            """,
+            (dataset_id, domain, limit, offset),
+        ).rows
+        return [_envelope_from_row(row) for row in rows]
 
     def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
         now = utcnow_iso()
@@ -5669,6 +5759,43 @@ class SyncDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
                 ON sync_object_state(dataset_id, domain, object_id)
+            """,
+            connection=connection,
+        )
+
+    def _ensure_sync_current_heads_table(self, *, connection: Any) -> None:
+        cursor_type = "BIGINT" if self.backend_type == BackendType.POSTGRESQL else "INTEGER"
+        self.backend.create_tables(
+            f"""
+            CREATE TABLE IF NOT EXISTS sync_current_heads (
+                dataset_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                latest_server_cursor {cursor_type} NOT NULL,
+                PRIMARY KEY (dataset_id, domain, object_id)
+            )
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+                ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id)
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_current_heads (
+                dataset_id, domain, object_id, latest_server_cursor
+            )
+            SELECT dataset_id, domain, entity_id, MAX(server_sequence)
+              FROM sync_envelopes
+             WHERE status = 'accepted'
+             GROUP BY dataset_id, domain, entity_id
+            ON CONFLICT (dataset_id, domain, object_id)
+            DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+             WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
             """,
             connection=connection,
         )

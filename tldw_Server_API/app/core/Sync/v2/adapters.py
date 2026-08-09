@@ -114,6 +114,9 @@ class SyncAdapterContext:
     prior_envelopes: Sequence[SyncHead] = field(default_factory=tuple)
     get_head: SyncHeadLookup | None = None
     list_heads: SyncDomainHeadLoader | None = None
+    trusted_server_origin: bool = False
+    organization_group_state: str | None = None
+    bootstrap_relationship_verified: bool = False
 
 
 class SyncDomainAdapter(Protocol):

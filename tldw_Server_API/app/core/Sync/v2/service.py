@@ -3039,17 +3039,44 @@ class SyncV2Service:
                 payload_clear=envelope.payload_clear,
             )
         if context is None:
+            current = self.store.get_current_head(
+                dataset.dataset_id,
+                envelope.domain,
+                envelope.object_id,
+            )
             context = SyncAdapterContext(
-                prior_envelopes=self.store.list_envelopes_for_entity(
-                    dataset.dataset_id,
-                    envelope.domain,
-                    entity_id=envelope.entity_id,
-                    stable_key=envelope.stable_key,
-                    limit=100,
-                )
+                prior_envelopes=(current,) if current is not None else (),
+                get_head=lambda domain, object_id: self.store.get_current_head(
+                    dataset.dataset_id, domain, object_id
+                ),
+                list_heads=lambda domain: self._list_current_heads_for_adapter(
+                    dataset.dataset_id, domain
+                ),
             )
         adapter = self.adapters.get(envelope.domain)
         return _call_adapter_evaluate(adapter, envelope, dataset=dataset, context=context)
+
+    def _list_current_heads_for_adapter(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+    ) -> tuple[SyncEnvelope, ...]:
+        """Load current heads through bounded pages for adapter-wide checks."""
+
+        page_size = 1000
+        offset = 0
+        heads: list[SyncEnvelope] = []
+        while True:
+            page = self.store.list_current_heads(
+                dataset_id,
+                domain,
+                limit=page_size,
+                offset=offset,
+            )
+            heads.extend(page)
+            if len(page) < page_size:
+                return tuple(heads)
+            offset += page_size
 
     def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:
         if not device_id:

@@ -19,6 +19,7 @@ from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegist
 from .blob_store import LocalSyncBlobStore
 from .domain_adapters.media import MediaMetadataAdapter
 from .domain_adapters.notes import NotesDomainAdapter
+from .domain_adapters.notes_organization import NotesOrganizationDomainAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
@@ -29,7 +30,13 @@ from .materializers import (
     NotesMaterializer,
     SourceCacheMaterializer,
 )
-from .models import M1_SYNC_DOMAINS, MEDIA_SYNC_DOMAINS, SOURCE_CACHE_SYNC_DOMAINS, WORKSPACE_SYNC_DOMAINS
+from .models import (
+    M1_SYNC_DOMAINS,
+    MEDIA_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    SOURCE_CACHE_SYNC_DOMAINS,
+    WORKSPACE_SYNC_DOMAINS,
+)
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
 from .store import SyncV2Store
@@ -53,6 +60,10 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [WorkspacesDomainAdapter(domain=domain) for domain in WORKSPACE_SYNC_DOMAINS]
         + [SourceCacheAdapter(domain=domain) for domain in SOURCE_CACHE_SYNC_DOMAINS]
         + [MediaMetadataAdapter(domain=domain) for domain in MEDIA_SYNC_DOMAINS]
+        + [
+            NotesOrganizationDomainAdapter(domain=domain)
+            for domain in NOTES_ORGANIZATION_DOMAINS
+        ]
     )
 
 

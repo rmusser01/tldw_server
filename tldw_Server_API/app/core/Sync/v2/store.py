@@ -259,6 +259,33 @@ class SyncV2Store:
     ) -> SyncObjectState | None:
         return self.db.get_object_state(dataset_id, domain, object_id)
 
+    def get_current_head(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+    ) -> SyncEnvelope | None:
+        """Return the canonical current head for one dataset-scoped object."""
+
+        return self.db.get_current_head(dataset_id, domain, object_id)
+
+    def list_current_heads(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[SyncEnvelope]:
+        """Return a bounded page of canonical heads for one dataset domain."""
+
+        return self.db.list_current_heads(
+            dataset_id,
+            domain,
+            limit=limit,
+            offset=offset,
+        )
+
     def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
         return self.db.upsert_object_state(state)
 

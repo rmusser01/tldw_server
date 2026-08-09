@@ -175,19 +175,25 @@ def _evaluate_plan(
         if key in overlay:
             return overlay[key]
         if key not in stored:
-            history = service.store.list_envelopes_for_entity(
-                dataset.dataset_id,
-                domain,
-                entity_id=object_id,
-                limit=1,
+            stored[key] = service.store.get_current_head(
+                dataset.dataset_id, domain, object_id
             )
-            stored[key] = history[0] if history else None
         return stored[key]
 
     def list_heads(domain: SyncDomain) -> Sequence[SyncHead]:
-        return tuple(
-            head for (head_domain, _), head in overlay.items() if head_domain == domain
-        )
+        planned = {
+            object_id: head
+            for (head_domain, object_id), head in overlay.items()
+            if head_domain == domain
+        }
+        stored_heads = {
+            head.object_id: head
+            for head in service._list_current_heads_for_adapter(
+                dataset.dataset_id, domain
+            )
+        }
+        stored_heads.update(planned)
+        return tuple(stored_heads.values())
 
     envelopes: list[SyncEnvelopeCreate] = []
     step_count = len(canonical_steps)
