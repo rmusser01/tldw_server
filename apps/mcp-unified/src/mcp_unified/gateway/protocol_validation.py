@@ -217,11 +217,12 @@ def _resolve_fragment(
     resource: object,
     fragment: str,
     anchors: dict[str, tuple[object, str]],
+    resource_pointer: str,
 ) -> object:
-    """Return the submitted target of a decoded pointer or anchor."""
+    """Return a submitted target and its stable physical-document pointer."""
 
     if not fragment:
-        return resource, ""
+        return resource, resource_pointer
     if not fragment.startswith("/"):
         return anchors.get(unquote(fragment), _UNRESOLVED)
 
@@ -239,7 +240,7 @@ def _resolve_fragment(
         else:
             return _UNRESOLVED
         canonical_tokens.append(token.replace("~", "~0").replace("/", "~1"))
-    return current, "/" + "/".join(canonical_tokens)
+    return current, f"{resource_pointer}/{'/'.join(canonical_tokens)}"
 
 
 def _split_reference(base: str, reference: str) -> tuple[str, str]:
@@ -263,7 +264,7 @@ def _schema_children(
     dialect: str,
     pointer: str,
 ) -> list[tuple[object, str]]:
-    """Return schema children paired with canonical resource-local pointers."""
+    """Return schema children paired with stable physical-document pointers."""
 
     children: list[tuple[object, str]] = []
     for keyword in _SCHEMA_SINGLE_KEYWORDS[dialect]:
@@ -307,7 +308,7 @@ def _inspect_schema_keywords(
     int,
     list[tuple[str, str]],
     int,
-    dict[str, object],
+    dict[str, tuple[object, str]],
     dict[str, dict[str, tuple[object, str]]],
 ]:
     """Inspect schema locations plus every successfully resolved local target."""
@@ -315,9 +316,9 @@ def _inspect_schema_keywords(
     subschema_count = 0
     refs: list[tuple[str, str]] = []
     pattern_chars = 0
-    resources: dict[str, object] = {"": schema}
+    resources: dict[str, tuple[object, str]] = {"": (schema, "")}
     anchors: dict[str, dict[str, tuple[object, str]]] = {"": {}}
-    visited: set[tuple[str, str]] = set()
+    visited: set[str] = set()
     followed_refs: set[int] = set()
     stack: list[tuple[object, str, str, str]] = [(schema, "", "", "")]
     while True:
@@ -333,13 +334,11 @@ def _inspect_schema_keywords(
                 if isinstance(identifier, str):
                     base = urljoin(inherited_base, identifier)
                     resource_uri = urldefrag(base).url
-                    pointer = ""
-                    resources[resource_uri] = current
+                    resources[resource_uri] = (current, pointer)
                     anchors.setdefault(resource_uri, {})
-            visit_key = (resource_uri, pointer)
-            if visit_key in visited:
+            if pointer in visited:
                 continue
-            visited.add(visit_key)
+            visited.add(pointer)
             subschema_count += 1
             if isinstance(current, bool):
                 continue
@@ -371,13 +370,15 @@ def _inspect_schema_keywords(
             if index in followed_refs or reference == "\0":
                 continue
             resource_uri, fragment = _split_reference(base, reference)
-            resource = resources.get(resource_uri)
-            if resource is None:
+            resource_entry = resources.get(resource_uri)
+            if resource_entry is None:
                 continue
+            resource, resource_pointer = resource_entry
             resolved_target = _resolve_fragment(
                 resource,
                 fragment,
                 anchors.get(resource_uri, {}),
+                resource_pointer,
             )
             if resolved_target is _UNRESOLVED:
                 continue
@@ -463,17 +464,19 @@ def _preflight_schema(
                 "Schema contains an unresolved local reference",
             )
         resource_uri, fragment = _split_reference(base, reference)
-        resource = resources.get(resource_uri)
-        if resource is None:
+        resource_entry = resources.get(resource_uri)
+        if resource_entry is None:
             raise _validation_error(
                 "schema_external_ref",
                 "Schema references must resolve within the submitted schema",
             )
+        resource, resource_pointer = resource_entry
         if (
             _resolve_fragment(
                 resource,
                 fragment,
                 anchors.get(resource_uri, {}),
+                resource_pointer,
             )
             is _UNRESOLVED
         ):

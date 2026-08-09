@@ -1205,6 +1205,74 @@ def test_referenced_boolean_schema_honors_exact_subschema_boundary(
     assert raised.value.reason_code == "schema_too_complex"
 
 
+@pytest.mark.parametrize(
+    ("descendant", "expected_pattern_chars"),
+    [(True, 0), (False, 0), ({"pattern": "x"}, 1)],
+)
+def test_embedded_resource_descendant_aliases_share_one_physical_location(
+    descendant: bool | dict[str, str],
+    expected_pattern_chars: int,
+) -> None:
+    """Containing- and child-resource refs must not recount one physical node."""
+
+    api = _validation_api()
+    schema = {
+        "$id": "https://example.invalid/root",
+        "$ref": "#/properties/embedded/properties/x",
+        "properties": {
+            "embedded": {
+                "$id": "child",
+                "$ref": "#/properties/x",
+                "properties": {"x": descendant},
+            }
+        },
+    }
+    subschemas, refs, pattern_chars, *_ = api._inspect_schema_keywords(
+        schema,
+        dialect=PROTOCOL_PROFILES["2026-07-28"].schema_dialect,
+    )
+    assert (subschemas, len(refs), pattern_chars) == (
+        3,
+        2,
+        expected_pattern_chars,
+    )
+
+
+@pytest.mark.parametrize("descendant", [True, False, {"type": "integer"}])
+def test_embedded_resource_descendant_aliases_honor_exact_subschema_boundary(
+    descendant: bool | dict[str, str],
+) -> None:
+    """Three physical schemas fit limit three and exceed limit two despite aliases."""
+
+    api = _validation_api()
+    schema = {
+        "$id": "https://example.invalid/root",
+        "$ref": "#/properties/embedded/properties/x",
+        "properties": {
+            "embedded": {
+                "$id": "child",
+                "$ref": "#/properties/x",
+                "properties": {"x": descendant},
+            }
+        },
+    }
+    encoded = api._preflight_schema(
+        schema,
+        profile=PROTOCOL_PROFILES["2026-07-28"],
+        limits=replace(GatewayLimits(), max_schema_subschemas=3),
+        root_mode="any",
+    )
+    assert json.loads(encoded) == schema
+    with pytest.raises(GatewayApplicationError) as raised:
+        api._preflight_schema(
+            schema,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+            limits=replace(GatewayLimits(), max_schema_subschemas=2),
+            root_mode="any",
+        )
+    assert raised.value.reason_code == "schema_too_complex"
+
+
 @pytest.mark.asyncio
 async def test_close_uses_shared_wait_phases_for_all_real_children() -> None:
     """One force-wait consumer must not starve a later survivor's reap budget."""
