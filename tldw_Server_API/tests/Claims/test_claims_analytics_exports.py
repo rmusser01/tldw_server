@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import 
     create_queued_artifact,
     create_ready_artifact,
     export_max_bytes,
+    export_retention_hours,
     normalize_export_request,
     orphan_grace_seconds,
     process_export_artifact,
@@ -546,12 +547,24 @@ def test_export_settings_read_environment_before_cached_settings(
     assert resolver() == expected
 
 
+@pytest.mark.parametrize(
+    ("key", "resolver", "env_value", "settings_value"),
+    [
+        ("CLAIMS_ANALYTICS_EXPORT_MAX_BYTES", export_max_bytes, "2048", 4096),
+        ("CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", orphan_grace_seconds, "30", 45),
+        ("CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS", export_retention_hours, "2", 48),
+    ],
+)
 def test_explicit_export_settings_override_process_environment(
     monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    resolver: Any,
+    env_value: str,
+    settings_value: int,
 ) -> None:
-    monkeypatch.setenv("CLAIMS_ANALYTICS_EXPORT_MAX_BYTES", "2048")
+    monkeypatch.setenv(key, env_value)
 
-    assert export_max_bytes({"CLAIMS_ANALYTICS_EXPORT_MAX_BYTES": 4096}) == 4096
+    assert resolver({key: settings_value}) == settings_value
 
 
 @pytest.mark.parametrize(
