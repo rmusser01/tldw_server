@@ -443,7 +443,27 @@ def _is_unconditional_bare_reraise(handler: ast.ExceptHandler) -> bool:
     )
 
 
+def _shadows_base_exception(tree: ast.Module) -> bool:
+    """Keep cancellation analysis sound by forbidding lexical rebinding."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "BaseException" and not isinstance(node.ctx, ast.Load):
+            return True
+        if isinstance(node, ast.arg) and node.arg == "BaseException":
+            return True
+        if isinstance(node, ast.ExceptHandler) and node.name == "BaseException":
+            return True
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == "BaseException":
+            return True
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+            (alias.asname or alias.name.split(".")[0]) == "BaseException" for alias in node.names
+        ):
+            return True
+    return False
+
+
 def _recoverable_cancelled_error_violations(tree: ast.Module) -> list[str]:
+    if _shadows_base_exception(tree):
+        return ["shadow BaseException"]
     contexts = _scope_for_nodes(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
@@ -1161,7 +1181,7 @@ try:
 except BaseException:
     pass
 """,
-            [],
+            ["shadow BaseException"],
         ),
         "shadowed_base_exception_alias_tuple": (
             """
@@ -1172,7 +1192,7 @@ try:
 except _RECOVERABLE:
     pass
 """,
-            [],
+            ["shadow BaseException"],
         ),
         "base_exception_rebound_after_handler": (
             """
@@ -1182,7 +1202,7 @@ except BaseException:
     pass
 BaseException = ValueError
 """,
-            ["BaseException"],
+            ["shadow BaseException"],
         ),
         "function_parameter_shadows_base_exception": (
             """
@@ -1192,7 +1212,7 @@ def extract(BaseException):
     except BaseException:
         pass
 """,
-            [],
+            ["shadow BaseException"],
         ),
         "function_runtime_global_shadows_base_exception": (
             """
@@ -1205,7 +1225,7 @@ def extract():
 BaseException = ValueError
 extract()
 """,
-            [],
+            ["shadow BaseException"],
         ),
         "closure_runtime_binding_shadows_base_exception": (
             """
@@ -1221,7 +1241,7 @@ def outer():
 
 outer()
 """,
-            [],
+            ["shadow BaseException"],
         ),
         "method_skips_class_base_exception_shadow": (
             """
@@ -1234,7 +1254,66 @@ class Extractor:
         except BaseException:
             pass
 """,
-            ["BaseException"],
+            ["shadow BaseException"],
+        ),
+        "function_called_before_runtime_global_rebind": (
+            """
+def extract():
+    try:
+        operation()
+    except BaseException:
+        recover()
+
+extract()
+BaseException = ValueError
+""",
+            ["shadow BaseException"],
+        ),
+        "conditional_base_exception_rebind": (
+            """
+if False:
+    BaseException = ValueError
+try:
+    operation()
+except BaseException:
+    recover()
+""",
+            ["shadow BaseException"],
+        ),
+        "global_base_exception_rebind": (
+            """
+def extract():
+    global BaseException
+    try:
+        operation()
+    except BaseException:
+        recover()
+    BaseException = ValueError
+""",
+            ["shadow BaseException"],
+        ),
+        "deleted_exception_target_rebind": (
+            """
+try:
+    operation()
+except ValueError as BaseException:
+    recover()
+try:
+    operation()
+except BaseException:
+    recover()
+""",
+            ["shadow BaseException"],
+        ),
+        "composite_assignment_rebind": (
+            """
+(BaseException,) = (ValueError,)
+try:
+    operation()
+except BaseException:
+    recover()
+""",
+            ["shadow BaseException"],
         ),
         "qualified_bare_reraise": (
             """

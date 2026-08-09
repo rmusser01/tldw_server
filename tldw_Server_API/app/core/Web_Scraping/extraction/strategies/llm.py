@@ -161,6 +161,7 @@ def call_llm_provider(
                 dependencies.cancellation_checkpoint()
                 return response, False
         except Exception as exc:  # noqa: BLE001 - provider SDKs use unrelated exception hierarchies
+            dependencies.cancellation_checkpoint()
             _log_provider_failure(exc, stage=stage, url=url)
             if attempt >= max_retries:
                 return None, True

@@ -495,6 +495,41 @@ def test_provider_base_exceptions_are_not_translated_or_retried(
     assert provider_calls == 1
 
 
+def test_pipeline_cancellation_after_terminal_provider_error_is_not_translated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = False
+    provider_calls = 0
+
+    def checkpoint() -> None:
+        if cancelled:
+            raise asyncio.CancelledError
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal cancelled, provider_calls
+        provider_calls += 1
+        cancelled = True
+        raise ChatProviderError(SECRET)
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "0")
+    monkeypatch.setattr(pipeline, "get_strategy_semaphore", lambda *_args: None)
+    dependencies = _dependencies(
+        perform_chat_api_call=provider,
+        cancellation_checkpoint=checkpoint,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        pipeline._extract_article_with_pipeline_with_dependencies(
+            "<p>Body</p>",
+            "https://example.com/provider-cancel",
+            dependencies=dependencies,
+            strategy_order=["llm"],
+            llm_settings={"provider": "openai"},
+        )
+
+    assert provider_calls == 1
+
+
 @pytest.mark.parametrize("llm_response", ['{"score": 0}', '{"flag": false}'])
 def test_scalar_llm_data_allows_trafilatura_fallback(
     monkeypatch: pytest.MonkeyPatch,
