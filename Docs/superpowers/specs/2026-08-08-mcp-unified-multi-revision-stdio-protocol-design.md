@@ -369,10 +369,14 @@ defaults:
 | `max_schema_refs` | `int` | `256` | `1..4_096` |
 | `max_schema_pattern_chars` | `int` | `4_096` | `1..65_536` |
 | `max_schema_validation_processes` | `int` | `4` | `1..32` |
-| `schema_validation_timeout_seconds` | `float` | `1.0` | finite and `(0, 10]` |
+| `schema_validation_timeout_seconds` | `float` | `5.0` | finite and `(0, 10]` |
 | `graceful_shutdown_timeout_seconds` | `float` | `5.0` | finite and `(0, 60]` |
 
 Integer fields reject booleans and values outside their accepted ranges.
+The validation timeout default was raised from `1.0` to `5.0` in `0.2.1`
+after the protected Windows SDK smoke demonstrated that a clean spawned worker
+can need more than one second to import before validation begins; the `10.0`
+second upper bound is unchanged.
 Cross-field relationships in the table are validated. Construction fails
 before serving; values are never silently clamped. `max_json_depth` applies to
 decoded requests, runtime results, and metadata; `max_schema_depth` separately

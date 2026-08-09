@@ -988,7 +988,7 @@ def _distribution_metadata(artifact: Path, *, kind: str) -> Message:
 def _jsonschema_base_dependency(metadata: Message) -> str:
     """Return the exact unmarked jsonschema base requirement or fail closed."""
 
-    matches: set[str] = set()
+    matches: dict[frozenset[str], str] = {}
     for value in metadata.get_all("Requires-Dist") or []:
         requirement, separator, marker = value.partition(";")
         name_match = re.match(r"\s*([A-Za-z0-9_.-]+)", requirement)
@@ -996,13 +996,14 @@ def _jsonschema_base_dependency(metadata: Message) -> str:
             continue
         name = name_match.group(1).lower().replace("_", "-")
         if name == "jsonschema" and (not separator or not marker.strip()):
-            matches.add(requirement.strip())
+            normalized = requirement.strip()
+            specifier_text = normalized[name_match.end() :].replace(" ", "").strip("()")
+            specifiers = frozenset(part for part in specifier_text.split(",") if part)
+            matches.setdefault(specifiers, normalized)
     if len(matches) != 1:
         raise ValueError("metadata must declare one unmarked jsonschema base dependency")
 
-    requirement = next(iter(matches))
-    specifier_text = requirement[len("jsonschema") :].replace(" ", "")
-    specifiers = frozenset(part for part in specifier_text.split(",") if part)
+    specifiers, requirement = next(iter(matches.items()))
     if specifiers != JSONSCHEMA_REQUIREMENT_BOUNDS:
         raise ValueError("jsonschema base dependency must be bounded to >=4.23,<5")
     return requirement

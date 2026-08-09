@@ -60,7 +60,7 @@ def test_jsonschema_dependency_accepts_duplicate_identical_metadata_headers() ->
 
     metadata = Parser().parsestr(
         "Requires-Dist: jsonschema<5,>=4.23\n"
-        "Requires-Dist: jsonschema<5,>=4.23\n"
+        "Requires-Dist: jsonschema>=4.23,<5\n"
         'Requires-Dist: jsonschema<5,>=4.23; extra == "dev"\n'
         "\n"
     )
