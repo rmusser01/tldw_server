@@ -779,6 +779,26 @@ class _GuardedSQLiteConnection:
     async def cursor(self) -> _GuardedSQLiteCursor:
         return _GuardedSQLiteCursor(await self._connection.cursor(), self)
 
+    @staticmethod
+    def _savepoint_name(name: str) -> str:
+        if type(name) is not str or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", name) is None:
+            raise ValueError("Invalid SQLite savepoint name")
+        return name
+
+    async def create_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(f'SAVEPOINT "{savepoint}"')  # nosec B608
+
+    async def rollback_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(
+            f'ROLLBACK TO SAVEPOINT "{savepoint}"'  # nosec B608
+        )
+
+    async def release_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(f'RELEASE SAVEPOINT "{savepoint}"')  # nosec B608
+
     async def commit(self) -> None:
         await self._connection.commit()
 

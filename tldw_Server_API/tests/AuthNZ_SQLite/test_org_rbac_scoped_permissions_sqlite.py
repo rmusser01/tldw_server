@@ -4,6 +4,29 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
+
+
+async def _insert_test_user(conn, *, username: str, email: str, role: str = "user") -> None:
+    await VersionedUserWriteGateway("sqlite").insert_user(
+        conn,
+        values={
+            "username": username,
+            "email": email,
+            "password_hash": "x",
+            "is_active": True,
+            "role": role,
+        },
+    )
+
 
 async def _issue_access_token(
     user_row: dict,
@@ -42,14 +65,14 @@ async def test_org_rbac_scoped_permissions_require_active_sqlite(tmp_path, monke
     monkeypatch.setenv("ORG_RBAC_PROPAGATION_ENABLED", "true")
     monkeypatch.setenv("ORG_RBAC_SCOPE_MODE", "require_active")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.org_rbac import apply_scoped_permissions
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
-        AuthnzOrgsTeamsRepo,
         DEFAULT_BASE_TEAM_NAME,
+        AuthnzOrgsTeamsRepo,
     )
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -58,12 +81,10 @@ async def test_org_rbac_scoped_permissions_require_active_sqlite(tmp_path, monke
     ensure_authnz_tables(Path(pool.db_path))
 
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active)
-            VALUES (?, ?, ?, 1)
-            """,
-            ("alice", "alice@example.com", "x"),
+        await _insert_test_user(
+            conn,
+            username="alice",
+            email="alice@example.com",
         )
 
     user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", ("alice",))
@@ -71,12 +92,13 @@ async def test_org_rbac_scoped_permissions_require_active_sqlite(tmp_path, monke
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(name="Acme", owner_user_id=user_id)
     org_id = org["id"]
-    await repo.add_org_member(org_id=org_id, user_id=user_id, role="owner")
+    await repo.add_org_member(org_id=org_id, user_id=user_id, role="owner", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     default_team_id = await pool.fetchval(
         "SELECT id FROM teams WHERE org_id = ? AND name = ?",
         (org_id, DEFAULT_BASE_TEAM_NAME),
     )
+    assert default_team_id is not None
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -121,13 +143,13 @@ async def test_org_rbac_scoped_permissions_endpoint_allows_media_read(tmp_path, 
     monkeypatch.setenv("ORG_RBAC_SCOPE_MODE", "require_active")
     monkeypatch.setenv("TEST_MODE", "1")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -136,12 +158,11 @@ async def test_org_rbac_scoped_permissions_endpoint_allows_media_read(tmp_path, 
     ensure_authnz_tables(Path(pool.db_path))
 
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("scoped-user", "scoped@example.com", "x", "guest"),
+        await _insert_test_user(
+            conn,
+            username="scoped-user",
+            email="scoped@example.com",
+            role="guest",
         )
 
     user_id = await pool.fetchval(
@@ -150,7 +171,7 @@ async def test_org_rbac_scoped_permissions_endpoint_allows_media_read(tmp_path, 
 
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(name="Scoped Org", owner_user_id=user_id)
-    await repo.add_org_member(org_id=org["id"], user_id=user_id, role="member")
+    await repo.add_org_member(org_id=org["id"], user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     api_key_mgr = APIKeyManager()
     await api_key_mgr.initialize()
@@ -183,13 +204,13 @@ async def test_org_rbac_scoped_permissions_denylist_blocks_admin(tmp_path, monke
     monkeypatch.setenv("ORG_RBAC_SCOPED_PERMISSION_DENYLIST", "system.configure")
     monkeypatch.setenv("TEST_MODE", "1")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -198,12 +219,11 @@ async def test_org_rbac_scoped_permissions_denylist_blocks_admin(tmp_path, monke
     ensure_authnz_tables(Path(pool.db_path))
 
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("deny-user", "deny@example.com", "x", "guest"),
+        await _insert_test_user(
+            conn,
+            username="deny-user",
+            email="deny@example.com",
+            role="guest",
         )
 
     user_id = await pool.fetchval(
@@ -212,7 +232,7 @@ async def test_org_rbac_scoped_permissions_denylist_blocks_admin(tmp_path, monke
 
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(name="Deny Org", owner_user_id=user_id)
-    await repo.add_org_member(org_id=org["id"], user_id=user_id, role="member")
+    await repo.add_org_member(org_id=org["id"], user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -262,16 +282,16 @@ async def test_org_rbac_scoped_permissions_team_denylist_blocks_admin(tmp_path, 
     monkeypatch.setenv("ORG_RBAC_SCOPED_PERMISSION_DENYLIST", "system.configure")
     monkeypatch.setenv("TEST_MODE", "1")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
-        AuthnzOrgsTeamsRepo,
         DEFAULT_BASE_TEAM_NAME,
+        AuthnzOrgsTeamsRepo,
     )
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -280,12 +300,11 @@ async def test_org_rbac_scoped_permissions_team_denylist_blocks_admin(tmp_path, 
     ensure_authnz_tables(Path(pool.db_path))
 
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("deny-team-user", "deny-team@example.com", "x", "guest"),
+        await _insert_test_user(
+            conn,
+            username="deny-team-user",
+            email="deny-team@example.com",
+            role="guest",
         )
 
     user_id = await pool.fetchval(
@@ -295,12 +314,13 @@ async def test_org_rbac_scoped_permissions_team_denylist_blocks_admin(tmp_path, 
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(name="Deny Team Org", owner_user_id=user_id)
     org_id = org["id"]
-    await repo.add_org_member(org_id=org_id, user_id=user_id, role="member")
+    await repo.add_org_member(org_id=org_id, user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     default_team_id = await pool.fetchval(
         "SELECT id FROM teams WHERE org_id = ? AND name = ?",
         (org_id, DEFAULT_BASE_TEAM_NAME),
     )
+    assert default_team_id is not None
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -349,15 +369,15 @@ async def test_org_rbac_scoped_permissions_allows_tools_execute(tmp_path, monkey
     monkeypatch.setenv("ORG_RBAC_SCOPE_MODE", "require_active")
     monkeypatch.setenv("TEST_MODE", "1")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
-        AuthnzOrgsTeamsRepo,
         DEFAULT_BASE_TEAM_NAME,
+        AuthnzOrgsTeamsRepo,
     )
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -366,12 +386,11 @@ async def test_org_rbac_scoped_permissions_allows_tools_execute(tmp_path, monkey
     ensure_authnz_tables(Path(pool.db_path))
 
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("tool-user", "tool-user@example.com", "x", "guest"),
+        await _insert_test_user(
+            conn,
+            username="tool-user",
+            email="tool-user@example.com",
+            role="guest",
         )
 
     user_id = await pool.fetchval(
@@ -381,12 +400,13 @@ async def test_org_rbac_scoped_permissions_allows_tools_execute(tmp_path, monkey
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(name="Tool Org", owner_user_id=user_id)
     org_id = org["id"]
-    await repo.add_org_member(org_id=org_id, user_id=user_id, role="member")
+    await repo.add_org_member(org_id=org_id, user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     default_team_id = await pool.fetchval(
         "SELECT id FROM teams WHERE org_id = ? AND name = ?",
         (org_id, DEFAULT_BASE_TEAM_NAME),
     )
+    assert default_team_id is not None
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -438,13 +458,13 @@ async def test_org_rbac_scoped_permissions_jwt_active_org_claims(tmp_path, monke
     monkeypatch.setenv("ORG_RBAC_SCOPE_MODE", "require_active")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
     reset_jwt_service()
@@ -468,8 +488,8 @@ async def test_org_rbac_scoped_permissions_jwt_active_org_claims(tmp_path, monke
     repo = AuthnzOrgsTeamsRepo(pool)
     org_alpha = await repo.create_organization(name="Org Alpha", owner_user_id=int(user["id"]))
     org_beta = await repo.create_organization(name="Org Beta", owner_user_id=int(user["id"]))
-    await repo.add_org_member(org_id=org_alpha["id"], user_id=int(user["id"]), role="member")
-    await repo.add_org_member(org_id=org_beta["id"], user_id=int(user["id"]), role="lead")
+    await repo.add_org_member(org_id=org_alpha["id"], user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await repo.add_org_member(org_id=org_beta["id"], user_id=int(user["id"]), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -525,16 +545,16 @@ async def test_org_rbac_scoped_permissions_active_org_includes_team_perms(tmp_pa
     monkeypatch.setenv("ORG_RBAC_SCOPE_MODE", "require_active")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
-        AuthnzOrgsTeamsRepo,
         DEFAULT_BASE_TEAM_NAME,
+        AuthnzOrgsTeamsRepo,
     )
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
     reset_jwt_service()
@@ -562,13 +582,14 @@ async def test_org_rbac_scoped_permissions_active_org_includes_team_perms(tmp_pa
     org_secondary = await repo.create_organization(
         name="Org Secondary", owner_user_id=int(user["id"])
     )
-    await repo.add_org_member(org_id=org_primary["id"], user_id=int(user["id"]), role="member")
-    await repo.add_org_member(org_id=org_secondary["id"], user_id=int(user["id"]), role="member")
+    await repo.add_org_member(org_id=org_primary["id"], user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await repo.add_org_member(org_id=org_secondary["id"], user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     primary_team_id = await pool.fetchval(
         "SELECT id FROM teams WHERE org_id = ? AND name = ?",
         (org_primary["id"], DEFAULT_BASE_TEAM_NAME),
     )
+    assert primary_team_id is not None
     secondary_team_id = await pool.fetchval(
         "SELECT id FROM teams WHERE org_id = ? AND name = ?",
         (org_secondary["id"], DEFAULT_BASE_TEAM_NAME),
@@ -578,6 +599,7 @@ async def test_org_rbac_scoped_permissions_active_org_includes_team_perms(tmp_pa
         team_id=int(secondary_team_id),
         user_id=int(user["id"]),
         role="lead",
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
     )
 
     async with pool.transaction() as conn:
@@ -627,13 +649,13 @@ async def test_org_rbac_scoped_permissions_jwt_active_team_derives_org(tmp_path,
     monkeypatch.setenv("ORG_RBAC_SCOPE_MODE", "require_active")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
     reset_jwt_service()
@@ -659,8 +681,8 @@ async def test_org_rbac_scoped_permissions_jwt_active_team_derives_org(tmp_path,
         name="Team Derive Org", owner_user_id=int(user["id"])
     )
     team = await repo.create_team(org_id=int(org["id"]), name="Team A")
-    await repo.add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="member")
-    await repo.add_team_member(team_id=int(team["id"]), user_id=int(user["id"]), role="member")
+    await repo.add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await repo.add_team_member(team_id=int(team["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -707,13 +729,13 @@ async def test_org_rbac_scoped_permissions_jwt_require_active_fallback(tmp_path,
     monkeypatch.setenv("ORG_RBAC_SCOPE_MODE", "require_active")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
     reset_jwt_service()
@@ -738,7 +760,7 @@ async def test_org_rbac_scoped_permissions_jwt_require_active_fallback(tmp_path,
     org = await repo.create_organization(
         name="Fallback Org", owner_user_id=int(user["id"])
     )
-    await repo.add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="member")
+    await repo.add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     async with pool.transaction() as conn:
         await conn.execute(

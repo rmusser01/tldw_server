@@ -11,6 +11,15 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
+
 
 class _PostgresMutationConnectionGate:
     def __init__(self, connection, owner: "_PostgresMutationGatePool") -> None:
@@ -522,8 +531,8 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
 
     org = await create_organization(name=f"BYOK Org {name_suffix}", owner_user_id=admin_id)
     team = await create_team(org_id=int(org["id"]), name=f"BYOK Team {name_suffix}")
-    await add_org_member(org_id=int(org["id"]), user_id=user_id, role="lead")
-    await add_team_member(team_id=int(team["id"]), user_id=user_id, role="lead")
+    await add_org_member(org_id=int(org["id"]), user_id=user_id, role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=int(team["id"]), user_id=user_id, role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     shared_repo = AuthnzOrgProviderSecretsRepo(test_db_pool)
     await shared_repo.ensure_tables()

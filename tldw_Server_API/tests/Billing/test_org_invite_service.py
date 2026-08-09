@@ -30,18 +30,26 @@ Mocking Approach
 
 For integration tests with real database, see test_billing_endpoints_integration.py.
 """
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
-from tldw_Server_API.app.services.org_invite_service import (
-    OrgInviteService,
-    InviteStatus,
-    InviteValidationResult,
-    RedemptionResult,
-    get_invite_service,
+import pytest
+
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.services.org_invite_service import (
+    InviteStatus,
+    InviteValidationResult,
+    OrgInviteService,
+    RedemptionResult,
+)
+
+_REGISTRATION_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.REGISTRATION,
+)
 
 
 class TestInviteValidationResult:
@@ -353,7 +361,12 @@ class TestOrgInviteService:
 
         assert result.success is True
         assert result.was_already_member is False
-        mock_orgs_repo.add_org_member.assert_called_once_with(org_id=1, user_id=100, role="member")
+        mock_orgs_repo.add_org_member.assert_called_once_with(
+            org_id=1,
+            user_id=100,
+            role="member",
+            context=_REGISTRATION_MEMBERSHIP_CONTEXT,
+        )
         mock_invites_repo.record_redemption.assert_called_once()
         mock_invites_repo.increment_uses_count.assert_called_once()
 
@@ -444,7 +457,12 @@ class TestOrgInviteService:
         )
 
         assert result.success is True
-        mock_orgs_repo.add_org_member.assert_called_once_with(org_id=1, user_id=100, role="member")
+        mock_orgs_repo.add_org_member.assert_called_once_with(
+            org_id=1,
+            user_id=100,
+            role="member",
+            context=_REGISTRATION_MEMBERSHIP_CONTEXT,
+        )
         monkeypatch.delenv("ORG_INVITE_ALLOW_MISSING_EMAIL", raising=False)
         reset_settings()
 
@@ -472,7 +490,12 @@ class TestOrgInviteService:
         )
 
         assert result.success is True
-        mock_orgs_repo.add_org_member.assert_called_once_with(org_id=1, user_id=100, role="member")
+        mock_orgs_repo.add_org_member.assert_called_once_with(
+            org_id=1,
+            user_id=100,
+            role="member",
+            context=_REGISTRATION_MEMBERSHIP_CONTEXT,
+        )
 
     @pytest.mark.asyncio
     async def test_redeem_invite_org_member_add_error_is_sanitized(
@@ -530,7 +553,12 @@ class TestOrgInviteService:
         assert result.success is True
         assert result.team_id == 77
         mock_orgs_repo.add_org_member.assert_called_once()
-        mock_orgs_repo.add_team_member.assert_called_once_with(team_id=77, user_id=100, role="member")
+        mock_orgs_repo.add_team_member.assert_called_once_with(
+            team_id=77,
+            user_id=100,
+            role="member",
+            context=_REGISTRATION_MEMBERSHIP_CONTEXT,
+        )
 
     @pytest.mark.asyncio
     async def test_revoke_invite_success(self, service, mock_invites_repo):

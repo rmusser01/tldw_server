@@ -15,9 +15,17 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.org_invites_repo import AuthnzOrgInvitesRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+_INVITE_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.REGISTRATION,
+)
 
 
 class InviteStatus(str, Enum):
@@ -358,7 +366,12 @@ class OrgInviteService:
 
         # Add user to org
         try:
-            await orgs_repo.add_org_member(org_id=org_id, user_id=user_id, role=role)
+            await orgs_repo.add_org_member(
+                org_id=org_id,
+                user_id=user_id,
+                role=role,
+                context=_INVITE_MEMBERSHIP_CONTEXT,
+            )
         except Exception as e:
             logger.error(f"Failed to add user {user_id} to org {org_id}: {e}")
             return RedemptionResult(
@@ -370,7 +383,12 @@ class OrgInviteService:
         team_membership_failed = False
         if team_id:
             try:
-                await orgs_repo.add_team_member(team_id=team_id, user_id=user_id, role=role)
+                await orgs_repo.add_team_member(
+                    team_id=team_id,
+                    user_id=user_id,
+                    role=role,
+                    context=_INVITE_MEMBERSHIP_CONTEXT,
+                )
             except Exception as e:
                 logger.warning(f"Failed to add user {user_id} to team {team_id}: {e}")
                 # Don't fail the whole operation - org membership succeeded
