@@ -7,8 +7,10 @@ import hashlib
 import json
 import multiprocessing
 import os
+import signal
 import time
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,22 @@ def _hang_worker(*_args: object) -> None:
     time.sleep(60)
 
 
+def _ignore_sigterm_worker(ready: Any, *_args: object) -> None:
+    """Stay alive through terminate so cleanup must exercise kill and reap."""
+
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    ready.set()
+    time.sleep(60)
+
+
+def _ignore_sigterm_queue_worker(ready: Any, *_args: object) -> None:
+    """Queue readiness from each SIGTERM-ignoring worker."""
+
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    ready.put(os.getpid())
+    time.sleep(60)
+
+
 class _TrackingSpawnContext:
     """Delegate to spawn while retaining every real Process handle."""
 
@@ -57,6 +75,54 @@ class _TrackingSpawnContext:
         process = self._context.Process(*args, **kwargs)
         self.processes.append(process)
         return process
+
+
+class _PostKillProcess:
+    """Wrap a real child and record whether post-kill join receives time."""
+
+    def __init__(self, process: multiprocessing.Process) -> None:
+        self._process = process
+        self.killed = False
+        self.post_kill_join_timeouts: list[float | None] = []
+
+    @property
+    def pid(self) -> int | None:
+        return self._process.pid
+
+    @property
+    def exitcode(self) -> int | None:
+        return self._process.exitcode
+
+    def start(self) -> None:
+        self._process.start()
+
+    def is_alive(self) -> bool:
+        return self._process.is_alive()
+
+    def terminate(self) -> None:
+        self._process.terminate()
+
+    def kill(self) -> None:
+        self.killed = True
+        self._process.kill()
+
+    def join(self, timeout: float | None = None) -> None:
+        if self.killed:
+            self.post_kill_join_timeouts.append(timeout)
+        self._process.join(timeout)
+
+
+class _PostKillTrackingContext(_TrackingSpawnContext):
+    """Return real process proxies that expose post-kill scheduling evidence."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.processes: list[Any] = []
+
+    def Process(self, *args: object, **kwargs: object) -> _PostKillProcess:  # noqa: N802
+        wrapped = _PostKillProcess(self._context.Process(*args, **kwargs))
+        self.processes.append(wrapped)
+        return wrapped
 
 
 class _ReapCheckingSemaphore:
@@ -795,4 +861,268 @@ async def test_close_uses_one_global_graceful_shutdown_deadline() -> None:
     assert clock[0] <= 100.12
     assert all(any(call[0] == "terminate" for call in process.calls) for process in processes)
     assert all(any(call[0] == "kill" for call in process.calls) for process in processes)
+    assert manager.live_process_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("schema", "limit_changes", "reason_code"),
+    [
+        (
+            {"definitions": {"legacy": {"pattern": "abcd"}}},
+            {"max_schema_pattern_chars": 3},
+            "schema_pattern_limit",
+        ),
+        (
+            {"dependencies": {"legacy": {"pattern": "abcd"}}},
+            {"max_schema_pattern_chars": 3},
+            "schema_pattern_limit",
+        ),
+        (
+            {"$ref": "#/default", "default": {"pattern": "abcd"}},
+            {"max_schema_pattern_chars": 3},
+            "schema_pattern_limit",
+        ),
+        (
+            {"$ref": "#/default", "default": {"type": "integer"}},
+            {"max_schema_subschemas": 1},
+            "schema_too_complex",
+        ),
+        (
+            {"$ref": "#/default", "default": {"$ref": "#"}},
+            {"max_schema_refs": 1},
+            "schema_ref_limit",
+        ),
+    ],
+)
+async def test_2020_compatibility_and_referenced_schema_nodes_consume_limits(
+    schema: dict[str, Any],
+    limit_changes: dict[str, int],
+    reason_code: str,
+) -> None:
+    """Every reachable schema node must consume the matching parent-side bound."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager(limits=replace(GatewayLimits(), **limit_changes))
+    with pytest.raises(GatewayApplicationError) as raised:
+        await manager.validate(
+            schema,
+            1,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    assert raised.value.reason_code == reason_code
+    assert manager.live_process_count == 0
+    await manager.close()
+
+
+@pytest.mark.timeout(2)
+def test_reference_cycle_terminates_without_double_counting() -> None:
+    """Following local refs must visit each target once while counting each ref once."""
+
+    api = _validation_api()
+    schema = {
+        "$ref": "#/default",
+        "default": {"$ref": "#", "pattern": "x"},
+    }
+    subschemas, refs, pattern_chars, *_ = api._inspect_schema_keywords(
+        schema,
+        dialect=PROTOCOL_PROFILES["2026-07-28"].schema_dialect,
+    )
+    assert (subschemas, len(refs), pattern_chars) == (2, 2, 1)
+
+
+def test_structural_resource_reached_by_absolute_ref_is_counted_once() -> None:
+    """A discovered `$id` resource must retain one visited identity after resolution."""
+
+    api = _validation_api()
+    schema = {
+        "$id": "https://example.invalid/root.json",
+        "$defs": {
+            "child": {
+                "$id": "child.json",
+                "pattern": "x",
+            }
+        },
+        "$ref": "child.json",
+    }
+    subschemas, refs, pattern_chars, *_ = api._inspect_schema_keywords(
+        schema,
+        dialect=PROTOCOL_PROFILES["2026-07-28"].schema_dialect,
+    )
+    assert (subschemas, len(refs), pattern_chars) == (2, 1, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opaque_id", ["urn:example:child", "custom:opaque-child"])
+async def test_fragment_refs_resolve_inside_submitted_opaque_resources(
+    opaque_id: str,
+) -> None:
+    """Opaque resource bases must retain their URI for pointer and anchor fragments."""
+
+    api = _validation_api()
+    schema = {
+        "$id": "urn:example:root",
+        "$defs": {
+            "child": {
+                "$id": opaque_id,
+                "$anchor": "child",
+                "$defs": {
+                    "value": {
+                        "$anchor": "value",
+                        "type": "integer",
+                    }
+                },
+                "allOf": [
+                    {"$ref": "#/$defs/value"},
+                    {"$ref": "#value"},
+                ],
+            }
+        },
+        "$ref": f"{opaque_id}#child",
+    }
+    manager = api.GatewaySchemaValidationManager()
+    try:
+        await manager.validate(
+            schema,
+            1,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shutdown", ["close", "cancel"])
+async def test_sigterm_ignoring_worker_gets_post_kill_reap_budget(
+    shutdown: str,
+) -> None:
+    """Real SIGTERM survivors must be killed and joined before permit release."""
+
+    if not hasattr(signal, "SIGTERM") or not hasattr(signal, "SIGKILL"):
+        pytest.skip("POSIX process signals are required")
+    api = _validation_api()
+    context = _PostKillTrackingContext()
+    ready = context._context.Event()
+    limits = replace(GatewayLimits(), graceful_shutdown_timeout_seconds=0.3)
+    manager = api.GatewaySchemaValidationManager(
+        limits=limits,
+        process_context=context,
+        _worker_target=partial(_ignore_sigterm_worker, ready),
+    )
+    semaphore = _ReapCheckingSemaphore(context)
+    manager._semaphore = semaphore
+    task = asyncio.create_task(
+        manager.validate(
+            {"type": "integer"},
+            1,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    )
+    await _wait_for_process(context)
+    for _ in range(500):
+        if ready.is_set():
+            break
+        await asyncio.sleep(0.002)
+    else:
+        pytest.fail("SIGTERM-ignoring worker did not become ready")
+
+    if shutdown == "close":
+        await manager.close()
+        with pytest.raises(GatewayApplicationError) as raised:
+            await task
+        assert raised.value.reason_code == "schema_validator_closed"
+    else:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await manager.close()
+
+    process = context.processes[0]
+    assert process.killed
+    assert process.exitcode == -signal.SIGKILL
+    assert any(timeout is not None and timeout > 0 for timeout in process.post_kill_join_timeouts)
+    assert semaphore.released == 1
+    assert manager.live_process_count == 0
+
+
+@pytest.mark.asyncio
+async def test_close_kills_and_reaps_every_real_sigterm_survivor() -> None:
+    """A shared deadline must retain post-kill scheduling for every live child."""
+
+    if not hasattr(signal, "SIGTERM") or not hasattr(signal, "SIGKILL"):
+        pytest.skip("POSIX process signals are required")
+    api = _validation_api()
+    context = _PostKillTrackingContext()
+    ready = context._context.Queue()
+    limits = replace(
+        GatewayLimits(),
+        max_schema_validation_processes=2,
+        graceful_shutdown_timeout_seconds=0.4,
+    )
+    manager = api.GatewaySchemaValidationManager(
+        limits=limits,
+        process_context=context,
+        _worker_target=partial(_ignore_sigterm_queue_worker, ready),
+    )
+    tasks = [
+        asyncio.create_task(
+            manager.validate(
+                {"type": "integer"},
+                index,
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        )
+        for index in range(2)
+    ]
+    for _ in range(500):
+        if len(context.processes) == 2:
+            break
+        await asyncio.sleep(0.002)
+    else:
+        pytest.fail("validation workers did not start")
+    ready.get(timeout=5)
+    ready.get(timeout=5)
+
+    await manager.close()
+    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert all(isinstance(outcome, GatewayApplicationError) for outcome in outcomes)
+    assert all(process.killed for process in context.processes)
+    assert all(process.exitcode == -signal.SIGKILL for process in context.processes)
+    assert all(
+        any(timeout is not None and timeout > 0 for timeout in process.post_kill_join_timeouts)
+        for process in context.processes
+    )
+    assert manager.live_process_count == 0
+
+
+@pytest.mark.asyncio
+async def test_cancellation_preserves_cancelled_error_when_cleanup_reports_failure() -> None:
+    """Cleanup diagnostics must not replace an active task cancellation."""
+
+    api = _validation_api()
+    context = _TrackingSpawnContext()
+    manager = api.GatewaySchemaValidationManager(
+        process_context=context,
+        _worker_target=_hang_worker,
+    )
+    task = asyncio.create_task(
+        manager.validate(
+            {"type": "integer"},
+            1,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    )
+    await _wait_for_process(context)
+    original_cleanup = manager._cleanup_process
+    manager._cleanup_process = lambda *_args, **_kwargs: [  # type: ignore[method-assign]
+        "injected cleanup failure"
+    ]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert manager.live_process_count == 1
+
+    manager._cleanup_process = original_cleanup  # type: ignore[method-assign]
+    await manager.close()
     assert manager.live_process_count == 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -901,3 +902,141 @@ def test_all_projected_descriptors_and_results_match_pinned_official_schemas(
     }
     for definition, value in {**descriptors, **results}.items():
         validate(definition, value)
+
+
+def test_public_projection_entrypoints_expose_keyword_only_limits() -> None:
+    """Callers must be able to apply connection-specific JSON depth policy."""
+
+    api = _projection_api()
+    for name in (
+        "project_descriptor",
+        "project_tool_result",
+        "project_resource_result",
+        "project_prompt_result",
+        "project_application_error",
+    ):
+        parameter = inspect.signature(getattr(api, name)).parameters["limits"]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameter.default == GatewayLimits()
+
+
+def test_projection_honors_smaller_configured_depth_through_every_clone_path() -> None:
+    """Descriptor, metadata, and all result projectors share the configured depth."""
+
+    api = _projection_api()
+    profile = PROTOCOL_PROFILES["2026-07-28"]
+    limits = replace(GatewayLimits(), max_json_depth=2)
+    deep = {"one": {"two": {"three": 3}}}
+    deep_schema = {"type": "object", "nested": deep}
+    calls = [
+        lambda: api.project_descriptor(
+            "tool",
+            {"name": "safe", "inputSchema": deep_schema},
+            profile,
+            limits=limits,
+        ),
+        lambda: api.project_tool_result(deep, profile, limits=limits),
+        lambda: api.project_tool_result(
+            None,
+            profile,
+            content=[
+                {
+                    "type": "text",
+                    "text": "safe",
+                    "annotations": deep,
+                }
+            ],
+            limits=limits,
+        ),
+        lambda: api.project_resource_result(
+            {"contents": [{"uri": "file:///safe", "text": "safe"}], "_meta": deep},
+            profile,
+            limits=limits,
+        ),
+        lambda: api.project_prompt_result(
+            {
+                "messages": [{"role": "user", "content": {"type": "text", "text": "safe"}}],
+                "_meta": deep,
+            },
+            profile,
+            limits=limits,
+        ),
+    ]
+    for call in calls:
+        with pytest.raises(GatewayInvalidApplicationResult):
+            call()
+
+
+def test_projection_accepts_values_within_a_larger_configured_depth() -> None:
+    """The default depth must not override an explicitly larger valid policy."""
+
+    api = _projection_api()
+    nested: Any = None
+    for _ in range(80):
+        nested = [nested]
+    projected = api.project_tool_result(
+        nested,
+        PROTOCOL_PROFILES["2026-07-28"],
+        limits=replace(GatewayLimits(), max_json_depth=128),
+    )
+    assert projected["structuredContent"] == nested
+
+
+@pytest.mark.parametrize(
+    ("uri_template", "expected"),
+    [
+        (
+            "https://example.com:{port}/resource",
+            "https://example.com:{port}/resource",
+        ),
+        (
+            "https://{host}:{port}/resource",
+            "https://{host}:{port}/resource",
+        ),
+        (
+            "HTTPS://EXAMPLE.COM:{port}/resource",
+            "https://example.com:{port}/resource",
+        ),
+        (
+            "https://example.com/resource{?q,lang}",
+            "https://example.com/resource{?q,lang}",
+        ),
+        ("https://example.com/{+path}", "https://example.com/{+path}"),
+        ("https://example.com/{id:3}", "https://example.com/{id:3}"),
+        ("https://example.com/{list*}", "https://example.com/{list*}"),
+    ],
+)
+def test_resource_template_accepts_authority_and_operator_expressions(
+    uri_template: str,
+    expected: str,
+) -> None:
+    """Valid RFC 6570 expressions must survive conservative URI normalization."""
+
+    projected = _projection_api().project_descriptor(
+        "resource_template",
+        {"name": "safe", "uriTemplate": uri_template},
+        PROTOCOL_PROFILES["2026-07-28"],
+    )
+    assert projected["uriTemplate"] == expected
+
+
+@pytest.mark.parametrize(
+    "uri_template",
+    [
+        "https://user:pass@example.com/{id}",
+        "https://example.com:not-a-port/resource",
+        "https://:{port}/resource",
+        "https://example.com/{id:0001}",
+    ],
+)
+def test_resource_template_rejects_credentials_bad_literals_and_bad_modifiers(
+    uri_template: str,
+) -> None:
+    """Template-aware parsing must retain concrete URI security checks."""
+
+    with pytest.raises(GatewayInvalidApplicationResult):
+        _projection_api().project_descriptor(
+            "resource_template",
+            {"name": "safe", "uriTemplate": uri_template},
+            PROTOCOL_PROFILES["2026-07-28"],
+        )

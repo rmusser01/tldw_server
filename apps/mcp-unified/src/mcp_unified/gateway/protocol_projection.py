@@ -31,7 +31,6 @@ _META_KEY_PATTERN = re.compile(
 )
 _SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
 _TOOL_ERROR_KEY = "io.github.rmusser01.mcp-unified/error"
-_DEFAULT_JSON_DEPTH = GatewayLimits().max_json_depth
 _URI_TEMPLATE_VARIABLE = re.compile(
     r"(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2})+"
     r"(?:\.(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2})+)*\Z"
@@ -43,11 +42,11 @@ def _invalid() -> GatewayInvalidApplicationResult:
     return GatewayInvalidApplicationResult()
 
 
-def _deterministic_json(value: object) -> str:
+def _deterministic_json(value: object, *, max_depth: int) -> str:
     """Serialize finite JSON with stable Unicode and key ordering."""
 
     try:
-        _validate_json_structure(value, max_depth=_DEFAULT_JSON_DEPTH)
+        _validate_json_structure(value, max_depth=max_depth)
     except _JSONStructureError as exc:
         raise _invalid() from exc
     try:
@@ -62,10 +61,10 @@ def _deterministic_json(value: object) -> str:
         raise _invalid() from exc
 
 
-def _json_clone(value: object) -> GatewayJSONValue:
+def _json_clone(value: object, *, max_depth: int) -> GatewayJSONValue:
     """Return a detached finite JSON value with string-key validation."""
 
-    return json.loads(_deterministic_json(value))
+    return json.loads(_deterministic_json(value, max_depth=max_depth))
 
 
 def _required_string(value: object, *, maximum: int = 4_096) -> str:
@@ -96,29 +95,55 @@ def _normalize_uri(value: object, *, template: bool = False) -> str:
         _validate_uri_template(uri)
     try:
         parsed = urlsplit(uri)
-        port = parsed.port
     except ValueError as exc:
         raise _invalid() from exc
     if _SCHEME_PATTERN.fullmatch(parsed.scheme) is None:
         raise _invalid()
     scheme = parsed.scheme.lower()
-    if scheme in {"http", "https"} and not parsed.hostname:
-        raise _invalid()
-    if parsed.username is not None or parsed.password is not None:
-        raise _invalid()
 
     netloc = parsed.netloc
-    if parsed.hostname is not None:
-        host = parsed.hostname.lower()
-        if ":" in host:
-            host = f"[{host}]"
-        default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
-        netloc = host if port is None or default_port else f"{host}:{port}"
+    authority_has_expression = template and "{" in netloc
+    if authority_has_expression:
+        if "@" in netloc:
+            raise _invalid()
+        host_literal = netloc.split(":", 1)[0]
+        if scheme in {"http", "https"} and not host_literal:
+            raise _invalid()
+        netloc = _lower_uri_template_literals(netloc)
+    else:
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise _invalid() from exc
+        if scheme in {"http", "https"} and not parsed.hostname:
+            raise _invalid()
+        if parsed.username is not None or parsed.password is not None:
+            raise _invalid()
+        if parsed.hostname is not None:
+            host = parsed.hostname.lower()
+            if ":" in host:
+                host = f"[{host}]"
+            default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+            netloc = host if port is None or default_port else f"{host}:{port}"
     normalized = urlunsplit(SplitResult(scheme, netloc, parsed.path, parsed.query, parsed.fragment))
     if template and ("{" not in normalized or "}" not in normalized):
         # A concrete URI is still a valid zero-variable RFC 6570 template.
         return normalized
     return normalized
+
+
+def _lower_uri_template_literals(value: str) -> str:
+    """Lowercase authority literals while preserving expansion expressions."""
+
+    result: list[str] = []
+    in_expression = False
+    for character in value:
+        if character == "{":
+            in_expression = True
+        result.append(character if in_expression else character.lower())
+        if character == "}":
+            in_expression = False
+    return "".join(result)
 
 
 def _validate_uri_template(value: str) -> None:
@@ -170,6 +195,7 @@ def _metadata(
     *,
     reserved_meta: Mapping[str, GatewayJSONValue] | None = None,
     gateway_owned: Mapping[str, GatewayJSONValue] | None = None,
+    max_depth: int,
 ) -> dict[str, GatewayJSONValue]:
     """Validate vendor metadata and overwrite every gateway-owned key."""
 
@@ -180,21 +206,29 @@ def _metadata(
     else:
         raise _invalid()
 
+    cloned_source = _json_clone(dict(source), max_depth=max_depth)
+    if not isinstance(cloned_source, dict):
+        raise _invalid()
     projected: dict[str, GatewayJSONValue] = {}
-    for key, value in source.items():
+    for key, value in cloned_source.items():
         if not isinstance(key, str) or _META_KEY_PATTERN.fullmatch(key) is None:
             raise _invalid()
         if not _is_reserved_meta_key(key):
-            projected[key] = _json_clone(value)
+            projected[key] = value
 
     if profile.era == "modern" and reserved_meta:
-        for key, value in reserved_meta.items():
+        cloned_reserved = _json_clone(dict(reserved_meta), max_depth=max_depth)
+        if not isinstance(cloned_reserved, dict):
+            raise _invalid()
+        for key, value in cloned_reserved.items():
             if not isinstance(key, str) or _META_KEY_PATTERN.fullmatch(key) is None:
                 raise _invalid()
-            projected[key] = _json_clone(value)
+            projected[key] = value
     if gateway_owned:
-        for key, value in gateway_owned.items():
-            projected[key] = _json_clone(value)
+        cloned_gateway = _json_clone(dict(gateway_owned), max_depth=max_depth)
+        if not isinstance(cloned_gateway, dict):
+            raise _invalid()
+        projected.update(cloned_gateway)
     return projected
 
 
@@ -212,8 +246,9 @@ def _annotations(
     profile: GatewayProtocolProfile,
     *,
     tool: bool = False,
+    max_depth: int,
 ) -> dict[str, GatewayJSONValue]:
-    cloned = _json_clone(value)
+    cloned = _json_clone(value, max_depth=max_depth)
     if not isinstance(cloned, dict):
         raise _invalid()
     if tool and profile.version == "2024-11-05":
@@ -310,6 +345,7 @@ def project_descriptor(
     profile: GatewayProtocolProfile,
     *,
     reserved_meta: Mapping[str, GatewayJSONValue] | None = None,
+    limits: GatewayLimits = GatewayLimits(),
 ) -> dict[str, GatewayJSONValue]:
     """Normalize and project one runtime descriptor for a protocol profile."""
 
@@ -334,17 +370,24 @@ def project_descriptor(
             descriptor["annotations"],
             profile,
             tool=kind == "tool",
+            max_depth=limits.max_json_depth,
         )
         if annotations:
             projected["annotations"] = annotations
 
     if kind == "tool":
-        input_schema = _json_clone(descriptor.get("inputSchema"))
+        input_schema = _json_clone(
+            descriptor.get("inputSchema"),
+            max_depth=limits.max_json_depth,
+        )
         if not isinstance(input_schema, dict) or input_schema.get("type") != "object":
             raise _invalid()
         projected["inputSchema"] = input_schema
         if "outputSchema" in descriptor and profile.structured_content_mode != "none":
-            output_schema = _json_clone(descriptor["outputSchema"])
+            output_schema = _json_clone(
+                descriptor["outputSchema"],
+                max_depth=limits.max_json_depth,
+            )
             if not isinstance(output_schema, dict):
                 raise _invalid()
             if profile.structured_content_mode == "any" or output_schema.get("type") == "object":
@@ -370,6 +413,7 @@ def project_descriptor(
             descriptor.get("_meta"),
             profile,
             reserved_meta=reserved_meta,
+            max_depth=limits.max_json_depth,
         )
         if profile.supports_titles
         else {}
@@ -382,6 +426,8 @@ def project_descriptor(
 def _resource_contents(
     value: object,
     profile: GatewayProtocolProfile,
+    *,
+    max_depth: int,
 ) -> dict[str, GatewayJSONValue]:
     if not isinstance(value, Mapping):
         raise _invalid()
@@ -399,7 +445,7 @@ def _resource_contents(
         _optional_string(value[field], maximum=16_777_216) if field == "text" else _base64_data(value[field])
     )
     if profile.supports_titles and "_meta" in value:
-        meta = _metadata(value["_meta"], profile)
+        meta = _metadata(value["_meta"], profile, max_depth=max_depth)
         if meta:
             projected["_meta"] = meta
     return projected
@@ -408,6 +454,8 @@ def _resource_contents(
 def _content_block(
     value: object,
     profile: GatewayProtocolProfile,
+    *,
+    max_depth: int,
 ) -> dict[str, GatewayJSONValue]:
     if not isinstance(value, Mapping):
         raise _invalid()
@@ -429,7 +477,11 @@ def _content_block(
     elif block_type == "resource":
         projected = {
             "type": "resource",
-            "resource": _resource_contents(value.get("resource"), profile),
+            "resource": _resource_contents(
+                value.get("resource"),
+                profile,
+                max_depth=max_depth,
+            ),
         }
     elif block_type == "resource_link" and profile.supports_resource_links:
         projected = {
@@ -452,9 +504,13 @@ def _content_block(
     else:
         raise _invalid()
     if "annotations" in value:
-        projected["annotations"] = _annotations(value["annotations"], profile)
+        projected["annotations"] = _annotations(
+            value["annotations"],
+            profile,
+            max_depth=max_depth,
+        )
     if profile.supports_titles and "_meta" in value:
-        meta = _metadata(value["_meta"], profile)
+        meta = _metadata(value["_meta"], profile, max_depth=max_depth)
         if meta:
             projected["_meta"] = meta
     return projected
@@ -463,10 +519,12 @@ def _content_block(
 def _content_blocks(
     value: object,
     profile: GatewayProtocolProfile,
+    *,
+    max_depth: int,
 ) -> list[dict[str, GatewayJSONValue]]:
     if not isinstance(value, list):
         raise _invalid()
-    return [_content_block(block, profile) for block in value]
+    return [_content_block(block, profile, max_depth=max_depth) for block in value]
 
 
 def _apply_complete_result(
@@ -484,6 +542,7 @@ def project_tool_result(
     content: Sequence[Mapping[str, object]] | None = None,
     metadata: Mapping[str, GatewayJSONValue] | None = None,
     reserved_meta: Mapping[str, GatewayJSONValue] | None = None,
+    limits: GatewayLimits = GatewayLimits(),
 ) -> dict[str, GatewayJSONValue]:
     """Project one raw tool value or safe typed tool failure."""
 
@@ -499,11 +558,23 @@ def project_tool_result(
             }
         }
     else:
-        structured = _json_clone(result)
+        structured = _json_clone(result, max_depth=limits.max_json_depth)
         if content is None:
-            blocks = [{"type": "text", "text": _deterministic_json(structured)}]
+            blocks = [
+                {
+                    "type": "text",
+                    "text": _deterministic_json(
+                        structured,
+                        max_depth=limits.max_json_depth,
+                    ),
+                }
+            ]
         else:
-            blocks = _content_blocks(list(content), profile)
+            blocks = _content_blocks(
+                list(content),
+                profile,
+                max_depth=limits.max_json_depth,
+            )
         projected = {"content": blocks}
         if profile.structured_content_mode == "any" or (
             profile.structured_content_mode == "object" and isinstance(structured, dict)
@@ -517,6 +588,7 @@ def project_tool_result(
         profile,
         reserved_meta=reserved_meta,
         gateway_owned=gateway_owned,
+        max_depth=limits.max_json_depth,
     )
     if meta:
         projected["_meta"] = meta
@@ -528,19 +600,32 @@ def project_resource_result(
     profile: GatewayProtocolProfile,
     *,
     reserved_meta: Mapping[str, GatewayJSONValue] | None = None,
+    limits: GatewayLimits = GatewayLimits(),
 ) -> dict[str, GatewayJSONValue]:
     """Validate and project a resource read result."""
 
     if not isinstance(result, Mapping) or not isinstance(result.get("contents"), list):
         raise _invalid()
     projected: dict[str, GatewayJSONValue] = {
-        "contents": [_resource_contents(item, profile) for item in result["contents"]]
+        "contents": [
+            _resource_contents(
+                item,
+                profile,
+                max_depth=limits.max_json_depth,
+            )
+            for item in result["contents"]
+        ]
     }
     if profile.cache_hints:
         projected["ttlMs"] = 0
         projected["cacheScope"] = "private"
     _apply_complete_result(projected, profile)
-    meta = _metadata(result.get("_meta"), profile, reserved_meta=reserved_meta)
+    meta = _metadata(
+        result.get("_meta"),
+        profile,
+        reserved_meta=reserved_meta,
+        max_depth=limits.max_json_depth,
+    )
     if meta:
         projected["_meta"] = meta
     return projected
@@ -551,6 +636,7 @@ def project_prompt_result(
     profile: GatewayProtocolProfile,
     *,
     reserved_meta: Mapping[str, GatewayJSONValue] | None = None,
+    limits: GatewayLimits = GatewayLimits(),
 ) -> dict[str, GatewayJSONValue]:
     """Validate and project a prompt result and its message roles/content."""
 
@@ -563,13 +649,22 @@ def project_prompt_result(
         messages.append(
             {
                 "role": raw["role"],
-                "content": _content_block(raw.get("content"), profile),
+                "content": _content_block(
+                    raw.get("content"),
+                    profile,
+                    max_depth=limits.max_json_depth,
+                ),
             }
         )
     projected: dict[str, GatewayJSONValue] = {"messages": messages}
     _copy_optional_text(result, projected, "description")
     _apply_complete_result(projected, profile)
-    meta = _metadata(result.get("_meta"), profile, reserved_meta=reserved_meta)
+    meta = _metadata(
+        result.get("_meta"),
+        profile,
+        reserved_meta=reserved_meta,
+        max_depth=limits.max_json_depth,
+    )
     if meta:
         projected["_meta"] = meta
     return projected
@@ -578,9 +673,12 @@ def project_prompt_result(
 def project_application_error(
     error: GatewayApplicationError,
     profile: GatewayProtocolProfile,
+    *,
+    limits: GatewayLimits = GatewayLimits(),
 ) -> dict[str, GatewayJSONValue]:
     """Project only allowlisted fields from a safe application exception."""
 
+    del limits
     if isinstance(error, GatewayInvalidApplicationResult):
         return {"code": -32603, "message": "Internal error"}
     data: dict[str, GatewayJSONValue] = {

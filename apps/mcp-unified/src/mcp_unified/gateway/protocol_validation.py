@@ -16,6 +16,8 @@ from jsonschema import Draft7Validator, Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 from referencing import Registry
 from referencing.exceptions import NoSuchResource
+from referencing.jsonschema import DRAFT7 as REFERENCING_DRAFT7
+from referencing.jsonschema import DRAFT202012 as REFERENCING_DRAFT202012
 
 from .protocol_errors import GatewayApplicationError
 from .protocol_limits import GatewayLimits
@@ -33,42 +35,9 @@ _VALIDATORS = {
     _DRAFT_7: Draft7Validator,
 }
 _WORKER_INVALID_CODES = frozenset({"invalid_schema", "schema_validation_failed"})
-_MAPPING_SCHEMA_KEYWORDS = {
-    _DRAFT_2020_12: frozenset({"$defs", "dependentSchemas", "patternProperties", "properties"}),
-    _DRAFT_7: frozenset({"definitions", "patternProperties", "properties"}),
-}
-_ARRAY_SCHEMA_KEYWORDS = {
-    _DRAFT_2020_12: frozenset({"allOf", "anyOf", "oneOf", "prefixItems"}),
-    _DRAFT_7: frozenset({"allOf", "anyOf", "oneOf"}),
-}
-_SINGLE_SCHEMA_KEYWORDS = {
-    _DRAFT_2020_12: frozenset(
-        {
-            "additionalProperties",
-            "contains",
-            "contentSchema",
-            "else",
-            "if",
-            "items",
-            "not",
-            "propertyNames",
-            "then",
-            "unevaluatedItems",
-            "unevaluatedProperties",
-        }
-    ),
-    _DRAFT_7: frozenset(
-        {
-            "additionalItems",
-            "additionalProperties",
-            "contains",
-            "else",
-            "if",
-            "not",
-            "propertyNames",
-            "then",
-        }
-    ),
+_SPECIFICATIONS = {
+    _DRAFT_2020_12: REFERENCING_DRAFT202012,
+    _DRAFT_7: REFERENCING_DRAFT7,
 }
 _DIALECT_REF_KEYS = {
     _DRAFT_2020_12: frozenset({"$ref", "$dynamicRef"}),
@@ -195,13 +164,20 @@ def _serialize_json(value: object, *, reason_code: str, message: str) -> bytes:
     return encoded
 
 
-def _resolve_fragment(resource: object, fragment: str, anchors: set[str]) -> bool:
-    """Return whether a decoded pointer or anchor resolves in one resource."""
+_UNRESOLVED = object()
+
+
+def _resolve_fragment(
+    resource: object,
+    fragment: str,
+    anchors: dict[str, object],
+) -> object:
+    """Return the submitted target of a decoded pointer or anchor."""
 
     if not fragment:
-        return True
+        return resource
     if not fragment.startswith("/"):
-        return unquote(fragment) in anchors
+        return anchors.get(unquote(fragment), _UNRESOLVED)
 
     current = resource
     for encoded_token in fragment[1:].split("/"):
@@ -213,34 +189,27 @@ def _resolve_fragment(resource: object, fragment: str, anchors: set[str]) -> boo
             try:
                 current = current[int(token)]
             except (IndexError, TypeError, ValueError):
-                return False
+                return _UNRESOLVED
             continue
-        return False
-    return True
+        return _UNRESOLVED
+    return current
+
+
+def _split_reference(base: str, reference: str) -> tuple[str, str]:
+    """Resolve a reference exactly like ``referencing.Resolver.lookup``."""
+
+    if reference.startswith("#"):
+        return urldefrag(base).url, reference[1:]
+    resolved = urldefrag(urljoin(base, reference))
+    return resolved.url, resolved.fragment
 
 
 def _schema_children(node: dict[str, object], dialect: str) -> list[object]:
     """Return only values occupying schema-valued keywords for one dialect."""
 
-    children: list[object] = []
-    for keyword in _MAPPING_SCHEMA_KEYWORDS[dialect]:
-        value = node.get(keyword)
-        if isinstance(value, dict):
-            children.extend(value.values())
-    for keyword in _ARRAY_SCHEMA_KEYWORDS[dialect]:
-        value = node.get(keyword)
-        if isinstance(value, list):
-            children.extend(value)
-    for keyword in _SINGLE_SCHEMA_KEYWORDS[dialect]:
-        value = node.get(keyword)
-        if isinstance(value, (dict, bool)):
-            children.append(value)
-    items = node.get("items")
-    if dialect == _DRAFT_7:
-        if isinstance(items, (dict, bool)):
-            children.append(items)
-        elif isinstance(items, list):
-            children.extend(items)
+    specification = _SPECIFICATIONS[dialect]
+    children = list(specification.subresources_of(node))
+    if dialect == _DRAFT_2020_12:
         dependencies = node.get("dependencies")
         if isinstance(dependencies, dict):
             children.extend(value for value in dependencies.values() if isinstance(value, (dict, bool)))
@@ -251,49 +220,87 @@ def _inspect_schema_keywords(
     schema: object,
     *,
     dialect: str,
-) -> tuple[int, list[tuple[str, str]], int, dict[str, object], dict[str, set[str]]]:
-    """Inspect only true schema locations and record submitted resources."""
+) -> tuple[
+    int,
+    list[tuple[str, str]],
+    int,
+    dict[str, object],
+    dict[str, dict[str, object]],
+]:
+    """Inspect schema locations plus every successfully resolved local target."""
 
     subschema_count = 0
     refs: list[tuple[str, str]] = []
     pattern_chars = 0
     resources: dict[str, object] = {"": schema}
-    anchors: dict[str, set[str]] = {"": set()}
+    anchors: dict[str, dict[str, object]] = {"": {}}
+    resource_uri_by_identity: dict[int, str] = {id(schema): ""}
+    visited: set[tuple[str, int]] = set()
+    followed_refs: set[int] = set()
     stack: list[tuple[object, str, str]] = [(schema, "", "")]
-    while stack:
-        current, inherited_base, inherited_resource_uri = stack.pop()
-        if not isinstance(current, (dict, bool)):
-            continue
-        subschema_count += 1
-        if isinstance(current, bool):
-            continue
+    while True:
+        while stack:
+            current, inherited_base, inherited_resource_uri = stack.pop()
+            if not isinstance(current, (dict, bool)):
+                continue
+            if isinstance(current, bool):
+                subschema_count += 1
+                continue
 
-        base = inherited_base
-        resource_uri = inherited_resource_uri
-        identifier = current.get("$id")
-        if isinstance(identifier, str):
-            base = urljoin(inherited_base, identifier)
-            resource_uri = urldefrag(base).url
-            resources[resource_uri] = current
-            anchors.setdefault(resource_uri, set())
-        for anchor_keyword in ("$anchor", "$dynamicAnchor"):
-            anchor = current.get(anchor_keyword)
-            if isinstance(anchor, str):
-                anchors.setdefault(resource_uri, set()).add(anchor)
-        for ref_keyword in _DIALECT_REF_KEYS[dialect]:
-            reference = current.get(ref_keyword)
-            if reference is not None:
-                if not isinstance(reference, str):
-                    refs.append(("\0", base))
-                else:
-                    refs.append((reference, base))
-        pattern = current.get("pattern")
-        if isinstance(pattern, str):
-            pattern_chars += len(pattern)
-        pattern_properties = current.get("patternProperties")
-        if isinstance(pattern_properties, dict):
-            pattern_chars += sum(len(key) for key in pattern_properties)
-        stack.extend((child, base, resource_uri) for child in _schema_children(current, dialect))
+            base = inherited_base
+            resource_uri = inherited_resource_uri
+            identifier = _SPECIFICATIONS[dialect].id_of(current)
+            if isinstance(identifier, str):
+                base = urljoin(inherited_base, identifier)
+                resource_uri = urldefrag(base).url
+                resources[resource_uri] = current
+                anchors.setdefault(resource_uri, {})
+                resource_uri_by_identity[id(current)] = resource_uri
+            visit_key = (resource_uri, id(current))
+            if visit_key in visited:
+                continue
+            visited.add(visit_key)
+            subschema_count += 1
+            for anchor_keyword in ("$anchor", "$dynamicAnchor"):
+                anchor = current.get(anchor_keyword)
+                if isinstance(anchor, str):
+                    anchors.setdefault(resource_uri, {})[anchor] = current
+            for ref_keyword in _DIALECT_REF_KEYS[dialect]:
+                reference = current.get(ref_keyword)
+                if reference is not None:
+                    refs.append((reference if isinstance(reference, str) else "\0", base))
+            pattern = current.get("pattern")
+            if isinstance(pattern, str):
+                pattern_chars += len(pattern)
+            pattern_properties = current.get("patternProperties")
+            if isinstance(pattern_properties, dict):
+                pattern_chars += sum(len(key) for key in pattern_properties)
+            stack.extend((child, base, resource_uri) for child in _schema_children(current, dialect))
+
+        made_progress = False
+        for index, (reference, base) in enumerate(refs):
+            if index in followed_refs or reference == "\0":
+                continue
+            resource_uri, fragment = _split_reference(base, reference)
+            resource = resources.get(resource_uri)
+            if resource is None:
+                continue
+            target = _resolve_fragment(
+                resource,
+                fragment,
+                anchors.get(resource_uri, {}),
+            )
+            if target is _UNRESOLVED:
+                continue
+            followed_refs.add(index)
+            target_resource_uri = resource_uri_by_identity.get(
+                id(target),
+                resource_uri,
+            )
+            stack.append((target, target_resource_uri, target_resource_uri))
+            made_progress = True
+        if not made_progress:
+            break
     return subschema_count, refs, pattern_chars, resources, anchors
 
 
@@ -340,7 +347,7 @@ def _preflight_schema(
             )
 
     subschema_count, refs, pattern_chars, resources, anchors = _inspect_schema_keywords(
-        schema,
+        json.loads(schema_json),
         dialect=profile.schema_dialect,
     )
 
@@ -362,15 +369,21 @@ def _preflight_schema(
                 "schema_unresolved_ref",
                 "Schema contains an unresolved local reference",
             )
-        absolute = urljoin(base, reference)
-        resource_uri, fragment = urldefrag(absolute)
+        resource_uri, fragment = _split_reference(base, reference)
         resource = resources.get(resource_uri)
         if resource is None:
             raise _validation_error(
                 "schema_external_ref",
                 "Schema references must resolve within the submitted schema",
             )
-        if not _resolve_fragment(resource, fragment, anchors.get(resource_uri, set())):
+        if (
+            _resolve_fragment(
+                resource,
+                fragment,
+                anchors.get(resource_uri, {}),
+            )
+            is _UNRESOLVED
+        ):
             raise _validation_error(
                 "schema_unresolved_ref",
                 "Schema contains an unresolved local reference",
@@ -500,7 +513,9 @@ class GatewaySchemaValidationManager:
                     process,
                     deadline=self._clock() + self._limits.graceful_shutdown_timeout_seconds,
                 )
-                if cleanup_errors:
+                current_task = asyncio.current_task()
+                cancellation_active = current_task is not None and current_task.cancelling() > 0
+                if cleanup_errors and not cancellation_active:
                     raise RuntimeError("; ".join(cleanup_errors))
             elif receiver is not None:
                 receiver.close()
@@ -570,8 +585,10 @@ class GatewaySchemaValidationManager:
                     process.terminate()
                 except Exception as exc:  # noqa: BLE001 - kill/join must still be attempted
                     errors.append(f"schema validation child terminate failed: {type(exc).__name__}")
+            remaining = max(0.0, deadline - self._clock())
+            graceful_deadline = self._clock() + remaining / 2
             try:
-                process.join(timeout=max(0.0, deadline - self._clock()))
+                process.join(timeout=max(0.0, graceful_deadline - self._clock()))
             except Exception as exc:  # noqa: BLE001 - kill/join must still be attempted
                 errors.append(f"schema validation child join failed: {type(exc).__name__}")
             try:
