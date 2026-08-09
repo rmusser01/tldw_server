@@ -79,6 +79,8 @@ CacheKeyFn = Callable[[str, str, str, int | None, str | None], str]
 ProviderPreflight = Callable[[str, str], Awaitable[None]]
 
 
+# Stage 2D compatibility only: these private execution members are unreachable
+# from execute(). Stage 2E removes them after runner and header migration.
 @dataclass(frozen=True, slots=True)
 class _ProviderExecution:
     vectors: list[list[float]]

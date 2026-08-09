@@ -802,16 +802,10 @@ async def test_fallback_passes_the_complete_prepared_request_to_successful_attem
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "boundary",
-    ["backend_identity", "cache_key", "cache", "validation", "postprocessing", "writeback"],
-)
-async def test_fallback_propagates_attempt_boundary_errors_without_advancing(
-    boundary: str,
-):
+async def test_fallback_propagates_attempt_exception_without_advancing():
     error = EmbeddingExecutionError(
         "internal_execution_failure",
-        f"{boundary} failed",
+        "attempt boundary failed",
         retryable=True,
     )
     readiness = RecordingReadiness()
