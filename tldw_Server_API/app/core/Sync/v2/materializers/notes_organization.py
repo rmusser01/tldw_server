@@ -2,14 +2,23 @@ from __future__ import annotations
 
 """Materialize Notes organization Sync envelopes into one user's ChaChaNotes DB."""
 
+import sqlite3
 from dataclasses import dataclass
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
 
 from ..models import (
     NOTES_ORGANIZATION_DOMAINS,
@@ -18,6 +27,7 @@ from ..models import (
     SyncObjectState,
 )
 from ..notes_organization import (
+    NotesOrganizationValidationError,
     parse_notes_organization_payload,
     validate_organization_object_id,
 )
@@ -259,8 +269,18 @@ def _conflict_result(
 
 
 def _safe_error_message(exc: Exception) -> str:
-    message = str(exc).strip()
-    return message[:200] if message else type(exc).__name__
+    if isinstance(exc, NotesOrganizationValidationError):
+        return "Notes organization envelope validation failed"
+    if isinstance(exc, InputError):
+        return "Notes organization dependency or hierarchy validation failed"
+    if isinstance(exc, ConflictError):
+        return "Notes organization projection conflicts with existing state"
+    if isinstance(
+        exc,
+        (CharactersRAGDBError, BackendDatabaseError, sqlite3.DatabaseError),
+    ):
+        return "Notes organization product database operation failed"
+    return "Notes organization projection failed"
 
 
 __all__ = ["NotesOrganizationMaterializer"]

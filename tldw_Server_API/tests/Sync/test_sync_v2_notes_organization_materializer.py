@@ -226,6 +226,17 @@ def test_each_domain_upserts_tombstones_restores_and_reapplies_idempotently(
     created = _stored_envelope(sync_store, domain)
     assert materializer.apply(created, store=sync_store).status == "applied"
     assert _projection_count(note_db, domain) == 1
+    local_id_before: int | None = None
+    if domain in {"notes.keyword", "notes.keyword_collection", "notes.folder"}:
+        from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+            NotesOrganizationSyncStore,
+        )
+
+        resource = NotesOrganizationSyncStore(note_db).get_resource(
+            domain, created.object_id
+        )
+        assert resource is not None
+        local_id_before = resource.local_id
 
     tombstone_payload = {} if domain in {
         "notes.keyword",
@@ -255,6 +266,16 @@ def test_each_domain_upserts_tombstones_restores_and_reapplies_idempotently(
     assert materializer.apply(restored, store=sync_store).status == "applied"
     assert materializer.apply(restored, store=sync_store).status == "applied"
     assert _projection_count(note_db, domain) == 1
+    if local_id_before is not None:
+        from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+            NotesOrganizationSyncStore,
+        )
+
+        restored_resource = NotesOrganizationSyncStore(note_db).get_resource(
+            domain, restored.object_id
+        )
+        assert restored_resource is not None
+        assert restored_resource.local_id == local_id_before
     state = sync_store.get_object_state("dataset-1", domain, restored.object_id)
     assert state is not None
     assert (state.latest_server_cursor, state.deleted) == (restored.server_cursor, False)
@@ -491,6 +512,27 @@ def test_materializer_rejects_stored_payload_and_identity_drift_before_product_w
     assert _projection_count(note_db, "notes.keyword") == 0
 
 
+def test_materializer_rejects_valid_relationship_payload_with_mismatched_object_id(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+) -> None:
+    _seed_dependencies(note_db, "notes.keyword_link")
+    envelope = _stored_envelope(
+        sync_store,
+        "notes.keyword_link",
+        object_id="notes.keyword_link:sha256:" + "0" * 64,
+    )
+
+    result = NotesOrganizationMaterializer(note_db, "notes.keyword_link").apply(
+        envelope, store=sync_store
+    )
+
+    assert result.status == "failed"
+    assert result.error_code == "notes_organization_projection_failed"
+    assert result.message == "Notes organization envelope validation failed"
+    assert _projection_count(note_db, "notes.keyword_link") == 0
+
+
 @pytest.mark.parametrize(
     "domain",
     ("notes.keyword_link", "notes.keyword_collection_link", "notes.folder_link"),
@@ -513,3 +555,69 @@ def test_relationship_materialization_fails_retryably_for_missing_owner_bound_de
         "dataset-1", domain, entity_id=envelope.object_id, limit=10
     )[0]
     assert stored.apply_status == "failed"
+
+
+def test_relationship_materialization_fails_retryably_for_soft_deleted_dependency(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+        NotesOrganizationSyncStore,
+    )
+
+    _seed_dependencies(note_db, "notes.keyword_link")
+    NotesOrganizationSyncStore(note_db).apply_resource(
+        domain="notes.keyword",
+        object_id=KEYWORD_ID,
+        operation="tombstone",
+        payload={},
+    )
+    envelope = _stored_envelope(sync_store, "notes.keyword_link")
+
+    result = NotesOrganizationMaterializer(note_db, "notes.keyword_link").apply(
+        envelope, store=sync_store
+    )
+
+    assert result.status == "failed"
+    assert result.error_code == "notes_organization_projection_failed"
+    assert result.message == "Notes organization dependency or hierarchy validation failed"
+    assert _projection_count(note_db, "notes.keyword_link") == 0
+
+
+def test_projection_failure_message_never_persists_user_labels_paths_or_backend_text(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel_label = "LEAK-SENTINEL-PRIVATE-LABEL"
+    sentinel_path = "/private/owner/secret-folder"
+    sentinel_backend = "DETAIL: duplicate key value contains user data"
+    envelope = _stored_envelope(
+        sync_store,
+        "notes.keyword",
+        payload={"keyword": sentinel_label},
+    )
+
+    def _fail_with_sensitive_backend_text(*args, **kwargs):
+        raise RuntimeError(f"{sentinel_backend}: {sentinel_label} at {sentinel_path}")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sync.v2.materializers.notes_organization."
+        "NotesOrganizationSyncStore.apply_resource",
+        _fail_with_sensitive_backend_text,
+    )
+
+    result = NotesOrganizationMaterializer(note_db, "notes.keyword").apply(
+        envelope, store=sync_store
+    )
+
+    stored = sync_store.list_envelopes_for_entity(
+        "dataset-1", "notes.keyword", entity_id=KEYWORD_ID, limit=10
+    )[0]
+    assert result.status == "failed"
+    assert result.error_code == "notes_organization_projection_failed"
+    assert result.message == "Notes organization projection failed"
+    assert stored.apply_error_message == "Notes organization projection failed"
+    for secret in (sentinel_label, sentinel_path, sentinel_backend):
+        assert secret not in result.message
+        assert secret not in stored.apply_error_message
