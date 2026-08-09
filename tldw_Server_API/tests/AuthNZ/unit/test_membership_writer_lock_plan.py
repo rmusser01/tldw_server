@@ -293,6 +293,82 @@ def test_default_team_companion_accepts_matching_earlier_parent_mutation() -> No
     assert plan.mutations == (org_remove, companion)
 
 
+def test_organization_companion_accepts_only_matching_earlier_org_add() -> None:
+    actor = ActorMembershipWriteContext(
+        actor_user_id=4,
+        required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+    )
+    org_add = _mutation(
+        MembershipScopeType.ORGANIZATION,
+        5,
+        9,
+        MembershipMutationKind.ADD,
+        role="member",
+    )
+    companion = _mutation(
+        MembershipScopeType.TEAM,
+        20,
+        9,
+        MembershipMutationKind.ADD,
+        role="member",
+        relationship=MembershipMutationRelationship.ORGANIZATION_COMPANION,
+    )
+
+    plan = plan_membership_write(
+        context=actor,
+        mutations=(org_add, companion),
+        preflight=MembershipPlanningPreflight(
+            team_parents=(TeamParentOrganization(team_id=20, organization_id=5),),
+        ),
+    )
+
+    assert plan.mutations == (org_add, companion)
+
+    with pytest.raises(MembershipWriterContractError):
+        plan_membership_write(
+            context=actor,
+            mutations=(org_add, companion),
+            preflight=MembershipPlanningPreflight(
+                team_parents=(
+                    TeamParentOrganization(team_id=20, organization_id=6),
+                ),
+            ),
+        )
+
+
+def test_organization_companion_accepts_remove_after_org_remove() -> None:
+    actor = ActorMembershipWriteContext(
+        actor_user_id=4,
+        required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+    )
+    org_remove = _mutation(
+        MembershipScopeType.ORGANIZATION,
+        5,
+        9,
+        MembershipMutationKind.REMOVE,
+    )
+    companion = _mutation(
+        MembershipScopeType.TEAM,
+        20,
+        9,
+        MembershipMutationKind.REMOVE,
+        relationship=MembershipMutationRelationship.ORGANIZATION_COMPANION,
+    )
+
+    plan = plan_membership_write(
+        context=actor,
+        mutations=(org_remove, companion),
+        preflight=MembershipPlanningPreflight(
+            team_parents=(
+                TeamParentOrganization(team_id=20, organization_id=5),
+            ),
+            organization_owners=(_owner_coverage(5, (7,)),),
+        ),
+    )
+
+    assert plan.mutations == (org_remove, companion)
+
+
 def test_missing_or_conflicting_team_parent_preflight_fails_closed() -> None:
     actor = ActorMembershipWriteContext(
         actor_user_id=4,

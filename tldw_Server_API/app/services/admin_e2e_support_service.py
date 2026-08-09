@@ -297,11 +297,12 @@ async def _ensure_org(
         if str(row.get("name") or "").strip() == _ORG_NAME:
             return row
 
-    return await orgs_repo.create_organization(
+    return await orgs_repo.create_organization_with_owner_membership(
         name=_ORG_NAME,
         slug=_ORG_SLUG,
         owner_user_id=owner_user_id,
         metadata={"created_by": "admin_e2e_support"},
+        context=_E2E_MEMBERSHIP_CONTEXT,
     )
 
 
@@ -576,7 +577,7 @@ async def seed_admin_e2e_scenario(scenario: str) -> dict[str, Any]:
         role="user",
     )
 
-    org = await _ensure_org(orgs_repo=orgs_repo, owner_user_id=int(admin_user["id"]))
+    org = await _ensure_org(orgs_repo=orgs_repo, owner_user_id=int(owner_user["id"]))
     org_id = int(org["id"])
     for user, role in (
         (admin_user, "admin"),

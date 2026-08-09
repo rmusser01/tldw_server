@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
+from tldw_Server_API.app.services import registration_service as registration_module
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
 
@@ -320,3 +321,49 @@ async def test_register_user_rejects_negative_storage_quota_override() -> None:
             storage_quota_override=-1,
             system_provisioning=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_registration_rollback_failure_does_not_render_backend_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "secret SQL at /private/registration.db"
+
+    class _FailingTransaction:
+        async def __aenter__(self):
+            raise RuntimeError(secret)
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001, ARG002
+            return False
+
+    class _FailingPool:
+        pool = None
+
+        def transaction(self) -> _FailingTransaction:
+            return _FailingTransaction()
+
+    class _Logger:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+
+        def bind(self, **values):
+            self.events.append(repr(values))
+            return self
+
+        def opt(self, *, exception):
+            self.events.append(repr(exception))
+            return self
+
+        def error(self, message: str, *args) -> None:
+            self.events.append(message.format(*args))
+
+    logger_stub = _Logger()
+    service = _make_service(_FailingPool())
+    monkeypatch.setattr(registration_module, "logger", logger_stub)
+
+    rolled_back = await service.rollback_user_registration(17)
+
+    rendered = "\n".join(logger_stub.events)
+    assert rolled_back is False
+    assert secret not in rendered
+    assert "RuntimeError" in rendered

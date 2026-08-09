@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
     TrustedMembershipReason,
     TrustedMembershipWriteContext,
 )
@@ -28,9 +30,17 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
     member_id = await ensure_test_user(pool, "member_pg", "member_pg@example.com", is_verified=True)
 
     repo = AuthnzOrgsTeamsRepo(pool)
+    owner_context = ActorMembershipWriteContext(
+        actor_user_id=owner_id,
+        required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+    )
 
     # Create organization and add members (owner + member)
-    org = await repo.create_organization(name="PG Acme Corp", owner_user_id=owner_id)
+    org = await repo.create_organization_with_owner_membership(
+        name="PG Acme Corp",
+        owner_user_id=owner_id,
+        context=owner_context,
+    )
     org_id = org["id"]
 
     owner_membership = await repo.add_org_member(
@@ -173,7 +183,11 @@ async def test_authnz_orgs_teams_repo_list_organizations_for_user_variants_postg
     # Create 3 orgs and enroll the owner in all, member in 2.
     org_ids: list[int] = []
     for name in ("PG Org One", "PG Org Two", "PG Org Three"):
-        org = await repo.create_organization(name=name, owner_user_id=owner_id)
+        org = await repo.create_organization_with_owner_membership(
+            name=name,
+            owner_user_id=owner_id,
+            context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+        )
         org_ids.append(org["id"])
         await repo.add_org_member(
             org_id=org["id"],
