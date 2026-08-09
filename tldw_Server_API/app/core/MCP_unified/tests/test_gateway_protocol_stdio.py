@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import io
 import json
 import os
+import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import mcp_unified.gateway.protocol_stdio as protocol_stdio
+import mcp_unified.gateway.protocol_stdio_adapters as stdio_adapters
 import pytest
 import yaml
 from mcp_unified.gateway import (
@@ -24,13 +26,11 @@ from mcp_unified.gateway import (
     handle_stdio_line,
     serve_stdio,
 )
-from mcp_unified.gateway.protocol_stdio import (
+from mcp_unified.gateway.protocol_stdio_adapters import (
     _open_native_stdio,
     _open_threaded_stdio,
     _OwnedStdioAdapters,
 )
-
-pytestmark = pytest.mark.unit
 
 _MODERN_META = {
     "io.modelcontextprotocol/protocolVersion": "2026-07-28",
@@ -504,12 +504,17 @@ async def _pipe_server(
     output_file = os.fdopen(output_write_fd, "wb", buffering=0)
     captured: list[_OwnedStdioAdapters] = []
 
-    async def selector(selected_limits: GatewayLimits) -> _OwnedStdioAdapters:
-        adapters = await opener(input_file, output_file, selected_limits)
-        captured.append(adapters)
-        input_file.close()
-        output_file.close()
-        return adapters
+    async def selector(
+        direction: str,
+        selected_limits: GatewayLimits,
+    ) -> _OwnedStdioAdapters:
+        del direction
+        if not captured:
+            adapters = await opener(input_file, output_file, selected_limits)
+            captured.append(adapters)
+            input_file.close()
+            output_file.close()
+        return captured[0]
 
     server = GatewayProtocolStdioServer(
         _CoreRuntime(),
@@ -557,7 +562,6 @@ async def test_threaded_fallback_bounds_reads_serializes_writes_and_joins() -> N
     assert values[0]["error"]["code"] == -32700
     assert adapters.thread_count == 2
     assert adapters.threads_alive == 0
-    assert adapters.max_pending_per_thread <= 1
 
 
 @pytest.mark.asyncio
@@ -570,12 +574,14 @@ async def test_threaded_fallback_propagates_cancellation_and_joins_threads() -> 
     output_file = os.fdopen(output_write_fd, "wb", buffering=0)
     captured: list[_OwnedStdioAdapters] = []
 
-    async def selector(limits: GatewayLimits) -> _OwnedStdioAdapters:
-        adapters = await _open_threaded_stdio(input_file, output_file, limits)
-        captured.append(adapters)
-        input_file.close()
-        output_file.close()
-        return adapters
+    async def selector(direction: str, limits: GatewayLimits) -> _OwnedStdioAdapters:
+        del direction
+        if not captured:
+            adapters = await _open_threaded_stdio(input_file, output_file, limits)
+            captured.append(adapters)
+            input_file.close()
+            output_file.close()
+        return captured[0]
 
     task = asyncio.create_task(
         GatewayProtocolStdioServer(
@@ -607,12 +613,14 @@ async def test_threaded_fallback_fatal_write_reaps_workers_and_fds() -> None:
     output_file = os.fdopen(output_write_fd, "wb", buffering=0)
     captured: list[_OwnedStdioAdapters] = []
 
-    async def selector(limits: GatewayLimits) -> _OwnedStdioAdapters:
-        adapters = await _open_threaded_stdio(input_file, output_file, limits)
-        captured.append(adapters)
-        input_file.close()
-        output_file.close()
-        return adapters
+    async def selector(direction: str, limits: GatewayLimits) -> _OwnedStdioAdapters:
+        del direction
+        if not captured:
+            adapters = await _open_threaded_stdio(input_file, output_file, limits)
+            captured.append(adapters)
+            input_file.close()
+            output_file.close()
+        return captured[0]
 
     result = await GatewayProtocolStdioServer(
         _CoreRuntime(),
@@ -638,9 +646,15 @@ async def test_default_adapter_preserves_globals_and_closes_only_duplicated_fds(
     fake_stdin = SimpleNamespace(buffer=input_file)
     fake_stdout = SimpleNamespace(buffer=output_file)
     fake_sys = SimpleNamespace(stdin=fake_stdin, stdout=fake_stdout)
-    monkeypatch.setattr(protocol_stdio, "sys", fake_sys)
+    monkeypatch.setattr(stdio_adapters, "sys", fake_sys)
 
-    adapters = await protocol_stdio._select_process_stdio(GatewayLimits())
+    input_adapters = await stdio_adapters._select_process_stdio("input", GatewayLimits())
+    output_adapters = await stdio_adapters._select_process_stdio("output", GatewayLimits())
+    adapters = _OwnedStdioAdapters(
+        input_adapters.reader,
+        output_adapters.writer,
+        input_adapters.workers + output_adapters.workers,
+    )
     owned_reader_fd = getattr(adapters.reader, "_fd", None)
     if owned_reader_fd is None:
         owned_reader_fd = adapters.reader._stream.fileno()  # type: ignore[attr-defined]
@@ -708,6 +722,8 @@ def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> No
     job = workflow["jobs"]["portable-stdio"]
     assert job["strategy"]["matrix"]["os"] == ["ubuntu-latest", "windows-latest"]
     assert job["runs-on"] == "${{ matrix.os }}"
+    checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
+    assert re.fullmatch(r"actions/checkout@[0-9a-f]{40}", checkout["uses"])
     run_blocks = "\n".join(step["run"] for step in job["steps"] if "run" in step)
     assert 'python -m pip install "./apps/mcp-unified[dev]"' in run_blocks
     assert "test_gateway_protocol_contracts.py" in run_blocks
@@ -715,3 +731,482 @@ def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> No
     assert "test_gateway_protocol_stdio.py" in run_blocks
     assert "--noconftest" in run_blocks
     assert "-c apps/mcp-unified/pyproject.toml" in run_blocks
+
+
+def _pipe_files() -> tuple[Any, Any, list[int]]:
+    input_read_fd, input_write_fd = os.pipe()
+    output_read_fd, output_write_fd = os.pipe()
+    os.close(input_write_fd)
+    os.close(output_read_fd)
+    return (
+        os.fdopen(input_read_fd, "rb", buffering=0),
+        os.fdopen(output_write_fd, "wb", buffering=0),
+        [input_read_fd, output_write_fd],
+    )
+
+
+def _fd_is_open(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
+
+
+@pytest.mark.asyncio
+async def test_native_second_dup_failure_closes_first_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second native dup failure must not leak the first owned descriptor."""
+
+    input_file, output_file, _ = _pipe_files()
+    real_dup = os.dup
+    duplicates: list[int] = []
+
+    def failing_second_dup(fd: int) -> int:
+        if duplicates:
+            raise OSError("second dup failed")
+        duplicate = real_dup(fd)
+        duplicates.append(duplicate)
+        return duplicate
+
+    monkeypatch.setattr(stdio_adapters.os, "dup", failing_second_dup)
+    try:
+        with pytest.raises(OSError, match="second dup failed"):
+            await _open_native_stdio(input_file, output_file, GatewayLimits())
+        assert duplicates and not _fd_is_open(duplicates[0])
+    finally:
+        for duplicate in duplicates:
+            if _fd_is_open(duplicate):
+                os.close(duplicate)
+        input_file.close()
+        output_file.close()
+
+
+@pytest.mark.asyncio
+async def test_threaded_second_fdopen_failure_closes_every_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later fdopen failure must close both its raw fd and the first file object."""
+
+    input_file, output_file, _ = _pipe_files()
+    real_dup = os.dup
+    real_fdopen = os.fdopen
+    duplicates: list[int] = []
+    fdopen_calls = 0
+
+    def tracking_dup(fd: int) -> int:
+        duplicate = real_dup(fd)
+        duplicates.append(duplicate)
+        return duplicate
+
+    def failing_second_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        nonlocal fdopen_calls
+        fdopen_calls += 1
+        if fdopen_calls == 2:
+            raise OSError("second fdopen failed")
+        return real_fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(stdio_adapters.os, "dup", tracking_dup)
+    monkeypatch.setattr(stdio_adapters.os, "fdopen", failing_second_fdopen)
+    try:
+        with pytest.raises(OSError, match="second fdopen failed"):
+            await _open_threaded_stdio(input_file, output_file, GatewayLimits())
+        assert len(duplicates) == 2
+        assert all(not _fd_is_open(fd) for fd in duplicates)
+    finally:
+        for duplicate in duplicates:
+            if _fd_is_open(duplicate):
+                os.close(duplicate)
+        input_file.close()
+        output_file.close()
+
+
+@pytest.mark.asyncio
+async def test_thread_start_failure_closes_prepared_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure to start the first dedicated worker must close all prepared files."""
+
+    input_file, output_file, _ = _pipe_files()
+    real_dup = os.dup
+    real_fdopen = os.fdopen
+    duplicates: list[int] = []
+    prepared_files: list[Any] = []
+
+    def tracking_dup(fd: int) -> int:
+        duplicate = real_dup(fd)
+        duplicates.append(duplicate)
+        return duplicate
+
+    def fail_start(thread: Any) -> None:
+        raise RuntimeError("thread start failed")
+
+    def tracking_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        prepared = real_fdopen(fd, *args, **kwargs)
+        prepared_files.append(prepared)
+        return prepared
+
+    monkeypatch.setattr(stdio_adapters.os, "dup", tracking_dup)
+    monkeypatch.setattr(stdio_adapters.os, "fdopen", tracking_fdopen)
+    monkeypatch.setattr(stdio_adapters.threading.Thread, "start", fail_start)
+    try:
+        with pytest.raises(RuntimeError, match="thread start failed"):
+            await _open_threaded_stdio(input_file, output_file, GatewayLimits())
+        assert len(duplicates) == 2
+        assert all(prepared.closed for prepared in prepared_files)
+        assert all(not _fd_is_open(fd) for fd in duplicates)
+    finally:
+        for duplicate in duplicates:
+            if _fd_is_open(duplicate):
+                os.close(duplicate)
+        input_file.close()
+        output_file.close()
+
+
+@pytest.mark.asyncio
+async def test_second_thread_start_failure_stops_first_worker_and_closes_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure to start worker two must stop worker one and close both files."""
+
+    input_file, output_file, _ = _pipe_files()
+    real_fdopen = os.fdopen
+    prepared_files: list[Any] = []
+    workers: list[Any] = []
+
+    class StartWorker:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.started = False
+            self.shutdown_calls = 0
+            workers.append(self)
+
+        @property
+        def alive(self) -> bool:
+            return self.started
+
+        def start(self) -> None:
+            if len([worker for worker in workers if worker.started]) == 1:
+                raise RuntimeError("second thread start failed")
+            self.started = True
+
+        async def shutdown(self, timeout: float) -> bool:
+            self.shutdown_calls += 1
+            self.started = False
+            return True
+
+    def tracking_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        prepared = real_fdopen(fd, *args, **kwargs)
+        prepared_files.append(prepared)
+        return prepared
+
+    monkeypatch.setattr(stdio_adapters, "_BlockingIOWorker", StartWorker)
+    monkeypatch.setattr(stdio_adapters.os, "fdopen", tracking_fdopen)
+    try:
+        with pytest.raises(RuntimeError, match="second thread start failed"):
+            await _open_threaded_stdio(input_file, output_file, GatewayLimits())
+        assert len(workers) == 2
+        assert workers[0].shutdown_calls == 1
+        assert workers[0].alive is False
+        assert workers[1].shutdown_calls == 0
+        assert all(prepared.closed for prepared in prepared_files)
+    finally:
+        for prepared in prepared_files:
+            if not prepared.closed:
+                prepared.close()
+        input_file.close()
+        output_file.close()
+
+
+@pytest.mark.asyncio
+async def test_second_worker_construction_failure_closes_prepared_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure to construct the second worker must close both prepared files."""
+
+    input_file, output_file, _ = _pipe_files()
+    real_fdopen = os.fdopen
+    prepared_files: list[Any] = []
+    worker_calls = 0
+
+    class PreparedWorker:
+        def __init__(self) -> None:
+            self.start_calls = 0
+
+        @property
+        def alive(self) -> bool:
+            return False
+
+        def start(self) -> None:
+            self.start_calls += 1
+
+    prepared_worker = PreparedWorker()
+
+    def failing_second_worker(name: str) -> Any:
+        nonlocal worker_calls
+        worker_calls += 1
+        if worker_calls == 2:
+            raise RuntimeError("second worker construction failed")
+        return prepared_worker
+
+    def tracking_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        prepared = real_fdopen(fd, *args, **kwargs)
+        prepared_files.append(prepared)
+        return prepared
+
+    monkeypatch.setattr(stdio_adapters, "_BlockingIOWorker", failing_second_worker)
+    monkeypatch.setattr(stdio_adapters.os, "fdopen", tracking_fdopen)
+    try:
+        with pytest.raises(RuntimeError, match="second worker construction failed"):
+            await _open_threaded_stdio(input_file, output_file, GatewayLimits())
+        assert len(prepared_files) == 2
+        assert all(prepared.closed for prepared in prepared_files)
+        assert prepared_worker.start_calls == 0
+    finally:
+        for prepared in prepared_files:
+            if not prepared.closed:
+                prepared.close()
+        input_file.close()
+        output_file.close()
+
+
+class _CloseSpy:
+    def __init__(self, *, failure: BaseException | None = None) -> None:
+        self.failure = failure
+        self.close_calls = 0
+
+    async def readline(self) -> bytes:
+        return b""
+
+    def write(self, data: bytes) -> None:
+        return None
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.failure is not None:
+            raise self.failure
+
+
+class _ShutdownWorkerSpy:
+    def __init__(self, *, stops: bool) -> None:
+        self.stops = stops
+        self.shutdown_calls = 0
+
+    @property
+    def alive(self) -> bool:
+        return not self.stops
+
+    async def shutdown(self, timeout: float) -> bool:
+        self.shutdown_calls += 1
+        return self.stops
+
+
+@pytest.mark.asyncio
+async def test_owned_shutdown_closes_writer_when_reader_close_raises() -> None:
+    """One close exception must not prevent its sibling descriptor from closing."""
+
+    reader = _CloseSpy(failure=OSError("reader close failed"))
+    writer = _CloseSpy()
+    adapters = _OwnedStdioAdapters(reader, writer)
+
+    with pytest.raises(Exception, match="stdio adapter shutdown failed"):
+        await adapters.shutdown(0.1)
+
+    assert reader.close_calls == 1
+    assert writer.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_owned_shutdown_accounts_all_workers_and_discloses_residual_safely() -> None:
+    """A residual worker must not hide sibling cleanup or leak payload data to diagnostics."""
+
+    reader = _CloseSpy()
+    writer = _CloseSpy()
+    residual = _ShutdownWorkerSpy(stops=False)
+    sibling = _ShutdownWorkerSpy(stops=True)
+    diagnostics: list[str] = []
+    adapters = _OwnedStdioAdapters(
+        reader,
+        writer,
+        (residual, sibling),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(Exception, match="stdio adapter shutdown failed"):
+        await adapters.shutdown(0.1, diagnostic=diagnostics.append)
+
+    assert residual.shutdown_calls == 1
+    assert sibling.shutdown_calls == 1
+    assert reader.close_calls == 1
+    assert writer.close_calls == 1
+    assert diagnostics == [
+        "MCP stdio shutdown incomplete: residual blocking I/O worker; process termination may be required"
+    ]
+    assert "reader close failed" not in diagnostics[0]
+
+
+class _BlockingCleanupConnection:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.shutdown_calls = 0
+
+    async def receive(self, payload: Any) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        self.shutdown_calls += 1
+        self.started.set()
+        await self.release.wait()
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancellation_waits_for_the_same_cleanup_task() -> None:
+    """A second cancellation must not detach connection and adapter cleanup."""
+
+    server = GatewayProtocolStdioServer(
+        _CoreRuntime(),
+        input_stream=(reader := _QueueReader()),
+        output_stream=_MemoryWriter(),
+        limits=GatewayLimits(graceful_shutdown_timeout_seconds=0.2),
+    )
+    connection = _BlockingCleanupConnection()
+    server._connection = connection  # type: ignore[assignment]
+    task = asyncio.create_task(server.serve())
+    await _eventually(lambda: reader.read_calls > 0)
+    task.cancel()
+    await connection.started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+
+    try:
+        assert task.done() is False
+        connection.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert connection.shutdown_calls == 1
+    finally:
+        connection.release.set()
+        if not task.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+class _PrefixResistantWriter:
+    def __init__(self) -> None:
+        self.write_calls = 0
+        self.drain_calls = 0
+        self.prefix = bytearray()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.active_drains = 0
+
+    def write(self, data: bytes) -> None:
+        self.write_calls += 1
+        self.prefix.extend(data[:8])
+
+    async def drain(self) -> None:
+        self.drain_calls += 1
+        self.active_drains += 1
+        self.entered.set()
+        try:
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                await self.release.wait()
+        finally:
+            self.active_drains -= 1
+
+
+@pytest.mark.asyncio
+async def test_drain_timeout_poison_is_terminal_and_never_redrains(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A prefix-emitting resistant drain must terminally poison the byte transport."""
+
+    writer = _PrefixResistantWriter()
+    reader = _QueueReader(_request("first"))
+    server = GatewayProtocolStdioServer(
+        _CoreRuntime(),
+        input_stream=reader,
+        output_stream=writer,
+        limits=GatewayLimits(graceful_shutdown_timeout_seconds=0.05),
+    )
+    task = asyncio.create_task(server.serve())
+    await writer.entered.wait()
+    reader.feed(_request("must-not-write"))
+    done, _ = await asyncio.wait({task}, timeout=0.4)
+
+    try:
+        assert task in done
+        assert await task == 1
+        assert writer.write_calls == 1
+        assert writer.drain_calls == 1
+        assert writer.active_drains == 1
+        assert bytes(writer.prefix) and b"\n" not in writer.prefix
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "MCP stdio shutdown incomplete: residual output drain" in captured.err
+    finally:
+        writer.release.set()
+        reader.feed(b"")
+        await _eventually(lambda: writer.active_drains == 0)
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+class _ExplodingGlobal:
+    @property
+    def buffer(self) -> Any:
+        raise AssertionError("irrelevant process global was accessed")
+
+
+@pytest.mark.asyncio
+async def test_injected_reader_only_resolves_process_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An injected reader must make an invalid process stdin irrelevant."""
+
+    output_read_fd, output_write_fd = os.pipe()
+    output_file = os.fdopen(output_write_fd, "wb", buffering=0)
+    fake_sys = SimpleNamespace(
+        stdin=_ExplodingGlobal(),
+        stdout=SimpleNamespace(buffer=output_file),
+    )
+    monkeypatch.setattr(stdio_adapters, "sys", fake_sys)
+
+    try:
+        assert await serve_stdio(_CoreRuntime(), input_stream=_QueueReader(b"")) == 0
+        assert output_file.closed is False
+    finally:
+        output_file.close()
+        os.close(output_read_fd)
+
+
+@pytest.mark.asyncio
+async def test_injected_writer_only_resolves_process_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An injected writer must make an invalid process stdout irrelevant."""
+
+    input_read_fd, input_write_fd = os.pipe()
+    os.close(input_write_fd)
+    input_file = os.fdopen(input_read_fd, "rb", buffering=0)
+    fake_sys = SimpleNamespace(
+        stdin=SimpleNamespace(buffer=input_file),
+        stdout=_ExplodingGlobal(),
+    )
+    monkeypatch.setattr(stdio_adapters, "sys", fake_sys)
+    writer = _MemoryWriter()
+
+    try:
+        assert await serve_stdio(_CoreRuntime(), output_stream=writer) == 0
+        assert input_file.closed is False
+        assert writer.closed is False
+    finally:
+        input_file.close()

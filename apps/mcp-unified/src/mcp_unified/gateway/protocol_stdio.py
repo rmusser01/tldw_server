@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import inspect
 import io
 import json
-import os
-import queue
 import sys
-import threading
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Any, BinaryIO, Protocol, TypeAlias, runtime_checkable
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol, runtime_checkable
 
 from .protocol_connection import GatewayProtocolConnection
 from .protocol_limits import GatewayLimits
+from .protocol_stdio_adapters import (
+    _AdapterDirection,
+    _AdapterSelector,
+    _OwnedStdioAdapters,
+    _select_process_stdio,
+)
 from .runtime import GatewayCoreRuntime, GatewayJSONValue
 
 _PARSE_ERROR: dict[str, GatewayJSONValue] = {
@@ -24,6 +25,21 @@ _PARSE_ERROR: dict[str, GatewayJSONValue] = {
     "id": None,
     "error": {"code": -32700, "message": "Parse error"},
 }
+_RESIDUAL_DRAIN_MESSAGE = "MCP stdio shutdown incomplete: residual output drain; process termination may be required"
+_RESIDUAL_READ_MESSAGE = "MCP stdio shutdown incomplete: residual input read; process termination may be required"
+_RESIDUAL_CONNECTION_MESSAGE = (
+    "MCP stdio shutdown incomplete: residual protocol cleanup; process termination may be required"
+)
+
+
+def _write_stderr_diagnostic(message: str) -> None:
+    """Best-effort fixed diagnostics that can never corrupt protocol stdout."""
+
+    try:
+        sys.stderr.write(f"{message}\n")
+        sys.stderr.flush()
+    except BaseException:  # noqa: BLE001 - diagnostics must not block cleanup
+        pass
 
 
 @runtime_checkable
@@ -43,386 +59,6 @@ class GatewayAsyncByteWriter(Protocol):
 
     async def drain(self) -> None:
         """Flush buffered bytes to the underlying transport."""
-
-
-class _OwnedByteReader(GatewayAsyncByteReader, Protocol):
-    def close(self) -> None: ...
-
-
-class _OwnedByteWriter(GatewayAsyncByteWriter, Protocol):
-    def close(self) -> None: ...
-
-
-@dataclass(slots=True)
-class _WorkItem:
-    operation: Callable[[], Any]
-    future: concurrent.futures.Future[Any]
-
-
-class _BlockingIOWorker:
-    """One bounded dedicated worker for a single blocking byte-stream direction."""
-
-    def __init__(self, name: str) -> None:
-        self._queue: queue.Queue[_WorkItem | None] = queue.Queue(maxsize=1)
-        self._state_lock = threading.Lock()
-        self._closed = False
-        self._pending = 0
-        self.max_pending = 0
-        self._thread = threading.Thread(
-            target=self._run,
-            name=name,
-            daemon=True,
-        )
-        self._thread.start()
-
-    @property
-    def alive(self) -> bool:
-        return self._thread.is_alive()
-
-    async def submit(self, operation: Callable[[], Any]) -> Any:
-        with self._state_lock:
-            if self._closed:
-                raise RuntimeError("blocking I/O worker is closed")
-            future: concurrent.futures.Future[Any] = concurrent.futures.Future()
-            self._pending += 1
-            self.max_pending = max(self.max_pending, self._pending)
-        try:
-            self._queue.put_nowait(_WorkItem(operation, future))
-        except queue.Full as exc:
-            with self._state_lock:
-                self._pending -= 1
-            raise RuntimeError("blocking I/O worker queue is full") from exc
-        return await asyncio.wrap_future(future)
-
-    async def shutdown(self, timeout: float) -> bool:
-        with self._state_lock:
-            self._closed = True
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + max(0.0, timeout)
-        sentinel_sent = False
-        while self._thread.is_alive():
-            if not sentinel_sent:
-                try:
-                    self._queue.put_nowait(None)
-                    sentinel_sent = True
-                except queue.Full:
-                    pass
-            remaining = max(0.0, deadline - loop.time())
-            if remaining <= 0:
-                break
-            await asyncio.to_thread(self._thread.join, min(0.05, remaining))
-        return not self._thread.is_alive()
-
-    def _run(self) -> None:
-        while True:
-            item = self._queue.get()
-            if item is None:
-                return
-            try:
-                if item.future.set_running_or_notify_cancel():
-                    try:
-                        item.future.set_result(item.operation())
-                    except BaseException as exc:  # noqa: BLE001 - cross-thread propagation
-                        item.future.set_exception(exc)
-            finally:
-                with self._state_lock:
-                    self._pending -= 1
-
-
-class _ThreadedByteReader:
-    def __init__(self, stream: BinaryIO, limit: int, worker: _BlockingIOWorker) -> None:
-        self._stream = stream
-        self._limit = limit
-        self._worker = worker
-
-    async def readline(self) -> bytes:
-        value = await self._worker.submit(lambda: self._stream.readline(self._limit + 1))
-        if not isinstance(value, bytes):
-            raise TypeError("binary reader returned non-bytes")
-        return value
-
-    def close(self) -> None:
-        self._stream.close()
-
-
-class _ThreadedByteWriter:
-    def __init__(self, stream: BinaryIO, limit: int, worker: _BlockingIOWorker) -> None:
-        self._stream = stream
-        self._limit = limit
-        self._worker = worker
-        self._buffer: bytes | None = None
-
-    def write(self, data: bytes) -> None:
-        if not isinstance(data, bytes):
-            raise TypeError("binary writer requires bytes")
-        if len(data) > self._limit:
-            raise ValueError("output line exceeds configured limit")
-        if self._buffer is not None:
-            raise RuntimeError("previous write has not been drained")
-        self._buffer = data
-
-    async def drain(self) -> None:
-        data = self._buffer
-        self._buffer = None
-        if data is None:
-            await self._worker.submit(self._stream.flush)
-            return
-        await self._worker.submit(lambda: self._write_all(data))
-
-    def close(self) -> None:
-        self._stream.close()
-
-    def _write_all(self, data: bytes) -> None:
-        view = memoryview(data)
-        while view:
-            written = self._stream.write(view)
-            if not isinstance(written, int) or written <= 0:
-                raise OSError("binary output stream did not make progress")
-            view = view[written:]
-        self._stream.flush()
-
-
-class _NativePosixByteReader:
-    def __init__(self, fd: int, limit: int) -> None:
-        self._fd = fd
-        self._limit = limit
-        self._buffer = bytearray()
-        self._closed = False
-        self._waiter: asyncio.Future[bytes] | None = None
-
-    async def readline(self) -> bytes:
-        while True:
-            newline = self._buffer.find(b"\n")
-            if newline >= 0:
-                end = newline + 1
-                value = bytes(self._buffer[:end])
-                del self._buffer[:end]
-                return value
-            if len(self._buffer) >= self._limit + 1:
-                value = bytes(self._buffer[: self._limit + 1])
-                del self._buffer[: self._limit + 1]
-                return value
-            chunk = await self._read_ready()
-            if not chunk:
-                value = bytes(self._buffer)
-                self._buffer.clear()
-                return value
-            self._buffer.extend(chunk)
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        loop = asyncio.get_running_loop()
-        loop.remove_reader(self._fd)
-        waiter = self._waiter
-        if waiter is not None and not waiter.done():
-            waiter.set_result(b"")
-        os.close(self._fd)
-
-    async def _read_ready(self) -> bytes:
-        if self._closed:
-            return b""
-        loop = asyncio.get_running_loop()
-        waiter: asyncio.Future[bytes] = loop.create_future()
-        self._waiter = waiter
-
-        def readable() -> None:
-            loop.remove_reader(self._fd)
-            if waiter.done():
-                return
-            try:
-                remaining = self._limit + 1 - len(self._buffer)
-                waiter.set_result(os.read(self._fd, max(1, min(65_536, remaining))))
-            except BlockingIOError:
-                loop.add_reader(self._fd, readable)
-            except BaseException as exc:  # noqa: BLE001 - transport propagation
-                waiter.set_exception(exc)
-
-        loop.add_reader(self._fd, readable)
-        try:
-            return await waiter
-        finally:
-            loop.remove_reader(self._fd)
-            self._waiter = None
-
-
-class _NativePosixByteWriter:
-    def __init__(self, fd: int, limit: int) -> None:
-        self._fd = fd
-        self._limit = limit
-        self._buffer: bytes | None = None
-        self._closed = False
-
-    def write(self, data: bytes) -> None:
-        if not isinstance(data, bytes):
-            raise TypeError("binary writer requires bytes")
-        if len(data) > self._limit:
-            raise ValueError("output line exceeds configured limit")
-        if self._buffer is not None:
-            raise RuntimeError("previous write has not been drained")
-        self._buffer = data
-
-    async def drain(self) -> None:
-        data = self._buffer
-        self._buffer = None
-        if data is None:
-            return
-        offset = 0
-        while offset < len(data):
-            await self._writable()
-            try:
-                written = os.write(self._fd, data[offset : offset + 65_536])
-            except BlockingIOError:
-                continue
-            if written <= 0:
-                raise OSError("binary output pipe did not make progress")
-            offset += written
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        asyncio.get_running_loop().remove_writer(self._fd)
-        os.close(self._fd)
-
-    async def _writable(self) -> None:
-        if self._closed:
-            raise OSError("binary output pipe is closed")
-        loop = asyncio.get_running_loop()
-        waiter: asyncio.Future[None] = loop.create_future()
-
-        def writable() -> None:
-            loop.remove_writer(self._fd)
-            if not waiter.done():
-                waiter.set_result(None)
-
-        loop.add_writer(self._fd, writable)
-        try:
-            await waiter
-        finally:
-            loop.remove_writer(self._fd)
-
-
-@dataclass(slots=True)
-class _OwnedStdioAdapters:
-    """Process-stream duplicates and any dedicated workers owned by the server."""
-
-    reader: _OwnedByteReader
-    writer: _OwnedByteWriter
-    workers: tuple[_BlockingIOWorker, ...] = ()
-    closed: bool = False
-    _thread_count: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        self._thread_count = len(self.workers)
-
-    @property
-    def thread_count(self) -> int:
-        return self._thread_count
-
-    @property
-    def threads_alive(self) -> int:
-        return sum(worker.alive for worker in self.workers)
-
-    @property
-    def max_pending_per_thread(self) -> int:
-        return max((worker.max_pending for worker in self.workers), default=0)
-
-    async def shutdown(self, timeout: float) -> None:
-        if self.closed:
-            return
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + max(0.0, timeout)
-        joined = True
-        for worker in self.workers:
-            joined = await worker.shutdown(max(0.0, deadline - loop.time())) and joined
-        if not joined:
-            raise RuntimeError("blocking stdio worker did not stop; Python threads cannot be force-killed")
-        self.reader.close()
-        self.writer.close()
-        self.closed = True
-
-
-_AdapterSelector: TypeAlias = Callable[[GatewayLimits], Awaitable[_OwnedStdioAdapters]]
-
-
-def _validate_binary_process_stream(stream: object, direction: str) -> BinaryIO:
-    if isinstance(stream, io.TextIOBase):
-        raise ValueError(f"process {direction} must be a binary stream")
-    if not callable(getattr(stream, "fileno", None)):
-        raise ValueError(f"process {direction} must expose a file descriptor")
-    if direction == "input" and not callable(getattr(stream, "readline", None)):
-        raise ValueError("process input must be a binary readable stream")
-    if direction == "output" and not callable(getattr(stream, "write", None)):
-        raise ValueError("process output must be a binary writable stream")
-    return stream  # type: ignore[return-value]
-
-
-def _standard_binary_streams() -> tuple[BinaryIO, BinaryIO]:
-    input_stream = getattr(sys.stdin, "buffer", None)
-    output_stream = getattr(sys.stdout, "buffer", None)
-    return (
-        _validate_binary_process_stream(input_stream, "input"),
-        _validate_binary_process_stream(output_stream, "output"),
-    )
-
-
-async def _open_native_stdio(
-    input_stream: BinaryIO,
-    output_stream: BinaryIO,
-    limits: GatewayLimits,
-) -> _OwnedStdioAdapters:
-    """Duplicate and register POSIX binary pipes without owning process globals."""
-
-    if os.name != "posix":
-        raise NotImplementedError("native pipe registration is POSIX-only")
-    input_fd = os.dup(input_stream.fileno())
-    output_fd = os.dup(output_stream.fileno())
-    try:
-        os.set_blocking(input_fd, False)
-        os.set_blocking(output_fd, False)
-        loop = asyncio.get_running_loop()
-        loop.add_reader(input_fd, lambda: None)
-        loop.remove_reader(input_fd)
-        loop.add_writer(output_fd, lambda: None)
-        loop.remove_writer(output_fd)
-        return _OwnedStdioAdapters(
-            _NativePosixByteReader(input_fd, limits.max_input_line_bytes),
-            _NativePosixByteWriter(output_fd, limits.max_output_line_bytes),
-        )
-    except BaseException:
-        os.close(input_fd)
-        os.close(output_fd)
-        raise
-
-
-async def _open_threaded_stdio(
-    input_stream: BinaryIO,
-    output_stream: BinaryIO,
-    limits: GatewayLimits,
-) -> _OwnedStdioAdapters:
-    """Duplicate binary streams and bind them to two bounded dedicated workers."""
-
-    input_file = os.fdopen(os.dup(input_stream.fileno()), "rb", buffering=0)
-    output_file = os.fdopen(os.dup(output_stream.fileno()), "wb", buffering=0)
-    read_worker = _BlockingIOWorker("mcp-stdio-reader")
-    write_worker = _BlockingIOWorker("mcp-stdio-writer")
-    return _OwnedStdioAdapters(
-        _ThreadedByteReader(input_file, limits.max_input_line_bytes, read_worker),
-        _ThreadedByteWriter(output_file, limits.max_output_line_bytes, write_worker),
-        (read_worker, write_worker),
-    )
-
-
-async def _select_process_stdio(limits: GatewayLimits) -> _OwnedStdioAdapters:
-    input_stream, output_stream = _standard_binary_streams()
-    if os.name == "posix":
-        try:
-            return await _open_native_stdio(input_stream, output_stream, limits)
-        except (NotImplementedError, OSError, ValueError):
-            pass
-    return await _open_threaded_stdio(input_stream, output_stream, limits)
 
 
 def _validate_reader(reader: object) -> GatewayAsyncByteReader:
@@ -461,16 +97,21 @@ class GatewayProtocolStdioServer:
         limits: GatewayLimits = GatewayLimits(),
         metadata: Mapping[str, Any] | None = None,
         _adapter_selector: _AdapterSelector = _select_process_stdio,
+        _diagnostic: Callable[[str], None] = _write_stderr_diagnostic,
     ) -> None:
-        if not callable(_adapter_selector):
+        if not callable(_adapter_selector) or not callable(_diagnostic):
             raise ValueError("adapter selector must be callable")
         self._limits = limits
         self._input = _validate_reader(input_stream) if input_stream is not None else None
         self._output = _validate_writer(output_stream) if output_stream is not None else None
         self._adapter_selector = _adapter_selector
-        self._owned_adapters: _OwnedStdioAdapters | None = None
+        self._diagnostic = _diagnostic
+        self._owned_adapters: list[_OwnedStdioAdapters] = []
         self._write_lock = asyncio.Lock()
-        self._drain_tasks: set[asyncio.Task[None]] = set()
+        self._transport_failed = asyncio.Event()
+        self._transport_poisoned = False
+        self._active_drain_task: asyncio.Task[None] | None = None
+        self._residual_drain_disclosed = False
         self._connection = GatewayProtocolConnection(
             runtime,
             self._write_protocol_value,
@@ -491,34 +132,48 @@ class GatewayProtocolStdioServer:
         except Exception:  # noqa: BLE001 - fatal transport/internal boundary
             fatal = True
 
-        try:
-            cleanup = asyncio.create_task(self._shutdown())
-            await asyncio.shield(cleanup)
-        except asyncio.CancelledError:
-            cancelled = True
-        except Exception:  # noqa: BLE001 - cleanup failure is a fatal exit
-            fatal = True
+        cleanup = asyncio.create_task(self._shutdown())
+        while True:
+            try:
+                await asyncio.shield(cleanup)
+                break
+            except asyncio.CancelledError:
+                cancelled = True
+                continue
+            except Exception:  # noqa: BLE001 - cleanup failure is a fatal exit
+                fatal = True
+                break
 
-        if cancelled:
+        current_task = asyncio.current_task()
+        cancelling = getattr(current_task, "cancelling", lambda: 0)
+        if cancelled or cancelling():
             raise asyncio.CancelledError
         return 1 if fatal else 0
 
     async def _resolve_streams(self) -> None:
-        if self._input is not None and self._output is not None:
-            return
-        adapters = await self._adapter_selector(self._limits)
-        if not isinstance(adapters, _OwnedStdioAdapters):
-            raise ValueError("adapter selector returned an invalid adapter bundle")
-        self._owned_adapters = adapters
         if self._input is None:
+            adapters = await self._resolve_direction("input")
+            if adapters.reader is None:
+                raise ValueError("input adapter did not provide a reader")
             self._input = _validate_reader(adapters.reader)
         if self._output is None:
+            adapters = await self._resolve_direction("output")
+            if adapters.writer is None:
+                raise ValueError("output adapter did not provide a writer")
             self._output = _validate_writer(adapters.writer)
+
+    async def _resolve_direction(self, direction: _AdapterDirection) -> _OwnedStdioAdapters:
+        adapters = await self._adapter_selector(direction, self._limits)
+        if not isinstance(adapters, _OwnedStdioAdapters):
+            raise ValueError("adapter selector returned an invalid adapter bundle")
+        if not any(owned is adapters for owned in self._owned_adapters):
+            self._owned_adapters.append(adapters)
+        return adapters
 
     async def _read_loop(self) -> None:
         reader = self._require_reader()
         while True:
-            line = await reader.readline()
+            line = await self._readline_or_transport_failure(reader)
             if not isinstance(line, bytes):
                 raise TypeError("input_stream.readline() must return bytes")
             if line == b"":
@@ -543,7 +198,7 @@ class GatewayProtocolStdioServer:
 
     async def _discard_oversized_line(self, reader: GatewayAsyncByteReader) -> None:
         while True:
-            chunk = await reader.readline()
+            chunk = await self._readline_or_transport_failure(reader)
             if not isinstance(chunk, bytes):
                 raise TypeError("input_stream.readline() must return bytes")
             if not chunk or chunk.endswith(b"\n"):
@@ -562,54 +217,82 @@ class GatewayProtocolStdioServer:
 
     async def _write_bytes(self, data: bytes) -> None:
         async with self._write_lock:
+            if self._transport_poisoned:
+                raise RuntimeError("stdio output transport is unavailable")
             writer = self._require_writer()
-            writer.write(data)
+            try:
+                writer.write(data)
+            except BaseException:
+                self._poison_transport()
+                raise
             await self._bounded_drain(writer)
 
     async def _bounded_drain(self, writer: GatewayAsyncByteWriter) -> None:
         task = asyncio.create_task(writer.drain())
-        self._drain_tasks.add(task)
-        task.add_done_callback(self._drain_tasks.discard)
-        done, _ = await asyncio.wait(
-            {task},
-            timeout=self._limits.graceful_shutdown_timeout_seconds,
-        )
-        if task not in done:
+        self._active_drain_task = task
+        task.add_done_callback(self._consume_drain_result)
+        try:
+            done, _ = await asyncio.wait(
+                {task},
+                timeout=self._limits.graceful_shutdown_timeout_seconds,
+            )
+            if task not in done:
+                self._poison_transport()
+                task.cancel()
+                raise TimeoutError("output drain timed out")
+            await task
+        except asyncio.CancelledError:
+            self._poison_transport()
             task.cancel()
-            raise TimeoutError("output drain timed out")
-        await task
+            raise
+        except BaseException:
+            self._poison_transport()
+            raise
 
     async def _shutdown(self) -> None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._limits.graceful_shutdown_timeout_seconds
         errors: list[BaseException] = []
 
-        try:
-            await asyncio.wait_for(
-                self._connection.shutdown(),
-                timeout=max(0.0, deadline - loop.time()),
-            )
-        except BaseException as exc:  # noqa: BLE001 - finish all owned cleanup
-            errors.append(exc)
+        connection_task = asyncio.create_task(self._connection.shutdown())
+        connection_done, _ = await asyncio.wait({connection_task}, timeout=max(0.0, deadline - loop.time()))
+        if connection_task in connection_done:
+            try:
+                await connection_task
+            except BaseException as exc:  # noqa: BLE001 - finish all owned cleanup
+                errors.append(exc)
+        else:
+            connection_task.cancel()
+            await asyncio.sleep(0)
+            if connection_task.done():
+                await asyncio.gather(connection_task, return_exceptions=True)
+            else:
+                self._emit_diagnostic(_RESIDUAL_CONNECTION_MESSAGE)
+            errors.append(TimeoutError("protocol cleanup timed out"))
 
         output = self._output
-        if output is not None and loop.time() < deadline:
+        active_drain = self._active_drain_task
+        if active_drain is not None and not active_drain.done():
+            if not await self._account_drain(active_drain, deadline):
+                self._disclose_residual_drain()
+                errors.append(TimeoutError("output drain did not stop"))
+        elif output is not None and not self._transport_poisoned and loop.time() < deadline:
             try:
                 await self._drain_with_deadline(output, deadline)
             except BaseException as exc:  # noqa: BLE001 - finish adapter cleanup
                 errors.append(exc)
 
-        adapters = self._owned_adapters
-        if adapters is not None:
+        for adapters in self._owned_adapters:
             try:
-                await adapters.shutdown(max(0.0, deadline - loop.time()))
+                await adapters.shutdown(
+                    max(0.0, deadline - loop.time()),
+                    diagnostic=self._diagnostic,
+                )
             except BaseException as exc:  # noqa: BLE001 - report bounded join failure
                 errors.append(exc)
 
-        for task in tuple(self._drain_tasks):
-            task.cancel()
         if errors:
-            raise errors[0]
+            raise RuntimeError("stdio shutdown failed")
 
     async def _drain_with_deadline(
         self,
@@ -617,16 +300,74 @@ class GatewayProtocolStdioServer:
         deadline: float,
     ) -> None:
         task = asyncio.create_task(writer.drain())
-        self._drain_tasks.add(task)
-        task.add_done_callback(self._drain_tasks.discard)
+        self._active_drain_task = task
+        task.add_done_callback(self._consume_drain_result)
         done, _ = await asyncio.wait(
             {task},
             timeout=max(0.0, deadline - asyncio.get_running_loop().time()),
         )
         if task not in done:
+            self._poison_transport()
             task.cancel()
+            if not await self._account_drain(task, deadline):
+                self._disclose_residual_drain()
             raise TimeoutError("output shutdown drain timed out")
         await task
+
+    async def _readline_or_transport_failure(
+        self,
+        reader: GatewayAsyncByteReader,
+    ) -> bytes:
+        if self._transport_poisoned:
+            raise RuntimeError("stdio output transport is unavailable")
+        read_task = asyncio.create_task(reader.readline())
+        failure_task = asyncio.create_task(self._transport_failed.wait())
+        done, _ = await asyncio.wait({read_task, failure_task}, return_when=asyncio.FIRST_COMPLETED)
+        if failure_task in done and self._transport_poisoned:
+            read_task.cancel()
+            await self._account_cancelled_read(read_task)
+            raise RuntimeError("stdio output transport is unavailable")
+        failure_task.cancel()
+        await asyncio.gather(failure_task, return_exceptions=True)
+        return await read_task
+
+    async def _account_cancelled_read(self, task: asyncio.Task[bytes]) -> None:
+        done, _ = await asyncio.wait({task}, timeout=self._limits.graceful_shutdown_timeout_seconds)
+        if task not in done:
+            self._emit_diagnostic(_RESIDUAL_READ_MESSAGE)
+        else:
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _account_drain(self, task: asyncio.Task[None], deadline: float) -> bool:
+        if task.done():
+            await asyncio.gather(task, return_exceptions=True)
+            return True
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - asyncio.get_running_loop().time()))
+        if task in done:
+            await asyncio.gather(task, return_exceptions=True)
+            return True
+        return False
+
+    def _consume_drain_result(self, task: asyncio.Task[None]) -> None:
+        if self._active_drain_task is task and task.done():
+            self._active_drain_task = None
+        if not task.cancelled():
+            task.exception()
+
+    def _poison_transport(self) -> None:
+        self._transport_poisoned = True
+        self._transport_failed.set()
+
+    def _disclose_residual_drain(self) -> None:
+        if not self._residual_drain_disclosed:
+            self._residual_drain_disclosed = True
+            self._emit_diagnostic(_RESIDUAL_DRAIN_MESSAGE)
+
+    def _emit_diagnostic(self, message: str) -> None:
+        try:
+            self._diagnostic(message)
+        except BaseException:  # noqa: BLE001 - diagnostics cannot block cleanup
+            pass
 
     def _require_reader(self) -> GatewayAsyncByteReader:
         if self._input is None:

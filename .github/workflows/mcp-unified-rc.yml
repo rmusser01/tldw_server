@@ -109,7 +109,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5a
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
