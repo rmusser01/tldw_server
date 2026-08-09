@@ -466,7 +466,7 @@ def _literal_replay(head: SyncHead, envelope: SyncEnvelopeCreate) -> bool:
     )
     if any(getattr(head, name) != getattr(envelope, name) for name in fingerprint_fields):
         return False
-    if envelope.mutation_group_id is None:
+    if head.mutation_group_id is None and envelope.mutation_group_id is None:
         return True
     return all(
         getattr(head, name) == getattr(envelope, name)

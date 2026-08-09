@@ -378,6 +378,50 @@ def test_literal_original_retry_is_accepted_but_id_or_payload_drift_is_not() -> 
     assert new_baseless_change.conflict_type == "notes_organization_base_conflict"
 
 
+def test_literal_retry_requires_symmetric_mutation_group_metadata() -> None:
+    grouped = replace(
+        _envelope(
+            "notes.keyword",
+            client_envelope_id="grouped-create",
+            object_revision=1,
+        ),
+        mutation_group_id="group-1",
+        mutation_step=0,
+        mutation_step_count=1,
+        mutation_plan_hash="a" * 64,
+    )
+    head = _stored(grouped, sequence=7)
+    adapter = NotesOrganizationDomainAdapter("notes.keyword")
+
+    exact_grouped = adapter.evaluate_envelope(
+        grouped,
+        dataset=_dataset(),
+        context=_context(head),
+    )
+    omitted_group = adapter.evaluate_envelope(
+        replace(
+            grouped,
+            mutation_group_id=None,
+            mutation_step=None,
+            mutation_step_count=None,
+            mutation_plan_hash=None,
+        ),
+        dataset=_dataset(),
+        context=_context(head),
+    )
+    drifted_group = adapter.evaluate_envelope(
+        replace(grouped, mutation_plan_hash="b" * 64),
+        dataset=_dataset(),
+        context=_context(head),
+    )
+
+    assert isinstance(exact_grouped, AdapterAccepted)
+    assert isinstance(omitted_group, AdapterConflict)
+    assert omitted_group.conflict_type == "notes_organization_base_conflict"
+    assert isinstance(drifted_group, AdapterConflict)
+    assert drifted_group.conflict_type == "notes_organization_base_conflict"
+
+
 def test_base_version_is_canonical_lineage_for_updates_and_equivalent_replays() -> None:
     head = _stored(
         replace(
