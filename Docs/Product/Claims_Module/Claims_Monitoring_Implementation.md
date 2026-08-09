@@ -291,7 +291,7 @@ Response schema:
   "job_id": "integer|null",
   "job_status": "queued|processing|completed|failed|cancelled|quarantined|null",
   "error_code": "string|null",
-  "snapshot_at": "string",
+  "snapshot_at": "string|null",
   "download_url": "string|null",
   "created_at": "string"
 }
