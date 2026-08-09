@@ -41,12 +41,12 @@ _assert_strict_consumer_output = _ARTIFACT_UTILS["assert_strict_consumer_output"
 _build_standalone_distributions = _ARTIFACT_UTILS["build_standalone_distributions"]
 
 
-def test_official_sdk_smoke_prepares_windows_multiprocessing() -> None:
-    """The real stdio entrypoint must prepare nested schema workers on Windows."""
+def test_official_sdk_smoke_does_not_require_nested_multiprocessing() -> None:
+    """The real stdio entrypoint must not depend on nested Windows spawn setup."""
 
     source = (REPO_ROOT / OFFICIAL_SDK_SMOKE).read_text(encoding="utf-8")
 
-    assert "multiprocessing.freeze_support()" in source
+    assert "multiprocessing.freeze_support()" not in source
 
 
 _DOWNSTREAM_CONSUMER = r"""
@@ -450,10 +450,7 @@ def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
         calls.append({"command": command, "cwd": cwd, "timeout": timeout, "env": env})
         stdout = (
             "MCP_UNIFIED_OFFICIAL_SDK_STDIO_OK\n"
-            if any(
-                str(argument).replace("\\", "/").endswith(OFFICIAL_SDK_SMOKE.as_posix())
-                for argument in command
-            )
+            if any(str(argument).replace("\\", "/").endswith(OFFICIAL_SDK_SMOKE.as_posix()) for argument in command)
             else ""
         )
         return mcp_unified_rc.RcCommandResult(
@@ -793,10 +790,13 @@ def test_protected_portable_gate_uses_isolated_rc_command_and_exact_routing() ->
     workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-rc.yml"
     workflow_text = workflow_path.read_text(encoding="utf-8")
     assert "python Helper_Scripts/mcp_unified_rc.py portable-gate" in workflow_text
-    assert "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py" not in workflow_text.split(
-        "- name: Run installed protocol and portable stdio contracts",
-        1,
-    )[1]
+    assert (
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py"
+        not in workflow_text.split(
+            "- name: Run installed protocol and portable stdio contracts",
+            1,
+        )[1]
+    )
 
     import yaml
 

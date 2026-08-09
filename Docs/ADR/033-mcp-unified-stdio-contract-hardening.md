@@ -39,6 +39,14 @@ duplicate identities, uses deterministic ordering, and binds an integrity-
 protected cursor to method, profile, configured page size, offset, and
 normalized catalog fingerprint; a moving catalog invalidates the cursor.
 
+POSIX hosts use the multiprocessing `spawn` worker. Native Windows hosts use
+an equivalent fixed-argument Python subprocess because protected official-SDK
+stdio execution demonstrated that nested multiprocessing reconstruction could
+not complete reliably there. The Windows handoff is an exact-length,
+owner-only temporary payload; the child has no shell, stdin, inherited stdio,
+or network resolver, emits only the same bounded verdict, and the parent
+removes the payload only as part of bounded child cleanup.
+
 `GatewayToolExecutionError` remains a protocol-valid `isError: true` tool
 result. Its safe stable classification is carried under the gateway-owned
 result metadata key `io.github.rmusser01.mcp-unified/error` with bounded

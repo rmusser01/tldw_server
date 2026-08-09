@@ -186,6 +186,15 @@ self-reported client identity as authorization.
 | `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 5.0 |
 | `graceful_shutdown_timeout_seconds` | 5.0 | | |
 
+Schema compilation and instance validation run in disposable bounded child
+processes. On native Windows, the preflighted schema and complete validation
+instance are briefly stored in an owner-only file in the operating-system
+temporary directory so the nested stdio server can launch the child reliably.
+The file is never logged, is removed during the same bounded child cleanup,
+and is not retained after success, failure, timeout, cancellation, or shutdown.
+Applications handling data that must never touch temporary storage should
+account for this Windows behavior before enabling strict tool calls.
+
 Modern responses use conservative private cache hints
 `{"ttlMs": 0, "cacheScope": "private"}`; legacy projections omit modern cache
 fields. Errors expose only stable, allowlisted classifications and safe limit

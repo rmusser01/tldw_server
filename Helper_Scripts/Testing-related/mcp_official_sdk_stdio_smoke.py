@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import inspect
-import multiprocessing
 import os
 import sys
 import sysconfig
@@ -140,5 +139,4 @@ async def _main() -> None:
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
     asyncio.run(_main())

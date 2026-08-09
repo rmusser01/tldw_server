@@ -6,10 +6,16 @@ import asyncio
 import json
 import math
 import multiprocessing
+import os
+import struct
+import subprocess  # nosec B404
+import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import replace
 from multiprocessing.connection import Connection
+from pathlib import Path
 from typing import Any, Literal, TypeAlias
 from urllib.parse import unquote, urldefrag, urljoin
 
@@ -27,6 +33,8 @@ SchemaWorkerVerdict: TypeAlias = tuple[Literal["ok", "invalid", "internal"], str
 SchemaRootMode: TypeAlias = Literal["any", "object"]
 SchemaInstanceRole: TypeAlias = Literal["input", "output"]
 _SCHEMA_WORKER_MAX_VERDICT_BYTES = 4_096
+_SCHEMA_WORKER_PAYLOAD_HEADER = struct.Struct(">II")
+_SCHEMA_WORKER_NO_INSTANCE = 0xFFFFFFFF
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DRAFT_7 = "http://json-schema.org/draft-07/schema#"
 _VALIDATORS = {
@@ -102,6 +110,23 @@ def _validation_error(reason_code: str, message: str) -> GatewayApplicationError
     """Build a bounded safe validation error without input or schema details."""
 
     return GatewayApplicationError(message, reason_code=reason_code)
+
+
+def _decode_worker_verdict(payload: bytes) -> SchemaWorkerVerdict:
+    """Decode one bounded worker verdict into a stable safe result."""
+
+    try:
+        decoded = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ("internal", "schema_validation_worker_failed")
+    if (
+        isinstance(decoded, list)
+        and len(decoded) == 2
+        and decoded[0] in {"ok", "invalid", "internal"}
+        and isinstance(decoded[1], str)
+    ):
+        return (decoded[0], decoded[1])
+    return ("internal", "schema_validation_worker_failed")
 
 
 def _validate_json_structure(value: object, *, max_depth: int) -> None:
@@ -473,21 +498,34 @@ class GatewaySchemaValidationManager:
         process_context: Any | None = None,
         _worker_target: Callable[..., None] | None = None,
         _clock: Callable[[], float] = time.monotonic,
+        _use_exec_worker: bool | None = None,
+        _exec_worker_command: tuple[str, ...] | None = None,
     ) -> None:
         self._limits = limits
         self._context = process_context or multiprocessing.get_context("spawn")
         self._worker_target = _worker_target or _schema_validation_worker
         self._clock = _clock
+        explicit_process_backend = process_context is not None or _worker_target is not None
+        self._use_exec_worker = (
+            os.name == "nt" and not explicit_process_backend if _use_exec_worker is None else _use_exec_worker
+        )
+        self._exec_worker_command = _exec_worker_command or (
+            sys.executable,
+            "-m",
+            "mcp_unified._schema_worker",
+        )
         self._semaphore = asyncio.Semaphore(limits.max_schema_validation_processes)
         self._live_processes: set[multiprocessing.Process] = set()
         self._receivers: dict[multiprocessing.Process, Connection] = {}
+        self._live_exec_processes: set[subprocess.Popen[bytes]] = set()
+        self._exec_payloads: dict[subprocess.Popen[bytes], Path] = {}
         self._closed = False
 
     @property
     def live_process_count(self) -> int:
         """Return the number of validation children not yet reaped."""
 
-        return len(self._live_processes)
+        return len(self._live_processes) + len(self._live_exec_processes)
 
     async def validate_schema(
         self,
@@ -577,6 +615,10 @@ class GatewaySchemaValidationManager:
     ) -> None:
         """Run one compile or validation job through the shared process lifecycle."""
 
+        if self._use_exec_worker:
+            await self._run_exec_worker(schema_json, instance_json, dialect)
+            return
+
         await self._semaphore.acquire()
         process: multiprocessing.Process | None = None
         receiver: Connection | None = None
@@ -627,6 +669,209 @@ class GatewaySchemaValidationManager:
             if permit_owned:
                 self._semaphore.release()
 
+    async def _run_exec_worker(
+        self,
+        schema_json: bytes,
+        instance_json: bytes | None,
+        dialect: str,
+    ) -> None:
+        """Run one validation in a fixed-argument subprocess on Windows."""
+
+        await self._semaphore.acquire()
+        process: subprocess.Popen[bytes] | None = None
+        payload_path: Path | None = None
+        permit_owned = True
+        cancelled = False
+        cleanup_cancelled = False
+        if self._closed:
+            self._semaphore.release()
+            raise _validation_error("schema_validator_closed", "Schema validator is closed")
+
+        try:
+            payload_path = self._write_exec_payload(schema_json, instance_json)
+            command = (*self._exec_worker_command, str(payload_path), dialect)
+            # The executable prefix is private/fixed; only a generated path and known
+            # dialect are appended, and shell execution is never enabled.
+            process = subprocess.Popen(  # noqa: S603  # nosec B603
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self._live_exec_processes.add(process)
+            self._exec_payloads[process] = payload_path
+            permit_owned = False
+            verdict = await self._receive_exec_verdict(process)
+            if verdict[0] == "ok":
+                return
+            if verdict[0] == "invalid" and verdict[1] in _WORKER_INVALID_CODES:
+                raise _validation_error(verdict[1], "Schema validation failed")
+            raise _validation_error(
+                "schema_validation_worker_failed",
+                "Schema validation worker failed",
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+        finally:
+            if process is not None and (process in self._live_exec_processes or process in self._exec_payloads):
+                cleanup_errors, cleanup_cancelled = await self._await_exec_cleanup(
+                    process,
+                    deadline=self._clock() + self._limits.graceful_shutdown_timeout_seconds,
+                )
+                if cleanup_errors and not cancelled and not cleanup_cancelled:
+                    raise RuntimeError("; ".join(cleanup_errors))
+            elif payload_path is not None:
+                try:
+                    payload_path.unlink(missing_ok=True)
+                except OSError:
+                    if not cancelled:
+                        raise RuntimeError("schema validation payload cleanup failed") from None
+            if permit_owned:
+                self._semaphore.release()
+            if cleanup_cancelled and not cancelled:
+                raise asyncio.CancelledError
+
+    def _write_exec_payload(
+        self,
+        schema_json: bytes,
+        instance_json: bytes | None,
+    ) -> Path:
+        """Create one owner-only, exact-length subprocess payload."""
+
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix="mcp-unified-schema-",
+            suffix=".bin",
+        )
+        path = Path(raw_path)
+        instance_length = _SCHEMA_WORKER_NO_INSTANCE if instance_json is None else len(instance_json)
+        try:
+            with os.fdopen(descriptor, "wb") as payload_file:
+                payload_file.write(_SCHEMA_WORKER_PAYLOAD_HEADER.pack(len(schema_json), instance_length))
+                payload_file.write(schema_json)
+                if instance_json is not None:
+                    payload_file.write(instance_json)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return path
+
+    async def _receive_exec_verdict(
+        self,
+        process: subprocess.Popen[bytes],
+    ) -> SchemaWorkerVerdict:
+        """Poll a subprocess without an executor thread or unbounded read."""
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._limits.schema_validation_timeout_seconds
+        while True:
+            if self._closed:
+                raise _validation_error(
+                    "schema_validator_closed",
+                    "Schema validator is closed",
+                )
+            if process.poll() is not None:
+                if process.stdout is None:
+                    return ("internal", "schema_validation_worker_failed")
+                try:
+                    payload = process.stdout.read(_SCHEMA_WORKER_MAX_VERDICT_BYTES + 1)
+                except OSError:
+                    return ("internal", "schema_validation_worker_failed")
+                if len(payload) > _SCHEMA_WORKER_MAX_VERDICT_BYTES:
+                    return ("internal", "schema_validation_worker_failed")
+                return _decode_worker_verdict(payload)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise _validation_error(
+                    "schema_validation_timeout",
+                    "Schema validation timed out",
+                )
+            await asyncio.sleep(min(0.005, remaining))
+
+    async def _await_exec_cleanup(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        deadline: float,
+    ) -> tuple[list[str], bool]:
+        """Keep bounded cleanup attached through repeated task cancellation."""
+
+        task = asyncio.create_task(self._cleanup_exec_process(process, deadline=deadline))
+        interrupted = False
+        while True:
+            try:
+                return await asyncio.shield(task), interrupted
+            except asyncio.CancelledError:
+                interrupted = True
+
+    async def _cleanup_exec_process(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        deadline: float,
+        terminate_first: bool = True,
+    ) -> list[str]:
+        """Terminate, kill, reap, close, and unlink one exec worker."""
+
+        if process not in self._live_exec_processes:
+            return self._cleanup_exec_payload(process)
+        errors: list[str] = []
+        if process.poll() is None and terminate_first:
+            try:
+                process.terminate()
+            except OSError as exc:
+                errors.append(f"schema validation child terminate failed: {type(exc).__name__}")
+        remaining = max(0.0, deadline - self._clock())
+        await self._poll_exec_process(process, self._clock() + remaining / 2)
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError as exc:
+                errors.append(f"schema validation child kill failed: {type(exc).__name__}")
+        await self._poll_exec_process(process, deadline)
+        reaped = process.poll() is not None
+        if not reaped:
+            errors.append("schema validation child could not be reaped")
+        if process.stdout is not None:
+            try:
+                process.stdout.close()
+            except OSError as exc:
+                errors.append(f"schema validation stdout close failed: {type(exc).__name__}")
+        if reaped:
+            if process in self._live_exec_processes:
+                self._live_exec_processes.remove(process)
+                self._semaphore.release()
+            errors.extend(self._cleanup_exec_payload(process))
+        return errors
+
+    async def _poll_exec_process(
+        self,
+        process: subprocess.Popen[bytes],
+        deadline: float,
+    ) -> None:
+        """Poll until a subprocess is reaped or the shared deadline expires."""
+
+        while process.poll() is None:
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(0.005, remaining))
+
+    def _cleanup_exec_payload(self, process: subprocess.Popen[bytes]) -> list[str]:
+        """Remove one exact payload path without exposing it in diagnostics."""
+
+        path = self._exec_payloads.get(process)
+        if path is None:
+            return []
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            return [f"schema validation payload cleanup failed: {type(exc).__name__}"]
+        self._exec_payloads.pop(process, None)
+        return []
+
     async def _receive_verdict(
         self,
         process: multiprocessing.Process,
@@ -649,17 +894,9 @@ class GatewaySchemaValidationManager:
             if verdict_ready:
                 try:
                     payload = receiver.recv_bytes(_SCHEMA_WORKER_MAX_VERDICT_BYTES)
-                    decoded = json.loads(payload)
-                except (EOFError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+                except (EOFError, OSError):
                     return ("internal", "schema_validation_worker_failed")
-                if (
-                    isinstance(decoded, list)
-                    and len(decoded) == 2
-                    and decoded[0] in {"ok", "invalid", "internal"}
-                    and isinstance(decoded[1], str)
-                ):
-                    return (decoded[0], decoded[1])
-                return ("internal", "schema_validation_worker_failed")
+                return _decode_worker_verdict(payload)
             if not process.is_alive():
                 return ("internal", "schema_validation_worker_failed")
             remaining = deadline - loop.time()
@@ -736,7 +973,7 @@ class GatewaySchemaValidationManager:
     async def close(self) -> None:
         """Reject new work and reap every currently running validation child."""
 
-        if self._closed and not self._live_processes:
+        if self._closed and not self._live_processes and not self._live_exec_processes and not self._exec_payloads:
             return
         self._closed = True
         errors: list[str] = []
@@ -744,6 +981,7 @@ class GatewaySchemaValidationManager:
         deadline = started + self._limits.graceful_shutdown_timeout_seconds
         graceful_cutoff = started + self._limits.graceful_shutdown_timeout_seconds / 2
         processes = tuple(self._live_processes)
+        exec_processes = tuple(self._live_exec_processes | self._exec_payloads.keys())
         for process in processes:
             try:
                 alive = process.is_alive()
@@ -755,7 +993,14 @@ class GatewaySchemaValidationManager:
                     process.terminate()
                 except Exception as exc:  # noqa: BLE001 - siblings must still be signaled
                     errors.append(f"schema validation child terminate failed: {type(exc).__name__}")
+        for exec_process in exec_processes:
+            if exec_process.poll() is None:
+                try:
+                    exec_process.terminate()
+                except OSError as exc:
+                    errors.append(f"schema validation child terminate failed: {type(exc).__name__}")
         self._join_process_phase(processes, graceful_cutoff, errors)
+        await self._poll_exec_processes(exec_processes, graceful_cutoff)
 
         survivors: list[multiprocessing.Process] = []
         for process in processes:
@@ -770,7 +1015,14 @@ class GatewaySchemaValidationManager:
                     process.kill()
                 except Exception as exc:  # noqa: BLE001 - siblings must still be killed
                     errors.append(f"schema validation child kill failed: {type(exc).__name__}")
+        for exec_process in exec_processes:
+            if exec_process.poll() is None:
+                try:
+                    exec_process.kill()
+                except OSError as exc:
+                    errors.append(f"schema validation child kill failed: {type(exc).__name__}")
         self._join_process_phase(tuple(survivors), deadline, errors)
+        await self._poll_exec_processes(exec_processes, deadline)
 
         for process in processes:
             receiver = self._receivers.get(process)
@@ -792,8 +1044,35 @@ class GatewaySchemaValidationManager:
         for process in processes:
             if process not in self._live_processes:
                 self._semaphore.release()
+        for exec_process in exec_processes:
+            reaped = exec_process.poll() is not None
+            if not reaped:
+                errors.append("schema validation child could not be reaped")
+            if exec_process.stdout is not None:
+                try:
+                    exec_process.stdout.close()
+                except OSError as exc:
+                    errors.append(f"schema validation stdout close failed: {type(exc).__name__}")
+            if reaped and exec_process in self._live_exec_processes:
+                self._live_exec_processes.remove(exec_process)
+                self._semaphore.release()
+            if reaped:
+                errors.extend(self._cleanup_exec_payload(exec_process))
         if errors:
             raise RuntimeError("; ".join(errors))
+
+    async def _poll_exec_processes(
+        self,
+        processes: tuple[subprocess.Popen[bytes], ...],
+        deadline: float,
+    ) -> None:
+        """Fairly poll all exec children within one shared phase deadline."""
+
+        while any(process.poll() is None for process in processes):
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(0.005, remaining))
 
     def _join_process_phase(
         self,

@@ -87,3 +87,36 @@ A final fresh PyPI query and final full RC could not start because the approval 
 Fix-round release evidence includes 388 passing focused protocol/artifact tests; successful clean wheel and sdist installed-suite runs of 362 tests apiece; 26 passing artifact-consumer/security cases with independently strict wheel and sdist stdout/stderr checks; a 24/24 focused confidentiality, fixture-confinement, routing, noisy-output, and utility-side-effect set; and a 4/4 sparse dev artifact gate. The corrected authoritative Python 3.11.13 RC-helper `all` run passed 48/48 top-level gates, and `make mcp-unified-publish-dry-run` succeeded without upload. The RC-verified wheel and sdist SHA-256 values are `9743109056e8b16bf6de080d6b1d57d76b92b951df61b5c9c74a958a258f4e52` and `a37813d35780ebb3e822de4a9cfcdf22bbbf17b8996cfaa76bda9df4661bb4d9`. Ruff checks, Python 3.10/3.11 compile checks, and docs parity/contracts passed. The authoritative command `python -m bandit -r apps/mcp-unified/src/mcp_unified/gateway Helper_Scripts/mcp_unified_rc.py -f json -o <ignored-json>` scanned exactly the gateway plus RC helper: 20,990 lines, zero findings, zero errors, and two skipped tests. The new utility is mypy-clean while three pre-existing RC-helper mypy findings remain documented. The authoritative 3,694-test package/docs partition was not rerun because the review fix changes only release tooling/tests/routing; its five accepted package-boundary failures, seven independently reproducible broader baseline failures, order/global-state contamination, and expected external-federation skip remain recorded in the Task 5 implementer report.
 
 ADR-033 remains the governing decision. GPL package metadata was preserved, publish protection still requires the protected environment, manual `MCP_UNIFIED_PUBLISH`, duplicate-version guard, and `MCP_UNIFIED_ALLOW_PUBLISH=1`, and no live upload was attempted. The release-routing manifest, side-effect-free test utility, official SDK smoke, mirrored consumer isolation, and the two reviewed strict-protocol corrections were added to Task 5 scope during review hardening. The task intentionally remains **In Progress**: the five-job Python 3.10-3.13/Windows artifact matrix and official SDK scenarios must run in protected CI, followed by merge, protected publish, and fresh PyPI install/metadata verification before acceptance criteria 9-10, DoD 1, and task completion can be checked.
+
+The protected `0.2.0` publish subsequently completed and fresh macOS/Linux
+installation plus the official SDK smoke passed, but the required Windows
+portable job exposed a nested-process defect before the downstream migration
+was allowed to begin. The Windows named-pipe failure, source-only POSIX test,
+sdist dependency metadata, artifact-consumer path matching, and SDK launch
+diagnostics were corrected incrementally for `0.2.1`. The decisive evidence
+was that the SDK call failed at the exact schema-worker timeout even after
+raising the bound, preloading validator dependencies, and moving the target to
+a lightweight top-level module: nested `multiprocessing` reconstruction was
+the incompatible boundary, not schema evaluation. Native Windows validation
+therefore uses the same disposable fail-closed worker through a fixed-argument
+Python subprocess with an exact-length owner-only temporary payload and
+bounded verdict; POSIX and explicit process-test seams retain
+`multiprocessing spawn`. Timeout, cancellation, active shutdown, reaping,
+permit release, payload deletion, malformed verdict, and dialect behavior
+remain bounded. The task remains **In Progress** until the corrected protected
+matrix, merge, `0.2.1` publish, and fresh PyPI artifact verification pass.
+
+Corrective local verification is green before protected execution: all five
+source protocol suites pass 381/381; the RC helper passes 34/34; the package
+boundary retains exactly its accepted 45 passing plus five unchanged legacy
+failures. The clean `portable-gate` passes 18/18 required checks with wheel and
+sdist each running 381 installed protocol tests, separate official SDK stdio
+smokes, and the 29-case installed-artifact consumer. The wheel SHA-256 is
+`696f4dd43dfbc86f8fa6f0a20acf357669bbd5ce3528c687c22198802c3b77cc`;
+the sdist SHA-256 is
+`80e4adc729470a5c9370aee0bc33a7747601dfd7718b09618c9deb0b1978f033`.
+Ruff, formatting, expanded Bandit, Python 3.10/3.11 compilation, README and
+USER_GUIDE package-copy parity, and diff checks pass. The public docs disclose
+that native Windows briefly uses an owner-only temporary validation payload so
+applications with stricter no-temporary-storage requirements can make an
+informed privacy decision.
