@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store impor
     NotesOrganizationSyncStore,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 
 pytestmark = pytest.mark.unit
 
@@ -155,6 +156,144 @@ def test_folder_soft_delete_preserves_parent_pointer_and_membership_rows(
     assert db.get_note_folder_by_path("Keep/Linked")["sync_id"] == child["sync_id"]
 
 
+@pytest.mark.parametrize("provenance", ["manual", "source", "mixed"])
+def test_folder_link_tombstone_suppresses_effective_membership_without_deleting_source_provenance(
+    db: CharactersRAGDB,
+    provenance: str,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    note_id = db.add_note(title=f"{provenance} folder", content="suppression")
+    folder = db.create_note_folder_path(f"Suppressed/{provenance}")
+    if provenance in {"manual", "mixed"}:
+        db.sync_note_folders(note_id, [folder["path"]])
+    if provenance in {"source", "mixed"}:
+        db.sync_note_source_folders(note_id, 41, [folder["path"]])
+
+    payload = {"note_id": note_id, "folder_sync_id": folder["sync_id"]}
+    object_id = organization_link_id(
+        "notes.folder_link", [note_id, folder["sync_id"]]
+    )
+
+    for _ in range(2):
+        store.apply_relationship(
+            domain="notes.folder_link",
+            object_id=object_id,
+            operation="tombstone",
+            payload=payload,
+            routing_metadata={},
+        )
+
+    assert folder["sync_id"] not in {
+        row["sync_id"] for row in db.get_note_folders_for_note(note_id)
+    }
+    assert folder["sync_id"] not in {
+        row["sync_id"]
+        for row in db.get_note_folders_for_notes([note_id])[note_id]
+    }
+    assert all(
+        relationship.object_id != object_id
+        for relationship in store.snapshot().relationships
+    )
+    with db.transaction() as conn:
+        manual_count = conn.execute(
+            "SELECT COUNT(*) FROM note_folder_memberships WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0]
+        source_count = conn.execute(
+            "SELECT COUNT(*) FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
+            (note_id, 41, folder["id"]),
+        ).fetchone()[0]
+        source_key_count = conn.execute(
+            "SELECT COUNT(*) FROM note_folder_source_keys WHERE source_id = ? AND folder_id = ?",
+            (41, folder["id"]),
+        ).fetchone()[0]
+        suppression_count = conn.execute(
+            "SELECT COUNT(*) FROM note_folder_sync_suppressions "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0]
+    assert manual_count == 0
+    assert source_count == (1 if provenance in {"source", "mixed"} else 0)
+    assert source_key_count == (1 if provenance in {"source", "mixed"} else 0)
+    assert suppression_count == 1
+
+    for _ in range(2):
+        store.apply_relationship(
+            domain="notes.folder_link",
+            object_id=object_id,
+            operation="upsert",
+            payload=payload,
+            routing_metadata={},
+        )
+
+    visible_sync_ids = [
+        row["sync_id"] for row in db.get_note_folders_for_note(note_id)
+    ]
+    assert visible_sync_ids.count(folder["sync_id"]) == 1
+    bulk_visible_sync_ids = [
+        row["sync_id"]
+        for row in db.get_note_folders_for_notes([note_id])[note_id]
+    ]
+    assert bulk_visible_sync_ids.count(folder["sync_id"]) == 1
+    assert any(
+        relationship.object_id == object_id
+        for relationship in store.snapshot().relationships
+    )
+    with db.transaction() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_memberships WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_sync_suppressions "
+            "WHERE note_id = ? AND folder_id = ?",
+            (note_id, folder["id"]),
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM note_folder_source_memberships "
+            "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
+            (note_id, 41, folder["id"]),
+        ).fetchone()[0] == (1 if provenance in {"source", "mixed"} else 0)
+
+
+@pytest.mark.timeout(2, method="signal", func_only=True)
+def test_folder_hierarchy_rejects_preexisting_descendant_cycle_before_mutation(
+    db: CharactersRAGDB,
+) -> None:
+    store = NotesOrganizationSyncStore(db)
+    root = db.create_note_folder_path("Cycle")
+    child = db.create_note_folder_path("Cycle/Child")
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_folders SET parent_id = ? WHERE id = ?",
+            (child["id"], root["id"]),
+        )
+        before = [
+            tuple(row)
+            for row in conn.execute(
+                "SELECT id, name, path, parent_id, version FROM note_folders ORDER BY id"
+            ).fetchall()
+        ]
+
+    with pytest.raises(InputError, match="cycle|invalid"):
+        store.apply_resource(
+            domain="notes.folder",
+            object_id=root["sync_id"],
+            operation="upsert",
+            payload={"name": "Renamed", "parent_sync_id": None},
+        )
+
+    with db.transaction() as conn:
+        after = [
+            tuple(row)
+            for row in conn.execute(
+                "SELECT id, name, path, parent_id, version FROM note_folders ORDER BY id"
+            ).fetchall()
+        ]
+    assert after == before
+
+
 def test_postgres_note_folder_schema_enforces_case_insensitive_paths() -> None:
     class FakePostgresBackend:
         backend_type = BackendType.POSTGRESQL
@@ -179,6 +318,11 @@ def test_postgres_note_folder_schema_enforces_case_insensitive_paths() -> None:
         and "LOWER(path)" in statement
         and "WHERE" in statement
         and "deleted" in statement
+        for statement in backend.statements
+    )
+    assert any(
+        "CREATE TABLE IF NOT EXISTS note_folder_sync_suppressions" in statement
+        and "PRIMARY KEY(note_id, folder_id)" in statement
         for statement in backend.statements
     )
 

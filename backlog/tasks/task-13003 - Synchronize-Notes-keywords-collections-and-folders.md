@@ -4,7 +4,7 @@ title: Synchronize Notes keywords collections and folders
 status: In Progress
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-08 23:44'
+updated_date: '2026-08-09 01:13'
 labels:
   - notes
   - sync-v2
@@ -15,6 +15,8 @@ dependencies:
 references:
   - Docs/ADR/031-notes-capability-sync-domains.md
   - Docs/ADR/032-durable-server-origin-sync-mutation-batches.md
+  - >-
+    Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md
 documentation:
   - Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md
   - Docs/API/Sync_V2_M1.md
@@ -45,7 +47,7 @@ Add first-class Sync v2 ownership for Notes keywords, keyword links and collecti
 Detailed execution plan: Docs/superpowers/plans/2026-08-08-notes-organization-sync-implementation-plan.md
 
 1. Define the six-domain public contract, strict payload schemas, and deterministic identities.
-2. Migrate ChaChaNotes to schema v55 and add stable resource identities plus a focused projection seam.
+2. Migrate ChaChaNotes to schema v55 and add stable resource identities plus a focused projection seam, including canonical folder-link suppression that preserves local source provenance.
 3. Add atomic mutation-group persistence to the Sync store.
 4. Add batch preflight, durable append, ordered materialization, and resume semantics.
 5. Implement strict organization adapters and conflict policy.
@@ -56,8 +58,8 @@ Detailed execution plan: Docs/superpowers/plans/2026-08-08-notes-organization-sy
 10. Integrate restore/repair, update docs, and record focused release evidence.
 
 ADR required: yes
-ADR path: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md
-Reason: This task adds a durable cross-database mutation-group contract, domain ownership boundaries, bootstrap policy, and long-lived Sync semantics.
+ADR paths: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md; Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md
+Reason: This task adds durable cross-database mutation groups and a local derived suppression projection so canonical folder-link absence converges without deleting source-ingestion provenance.
 <!-- SECTION:PLAN:END -->
 
 ## Definition of Done

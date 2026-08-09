@@ -12,7 +12,7 @@
 
 - Execute tasks in order and one at a time. Do not parallelize tests or implementation work.
 - Apply test-driven development for every behavior change: write the named focused test, run it and observe the specified failure, implement the smallest production change, then rerun the same test.
-- Treat `Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md` and `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md` as normative.
+- Treat `Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md`, `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`, and `Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md` as normative.
 - Preserve existing integer REST and storage IDs. Only canonical Sync identities use resource `sync_id` values or deterministic relationship hashes.
 - Never publish part of a mutation group to the Sync log. Product materialization may be a durable applied prefix, but it must resume in `mutation_step` order and must not skip a failed or conflicted step.
 - The six organization domains are one enrollment/readiness group. Partial enrollment and writes while `initializing` or `failed` must fail closed.
@@ -187,6 +187,9 @@ Expected: both focused test commands pass.
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py`
 - Create: `tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py`
+- Create: `Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md`
+- Modify: `Docs/ADR/README.md`
+- Modify: `Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md`
 - Modify: `tldw_Server_API/app/api/v1/schemas/notes_schemas.py`
 - Modify: `tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py`
 - Modify: `tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py`
@@ -236,6 +239,8 @@ Cover:
 - folder descendant paths recalculate transactionally after rename/move;
 - self-parenting, ancestor cycles, missing/deleted parents, and paths over 500 characters fail without partial changes; and
 - soft deletion keeps parent pointers and relationship rows intact.
+- source-backed folder links remain locally preserved but are excluded from effective reads and snapshots after a canonical folder-link tombstone; a canonical upsert restores visibility.
+- pre-existing cycles are rejected during both ancestor and descendant traversal without looping or partial mutation.
 
 Run:
 
@@ -304,6 +309,13 @@ class NotesOrganizationSyncStore:
 
 The class receives one initialized per-user `CharactersRAGDB`. Each public apply method uses one ChaCha transaction. Folder subtree path updates happen inside that transaction. `routing_metadata.bootstrap_capture` and origin provenance deltas are not interpreted here until Tasks 6 and 9.
 
+Implement ADR-033 in fresh SQLite/PostgreSQL schemas and the v54-to-v55 migration.
+`note_folder_sync_suppressions` has one unique `(note_id, folder_id)` pair. Folder
+relationship reads and snapshots use `(manual UNION source) MINUS suppression`.
+Canonical folder-link upsert removes suppression and ensures the manual row;
+tombstone removes the manual row and inserts suppression. Never delete source
+membership or source-key rows from the canonical apply path.
+
 Extend keyword and folder CRUD responses and Pydantic response schemas additively with `sync_id`. Keep integer `id` fields unchanged.
 
 - [ ] **Step 5: Verify PostgreSQL DDL and projection parity**
@@ -327,7 +339,7 @@ pytest -q tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_
 pytest -q tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py -k "sync_id or hierarchy or soft_delete"
 pytest -q tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_postgres_contract.py
 git diff --check
-git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py tldw_Server_API/app/api/v1/schemas/notes_schemas.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders_postgres.py tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_postgres_contract.py
+git add Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md Docs/ADR/README.md Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py tldw_Server_API/app/api/v1/schemas/notes_schemas.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders_postgres.py tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_postgres_contract.py
 git commit -m "feat(notes): add stable organization identities"
 ```
 
@@ -1033,6 +1045,7 @@ Exercise manual and source membership combinations:
 - removing the final effective source emits one tombstone;
 - origin materialization applies provenance and canonical membership in one ChaCha transaction;
 - remote materialization ignores provenance; and
+- canonical tombstones preserve source rows while suppressing their effective relationship, and canonical upserts clear that suppression;
 - routing metadata contains no source content, credential, or filesystem path.
 
 Run:

@@ -4,6 +4,8 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -86,6 +88,7 @@ def _build_v54_fixture(db_path: Path) -> dict[str, list[int]]:
         db.close_connection()
 
     with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE IF EXISTS note_folder_sync_suppressions")
         for table, index_name in (
             ("keywords", "idx_keywords_sync_id_unique"),
             ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
@@ -146,6 +149,23 @@ def test_v54_migration_adds_stable_unique_sync_ids_and_preserves_rows(tmp_path: 
                 1,
                 6,
             )
+            suppression_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info('note_folder_sync_suppressions')"
+                ).fetchall()
+            }
+            assert suppression_columns >= {"note_id", "folder_id", "created_at"}
+            note_id = str(conn.execute("SELECT id FROM notes LIMIT 1").fetchone()["id"])
+            conn.execute(
+                "INSERT INTO note_folder_sync_suppressions(note_id, folder_id) VALUES (?, ?)",
+                (note_id, original_ids["note_folders"][1]),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO note_folder_sync_suppressions(note_id, folder_id) VALUES (?, ?)",
+                    (note_id, original_ids["note_folders"][1]),
+                )
     finally:
         migrated.close_connection()
 

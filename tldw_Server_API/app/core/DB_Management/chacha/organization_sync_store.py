@@ -196,7 +196,11 @@ class NotesOrganizationSyncStore:
                 "FROM ("
                 "SELECT note_id, folder_id FROM note_folder_memberships "
                 "UNION SELECT note_id, folder_id FROM note_folder_source_memberships"
-                ") memberships JOIN note_folders f ON f.id = memberships.folder_id"
+                ") memberships JOIN note_folders f ON f.id = memberships.folder_id "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM note_folder_sync_suppressions suppression "
+                "WHERE suppression.note_id = memberships.note_id "
+                "AND suppression.folder_id = memberships.folder_id)"
             ).fetchall()
             for row in folder_rows:
                 payload = {
@@ -324,9 +328,13 @@ class NotesOrganizationSyncStore:
             if row["parent_id"] is not None:
                 children[int(row["parent_id"])].append(int(row["id"]))
         subtree: list[int] = []
+        visited: set[int] = set()
         queue = deque([existing.local_id])
         while queue:
             folder_id = queue.popleft()
+            if folder_id in visited or folder_id not in by_id:
+                raise InputError("Folder hierarchy contains a cycle or invalid descendant")
+            visited.add(folder_id)
             subtree.append(folder_id)
             queue.extend(sorted(children.get(folder_id, [])))
 
@@ -582,7 +590,27 @@ class NotesOrganizationSyncStore:
             else:
                 raise InputError(f"Unsupported organization relationship domain: {domain}")
 
-            if operation == "upsert":
+            if domain == "notes.folder_link":
+                if operation == "upsert":
+                    conn.execute(
+                        "DELETE FROM note_folder_sync_suppressions "
+                        "WHERE note_id = ? AND folder_id = ?",
+                        values,
+                    )
+                    self._insert_link(conn, link_table, columns, values)
+                else:
+                    conn.execute(
+                        "DELETE FROM note_folder_memberships "
+                        "WHERE note_id = ? AND folder_id = ?",
+                        values,
+                    )
+                    self._insert_link(
+                        conn,
+                        "note_folder_sync_suppressions",
+                        ("note_id", "folder_id"),
+                        values,
+                    )
+            elif operation == "upsert":
                 self._insert_link(conn, link_table, columns, values)
             else:
                 conn.execute(

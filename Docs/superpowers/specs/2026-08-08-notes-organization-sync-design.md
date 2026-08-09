@@ -4,7 +4,7 @@
 - **Task:** TASK-13003
 - **Status:** Approved design; implementation planning and execution remain separate gates
 - **Depends on:** TASK-13002 and ADR-031
-- **Architecture decision:** `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`
+- **Architecture decisions:** `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`, `Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md`
 - **Reviewed server baseline:** `dev` at `a495e252c1319a6e44c20a259e92fa94c0107627`
 
 ## Purpose
@@ -207,6 +207,13 @@ bookkeeping and no canonical envelope is emitted. This preserves the visible
 organization result across devices without making source IDs or folder keys a
 second authority. Routing metadata for this purpose must not contain source content,
 credentials, or filesystem paths.
+
+Canonical absence is projected without deleting source provenance. ChaChaNotes v55
+stores a local `note_folder_sync_suppressions` pair for each canonical folder-link
+tombstone. Effective membership is the manual/source union minus suppressions. A
+canonical upsert clears the matching suppression and ensures the manual projection;
+a tombstone removes the manual projection and creates the suppression. The table is
+derived projection state, not a Sync domain. ADR-033 records this ownership boundary.
 
 ## Existing-dataset bootstrap
 

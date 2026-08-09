@@ -88,6 +88,11 @@ def test_postgres_v55_migration_uses_transactional_nullable_backfill_validation_
 
     assert statements[-1].startswith("INSERT INTO db_schema_version")
     assert backend.calls[-1][1] == (CharactersRAGDB._SCHEMA_NAME, 55)
+    assert any(
+        "CREATE TABLE IF NOT EXISTS note_folder_sync_suppressions" in statement
+        and "PRIMARY KEY(note_id, folder_id)" in statement
+        for statement in statements
+    )
 
 
 def test_projection_apply_methods_use_one_transaction_and_snapshot_all_domains(

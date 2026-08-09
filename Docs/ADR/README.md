@@ -66,3 +66,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-032](032-mcp-unified-multi-revision-stdio-protocol.md) | Superseded by ADR-033 | Original strict multi-revision stdio decision; replaced after public-contract hardening. |
 | [ADR-033](033-mcp-unified-stdio-contract-hardening.md) | Accepted | Harden the reusable stdio API for arbitrary JSON outputs, typed IDs, bounded pagination/results, safe errors, and portable streams. |
 | [ADR-032](032-durable-server-origin-sync-mutation-batches.md) | Accepted | Persist complete server-origin Sync mutation plans atomically, then materialize them in ordered, resumable steps. |
+| [ADR-033](033-canonical-folder-link-suppression-preserves-source-provenance.md) | Accepted | Materialize canonical folder-link tombstones with local suppressions while preserving source-ingestion provenance. |

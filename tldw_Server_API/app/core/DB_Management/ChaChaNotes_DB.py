@@ -8935,6 +8935,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
             if "note_folders" not in self._sqlite_table_names(conn):
                 self._ensure_note_folder_schema_sqlite(conn)
+            else:
+                self._ensure_note_folder_sync_suppression_schema_sqlite(conn)
             table_indexes = (
                 ("keywords", "idx_keywords_sync_id_unique"),
                 ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
@@ -9021,6 +9023,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Backfill stable organization identities inside the caller's transaction."""
         from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
 
+        self._ensure_note_folder_sync_suppression_schema_postgres(conn)
         table_indexes = (
             ("chacha_keywords", "idx_keywords_sync_id_unique"),
             ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
@@ -9442,6 +9445,46 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         for statement in statements:
             conn.execute(statement)
+        self._ensure_note_folder_sync_suppression_schema_sqlite(conn)
+
+    @staticmethod
+    def _ensure_note_folder_sync_suppression_schema_sqlite(
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Ensure derived canonical folder-link suppression state exists."""
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS note_folder_sync_suppressions(
+              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              folder_id  INTEGER NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(note_id, folder_id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_folder_sync_suppressions_folder "
+            "ON note_folder_sync_suppressions(folder_id)"
+        )
+
+    def _ensure_note_folder_sync_suppression_schema_postgres(self, conn: Any) -> None:
+        """Ensure PostgreSQL derived canonical folder-link suppression state exists."""
+        self.backend.execute(
+            """
+            CREATE TABLE IF NOT EXISTS note_folder_sync_suppressions(
+              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              folder_id  BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(note_id, folder_id)
+            )
+            """,
+            connection=conn,
+        )
+        self.backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_folder_sync_suppressions_folder "
+            "ON note_folder_sync_suppressions(folder_id)",
+            connection=conn,
+        )
 
     def _ensure_note_folder_schema_postgres(self, conn: Any) -> None:
         """Backfill note folder tables for PostgreSQL deployments."""
@@ -9611,6 +9654,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
+        self._ensure_note_folder_sync_suppression_schema_postgres(conn)
 
     def _ensure_note_studio_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure the Studio sidecar table exists for SQLite deployments."""
@@ -24529,9 +24573,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   ) memberships
                     ON memberships.folder_id = f.id
                  WHERE f.deleted = 0
+                   AND NOT EXISTS (
+                         SELECT 1
+                           FROM note_folder_sync_suppressions suppression
+                          WHERE suppression.note_id = ?
+                            AND suppression.folder_id = memberships.folder_id
+                   )
                 {order_clause}
                 """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (note_id, note_id))
+        cursor = self.execute_query(query, (note_id, note_id, note_id))
         return [dict(row) for row in cursor.fetchall()]
 
     def get_note_folders_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -24557,6 +24607,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       ) memberships
                         ON memberships.folder_id = f.id
                      WHERE f.deleted = 0
+                       AND NOT EXISTS (
+                             SELECT 1
+                               FROM note_folder_sync_suppressions suppression
+                              WHERE suppression.note_id = memberships.note_id
+                                AND suppression.folder_id = memberships.folder_id
+                       )
                      ORDER BY memberships.note_id, {path_order_expr}
                     """.format_map(locals())  # nosec B608
             cursor = self.execute_query(query, tuple(batch + batch))
