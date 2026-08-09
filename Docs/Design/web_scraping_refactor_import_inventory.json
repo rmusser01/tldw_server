@@ -581,7 +581,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 724,
+        "line": 826,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "Article_Extractor_Lib"
@@ -589,7 +589,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 753,
+        "line": 855,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "Article_Extractor_Lib"
@@ -597,7 +597,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 784,
+        "line": 886,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "Article_Extractor_Lib"
@@ -605,7 +605,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 831,
+        "line": 933,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "Article_Extractor_Lib"
@@ -1553,7 +1553,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 725,
+        "line": 827,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "enhanced_web_scraping"
@@ -1561,7 +1561,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJobQueue",
-        "line": 725,
+        "line": 827,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "enhanced_web_scraping"

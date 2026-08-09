@@ -443,31 +443,133 @@ def _is_unconditional_bare_reraise(handler: ast.ExceptHandler) -> bool:
     )
 
 
-def _shadows_base_exception(tree: ast.Module) -> bool:
-    """Keep cancellation analysis sound by forbidding lexical rebinding."""
+def _import_binding_name(alias: ast.alias) -> str:
+    return alias.asname or alias.name.split(".")[0]
+
+
+def _direct_module_reference(expression: ast.expr, module_names: set[str]) -> bool:
+    return isinstance(expression, ast.Name) and expression.id in module_names
+
+
+def _direct_cancellation_reference(
+    expression: ast.expr,
+    module_names: set[str],
+    exception_names: set[str],
+) -> bool:
+    if isinstance(expression, ast.Name):
+        return expression.id in exception_names
+    attributes: list[str] = []
+    current = expression
+    while isinstance(current, ast.Attribute):
+        attributes.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name) or current.id not in module_names:
+        return False
+    return tuple(reversed(attributes)) in {("CancelledError",), ("exceptions", "CancelledError")}
+
+
+def _protected_cancellation_names(tree: ast.Module) -> tuple[set[str], set[str]]:
+    module_names: set[str] = set()
+    exception_names = {"BaseException"}
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id == "BaseException" and not isinstance(node.ctx, ast.Load):
-            return True
-        if isinstance(node, ast.arg) and node.arg == "BaseException":
-            return True
-        if isinstance(node, ast.ExceptHandler) and node.name == "BaseException":
-            return True
-        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == "BaseException":
-            return True
-        if isinstance(node, ast.MatchMapping) and node.rest == "BaseException":
-            return True
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == "BaseException":
-            return True
-        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
-            (alias.asname or alias.name.split(".")[0]) == "BaseException" for alias in node.names
+        if isinstance(node, ast.Import):
+            module_names.update(
+                _import_binding_name(alias) for alias in node.names if alias.name in {"asyncio", "asyncio.exceptions"}
+            )
+        elif isinstance(node, ast.ImportFrom) and node.module in {"asyncio", "asyncio.exceptions"}:
+            for alias in node.names:
+                bound_name = alias.asname or alias.name
+                if alias.name == "CancelledError":
+                    exception_names.add(bound_name)
+                elif node.module == "asyncio" and alias.name == "exceptions":
+                    module_names.add(bound_name)
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            value: ast.expr | None = None
+            target: ast.expr | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target, value = node.targets[0], node.value
+            elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
+                target, value = node.target, node.value
+            if not isinstance(target, ast.Name) or value is None or target.id == "BaseException":
+                continue
+            if _direct_module_reference(value, module_names) and target.id not in module_names:
+                module_names.add(target.id)
+                changed = True
+            if (
+                _direct_cancellation_reference(value, module_names, exception_names)
+                and target.id not in exception_names
+            ):
+                exception_names.add(target.id)
+                changed = True
+    return module_names, exception_names
+
+
+def _cancellation_shadow_violations(tree: ast.Module) -> list[str]:
+    """Reject competing bindings for cancellation roots and direct aliases."""
+    module_names, exception_names = _protected_cancellation_names(tree)
+    protected_names = module_names | exception_names
+    safe_targets: set[int] = set()
+    shadows: set[str] = set()
+
+    for node in ast.walk(tree):
+        value: ast.expr | None = None
+        target: ast.expr | None = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
+            target, value = node.target, node.value
+        if isinstance(target, ast.Name) and value is not None and target.id != "BaseException":
+            if target.id in module_names and _direct_module_reference(value, module_names):
+                safe_targets.add(id(target))
+            if target.id in exception_names and _direct_cancellation_reference(
+                value,
+                module_names,
+                exception_names,
+            ):
+                safe_targets.add(id(target))
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and node.id in protected_names
+            and not isinstance(node.ctx, ast.Load)
+            and id(node) not in safe_targets
         ):
-            return True
-    return False
+            shadows.add(node.id)
+        elif isinstance(node, ast.arg) and node.arg in protected_names:
+            shadows.add(node.arg)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name in protected_names:
+            shadows.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest in protected_names:
+            shadows.add(node.rest)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in protected_names:
+            shadows.add(node.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound_name = _import_binding_name(alias)
+                if bound_name in protected_names and (
+                    alias.name not in {"asyncio", "asyncio.exceptions"} or bound_name == "BaseException"
+                ):
+                    shadows.add(bound_name)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                bound_name = alias.asname or alias.name
+                is_cancellation_import = node.module in {"asyncio", "asyncio.exceptions"} and (
+                    alias.name == "CancelledError" or node.module == "asyncio" and alias.name == "exceptions"
+                )
+                if bound_name in protected_names and (not is_cancellation_import or bound_name == "BaseException"):
+                    shadows.add(bound_name)
+    return [f"shadow {name}" for name in sorted(shadows)]
 
 
 def _recoverable_cancelled_error_violations(tree: ast.Module) -> list[str]:
-    if _shadows_base_exception(tree):
-        return ["shadow BaseException"]
+    shadow_violations = _cancellation_shadow_violations(tree)
+    if shadow_violations:
+        return shadow_violations
     contexts = _scope_for_nodes(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
@@ -1601,7 +1703,7 @@ try:
 except CE:
     pass
 """,
-            ["CE"],
+            ["shadow CE"],
         ),
         "function_annotation_without_value_shadows_global": (
             """
@@ -1613,7 +1715,7 @@ def extract():
     except CE:
         pass
 """,
-            [],
+            ["shadow CE"],
         ),
         "import_rebound_before_handler": (
             """
@@ -1624,7 +1726,7 @@ try:
 except asyncio.CancelledError:
     pass
 """,
-            [],
+            ["shadow asyncio"],
         ),
         "class_rebound_before_handler": (
             """
@@ -1635,7 +1737,7 @@ try:
 except CancelledError:
     pass
 """,
-            [],
+            ["shadow CancelledError"],
         ),
         "alias_captures_import_before_rebinding": (
             """
@@ -1647,7 +1749,7 @@ try:
 except _RECOVERABLE:
     pass
 """,
-            ["_RECOVERABLE"],
+            ["shadow asyncio"],
         ),
         "rebound_after_handler": (
             """
@@ -1658,7 +1760,7 @@ except CE:
     pass
 CE = ValueError
 """,
-            ["CE"],
+            ["shadow CE"],
         ),
         "function_global_imported_after_definition": (
             """
@@ -1685,7 +1787,7 @@ def extract():
 CE = ValueError
 extract()
 """,
-            [],
+            ["shadow CE"],
         ),
         "closure_imported_after_inner_definition": (
             """
@@ -1719,7 +1821,7 @@ def outer():
 
 outer()
 """,
-            [],
+            ["shadow CE"],
         ),
         "absent_asyncio_import": (
             """
@@ -1739,7 +1841,7 @@ def extract(asyncio):
     except asyncio.CancelledError:
         pass
 """,
-            [],
+            ["shadow asyncio"],
         ),
         "parameter_shadows_imported_class": (
             """
@@ -1750,7 +1852,7 @@ def extract(CE):
     except CE:
         pass
 """,
-            [],
+            ["shadow CE"],
         ),
         "method_skips_class_only_alias": (
             """
@@ -1777,7 +1879,82 @@ class Extractor:
         except CE:
             pass
 """,
-            ["CE"],
+            ["shadow CE"],
+        ),
+        "conditional_imported_alias_rebind": (
+            """
+from asyncio import CancelledError as CE
+if False:
+    CE = ValueError
+try:
+    operation()
+except CE:
+    recover()
+""",
+            ["shadow CE"],
+        ),
+        "conditional_asyncio_root_rebind": (
+            """
+import asyncio
+if False:
+    asyncio = object()
+try:
+    operation()
+except asyncio.CancelledError:
+    recover()
+""",
+            ["shadow asyncio"],
+        ),
+        "function_called_before_imported_alias_rebind": (
+            """
+from asyncio import CancelledError as CE
+def extract():
+    try:
+        operation()
+    except CE:
+        recover()
+
+extract()
+CE = ValueError
+""",
+            ["shadow CE"],
+        ),
+        "composite_imported_alias_rebind": (
+            """
+from asyncio import CancelledError as CE
+(CE,) = (ValueError,)
+try:
+    operation()
+except CE:
+    recover()
+""",
+            ["shadow CE"],
+        ),
+        "direct_cancellation_alias_rebind": (
+            """
+from asyncio import CancelledError as CE
+Cancellation = CE
+if False:
+    Cancellation = ValueError
+try:
+    operation()
+except Cancellation:
+    recover()
+""",
+            ["shadow Cancellation"],
+        ),
+        "assigned_asyncio_root_alias_rebind": (
+            """
+import asyncio
+aio = asyncio
+if False:
+    aio = object()
+try:
+    operation()
+except aio.CancelledError:
+    recover()
+""",
+            ["shadow aio"],
         ),
         "inline_tuple": (
             """
