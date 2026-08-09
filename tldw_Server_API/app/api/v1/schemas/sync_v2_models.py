@@ -901,12 +901,15 @@ class SyncRestorePreviewRequest(BaseModel):
     """Client inventory request for a Sync v2 M1 restore preview."""
 
     device_id: str | None = None
-    dataset_ids: list[str] = Field(default_factory=list)
-    domains: list[SyncDomain] = Field(default_factory=list)
-    selected_object_ids: list[str] = Field(default_factory=list)
-    selected_attachment_ids: list[str] = Field(default_factory=list)
+    dataset_ids: list[str] = Field(default_factory=list, max_length=100)
+    domains: list[SyncDomain] = Field(default_factory=list, max_length=100)
+    selected_object_ids: list[str] = Field(default_factory=list, max_length=10_000)
+    selected_attachment_ids: list[str] = Field(default_factory=list, max_length=10_000)
     metadata_only: bool = False
-    local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(default_factory=list)
+    local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(
+        default_factory=list,
+        max_length=10_000,
+    )
     attachment_availability: dict[str, str] = Field(default_factory=dict)
 
 

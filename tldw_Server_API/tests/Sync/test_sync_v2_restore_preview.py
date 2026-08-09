@@ -89,6 +89,35 @@ def client(sync_service: SyncV2Service) -> TestClient:
     return TestClient(app)
 
 
+@pytest.mark.parametrize(
+    ("field", "items"),
+    [
+        ("dataset_ids", ["dataset-1"] * 101),
+        ("domains", ["notes.note"] * 101),
+        ("selected_object_ids", ["note-1"] * 10_001),
+        ("selected_attachment_ids", ["attachment-1"] * 10_001),
+        (
+            "local_inventory",
+            [
+                {"domain": "notes.note", "object_id": f"note-{index}"}
+                for index in range(10_001)
+            ],
+        ),
+    ],
+)
+def test_code_quality_round2_restore_preview_rejects_oversized_request_lists(
+    client: TestClient,
+    field: str,
+    items: list[object],
+) -> None:
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={"dataset_ids": ["dataset-1"], "local_inventory": [], field: items},
+    )
+
+    assert response.status_code == 422
+
+
 def _note_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     payload: dict[str, Any] = {
         "dataset_id": "dataset-1",
@@ -987,6 +1016,54 @@ def test_provider_selection_prefers_latest_earlier_revision_over_later_revision(
     ]
 
 
+def test_code_quality_round2_provider_lookup_reads_each_provider_linearly() -> None:
+    operation_reads = 0
+
+    class CountingEnvelope:
+        def __init__(self, envelope: SyncEnvelope) -> None:
+            self.envelope = envelope
+
+        def __getattr__(self, name: str) -> object:
+            nonlocal operation_reads
+            if name == "operation":
+                operation_reads += 1
+            return getattr(self.envelope, name)
+
+    provider_id = "11111111-1111-4111-8111-111111111111"
+    provider_count = 40
+    providers = [
+        CountingEnvelope(
+            SyncEnvelope(
+                server_cursor=index + 1,
+                dataset_id="dataset-1",
+                client_envelope_id=f"env-provider-scale-{index}",
+                domain="notes.folder",
+                operation="upsert",
+                object_id=provider_id,
+                payload={"name": f"Provider {index}", "parent_sync_id": None},
+            )
+        )
+        for index in range(provider_count)
+    ]
+    consumers = [
+        SyncEnvelope(
+            server_cursor=provider_count + index + 1,
+            dataset_id="dataset-1",
+            client_envelope_id=f"env-consumer-scale-{index}",
+            domain="notes.folder",
+            operation="upsert",
+            object_id=f"22222222-2222-4222-8222-{index:012d}",
+            payload={"name": f"Consumer {index}", "parent_sync_id": provider_id},
+        )
+        for index in range(provider_count)
+    ]
+
+    ordered = order_restore_envelopes([*providers, *consumers])  # type: ignore[list-item]
+
+    assert len(ordered) == provider_count * 2
+    assert operation_reads <= provider_count * 8
+
+
 def test_tombstone_graph_keeps_historical_group_before_later_exact_restore(
     sync_service: SyncV2Service,
 ) -> None:
@@ -1534,7 +1611,7 @@ def test_restore_preview_round5_distinguishes_same_object_across_datasets(
 
     preview = sync_service.restore_preview(
         user_id="user-1",
-        dataset_ids=["dataset-1", "dataset-2"],
+        dataset_ids=["dataset-1", "dataset-1", "dataset-2", "dataset-1"],
         domains=["notes.note"],
         local_inventory=[],
     )
@@ -1556,7 +1633,7 @@ def test_restore_preview_round5_distinguishes_same_object_across_datasets(
     response = client.post(
         "/api/v1/sync/restore/preview",
         json={
-            "dataset_ids": ["dataset-1", "dataset-2"],
+            "dataset_ids": ["dataset-1", "dataset-1", "dataset-2", "dataset-1"],
             "domains": ["notes.note"],
             "local_inventory": [],
         },

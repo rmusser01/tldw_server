@@ -68,6 +68,9 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncRestoreManifestStats,
     normalize_sync_timestamp,
 )
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    SYNC_MUTATION_GROUP_MAX_SIZE,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 from .backends.base import (
@@ -1107,7 +1110,19 @@ def _dataset_from_row(row: dict[str, Any]) -> SyncDataset:
 
 
 def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
-    return SyncEnvelope(
+    raw_created_at_client = row.get("created_at_client") or row.get("client_timestamp")
+    raw_client_timestamp = row.get("client_timestamp") or row.get("created_at_client")
+    created_at_client = (
+        raw_created_at_client
+        if isinstance(raw_created_at_client, str)
+        else _timestamp_to_string(raw_created_at_client)
+    )
+    client_timestamp = (
+        raw_client_timestamp
+        if isinstance(raw_client_timestamp, str)
+        else _timestamp_to_string(raw_client_timestamp)
+    )
+    envelope = SyncEnvelope(
         server_cursor=int(row["server_sequence"]),
         dataset_id=row["dataset_id"],
         client_envelope_id=row["client_envelope_id"],
@@ -1127,15 +1142,11 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
         mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
         mutation_plan_hash=row.get("mutation_plan_hash"),
         stable_key=row.get("stable_key"),
-        created_at_client=_timestamp_to_string(
-            row.get("created_at_client") or row.get("client_timestamp")
-        ),
+        created_at_client=created_at_client,
         received_at_server=_timestamp_to_string(
             row.get("received_at_server") or row.get("server_timestamp")
         ),
-        client_timestamp=_timestamp_to_string(
-            row.get("client_timestamp") or row.get("created_at_client")
-        ),
+        client_timestamp=client_timestamp,
         server_timestamp=_timestamp_to_string(
             row.get("server_timestamp") or row.get("received_at_server")
         ),
@@ -1185,6 +1196,10 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
         apply_error_message=row.get("apply_error_message"),
         applied_at=row.get("applied_at"),
     )
+    if isinstance(raw_created_at_client, str):
+        object.__setattr__(envelope, "created_at_client", created_at_client)
+        object.__setattr__(envelope, "client_timestamp", client_timestamp)
+    return envelope
 
 
 def _cursor_from_row(row: dict[str, Any]) -> SyncDeviceCursor:
@@ -1434,7 +1449,7 @@ def _envelope_fingerprint_from_row(
             if row.get("client_sequence") is not None
             else None
         ),
-        "created_at_client": _timestamp_to_string(
+        "created_at_client": normalize_sync_timestamp(
             row.get("created_at_client") or row.get("client_timestamp")
         ),
         "base_server_cursor": (
@@ -3541,6 +3556,8 @@ class SyncDatabase:
         plan = list(envelopes)
         if not plan:
             raise SyncStoreError("Sync mutation group must contain at least one envelope")
+        if len(plan) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_restore_group_limit_exceeded")
         for envelope in plan:
             self._validate_envelope_contract(envelope)
 
@@ -3595,15 +3612,23 @@ class SyncDatabase:
         *,
         connection: Any | None = None,
     ) -> list[dict[str, Any]]:
-        return self.execute(
+        rows = self.execute(
             """
             SELECT * FROM sync_envelopes
              WHERE dataset_id = ? AND mutation_group_id = ?
              ORDER BY mutation_step ASC
+             LIMIT ?
             """,
-            (dataset_id, mutation_group_id),
+            (
+                dataset_id,
+                mutation_group_id,
+                SYNC_MUTATION_GROUP_MAX_SIZE + 1,
+            ),
             connection=connection,
         ).rows
+        if len(rows) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_restore_group_limit_exceeded")
+        return rows
 
     def _matched_mutation_group_replay(
         self,

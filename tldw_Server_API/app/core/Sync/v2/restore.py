@@ -3,6 +3,7 @@ from __future__ import annotations
 """Helpers for building Sync v2 restore preview plans."""
 
 import heapq
+from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
@@ -61,11 +62,28 @@ def order_restore_envelopes(
             units_by_identity.setdefault((envelope.domain, envelope.object_id), []).append(
                 (unit_index, position, envelope)
             )
+    for occurrences in units_by_identity.values():
+        occurrences.sort(key=lambda item: item[2].server_cursor or 0)
+    live_occurrences_by_identity = {
+        identity: [item for item in occurrences if item[2].operation != "tombstone"]
+        for identity, occurrences in units_by_identity.items()
+    }
+    live_cursors_by_identity = {
+        identity: [item[2].server_cursor or 0 for item in occurrences]
+        for identity, occurrences in live_occurrences_by_identity.items()
+    }
+    live_positions_by_identity_unit: dict[
+        tuple[SyncDomain, str], dict[int, list[int]]
+    ] = {}
+    for identity, occurrences in live_occurrences_by_identity.items():
+        positions_by_unit: dict[int, list[int]] = {}
+        for unit_index, position, _ in occurrences:
+            positions_by_unit.setdefault(unit_index, []).append(position)
+        live_positions_by_identity_unit[identity] = positions_by_unit
     edges: dict[int, set[int]] = {index: set() for index in range(len(units))}
 
     for occurrences in units_by_identity.values():
-        ordered = sorted(occurrences, key=lambda item: item[2].server_cursor or 0)
-        for earlier, later in zip(ordered, ordered[1:]):
+        for earlier, later in zip(occurrences, occurrences[1:]):
             if earlier[0] != later[0]:
                 edges[earlier[0]].add(later[0])
 
@@ -75,28 +93,30 @@ def order_restore_envelopes(
                 occurrences = units_by_identity.get(dependency)
                 if not occurrences:
                     raise RestorePlanningError("Restore dependency is missing")
-                live = [item for item in occurrences if item[2].operation != "tombstone"]
+                live = live_occurrences_by_identity[dependency]
                 if live:
-                    if any(
-                        dependency_unit == unit_index and dependency_position < position
-                        for dependency_unit, dependency_position, _ in live
-                    ):
+                    unit_positions = live_positions_by_identity_unit[dependency].get(
+                        unit_index, []
+                    )
+                    if bisect_left(unit_positions, position):
                         continue
-                    external = [item for item in live if item[0] != unit_index]
-                    if not external:
+                    cursors = live_cursors_by_identity[dependency]
+                    insertion = bisect_left(cursors, envelope.server_cursor or 0)
+                    provider_index = insertion - 1
+                    while provider_index >= 0 and live[provider_index][0] == unit_index:
+                        provider_index -= 1
+                    if provider_index < 0:
+                        provider_index = insertion
+                        while (
+                            provider_index < len(live)
+                            and live[provider_index][0] == unit_index
+                        ):
+                            provider_index += 1
+                    if provider_index >= len(live):
                         raise RestorePlanningError(
                             "Mutation group ordering conflicts with restore dependencies"
                         )
-                    earlier = [
-                        item
-                        for item in external
-                        if (item[2].server_cursor or 0) < (envelope.server_cursor or 0)
-                    ]
-                    provider = (
-                        max(earlier, key=lambda item: item[2].server_cursor or 0)
-                        if earlier
-                        else min(external, key=lambda item: item[2].server_cursor or 0)
-                    )
+                    provider = live[provider_index]
                     edges[provider[0]].add(unit_index)
                     continue
                 for tombstone_unit, tombstone_position, _ in occurrences:

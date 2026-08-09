@@ -122,6 +122,7 @@ def _mutation_group_envelopes(
     *,
     mutation_group_id: str = "mutation-group-1",
     mutation_plan_hash: str = "a" * 64,
+    count: int = 3,
 ) -> list[SyncEnvelopeCreate]:
     return [
         _envelope(
@@ -130,10 +131,10 @@ def _mutation_group_envelopes(
             payload_hash=f"sha256:note-{step + 1}",
             mutation_group_id=mutation_group_id,
             mutation_step=step,
-            mutation_step_count=3,
+            mutation_step_count=count,
             mutation_plan_hash=mutation_plan_hash,
         )
-        for step in range(3)
+        for step in range(count)
     ]
 
 
@@ -1131,6 +1132,36 @@ def test_insert_envelopes_atomic_persists_complete_ordered_mutation_group(
     assert sync_store.list_mutation_group("dataset-1", "mutation-group-1") == inserted
 
 
+def test_code_quality_round2_atomic_append_rejects_oversized_group(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+
+    with pytest.raises(SyncStoreError, match="sync_restore_group_limit_exceeded"):
+        sync_store.insert_envelopes_atomic(_mutation_group_envelopes(count=1_001))
+
+    assert sync_store.list_mutation_group("dataset-1", "mutation-group-1") == []
+
+
+def test_code_quality_round2_group_read_uses_bounded_max_plus_one_query(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def oversized_query(sql, params, *, connection=None):
+        captured.update(sql=sql, params=params, connection=connection)
+        return type("Result", (), {"rows": [{}] * 1_001})()
+
+    monkeypatch.setattr(sync_store.db, "execute", oversized_query)
+
+    with pytest.raises(SyncStoreError, match="sync_restore_group_limit_exceeded"):
+        sync_store.list_mutation_group("dataset-1", "mutation-group-1")
+
+    assert "LIMIT ?" in str(captured["sql"])
+    assert captured["params"] == ("dataset-1", "mutation-group-1", 1_001)
+
+
 def test_insert_envelopes_atomic_returns_identical_mutation_group_replay(
     sync_store: SyncV2Store,
 ) -> None:
@@ -1175,6 +1206,79 @@ def test_code_quality_i2_native_postgres_timestamp_preserves_group_fingerprint(
     assert _envelope_fingerprint_from_row(native_rows[0]) == (
         _envelope_fingerprint_from_create(plan[0])
     )
+    validate_stored_mutation_group(
+        restored,
+        dataset_id="dataset-1",
+        mutation_group_id="mutation-group-1",
+    )
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "legacy_plan_hash"),
+    [
+        (
+            "2026-05-10T00:00:00Z",
+            "c320a2ff060ffe677c1e89fef9b69add90e27ea25226ecc23091971e1435c665",
+        ),
+        (
+            "2026-05-09T17:00:00-07:00",
+            "7bd3699f323f6409d188e41c93ae1a5570c37e3ea367814c2f1cd229efe4ca51",
+        ),
+    ],
+)
+def test_code_quality_round2_accepts_genuine_legacy_sqlite_timestamp_hashes(
+    sync_store: SyncV2Store,
+    timestamp: str,
+    legacy_plan_hash: str,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    legacy_plan = _mutation_group_envelopes(mutation_plan_hash=legacy_plan_hash)
+    for envelope in legacy_plan:
+        object.__setattr__(envelope, "created_at_client", timestamp)
+        object.__setattr__(envelope, "client_timestamp", timestamp)
+    sync_store.insert_envelopes_atomic(legacy_plan)
+
+    restored = sync_store.list_mutation_group("dataset-1", "mutation-group-1")
+
+    assert [envelope.created_at_client for envelope in restored] == [timestamp] * 3
+    validate_stored_mutation_group(
+        restored,
+        dataset_id="dataset-1",
+        mutation_group_id="mutation-group-1",
+    )
+
+
+def test_code_quality_round2_accepts_legacy_utc_z_hash_from_postgres_datetime(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    legacy_plan_hash = (
+        "c320a2ff060ffe677c1e89fef9b69add90e27ea25226ecc23091971e1435c665"
+    )
+    legacy_plan = _mutation_group_envelopes(mutation_plan_hash=legacy_plan_hash)
+    for envelope in legacy_plan:
+        object.__setattr__(envelope, "created_at_client", "2026-05-10T00:00:00Z")
+        object.__setattr__(envelope, "client_timestamp", "2026-05-10T00:00:00Z")
+    sync_store.insert_envelopes_atomic(legacy_plan)
+    rows = sync_store.db.execute(
+        "SELECT * FROM sync_envelopes WHERE mutation_group_id = ? "
+        "ORDER BY mutation_step ASC",
+        ("mutation-group-1",),
+    ).rows
+    native_rows = [
+        {
+            **row,
+            "created_at_client": datetime(2026, 5, 10, tzinfo=timezone.utc),
+            "client_timestamp": datetime(2026, 5, 10, tzinfo=timezone.utc),
+        }
+        for row in rows
+    ]
+
+    restored = [_envelope_from_row(row) for row in native_rows]
+
+    assert [envelope.created_at_client for envelope in restored] == [
+        "2026-05-10T00:00:00+00:00"
+    ] * 3
     validate_stored_mutation_group(
         restored,
         dataset_id="dataset-1",

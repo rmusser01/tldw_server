@@ -181,7 +181,6 @@ class SyncV2Settings:
     restore_manifest_scan_limit: int = 10_000
     restore_preview_candidate_limit: int = 50_000
     restore_preview_action_limit: int = 10_000
-    restore_max_group_size: int = 1_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -1714,8 +1713,6 @@ class SyncV2Service:
             raise SyncStoreError("sync_restore_candidate_limit_invalid")
         if self.settings.restore_preview_action_limit < 1:
             raise SyncStoreError("sync_restore_action_limit_invalid")
-        if self.settings.restore_max_group_size < 1:
-            raise SyncStoreError("sync_restore_group_limit_invalid")
 
         preview_datasets: list[SyncRestorePreviewDataset] = []
         ordered_actions: list[SyncRestoreOrderedAction] = []
@@ -2269,8 +2266,6 @@ class SyncV2Service:
             raise SyncStoreError("Invalid sync cursor: repair since_cursor must be non-negative")
         if limit is not None and limit < 1:
             raise SyncStoreError("Sync repair limit must be greater than zero")
-        if self.settings.restore_max_group_size < 1:
-            raise SyncStoreError("sync_restore_group_limit_invalid")
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
@@ -2289,7 +2284,6 @@ class SyncV2Service:
             materialize=_repair_materialize,
             snapshot=self._envelope_snapshot,
             scan_limit=self.settings.restore_manifest_scan_limit,
-            max_group_size=self.settings.restore_max_group_size,
         ).run(
             dataset_id=dataset.dataset_id,
             domains=selected_domains,
@@ -3384,7 +3378,7 @@ class SyncV2Service:
         if dataset_ids:
             return [
                 self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-                for dataset_id in dataset_ids
+                for dataset_id in dict.fromkeys(dataset_ids)
             ]
         datasets: list[SyncDataset] = []
         for dataset in self.store.list_datasets_for_user(user_id):
@@ -4077,8 +4071,6 @@ class SyncV2Service:
             if not group_id or group_id in processed_groups:
                 continue
             group = self.store.list_mutation_group(dataset_id, group_id)
-            if len(group) > self.settings.restore_max_group_size:
-                raise SyncStoreError("sync_restore_group_limit_exceeded")
             validate_stored_mutation_group(
                 group,
                 dataset_id=dataset_id,

@@ -9,6 +9,8 @@ from collections.abc import Sequence
 from .errors import SyncIdempotencyConflictError
 from .models import SyncEnvelope, SyncEnvelopeCreate, normalize_sync_timestamp
 
+SYNC_MUTATION_GROUP_MAX_SIZE = 1_000
+
 
 class StoredMutationGroupValidationError(SyncIdempotencyConflictError):
     """Safe persisted-group integrity failure."""
@@ -19,11 +21,11 @@ class StoredMutationGroupValidationError(SyncIdempotencyConflictError):
         self.failing_step = failing_step
 
 
-def mutation_group_plan_hash(
+def _mutation_group_plan_hash(
     envelopes: Sequence[SyncEnvelope | SyncEnvelopeCreate],
+    *,
+    timestamp_format: str,
 ) -> str:
-    """Return the canonical full-envelope fingerprint for a mutation plan."""
-
     encoded = json.dumps(
         [
             {
@@ -46,8 +48,13 @@ def mutation_group_plan_hash(
                 "payload_ciphertext": envelope.payload_ciphertext,
                 "payload_hash": envelope.payload_hash,
                 "payload_size_bytes": envelope.payload_size_bytes,
-                "created_at_client": normalize_sync_timestamp(
+                "created_at_client": (
                     envelope.created_at_client
+                    if timestamp_format == "stored"
+                    else _formatted_timestamp(
+                        envelope.created_at_client,
+                        utc_z=timestamp_format == "utc_z",
+                    )
                 ),
                 "deleted": envelope.deleted,
                 "encryption_metadata": envelope.encryption_metadata,
@@ -71,6 +78,21 @@ def mutation_group_plan_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _formatted_timestamp(value: object | None, *, utc_z: bool) -> str | None:
+    normalized = normalize_sync_timestamp(value)
+    if utc_z and normalized is not None and normalized.endswith("+00:00"):
+        return f"{normalized[:-6]}Z"
+    return normalized
+
+
+def mutation_group_plan_hash(
+    envelopes: Sequence[SyncEnvelope | SyncEnvelopeCreate],
+) -> str:
+    """Return the canonical full-envelope fingerprint for a mutation plan."""
+
+    return _mutation_group_plan_hash(envelopes, timestamp_format="canonical")
+
+
 def validate_stored_mutation_group(
     envelopes: Sequence[SyncEnvelope],
     *,
@@ -81,6 +103,11 @@ def validate_stored_mutation_group(
 
     if not envelopes:
         raise StoredMutationGroupValidationError("mutation_group_step_missing", 0)
+    if len(envelopes) > SYNC_MUTATION_GROUP_MAX_SIZE:
+        raise StoredMutationGroupValidationError(
+            "mutation_group_limit_exceeded",
+            SYNC_MUTATION_GROUP_MAX_SIZE,
+        )
     first = envelopes[0]
     expected_count = first.mutation_step_count
     if not isinstance(expected_count, int) or expected_count < 1:
@@ -116,11 +143,17 @@ def validate_stored_mutation_group(
                 "mutation_group_plan_hash_invalid",
                 envelope.mutation_step or 0,
             )
-    if mutation_group_plan_hash(envelopes) != plan_hash:
+    valid_hashes = {
+        mutation_group_plan_hash(envelopes),
+        _mutation_group_plan_hash(envelopes, timestamp_format="stored"),
+        _mutation_group_plan_hash(envelopes, timestamp_format="utc_z"),
+    }
+    if plan_hash not in valid_hashes:
         raise StoredMutationGroupValidationError("mutation_group_fingerprint_invalid", 0)
 
 
 __all__ = [
+    "SYNC_MUTATION_GROUP_MAX_SIZE",
     "StoredMutationGroupValidationError",
     "mutation_group_plan_hash",
     "validate_stored_mutation_group",

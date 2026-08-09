@@ -565,20 +565,28 @@ def test_code_quality_i4_repair_limit_is_soft_for_one_complete_group(
     assert result.to_cursor == stored[-1].server_cursor
 
 
-def test_code_quality_i4_repair_rejects_group_over_explicit_maximum(
+def test_code_quality_i4_repair_propagates_shared_group_limit_failure(
     sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     materializer = _RecordingGroupMaterializer()
     service = _service(
         sync_store,
         materializers={"notes.keyword": materializer},
     )
-    service.settings = replace(service.settings, restore_max_group_size=2)
     _register_and_enroll(service)
     _enable_ready_notes_organization(sync_store)
     sync_store.insert_envelopes_atomic(
         _keyword_group(group_id="server-origin-oversized-repair-group")
     )
+
+    def reject_oversized_group(
+        _dataset_id: str,
+        _mutation_group_id: str,
+    ) -> list[Any]:
+        raise SyncStoreError("sync_restore_group_limit_exceeded")
+
+    monkeypatch.setattr(sync_store, "list_mutation_group", reject_oversized_group)
 
     with pytest.raises(SyncStoreError, match="sync_restore_group_limit_exceeded"):
         service.repair(

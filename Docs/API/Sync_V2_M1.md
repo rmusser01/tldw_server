@@ -335,6 +335,14 @@ Client timestamps are normalized to one UTC ISO-8601 representation before
 persistence and mutation-group hashing. This includes native timezone-aware
 timestamps returned by PostgreSQL `TIMESTAMPTZ`, so reloading a stored group does
 not change its immutable plan fingerprint. A `Z` suffix remains valid input.
+For immutable groups stored before this normalization, validation uses a bounded
+compatibility set over the complete plan: the exact timestamp spelling retained
+by SQLite, and the exact UTC `Z` spelling when PostgreSQL has reloaded that value
+as a native UTC timestamp. PostgreSQL `TIMESTAMPTZ` cannot recover an arbitrary
+original non-UTC offset spelling after reload; the server-origin clock used by
+production emitted canonical UTC, while the historical bootstrap path also used
+the reconstructible UTC `Z` form. All other envelope fingerprint fields remain
+strict.
 
 `chat.message` append envelopes dedupe by stable message `object_id` plus
 `payload_hash`. Matching duplicates are idempotent. A duplicate message ID with
@@ -783,7 +791,17 @@ an otherwise-ready tombstone. Preview is bounded to 50,000 scanned candidates,
 10,000 ordered actions, and 1,000 members in any expanded mutation group. Exceeding
 one of those ceilings returns HTTP 413 with
 `sync_restore_candidate_limit_exceeded`, `sync_restore_action_limit_exceeded`, or
-`sync_restore_group_limit_exceeded` respectively.
+`sync_restore_group_limit_exceeded` respectively. The 1,000-member ceiling is
+shared by atomic append, restore, and repair. Atomic append rejects an oversized
+group before writing, while persisted-group reads fetch at most 1,001 rows and
+reject an oversized legacy or corrupt group before constructing public actions or
+materialization models.
+
+Restore-preview request lists are bounded before service planning: `dataset_ids`
+and `domains` accept at most 100 entries each, while `selected_object_ids`,
+`selected_attachment_ids`, and `local_inventory` accept at most 10,000 entries
+each. Repeated dataset IDs are deduplicated in first-seen order before access
+checks and planning, so they never duplicate datasets or actions in the response.
 
 `ordered_actions` is the only executable object-action sequence. Its zero-based
 `plan_index` values are stable across the complete returned multi-dataset plan.
@@ -872,7 +890,7 @@ returned. For example:
 
 ```json
 {
-  "dataset_id": "ds_personal_01HZZ0",
+  "dataset_ids": ["ds_personal_01HZZ0"],
   "device_id": "dev_chatbook_laptop",
   "client_profile_id": "chatbook_profile_main",
   "target_profile": {
