@@ -4,7 +4,7 @@ title: Implement Claims Jobs Stage 2A analytics exports
 status: In Progress
 assignee: []
 created_date: 2026-08-08 21:36
-updated_date: 2026-08-09 04:40
+updated_date: 2026-08-09 05:18
 labels:
 - claims
 - jobs
@@ -82,4 +82,5 @@ Task 5 complete at 8d94ca2cd6 with review fixes 7127cc38d9, 60ec088543, and 74eb
 Task 6 complete at fbb072326f with review fix b0386083a0: strict three-field analytics export payload, dual producer flags, exact Jobs admission metadata, direct create-result return without refresh, and retry settings constrained to the Jobs schema range. Verification: 116 Claims Jobs contract/producer/handler/worker tests passed; Ruff, compile, diff checks, and Bandit passed; specification and quality reviews approved.
 Task 7 complete at b7933c2c0a with review fixes cb1e445d7c and ae44be3aab: strict owner/payload/Job-ID validation, owner-scoped threaded export dispatch, safe domain translation, cause-chain retry classification for explicit SQLite/PostgreSQL/OS transient signals, terminal redaction for unclassified failures, and sanitized diagnostics. Verification: 63 handler and Claims worker-service tests passed; Ruff, formatting, compile, diff checks, and Bandit passed; specification and quality reviews approved.
 Task 8 complete at a85a3257ee with review fixes 2c993bb1ca and 04ea7d8bd0: shared sync/async create orchestration, canonical cross-owner SQLite/PostgreSQL routing, nullable API compatibility, bounded best-effort maintenance, durable Jobs acceptance semantics, enqueue-only compensation, sanitized storage failures, dynamic 200/202 responses, and additive OpenAPI/schema fields. Verification: 35 focused API/dashboard/OpenAPI tests passed; 263 export-domain/cleanup/producer/handler/worker tests passed earlier in the task; Ruff, compile, diff checks, and Bandit (zero findings) passed. Fresh specification and code-quality reviews approved. Live PostgreSQL integration coverage remains assigned to Task 10.
+Task 9 complete at 289d31528d: owner-scoped export lists and downloads, separate artifact/Jobs status projection, conservative request-time reconciliation and retention, canonical cross-owner SQLite/PostgreSQL routing, exact JSON/CSV response bodies and safe headers, stable 409 lifecycle conflicts, indistinguishable 404 lookup boundaries, and additive OpenAPI documentation. Verification: 235 selected export/list/download/cleanup/OpenAPI tests passed; the 137-test export-domain regression suite passed; Ruff, compile, diff checks, and Bandit (zero findings) passed. Fresh specification and code-quality reviews approved. The unfiltered combined verification command also exposed an import-order-dependent OpenAPI fixture issue in two unrelated route assertions; both affected assertions pass in a fresh process, and all Claims OpenAPI assertions pass in the combined targeted run.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
