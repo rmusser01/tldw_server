@@ -636,6 +636,13 @@ def _caused_by(outer: Exception, cause: Exception) -> Exception:
     return outer
 
 
+def _sqlite_operational_error(message: str, *, code: int | None = None) -> sqlite3.OperationalError:
+    error = sqlite3.OperationalError(message)
+    if code is not None:
+        error.sqlite_errorcode = code
+    return error
+
+
 @pytest.mark.parametrize(
     "error",
     [
@@ -687,6 +694,10 @@ async def test_analytics_export_handler_redacts_transient_storage_failure(monkey
         sqlite3.DatabaseError("non-operational database failure"),
         sqlite3.IntegrityError("constraint failed"),
         sqlite3.OperationalError("no such table: claims_analytics_exports"),
+        _sqlite_operational_error(
+            "no such table: database is locked",
+            code=sqlite3.SQLITE_ERROR,
+        ),
         BackendDatabaseError("invalid backend configuration"),
         MediaDatabaseError("missing required schema"),
         _caused_by(

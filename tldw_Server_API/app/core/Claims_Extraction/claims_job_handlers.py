@@ -51,11 +51,13 @@ _CLAIMS_EXPORT_STORAGE_ERROR_TYPES: tuple[type[BaseException], ...] = (
     OSError,
 )
 _TRANSIENT_SQLITE_CODES = frozenset({sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED})
-_TRANSIENT_SQLITE_MESSAGES = (
-    "database is busy",
-    "database is locked",
-    "database schema is locked",
-    "database table is locked",
+_TRANSIENT_SQLITE_MESSAGES = frozenset(
+    {
+        "database is busy",
+        "database is locked",
+        "database schema is locked",
+        "database table is locked",
+    }
 )
 _TRANSIENT_POSTGRES_SQLSTATES = frozenset(
     {
@@ -185,7 +187,7 @@ def _is_transient_export_storage_error(exc: BaseException) -> bool:
             code = getattr(current, "sqlite_errorcode", None)
             if isinstance(code, int) and (code & 0xFF) in _TRANSIENT_SQLITE_CODES:
                 return True
-            if any(marker in str(current).lower() for marker in _TRANSIENT_SQLITE_MESSAGES):
+            if code is None and str(current).strip().lower() in _TRANSIENT_SQLITE_MESSAGES:
                 return True
 
         sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
