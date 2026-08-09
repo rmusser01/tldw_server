@@ -426,9 +426,17 @@ missing or wrong-owner exports, 409 for non-ready or failed download conflicts,
 Error code guidance: `invalid_channels` when all alert channels are false (400).
 
 Download behavior is explicit: a non-ready or failed artifact returns HTTP 409
-with artifact status, nullable `job_status`, and a stable public error code. A
-missing or wrong-owner export returns HTTP 404 without revealing whether another
-owner has that ID.
+with artifact status, nullable `job_status`, and a stable public error code:
+
+- Pending or retrying work uses `claims_export_not_ready`.
+- A cancelled Jobs projection uses `claims_export_job_cancelled`.
+- A quarantined Jobs projection uses `claims_export_job_quarantined`.
+- A failed artifact uses its stored safe `error_code`, or
+  `claims_export_failed` when no safe stored code is available.
+
+A missing or wrong-owner export returns the same generic HTTP 404
+`"Export not found"` response, without revealing whether another owner has that
+ID.
 
 Webhook delivery:
 - Retry strategy: exponential backoff with jitter.
