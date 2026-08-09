@@ -104,11 +104,7 @@ def _normalize_uri(value: object, *, template: bool = False) -> str:
     netloc = parsed.netloc
     authority_has_expression = template and "{" in netloc
     if authority_has_expression:
-        if "@" in netloc:
-            raise _invalid()
-        host_literal = netloc.split(":", 1)[0]
-        if scheme in {"http", "https"} and not host_literal:
-            raise _invalid()
+        _validate_template_authority(netloc, require_host=scheme in {"http", "https"})
         netloc = _lower_uri_template_literals(netloc)
     else:
         try:
@@ -130,6 +126,55 @@ def _normalize_uri(value: object, *, template: bool = False) -> str:
         # A concrete URI is still a valid zero-variable RFC 6570 template.
         return normalized
     return normalized
+
+
+def _validate_template_authority(netloc: str, *, require_host: bool) -> None:
+    """Validate literal authority delimiters without interpreting expansions as ports."""
+
+    if "@" in netloc:
+        raise _invalid()
+
+    if netloc.startswith("["):
+        bracket_end = netloc.find("]")
+        if bracket_end < 0 or "{" in netloc[1:bracket_end]:
+            raise _invalid()
+        host = netloc[: bracket_end + 1]
+        suffix = netloc[bracket_end + 1 :]
+        if suffix and not suffix.startswith(":"):
+            raise _invalid()
+        port = suffix[1:] if suffix else None
+    else:
+        colon_positions: list[int] = []
+        in_expression = False
+        for index, character in enumerate(netloc):
+            if character == "{":
+                in_expression = True
+            elif character == "}":
+                in_expression = False
+            elif character == ":" and not in_expression:
+                colon_positions.append(index)
+        if len(colon_positions) > 1:
+            raise _invalid()
+        if colon_positions:
+            separator = colon_positions[0]
+            host = netloc[:separator]
+            port = netloc[separator + 1 :]
+        else:
+            host = netloc
+            port = None
+
+    if require_host and not host:
+        raise _invalid()
+    if port is None:
+        return
+    if not port:
+        raise _invalid()
+    if port.startswith("{") or port.endswith("}"):
+        if not (port.startswith("{") and port.endswith("}") and port.count("{") == 1):
+            raise _invalid()
+        return
+    if not port.isascii() or not port.isdigit() or int(port) > 65_535:
+        raise _invalid()
 
 
 def _lower_uri_template_literals(value: str) -> str:

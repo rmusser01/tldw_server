@@ -39,6 +39,52 @@ _SPECIFICATIONS = {
     _DRAFT_2020_12: REFERENCING_DRAFT202012,
     _DRAFT_7: REFERENCING_DRAFT7,
 }
+_SCHEMA_MAPPING_KEYWORDS = {
+    _DRAFT_2020_12: frozenset(
+        {
+            "$defs",
+            "definitions",
+            "dependencies",
+            "dependentSchemas",
+            "patternProperties",
+            "properties",
+        }
+    ),
+    _DRAFT_7: frozenset({"definitions", "dependencies", "patternProperties", "properties"}),
+}
+_SCHEMA_ARRAY_KEYWORDS = {
+    _DRAFT_2020_12: frozenset({"allOf", "anyOf", "oneOf", "prefixItems"}),
+    _DRAFT_7: frozenset({"allOf", "anyOf", "oneOf"}),
+}
+_SCHEMA_SINGLE_KEYWORDS = {
+    _DRAFT_2020_12: frozenset(
+        {
+            "additionalProperties",
+            "contains",
+            "contentSchema",
+            "else",
+            "if",
+            "items",
+            "not",
+            "propertyNames",
+            "then",
+            "unevaluatedItems",
+            "unevaluatedProperties",
+        }
+    ),
+    _DRAFT_7: frozenset(
+        {
+            "additionalItems",
+            "additionalProperties",
+            "contains",
+            "else",
+            "if",
+            "not",
+            "propertyNames",
+            "then",
+        }
+    ),
+}
 _DIALECT_REF_KEYS = {
     _DRAFT_2020_12: frozenset({"$ref", "$dynamicRef"}),
     _DRAFT_7: frozenset({"$ref"}),
@@ -170,29 +216,30 @@ _UNRESOLVED = object()
 def _resolve_fragment(
     resource: object,
     fragment: str,
-    anchors: dict[str, object],
+    anchors: dict[str, tuple[object, str]],
 ) -> object:
     """Return the submitted target of a decoded pointer or anchor."""
 
     if not fragment:
-        return resource
+        return resource, ""
     if not fragment.startswith("/"):
         return anchors.get(unquote(fragment), _UNRESOLVED)
 
     current = resource
-    for encoded_token in fragment[1:].split("/"):
-        token = unquote(encoded_token).replace("~1", "/").replace("~0", "~")
+    canonical_tokens: list[str] = []
+    for encoded_token in unquote(fragment[1:]).split("/"):
+        token = encoded_token.replace("~1", "/").replace("~0", "~")
         if isinstance(current, dict) and token in current:
             current = current[token]
-            continue
-        if isinstance(current, list):
+        elif isinstance(current, list):
             try:
                 current = current[int(token)]
             except (IndexError, TypeError, ValueError):
                 return _UNRESOLVED
-            continue
-        return _UNRESOLVED
-    return current
+        else:
+            return _UNRESOLVED
+        canonical_tokens.append(token.replace("~", "~0").replace("/", "~1"))
+    return current, "/" + "/".join(canonical_tokens)
 
 
 def _split_reference(base: str, reference: str) -> tuple[str, str]:
@@ -204,15 +251,51 @@ def _split_reference(base: str, reference: str) -> tuple[str, str]:
     return resolved.url, resolved.fragment
 
 
-def _schema_children(node: dict[str, object], dialect: str) -> list[object]:
-    """Return only values occupying schema-valued keywords for one dialect."""
+def _pointer_child(pointer: str, *tokens: object) -> str:
+    """Append escaped tokens to one canonical JSON Pointer."""
 
-    specification = _SPECIFICATIONS[dialect]
-    children = list(specification.subresources_of(node))
-    if dialect == _DRAFT_2020_12:
-        dependencies = node.get("dependencies")
-        if isinstance(dependencies, dict):
-            children.extend(value for value in dependencies.values() if isinstance(value, (dict, bool)))
+    encoded = [str(token).replace("~", "~0").replace("/", "~1") for token in tokens]
+    return f"{pointer}/{'/'.join(encoded)}"
+
+
+def _schema_children(
+    node: dict[str, object],
+    dialect: str,
+    pointer: str,
+) -> list[tuple[object, str]]:
+    """Return schema children paired with canonical resource-local pointers."""
+
+    children: list[tuple[object, str]] = []
+    for keyword in _SCHEMA_SINGLE_KEYWORDS[dialect]:
+        value = node.get(keyword)
+        if isinstance(value, (dict, bool)):
+            children.append((value, _pointer_child(pointer, keyword)))
+    for keyword in _SCHEMA_ARRAY_KEYWORDS[dialect]:
+        value = node.get(keyword)
+        if isinstance(value, list):
+            children.extend(
+                (child, _pointer_child(pointer, keyword, index))
+                for index, child in enumerate(value)
+                if isinstance(child, (dict, bool))
+            )
+    for keyword in _SCHEMA_MAPPING_KEYWORDS[dialect]:
+        value = node.get(keyword)
+        if isinstance(value, dict):
+            children.extend(
+                (child, _pointer_child(pointer, keyword, name))
+                for name, child in value.items()
+                if isinstance(child, (dict, bool))
+            )
+    if dialect == _DRAFT_7:
+        items = node.get("items")
+        if isinstance(items, (dict, bool)):
+            children.append((items, _pointer_child(pointer, "items")))
+        elif isinstance(items, list):
+            children.extend(
+                (child, _pointer_child(pointer, "items", index))
+                for index, child in enumerate(items)
+                if isinstance(child, (dict, bool))
+            )
     return children
 
 
@@ -225,7 +308,7 @@ def _inspect_schema_keywords(
     list[tuple[str, str]],
     int,
     dict[str, object],
-    dict[str, dict[str, object]],
+    dict[str, dict[str, tuple[object, str]]],
 ]:
     """Inspect schema locations plus every successfully resolved local target."""
 
@@ -233,38 +316,37 @@ def _inspect_schema_keywords(
     refs: list[tuple[str, str]] = []
     pattern_chars = 0
     resources: dict[str, object] = {"": schema}
-    anchors: dict[str, dict[str, object]] = {"": {}}
-    resource_uri_by_identity: dict[int, str] = {id(schema): ""}
-    visited: set[tuple[str, int]] = set()
+    anchors: dict[str, dict[str, tuple[object, str]]] = {"": {}}
+    visited: set[tuple[str, str]] = set()
     followed_refs: set[int] = set()
-    stack: list[tuple[object, str, str]] = [(schema, "", "")]
+    stack: list[tuple[object, str, str, str]] = [(schema, "", "", "")]
     while True:
         while stack:
-            current, inherited_base, inherited_resource_uri = stack.pop()
+            current, inherited_base, inherited_resource_uri, pointer = stack.pop()
             if not isinstance(current, (dict, bool)):
-                continue
-            if isinstance(current, bool):
-                subschema_count += 1
                 continue
 
             base = inherited_base
             resource_uri = inherited_resource_uri
-            identifier = _SPECIFICATIONS[dialect].id_of(current)
-            if isinstance(identifier, str):
-                base = urljoin(inherited_base, identifier)
-                resource_uri = urldefrag(base).url
-                resources[resource_uri] = current
-                anchors.setdefault(resource_uri, {})
-                resource_uri_by_identity[id(current)] = resource_uri
-            visit_key = (resource_uri, id(current))
+            if isinstance(current, dict):
+                identifier = _SPECIFICATIONS[dialect].id_of(current)
+                if isinstance(identifier, str):
+                    base = urljoin(inherited_base, identifier)
+                    resource_uri = urldefrag(base).url
+                    pointer = ""
+                    resources[resource_uri] = current
+                    anchors.setdefault(resource_uri, {})
+            visit_key = (resource_uri, pointer)
             if visit_key in visited:
                 continue
             visited.add(visit_key)
             subschema_count += 1
+            if isinstance(current, bool):
+                continue
             for anchor_keyword in ("$anchor", "$dynamicAnchor"):
                 anchor = current.get(anchor_keyword)
                 if isinstance(anchor, str):
-                    anchors.setdefault(resource_uri, {})[anchor] = current
+                    anchors.setdefault(resource_uri, {})[anchor] = (current, pointer)
             for ref_keyword in _DIALECT_REF_KEYS[dialect]:
                 reference = current.get(ref_keyword)
                 if reference is not None:
@@ -275,7 +357,14 @@ def _inspect_schema_keywords(
             pattern_properties = current.get("patternProperties")
             if isinstance(pattern_properties, dict):
                 pattern_chars += sum(len(key) for key in pattern_properties)
-            stack.extend((child, base, resource_uri) for child in _schema_children(current, dialect))
+            stack.extend(
+                (child, base, resource_uri, child_pointer)
+                for child, child_pointer in _schema_children(
+                    current,
+                    dialect,
+                    pointer,
+                )
+            )
 
         made_progress = False
         for index, (reference, base) in enumerate(refs):
@@ -285,19 +374,23 @@ def _inspect_schema_keywords(
             resource = resources.get(resource_uri)
             if resource is None:
                 continue
-            target = _resolve_fragment(
+            resolved_target = _resolve_fragment(
                 resource,
                 fragment,
                 anchors.get(resource_uri, {}),
             )
-            if target is _UNRESOLVED:
+            if resolved_target is _UNRESOLVED:
                 continue
+            target, target_pointer = resolved_target
             followed_refs.add(index)
-            target_resource_uri = resource_uri_by_identity.get(
-                id(target),
-                resource_uri,
+            stack.append(
+                (
+                    target,
+                    resource_uri,
+                    resource_uri,
+                    target_pointer,
+                )
             )
-            stack.append((target, target_resource_uri, target_resource_uri))
             made_progress = True
         if not made_progress:
             break
@@ -479,6 +572,7 @@ class GatewaySchemaValidationManager:
         receiver: Connection | None = None
         sender: Connection | None = None
         permit_owned = True
+        cancelled = False
         if self._closed:
             self._semaphore.release()
             raise _validation_error("schema_validator_closed", "Schema validator is closed")
@@ -505,6 +599,9 @@ class GatewaySchemaValidationManager:
                 "schema_validation_worker_failed",
                 "Schema validation worker failed",
             )
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             if sender is not None:
                 sender.close()
@@ -513,9 +610,7 @@ class GatewaySchemaValidationManager:
                     process,
                     deadline=self._clock() + self._limits.graceful_shutdown_timeout_seconds,
                 )
-                current_task = asyncio.current_task()
-                cancellation_active = current_task is not None and current_task.cancelling() > 0
-                if cleanup_errors and not cancellation_active:
+                if cleanup_errors and not cancelled:
                     raise RuntimeError("; ".join(cleanup_errors))
             elif receiver is not None:
                 receiver.close()
@@ -631,7 +726,9 @@ class GatewaySchemaValidationManager:
             return
         self._closed = True
         errors: list[str] = []
-        deadline = self._clock() + self._limits.graceful_shutdown_timeout_seconds
+        started = self._clock()
+        deadline = started + self._limits.graceful_shutdown_timeout_seconds
+        graceful_cutoff = started + self._limits.graceful_shutdown_timeout_seconds / 2
         processes = tuple(self._live_processes)
         for process in processes:
             try:
@@ -644,16 +741,65 @@ class GatewaySchemaValidationManager:
                     process.terminate()
                 except Exception as exc:  # noqa: BLE001 - siblings must still be signaled
                     errors.append(f"schema validation child terminate failed: {type(exc).__name__}")
+        self._join_process_phase(processes, graceful_cutoff, errors)
+
+        survivors: list[multiprocessing.Process] = []
         for process in processes:
-            errors.extend(
-                self._cleanup_process(
-                    process,
-                    deadline=deadline,
-                    terminate_first=False,
-                )
-            )
+            try:
+                alive = process.is_alive()
+            except Exception as exc:  # noqa: BLE001 - every survivor must be killed
+                errors.append(f"schema validation child status failed: {type(exc).__name__}")
+                alive = True
+            if alive:
+                survivors.append(process)
+                try:
+                    process.kill()
+                except Exception as exc:  # noqa: BLE001 - siblings must still be killed
+                    errors.append(f"schema validation child kill failed: {type(exc).__name__}")
+        self._join_process_phase(tuple(survivors), deadline, errors)
+
+        for process in processes:
+            receiver = self._receivers.get(process)
+            try:
+                reaped = not process.is_alive() and process.exitcode is not None
+            except Exception as exc:  # noqa: BLE001 - cleanup must remain fail closed
+                errors.append(f"schema validation child status failed: {type(exc).__name__}")
+                reaped = False
+            if not reaped:
+                errors.append("schema validation child could not be reaped")
+            if receiver is not None:
+                try:
+                    receiver.close()
+                except Exception as exc:  # noqa: BLE001 - accounting must still finish
+                    errors.append(f"schema validation receiver close failed: {type(exc).__name__}")
+            if reaped:
+                self._receivers.pop(process, None)
+                self._live_processes.remove(process)
+        for process in processes:
+            if process not in self._live_processes:
+                self._semaphore.release()
         if errors:
             raise RuntimeError("; ".join(errors))
+
+    def _join_process_phase(
+        self,
+        processes: tuple[multiprocessing.Process, ...],
+        deadline: float,
+        errors: list[str],
+    ) -> None:
+        """Fairly join all children within one shared phase deadline."""
+
+        pending = list(processes)
+        for process in tuple(pending):
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return
+            timeout = remaining / max(1, len(pending))
+            try:
+                process.join(timeout=timeout)
+            except Exception as exc:  # noqa: BLE001 - siblings must still be joined
+                errors.append(f"schema validation child join failed: {type(exc).__name__}")
+            pending.remove(process)
 
 
 __all__ = [

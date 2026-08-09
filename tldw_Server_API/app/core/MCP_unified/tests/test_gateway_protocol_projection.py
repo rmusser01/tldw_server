@@ -1040,3 +1040,59 @@ def test_resource_template_rejects_credentials_bad_literals_and_bad_modifiers(
             {"name": "safe", "uriTemplate": uri_template},
             PROTOCOL_PROFILES["2026-07-28"],
         )
+
+
+@pytest.mark.parametrize(
+    "uri_template",
+    [
+        "https://{host}:not-a-port/resource",
+        "https://{host}:99999/resource",
+        "https://{host}:bad{port}/resource",
+        "https://{host}:-1/resource",
+        "https://{host}:/resource",
+        "https://{host}:1:2/resource",
+        "https://example.com:bad{port}/resource",
+    ],
+)
+def test_resource_template_rejects_invalid_literal_or_mixed_ports(
+    uri_template: str,
+) -> None:
+    """Only a valid concrete port or one complete expression may follow the host."""
+
+    with pytest.raises(GatewayInvalidApplicationResult):
+        _projection_api().project_descriptor(
+            "resource_template",
+            {"name": "safe", "uriTemplate": uri_template},
+            PROTOCOL_PROFILES["2026-07-28"],
+        )
+
+
+@pytest.mark.parametrize(
+    ("uri_template", "expected"),
+    [
+        (
+            "https://[2001:db8::1]:{port}/resource",
+            "https://[2001:db8::1]:{port}/resource",
+        ),
+        (
+            "HTTPS://[2001:DB8::1]:443/resource",
+            "https://[2001:db8::1]/resource",
+        ),
+        (
+            "https://{host}:{port}/resource{?query}",
+            "https://{host}:{port}/resource{?query}",
+        ),
+    ],
+)
+def test_resource_template_preserves_valid_port_ipv6_and_operator_forms(
+    uri_template: str,
+    expected: str,
+) -> None:
+    """Port validation must preserve complete expansions and concrete IPv6 URIs."""
+
+    projected = _projection_api().project_descriptor(
+        "resource_template",
+        {"name": "safe", "uriTemplate": uri_template},
+        PROTOCOL_PROFILES["2026-07-28"],
+    )
+    assert projected["uriTemplate"] == expected

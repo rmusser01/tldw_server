@@ -84,6 +84,7 @@ class _PostKillProcess:
         self._process = process
         self.killed = False
         self.post_kill_join_timeouts: list[float | None] = []
+        self.consume_post_kill_wait = False
 
     @property
     def pid(self) -> int | None:
@@ -109,6 +110,11 @@ class _PostKillProcess:
     def join(self, timeout: float | None = None) -> None:
         if self.killed:
             self.post_kill_join_timeouts.append(timeout)
+            if self.consume_post_kill_wait and timeout is not None:
+                self.consume_post_kill_wait = False
+                time.sleep(timeout)
+                self._process.join(0)
+                return
         self._process.join(timeout)
 
 
@@ -1126,3 +1132,131 @@ async def test_cancellation_preserves_cancelled_error_when_cleanup_reports_failu
     manager._cleanup_process = original_cleanup  # type: ignore[method-assign]
     await manager.close()
     assert manager.live_process_count == 0
+
+
+@pytest.mark.asyncio
+async def test_validation_cleanup_does_not_require_python311_task_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Normal validation must work when the current task has no `cancelling()` API."""
+
+    api = _validation_api()
+    monkeypatch.setattr(api.asyncio, "current_task", lambda: object())
+    manager = api.GatewaySchemaValidationManager()
+    try:
+        await manager.validate(
+            {"type": "integer"},
+            1,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+        )
+    finally:
+        await manager.close()
+
+
+@pytest.mark.parametrize("boolean_schema", [True, False])
+def test_referenced_boolean_schema_uses_one_canonical_location(
+    boolean_schema: bool,
+) -> None:
+    """A boolean in `$defs` must not be counted again when reached by pointer."""
+
+    api = _validation_api()
+    schema = {"$defs": {"target": boolean_schema}, "$ref": "#/$defs/target"}
+    subschemas, refs, pattern_chars, *_ = api._inspect_schema_keywords(
+        schema,
+        dialect=PROTOCOL_PROFILES["2026-07-28"].schema_dialect,
+    )
+    assert (subschemas, len(refs), pattern_chars) == (2, 1, 0)
+
+
+def test_unrelated_repeated_boolean_schemas_keep_distinct_locations() -> None:
+    """Python's singleton booleans must not collapse independent schema locations."""
+
+    api = _validation_api()
+    schema = {"$defs": {"first": True, "second": True, "third": False}}
+    subschemas, refs, pattern_chars, *_ = api._inspect_schema_keywords(
+        schema,
+        dialect=PROTOCOL_PROFILES["2026-07-28"].schema_dialect,
+    )
+    assert (subschemas, len(refs), pattern_chars) == (4, 0, 0)
+
+
+@pytest.mark.parametrize("boolean_schema", [True, False])
+def test_referenced_boolean_schema_honors_exact_subschema_boundary(
+    boolean_schema: bool,
+) -> None:
+    """Root plus one referenced boolean fits two nodes and exceeds one node."""
+
+    api = _validation_api()
+    schema = {"$defs": {"target": boolean_schema}, "$ref": "#/$defs/target"}
+    encoded = api._preflight_schema(
+        schema,
+        profile=PROTOCOL_PROFILES["2026-07-28"],
+        limits=replace(GatewayLimits(), max_schema_subschemas=2),
+        root_mode="any",
+    )
+    assert json.loads(encoded) == schema
+    with pytest.raises(GatewayApplicationError) as raised:
+        api._preflight_schema(
+            schema,
+            profile=PROTOCOL_PROFILES["2026-07-28"],
+            limits=replace(GatewayLimits(), max_schema_subschemas=1),
+            root_mode="any",
+        )
+    assert raised.value.reason_code == "schema_too_complex"
+
+
+@pytest.mark.asyncio
+async def test_close_uses_shared_wait_phases_for_all_real_children() -> None:
+    """One force-wait consumer must not starve a later survivor's reap budget."""
+
+    if not hasattr(signal, "SIGTERM") or not hasattr(signal, "SIGKILL"):
+        pytest.skip("POSIX process signals are required")
+    api = _validation_api()
+    context = _PostKillTrackingContext()
+    ready = context._context.Queue()
+    limits = replace(
+        GatewayLimits(),
+        max_schema_validation_processes=2,
+        graceful_shutdown_timeout_seconds=0.4,
+    )
+    manager = api.GatewaySchemaValidationManager(
+        limits=limits,
+        process_context=context,
+        _worker_target=partial(_ignore_sigterm_queue_worker, ready),
+    )
+    semaphore = _ReapCheckingSemaphore(context)
+    manager._semaphore = semaphore
+    tasks = [
+        asyncio.create_task(
+            manager.validate(
+                {"type": "integer"},
+                index,
+                profile=PROTOCOL_PROFILES["2026-07-28"],
+            )
+        )
+        for index in range(2)
+    ]
+    for _ in range(500):
+        if len(context.processes) == 2:
+            break
+        await asyncio.sleep(0.002)
+    else:
+        pytest.fail("validation workers did not start")
+    ready.get(timeout=5)
+    ready.get(timeout=5)
+    ordered = tuple(manager._live_processes)
+    first, later = ordered
+    first.consume_post_kill_wait = True
+
+    try:
+        await manager.close()
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        assert all(isinstance(outcome, GatewayApplicationError) for outcome in outcomes)
+        assert any(timeout is not None and timeout > 0 for timeout in later.post_kill_join_timeouts)
+        assert semaphore.released == 2
+        assert manager.live_process_count == 0
+    finally:
+        for process in context.processes:
+            if process.is_alive():
+                process.kill()
+            process.join(1)
