@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import mcp_unified.gateway.protocol_stdio as protocol_stdio
 import mcp_unified.gateway.protocol_stdio_adapters as stdio_adapters
 import pytest
 import yaml
@@ -32,6 +33,8 @@ from mcp_unified.gateway.protocol_stdio_adapters import (
     _open_threaded_stdio,
     _OwnedStdioAdapters,
 )
+
+pytestmark = pytest.mark.unit
 
 _MODERN_META = {
     "io.modelcontextprotocol/protocolVersion": "2026-07-28",
@@ -277,6 +280,27 @@ def test_invalid_injected_stream_shapes_fail_locally(reader: Any, writer: Any) -
             input_stream=reader,
             output_stream=writer,
         )
+
+
+def test_stdio_validation_helpers_are_documented() -> None:
+    """Private transport validators still require maintainable API documentation."""
+
+    assert inspect.getdoc(protocol_stdio._validate_reader)  # nosec B101
+    assert inspect.getdoc(protocol_stdio._validate_writer)  # nosec B101
+
+
+def test_stderr_diagnostic_does_not_swallow_process_interrupts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A best-effort diagnostic must not consume KeyboardInterrupt or SystemExit."""
+
+    class _InterruptingStderr:
+        def write(self, message: str) -> int:
+            del message
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(protocol_stdio.sys, "stderr", _InterruptingStderr())
+
+    with pytest.raises(KeyboardInterrupt):
+        protocol_stdio._write_stderr_diagnostic("fixed diagnostic")
 
 
 @pytest.mark.asyncio

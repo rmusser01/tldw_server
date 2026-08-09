@@ -38,8 +38,8 @@ def _write_stderr_diagnostic(message: str) -> None:
     try:
         sys.stderr.write(f"{message}\n")
         sys.stderr.flush()
-    except BaseException:  # noqa: BLE001 - diagnostics must not block cleanup
-        pass
+    except (OSError, UnicodeError, ValueError):
+        return
 
 
 @runtime_checkable
@@ -62,6 +62,8 @@ class GatewayAsyncByteWriter(Protocol):
 
 
 def _validate_reader(reader: object) -> GatewayAsyncByteReader:
+    """Return a valid asynchronous binary reader or reject the injected stream."""
+
     if isinstance(reader, io.TextIOBase):
         raise ValueError("input_stream must be a binary async reader")
     readline = getattr(reader, "readline", None)
@@ -71,6 +73,8 @@ def _validate_reader(reader: object) -> GatewayAsyncByteReader:
 
 
 def _validate_writer(writer: object) -> GatewayAsyncByteWriter:
+    """Return a valid asynchronous binary writer or reject the injected stream."""
+
     if isinstance(writer, io.TextIOBase):
         raise ValueError("output_stream must be a binary async writer")
     write = getattr(writer, "write", None)
