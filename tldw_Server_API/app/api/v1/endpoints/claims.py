@@ -621,24 +621,42 @@ def list_claims_analytics_exports(
                 "text/csv": {},
             },
         },
+        409: {
+            "description": "The export artifact is not ready for download.",
+        },
     },
 )
 def download_claims_analytics_export(
     export_id: str,
+    workspace_id: Optional[str] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> Any:
+) -> Response:
     """Download a prepared claims analytics export."""
     result = claims_service.get_claims_analytics_export(
         export_id=export_id,
+        workspace_id=workspace_id,
         principal=principal,
         current_user=current_user,
         db=db,
     )
-    if result.get("format") == "csv":
-        return Response(content=str(result.get("payload") or ""), media_type="text/csv")
-    return result.get("payload") or {}
+    if result["format"] == "csv":
+        return Response(
+            content=result["payload_csv"],
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="claims-analytics-{result["export_id"]}.csv"'
+                ),
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    return Response(
+        content=result["payload_json"],
+        media_type="application/json",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/clusters")

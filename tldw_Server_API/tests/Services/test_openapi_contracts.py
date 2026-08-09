@@ -739,6 +739,15 @@ def test_claims_analytics_export_openapi_documents_csv_response(openapi_spec: di
 
 
 @pytest.mark.integration
+def test_claims_analytics_export_download_documents_lifecycle_conflict(
+    openapi_spec: dict[str, Any],
+) -> None:
+    operation = openapi_spec["paths"][CLAIMS_ANALYTICS_EXPORT_DOWNLOAD_PATH]["get"]
+
+    assert "409" in operation["responses"]
+
+
+@pytest.mark.integration
 def test_claims_analytics_export_create_documents_sync_and_async_responses(
     openapi_spec: dict[str, Any],
 ) -> None:

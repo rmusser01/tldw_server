@@ -40,6 +40,84 @@ class _FakeDb:
         return True
 
 
+class _ExportReadDb:
+    def __init__(
+        self,
+        rows: list[dict[str, Any]] | None = None,
+        *,
+        backend_type: BackendType = BackendType.SQLITE,
+    ) -> None:
+        self.backend_type = backend_type
+        self.rows = list(rows or [])
+        self.list_calls: list[dict[str, Any]] = []
+        self.count_calls: list[dict[str, Any]] = []
+        self.get_calls: list[dict[str, Any]] = []
+
+    def list_claims_analytics_exports(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self.list_calls.append(kwargs)
+        matching = self._matching_rows(
+            user_id=kwargs["user_id"],
+            status=kwargs.get("status"),
+            format=kwargs.get("format"),
+        )
+        offset = int(kwargs["offset"])
+        return matching[offset : offset + int(kwargs["limit"])]
+
+    def count_claims_analytics_exports(self, **kwargs: Any) -> int:
+        self.count_calls.append(kwargs)
+        return len(
+            self._matching_rows(
+                user_id=kwargs["user_id"],
+                status=kwargs.get("status"),
+                format=kwargs.get("format"),
+            )
+        )
+
+    def get_claims_analytics_export(self, export_id: str, *, user_id: str) -> dict[str, Any] | None:
+        self.get_calls.append({"export_id": export_id, "user_id": user_id})
+        return next(
+            (
+                dict(row)
+                for row in self.rows
+                if row.get("export_id") == export_id and row.get("user_id") == user_id
+            ),
+            None,
+        )
+
+    def _matching_rows(
+        self,
+        *,
+        user_id: str,
+        status: str | None,
+        format: str | None,
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.rows
+            if row.get("user_id") == user_id
+            and (status is None or row.get("status") == status)
+            and (format is None or row.get("format") == format)
+        ]
+
+
+class _JobsReader:
+    def __init__(
+        self,
+        jobs: dict[int, dict[str, Any]] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.jobs = jobs or {}
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def get_jobs_by_ids(self, job_ids: list[int], **kwargs: Any) -> dict[int, dict[str, Any]]:
+        self.calls.append({"job_ids": job_ids, **kwargs})
+        if self.error is not None:
+            raise self.error
+        return {job_id: self.jobs[job_id] for job_id in job_ids if job_id in self.jobs}
+
+
 def _principal(*, platform_admin: bool = True) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -75,6 +153,36 @@ def _row(owner: str, *, status: str, format: str = "json") -> dict[str, Any]:
         "error_code": None,
         "snapshot_at": _SNAPSHOT,
         "created_at": "2026-08-08T12:00:01.000Z",
+    }
+
+
+def _stored_row(
+    owner: str,
+    *,
+    export_id: str = _EXPORT_ID,
+    status: str = "ready",
+    format: str = "json",
+    job_id: int | None = None,
+    error_code: str | None = None,
+    payload_json: str | None = '{"events":[{"id":1}]}',
+    payload_csv: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "export_id": export_id,
+        "user_id": owner,
+        "format": format,
+        "status": status,
+        "job_id": job_id,
+        "error_code": error_code,
+        "error_message": "A safe stored message.",
+        "snapshot_at": _SNAPSHOT,
+        "filters_json": '{"event_type":"unsupported_ratio","end_time":"2026-08-08T12:00:00.000Z"}',
+        "pagination_json": '{"limit":10,"offset":0}',
+        "filters": {"workspace_id": "999"},
+        "payload_json": payload_json,
+        "payload_csv": payload_csv,
+        "created_at": "2026-08-08T12:00:01.000Z",
+        "updated_at": "2026-08-08T12:00:02.000Z",
     }
 
 
@@ -685,3 +793,487 @@ def test_export_endpoint_applies_service_response_status(monkeypatch: pytest.Mon
 
     assert response.status_code == 202
     assert result == body
+
+
+def _patch_export_read_maintenance(
+    monkeypatch: pytest.MonkeyPatch,
+    manager: _JobsReader,
+) -> list[tuple[str, object, str, int]]:
+    calls: list[tuple[str, object, str, int]] = []
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: manager)
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "reconcile_export_artifacts",
+        lambda actual_db, *, owner_user_id, limit, **_kwargs: calls.append(
+            ("reconcile", actual_db, owner_user_id, limit)
+        ),
+    )
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "cleanup_export_artifacts",
+        lambda actual_db, *, owner_user_id, limit, **_kwargs: calls.append(
+            ("cleanup", actual_db, owner_user_id, limit)
+        ),
+    )
+    return calls
+
+
+def test_list_is_owner_scoped_and_batches_nullable_job_status_hydration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _stored_row("1", status="ready", job_id=81)
+    second = _stored_row("1", export_id="b" * 32, status="processing", job_id=82)
+    unlinked = _stored_row("1", export_id="c" * 32, status="queued")
+    other_owner = _stored_row("2", export_id="d" * 32, status="ready", job_id=83)
+    db = _ExportReadDb([first, second, unlinked, other_owner])
+    manager = _JobsReader(
+        {
+            81: {"id": 81, "status": "completed"},
+            82: {"id": 82, "status": "retrying"},
+            83: {"id": 83, "status": "completed"},
+        }
+    )
+    maintenance_calls = _patch_export_read_maintenance(monkeypatch, manager)
+
+    result = claims_service.list_claims_analytics_exports(
+        limit=100,
+        offset=0,
+        status_filter=None,
+        format_filter=None,
+        workspace_id=None,
+        principal=_principal(platform_admin=False),
+        current_user=_user(1),
+        db=db,
+    )
+
+    assert result["total"] == 3
+    assert [(row["status"], row["job_status"]) for row in result["exports"]] == [
+        ("ready", "completed"),
+        ("processing", "retrying"),
+        ("queued", None),
+    ]
+    assert result["exports"][0]["job_id"] == 81
+    assert result["exports"][0]["error_code"] is None
+    assert result["exports"][0]["snapshot_at"] == _SNAPSHOT
+    assert result["exports"][0]["filters"] == {
+        "event_type": "unsupported_ratio",
+        "end_time": _SNAPSHOT,
+    }
+    assert result["exports"][0]["pagination"] == {"limit": 10, "offset": 0}
+    assert manager.calls == [
+        {
+            "job_ids": [81, 82],
+            "domain": "claims",
+            "owner_user_id": "1",
+            "include_archived": True,
+        }
+    ]
+    assert db.list_calls[0]["user_id"] == "1"
+    assert db.count_calls[0]["user_id"] == "1"
+    assert maintenance_calls == [
+        ("reconcile", db, "1", 100),
+        ("cleanup", db, "1", 100),
+    ]
+
+
+def test_list_jobs_outage_returns_artifacts_with_null_job_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _stored_row("1", status="processing", job_id=81)
+    db = _ExportReadDb([row])
+    manager = _JobsReader(error=RuntimeError("jobs outage secret"))
+    _patch_export_read_maintenance(monkeypatch, manager)
+
+    result = claims_service.list_claims_analytics_exports(
+        limit=10,
+        offset=0,
+        status_filter=None,
+        format_filter=None,
+        workspace_id=None,
+        principal=_principal(platform_admin=False),
+        current_user=_user(1),
+        db=db,
+    )
+
+    assert result["exports"][0]["status"] == "processing"
+    assert result["exports"][0]["job_status"] is None
+    assert len(manager.calls) == 1
+
+
+def test_list_status_filter_remains_artifact_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    ready = _stored_row("1", status="ready", job_id=81)
+    processing = _stored_row("1", export_id="b" * 32, status="processing", job_id=82)
+    db = _ExportReadDb([ready, processing])
+    manager = _JobsReader(
+        {
+            81: {"id": 81, "status": "processing"},
+            82: {"id": 82, "status": "completed"},
+        }
+    )
+    _patch_export_read_maintenance(monkeypatch, manager)
+
+    result = claims_service.list_claims_analytics_exports(
+        limit=10,
+        offset=0,
+        status_filter="ready",
+        format_filter=None,
+        workspace_id=None,
+        principal=_principal(platform_admin=False),
+        current_user=_user(1),
+        db=db,
+    )
+
+    assert [(row["status"], row["job_status"]) for row in result["exports"]] == [
+        ("ready", "processing")
+    ]
+    assert db.list_calls[0]["status"] == "ready"
+    assert db.count_calls[0]["status"] == "ready"
+
+
+def test_platform_admin_cross_owner_list_routes_sqlite_and_canonicalizes_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caller_db = _ExportReadDb([_stored_row("1")])
+    target_db = _ExportReadDb(
+        [
+            _stored_row("2", export_id="b" * 32),
+            _stored_row("2", export_id="c" * 32),
+        ]
+    )
+    manager = _JobsReader()
+    _patch_export_read_maintenance(monkeypatch, manager)
+    routed: list[int] = []
+
+    @contextmanager
+    def _override(user_id: int):
+        routed.append(user_id)
+        yield target_db, f"/users/{user_id}/Media_DB_v2.db"
+
+    monkeypatch.setattr(claims_service, "_claims_user_override_db", _override)
+
+    result = claims_service.list_claims_analytics_exports(
+        limit=10,
+        offset=0,
+        status_filter=None,
+        format_filter=None,
+        workspace_id="2",
+        principal=_principal(platform_admin=True),
+        current_user=_user(1),
+        db=caller_db,
+    )
+
+    assert routed == [2]
+    assert caller_db.list_calls == []
+    assert target_db.list_calls[0]["user_id"] == "2"
+    assert [row["download_url"] for row in result["exports"]] == [
+        f"/api/v1/claims/analytics/export/{'b' * 32}?workspace_id=2",
+        f"/api/v1/claims/analytics/export/{'c' * 32}?workspace_id=2",
+    ]
+
+
+def test_platform_admin_cross_owner_list_scopes_shared_postgres_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared_db = _ExportReadDb(
+        [_stored_row("2", export_id="b" * 32, job_id=81)],
+        backend_type=BackendType.POSTGRESQL,
+    )
+    manager = _JobsReader({81: {"id": 81, "status": "completed"}})
+    _patch_export_read_maintenance(monkeypatch, manager)
+    monkeypatch.setattr(
+        claims_service,
+        "_claims_user_override_db",
+        lambda _user_id: pytest.fail("PostgreSQL must retain the shared database"),
+    )
+
+    result = claims_service.list_claims_analytics_exports(
+        limit=10,
+        offset=0,
+        status_filter=None,
+        format_filter=None,
+        workspace_id="2",
+        principal=_principal(platform_admin=True),
+        current_user=_user(1),
+        db=shared_db,
+    )
+
+    assert shared_db.list_calls == [
+        {"user_id": "2", "status": None, "format": None, "limit": 10, "offset": 0}
+    ]
+    assert shared_db.count_calls == [{"user_id": "2", "status": None, "format": None}]
+    assert manager.calls == [
+        {
+            "job_ids": [81],
+            "domain": "claims",
+            "owner_user_id": "2",
+            "include_archived": True,
+        }
+    ]
+    assert result["exports"][0]["download_url"].endswith("?workspace_id=2")
+
+
+def test_non_platform_admin_cannot_list_cross_owner_exports() -> None:
+    db = _ExportReadDb([_stored_row("2")])
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.list_claims_analytics_exports(
+            limit=10,
+            offset=0,
+            status_filter=None,
+            format_filter=None,
+            workspace_id="2",
+            principal=_principal(platform_admin=False),
+            current_user=_user(1),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert db.list_calls == []
+
+
+def _download(
+    *,
+    db: _ExportReadDb,
+    workspace_id: str | None = None,
+    principal: AuthPrincipal | None = None,
+) -> Response:
+    return claims_endpoint.download_claims_analytics_export(
+        export_id=_EXPORT_ID,
+        workspace_id=workspace_id,
+        principal=principal or _principal(platform_admin=False),
+        current_user=_user(1),
+        db=db,
+    )
+
+
+def test_download_ready_json_returns_exact_payload_and_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = '{"events":[{"id":1}],"pagination":{"limit":10}}'
+    db = _ExportReadDb([_stored_row("1", payload_json=payload)])
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: _JobsReader())
+
+    response = _download(db=db)
+
+    assert response.status_code == 200
+    assert response.body == payload.encode("utf-8")
+    assert response.headers["content-type"] == "application/json"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_download_ready_csv_uses_exact_safe_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = "id,event_type\r\n1,unsupported_ratio\r\n"
+    db = _ExportReadDb(
+        [_stored_row("1", format="csv", payload_json=None, payload_csv=payload)]
+    )
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: _JobsReader())
+
+    response = _download(db=db)
+
+    assert response.status_code == 200
+    assert response.body == payload.encode("utf-8")
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-disposition"] == (
+        f'attachment; filename="claims-analytics-{_EXPORT_ID}.csv"'
+    )
+
+
+def test_ready_download_survives_jobs_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = _ExportReadDb([_stored_row("1")])
+    monkeypatch.setattr(
+        claims_service,
+        "jobs_manager_from_env",
+        lambda: (_ for _ in ()).throw(RuntimeError("jobs outage secret")),
+    )
+
+    response = _download(db=db)
+
+    assert response.status_code == 200
+    assert response.body == b'{"events":[{"id":1}]}'
+
+
+@pytest.mark.parametrize(
+    ("artifact_status", "job_status"),
+    [
+        ("queued", "queued"),
+        ("processing", "processing"),
+        ("processing", "retrying"),
+    ],
+)
+def test_pending_download_returns_stable_not_ready_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    artifact_status: str,
+    job_status: str,
+) -> None:
+    db = _ExportReadDb([_stored_row("1", status=artifact_status, job_id=81, payload_json=None)])
+    monkeypatch.setattr(
+        claims_service,
+        "jobs_manager_from_env",
+        lambda: _JobsReader({81: {"id": 81, "status": job_status}}),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _download(db=db)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "code": "claims_export_not_ready",
+        "status": artifact_status,
+        "job_status": job_status,
+    }
+
+
+@pytest.mark.parametrize(
+    ("job_status", "expected_code"),
+    [
+        ("cancelled", "claims_export_job_cancelled"),
+        ("quarantined", "claims_export_job_quarantined"),
+    ],
+)
+def test_terminal_job_projection_returns_stable_conflict_code(
+    monkeypatch: pytest.MonkeyPatch,
+    job_status: str,
+    expected_code: str,
+) -> None:
+    db = _ExportReadDb([_stored_row("1", status="queued", job_id=81, payload_json=None)])
+    monkeypatch.setattr(
+        claims_service,
+        "jobs_manager_from_env",
+        lambda: _JobsReader({81: {"id": 81, "status": job_status}}),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _download(db=db)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "code": expected_code,
+        "status": "queued",
+        "job_status": job_status,
+    }
+
+
+@pytest.mark.parametrize(
+    ("stored_code", "expected_code"),
+    [
+        ("claims_export_too_large", "claims_export_too_large"),
+        (None, "claims_export_failed"),
+        ("postgresql://owner:secret@private-db", "claims_export_failed"),
+    ],
+)
+def test_failed_download_uses_only_safe_stored_code(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_code: str | None,
+    expected_code: str,
+) -> None:
+    db = _ExportReadDb(
+        [_stored_row("1", status="failed", error_code=stored_code, payload_json=None)]
+    )
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: _JobsReader())
+
+    with pytest.raises(HTTPException) as exc_info:
+        _download(db=db)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "code": expected_code,
+        "status": "failed",
+        "job_status": None,
+    }
+    assert "secret" not in repr(exc_info.value.detail)
+
+
+def test_missing_wrong_owner_and_malformed_downloads_are_indistinguishable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: _JobsReader())
+    missing_db = _ExportReadDb()
+    wrong_owner_db = _ExportReadDb([_stored_row("2")])
+    details: list[Any] = []
+
+    for export_id, db in [
+        (_EXPORT_ID, missing_db),
+        (_EXPORT_ID, wrong_owner_db),
+        ("../../private.csv", missing_db),
+    ]:
+        with pytest.raises(HTTPException) as exc_info:
+            claims_service.get_claims_analytics_export(
+                export_id=export_id,
+                workspace_id=None,
+                principal=_principal(platform_admin=False),
+                current_user=_user(1),
+                db=db,
+            )
+        assert exc_info.value.status_code == 404
+        details.append(exc_info.value.detail)
+
+    assert details[0] == details[1] == details[2]
+    assert wrong_owner_db.get_calls == [{"export_id": _EXPORT_ID, "user_id": "1"}]
+    assert missing_db.get_calls == [{"export_id": _EXPORT_ID, "user_id": "1"}]
+
+
+def test_platform_admin_cross_owner_download_routes_sqlite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caller_db = _ExportReadDb([_stored_row("1")])
+    target_db = _ExportReadDb([_stored_row("2")])
+    routed: list[int] = []
+
+    @contextmanager
+    def _override(user_id: int):
+        routed.append(user_id)
+        yield target_db, f"/users/{user_id}/Media_DB_v2.db"
+
+    monkeypatch.setattr(claims_service, "_claims_user_override_db", _override)
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: _JobsReader())
+
+    response = _download(
+        db=caller_db,
+        workspace_id="2",
+        principal=_principal(platform_admin=True),
+    )
+
+    assert response.status_code == 200
+    assert routed == [2]
+    assert caller_db.get_calls == []
+    assert target_db.get_calls == [{"export_id": _EXPORT_ID, "user_id": "2"}]
+
+
+def test_platform_admin_cross_owner_download_scopes_shared_postgres_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared_db = _ExportReadDb(
+        [_stored_row("2")],
+        backend_type=BackendType.POSTGRESQL,
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "_claims_user_override_db",
+        lambda _user_id: pytest.fail("PostgreSQL must retain the shared database"),
+    )
+
+    response = _download(
+        db=shared_db,
+        workspace_id="2",
+        principal=_principal(platform_admin=True),
+    )
+
+    assert response.status_code == 200
+    assert shared_db.get_calls == [{"export_id": _EXPORT_ID, "user_id": "2"}]
+
+
+def test_non_platform_admin_cannot_download_cross_owner_export() -> None:
+    db = _ExportReadDb([_stored_row("2")])
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.get_claims_analytics_export(
+            export_id=_EXPORT_ID,
+            workspace_id="2",
+            principal=_principal(platform_admin=False),
+            current_user=_user(1),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert db.get_calls == []
