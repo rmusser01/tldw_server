@@ -1,6 +1,5 @@
 """JSON-LD and microdata extraction strategy."""
 
-import asyncio
 import json
 import re
 from typing import Any
@@ -184,8 +183,6 @@ def _decode_all_json(payload: str) -> list[Any]:
         start = bracket if brace == -1 or bracket != -1 and bracket < brace else brace
         try:
             obj, end = decoder.raw_decode(payload, start)
-        except asyncio.CancelledError:
-            raise
         except (json.JSONDecodeError, ValueError):
             index = start + 1
             continue
@@ -216,8 +213,6 @@ def extract_jsonld_entities(html_text: str, url: str) -> dict[str, Any]:
             continue
         try:
             objects = _decode_all_json(payload) or [json.loads(payload)]
-        except asyncio.CancelledError:
-            raise
         except (json.JSONDecodeError, TypeError, ValueError):
             parse_failed = True
             continue
