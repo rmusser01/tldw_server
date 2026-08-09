@@ -243,7 +243,7 @@ def test_strict_stdio_public_contract_is_exact() -> None:
         "max_catalog_items=10000, max_batch_items=100, max_requests_per_minute=600, "
         "request_burst=32, max_schema_bytes=262144, max_schema_depth=32, "
         "max_schema_subschemas=1024, max_schema_refs=256, max_schema_pattern_chars=4096, "
-        "max_schema_validation_processes=4, schema_validation_timeout_seconds=1.0, "
+        "max_schema_validation_processes=4, schema_validation_timeout_seconds=5.0, "
         "graceful_shutdown_timeout_seconds=5.0), "
         "metadata: 'Mapping[str, Any] | None' = None) -> 'int'"
     )
