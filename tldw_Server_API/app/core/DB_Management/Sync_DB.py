@@ -1131,9 +1131,13 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
         mutation_plan_hash=row.get("mutation_plan_hash"),
         stable_key=row.get("stable_key"),
         created_at_client=row.get("created_at_client") or row.get("client_timestamp"),
-        received_at_server=row.get("received_at_server") or row.get("server_timestamp"),
+        received_at_server=_timestamp_to_string(
+            row.get("received_at_server") or row.get("server_timestamp")
+        ),
         client_timestamp=row.get("client_timestamp") or row.get("created_at_client"),
-        server_timestamp=row.get("server_timestamp") or row.get("received_at_server"),
+        server_timestamp=_timestamp_to_string(
+            row.get("server_timestamp") or row.get("received_at_server")
+        ),
         base_server_cursor=(
             int(row["base_server_cursor"])
             if row.get("base_server_cursor") is not None
