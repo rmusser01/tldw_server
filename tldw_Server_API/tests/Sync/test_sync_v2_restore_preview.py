@@ -12,11 +12,15 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SyncEnvelopeCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    mutation_group_plan_hash,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
@@ -264,6 +268,24 @@ def _organization_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     }
     payload.update(overrides)
     return SyncEnvelopeCreate(**payload)
+
+
+def _organization_group(
+    group_id: str,
+    *envelopes: SyncEnvelopeCreate,
+) -> list[SyncEnvelopeCreate]:
+    plan = [
+        replace(
+            envelope,
+            mutation_group_id=group_id,
+            mutation_step=index,
+            mutation_step_count=len(envelopes),
+            mutation_plan_hash="0" * 64,
+        )
+        for index, envelope in enumerate(envelopes)
+    ]
+    plan_hash = mutation_group_plan_hash(plan)
+    return [replace(envelope, mutation_plan_hash=plan_hash) for envelope in plan]
 
 
 def test_restore_preview_empty_inventory_returns_safe_applies_ranges_counts_and_key_status(
@@ -550,6 +572,208 @@ def test_restore_preview_includes_media_metadata_and_local_conflicts(
     ] == [("media.item", "media-1", "stable_id_conflict")]
 
 
+@pytest.mark.parametrize(
+    ("domains", "selected_object_ids"),
+    [
+        (["notes.keyword"], None),
+        (list(NOTES_ORGANIZATION_DOMAINS), ["11111111-1111-4111-8111-111111111111"]),
+    ],
+)
+def test_spec_fix_restore_rejects_explicit_filter_that_splits_stored_group(
+    sync_service: SyncV2Service,
+    domains: list[str],
+    selected_object_ids: list[str] | None,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-filtered-group",
+            _organization_envelope(
+                client_envelope_id="env-filter-keyword",
+                object_id="11111111-1111-4111-8111-111111111111",
+            ),
+            _organization_envelope(
+                client_envelope_id="env-filter-folder",
+                domain="notes.folder",
+                object_id="22222222-2222-4222-8222-222222222222",
+                payload={"name": "Folder", "parent_sync_id": None},
+            ),
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_restore_plan_invalid"):
+        sync_service.restore_preview(
+            user_id="user-1",
+            dataset_ids=["dataset-1"],
+            domains=domains,
+            selected_object_ids=selected_object_ids,
+            local_inventory=[],
+        )
+
+
+def test_spec_fix_restore_keeps_historical_group_before_superseding_head(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    keyword_a = "11111111-1111-4111-8111-111111111111"
+    keyword_b = "22222222-2222-4222-8222-222222222222"
+    stored = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-history-group",
+            _organization_envelope(
+                client_envelope_id="env-history-a",
+                object_id=keyword_a,
+                payload={"keyword": "A"},
+            ),
+            _organization_envelope(
+                client_envelope_id="env-history-b",
+                object_id=keyword_b,
+                payload={"keyword": "B"},
+            ),
+        )
+    )
+    superseding = sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-history-b-v2",
+            object_id=keyword_b,
+            object_revision=2,
+            payload={"keyword": "B2"},
+            payload_hash="sha256:history-b-v2",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        local_inventory=[],
+    )
+
+    assert [item.server_cursor for item in preview.safe_applies] == [
+        stored[0].server_cursor,
+        stored[1].server_cursor,
+        superseding.server_cursor,
+    ]
+
+
+def test_spec_fix_restore_rejects_incomplete_persisted_group(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    stored = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-incomplete-group",
+            _organization_envelope(client_envelope_id="env-incomplete-a"),
+            _organization_envelope(
+                client_envelope_id="env-incomplete-b",
+                object_id="22222222-2222-4222-8222-222222222222",
+            ),
+        )
+    )
+    sync_service.store.db.execute(
+        "DELETE FROM sync_envelopes WHERE server_sequence = ?",
+        (stored[1].server_cursor,),
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_restore_plan_invalid"):
+        sync_service.restore_preview(
+            user_id="user-1",
+            dataset_ids=["dataset-1"],
+            domains=list(NOTES_ORGANIZATION_DOMAINS),
+            local_inventory=[],
+        )
+
+
+def test_spec_fix_restore_rejects_missing_dependency(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-missing-parent",
+            domain="notes.folder",
+            object_id="11111111-1111-4111-8111-111111111111",
+            payload={
+                "name": "Child",
+                "parent_sync_id": "22222222-2222-4222-8222-222222222222",
+            },
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_restore_plan_invalid"):
+        sync_service.restore_preview(
+            user_id="user-1",
+            dataset_ids=["dataset-1"],
+            domains=list(NOTES_ORGANIZATION_DOMAINS),
+            local_inventory=[],
+        )
+
+
+def test_spec_fix_restore_rejects_group_dependency_contradiction(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    parent_id = "11111111-1111-4111-8111-111111111111"
+    child_id = "22222222-2222-4222-8222-222222222222"
+    sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-contradictory-group",
+            _organization_envelope(
+                client_envelope_id="env-child-first",
+                domain="notes.folder",
+                object_id=child_id,
+                payload={"name": "Child", "parent_sync_id": parent_id},
+            ),
+            _organization_envelope(
+                client_envelope_id="env-parent-second",
+                domain="notes.folder",
+                object_id=parent_id,
+                payload={"name": "Parent", "parent_sync_id": None},
+            ),
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_restore_plan_invalid"):
+        sync_service.restore_preview(
+            user_id="user-1",
+            dataset_ids=["dataset-1"],
+            domains=list(NOTES_ORGANIZATION_DOMAINS),
+            local_inventory=[],
+        )
+
+
+def test_spec_fix_restore_rejects_cyclic_dependencies(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_notes_organization(sync_service)
+    folder_a = "11111111-1111-4111-8111-111111111111"
+    folder_b = "22222222-2222-4222-8222-222222222222"
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-cycle-a",
+            domain="notes.folder",
+            object_id=folder_a,
+            payload={"name": "A", "parent_sync_id": folder_b},
+        )
+    )
+    sync_service.store.insert_envelope(
+        _organization_envelope(
+            client_envelope_id="env-cycle-b",
+            domain="notes.folder",
+            object_id=folder_b,
+            payload={"name": "B", "parent_sync_id": folder_a},
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_restore_plan_invalid"):
+        sync_service.restore_preview(
+            user_id="user-1",
+            dataset_ids=["dataset-1"],
+            domains=list(NOTES_ORGANIZATION_DOMAINS),
+            local_inventory=[],
+        )
+
+
 def test_notes_organization_restore_preview_counts_and_orders_complete_state(
     sync_service: SyncV2Service,
 ) -> None:
@@ -569,6 +793,13 @@ def test_notes_organization_restore_preview_counts_and_orders_complete_state(
         "notes.folder_link", [note_id, child_folder_id]
     )
 
+    sync_service.store.insert_envelope(
+        _note_envelope(
+            client_envelope_id="env-organization-note",
+            object_id=note_id,
+            payload_hash="sha256:organization-note",
+        )
+    )
     sync_service.store.insert_envelope(
         _organization_envelope(
             client_envelope_id="env-keyword-link",
@@ -600,17 +831,14 @@ def test_notes_organization_restore_preview_counts_and_orders_complete_state(
             payload_hash="sha256:folder-link",
         )
     )
-    group = [
+    group = _organization_group(
+        "server-origin-group-restore",
         _organization_envelope(
             client_envelope_id="env-collection",
             domain="notes.keyword_collection",
             object_id=collection_id,
             payload={"name": "Synthetic collection", "parent_sync_id": None},
             payload_hash="sha256:collection",
-            mutation_group_id="server-origin-group-restore",
-            mutation_step=0,
-            mutation_step_count=2,
-            mutation_plan_hash="0" * 64,
         ),
         _organization_envelope(
             client_envelope_id="env-collection-link",
@@ -621,12 +849,8 @@ def test_notes_organization_restore_preview_counts_and_orders_complete_state(
                 "keyword_sync_id": keyword_id,
             },
             payload_hash="sha256:collection-link",
-            mutation_group_id="server-origin-group-restore",
-            mutation_step=1,
-            mutation_step_count=2,
-            mutation_plan_hash="0" * 64,
         ),
-    ]
+    )
     sync_service.store.insert_envelopes_atomic(group)
     sync_service.store.insert_envelope(
         _organization_envelope(
@@ -658,11 +882,12 @@ def test_notes_organization_restore_preview_counts_and_orders_complete_state(
     preview = sync_service.restore_preview(
         user_id="user-1",
         dataset_ids=["dataset-1"],
-        domains=list(NOTES_ORGANIZATION_DOMAINS),
+        domains=["notes.note", *NOTES_ORGANIZATION_DOMAINS],
         local_inventory=[],
     )
 
     assert preview.total_counts == {
+        "notes.note": 1,
         "notes.folder": 2,
         "notes.folder_link": 1,
         "notes.keyword": 2,
@@ -677,6 +902,7 @@ def test_notes_organization_restore_preview_counts_and_orders_complete_state(
         )
         for detail in preview.domain_details
     } == {
+        "notes.note": (1, 0),
         "notes.keyword": (0, 1),
         "notes.keyword_link": (1, 0),
         "notes.keyword_collection": (1, 0),

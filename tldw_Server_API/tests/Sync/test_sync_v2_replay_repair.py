@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,9 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SyncEnvelopeCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    mutation_group_plan_hash,
 )
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
@@ -240,7 +243,7 @@ def _keyword_group(
     group_id: str,
     count: int = 3,
 ) -> list[SyncEnvelopeCreate]:
-    return [
+    plan = [
         SyncEnvelopeCreate(
             dataset_id="dataset-1",
             client_envelope_id=f"env-keyword-{index}",
@@ -260,6 +263,8 @@ def _keyword_group(
         )
         for index in range(count)
     ]
+    plan_hash = mutation_group_plan_hash(plan)
+    return [replace(envelope, mutation_plan_hash=plan_hash) for envelope in plan]
 
 
 class _RecordingGroupMaterializer:
@@ -274,6 +279,41 @@ class _RecordingGroupMaterializer:
             apply_status="applied",
         )
         return MaterializationResult(status="applied")
+
+
+class _RecordingMaterializer:
+    def __init__(self) -> None:
+        self.object_ids: list[str] = []
+
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        self.object_ids.append(envelope.object_id)
+        store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="applied",
+        )
+        return MaterializationResult(status="applied")
+
+
+def _assert_blocked_group(
+    result,
+    materializer: _RecordingGroupMaterializer,
+    *,
+    group_id: str,
+    failing_step: int,
+    error_code: str,
+) -> None:
+    assert materializer.steps == []
+    assert result.failed_count == 1
+    assert result.repair_status["status"] == "repair_needed"
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": group_id,
+            "failing_step": failing_step,
+            "error_code": error_code,
+            "retry_result": "blocked",
+            "state": "failed",
+        }
+    ]
 
 
 def test_repair_rebuilds_note_projection_from_accepted_envelopes(
@@ -496,6 +536,214 @@ def test_notes_organization_repair_resumes_failed_group_without_skipping_pending
     assert "Synthetic label" not in serialized
     assert "/private/path" not in serialized
     assert "raw database error" not in serialized
+
+
+def test_spec_fix_repair_blocks_per_step_plan_hash_mismatch(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-corrupt-step-hash"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    sync_store.db.execute(
+        "UPDATE sync_envelopes SET mutation_plan_hash = ? WHERE server_sequence = ?",
+        ("f" * 64, stored[1].server_cursor),
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=1,
+        error_code="mutation_group_plan_hash_invalid",
+    )
+
+
+def test_spec_fix_repair_blocks_recomputed_group_fingerprint_mismatch(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-corrupt-content"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    sync_store.db.execute(
+        "UPDATE sync_envelopes SET payload_json = ? WHERE server_sequence = ?",
+        (json.dumps({"keyword": "Secret /private/path raw value"}), stored[1].server_cursor),
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=0,
+        error_code="mutation_group_fingerprint_invalid",
+    )
+    serialized = str(asdict(result))
+    assert "Secret" not in serialized
+    assert "/private/path" not in serialized
+    assert "raw value" not in serialized
+
+
+def test_spec_fix_repair_reports_first_missing_group_index(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-missing-step"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    sync_store.db.execute(
+        "DELETE FROM sync_envelopes WHERE server_sequence = ?",
+        (stored[1].server_cursor,),
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=1,
+        error_code="mutation_group_step_missing",
+    )
+
+
+def test_spec_fix_repair_blocks_duplicate_group_index(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-duplicate-step"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    duplicate = [stored[0], replace(stored[1], mutation_step=0), stored[2]]
+    monkeypatch.setattr(sync_store, "list_mutation_group", lambda *_: duplicate)
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=0,
+        error_code="mutation_group_step_duplicate",
+    )
+
+
+def test_spec_fix_repair_resumes_pending_only_group_suffix(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-pending-suffix")
+    )
+    sync_store.mark_envelope_apply_status(stored[0].server_cursor, apply_status="applied")
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert materializer.steps == [1, 2]
+    assert result.attempted_count == 2
+    assert result.applied_count == 2
+    assert result.repair_status["status"] == "healthy"
+    assert result.repair_status["mutation_groups"][0]["state"] == "applied"
+
+
+def test_spec_fix_repair_resumes_pending_singleton(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelope(
+        replace(
+            _keyword_group(group_id="server-origin-unused", count=1)[0],
+            mutation_group_id=None,
+            mutation_step=None,
+            mutation_step_count=None,
+            mutation_plan_hash=None,
+        )
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert materializer.object_ids == ["00000001-1111-4111-8111-111111111111"]
+    assert result.applied_count == 1
+    assert result.skipped_count == 0
+    assert result.repair_status["status"] == "healthy"
+
+
+def test_spec_fix_repair_reports_unmaterializable_pending_group_as_repair_needed(
+    sync_store: SyncV2Store,
+) -> None:
+    service = _service(sync_store, materializers={})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-pending-blocked")
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert result.repair_status["status"] == "repair_needed"
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-pending-blocked",
+            "failing_step": 0,
+            "error_code": "sync_materializer_unavailable",
+            "retry_result": "blocked",
+            "state": "pending",
+        }
+    ]
 
 
 def test_notes_organization_repair_reports_blocked_group_without_applying_later_steps(

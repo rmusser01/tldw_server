@@ -24,6 +24,11 @@ OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
     }
 )
 
+
+class RestorePlanningError(ValueError):
+    """Raised when restore candidates cannot form one safe ordered plan."""
+
+
 @dataclass(frozen=True, slots=True)
 class LocalRestoreInventoryItem:
     """One local object fingerprint supplied by a restoring client."""
@@ -43,32 +48,45 @@ def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvel
     """Order restore candidates without splitting complete mutation groups."""
 
     units = _restore_units(envelopes)
-    unit_by_identity = {
-        (envelope.domain, envelope.object_id): unit_index
-        for unit_index, unit in enumerate(units)
-        for envelope in unit
-        if envelope.operation != "tombstone"
-    }
+    units_by_identity: dict[tuple[SyncDomain, str], list[tuple[int, int, SyncEnvelope]]] = {}
+    for unit_index, unit in enumerate(units):
+        for position, envelope in enumerate(unit):
+            units_by_identity.setdefault((envelope.domain, envelope.object_id), []).append(
+                (unit_index, position, envelope)
+            )
     edges: dict[int, set[int]] = {index: set() for index in range(len(units))}
 
+    for occurrences in units_by_identity.values():
+        ordered = sorted(occurrences, key=lambda item: item[2].server_cursor or 0)
+        for earlier, later in zip(ordered, ordered[1:]):
+            if earlier[0] != later[0]:
+                edges[earlier[0]].add(later[0])
+
     for unit_index, unit in enumerate(units):
-        positions = {
-            (envelope.domain, envelope.object_id): position
-            for position, envelope in enumerate(unit)
-            if envelope.operation != "tombstone"
-        }
         for position, envelope in enumerate(unit):
             for dependency in _restore_dependencies(envelope):
-                dependency_unit = unit_by_identity.get(dependency)
-                if dependency_unit is None:
+                occurrences = units_by_identity.get(dependency)
+                if not occurrences:
+                    raise RestorePlanningError("Restore dependency is missing")
+                live = [item for item in occurrences if item[2].operation != "tombstone"]
+                if live:
+                    for dependency_unit, dependency_position, _ in live:
+                        if dependency_unit == unit_index:
+                            if dependency_position >= position:
+                                raise RestorePlanningError(
+                                    "Mutation group ordering conflicts with restore dependencies"
+                                )
+                            continue
+                        edges[dependency_unit].add(unit_index)
                     continue
-                if dependency_unit == unit_index:
-                    if positions[dependency] >= position:
-                        raise ValueError(
-                            "Mutation group ordering conflicts with restore dependencies"
-                        )
-                    continue
-                edges[dependency_unit].add(unit_index)
+                for tombstone_unit, tombstone_position, _ in occurrences:
+                    if tombstone_unit == unit_index:
+                        if tombstone_position <= position:
+                            raise RestorePlanningError(
+                                "Mutation group tombstone ordering conflicts with restore dependencies"
+                            )
+                        continue
+                    edges[unit_index].add(tombstone_unit)
 
     live_units = {
         index
@@ -92,7 +110,7 @@ def order_restore_envelopes(envelopes: Sequence[SyncEnvelope]) -> list[SyncEnvel
             if not any(index in targets for source, targets in edges.items() if source in remaining)
         ]
         if not ready:
-            raise ValueError("Restore dependencies contain a cycle")
+            raise RestorePlanningError("Restore dependencies contain a cycle")
         selected = min(
             ready,
             key=lambda index: min(envelope.server_cursor or 0 for envelope in units[index]),
@@ -108,17 +126,15 @@ def _restore_units(envelopes: Sequence[SyncEnvelope]) -> list[list[SyncEnvelope]
     for envelope in envelopes:
         if envelope.mutation_group_id:
             grouped.setdefault(envelope.mutation_group_id, []).append(envelope)
+    incomplete = [group_id for group_id, group in grouped.items() if not _is_complete_restore_group(group)]
+    if incomplete:
+        raise RestorePlanningError("Restore mutation group is incomplete")
 
-    complete_groups = {
-        group_id
-        for group_id, group in grouped.items()
-        if _is_complete_restore_group(group)
-    }
     emitted: set[str] = set()
     units: list[list[SyncEnvelope]] = []
     for envelope in sorted(envelopes, key=lambda item: item.server_cursor or 0):
         group_id = envelope.mutation_group_id
-        if group_id not in complete_groups:
+        if group_id is None:
             units.append([envelope])
             continue
         if group_id in emitted:

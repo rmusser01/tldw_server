@@ -4,7 +4,7 @@ title: Synchronize Notes keywords collections and folders
 status: Done
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-09 19:43'
+updated_date: '2026-08-09 20:18'
 labels:
   - notes
   - sync-v2
@@ -65,7 +65,7 @@ Reason: This task adds durable cross-database mutation groups and a local derive
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Completed first-class Sync v2 ownership for the indivisible six-domain Notes organization group. The implementation uses strict public payloads and deterministic resource/link identities, durable mutation-group append followed by resumable ordered product projection, readiness-gated bootstrap, device-aware pulls, conflict-aware materialization, dependency-ordered restore, and group-aware repair. `Docs/API/Sync_V2_M1.md` now documents the complete public contract, corrected SHA-256 vectors, bootstrap/repair behavior, ownership and provenance rules, and explicit non-goals.
+Completed first-class Sync v2 ownership for the indivisible six-domain Notes organization group. The implementation uses strict public payloads and deterministic resource/link identities, durable mutation-group append followed by resumable ordered product projection, readiness-gated bootstrap, device-aware pulls, conflict-aware materialization, dependency-ordered restore, and group-aware repair. Restore now loads and validates each complete persisted group, rejects explicit filters that would split it, retains historical grouped siblings before superseding heads, and fails closed for incomplete or unsatisfiable dependency plans. Repair uses the same canonical full-envelope group validator as server-origin batch resume, resumes pending suffixes and singletons, and reports corrupt or blocked work only through stable safe fields. `Docs/API/Sync_V2_M1.md` documents the complete public contract, corrected SHA-256 vectors, bootstrap/repair behavior, ownership and provenance rules, and explicit non-goals.
 
 | AC | Evidence |
 | --- | --- |
@@ -74,13 +74,39 @@ Completed first-class Sync v2 ownership for the indivisible six-domain Notes org
 | 3 | `test_sync_v2_server_origin_batch.py`, `test_sync_v2_server_origin_capture.py`, and `test_notes_organization_sync_api.py` verify durable canonical capture for direct and compound REST mutations. |
 | 4 | `test_notes_organization_sync_api.py` and the M1-only compatibility cases in `test_sync_v2_server_origin_capture.py` verify ready-group writes and stable fail-closed behavior when the group is absent. |
 | 5 | Adapter and API tests cover rename, hierarchy, membership, merge, delete/update, idempotent replay, and reviewable conflict paths. |
-| 6 | `test_sync_v2_restore_preview.py`, `test_sync_v2_replay_repair.py`, and `Docs/API/Sync_V2_M1.md` cover all six domains, ordered restore, safe resumable group repair, and exact-post-state bookkeeping. |
+| 6 | `test_sync_v2_restore_preview.py`, `test_sync_v2_replay_repair.py`, and `Docs/API/Sync_V2_M1.md` cover all six domains, immutable complete-group restore, dependency/filter fail-closed planning, canonical persisted-plan validation, pending/failed resume, safe blocked results, and exact-post-state bookkeeping. |
 | 7 | `test_sync_v2_profile_bootstrap.py` and `test_sync_v2_notes_organization_bootstrap.py` verify all-or-none enrollment, source snapshot capture, interruption recovery, and readiness gates. |
 | 8 | `test_sync_v2_service.py` verifies device-requested implicit pulls and excludes unsupported organization domains from legacy devices. |
 
 Release-risk review found no accidental partial enrollment, product projection before durable group append, client-controlled bootstrap bypass, integer canonical identity, trusted remote origin provenance, flashcard movement, cascade soft-delete cleanup, ownership bypass, or organization-domain leakage to legacy devices. Cross-database behavior is documented as durable Sync append plus resumable product materialization, not atomicity across databases; folder source/manual effective membership follows ADR-033 suppression without deleting source provenance.
 
 Verification used the eleven focused plan commands. Supported SQLite and mock-contract suites passed; the optional live PostgreSQL folder integration was explicitly skipped because no live DSN was configured (`21 passed, 1 skipped` in that command). Bandit passed with existing `nosec` annotations. The exact broad Ruff scope reported 20 pre-existing findings in unrelated legacy files; a supplemental Ruff check over every Task 10 touched code/test file passed. `git diff --check` passed. Public examples are synthetic and private-safe.
+
+| Step 4 command | Exact result |
+| --- | --- |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_identity.py` | 108 passed, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py` | Exit 0, 41 collected, summary truncated; cache warning observed. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_store.py -k "mutation_group or envelope"` | 28 passed, 37 deselected, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_server_origin_capture.py tldw_Server_API/tests/Sync/test_sync_v2_server_origin_batch.py` | Fresh review-fix authorized rerun: 48 passed, 7 warnings. Restricted precursor had 8 SQLite-permission failures plus 10 genuine validator-message compatibility failures; the latter were fixed and independently verified 10 passed/10 deselected. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_adapters.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_materializer.py` | 69 passed, 4 warnings. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_profile_bootstrap.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_bootstrap.py` | 26 passed, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_service.py -k "notes_organization or implicit_pull or legacy_device"` | Fresh review-fix rerun: 2 passed, 92 deselected, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/Notes/test_notes_organization_sync_api.py` | 60 passed, 2 warnings on authorized rerun. |
+| `pytest -q tldw_Server_API/tests/Notes/test_notes_api_integration.py -k "note or keyword or collection or folder"` | 51 passed, 5 warnings on authorized rerun. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_restore_preview.py tldw_Server_API/tests/Sync/test_sync_v2_replay_repair.py -k notes_organization` | Fresh review-fix rerun: 4 passed, 29 deselected, 3 warnings. Full two-file compatibility gate: 33 passed, 3 warnings. |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_postgres_contract.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders_postgres.py` | 21 passed, 1 optional live-PostgreSQL skip, 3 warnings. |
+
+| Static/security command | Exact result |
+| --- | --- |
+| `ruff check tldw_Server_API/app/core/Sync/v2 tldw_Server_API/app/core/DB_Management/Sync_DB.py tldw_Server_API/app/core/DB_Management/chacha tldw_Server_API/app/api/v1/endpoints/notes.py tldw_Server_API/app/api/v1/schemas/notes_schemas.py` | Exit 1: 20 legacy findings, all outside review-fix touched lines; no unrelated cleanup. |
+| `ruff check` over the seven review-fix production/test Python files | All checks passed. |
+| `bandit -q -r tldw_Server_API/app/core/Sync/v2 tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py tldw_Server_API/app/api/v1/endpoints/notes.py` | Exit 0; informational existing B608 `nosec` notices only. |
+| `git diff --check` | Exit 0, no output. |
+
+| Step 8 representative command | Exact result |
+| --- | --- |
+| `pytest -q tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_adapters.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_materializer.py tldw_Server_API/tests/Sync/test_sync_v2_server_origin_batch.py` | 89 passed, 4 warnings. |
+| `pytest -q tldw_Server_API/tests/Notes/test_notes_organization_sync_api.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_bootstrap.py` | 74 passed, 2 warnings on authorized SQLite rerun. |
 
 ADR required: yes
 ADR path: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md

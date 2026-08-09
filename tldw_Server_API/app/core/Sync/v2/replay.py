@@ -9,6 +9,10 @@ from dataclasses import dataclass, field
 
 from .materializers import MaterializationResult, SyncMaterializer
 from .models import SyncDomain, SyncEnvelope
+from .mutation_group_validation import (
+    StoredMutationGroupValidationError,
+    validate_stored_mutation_group,
+)
 from .store import SyncV2Store
 
 
@@ -163,6 +167,7 @@ class SyncReplayRepairer:
                     )
                     mutation_group_results.append(
                         self._repair_mutation_group(
+                            dataset_id=dataset_id,
                             group_id=group_id,
                             group=group,
                             failed_only=failed_only,
@@ -202,7 +207,11 @@ class SyncReplayRepairer:
         conflict_count = sum(item.conflict_count for item in domain_results)
         skipped_count = sum(item.skipped_count for item in domain_results)
         repair_status = {
-            "status": "repair_needed" if failed_count or conflict_count else "healthy",
+            "status": (
+                "repair_needed"
+                if failed_count or conflict_count or skipped_count
+                else "healthy"
+            ),
             "failed_count": failed_count,
             "conflict_count": conflict_count,
             "skipped_count": skipped_count,
@@ -227,21 +236,26 @@ class SyncReplayRepairer:
     def _repair_mutation_group(
         self,
         *,
+        dataset_id: str,
         group_id: str,
         group: Sequence[SyncEnvelope],
         failed_only: bool,
         accumulators: dict[SyncDomain, _DomainAccumulator],
     ) -> dict[str, object]:
         safe_group_id = _safe_group_id(group_id)
-        shape_error = _mutation_group_shape_error(group)
-        if shape_error is not None:
-            failing_step, error_code = shape_error
+        try:
+            validate_stored_mutation_group(
+                group,
+                dataset_id=dataset_id,
+                mutation_group_id=group_id,
+            )
+        except StoredMutationGroupValidationError as exc:
             if group:
                 _accumulator(accumulators, group[0].domain).failed_count += 1
             return _group_result(
                 safe_group_id,
-                failing_step=failing_step,
-                error_code=error_code,
+                failing_step=exc.failing_step,
+                error_code=exc.error_code,
                 retry_result="blocked",
                 state="failed",
             )
@@ -261,18 +275,13 @@ class SyncReplayRepairer:
                 retry_result="blocked",
                 state="failed",
             )
-        if failed_only and (
-            first_unapplied is None
-            or not any(
-                envelope.apply_status in {"failed", "conflict"} for envelope in group
-            )
-        ):
+        if failed_only and first_unapplied is None:
             return _group_result(
                 safe_group_id,
-                failing_step=first_unapplied,
+                failing_step=None,
                 error_code=None,
                 retry_result="skipped",
-                state="applied" if first_unapplied is None else "pending",
+                state="applied",
             )
 
         start = 0 if first_unapplied is None else first_unapplied
@@ -371,8 +380,7 @@ class SyncReplayRepairer:
             result.conflict_count += 1
             result.skipped_count += 1
             return
-        if failed_only and envelope.apply_status != "failed":
-            result.skipped_count += 1
+        if failed_only and envelope.apply_status == "applied":
             return
         if envelope.domain not in self.materializers:
             result.skipped_count += 1
@@ -421,24 +429,6 @@ def _error_from_envelope(
         ),
         message=None,
     )
-
-
-def _mutation_group_shape_error(
-    group: Sequence[SyncEnvelope],
-) -> tuple[int | None, str] | None:
-    if not group:
-        return 0, "mutation_group_missing"
-    expected_count = group[0].mutation_step_count
-    if expected_count != len(group):
-        return len(group), "mutation_group_incomplete"
-    if any(
-        envelope.mutation_step_count != expected_count
-        or envelope.mutation_step != index
-        or envelope.mutation_group_id != group[0].mutation_group_id
-        for index, envelope in enumerate(group)
-    ):
-        return 0, "mutation_group_shape_invalid"
-    return None
 
 
 def _safe_group_id(group_id: str) -> str:

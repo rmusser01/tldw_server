@@ -84,11 +84,16 @@ from .models import (
     client_private_server_frontend_limitation_warning,
     sync_v2_domain_schemas,
 )
+from .mutation_group_validation import (
+    StoredMutationGroupValidationError,
+    validate_stored_mutation_group,
+)
 from .profile import SyncProfileStatus, SyncV2ProfileManager
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
 from .restore import (
     OBJECT_RESTORE_DOMAINS,
     WHOLE_OBJECT_RESTORE_DOMAINS,
+    RestorePlanningError,
     attachment_available_locally,
     attachment_restore_status,
     attachment_verified_locally,
@@ -1767,12 +1772,24 @@ class SyncV2Service:
                 for envelope in domain_envelopes.get(domain, []):
                     if envelope.apply_status == "conflict":
                         continue
-                    if selected_object_id_set and envelope.object_id not in selected_object_id_set:
-                        continue
                     latest_object_envelopes[(domain, envelope.object_id)] = envelope
-            for envelope in order_restore_envelopes(
-                list(latest_object_envelopes.values())
-            ):
+            selected_envelopes = [
+                envelope
+                for envelope in latest_object_envelopes.values()
+                if not selected_object_id_set or envelope.object_id in selected_object_id_set
+            ]
+            try:
+                restore_envelopes = self._expand_restore_mutation_groups(
+                    dataset_id=dataset.dataset_id,
+                    envelopes=selected_envelopes,
+                    latest_object_envelopes=latest_object_envelopes,
+                    selected_domains=selected_domains,
+                    selected_object_ids=selected_object_id_set,
+                )
+                ordered_restore_envelopes = order_restore_envelopes(restore_envelopes)
+            except (RestorePlanningError, StoredMutationGroupValidationError) as exc:
+                raise SyncStoreError("sync_restore_plan_invalid") from exc
+            for envelope in ordered_restore_envelopes:
                 domain = envelope.domain
                 object_id = envelope.object_id
                 object_state = self.store.get_object_state(dataset.dataset_id, domain, object_id)
@@ -3822,6 +3839,54 @@ class SyncV2Service:
         )
         visible = [envelope for envelope in raw if envelope.apply_status != "conflict"]
         return raw, visible
+
+    def _expand_restore_mutation_groups(
+        self,
+        *,
+        dataset_id: str,
+        envelopes: Sequence[SyncEnvelope],
+        latest_object_envelopes: Mapping[tuple[SyncDomain, str], SyncEnvelope],
+        selected_domains: set[SyncDomain],
+        selected_object_ids: set[str],
+    ) -> list[SyncEnvelope]:
+        """Expand selected restore heads to complete persisted mutation units."""
+
+        candidates = {
+            (envelope.server_cursor, envelope.client_envelope_id): envelope
+            for envelope in envelopes
+        }
+        queued = list(envelopes)
+        processed_groups: set[str] = set()
+        while queued:
+            envelope = queued.pop()
+            group_id = envelope.mutation_group_id
+            if not group_id or group_id in processed_groups:
+                continue
+            group = self.store.list_mutation_group(dataset_id, group_id)
+            validate_stored_mutation_group(
+                group,
+                dataset_id=dataset_id,
+                mutation_group_id=group_id,
+            )
+            if selected_domains and any(member.domain not in selected_domains for member in group):
+                raise RestorePlanningError("Restore domain filter splits a mutation group")
+            if selected_object_ids and any(
+                member.object_id not in selected_object_ids for member in group
+            ):
+                raise RestorePlanningError("Restore object filter splits a mutation group")
+            processed_groups.add(group_id)
+            for member in group:
+                if member.domain not in OBJECT_RESTORE_DOMAINS:
+                    raise RestorePlanningError("Restore mutation group contains unsupported domain")
+                candidates[(member.server_cursor, member.client_envelope_id)] = member
+                latest = latest_object_envelopes.get((member.domain, member.object_id))
+                if latest is None or latest.server_cursor == member.server_cursor:
+                    continue
+                key = (latest.server_cursor, latest.client_envelope_id)
+                if key not in candidates:
+                    candidates[key] = latest
+                    queued.append(latest)
+        return list(candidates.values())
 
     def _list_restore_preview_domain_envelopes(
         self,
