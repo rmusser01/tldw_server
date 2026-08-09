@@ -168,13 +168,17 @@ class _CancellationScope:
             )
         )
 
-    def resolve_name(self, name: str, *, before_order: int) -> _CancellationBinding | None:
+    def resolve_name(self, name: str, *, before_order: int | None) -> _CancellationBinding | None:
         for binding in reversed(self.bindings.get(name, [])):
-            if binding.order < before_order:
+            if before_order is None or binding.order < before_order:
                 return binding
         if self.kind == "function" and name in self.local_names:
             return None
-        return self.parent.resolve_name(name, before_order=before_order) if self.parent else None
+        if self.parent is None:
+            return None
+        # Function globals are resolved when called, not captured during definition traversal.
+        parent_order = None if self.kind == "function" and self.parent.kind == "module" else before_order
+        return self.parent.resolve_name(name, before_order=parent_order)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1330,6 +1334,33 @@ except CE:
 CE = ValueError
 """,
             ["CE"],
+        ),
+        "function_global_imported_after_definition": (
+            """
+def extract():
+    try:
+        operation()
+    except CE:
+        recover()
+
+from asyncio import CancelledError as CE
+extract()
+""",
+            ["CE"],
+        ),
+        "function_global_rebound_after_definition": (
+            """
+from asyncio import CancelledError as CE
+def extract():
+    try:
+        operation()
+    except CE:
+        recover()
+
+CE = ValueError
+extract()
+""",
+            [],
         ),
         "absent_asyncio_import": (
             """
