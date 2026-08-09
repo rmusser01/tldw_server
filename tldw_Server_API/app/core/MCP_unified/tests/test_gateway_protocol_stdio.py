@@ -853,6 +853,7 @@ def _fd_is_open(fd: int) -> bool:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name != "posix", reason="native pipe registration is POSIX-only")
 async def test_native_second_dup_failure_closes_first_duplicate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

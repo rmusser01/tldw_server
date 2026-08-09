@@ -699,7 +699,11 @@ class GatewaySchemaValidationManager:
                     "schema_validator_closed",
                     "Schema validator is closed",
                 )
-            if receiver.poll(0):
+            try:
+                verdict_ready = receiver.poll(0)
+            except (EOFError, OSError):
+                return ("internal", "schema_validation_worker_failed")
+            if verdict_ready:
                 try:
                     payload = receiver.recv_bytes(_SCHEMA_WORKER_MAX_VERDICT_BYTES)
                     decoded = json.loads(payload)

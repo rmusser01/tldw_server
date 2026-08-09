@@ -5,9 +5,9 @@ Unified standalone gateway boundary. It focuses on profiles, external servers,
 credential grants, configuration snapshots, and remote runtime commands.
 
 The package status is `public-alpha`, and its publishing status is `published`.
-Version `0.2.0` remains a release candidate until the protected PyPI publish
-succeeds. The package is published on PyPI; the former internal/experimental
-phase applies only to earlier
+Released versions are published on PyPI; repository versions remain release
+candidates until their protected publish succeeds. The former
+internal/experimental phase applies only to earlier
 releases. The package CLI does not launch a supported end-user gateway server;
 remote runtime commands require an already running package-local gateway
 mounted by a host application.
@@ -15,9 +15,8 @@ mounted by a host application.
 ## Publishing Readiness
 
 The standalone package has publishing status `published` and package status
-`public-alpha`. New users can install the released package from PyPI;
-developers testing the `0.2.0` release candidate before its protected publish
-should install from the repository.
+`public-alpha`. New users can install released versions from PyPI; developers
+testing an unpublished repository version should install from the repository.
 
 Run the full internal release candidate gate from the repository root:
 
@@ -58,7 +57,7 @@ python -m pip install "mcp-unified[gateway]"
 Downstream applications should use a compatible-minor pin:
 
 ```bash
-python -m pip install "mcp-unified[gateway]~=0.2.0"
+python -m pip install "mcp-unified[gateway]~=0.2.1"
 ```
 
 From the repository root, when testing unpublished changes:

@@ -174,6 +174,13 @@ class _FakeReceiver:
         self.closed = True
 
 
+class _BrokenPipeReceiver(_FakeReceiver):
+    """Model Windows reporting a crashed child as a broken named pipe."""
+
+    def poll(self, _timeout: float = 0) -> bool:
+        raise BrokenPipeError(109, "The pipe has been ended")
+
+
 class _FakeProcess:
     """Controllable process double for cleanup ordering and deadline tests."""
 
@@ -245,6 +252,22 @@ def test_validate_schema_exposes_the_compile_only_public_signature() -> None:
     assert list(signature.parameters) == ["self", "schema", "profile", "root_mode"]
     assert signature.parameters["profile"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["root_mode"].default == "any"
+
+
+@pytest.mark.asyncio
+async def test_receive_verdict_translates_a_broken_worker_pipe() -> None:
+    """A Windows named-pipe crash must become the bounded worker-failure verdict."""
+
+    api = _validation_api()
+    manager = api.GatewaySchemaValidationManager()
+    process = _FakeProcess()
+    process.alive = False
+    process.exitcode = 7
+
+    verdict = await manager._receive_verdict(process, _BrokenPipeReceiver())
+
+    assert verdict == ("internal", "schema_validation_worker_failed")
+    await manager.close()
 
 
 @pytest.mark.asyncio

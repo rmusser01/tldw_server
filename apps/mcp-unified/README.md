@@ -4,9 +4,9 @@ MCP Unified is the standalone package boundary for the Model Context Protocol
 runtime and gateway being extracted from `tldw-server`.
 
 The package status is `public-alpha`, and the publishing status is `published`.
-Version `0.2.0` remains a release candidate until the protected PyPI publish
-succeeds. The package is published on PyPI and built and tested inside the
-`tldw-server` repository; the
+Released versions are published on PyPI; repository versions remain release
+candidates until their protected publish succeeds. The package is built and
+tested inside the `tldw-server` repository; the
 former internal/experimental phase remains relevant only to earlier releases.
 
 This package does not currently ship an end-user standalone gateway server
@@ -60,8 +60,8 @@ recognize the inline type annotations when consuming built artifacts.
 ## Publishing Readiness
 
 Standalone package publishing is live but guarded. Package metadata reports
-`public-alpha` and publishing state `published`; the `0.2.0` build is a release
-candidate until the protected publish succeeds.
+`public-alpha` and publishing state `published`; repository builds remain
+release candidates until their protected publish succeeds.
 
 Run the full internal release candidate gate:
 
@@ -105,7 +105,7 @@ python -m pip install "mcp-unified[gateway]"
 Downstream applications should use a compatible-minor pin:
 
 ```bash
-python -m pip install "mcp-unified[gateway]~=0.2.0"
+python -m pip install "mcp-unified[gateway]~=0.2.1"
 ```
 
 For development tooling, install the optional development extras:
