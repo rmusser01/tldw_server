@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
 REPO_ROOT = Path(__file__).resolve().parents[5]
 ROOT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 STANDALONE_PROJECT_ROOT = REPO_ROOT / "apps" / "mcp-unified"
+_ARTIFACT_UTILS = runpy.run_path(
+    str(Path(__file__).with_name("mcp_unified_artifact_test_utils.py"))
+)
+_build_standalone_distributions = _ARTIFACT_UTILS["build_standalone_distributions"]
 STANDALONE_SRC_ROOT = STANDALONE_PROJECT_ROOT / "src"
 PACKAGE_ROOT = STANDALONE_SRC_ROOT / "mcp_unified"
 STANDALONE_PYPROJECT = STANDALONE_PROJECT_ROOT / "pyproject.toml"
@@ -173,19 +178,6 @@ def _require_offline_build_tools() -> None:
         )
 
 
-def _assert_artifact_gate_build_tools_available() -> None:
-    """Assert the mandatory artifact gate build tools are available."""
-
-    details = _offline_build_tool_issues()
-    if importlib.util.find_spec("build") is None:
-        details.append("missing: build")
-    if details:
-        raise AssertionError(
-            "Standalone artifact gate requires preinstalled build tools; "
-            f"{'; '.join(details)}."
-        )
-
-
 def _assert_subprocess_succeeded(
     result: subprocess.CompletedProcess[str],
     command_label: str,
@@ -223,66 +215,6 @@ def _subprocess_env_with_standalone_src(
         pythonpath_entries.append(existing_pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
     return env
-
-
-def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
-    """Build standalone MCP Unified wheel and sdist into a temporary directory."""
-
-    _assert_artifact_gate_build_tools_available()
-
-    package_source = tmp_path / "mcp_unified_source"
-    shutil.copytree(
-        STANDALONE_PROJECT_ROOT,
-        package_source,
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            "build",
-            "dist",
-            "*.egg-info",
-        ),
-    )
-    dist_dir = tmp_path / "dist"
-    dist_dir.mkdir()
-
-    result = subprocess.run(  # nosec B603
-        [
-            sys.executable,
-            "-m",
-            "build",
-            "--wheel",
-            "--sdist",
-            "--no-isolation",
-            "--outdir",
-            str(dist_dir),
-            str(package_source),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=_subprocess_env(
-            {
-                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-                "PIP_NO_INDEX": "1",
-            }
-        ),
-    )
-    _assert_subprocess_succeeded(result, "python -m build")
-
-    wheels = sorted(
-        [
-            *dist_dir.glob("mcp_unified-*.whl"),
-            *dist_dir.glob("mcp-unified-*.whl"),
-        ]
-    )
-    sdists = sorted(
-        [
-            *dist_dir.glob("mcp_unified-*.tar.gz"),
-            *dist_dir.glob("mcp-unified-*.tar.gz"),
-        ]
-    )
-    assert len(wheels) == 1  # nosec B101
-    assert len(sdists) == 1  # nosec B101
-    return wheels[0], sdists[0]
 
 
 def _read_wheel_metadata(wheel: Path) -> Message:

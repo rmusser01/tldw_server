@@ -27,7 +27,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from email.message import Message
 from email.parser import Parser
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from loguru import logger
@@ -75,6 +75,17 @@ PROTOCOL_FIXTURE_SHA256 = {
     "2025-03-26": "e720669548c8100a4282c49e580efd6ddf7f28899ea786fc8db251dbdb356131",
     "2024-11-05": "61cea2392d4f284092d09bc84b9ac488c0d5618ac2b38a56942fc5b99fd960ce",
 }
+PROTOCOL_FIXTURE_PATHS = {revision: Path(revision) / "schema.json" for revision in PROTOCOL_FIXTURE_SHA256}
+PROTOCOL_FIXTURE_REPOSITORY = "https://github.com/modelcontextprotocol/modelcontextprotocol"
+PROTOCOL_FIXTURE_LICENSE = "Apache-2.0"
+PROTOCOL_FIXTURE_URLS = {
+    revision: (
+        "https://raw.githubusercontent.com/modelcontextprotocol/"
+        f"modelcontextprotocol/{PROTOCOL_FIXTURE_COMMIT}/schema/{revision}/schema.json"
+    )
+    for revision in PROTOCOL_FIXTURE_SHA256
+}
+PROTOCOL_FIXTURE_SUPPORT_FILES = (Path("manifest.json"), Path("NOTICE.md"))
 JSONSCHEMA_REQUIREMENT_BOUNDS = frozenset({">=4.23", "<5"})
 PIP_DEPENDENCY_FAILURE_MARKERS = (
     "could not find a version that satisfies the requirement",
@@ -89,16 +100,15 @@ PIP_NETWORK_FAILURE_MARKERS = (
     "connection timed out",
 )
 PIP_DEPENDENCY_OUTAGE_REASON = "dependency resolution unavailable in this environment"
-LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
-    r"(^|[\s\"'(\[{=,:])"
-    r"(/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
-    r"[^\s\"',}\]]+)"
-)
-WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r"(?i)(^|[\s\"'(\[{=,:])([A-Z]:\\[^\s\"',}\]]+)")
+POSIX_ABSOLUTE_PATH_PATTERN = re.compile(r"(^|[\s\"'(\[{=,:])(/(?!/)[^\r\n\"',}\]]+)")
+WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"(?i)(^|[\s\"'(\[{=,:])([A-Z]:[\\/][^\r\n\"',}\]]+)")
+WINDOWS_UNC_PATH_PATTERN = re.compile(r"(^|[\s\"'(\[{=,:])(\\\\[^\r\n\"',}\]]+)")
 RELATIVE_LOCAL_PATH_PATTERN = re.compile(
     r"(?:\.\./)+(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
     r"[^\s\"',}\]]+"
 )
+FILE_URI_PATTERN = re.compile(r"(?i)\bfile:///(?:[^\r\n\"',}\]]+)")
+URI_USERINFO_PATTERN = re.compile(r"(?i)(\b[a-z][a-z0-9+.-]*://)([^/@\s]+)@")
 
 SECRET_KEY_VALUE_PATTERN = re.compile(
     r"(?i)\b(api[_-]?key|token|secret|password|bearer[_-]?token)\b"
@@ -254,7 +264,7 @@ class RcEvidenceRecorder:
             "failed": sum(1 for result in self.results if result["status"] == "failed"),
             "skipped": sum(1 for result in self.results if result["status"] == "skipped"),
         }
-        payload = {
+        payload: dict[str, Any] = {
             "schema_version": "1",
             "ok": not self.has_required_failures(),
             "package": {
@@ -280,6 +290,10 @@ class RcEvidenceRecorder:
             "summary": summary,
             "known_limitations": self.known_limitations,
         }
+        sanitized_payload = _sanitize_evidence_value(payload, self)
+        if not isinstance(sanitized_payload, dict):  # pragma: no cover - structural invariant.
+            raise TypeError("sanitized RC evidence payload must remain a dictionary")
+        payload = sanitized_payload
         json_path = self.evidence_dir / EVIDENCE_JSON
         markdown_path = self.evidence_dir / EVIDENCE_MARKDOWN
         json_path.write_text(
@@ -322,14 +336,17 @@ def _sanitize_evidence_value(value: Any, recorder: RcEvidenceRecorder) -> Any:
     if isinstance(value, tuple):
         return [_sanitize_evidence_value(item, recorder) for item in value]
     if isinstance(value, dict):
-        return {str(key): _sanitize_evidence_value(item, recorder) for key, item in value.items()}
+        return {
+            _redact_evidence_text(str(key), recorder): _sanitize_evidence_value(item, recorder)
+            for key, item in value.items()
+        }
     return value
 
 
 def _redact_evidence_text(value: str, recorder: RcEvidenceRecorder) -> str:
     """Redact secrets and local absolute filesystem paths from evidence text."""
 
-    redacted = redact_text(value)
+    redacted = URI_USERINFO_PATTERN.sub(r"\1[redacted]@", redact_text(value))
     replacements: list[tuple[str, str]] = []
     if recorder.repo_root is not None:
         replacements.append((str(recorder.repo_root), "<repo>"))
@@ -337,9 +354,11 @@ def _redact_evidence_text(value: str, recorder: RcEvidenceRecorder) -> str:
     for path, marker in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
         if path:
             redacted = redacted.replace(path, marker)
+    redacted = FILE_URI_PATTERN.sub("file:///<redacted-path>", redacted)
     redacted = RELATIVE_LOCAL_PATH_PATTERN.sub("<redacted-path>", redacted)
-    redacted = LOCAL_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
-    return WINDOWS_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
+    redacted = WINDOWS_UNC_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
+    redacted = WINDOWS_DRIVE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
+    return POSIX_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
 
 
 def sha256_file(path: Path) -> str:
@@ -350,6 +369,94 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _validated_protocol_fixture_files(fixture_root: Path) -> tuple[Path, ...]:
+    """Validate and return the exact seven approved protocol fixture files."""
+
+    if fixture_root.is_symlink() or not fixture_root.is_dir():
+        raise ValueError("protocol fixture root must be a regular directory")
+    resolved_root = fixture_root.resolve(strict=True)
+    expected_files = {
+        *PROTOCOL_FIXTURE_SUPPORT_FILES,
+        *PROTOCOL_FIXTURE_PATHS.values(),
+    }
+    expected_directories = {relative.parent for relative in PROTOCOL_FIXTURE_PATHS.values()}
+    actual_files: set[Path] = set()
+    actual_directories: set[Path] = set()
+    for member in fixture_root.rglob("*"):
+        relative = member.relative_to(fixture_root)
+        if member.is_symlink():
+            raise ValueError(f"protocol fixture member must not be a symlink: {relative}")
+        if member.is_dir():
+            actual_directories.add(relative)
+        elif member.is_file():
+            actual_files.add(relative)
+        else:
+            raise ValueError(f"protocol fixture member must be a regular file: {relative}")
+    if actual_files != expected_files or actual_directories != expected_directories:
+        raise ValueError("protocol fixture tree members do not match the exact release allowlist")
+
+    manifest_path = fixture_root / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("protocol fixture manifest is not readable JSON") from exc
+    if not isinstance(manifest, dict) or set(manifest) != {"upstream", "fixtures"}:
+        raise ValueError("protocol fixture manifest has unexpected top-level fields")
+    expected_upstream = {
+        "repository": PROTOCOL_FIXTURE_REPOSITORY,
+        "commit": PROTOCOL_FIXTURE_COMMIT,
+        "license": PROTOCOL_FIXTURE_LICENSE,
+    }
+    if manifest.get("upstream") != expected_upstream:
+        raise ValueError("protocol fixture upstream metadata does not match the release pin")
+    fixtures = manifest.get("fixtures")
+    if not isinstance(fixtures, list) or len(fixtures) != len(PROTOCOL_FIXTURE_SHA256):
+        raise ValueError("protocol fixture manifest must contain exactly five entries")
+
+    seen_revisions: set[str] = set()
+    seen_paths: set[str] = set()
+    for item in fixtures:
+        if not isinstance(item, dict) or set(item) != {"revision", "path", "url", "sha256"}:
+            raise ValueError("protocol fixture entry fields do not match the release contract")
+        revision = item.get("revision")
+        raw_path = item.get("path")
+        if not isinstance(revision, str) or not isinstance(raw_path, str):
+            raise ValueError("protocol fixture revision and path must be strings")
+        if revision in seen_revisions or raw_path in seen_paths:
+            raise ValueError("protocol fixture revisions and paths must be unique")
+        seen_revisions.add(revision)
+        seen_paths.add(raw_path)
+        if (
+            PurePosixPath(raw_path).is_absolute()
+            or PureWindowsPath(raw_path).is_absolute()
+            or ".." in PurePosixPath(raw_path).parts
+            or ".." in PureWindowsPath(raw_path).parts
+        ):
+            raise ValueError("protocol fixture path must be confined and relative")
+        expected_path = PROTOCOL_FIXTURE_PATHS.get(revision)
+        expected_hash = PROTOCOL_FIXTURE_SHA256.get(revision)
+        expected_url = PROTOCOL_FIXTURE_URLS.get(revision)
+        if expected_path is None or raw_path != expected_path.as_posix():
+            raise ValueError("protocol fixture revision path does not match the release pin")
+        if item.get("url") != expected_url or item.get("sha256") != expected_hash:
+            raise ValueError("protocol fixture URL or SHA-256 does not match the release pin")
+        candidate = fixture_root / expected_path
+        try:
+            resolved_candidate = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("protocol fixture schema file is missing") from exc
+        if not resolved_candidate.is_relative_to(resolved_root):
+            raise ValueError("protocol fixture schema resolves outside the fixture root")
+        if candidate.is_symlink() or not candidate.is_file():
+            raise ValueError("protocol fixture schema must be a regular non-symlink file")
+        if sha256_file(candidate) != expected_hash:
+            raise ValueError("protocol fixture schema content does not match the pinned SHA-256")
+    if seen_revisions != set(PROTOCOL_FIXTURE_SHA256):
+        raise ValueError("protocol fixture revisions do not match the exact release pin")
+
+    return (*PROTOCOL_FIXTURE_SUPPORT_FILES, *PROTOCOL_FIXTURE_PATHS.values())
 
 
 def run_command(
@@ -931,20 +1038,10 @@ def _record_protocol_fixture_provenance(
     """Verify and record the pinned normative schema commit and five hashes."""
 
     started = time.perf_counter()
-    manifest_path = paths.repo_root / PROTOCOL_FIXTURE_ROOT / "manifest.json"
+    fixture_root = paths.repo_root / PROTOCOL_FIXTURE_ROOT
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        commit = manifest["upstream"]["commit"]
-        fixtures = manifest["fixtures"]
-        declared = {item["revision"]: item["sha256"] for item in fixtures}
-        actual = {
-            item["revision"]: sha256_file(paths.repo_root / PROTOCOL_FIXTURE_ROOT / item["path"]) for item in fixtures
-        }
-        if commit != PROTOCOL_FIXTURE_COMMIT:
-            raise ValueError("normative fixture commit does not match the release pin")
-        if declared != PROTOCOL_FIXTURE_SHA256 or actual != PROTOCOL_FIXTURE_SHA256:
-            raise ValueError("normative fixture SHA-256 values do not match the release pin")
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        _validated_protocol_fixture_files(fixture_root)
+    except (OSError, TypeError, ValueError) as exc:
         recorder.record(
             phase="artifact_gate",
             name="normative_fixture_provenance",
@@ -1066,10 +1163,16 @@ def _prepare_installed_protocol_test_tree(
         shutil.copy2(paths.repo_root / relative_path, target)
         installed_suites.append(target)
 
-    shutil.copytree(
-        paths.repo_root / PROTOCOL_FIXTURE_ROOT,
-        test_dir / "fixtures" / "mcp_protocol",
-    )
+    fixture_source = paths.repo_root / PROTOCOL_FIXTURE_ROOT
+    fixture_target = test_dir / "fixtures" / "mcp_protocol"
+    for relative_path in _validated_protocol_fixture_files(fixture_source):
+        target = fixture_target / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(
+            fixture_source / relative_path,
+            target,
+            follow_symlinks=False,
+        )
     shutil.copy2(
         paths.package_project / "pytest-artifact-gate.ini",
         test_root / "pytest-artifact-gate.ini",
@@ -1079,6 +1182,10 @@ def _prepare_installed_protocol_test_tree(
     shutil.copy2(
         paths.repo_root / ".github" / "workflows" / "mcp-unified-rc.yml",
         workflow_target,
+    )
+    shutil.copy2(
+        paths.repo_root / ".github" / "license-first-paths.json",
+        test_root / ".github" / "license-first-paths.json",
     )
     return test_root, tuple(installed_suites)
 

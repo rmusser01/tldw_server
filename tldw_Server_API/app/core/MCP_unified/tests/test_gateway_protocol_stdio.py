@@ -764,6 +764,45 @@ def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> No
     )
 
 
+def test_rc_workflow_and_license_admission_route_every_release_input() -> None:
+    """No installed suite, fixture, or release helper change may bypass the RC."""
+
+    workflow = yaml.load(
+        (_REPO_ROOT / ".github/workflows/mcp-unified-rc.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    routes = json.loads(
+        (_REPO_ROOT / ".github/license-first-paths.json").read_text(encoding="utf-8")
+    )
+    required_paths = [
+        "apps/mcp-unified/**",
+        "Makefile",
+        "Helper_Scripts/mcp_unified_rc.py",
+        "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py",
+        ".github/tests/test_mcp_unified_artifact_gate.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_validation.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_projection.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/mcp_unified_artifact_test_utils.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/fixtures/mcp_protocol/**",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py",
+        "tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py",
+        ".github/workflows/mcp-unified-publish.yml",
+        ".github/license-first-paths.json",
+        ".github/workflows/mcp-unified-rc.yml",
+    ]
+
+    workflow_paths = workflow["on"]["pull_request"]["paths"]
+    admission = routes["mcp-unified-rc.yml"]
+    assert workflow_paths == required_paths
+    assert admission == {"mode": "paths", "patterns": required_paths}
+
+
 def _pipe_files() -> tuple[Any, Any, list[int]]:
     input_read_fd, input_write_fd = os.pipe()
     output_read_fd, output_write_fd = os.pipe()

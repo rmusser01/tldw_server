@@ -11,12 +11,20 @@ on:
       - Helper_Scripts/mcp_unified_rc.py
       - Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py
       - .github/tests/test_mcp_unified_artifact_gate.py
-      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py
-      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_validation.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_projection.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+      - tldw_Server_API/app/core/MCP_unified/tests/mcp_unified_artifact_test_utils.py
+      - tldw_Server_API/app/core/MCP_unified/tests/fixtures/mcp_protocol/**
       - tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py
+      - .github/workflows/mcp-unified-publish.yml
+      - .github/license-first-paths.json
       - .github/workflows/mcp-unified-rc.yml
   workflow_run:
     workflows: [Frontend License Gate Audit]

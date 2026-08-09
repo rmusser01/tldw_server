@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import importlib.util
+import json
 import os
+import runpy
+import shutil
 import subprocess
 import sys
 import venv
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 import pytest
@@ -33,24 +34,11 @@ FIXTURE_SHA256 = {
     "2025-03-26": "e720669548c8100a4282c49e580efd6ddf7f28899ea786fc8db251dbdb356131",
     "2024-11-05": "61cea2392d4f284092d09bc84b9ac488c0d5618ac2b38a56942fc5b99fd960ce",
 }
+FIXTURE_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "MCP_unified" / "tests" / "fixtures" / "mcp_protocol"
+_ARTIFACT_UTILS = runpy.run_path(str(Path(__file__).with_name("mcp_unified_artifact_test_utils.py")))
+_assert_strict_consumer_output = _ARTIFACT_UTILS["assert_strict_consumer_output"]
+_build_standalone_distributions = _ARTIFACT_UTILS["build_standalone_distributions"]
 
-
-def _load_boundary_tests() -> ModuleType:
-    """Load the neighboring artifact build helper without package imports."""
-
-    path = Path(__file__).with_name("test_runtime_package_boundary.py")
-    spec = importlib.util.spec_from_file_location(
-        "_mcp_unified_artifact_consumer_boundary",
-        path,
-    )
-    assert spec is not None and spec.loader is not None  # nosec B101
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_build_standalone_distributions = _load_boundary_tests()._build_standalone_distributions
 
 _DOWNSTREAM_CONSUMER = r"""
 from __future__ import annotations
@@ -413,6 +401,7 @@ def test_installed_artifact_supports_strict_downstream_consumer(
     result = _run_checked([str(python), str(script)], cwd=work_dir, env=env)
 
     assert result.stdout == f"{SUCCESS_MARKER}\n"  # nosec B101
+    assert result.stderr == ""  # nosec B101
 
 
 def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
@@ -501,3 +490,249 @@ def test_rc_artifact_gate_requires_installed_protocol_suites_and_provenance(
         if any(str(argument).endswith("test_gateway_protocol_artifact_consumer.py") for argument in call["command"])
     ]
     assert len(consumer_calls) == 1
+
+
+def test_strict_consumer_output_rejects_noisy_stderr() -> None:
+    """A successful process with stderr noise must not satisfy the consumer gate."""
+
+    noisy = subprocess.CompletedProcess(
+        args=["downstream_consumer.py"],
+        returncode=0,
+        stdout=f"{SUCCESS_MARKER}\n",
+        stderr="unexpected diagnostic\n",
+    )
+    with pytest.raises(AssertionError):
+        _assert_strict_consumer_output(noisy, SUCCESS_MARKER)
+
+
+@pytest.mark.parametrize(
+    "sensitive",
+    [
+        "/Library/Application Support/mcp-unified/config.json",
+        "/root/.config/mcp-unified/token",
+        "/mnt/release/mcp_unified-0.2.0.whl",
+        r"C:\Users\release\mcp-unified\evidence.json",
+        "D:/release/mcp-unified/evidence.json",
+        r"\\build-server\private\mcp-unified\evidence.json",
+    ],
+)
+def test_evidence_text_redacts_all_local_absolute_path_families(
+    sensitive: str,
+    tmp_path: Path,
+) -> None:
+    """Persisted evidence must not expose POSIX, drive, or UNC local paths."""
+
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path / "evidence",
+        package_name="mcp-unified",
+        package_version="0.2.0",
+        package_status="public-alpha",
+        publishing_status="published",
+        commit="review",
+        source_path="apps/mcp-unified",
+        layout="src",
+        repo_root=REPO_ROOT,
+    )
+
+    redacted = mcp_unified_rc._redact_evidence_text(f"path={sensitive}", recorder)
+
+    assert sensitive not in redacted
+    assert "<redacted-path>" in redacted
+
+
+def test_evidence_text_redacts_uri_userinfo_without_corrupting_public_urls_or_relative_paths(
+    tmp_path: Path,
+) -> None:
+    """URL credentials are private, while public URLs and safe relative paths remain useful."""
+
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path / "evidence",
+        package_name="mcp-unified",
+        package_version="0.2.0",
+        package_status="public-alpha",
+        publishing_status="published",
+        commit="review",
+        source_path="apps/mcp-unified",
+        layout="src",
+        repo_root=REPO_ROOT,
+    )
+    credential_url = "https://release-user:release-password@example.test/simple"
+    public_url = (
+        "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/"
+        f"{FIXTURE_COMMIT}/schema/2026-07-28/schema.json"
+    )
+    safe_relative = "apps/mcp-unified/README.md"
+
+    redacted = mcp_unified_rc._redact_evidence_text(credential_url, recorder)
+
+    assert "release-user" not in redacted
+    assert "release-password" not in redacted
+    assert redacted == "https://[redacted]@example.test/simple"
+    assert mcp_unified_rc._redact_evidence_text(public_url, recorder) == public_url
+    assert mcp_unified_rc._redact_evidence_text(safe_relative, recorder) == safe_relative
+
+
+def test_recorder_recursively_sanitizes_complete_final_payload(tmp_path: Path) -> None:
+    """Late-added nested evidence fields cannot bypass confidentiality redaction."""
+
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path / "evidence",
+        package_name="mcp-unified",
+        package_version="0.2.0",
+        package_status="public-alpha",
+        publishing_status="published",
+        commit="/root/private/commit",
+        source_path="apps/mcp-unified",
+        layout="src",
+        package_metadata={
+            "nested": [
+                {"path": "/Library/Application Support/private.json"},
+                (r"C:\Users\release\private.txt", None, True, 7, 2.5),
+            ],
+            "public_schema": "https://example.test/schema/2026-07-28/schema.json",
+        },
+        known_limitations=["inspect /mnt/private/log and token=top-secret"],
+        repo_root=REPO_ROOT,
+    )
+    recorder.results.append(
+        {
+            "phase": "artifact_gate",
+            "name": "nested_command",
+            "status": "passed",
+            "duration_ms": 0,
+            "required": True,
+            "details": {
+                "command": ["tool", "--output", "/root/private/result.json"],
+                "uri": "https://user:password@example.test/upload",
+                "tuple": ("/mnt/private/value", {7: r"\\server\share\secret"}),
+            },
+        }
+    )
+
+    json_path, markdown_path = recorder.write()
+    json_text = json_path.read_text(encoding="utf-8")
+    markdown_text = markdown_path.read_text(encoding="utf-8")
+    combined = f"{json_text}\n{markdown_text}"
+
+    for forbidden in (
+        "/Library/",
+        "/root/",
+        "/mnt/",
+        "C:\\Users\\",
+        r"\\server\share",
+        "top-secret",
+        "user:password",
+    ):
+        assert forbidden not in combined
+    assert "apps/mcp-unified" in combined
+    assert "https://example.test/schema/2026-07-28/schema.json" in combined
+    payload = json.loads(json_text)
+    assert payload["package"]["metadata"]["nested"][1][1:] == [None, True, 7, 2.5]
+
+
+def _copied_fixture_tree(tmp_path: Path) -> Path:
+    target = tmp_path / "mcp_protocol"
+    shutil.copytree(FIXTURE_ROOT, target)
+    return target
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "traversal",
+        "absolute_posix",
+        "absolute_windows",
+        "duplicate",
+        "missing_manifest_entry",
+        "extra_manifest_entry",
+        "wrong_revision",
+        "wrong_name",
+        "wrong_hash",
+        "missing_tree_member",
+        "extra_tree_member",
+        "symlink",
+    ],
+)
+def test_protocol_fixture_confinement_rejects_noncanonical_trees(
+    case: str,
+    tmp_path: Path,
+) -> None:
+    """Only the exact pinned five-schema fixture tree may enter RC temp trees."""
+
+    fixture_root = _copied_fixture_tree(tmp_path)
+    manifest_path = fixture_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    fixtures = manifest["fixtures"]
+    first_path = fixture_root / fixtures[0]["path"]
+
+    if case == "traversal":
+        fixtures[0]["path"] = "../schema.json"
+    elif case == "absolute_posix":
+        fixtures[0]["path"] = "/tmp/schema.json"
+    elif case == "absolute_windows":
+        fixtures[0]["path"] = r"C:\private\schema.json"
+    elif case == "duplicate":
+        fixtures[1] = dict(fixtures[0])
+    elif case == "missing_manifest_entry":
+        fixtures.pop()
+    elif case == "extra_manifest_entry":
+        fixtures.append(dict(fixtures[0]))
+    elif case == "wrong_revision":
+        fixtures[0]["revision"] = "2099-01-01"
+    elif case == "wrong_name":
+        fixtures[0]["path"] = "2026-07-28/not-schema.json"
+    elif case == "wrong_hash":
+        fixtures[0]["sha256"] = "0" * 64
+    elif case == "missing_tree_member":
+        first_path.unlink()
+    elif case == "extra_tree_member":
+        (fixture_root / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+    elif case == "symlink":
+        first_path.unlink()
+        first_path.symlink_to(fixture_root / fixtures[1]["path"])
+    if case not in {"missing_tree_member", "extra_tree_member", "symlink"}:
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        mcp_unified_rc._validated_protocol_fixture_files(fixture_root)
+
+
+def test_protocol_fixture_confinement_accepts_and_copies_only_exact_tree(tmp_path: Path) -> None:
+    """Validated fixture copying preserves only manifest, notice, and five schemas."""
+
+    validated = mcp_unified_rc._validated_protocol_fixture_files(FIXTURE_ROOT)
+    assert {path.as_posix() for path in validated} == {
+        "manifest.json",
+        "NOTICE.md",
+        *(f"{revision}/schema.json" for revision in FIXTURE_SHA256),
+    }
+    paths = mcp_unified_rc.RcPaths(
+        repo_root=REPO_ROOT,
+        package_project=REPO_ROOT / "apps" / "mcp-unified",
+        package_src=REPO_ROOT / "apps" / "mcp-unified" / "src" / "mcp_unified",
+        evidence_dir=tmp_path / "evidence",
+        dist_dir=tmp_path / "dist",
+    )
+
+    test_root, _ = mcp_unified_rc._prepare_installed_protocol_test_tree(paths, tmp_path / "copy")
+    copied_root = test_root / "tldw_Server_API" / "app" / "core" / "MCP_unified" / "tests" / "fixtures" / "mcp_protocol"
+    copied_files = {path.relative_to(copied_root).as_posix() for path in copied_root.rglob("*") if path.is_file()}
+
+    assert copied_files == {path.as_posix() for path in validated}
+    assert (test_root / ".github" / "license-first-paths.json").is_file()
+    for revision, expected_hash in FIXTURE_SHA256.items():
+        assert mcp_unified_rc.sha256_file(copied_root / revision / "schema.json") == expected_hash
+
+
+def test_artifact_build_utility_import_has_no_package_or_path_side_effects() -> None:
+    """The shared build helper must remain independent from package imports."""
+
+    sentinel = object()
+    previous_package = sys.modules.get("mcp_unified", sentinel)
+    previous_path = list(sys.path)
+
+    namespace = runpy.run_path(str(Path(__file__).with_name("mcp_unified_artifact_test_utils.py")))
+
+    assert callable(namespace["build_standalone_distributions"])
+    assert sys.path == previous_path
+    assert sys.modules.get("mcp_unified", sentinel) is previous_package
