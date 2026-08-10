@@ -275,12 +275,70 @@ def build_workspace_source_saved_view_rls_sql() -> list[str]:
     ]
 
 
+def build_web_clipper_rls_sql() -> list[str]:
+    """Owner policies for shared PostgreSQL Web Clipper sidecars."""
+
+    document_owner = """
+        client_id = current_setting('app.current_user_id', true)
+        AND EXISTS (
+          SELECT 1 FROM notes AS note
+          WHERE note.id = note_clipper_documents.note_id
+            AND note.client_id = current_setting('app.current_user_id', true)
+        )
+    """.strip()
+    placement_owner = """
+        client_id = current_setting('app.current_user_id', true)
+        AND EXISTS (
+          SELECT 1 FROM note_clipper_documents AS document
+          WHERE document.client_id = note_clipper_workspace_placements.client_id
+            AND document.clip_id = note_clipper_workspace_placements.clip_id
+            AND document.note_id = note_clipper_workspace_placements.source_note_id
+        )
+        AND EXISTS (
+          SELECT 1 FROM workspaces AS workspace
+          WHERE workspace.id = note_clipper_workspace_placements.workspace_id
+            AND workspace.client_id = current_setting('app.current_user_id', true)
+        )
+        AND EXISTS (
+          SELECT 1 FROM notes AS note
+          WHERE note.id = note_clipper_workspace_placements.source_note_id
+            AND note.client_id = current_setting('app.current_user_id', true)
+        )
+    """.strip()
+    return [
+        "ALTER TABLE IF EXISTS note_clipper_documents ENABLE ROW LEVEL SECURITY;",
+        "ALTER TABLE IF EXISTS note_clipper_documents FORCE ROW LEVEL SECURITY;",
+        "DROP POLICY IF EXISTS note_clipper_documents_tenant_isolation ON note_clipper_documents;",
+        "CREATE POLICY note_clipper_documents_tenant_isolation ON "
+        f"note_clipper_documents USING ({document_owner}) WITH CHECK ({document_owner});",
+        "ALTER TABLE IF EXISTS note_clipper_workspace_placements ENABLE ROW LEVEL SECURITY;",
+        "ALTER TABLE IF EXISTS note_clipper_workspace_placements FORCE ROW LEVEL SECURITY;",
+        "DROP POLICY IF EXISTS note_clipper_workspace_placements_tenant_isolation "
+        "ON note_clipper_workspace_placements;",
+        "CREATE POLICY note_clipper_workspace_placements_tenant_isolation ON "
+        "note_clipper_workspace_placements "
+        f"USING ({placement_owner}) WITH CHECK ({placement_owner});",
+    ]
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
 
     def add(sql: str) -> None:
         stmts.append(sql.strip())
+
+    def add_tenant_policy(table: str, predicate: str) -> None:
+        add(f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY;")
+        add(f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY;")
+        add(f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table};")
+        add(
+            f"""
+            CREATE POLICY {table}_tenant_isolation ON {table}
+              USING ({predicate})
+              WITH CHECK ({predicate});
+            """
+        )
 
     # Notes
     add("ALTER TABLE IF EXISTS notes ENABLE ROW LEVEL SECURITY;")
@@ -292,6 +350,122 @@ def build_chacha_rls_sql() -> list[str]:
           USING (client_id = current_setting('app.current_user_id', true));
         """
     )
+
+    for table in ("chacha_keywords", "keyword_collections", "note_folders"):
+        add_tenant_policy(
+            table,
+            "client_id = current_setting('app.current_user_id', true)",
+        )
+
+    add_tenant_policy(
+        "note_keywords",
+        """
+        EXISTS (
+          SELECT 1 FROM notes note
+          WHERE note.id = note_keywords.note_id
+            AND note.client_id = current_setting('app.current_user_id', true)
+        )
+        AND EXISTS (
+          SELECT 1 FROM chacha_keywords keyword
+          WHERE keyword.id = note_keywords.keyword_id
+            AND keyword.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
+    )
+    add_tenant_policy(
+        "conversation_keywords",
+        """
+        EXISTS (
+          SELECT 1 FROM conversations conversation
+          WHERE conversation.id = conversation_keywords.conversation_id
+            AND conversation.client_id = current_setting('app.current_user_id', true)
+        )
+        AND EXISTS (
+          SELECT 1 FROM chacha_keywords keyword
+          WHERE keyword.id = conversation_keywords.keyword_id
+            AND keyword.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
+    )
+    add_tenant_policy(
+        "collection_keywords",
+        """
+        EXISTS (
+          SELECT 1 FROM keyword_collections collection
+          WHERE collection.id = collection_keywords.collection_id
+            AND collection.client_id = current_setting('app.current_user_id', true)
+        )
+        AND EXISTS (
+          SELECT 1 FROM chacha_keywords keyword
+          WHERE keyword.id = collection_keywords.keyword_id
+            AND keyword.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
+    )
+    folder_endpoint_tables = (
+        "note_folder_memberships",
+        "note_folder_source_memberships",
+        "note_folder_sync_suppressions",
+    )
+    folder_endpoint_predicates = (
+        """
+        EXISTS (
+          SELECT 1 FROM notes note
+          WHERE note.id = note_folder_memberships.note_id
+            AND note.client_id = current_setting('app.current_user_id', true)
+        )
+        AND EXISTS (
+          SELECT 1 FROM note_folders folder
+          WHERE folder.id = note_folder_memberships.folder_id
+            AND folder.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
+        """
+        EXISTS (
+          SELECT 1 FROM notes note
+          WHERE note.id = note_folder_source_memberships.note_id
+            AND note.client_id = current_setting('app.current_user_id', true)
+        )
+        AND EXISTS (
+          SELECT 1 FROM note_folders folder
+          WHERE folder.id = note_folder_source_memberships.folder_id
+            AND folder.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
+        """
+        EXISTS (
+          SELECT 1 FROM notes note
+          WHERE note.id = note_folder_sync_suppressions.note_id
+            AND note.client_id = current_setting('app.current_user_id', true)
+        )
+        AND EXISTS (
+          SELECT 1 FROM note_folders folder
+          WHERE folder.id = note_folder_sync_suppressions.folder_id
+            AND folder.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
+    )
+    for table, predicate in zip(
+        folder_endpoint_tables,
+        folder_endpoint_predicates,
+        strict=True,
+    ):
+        add_tenant_policy(
+            table,
+            predicate,
+        )
+    add_tenant_policy(
+        "note_folder_source_keys",
+        """
+        EXISTS (
+          SELECT 1 FROM note_folders folder
+          WHERE folder.id = note_folder_source_keys.folder_id
+            AND folder.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
+    )
+
+    stmts.extend(build_web_clipper_rls_sql())
 
     # Character cards
     add("ALTER TABLE IF EXISTS character_cards ENABLE ROW LEVEL SECURITY;")

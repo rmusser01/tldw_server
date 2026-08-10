@@ -37,7 +37,7 @@ EncryptionPolicy = Literal[
 SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
 SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
-SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
+SyncApplyStatus = Literal["pending", "applied", "failed", "conflict", "superseded"]
 SyncBlobAvailabilityStatus = Literal[
     "metadata_only",
     "uploading",
@@ -157,6 +157,9 @@ STRICT_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "client_private_v1",
 ]
 CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE = "sync_server_frontend_client_private_disabled"
+SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION = (
+    "sync_rebase_required_after_conflict_resolution"
+)
 CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE = (
     "Server-front-end mutation is disabled for client_private_v1 datasets "
     "because opaque fields cannot be inspected or re-encrypted by the server."
@@ -184,6 +187,31 @@ SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
 def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     """Return client-discoverable payload contracts for versioned Sync domains."""
 
+    keyword_link_schema = {
+        "required": ["subject_type", "subject_id", "keyword_sync_id"],
+        "properties": {
+            "subject_type": {"enum": ["note", "conversation"]},
+            "subject_id": {"type": "string"},
+            "keyword_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
+    collection_link_schema = {
+        "required": ["collection_sync_id", "keyword_sync_id"],
+        "properties": {
+            "collection_sync_id": {"type": "string"},
+            "keyword_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
+    folder_link_schema = {
+        "required": ["note_id", "folder_sync_id"],
+        "properties": {
+            "note_id": {"type": "string"},
+            "folder_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
     return {
         "notes.note": {
             "schema_version": 1,
@@ -218,16 +246,8 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "notes.keyword_link": {
             "schema_version": 1,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
-            "upsert": {
-                "required": ["subject_type", "subject_id", "keyword_sync_id"],
-                "properties": {
-                    "subject_type": {"enum": ["note", "conversation"]},
-                    "subject_id": {"type": "string"},
-                    "keyword_sync_id": {"type": "string"},
-                },
-                "additional_properties": False,
-            },
-            "tombstone": {"operation": "tombstone"},
+            "upsert": keyword_link_schema,
+            "tombstone": keyword_link_schema,
         },
         "notes.keyword_collection": {
             "schema_version": 1,
@@ -245,15 +265,8 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "notes.keyword_collection_link": {
             "schema_version": 1,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
-            "upsert": {
-                "required": ["collection_sync_id", "keyword_sync_id"],
-                "properties": {
-                    "collection_sync_id": {"type": "string"},
-                    "keyword_sync_id": {"type": "string"},
-                },
-                "additional_properties": False,
-            },
-            "tombstone": {"operation": "tombstone"},
+            "upsert": collection_link_schema,
+            "tombstone": collection_link_schema,
         },
         "notes.folder": {
             "schema_version": 1,
@@ -271,15 +284,8 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "notes.folder_link": {
             "schema_version": 1,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
-            "upsert": {
-                "required": ["note_id", "folder_sync_id"],
-                "properties": {
-                    "note_id": {"type": "string"},
-                    "folder_sync_id": {"type": "string"},
-                },
-                "additional_properties": False,
-            },
-            "tombstone": {"operation": "tombstone"},
+            "upsert": folder_link_schema,
+            "tombstone": folder_link_schema,
         },
     }
 

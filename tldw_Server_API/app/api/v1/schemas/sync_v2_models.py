@@ -43,7 +43,7 @@ SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
 SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
-SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
+SyncApplyStatus = Literal["pending", "applied", "failed", "conflict", "superseded"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
 SyncRestoreOrderedActionKind = Literal["apply", "tombstone", "noop", "conflict"]
@@ -1334,6 +1334,15 @@ class SyncV2Envelope(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class SyncV2EnvelopeResponse(SyncV2Envelope):
+    """Server envelope fields returned by pull but never accepted from push."""
+
+    mutation_group_id: str | None = None
+    mutation_step: int | None = Field(None, ge=0)
+    mutation_step_count: int | None = Field(None, ge=1)
+    mutation_plan_hash: str | None = None
+
+
 class SyncPushOptions(BaseModel):
     """Client push behavior flags from the locked Sync v2 M1 contract."""
 
@@ -1429,7 +1438,7 @@ class SyncPullResponse(BaseModel):
     """Stable cursor-ordered envelopes returned by pull."""
 
     dataset_id: str
-    envelopes: list[SyncV2Envelope] = Field(default_factory=list)
+    envelopes: list[SyncV2EnvelopeResponse] = Field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
 
@@ -1843,6 +1852,7 @@ __all__ = [
     "SyncRestoreCompletenessStatus",
     "SyncRestoreDomainCompleteness",
     "SyncV2Envelope",
+    "SyncV2EnvelopeResponse",
     "WORKSPACE_SYNC_DOMAINS",
     "WORKSPACE_SYNC_OPERATIONS",
 ]

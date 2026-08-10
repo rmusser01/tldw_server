@@ -73,6 +73,10 @@ class NotesOrganizationSyncStore:
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
 
+    @property
+    def _owner_id(self) -> str:
+        return str(self._db.client_id)
+
     def _deleted_value(self, deleted: bool) -> bool | int:
         if self._db.backend_type == BackendType.POSTGRESQL:
             return deleted
@@ -111,11 +115,12 @@ class NotesOrganizationSyncStore:
         if parent_id is not None and domain in {"notes.keyword_collection", "notes.folder"}:
             table, _ = self._table(domain)
             parent = conn.execute(
-                f"SELECT sync_id FROM {table} WHERE id = ?",  # nosec B608
-                (int(parent_id),),
+                f"SELECT sync_id FROM {table} WHERE id = ? AND client_id = ?",  # nosec B608
+                (int(parent_id), self._owner_id),
             ).fetchone()
-            if parent:
-                parent_sync_id = str(parent["sync_id"])
+            if not parent:
+                raise InputError("Organization parent chain is invalid")
+            parent_sync_id = str(parent["sync_id"])
         _, name_column = self._table(domain)
         return OrganizationResource(
             domain=domain,
@@ -135,8 +140,8 @@ class NotesOrganizationSyncStore:
     ) -> OrganizationResource | None:
         table, _ = self._table(domain)
         row = conn.execute(
-            f"SELECT * FROM {table} WHERE sync_id = ?",  # nosec B608
-            (sync_id,),
+            f"SELECT * FROM {table} WHERE sync_id = ? AND client_id = ?",  # nosec B608
+            (sync_id, self._owner_id),
         ).fetchone()
         return self._resource_from_row(conn, domain, row) if row else None
 
@@ -158,7 +163,10 @@ class NotesOrganizationSyncStore:
         with self._db.transaction() as conn:
             for domain in cast(tuple[SyncDomain, ...], tuple(_RESOURCE_TABLES)):
                 table, _ = self._table(domain)
-                rows = conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()  # nosec B608
+                rows = conn.execute(
+                    f"SELECT * FROM {table} WHERE client_id = ? ORDER BY id",  # nosec B608
+                    (self._owner_id,),
+                ).fetchall()
                 resources.extend(self._resource_from_row(conn, domain, row) for row in rows)
 
             keyword_table = self._db._map_table_for_backend("keywords")
@@ -166,9 +174,13 @@ class NotesOrganizationSyncStore:
                 ("note", "note_keywords", "note_id"),
                 ("conversation", "conversation_keywords", "conversation_id"),
             ):
+                subject_table = "notes" if subject_type == "note" else "conversations"
                 rows = conn.execute(
                     f"SELECT l.{subject_column} AS subject_id, k.sync_id AS keyword_sync_id "  # nosec B608
-                    f"FROM {link_table} l JOIN {keyword_table} k ON k.id = l.keyword_id"
+                    f"FROM {link_table} l JOIN {keyword_table} k ON k.id = l.keyword_id "
+                    f"JOIN {subject_table} subject ON subject.id = l.{subject_column} "
+                    "WHERE k.client_id = ? AND subject.client_id = ?",
+                    (self._owner_id, self._owner_id),
                 ).fetchall()
                 for row in rows:
                     payload = {
@@ -188,7 +200,9 @@ class NotesOrganizationSyncStore:
                 f"SELECT c.sync_id AS collection_sync_id, k.sync_id AS keyword_sync_id "  # nosec B608
                 "FROM collection_keywords l "
                 "JOIN keyword_collections c ON c.id = l.collection_id "
-                f"JOIN {keyword_table} k ON k.id = l.keyword_id"  # nosec B608
+                f"JOIN {keyword_table} k ON k.id = l.keyword_id "  # nosec B608
+                "WHERE c.client_id = ? AND k.client_id = ?",
+                (self._owner_id, self._owner_id),
             ).fetchall()
             for row in collection_rows:
                 payload = {
@@ -209,10 +223,12 @@ class NotesOrganizationSyncStore:
                 "SELECT note_id, folder_id FROM note_folder_memberships "
                 "UNION SELECT note_id, folder_id FROM note_folder_source_memberships"
                 ") memberships JOIN note_folders f ON f.id = memberships.folder_id "
-                "WHERE NOT EXISTS ("
+                "JOIN notes note ON note.id = memberships.note_id "
+                "WHERE f.client_id = ? AND note.client_id = ? AND NOT EXISTS ("
                 "SELECT 1 FROM note_folder_sync_suppressions suppression "
                 "WHERE suppression.note_id = memberships.note_id "
-                "AND suppression.folder_id = memberships.folder_id)"
+                "AND suppression.folder_id = memberships.folder_id)",
+                (self._owner_id, self._owner_id),
             ).fetchall()
             for row in folder_rows:
                 payload = {
@@ -233,6 +249,87 @@ class NotesOrganizationSyncStore:
             ),
         )
 
+    def relationship_present(
+        self,
+        *,
+        domain: SyncDomain,
+        object_id: str,
+        payload: Mapping[str, object],
+    ) -> bool:
+        """Return whether one canonical relationship is effectively present."""
+
+        normalized = self._validated_payload(domain, "upsert", object_id, payload)
+        keyword_table = self._db._map_table_for_backend("keywords")
+        owner_id = self._owner_id
+        with self._db.transaction() as conn:
+            if domain == "notes.keyword_link":
+                subject_type = str(normalized["subject_type"])
+                link_table = (
+                    "note_keywords"
+                    if subject_type == "note"
+                    else "conversation_keywords"
+                )
+                subject_table = "notes" if subject_type == "note" else "conversations"
+                subject_column = (
+                    "note_id" if subject_type == "note" else "conversation_id"
+                )
+                query = (
+                    f"SELECT 1 FROM {link_table} link "  # nosec B608
+                    f"JOIN {keyword_table} keyword ON keyword.id = link.keyword_id "
+                    f"JOIN {subject_table} subject ON subject.id = link.{subject_column} "
+                    "WHERE subject.id = ? AND keyword.sync_id = ? "
+                    "AND subject.client_id = ? AND keyword.client_id = ? LIMIT 1"
+                )
+                params = (
+                    str(normalized["subject_id"]),
+                    str(normalized["keyword_sync_id"]),
+                    owner_id,
+                    owner_id,
+                )
+            elif domain == "notes.keyword_collection_link":
+                collection_table, _ = self._table("notes.keyword_collection")
+                query = (
+                    "SELECT 1 FROM collection_keywords link "
+                    f"JOIN {collection_table} collection ON collection.id = link.collection_id "  # nosec B608
+                    f"JOIN {keyword_table} keyword ON keyword.id = link.keyword_id "
+                    "WHERE collection.sync_id = ? AND keyword.sync_id = ? "
+                    "AND collection.client_id = ? AND keyword.client_id = ? LIMIT 1"
+                )
+                params = (
+                    str(normalized["collection_sync_id"]),
+                    str(normalized["keyword_sync_id"]),
+                    owner_id,
+                    owner_id,
+                )
+            elif domain == "notes.folder_link":
+                folder_table, _ = self._table("notes.folder")
+                query = (
+                    f"SELECT 1 FROM {folder_table} folder "  # nosec B608
+                    "JOIN notes note ON note.id = ? "
+                    "WHERE folder.sync_id = ? "
+                    "AND note.client_id = ? AND folder.client_id = ? "
+                    "AND ("
+                    "EXISTS (SELECT 1 FROM note_folder_memberships membership "
+                    "WHERE membership.note_id = note.id AND membership.folder_id = folder.id) "
+                    "OR EXISTS (SELECT 1 FROM note_folder_source_memberships source "
+                    "WHERE source.note_id = note.id AND source.folder_id = folder.id)"
+                    ") AND NOT EXISTS ("
+                    "SELECT 1 FROM note_folder_sync_suppressions suppression "
+                    "WHERE suppression.note_id = note.id AND suppression.folder_id = folder.id"
+                    ") LIMIT 1"
+                )
+                params = (
+                    str(normalized["note_id"]),
+                    str(normalized["folder_sync_id"]),
+                    owner_id,
+                    owner_id,
+                )
+            else:
+                raise InputError(
+                    f"Unsupported organization relationship domain: {domain}"
+                )
+            return conn.execute(query, params).fetchone() is not None
+
     def _validated_parent_id(
         self,
         conn: Any,
@@ -245,15 +342,16 @@ class NotesOrganizationSyncStore:
             return None
         table, _ = self._table(domain)
         parent = conn.execute(
-            f"SELECT id, parent_id, deleted FROM {table} WHERE sync_id = ?",  # nosec B608
-            (str(parent_sync_id),),
+            f"SELECT id, parent_id, deleted FROM {table} "  # nosec B608
+            "WHERE sync_id = ? AND client_id = ?",
+            (str(parent_sync_id), self._owner_id),
         ).fetchone()
         if not parent or bool(parent["deleted"]):
             raise InputError("Organization parent is missing or deleted")
         parent_id = int(parent["id"])
         current = conn.execute(
-            f"SELECT id FROM {table} WHERE sync_id = ?",  # nosec B608
-            (object_id,),
+            f"SELECT id FROM {table} WHERE sync_id = ? AND client_id = ?",  # nosec B608
+            (object_id, self._owner_id),
         ).fetchone()
         current_id = int(current["id"]) if current else None
         if current_id == parent_id:
@@ -266,8 +364,8 @@ class NotesOrganizationSyncStore:
                 raise InputError("Organization parent would create a cycle")
             seen.add(cursor_id)
             ancestor = conn.execute(
-                f"SELECT parent_id FROM {table} WHERE id = ?",  # nosec B608
-                (cursor_id,),
+                f"SELECT parent_id FROM {table} WHERE id = ? AND client_id = ?",  # nosec B608
+                (cursor_id, self._owner_id),
             ).fetchone()
             if not ancestor:
                 raise InputError("Organization parent chain is invalid")
@@ -300,7 +398,8 @@ class NotesOrganizationSyncStore:
         parent_path = ""
         if parent_id is not None:
             parent = conn.execute(
-                "SELECT path FROM note_folders WHERE id = ?", (parent_id,)
+                "SELECT path FROM note_folders WHERE id = ? AND client_id = ?",
+                (parent_id, self._owner_id),
             ).fetchone()
             parent_path = str(parent["path"])
         root_path = f"{parent_path}/{name}" if parent_path else name
@@ -310,8 +409,9 @@ class NotesOrganizationSyncStore:
         now = self._db._get_current_utc_timestamp_iso()
         if existing is None:
             duplicate = conn.execute(
-                "SELECT id FROM note_folders WHERE LOWER(path) = LOWER(?) LIMIT 1",
-                (root_path,),
+                "SELECT id FROM note_folders "
+                "WHERE client_id = ? AND LOWER(path) = LOWER(?) LIMIT 1",
+                (self._owner_id, root_path),
             ).fetchone()
             if duplicate:
                 raise ConflictError("Folder path already exists", entity="note_folders", entity_id=root_path)
@@ -333,7 +433,13 @@ class NotesOrganizationSyncStore:
             )
             return cast(OrganizationResource, self._get_resource_locked(conn, "notes.folder", object_id))
 
-        rows = [dict(row) for row in conn.execute("SELECT * FROM note_folders").fetchall()]
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM note_folders WHERE client_id = ?",
+                (self._owner_id,),
+            ).fetchall()
+        ]
         by_id = {int(row["id"]): row for row in rows}
         children: dict[int, list[int]] = defaultdict(list)
         for row in rows:
@@ -378,12 +484,17 @@ class NotesOrganizationSyncStore:
 
         for folder_id in subtree:
             conn.execute(
-                "UPDATE note_folders SET path = ? WHERE id = ?",
-                (f"__sync_repath__/{by_id[folder_id]['sync_id']}", folder_id),
+                "UPDATE note_folders SET path = ? WHERE id = ? AND client_id = ?",
+                (
+                    f"__sync_repath__/{by_id[folder_id]['sync_id']}",
+                    folder_id,
+                    self._owner_id,
+                ),
             )
         conn.execute(
             "UPDATE note_folders SET name = ?, path = ?, parent_id = ?, deleted = ?, "
-            "last_modified = ?, client_id = ?, version = ? WHERE id = ?",
+            "last_modified = ?, client_id = ?, version = ? "
+            "WHERE id = ? AND client_id = ?",
             (
                 name,
                 paths[existing.local_id],
@@ -393,12 +504,13 @@ class NotesOrganizationSyncStore:
                 self._db.client_id,
                 existing.version + 1,
                 existing.local_id,
+                self._owner_id,
             ),
         )
         for folder_id in subtree[1:]:
             conn.execute(
-                "UPDATE note_folders SET path = ? WHERE id = ?",
-                (paths[folder_id], folder_id),
+                "UPDATE note_folders SET path = ? WHERE id = ? AND client_id = ?",
+                (paths[folder_id], folder_id, self._owner_id),
             )
         return cast(OrganizationResource, self._get_resource_locked(conn, "notes.folder", object_id))
 
@@ -437,13 +549,14 @@ class NotesOrganizationSyncStore:
                     return existing
                 conn.execute(
                     f"UPDATE {table} SET deleted = ?, last_modified = ?, client_id = ?, version = ? "  # nosec B608
-                    "WHERE sync_id = ?",
+                    "WHERE sync_id = ? AND client_id = ?",
                     (
                         self._deleted_value(True),
                         self._db._get_current_utc_timestamp_iso(),
                         self._db.client_id,
                         existing.version + 1,
                         object_id,
+                        self._owner_id,
                     ),
                 )
                 return cast(OrganizationResource, self._get_resource_locked(conn, domain, object_id))
@@ -456,8 +569,8 @@ class NotesOrganizationSyncStore:
             name = str(normalized[name_column]).strip()
             duplicate = conn.execute(
                 f"SELECT id, sync_id FROM {table} WHERE LOWER({name_column}) = LOWER(?) "  # nosec B608
-                "AND sync_id <> ? LIMIT 1",
-                (name, object_id),
+                "AND sync_id <> ? AND client_id = ? LIMIT 1",
+                (name, object_id, self._owner_id),
             ).fetchone()
             if duplicate:
                 raise ConflictError(
@@ -507,10 +620,12 @@ class NotesOrganizationSyncStore:
                         self._db.client_id,
                         existing.version + 1,
                         object_id,
+                        self._owner_id,
                     ]
                 )
                 conn.execute(
-                    f"UPDATE {table} SET {', '.join(set_parts)} WHERE sync_id = ?",  # nosec B608
+                    f"UPDATE {table} SET {', '.join(set_parts)} "  # nosec B608
+                    "WHERE sync_id = ? AND client_id = ?",
                     tuple(values),
                 )
             return cast(OrganizationResource, self._get_resource_locked(conn, domain, object_id))
@@ -525,8 +640,8 @@ class NotesOrganizationSyncStore:
     ) -> Mapping[str, object]:
         table, _ = self._table(domain)
         row = conn.execute(
-            f"SELECT * FROM {table} WHERE sync_id = ?",  # nosec B608
-            (sync_id,),
+            f"SELECT * FROM {table} WHERE sync_id = ? AND client_id = ?",  # nosec B608
+            (sync_id, self._owner_id),
         ).fetchone()
         if not row or (require_active and bool(row["deleted"])):
             raise InputError(f"Referenced {domain} resource is missing or deleted")
@@ -616,21 +731,30 @@ class NotesOrganizationSyncStore:
     ) -> tuple[bool, set[int], bool]:
         manual = bool(
             conn.execute(
-                "SELECT 1 FROM note_folder_memberships "
-                "WHERE note_id = ? AND folder_id = ?",
-                (note_id, folder_id),
+                "SELECT 1 FROM note_folder_memberships membership "
+                "JOIN notes note ON note.id = membership.note_id "
+                "JOIN note_folders folder ON folder.id = membership.folder_id "
+                "WHERE membership.note_id = ? AND membership.folder_id = ? "
+                "AND note.client_id = ? AND folder.client_id = ?",
+                (note_id, folder_id, self._owner_id, self._owner_id),
             ).fetchone()
         )
         source_rows = conn.execute(
-            "SELECT source_id FROM note_folder_source_memberships "
-            "WHERE note_id = ? AND folder_id = ?",
-            (note_id, folder_id),
+            "SELECT membership.source_id FROM note_folder_source_memberships membership "
+            "JOIN notes note ON note.id = membership.note_id "
+            "JOIN note_folders folder ON folder.id = membership.folder_id "
+            "WHERE membership.note_id = ? AND membership.folder_id = ? "
+            "AND note.client_id = ? AND folder.client_id = ?",
+            (note_id, folder_id, self._owner_id, self._owner_id),
         ).fetchall()
         suppressed = bool(
             conn.execute(
-                "SELECT 1 FROM note_folder_sync_suppressions "
-                "WHERE note_id = ? AND folder_id = ?",
-                (note_id, folder_id),
+                "SELECT 1 FROM note_folder_sync_suppressions suppression "
+                "JOIN notes note ON note.id = suppression.note_id "
+                "JOIN note_folders folder ON folder.id = suppression.folder_id "
+                "WHERE suppression.note_id = ? AND suppression.folder_id = ? "
+                "AND note.client_id = ? AND folder.client_id = ?",
+                (note_id, folder_id, self._owner_id, self._owner_id),
             ).fetchone()
         )
         return manual, {int(row["source_id"]) for row in source_rows}, suppressed
@@ -705,7 +829,8 @@ class NotesOrganizationSyncStore:
             require_active=require_active,
         )
         note = conn.execute(
-            "SELECT id, deleted FROM notes WHERE id = ?", (note_id,)
+            "SELECT id, deleted FROM notes WHERE id = ? AND client_id = ?",
+            (note_id, self._owner_id),
         ).fetchone()
         if not note or (require_active and bool(note["deleted"])):
             raise InputError("Referenced folder-link note is missing or deleted")
@@ -817,8 +942,15 @@ class NotesOrganizationSyncStore:
             rows = conn.execute(
                 "SELECT folder.sync_id FROM note_folder_memberships membership "
                 "JOIN note_folders folder ON folder.id = membership.folder_id "
-                "WHERE membership.note_id = ? AND folder.deleted = ?",
-                (note_id, self._deleted_value(False)),
+                "JOIN notes note ON note.id = membership.note_id "
+                "WHERE membership.note_id = ? AND folder.deleted = ? "
+                "AND note.client_id = ? AND folder.client_id = ?",
+                (
+                    note_id,
+                    self._deleted_value(False),
+                    self._owner_id,
+                    self._owner_id,
+                ),
             ).fetchall()
         return {str(row["sync_id"]) for row in rows}
 
@@ -835,19 +967,31 @@ class NotesOrganizationSyncStore:
         if operation == "source_delete":
             conn.execute(
                 "DELETE FROM note_folder_source_memberships "
-                "WHERE note_id = ? AND source_id = ? AND folder_id = ?",
-                (note_id, source_id, folder_id),
+                "WHERE note_id = ? AND source_id = ? AND folder_id = ? "
+                "AND EXISTS (SELECT 1 FROM notes owner_note "
+                "WHERE owner_note.id = note_folder_source_memberships.note_id "
+                "AND owner_note.client_id = ?) "
+                "AND EXISTS (SELECT 1 FROM note_folders owner_folder "
+                "WHERE owner_folder.id = note_folder_source_memberships.folder_id "
+                "AND owner_folder.client_id = ?)",
+                (note_id, source_id, folder_id, self._owner_id, self._owner_id),
             )
             remaining = conn.execute(
-                "SELECT 1 FROM note_folder_source_memberships "
-                "WHERE source_id = ? AND folder_id = ? LIMIT 1",
-                (source_id, folder_id),
+                "SELECT 1 FROM note_folder_source_memberships membership "
+                "JOIN notes note ON note.id = membership.note_id "
+                "JOIN note_folders folder ON folder.id = membership.folder_id "
+                "WHERE membership.source_id = ? AND membership.folder_id = ? "
+                "AND note.client_id = ? AND folder.client_id = ? LIMIT 1",
+                (source_id, folder_id, self._owner_id, self._owner_id),
             ).fetchone()
             if not remaining:
                 conn.execute(
                     "DELETE FROM note_folder_source_keys "
-                    "WHERE source_id = ? AND folder_id = ?",
-                    (source_id, folder_id),
+                    "WHERE source_id = ? AND folder_id = ? "
+                    "AND EXISTS (SELECT 1 FROM note_folders owner_folder "
+                    "WHERE owner_folder.id = note_folder_source_keys.folder_id "
+                    "AND owner_folder.client_id = ?)",
+                    (source_id, folder_id, self._owner_id),
                 )
             return
 
@@ -857,8 +1001,11 @@ class NotesOrganizationSyncStore:
         now = self._db._get_current_utc_timestamp_iso()
         conn.execute(
             "DELETE FROM note_folder_source_keys "
-            "WHERE source_id = ? AND (folder_key = ? OR folder_id = ?)",
-            (source_id, folder_key, folder_id),
+            "WHERE source_id = ? AND (folder_key = ? OR folder_id = ?) "
+            "AND EXISTS (SELECT 1 FROM note_folders owner_folder "
+            "WHERE owner_folder.id = note_folder_source_keys.folder_id "
+            "AND owner_folder.client_id = ?)",
+            (source_id, folder_key, folder_id, self._owner_id),
         )
         conn.execute(
             "INSERT INTO note_folder_source_keys(source_id, folder_key, folder_id, created_at) "
@@ -966,6 +1113,8 @@ class NotesOrganizationSyncStore:
         normalized = self._validated_payload(domain, operation, object_id, payload)
         require_active = operation == "upsert"
         with self._db.transaction() as conn:
+            link_owner_sql = ""
+            link_owner_params: tuple[object, ...] = ()
             if domain == "notes.keyword_link":
                 keyword = self._resource_row_for_relationship(
                     conn,
@@ -977,8 +1126,9 @@ class NotesOrganizationSyncStore:
                 subject_id = str(normalized["subject_id"])
                 subject_table = "notes" if subject_type == "note" else "conversations"
                 subject = conn.execute(
-                    f"SELECT id, deleted FROM {subject_table} WHERE id = ?",  # nosec B608
-                    (subject_id,),
+                    f"SELECT id, deleted FROM {subject_table} "  # nosec B608
+                    "WHERE id = ? AND client_id = ?",
+                    (subject_id, self._owner_id),
                 ).fetchone()
                 if not subject or (require_active and bool(subject["deleted"])):
                     raise InputError("Referenced keyword-link subject is missing or deleted")
@@ -986,6 +1136,16 @@ class NotesOrganizationSyncStore:
                 subject_column = "note_id" if subject_type == "note" else "conversation_id"
                 values = (subject_id, int(keyword["id"]))
                 columns = (subject_column, "keyword_id")
+                keyword_table, _ = self._table("notes.keyword")
+                link_owner_sql = (
+                    f" AND EXISTS (SELECT 1 FROM {subject_table} owner_subject "  # nosec B608
+                    f"WHERE owner_subject.id = {link_table}.{subject_column} "
+                    "AND owner_subject.client_id = ?)"
+                    f" AND EXISTS (SELECT 1 FROM {keyword_table} owner_keyword "
+                    f"WHERE owner_keyword.id = {link_table}.keyword_id "
+                    "AND owner_keyword.client_id = ?)"
+                )
+                link_owner_params = (self._owner_id, self._owner_id)
             elif domain == "notes.keyword_collection_link":
                 collection = self._resource_row_for_relationship(
                     conn,
@@ -1002,6 +1162,17 @@ class NotesOrganizationSyncStore:
                 link_table = "collection_keywords"
                 columns = ("collection_id", "keyword_id")
                 values = (int(collection["id"]), int(keyword["id"]))
+                collection_table, _ = self._table("notes.keyword_collection")
+                keyword_table, _ = self._table("notes.keyword")
+                link_owner_sql = (
+                    f" AND EXISTS (SELECT 1 FROM {collection_table} owner_collection "  # nosec B608
+                    f"WHERE owner_collection.id = {link_table}.collection_id "
+                    "AND owner_collection.client_id = ?)"
+                    f" AND EXISTS (SELECT 1 FROM {keyword_table} owner_keyword "
+                    f"WHERE owner_keyword.id = {link_table}.keyword_id "
+                    "AND owner_keyword.client_id = ?)"
+                )
+                link_owner_params = (self._owner_id, self._owner_id)
             elif domain == "notes.folder_link":
                 note_id = str(normalized["note_id"])
                 _, folder = self._folder_relationship_rows(
@@ -1087,16 +1258,28 @@ class NotesOrganizationSyncStore:
                 if operation == "upsert":
                     conn.execute(
                         "DELETE FROM note_folder_sync_suppressions "
-                        "WHERE note_id = ? AND folder_id = ?",
-                        values,
+                        "WHERE note_id = ? AND folder_id = ? "
+                        "AND EXISTS (SELECT 1 FROM notes owner_note "
+                        "WHERE owner_note.id = note_folder_sync_suppressions.note_id "
+                        "AND owner_note.client_id = ?) "
+                        "AND EXISTS (SELECT 1 FROM note_folders owner_folder "
+                        "WHERE owner_folder.id = note_folder_sync_suppressions.folder_id "
+                        "AND owner_folder.client_id = ?)",
+                        (*values, self._owner_id, self._owner_id),
                     )
                     if origin_provenance is None:
                         self._insert_link(conn, link_table, columns, values)
                 else:
                     conn.execute(
                         "DELETE FROM note_folder_memberships "
-                        "WHERE note_id = ? AND folder_id = ?",
-                        values,
+                        "WHERE note_id = ? AND folder_id = ? "
+                        "AND EXISTS (SELECT 1 FROM notes owner_note "
+                        "WHERE owner_note.id = note_folder_memberships.note_id "
+                        "AND owner_note.client_id = ?) "
+                        "AND EXISTS (SELECT 1 FROM note_folders owner_folder "
+                        "WHERE owner_folder.id = note_folder_memberships.folder_id "
+                        "AND owner_folder.client_id = ?)",
+                        (*values, self._owner_id, self._owner_id),
                     )
                     self._insert_link(
                         conn,
@@ -1126,8 +1309,9 @@ class NotesOrganizationSyncStore:
                 self._insert_link(conn, link_table, columns, values)
             else:
                 conn.execute(
-                    f"DELETE FROM {link_table} WHERE {columns[0]} = ? AND {columns[1]} = ?",  # nosec B608
-                    values,
+                    f"DELETE FROM {link_table} WHERE {columns[0]} = ? "  # nosec B608
+                    f"AND {columns[1]} = ?{link_owner_sql}",
+                    (*values, *link_owner_params),
                 )
             return True
 

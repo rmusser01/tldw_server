@@ -335,6 +335,11 @@ def test_profile_status_reports_profile_and_per_domain_apply_health(tmp_path: Pa
     assert domains["notes.note"].envelope_count == 1
     assert domains["notes.note"].pending_apply_count == 1
     assert domains["notes.note"].failed_apply_count == 0
+    assert domains["notes.note"].repair_status == {
+        "status": "repair_needed",
+        "pending_apply_count": 1,
+        "failed_apply_count": 0,
+    }
     assert domains["notes.note"].last_apply_status == "pending"
     assert domains["notes.note"].last_apply_result["server_cursor"] == note.server_cursor
     assert domains["chat.message"].envelope_count == 1

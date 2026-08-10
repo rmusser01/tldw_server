@@ -4,7 +4,7 @@ title: Synchronize Notes keywords collections and folders
 status: Done
 assignee: []
 created_date: '2026-08-08 20:21'
-updated_date: '2026-08-09 23:23'
+updated_date: '2026-08-10 18:26'
 labels:
   - notes
   - sync-v2
@@ -17,6 +17,7 @@ references:
   - Docs/ADR/032-durable-server-origin-sync-mutation-batches.md
   - >-
     Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md
+  - Docs/ADR/034-web-clipper-external-identity-mapping.md
 documentation:
   - Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md
   - Docs/API/Sync_V2_M1.md
@@ -47,19 +48,19 @@ Add first-class Sync v2 ownership for Notes keywords, keyword links and collecti
 Detailed execution plan: Docs/superpowers/plans/2026-08-08-notes-organization-sync-implementation-plan.md
 
 1. Define the six-domain public contract, strict payload schemas, and deterministic identities.
-2. Migrate ChaChaNotes to schema v55 and add stable resource identities plus a focused projection seam, including canonical folder-link suppression that preserves local source provenance.
+2. Migrate ChaChaNotes and add stable resource identities plus a focused projection seam.
 3. Add atomic mutation-group persistence to the Sync store.
 4. Add batch preflight, durable append, ordered materialization, and resume semantics.
 5. Implement strict organization adapters and conflict policy.
 6. Implement SQLite/PostgreSQL materializers and production factory registration.
 7. Bootstrap existing datasets and isolate legacy-device implicit pulls.
-8. Route direct organization REST mutations through the coordinator.
-9. Make compound note writes, effective folder provenance, and keyword merge lossless.
-10. Integrate restore/repair, update docs, and record focused release evidence.
+8. Route every reachable Notes organization mutation surface through the coordinator.
+9. Make compound note writes, folder provenance, keyword merge, and conflict recovery lossless.
+10. Integrate restore/repair, bound concurrency, complete tenant-safe schema migrations, update docs, and record release evidence.
 
 ADR required: yes
-ADR paths: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md; Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md
-Reason: This task adds durable cross-database mutation groups and a local derived suppression projection so canonical folder-link absence converges without deleting source-ingestion provenance.
+ADR paths: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md; Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md; Docs/ADR/034-web-clipper-external-identity-mapping.md
+Reason: This task defines durable mutation-group concurrency, Notes organization ownership/RLS, folder-source suppression, and the WebClipper external-to-canonical identity boundary.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -150,7 +151,19 @@ Spec Fix Round 5/5 makes the public global ordered_actions plan unambiguous acro
 Code Quality Fix Round 1 makes restore preview fail closed before simulated state advances: a divergent tombstone is a blocking conflict, while a tombstone matching its explicit live base remains executable; stored accepted `apply_status=conflict` envelopes and their complete groups remain visible through the safe `sync_restore_stored_apply_conflict` ordered action instead of falling back to an older head. Client timestamps are normalized to canonical UTC at model, database-row, idempotency, and immutable group-hash boundaries so PostgreSQL-native aware datetimes preserve fingerprints. Restore ordering now uses a bounded indegree topological sort with hard chronology/dependency/group edges and deterministic compatible-live ready priority. Global ceilings are 50,000 preview candidates, 10,000 actions, and 1,000 group members with safe HTTP 413 codes. Repair's `limit` is documented and tested as a complete-unit soft limit, with the 1,000-member group ceiling and a cursor covering every admitted member. Focused RED/GREEN: I1 2 failed then 2 passed; I2 1 failed then 1 passed; I3 2 failed then 2 passed; I4 preview 3 failed then 3 passed and repair 2 failed then 2 passed. Final gates: restore/repair 55 passed; store 66 passed; endpoint selectors 12 passed; service selector 2 passed; capture/batch 48 passed; PostgreSQL contracts 21 passed with 1 optional live-DSN skip; Step 8 89 passed and 74 passed; exact touched Ruff passed; exact touched-production Bandit exited 0 with existing informational `nosec` notices only. `Docs/API/Sync_V2_M1.md` records the public behavior and limits. Compatibility fields, ordered-action privacy, group adjacency, and preview's no-product-mutation guarantee remain unchanged. No new ADR or general lesson was required; ADR-032 and ADR-033 remain governing. Known non-blocking concerns remain the documented broad Ruff legacy baseline and optional live PostgreSQL skip.
 
 Code Quality Fix Round 2 preserves genuine pre-normalization immutable group hashes without weakening any non-timestamp fingerprint field. Validation accepts the canonical hash, the exact SQLite-stored timestamp spelling, and the exact historical UTC `Z` spelling reconstructible from a PostgreSQL-native UTC timestamp; arbitrary non-UTC PostgreSQL lexemes remain unrecoverable after `TIMESTAMPTZ` normalization and are not guessed. One shared 1,000-member constant now rejects oversized atomic appends before writes and bounds group reads to 1,001 rows before model construction, with the existing safe 413 code preserved through restore and repair. Dependency-provider selection pre-sorts live occurrences per identity and uses cursor bisect instead of repeated full scans. Public restore-preview requests cap dataset/domain lists at 100 and selected object/attachment/local-inventory lists at 10,000; duplicate dataset IDs are deduplicated in first-seen order. RED/GREEN: timestamp compatibility 2 failed then 4 passed after the PostgreSQL `Z` regression; group ceiling 2 failed then 2 passed; provider operation count 1 failed then 1 passed; schema/dedup 6 failed then 6 passed. Final gates: restore/repair 61 passed; store 71 passed; endpoint selectors 12 passed; service selector 2 passed; capture/batch 48 passed; PostgreSQL contracts 21 passed with 1 optional live-DSN skip; Step 8 89 passed and 74 passed; exact Ruff over all nine touched Python files passed; Bandit over all six touched production Python files exited 0 with the existing informational `nosec` notice only. `Docs/API/Sync_V2_M1.md` records compatibility scope and bounds. Compatibility response fields, ordered-action privacy, group adjacency, and preview's no-product-mutation guarantee remain unchanged. The predecessor review's “10-file” statement was checked against git and the Round 1 commit actually changed 12 tracked files (two documentation/task files, seven production Python files, and three tests). No new ADR or general lesson was required; ADR-032 and ADR-033 remain governing. Known non-blocking concerns remain the documented broad Ruff legacy baseline and optional live PostgreSQL skip.
+
+Final merge review reopened TASK-13003: concurrent server-origin groups can preflight the same head and append/materialize out of order, object-state advancement is non-monotonic, and additional public Notes write paths remain uncaptured. AC3/AC5 and the affected Definition of Done gates stay open until the final fix wave is implemented and verified.
+
+Final merge-review wave completed AC3 and AC5. Every audited public/background Notes organization writer now resolves an explicit owner and routes active Sync writes through the readiness-gated coordinator; inactive behavior remains compatible and active incomplete/error states fail closed before product writes. Dataset-serialized append CAS, cursor-ordered projection, durable conflict bookkeeping, bounded repair/rebase handling, canonical restore actions, and superseded terminal state make concurrent mutations deterministic or reviewable. ChaChaNotes schema v56 maps owner-scoped WebClipper clip IDs to private UUID note identities with transactional rollback, endpoint-aware RLS, exact-retry recovery, and fail-closed history/payload checks. Schema v57 scopes Notes organization uniqueness per PostgreSQL tenant, validates cross-owner graphs under approved transaction-held locks, temporarily suspends and restores only verified FORCE-RLS tables, and reinstalls the complete policy set after schema ensure. ADR-032, ADR-033, and ADR-034 govern these contracts.
+
+Final evidence: authoritative Sync selection collected 555; restricted execution had 547 passes plus 8 SQLite-path permission failures, and the exact authorized eight reran 8/8. Organization/bootstrap/API/materializer gate passed 275. Final combined v56/v57/RLS and WebClipper gate passed 156; independent final migration/WebClipper review passed 138 with one optional live-PostgreSQL tenancy skip because no DSN was configured. Bandit over every changed production Python file exited 0. Focused Ruff and focused Ruff formatting passed; ChaChaNotes passed with its documented legacy-code exclusions, while unfiltered statistics remain 16 unrelated baseline findings. git diff --check passed. Independent final review found no remaining Critical, Important, or Minor issue. No new general lesson was added: the incidents were specific to the new migrations and are captured in ADR-033/034 plus regression tests.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented and hardened first-class Sync v2 ownership for Notes organization data across REST/background capture, atomic mutation groups, concurrent projection/conflict recovery, bootstrap, restore/repair, PostgreSQL tenancy, and WebClipper identity migration. SQLite and server-free PostgreSQL contract suites are green; the only environment limitation is one optional live-PostgreSQL tenancy test skipped without a configured DSN.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

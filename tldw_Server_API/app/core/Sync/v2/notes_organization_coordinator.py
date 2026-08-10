@@ -325,7 +325,9 @@ class NotesOrganizationCoordinator:
             if relationship_result:
                 def loader() -> object:
                     return self._relationship_present(
-                        result_domain, result_step.object_id
+                        result_domain,
+                        result_step.object_id,
+                        result_step.payload,
                     )
             elif result_domain == "notes.note":
                 def loader() -> object:
@@ -602,7 +604,7 @@ class NotesOrganizationCoordinator:
         )
         plan = PlannedNotesMutation(
             steps=(step,),
-            load_result=lambda: self._relationship_present(domain, object_id),
+            load_result=lambda: self._relationship_present(domain, object_id, payload),
         )
         if request_fingerprint is not None:
             return self.bind_request(plan, request_fingerprint)
@@ -1285,11 +1287,16 @@ class NotesOrganizationCoordinator:
             raise SyncStoreError("Materialized folder was not found")
         return str(row["path"])
 
-    def _relationship_present(self, domain: SyncDomain, object_id: str) -> bool:
-        snapshot = NotesOrganizationSyncStore(self.note_db).snapshot()
-        return any(
-            item.domain == domain and item.object_id == object_id
-            for item in snapshot.relationships
+    def _relationship_present(
+        self,
+        domain: SyncDomain,
+        object_id: str,
+        payload: Mapping[str, object],
+    ) -> bool:
+        return NotesOrganizationSyncStore(self.note_db).relationship_present(
+            domain=domain,
+            object_id=object_id,
+            payload=payload,
         )
 
     @staticmethod

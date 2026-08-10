@@ -121,7 +121,7 @@ def test_v54_migration_adds_stable_unique_sync_ids_and_preserves_rows(tmp_path: 
                 "SELECT version FROM db_schema_version WHERE schema_name = ?",
                 (CharactersRAGDB._SCHEMA_NAME,),
             ).fetchone()["version"]
-            assert version == 55
+            assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
             first_sync_ids: dict[str, list[str]] = {}
             for table, expected_ids in original_ids.items():

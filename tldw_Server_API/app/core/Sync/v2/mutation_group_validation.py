@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
+from dataclasses import replace
 
 from .errors import SyncIdempotencyConflictError
 from .models import SyncEnvelope, SyncEnvelopeCreate, normalize_sync_timestamp
@@ -93,6 +94,34 @@ def mutation_group_plan_hash(
     return _mutation_group_plan_hash(envelopes, timestamp_format="canonical")
 
 
+def materialization_group_view(
+    envelopes: Sequence[SyncEnvelope],
+) -> list[SyncEnvelope]:
+    """Resolve immutable in-plan cursor markers for product materialization."""
+
+    resolved: list[SyncEnvelope] = []
+    prior_by_object: dict[tuple[str, str], SyncEnvelope] = {}
+    for envelope in envelopes:
+        current = envelope
+        key = (envelope.domain, envelope.object_id)
+        if envelope.base_server_cursor == 0:
+            prior = prior_by_object.get(key)
+            if (
+                prior is None
+                or prior.server_cursor is None
+                or envelope.base_object_revision != prior.object_revision
+                or envelope.base_object_hash != prior.payload_hash
+            ):
+                raise StoredMutationGroupValidationError(
+                    "mutation_group_virtual_base_invalid",
+                    envelope.mutation_step or 0,
+                )
+            current = replace(envelope, base_server_cursor=prior.server_cursor)
+        resolved.append(current)
+        prior_by_object[key] = current
+    return resolved
+
+
 def validate_stored_mutation_group(
     envelopes: Sequence[SyncEnvelope],
     *,
@@ -155,6 +184,7 @@ def validate_stored_mutation_group(
 __all__ = [
     "SYNC_MUTATION_GROUP_MAX_SIZE",
     "StoredMutationGroupValidationError",
+    "materialization_group_view",
     "mutation_group_plan_hash",
     "validate_stored_mutation_group",
 ]

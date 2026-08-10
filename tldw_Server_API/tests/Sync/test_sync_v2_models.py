@@ -157,6 +157,49 @@ def test_notes_organization_schema_is_server_trusted_v1(domain: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("domain", "payload"),
+    [
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": "11111111-1111-4111-8111-111111111111",
+                "keyword_sync_id": "22222222-2222-4222-8222-222222222222",
+            },
+        ),
+        (
+            "notes.keyword_collection_link",
+            {
+                "collection_sync_id": "33333333-3333-4333-8333-333333333333",
+                "keyword_sync_id": "22222222-2222-4222-8222-222222222222",
+            },
+        ),
+        (
+            "notes.folder_link",
+            {
+                "note_id": "11111111-1111-4111-8111-111111111111",
+                "folder_sync_id": "44444444-4444-4444-8444-444444444444",
+            },
+        ),
+    ],
+)
+def test_link_tombstone_capability_payload_parses_strictly(
+    domain: str,
+    payload: dict[str, object],
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+        parse_notes_organization_payload,
+    )
+
+    descriptor = SyncCapabilitiesResponse().domain_schemas[domain]["tombstone"]
+    derived_payload = {field: payload[field] for field in descriptor["required"]}
+
+    assert parse_notes_organization_payload(
+        domain, "tombstone", derived_payload
+    ) == payload
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         {
@@ -925,6 +968,32 @@ def test_core_envelope_mapping_strips_api_only_server_fields_before_persistence(
     assert core_envelope.apply_status == "pending"
 
 
+def test_api_sync_responses_accept_terminal_superseded_apply_status():
+    envelope = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(
+            envelope_id="srv_env_000000000001",
+            server_cursor=1,
+            status="accepted",
+            apply_status="superseded",
+        )
+    )
+    response = SyncPushResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "accepted": [
+                {
+                    "client_envelope_id": "env-1",
+                    "server_cursor": 1,
+                    "apply_status": "superseded",
+                }
+            ],
+        }
+    )
+
+    assert envelope.apply_status == "superseded"
+    assert response.accepted[0].apply_status == "superseded"
+
+
 def test_conflict_resolution_request_uses_locked_m1_batch_shape():
     request = SyncConflictResolveRequest.model_validate(
         {
@@ -1167,6 +1236,30 @@ def test_push_request_allows_dataset_mismatch_for_per_envelope_outcomes():
     )
 
     assert request.envelopes[0].dataset_id == "dataset-2"
+
+
+def test_push_request_cannot_set_server_assigned_mutation_group_metadata() -> None:
+    request = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _m1_envelope_payload(
+                    mutation_group_id="client-group",
+                    mutation_step=0,
+                    mutation_step_count=1,
+                    mutation_plan_hash="a" * 64,
+                )
+            ],
+        }
+    )
+
+    core = _core_envelope_from_api(request.envelopes[0])
+
+    assert core.mutation_group_id is None
+    assert core.mutation_step is None
+    assert core.mutation_step_count is None
+    assert core.mutation_plan_hash is None
 
 
 def test_push_request_rejects_oversized_envelope_batches():

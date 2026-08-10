@@ -17,6 +17,13 @@ from typing import Any, Optional
 from loguru import logger
 
 from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from ....Notes.organization_capture import (
+    active_coordinator,
+    capture_note_tombstone,
+    capture_note_upsert,
+    replace_keywords,
+    stable_note_id,
+)
 from ....Notes_Tasks import NotesTaskService, TaskActor
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids, merge_requested_ids_with_scope
 from ..base import BaseModule, create_tool_definition
@@ -528,7 +535,9 @@ class NotesModule(BaseModule):
         chacha_path = context.db_paths.get("chacha")
         if not chacha_path:
             raise ValueError("ChaChaNotes DB path not available in context")
-        return CharactersRAGDB(db_path=chacha_path, client_id=f"mcp_notes_{self.config.name}")
+        owner_user_id = str(getattr(context, "user_id", "") or "").strip()
+        client_id = owner_user_id or f"mcp_notes_{self.config.name}"
+        return CharactersRAGDB(db_path=chacha_path, client_id=client_id)
 
     async def _search_notes(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
         query: str = args.get("query")
@@ -1436,7 +1445,7 @@ class NotesModule(BaseModule):
                 approval_id=approval_id,
                 idempotency_key=idempotency_key,
             )
-        actor_id = str(getattr(context, "user_id", "") or getattr(context, "client_id", "") or "") or None
+        actor_id = str(getattr(context, "user_id", "") or "") or None
         return TaskActor(
             actor_type="user",
             actor_id=actor_id,
@@ -1871,12 +1880,29 @@ class NotesModule(BaseModule):
             raise PermissionError("Cannot create a note outside explicit persona scope")
         db = self._open_db(context)
         try:
-            note_id = db.add_note(title=title, content=content)
-            if not note_id:
-                raise ValueError("Failed to create note")
             norm_tags = self._normalize_tags(tags)
-            if norm_tags:
-                self._apply_tags(db, note_id, norm_tags)
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                key = coordinator.request_fingerprint(
+                    "mcp.note.create",
+                    {"title": title, "content": content, "tags": norm_tags},
+                )
+                note_id = stable_note_id("mcp-notes", key)
+                capture_note_upsert(
+                    coordinator,
+                    note_id=note_id,
+                    title=title,
+                    content=content,
+                    keywords=norm_tags,
+                    source="mcp-notes",
+                    key=key,
+                )
+            else:
+                note_id = db.add_note(title=title, content=content)
+                if not note_id:
+                    raise ValueError("Failed to create note")
+                if norm_tags:
+                    self._apply_tags(db, note_id, norm_tags)
             row = db.get_note_by_id(note_id)
             if not row:
                 raise ValueError("Created note not found")
@@ -1904,7 +1930,20 @@ class NotesModule(BaseModule):
             current_version = int(row.get("version") or 1)
             ev = int(expected_version) if expected_version is not None else current_version
             updated_fields = list(updates.keys())
-            db.update_note(note_id, updates, ev)
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                capture_note_upsert(
+                    coordinator,
+                    note_id=note_id,
+                    title=str(updates.get("title", row.get("title") or "")),
+                    content=str(updates.get("content", row.get("content") or "")),
+                    conversation_id=row.get("conversation_id"),
+                    message_id=row.get("message_id"),
+                    expected_version=ev,
+                    source="mcp-notes",
+                )
+            else:
+                db.update_note(note_id, updates, ev)
             return {"note_id": note_id, "updated_fields": updated_fields, "success": True}
         finally:
             try:
@@ -1929,9 +1968,20 @@ class NotesModule(BaseModule):
                 raise ValueError(f"Note not found: {note_id}")
             current_version = int(row.get("version") or 1) if row else None
             ev = int(expected_version) if expected_version is not None else current_version
-            deleted = db.delete_note(note_id, expected_version=ev, hard_delete=permanent)
-            if not deleted:
-                raise ValueError(f"Note not found: {note_id}")
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                if permanent:
+                    raise ValueError("Permanent note delete is unavailable while Sync is active")
+                capture_note_tombstone(
+                    coordinator,
+                    note_id=note_id,
+                    expected_version=int(ev),
+                    source="mcp-notes",
+                )
+            else:
+                deleted = db.delete_note(note_id, expected_version=ev, hard_delete=permanent)
+                if not deleted:
+                    raise ValueError(f"Note not found: {note_id}")
             return {
                 "note_id": note_id,
                 "action": "permanently_deleted" if permanent else "soft_deleted",
@@ -1950,7 +2000,17 @@ class NotesModule(BaseModule):
             if not db.get_note_by_id(note_id):
                 raise ValueError(f"Note not found: {note_id}")
             norm_tags = self._normalize_tags(tags)
-            if norm_tags:
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                desired = [*self._tags_for_note(db, note_id), *norm_tags]
+                replace_keywords(
+                    coordinator,
+                    subject_type="note",
+                    subject_id=note_id,
+                    keywords=desired,
+                    source="mcp-notes",
+                )
+            elif norm_tags:
                 existing = {t.lower() for t in self._tags_for_note(db, note_id)}
                 for tag in norm_tags:
                     if tag in existing:
@@ -1972,10 +2032,22 @@ class NotesModule(BaseModule):
             if not db.get_note_by_id(note_id):
                 raise ValueError(f"Note not found: {note_id}")
             norm_tags = self._normalize_tags(tags)
-            for tag in norm_tags:
-                kw = db.get_keyword_by_text(tag)
-                if kw and kw.get("id") is not None:
-                    db.unlink_note_from_keyword(note_id, int(kw["id"]))
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                removed = set(norm_tags)
+                desired = [tag for tag in self._tags_for_note(db, note_id) if tag not in removed]
+                replace_keywords(
+                    coordinator,
+                    subject_type="note",
+                    subject_id=note_id,
+                    keywords=desired,
+                    source="mcp-notes",
+                )
+            else:
+                for tag in norm_tags:
+                    kw = db.get_keyword_by_text(tag)
+                    if kw and kw.get("id") is not None:
+                        db.unlink_note_from_keyword(note_id, int(kw["id"]))
             return {"note_id": note_id, "tags": self._tags_for_note(db, note_id), "success": True}
         finally:
             try:
@@ -1990,6 +2062,16 @@ class NotesModule(BaseModule):
             if not db.get_note_by_id(note_id):
                 raise ValueError(f"Note not found: {note_id}")
             desired = set(self._normalize_tags(tags))
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                replace_keywords(
+                    coordinator,
+                    subject_type="note",
+                    subject_id=note_id,
+                    keywords=sorted(desired),
+                    source="mcp-notes",
+                )
+                return {"note_id": note_id, "tags": self._tags_for_note(db, note_id), "success": True}
             existing_rows = db.get_keywords_for_note(note_id)
             existing = {str(r.get("keyword")).lower(): int(r.get("id")) for r in existing_rows if r.get("keyword") is not None}
 

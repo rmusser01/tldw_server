@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
+from threading import Event, local
 from typing import Any
 
 import pytest
@@ -124,6 +127,20 @@ def _service(sync_store: SyncV2Store, *, materializers: dict[str, Any]) -> SyncV
             restore_manifest_scan_limit=100,
         ),
     )
+
+
+class _ConflictMaterializer:
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="conflict",
+            apply_error_code="repair_conflict",
+        )
+        return MaterializationResult(
+            status="conflict",
+            conflict_type="repair_conflict",
+            error_code="repair_conflict",
+        )
 
 
 def _register_and_enroll(service: SyncV2Service) -> None:
@@ -468,6 +485,37 @@ def test_repair_never_replays_conflict_envelopes_as_accepted_changes(
     assert result.conflict_count == 0
 
 
+def test_repair_records_materialization_conflict_in_bound_sync_transaction(
+    log_service: SyncV2Service,
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _push(log_service, _note_envelope())
+    repair_service = _service(
+        sync_store,
+        materializers={"notes.note": _ConflictMaterializer()},
+    )
+    observed_connections: list[object | None] = []
+    original_insert = sync_store.db.insert_conflict
+
+    def record_insert(conflict, *, connection=None):
+        observed_connections.append(connection)
+        return original_insert(conflict, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "insert_conflict", record_insert)
+
+    result = repair_service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    assert result.conflict_count == 1
+    assert len(sync_store.list_conflicts("dataset-1")) == 1
+    assert len(observed_connections) == 1
+    assert observed_connections[0] is not None
+
+
 def test_repair_endpoint_requires_owned_dataset_and_returns_status(
     log_service: SyncV2Service,
     repair_client: TestClient,
@@ -490,6 +538,69 @@ def test_repair_endpoint_requires_owned_dataset_and_returns_status(
     assert chacha_db.get_note_by_id("note-1") is not None
     assert forbidden.status_code == 404
     assert forbidden.json()["detail"]["error_code"] == "sync_resource_not_found"
+
+
+def test_repair_treats_superseded_singleton_as_terminal_without_debt(
+    log_service: SyncV2Service,
+    sync_store: SyncV2Store,
+) -> None:
+    stored = sync_store.insert_envelope(_note_envelope(status="accepted"))
+    sync_store.mark_envelope_apply_status(
+        stored.server_cursor,
+        apply_status="superseded",
+        apply_error_code="sync_conflict_skipped",
+    )
+
+    result = log_service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    assert result.attempted_count == 0
+    assert result.skipped_count == 0
+    assert result.repair_status["status"] == "healthy"
+
+
+def test_repair_treats_all_superseded_group_as_terminal_without_debt(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-superseded-group")
+    )
+    for envelope in stored:
+        sync_store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="superseded",
+            apply_error_code="sync_conflict_superseded",
+        )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+    )
+
+    assert materializer.steps == []
+    assert result.attempted_count == 0
+    assert result.skipped_count == 0
+    assert result.repair_status["status"] == "healthy"
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-superseded-group",
+            "failing_step": None,
+            "error_code": None,
+            "retry_result": "skipped",
+            "state": "applied",
+        }
+    ]
 
 
 def test_notes_organization_repair_resumes_failed_group_without_skipping_pending_suffix(
@@ -746,6 +857,72 @@ def test_spec_fix_repair_resumes_pending_only_group_suffix(
     assert result.applied_count == 2
     assert result.repair_status["status"] == "healthy"
     assert result.repair_status["mutation_groups"][0]["state"] == "applied"
+
+
+def test_repair_holds_one_group_guard_across_every_projection_step(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-overlapping-repair")
+    )
+    thread_context = local()
+    first_step_entered = Event()
+    release_first_step = Event()
+    second_guard_attempted = Event()
+    second_finished = Event()
+    original_apply = materializer.apply
+    original_guard = sync_store.materialization_guard
+
+    def blocking_apply(envelope, *, store: SyncV2Store) -> MaterializationResult:
+        if getattr(thread_context, "label", None) == "first" and envelope.mutation_step == 0:
+            first_step_entered.set()
+            assert release_first_step.wait(5)
+        return original_apply(envelope, store=store)
+
+    @contextmanager
+    def observed_guard(envelopes):
+        members = tuple(envelopes)
+        label = getattr(thread_context, "label", None)
+        if label == "second":
+            second_guard_attempted.set()
+        with original_guard(members) as guarded:
+            yield guarded
+        if label == "first" and len(members) == 1 and members[0].mutation_step == 0:
+            assert second_finished.wait(5)
+
+    monkeypatch.setattr(materializer, "apply", blocking_apply)
+    monkeypatch.setattr(sync_store, "materialization_guard", observed_guard)
+
+    def run_repair(label: str):
+        thread_context.label = label
+        try:
+            return service.repair(
+                user_id="user-1",
+                dataset_id="dataset-1",
+                domains=["notes.keyword"],
+                failed_only=True,
+            )
+        finally:
+            if label == "second":
+                second_finished.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(run_repair, "first")
+        assert first_step_entered.wait(5)
+        second_future = executor.submit(run_repair, "second")
+        assert second_guard_attempted.wait(5)
+        release_first_step.set()
+        first_result = first_future.result()
+        second_result = second_future.result()
+
+    assert materializer.steps == [0, 1, 2]
+    assert first_result.repair_status["status"] == "healthy"
+    assert second_result.repair_status["status"] == "healthy"
 
 
 def test_spec_fix_repair_resumes_pending_singleton(

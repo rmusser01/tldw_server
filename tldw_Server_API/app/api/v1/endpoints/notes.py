@@ -45,6 +45,10 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     resolve_chacha_user_base_dir,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
+    NOTES_SYNC_EXCEPTIONS,
+    notes_sync_http_error,
+)
 from tldw_Server_API.app.api.v1.schemas.notes_moodboards import (
     MoodboardCreate,
     MoodboardListResponse,
@@ -2662,7 +2666,7 @@ async def import_notes(
                 except ConflictError as conflict_err:
                     # If "create_copy" still conflicts (for example, stale imported ID edge case),
                     # retry once without imported ID before surfacing a failure.
-                    if payload.duplicate_strategy == "create_copy":
+                    if payload.duplicate_strategy == "create_copy" and coordinator is None:
                         try:
                             created_note_id = db.add_note(
                                 title=parsed_note["title"],
@@ -4025,7 +4029,7 @@ async def get_note_studio_state_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db).get_note_studio_state(note_id=note_id)
+        studio_state = await NotesStudioService(db=db, user_id=current_user.id).get_note_studio_state(note_id=note_id)
         studio_state["note"] = _attach_keywords_inline(db, studio_state["note"])
         studio_state["note"] = _attach_folders_inline(db, studio_state["note"])
         return studio_state
@@ -4059,7 +4063,7 @@ async def derive_note_studio_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db).derive_from_excerpt(
+        studio_state = await NotesStudioService(db=db, user_id=current_user.id).derive_from_excerpt(
             source_note_id=studio_in.source_note_id,
             excerpt_text=studio_in.excerpt_text,
             template_type=studio_in.template_type,
@@ -4071,6 +4075,8 @@ async def derive_note_studio_endpoint(
         studio_state["note"] = _attach_folders_inline(db, studio_state["note"])
         record_note_created(user_id=current_user.id, note=studio_state["note"])
         return studio_state
+    except NOTES_SYNC_EXCEPTIONS as e:
+        raise notes_sync_http_error(e) from e
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "note studio")
 
@@ -4102,7 +4108,7 @@ async def regenerate_note_studio_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db).regenerate_note_markdown(
+        studio_state = await NotesStudioService(db=db, user_id=current_user.id).regenerate_note_markdown(
             note_id=note_id,
             expected_version=regenerate_in.expected_version,
             current_markdown=regenerate_in.current_markdown,
@@ -4117,6 +4123,8 @@ async def regenerate_note_studio_endpoint(
             patch={"regenerated": True},
         )
         return studio_state
+    except NOTES_SYNC_EXCEPTIONS as e:
+        raise notes_sync_http_error(e) from e
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "note studio")
 
@@ -4148,7 +4156,7 @@ async def update_note_studio_diagram_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db).update_diagram_manifest(
+        studio_state = await NotesStudioService(db=db, user_id=current_user.id).update_diagram_manifest(
             note_id=note_id,
             diagram_type=diagram_in.diagram_type,
             source_section_ids=diagram_in.source_section_ids,

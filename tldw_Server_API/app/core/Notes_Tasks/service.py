@@ -2,24 +2,62 @@
 
 from __future__ import annotations
 
-from datetime import date
+from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import NamedTuple
-from typing import TYPE_CHECKING, Any
+from datetime import date
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    active_coordinator,
+    capture_note_upsert,
+)
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 from tldw_Server_API.app.core.Notes_Tasks.models import ParsedChecklistItem, ReconciliationResult, TaskActor
 from tldw_Server_API.app.core.Notes_Tasks.reconciler import NotesTaskReconciler
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
+        NotesOrganizationCoordinator,
+    )
 
 
 _METADATA_TOKEN_ORDER = ("due_date", "priority", "estimate")
 _METADATA_TOKEN_NAMES = {"due_date": "due", "priority": "priority", "estimate": "estimate"}
 _TASK_STATUSES = {"open", "done"}
+
+
+def _write_note_content(
+    db: CharactersRAGDB,
+    *,
+    coordinator: NotesOrganizationCoordinator | None,
+    note: dict[str, Any],
+    content: str,
+    expected_version: int,
+    conn: TaskConnection | None = None,
+) -> None:
+    """Persist a projected checklist edit through active Sync when required."""
+
+    if coordinator is not None:
+        capture_note_upsert(
+            coordinator,
+            note_id=str(note["id"]),
+            title=str(note.get("title") or ""),
+            content=content,
+            conversation_id=note.get("conversation_id"),
+            message_id=note.get("message_id"),
+            expected_version=expected_version,
+            source="notes-tasks",
+        )
+        return
+    db.update_note(
+        note_id=str(note["id"]),
+        update_data={"content": content},
+        expected_version=expected_version,
+        conn=conn,
+    )
 
 
 class _ChecklistLine(NamedTuple):
@@ -248,7 +286,9 @@ class NotesTaskService:
         marker = "x" if status == "done" else " "
         line = f"- [{marker}] {self._render_body(text=text.strip(), metadata=metadata)}"
 
-        with db.transaction():
+        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        transaction = db.transaction() if coordinator is None else nullcontext(None)
+        with transaction:
             note = self._require_note_version(db, note_id=note_id, expected_note_version=expected_note_version)
             self.reconcile_note(
                 db=db,
@@ -258,9 +298,11 @@ class NotesTaskService:
                 actor=self._internal_reconciliation_actor(actor),
             )
             new_content = self._append_checklist_line(str(note.get("content") or ""), line)
-            db.update_note(
-                note_id=note_id,
-                update_data={"content": new_content},
+            _write_note_content(
+                db,
+                coordinator=coordinator,
+                note=note,
+                content=new_content,
                 expected_version=expected_note_version,
             )
             updated_note = self._require_note(db, note_id)
@@ -298,7 +340,9 @@ class NotesTaskService:
         if metadata is not None:
             self._validate_metadata(metadata)
 
-        with db.transaction() as conn:
+        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        transaction = db.transaction() if coordinator is None else nullcontext(None)
+        with transaction as conn:
             task = self._require_task_version(
                 db,
                 task_id=task_id,
@@ -375,9 +419,11 @@ class NotesTaskService:
                 projection=projection,
                 new_line=new_line,
             )
-            db.update_note(
-                note_id=str(note["id"]),
-                update_data={"content": new_content},
+            _write_note_content(
+                db,
+                coordinator=coordinator,
+                note=note,
+                content=new_content,
                 expected_version=expected_note_version,
                 conn=conn,
             )
@@ -437,7 +483,9 @@ class NotesTaskService:
         record_only: bool,
         actor: TaskActor,
     ) -> dict[str, Any]:
-        with db.transaction() as conn:
+        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        transaction = db.transaction() if coordinator is None else nullcontext(None)
+        with transaction as conn:
             task = self._require_task_version(
                 db,
                 task_id=task_id,
@@ -502,9 +550,11 @@ class NotesTaskService:
                     entity_id=task_id,
                 )
             new_content = self._delete_projection_line(str(note.get("content") or ""), projection)
-            db.update_note(
-                note_id=str(note["id"]),
-                update_data={"content": new_content},
+            _write_note_content(
+                db,
+                coordinator=coordinator,
+                note=note,
+                content=new_content,
                 expected_version=expected_note_version,
                 conn=conn,
             )

@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncDatasetNotFoundError,
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
+    SyncMaterializationPredecessorError,
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -273,6 +274,7 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
         "sync_domain_state",
         "sync_envelopes",
         "sync_object_state",
+        "sync_materialization_locks",
         "sync_device_cursors",
         "sync_conflicts",
         "sync_key_records",
@@ -580,6 +582,10 @@ def test_sync_envelope_mutation_group_schema_contains_m1_columns_and_indexes(
         row["name"]
         for row in sync_store.db.execute("PRAGMA index_list(sync_envelopes)").rows
     }
+    conflict_indexes = {
+        row["name"]
+        for row in sync_store.db.execute("PRAGMA index_list(sync_conflicts)").rows
+    }
     history_index_columns = [
         row["name"]
         for row in sync_store.db.execute(
@@ -627,10 +633,12 @@ def test_sync_envelope_mutation_group_schema_contains_m1_columns_and_indexes(
         "idx_sync_envelopes_dataset_device_client_sequence",
         "idx_sync_envelopes_payload_hash",
         "idx_sync_envelopes_failed_apply",
+        "idx_sync_envelopes_outstanding_apply",
         "uq_sync_envelopes_dataset_mutation_group_step",
         "idx_sync_envelopes_dataset_mutation_group_step",
         "idx_sync_envelopes_dataset_domain_entity_status_sequence",
     }.issubset(indexes)
+    assert "uq_sync_conflicts_dataset_envelope_cursor" in conflict_indexes
     assert history_index_columns == [
         "dataset_id",
         "domain",
@@ -638,6 +646,93 @@ def test_sync_envelope_mutation_group_schema_contains_m1_columns_and_indexes(
         "status",
         "server_sequence",
     ]
+
+
+def _insert_legacy_duplicate_conflict(
+    sync_store: SyncV2Store,
+    *,
+    conflict_id: str,
+) -> None:
+    sync_store.db.execute(
+        """
+        INSERT INTO sync_conflicts (
+            conflict_id, dataset_id, domain, entity_id, conflict_type, status,
+            base_envelope_id, local_envelope_id, remote_envelope_id,
+            server_sequence, metadata_json, resolved_by_envelope_id,
+            resolved_by_device_id, resolution_action, resolution_notes,
+            created_at, resolved_at
+        )
+        SELECT ?, dataset_id, domain, entity_id, conflict_type, status,
+               base_envelope_id, local_envelope_id, remote_envelope_id,
+               server_sequence, metadata_json, resolved_by_envelope_id,
+               resolved_by_device_id, resolution_action, resolution_notes,
+               created_at, resolved_at
+          FROM sync_conflicts
+         WHERE conflict_id = 'conflict-1'
+        """,
+        (conflict_id,),
+    )
+
+
+def test_sync_database_dedupes_compatible_legacy_conflicts_before_unique_index(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    sync_store.insert_conflict(_conflict())
+    sync_store.db.execute("DROP INDEX uq_sync_conflicts_dataset_envelope_cursor")
+    _insert_legacy_duplicate_conflict(sync_store, conflict_id="conflict-duplicate")
+
+    sync_store.db.ensure_schema()
+
+    conflicts = sync_store.list_conflicts("dataset-1")
+    indexes = {
+        row["name"]
+        for row in sync_store.db.execute("PRAGMA index_list(sync_conflicts)").rows
+    }
+    assert [conflict.conflict_id for conflict in conflicts] == ["conflict-1"]
+    assert "uq_sync_conflicts_dataset_envelope_cursor" in indexes
+
+
+def test_sync_database_rejects_incompatible_legacy_conflict_duplicates(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    sync_store.insert_conflict(_conflict())
+    sync_store.db.execute("DROP INDEX uq_sync_conflicts_dataset_envelope_cursor")
+    _insert_legacy_duplicate_conflict(sync_store, conflict_id="conflict-divergent")
+    sync_store.db.execute(
+        """
+        UPDATE sync_conflicts
+           SET status = 'resolved',
+               resolution_action = 'skip',
+               resolved_by_device_id = 'device-2',
+               resolved_at = '2026-05-10T13:00:00+00:00'
+         WHERE conflict_id = 'conflict-divergent'
+        """
+    )
+
+    with pytest.raises(SyncStoreError, match="incompatible legacy duplicates"):
+        sync_store.db.ensure_schema()
+
+    assert {
+        conflict.conflict_id for conflict in sync_store.list_conflicts("dataset-1")
+    } == {"conflict-1", "conflict-divergent"}
+
+
+def test_existing_sqlite_conflict_identity_index_skips_legacy_scan(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_scan(*, connection):
+        raise AssertionError("existing unique index must skip the legacy duplicate scan")
+
+    monkeypatch.setattr(
+        sync_store.db,
+        "_dedupe_legacy_conflict_identities",
+        fail_scan,
+    )
+    with sync_store.db.backend.transaction() as connection:
+        sync_store.db._ensure_conflict_indexes(connection=connection)
 
 
 def test_sync_database_migrates_pre_m1_sqlite_schema_for_mutation_groups_before_index_creation(
@@ -691,6 +786,7 @@ def test_sync_database_migrates_pre_m1_sqlite_schema_for_mutation_groups_before_
     assert "mutation_plan_hash" in envelope_columns
     assert "idx_sync_envelopes_dataset_device_client_sequence" in indexes
     assert "idx_sync_envelopes_failed_apply" in indexes
+    assert "idx_sync_envelopes_outstanding_apply" in indexes
     assert "uq_sync_envelopes_dataset_mutation_group_step" in indexes
     assert "idx_sync_envelopes_dataset_mutation_group_step" in indexes
     assert "idx_sync_envelopes_dataset_domain_entity_status_sequence" in indexes
@@ -1081,11 +1177,28 @@ def test_insert_envelope_idempotency_uses_envelope_key_after_other_insert(sync_s
 
 def test_insert_envelope_persists_m1_fields_and_aliases(sync_store: SyncV2Store):
     sync_store.enroll_dataset(_dataset())
+    created = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="env-created",
+            object_revision=1,
+            payload_hash="sha256:note-v1",
+        )
+    )
+    prior = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="env-prior",
+            object_revision=2,
+            payload_hash="sha256:note-v2",
+            base_server_cursor=created.server_cursor,
+            base_object_revision=created.object_revision,
+            base_object_hash=created.payload_hash,
+        )
+    )
 
     stored = sync_store.insert_envelope(
         _envelope(
             client_sequence=1,
-            base_server_cursor=8,
+            base_server_cursor=prior.server_cursor,
             base_object_revision=2,
             base_object_hash="sha256:note-v2",
             object_revision=3,
@@ -1102,7 +1215,7 @@ def test_insert_envelope_persists_m1_fields_and_aliases(sync_store: SyncV2Store)
     assert stored.server_sequence == stored.server_cursor
     assert stored.object_id == "note-1"
     assert stored.entity_id == "note-1"
-    assert stored.base_server_cursor == 8
+    assert stored.base_server_cursor == prior.server_cursor
     assert stored.base_object_revision == 2
     assert stored.base_object_hash == "sha256:note-v2"
     assert stored.object_revision == 3
@@ -1130,6 +1243,148 @@ def test_insert_envelopes_atomic_persists_complete_ordered_mutation_group(
     assert all(envelope.mutation_step_count == 3 for envelope in inserted)
     assert all(envelope.mutation_plan_hash == "a" * 64 for envelope in inserted)
     assert sync_store.list_mutation_group("dataset-1", "mutation-group-1") == inserted
+
+
+def test_insert_envelopes_atomic_does_not_queue_behind_unresolved_materialization_conflict(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    source = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="env-group-blocker",
+            object_id="note-blocker",
+            payload_hash="sha256:blocker",
+        )
+    )
+    source = sync_store.mark_envelope_apply_status(
+        source.server_cursor,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    sync_store.insert_conflict(
+        _conflict(
+            object_id=source.object_id,
+            local_envelope_id=source.client_envelope_id,
+            server_cursor=source.server_cursor,
+        )
+    )
+
+    with pytest.raises(SyncMaterializationPredecessorError):
+        sync_store.insert_envelopes_atomic(_mutation_group_envelopes())
+
+    assert sync_store.list_mutation_group("dataset-1", "mutation-group-1") == []
+
+
+def test_guarded_conflict_bookkeeping_reuses_materialization_transaction(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    envelope = sync_store.insert_envelope(_envelope())
+    observed_connections: list[object | None] = []
+
+    def record_conflict(conflict, *, connection=None):
+        observed_connections.append(connection)
+        return conflict
+
+    monkeypatch.setattr(sync_store.db, "insert_conflict", record_conflict)
+
+    with sync_store.materialization_guard([envelope]) as guarded_store:
+        guarded_store.insert_conflict(
+            _conflict(server_cursor=envelope.server_cursor)
+        )
+        guarded_connection = guarded_store._connection
+
+    assert observed_connections == [guarded_connection]
+
+
+def test_conflict_insert_rolls_back_on_crash_and_retries_idempotently_by_envelope_cursor(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    envelope = sync_store.insert_envelope(_envelope())
+    conflict = _conflict(
+        local_envelope_id=envelope.client_envelope_id,
+        server_cursor=envelope.server_cursor,
+    )
+
+    with pytest.raises(RuntimeError, match="crash before commit"):
+        with sync_store.materialization_guard([envelope]) as guarded_store:
+            guarded_store.insert_conflict(conflict)
+            raise RuntimeError("crash before commit")
+
+    assert sync_store.list_conflicts("dataset-1") == []
+
+    with sync_store.materialization_guard([envelope]) as guarded_store:
+        first = guarded_store.insert_conflict(conflict)
+        replay = guarded_store.insert_conflict(
+            replace(conflict, conflict_id="conflict-retry")
+        )
+
+    assert replay == first
+    assert [item.conflict_id for item in sync_store.list_conflicts("dataset-1")] == [
+        "conflict-1"
+    ]
+
+
+def test_direct_bootstrap_bookkeeping_acquires_dataset_guard(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    stale = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="bootstrap-stale",
+            object_revision=1,
+            routing_metadata={"source": "notes-organization-bootstrap"},
+        )
+    )
+    correction = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="bootstrap-correction",
+            object_revision=2,
+            payload_hash="sha256:correction",
+            base_server_cursor=stale.server_cursor,
+            base_object_revision=stale.object_revision,
+            base_object_hash=stale.payload_hash,
+            routing_metadata={"source": "notes-organization-bootstrap"},
+        )
+    )
+    assert correction.server_cursor is not None
+    sync_store.mark_envelope_apply_status(
+        correction.server_cursor,
+        apply_status="applied",
+    )
+    pending = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="bootstrap-pending",
+            object_id="note-2",
+            payload_hash="sha256:pending",
+            routing_metadata={"source": "notes-organization-bootstrap"},
+        )
+    )
+    acquired: list[str] = []
+    original_lock = sync_store.db._lock_materialization_dataset
+
+    def record_lock(dataset_id: str, *, connection):
+        acquired.append(dataset_id)
+        return original_lock(dataset_id, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "_lock_materialization_dataset", record_lock)
+
+    assert pending.server_cursor is not None
+    sync_store.mark_bootstrap_envelope_verified(
+        pending.server_cursor,
+        bootstrap_id="bootstrap-1",
+    )
+    assert stale.server_cursor is not None
+    sync_store.reconcile_bootstrap_envelope_superseded(
+        stale.server_cursor,
+        bootstrap_id="bootstrap-1",
+        superseded_by_cursor=correction.server_cursor,
+    )
+
+    assert acquired == ["dataset-1", "dataset-1"]
 
 
 def test_code_quality_round2_atomic_append_rejects_oversized_group(

@@ -401,6 +401,39 @@ def test_notes_sink_active_ready_bound_missing_note_conflicts_without_append(
 
 
 @pytest.mark.unit
+def test_notes_sink_active_ready_delete_uses_coordinator_batch(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks import notes_sink
+
+    notes_db, sync_store, _service = _active_sync_stack(tmp_path, monkeypatch)
+    created = notes_sink.apply_notes_change(
+        notes_db,
+        binding=None,
+        change={
+            "event_type": "created",
+            "relative_path": "delete-me.md",
+            "text": "# Delete me\n\nBody",
+            "source_id": 91,
+        },
+        policy="canonical",
+    )
+    note_id = str(created["note_id"])
+
+    result = notes_sink.apply_notes_change(
+        notes_db,
+        binding={"note_id": note_id, "current_version": 1, "sync_status": "sync_managed"},
+        change={"event_type": "deleted", "relative_path": "delete-me.md", "source_id": 91},
+        policy="canonical",
+    )
+
+    assert result["action"] == "archived"
+    tombstone = sync_store.list_envelopes_after("dataset-1", 0)[-1]
+    assert tombstone.domain == "notes.note"
+    assert tombstone.operation == "tombstone"
+    assert tombstone.mutation_group_id is not None
+    assert tombstone.routing_metadata["source"] == "notes-ingestion"
+
+
+@pytest.mark.unit
 def test_notes_sink_active_ready_version_change_after_precheck_does_not_overwrite(
     tmp_path,
     monkeypatch,

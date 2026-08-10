@@ -26,6 +26,10 @@ from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_lin
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
+from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+    ServerOriginMutationStep,
+    capture_server_origin_mutation_batch,
+)
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
@@ -104,6 +108,66 @@ def _folder_link_service(
             server_trusted_encryption=_ready_encryption(),
         ),
     )
+
+
+def test_server_origin_group_materializes_same_object_steps_against_real_cursors(
+    sync_store: SyncV2Store,
+    note_db: CharactersRAGDB,
+) -> None:
+    sync_store.db.execute(
+        "UPDATE sync_datasets SET metadata_json = ? WHERE dataset_id = ?",
+        (
+            json.dumps(
+                {
+                    "default_personal": True,
+                    "client_family": "chatbook",
+                    "notes_organization_v1": {"state": "ready"},
+                }
+            ),
+            "dataset-1",
+        ),
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.keyword", supported_adapter_versions={1})]
+        ),
+        materializers={
+            "notes.keyword": NotesOrganizationMaterializer(note_db, "notes.keyword")
+        },
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+
+    result = capture_server_origin_mutation_batch(
+        service=service,
+        user_id="owner-1",
+        source="notes_api",
+        idempotency_key="same-keyword-twice",
+        steps=[
+            ServerOriginMutationStep(
+                domain="notes.keyword",
+                operation="upsert",
+                object_id=KEYWORD_ID,
+                payload={"keyword": "First"},
+            ),
+            ServerOriginMutationStep(
+                domain="notes.keyword",
+                operation="upsert",
+                object_id=KEYWORD_ID,
+                payload={"keyword": "Renamed"},
+            ),
+        ],
+    )
+
+    assert result.fully_applied is True
+    assert [envelope.apply_status for envelope in result.envelopes] == [
+        "applied",
+        "applied",
+    ]
+    assert result.envelopes[1].base_server_cursor == 0
+    state = sync_store.get_object_state("dataset-1", "notes.keyword", KEYWORD_ID)
+    assert state is not None
+    assert state.latest_server_cursor == result.envelopes[1].server_cursor
 
 
 def _payload(domain: SyncDomain) -> dict[str, object]:
@@ -381,24 +445,25 @@ def test_each_domain_rejects_a_stale_non_head_apply_without_overwriting_product_
     materializer = NotesOrganizationMaterializer(note_db, domain)
     created = _stored_envelope(sync_store, domain)
     assert materializer.apply(created, store=sync_store).status == "applied"
-    current = _stored_envelope(
+    stale = _stored_envelope(
         sync_store,
         domain,
         payload=_payload(domain),
         revision=2,
         base=created,
-        suffix="current",
+        suffix="stale",
     )
-    assert materializer.apply(current, store=sync_store).status == "applied"
-
-    stale = _stored_envelope(
+    assert materializer.apply(stale, store=sync_store).status == "applied"
+    current = _stored_envelope(
         sync_store,
         domain,
         payload=_payload(domain),
         revision=3,
-        base=created,
-        suffix="stale",
+        base=stale,
+        suffix="current",
     )
+    assert materializer.apply(current, store=sync_store).status == "applied"
+
     result = materializer.apply(stale, store=sync_store)
 
     assert result.status == "conflict"

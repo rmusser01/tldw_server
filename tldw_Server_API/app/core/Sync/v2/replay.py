@@ -7,10 +7,12 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from .errors import SyncMaterializationBusyError, SyncMaterializationPredecessorError
 from .materializers import MaterializationResult, SyncMaterializer
 from .models import SyncDomain, SyncEnvelope
 from .mutation_group_validation import (
     StoredMutationGroupValidationError,
+    materialization_group_view,
     validate_stored_mutation_group,
 )
 from .store import SyncV2Store
@@ -95,8 +97,8 @@ class SyncReplayRepairer:
         *,
         store: SyncV2Store,
         materializers: Mapping[SyncDomain, SyncMaterializer],
-        materialize: Callable[[SyncEnvelope], MaterializationResult],
-        snapshot: Callable[[SyncEnvelope], SyncEnvelope],
+        materialize: Callable[[SyncEnvelope, SyncV2Store | None], MaterializationResult],
+        snapshot: Callable[[SyncEnvelope, SyncV2Store | None], SyncEnvelope],
         scan_limit: int,
     ) -> None:
         self.store = store
@@ -247,11 +249,52 @@ class SyncReplayRepairer:
     ) -> dict[str, object]:
         safe_group_id = _safe_group_id(group_id)
         try:
+            with self.store.materialization_guard(group) as guarded_store:
+                refreshed = guarded_store.list_mutation_group(dataset_id, group_id)
+                return self._repair_mutation_group_guarded(
+                    dataset_id=dataset_id,
+                    group_id=group_id,
+                    group=refreshed,
+                    failed_only=failed_only,
+                    accumulators=accumulators,
+                    store=guarded_store,
+                )
+        except (SyncMaterializationBusyError, SyncMaterializationPredecessorError) as exc:
+            if group:
+                _accumulator(accumulators, group[0].domain).skipped_count += 1
+            return _group_result(
+                safe_group_id,
+                failing_step=next(
+                    (
+                        envelope.mutation_step
+                        for envelope in group
+                        if envelope.apply_status not in {"applied", "superseded"}
+                    ),
+                    None,
+                ),
+                error_code=exc.error_code,
+                retry_result="blocked",
+                state="pending",
+            )
+
+    def _repair_mutation_group_guarded(
+        self,
+        *,
+        dataset_id: str,
+        group_id: str,
+        group: Sequence[SyncEnvelope],
+        failed_only: bool,
+        accumulators: dict[SyncDomain, _DomainAccumulator],
+        store: SyncV2Store,
+    ) -> dict[str, object]:
+        safe_group_id = _safe_group_id(group_id)
+        try:
             validate_stored_mutation_group(
                 group,
                 dataset_id=dataset_id,
                 mutation_group_id=group_id,
             )
+            materialization_group = materialization_group_view(group)
         except StoredMutationGroupValidationError as exc:
             if group:
                 _accumulator(accumulators, group[0].domain).failed_count += 1
@@ -264,11 +307,16 @@ class SyncReplayRepairer:
             )
 
         first_unapplied = next(
-            (index for index, envelope in enumerate(group) if envelope.apply_status != "applied"),
+            (
+                index
+                for index, envelope in enumerate(group)
+                if envelope.apply_status not in {"applied", "superseded"}
+            ),
             None,
         )
         if first_unapplied is not None and any(
-            envelope.apply_status == "applied" for envelope in group[first_unapplied + 1 :]
+            envelope.apply_status in {"applied", "superseded"}
+            for envelope in group[first_unapplied + 1 :]
         ):
             _accumulator(accumulators, group[first_unapplied].domain).failed_count += 1
             return _group_result(
@@ -278,7 +326,7 @@ class SyncReplayRepairer:
                 retry_result="blocked",
                 state="failed",
             )
-        if failed_only and first_unapplied is None:
+        if first_unapplied is None:
             return _group_result(
                 safe_group_id,
                 failing_step=None,
@@ -300,7 +348,7 @@ class SyncReplayRepairer:
                 state="conflict",
             )
 
-        for envelope in group[start:]:
+        for envelope in materialization_group[start:]:
             result = _accumulator(accumulators, envelope.domain)
             if envelope.apply_status == "conflict":
                 result.conflict_count += 1
@@ -325,8 +373,8 @@ class SyncReplayRepairer:
                 )
 
             result.attempted_count += 1
-            materialization = self.materialize(envelope)
-            snapshot = self.snapshot(envelope)
+            materialization = self.materialize(envelope, store)
+            snapshot = self.snapshot(envelope, store)
             status = snapshot.apply_status or materialization.status
             if status == "applied":
                 result.applied_count += 1
@@ -379,6 +427,8 @@ class SyncReplayRepairer:
         failed_only: bool,
         result: _DomainAccumulator,
     ) -> None:
+        if envelope.apply_status == "superseded":
+            return
         if envelope.apply_status == "conflict":
             result.conflict_count += 1
             result.skipped_count += 1
@@ -390,8 +440,8 @@ class SyncReplayRepairer:
             return
 
         result.attempted_count += 1
-        materialization = self.materialize(envelope)
-        snapshot = self.snapshot(envelope)
+        materialization = self.materialize(envelope, None)
+        snapshot = self.snapshot(envelope, None)
         status = snapshot.apply_status or materialization.status
         if status == "applied":
             result.applied_count += 1

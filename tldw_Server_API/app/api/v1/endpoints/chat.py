@@ -73,6 +73,10 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     get_chacha_db_for_user_id,
 )
+from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
+    NOTES_SYNC_EXCEPTIONS,
+    notes_sync_http_error,
+)
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
     ChatAnalyticsBucket,
     ChatAnalyticsPagination,
@@ -224,6 +228,12 @@ from tldw_Server_API.app.core.DB_Management.transaction_utils import (
 )
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     bootstrap_guardian_moderation_runtime,
+)
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    active_coordinator,
+    capture_note_upsert,
+    replace_keywords,
+    stable_note_id,
 )
 from tldw_Server_API.app.core.Skills.context_integration import (
     add_skill_tool_to_tools_list_async,
@@ -6048,7 +6058,22 @@ def _replace_conversation_keywords(
     db: CharactersRAGDB,
     conversation_id: str,
     keywords: list[str],
+    *,
+    owner_user_id: int | str,
+    coordinator=None,
+    preflighted: bool = False,
 ) -> None:
+    if not preflighted:
+        coordinator = active_coordinator(db, user_id=owner_user_id)
+    if coordinator is not None:
+        replace_keywords(
+            coordinator,
+            subject_type="conversation",
+            subject_id=conversation_id,
+            keywords=keywords,
+            source="chat-api",
+        )
+        return
     existing = db.get_keywords_for_conversation(conversation_id)
     existing_map = {str(k.get("keyword") or "").strip().lower(): int(k.get("id")) for k in existing if k.get("id")}
     target = {str(k).strip() for k in keywords if k is not None and str(k).strip()}
@@ -6318,30 +6343,33 @@ async def save_chat_knowledge(
         safe_title = conv_title[:200]
         note_title = f"Snippet: {safe_title}" if not safe_title.lower().startswith("snippet") else safe_title
 
-        note_id: int | None = None
+        note_id: str | None = None
         flashcard_id: str | None = None
 
-        # Ensure note, keyword links, and optional flashcard are created atomically.
-        async with db_transaction(db):
-            note_id = db.add_note(
+        coordinator = active_coordinator(db, user_id=current_user.id)
+        if coordinator is not None:
+            key = coordinator.request_fingerprint(
+                "chat.knowledge.save",
+                {
+                    "conversation_id": payload.conversation_id,
+                    "message_id": payload.message_id,
+                    "title": note_title,
+                    "snippet": payload.snippet,
+                    "tags": payload.tags,
+                },
+            )
+            note_id = stable_note_id("chat-knowledge", key)
+            capture_note_upsert(
+                coordinator,
+                note_id=note_id,
                 title=note_title,
                 content=payload.snippet,
                 conversation_id=payload.conversation_id,
                 message_id=payload.message_id,
+                keywords=payload.tags,
+                source="chat-knowledge",
+                key=key,
             )
-
-            if payload.tags:
-                for tag in payload.tags:
-                    try:
-                        kw = db.get_keyword_by_text(tag)
-                        if not kw:
-                            kw_id = db.add_keyword(tag)
-                            kw = db.get_keyword_by_id(kw_id) if kw_id is not None else None
-                        if kw and kw.get("id") is not None and note_id is not None:
-                            db.link_note_to_keyword(note_id, int(kw["id"]))
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as kw_err:
-                        logger.warning(f"Keyword attach failed for '{tag}' on note {note_id}: {kw_err}")
-
             if payload.make_flashcard:
                 flashcard_id = db.add_flashcard(
                     {
@@ -6355,6 +6383,41 @@ async def save_chat_knowledge(
                         "model_type": "basic",
                     }
                 )
+        else:
+            # Preserve the pre-Sync transaction contract when the dataset is inactive.
+            async with db_transaction(db):
+                note_id = db.add_note(
+                    title=note_title,
+                    content=payload.snippet,
+                    conversation_id=payload.conversation_id,
+                    message_id=payload.message_id,
+                )
+
+                if payload.tags:
+                    for tag in payload.tags:
+                        try:
+                            kw = db.get_keyword_by_text(tag)
+                            if not kw:
+                                kw_id = db.add_keyword(tag)
+                                kw = db.get_keyword_by_id(kw_id) if kw_id is not None else None
+                            if kw and kw.get("id") is not None and note_id is not None:
+                                db.link_note_to_keyword(note_id, int(kw["id"]))
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as kw_err:
+                            logger.warning(f"Keyword attach failed for '{tag}' on note {note_id}: {kw_err}")
+
+                if payload.make_flashcard:
+                    flashcard_id = db.add_flashcard(
+                        {
+                            "front": payload.snippet,
+                            "back": "",
+                            "notes": f"From {safe_title}",
+                            "source_ref_type": "note",
+                            "source_ref_id": note_id,
+                            "conversation_id": payload.conversation_id,
+                            "message_id": payload.message_id,
+                            "model_type": "basic",
+                        }
+                    )
 
         return KnowledgeSaveResponse(
             note_id=note_id,
@@ -6366,6 +6429,8 @@ async def save_chat_knowledge(
         )
     except HTTPException:
         raise
+    except NOTES_SYNC_EXCEPTIONS as exc:
+        raise notes_sync_http_error(exc) from exc
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
         logger.error(f"Failed to save chat knowledge snippet: {exc}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save snippet") from exc
@@ -6674,6 +6739,9 @@ async def update_chat_conversation(
         update_fields = payload.model_dump(exclude_unset=True)
         keywords_payload = update_fields.pop("keywords", None)
         update_fields.pop("version", None)
+        keyword_coordinator = None
+        if "keywords" in payload.model_fields_set:
+            keyword_coordinator = active_coordinator(db, user_id=current_user.id)
 
         topic_label_changed = "topic_label" in payload.model_fields_set
         if topic_label_changed:
@@ -6706,7 +6774,14 @@ async def update_chat_conversation(
         db.update_conversation(conversation_id, update_data, payload.version)
 
         if "keywords" in payload.model_fields_set:
-            _replace_conversation_keywords(db, conversation_id, keywords_payload or [])
+            _replace_conversation_keywords(
+                db,
+                conversation_id,
+                keywords_payload or [],
+                owner_user_id=current_user.id,
+                coordinator=keyword_coordinator,
+                preflighted=True,
+            )
 
         if topic_label_changed:
             try:
@@ -6743,6 +6818,8 @@ async def update_chat_conversation(
         )
     except (ConflictError, InputError) as exc:
         raise map_db_error_to_http(exc) from exc
+    except NOTES_SYNC_EXCEPTIONS as exc:
+        raise notes_sync_http_error(exc) from exc
     except HTTPException:
         raise
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:

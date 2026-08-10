@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+from tldw_Server_API.app.core.Notes.organization_capture import capture_note_tombstone
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationCoordinator,
@@ -289,7 +290,20 @@ def apply_notes_change(
     if event_type == "deleted":
         if binding and policy == "canonical":
             note_id = str(binding["note_id"])
-            notes_db.soft_delete_note(note_id, _expected_version(binding))
+            expected_version = _expected_version(binding)
+            coordinator = _active_organization_coordinator(notes_db)
+            if coordinator is not None:
+                capture_note_tombstone(
+                    coordinator,
+                    note_id=note_id,
+                    expected_version=expected_version,
+                    source="notes-ingestion",
+                    key=_source_folder_request_key(
+                        "note-delete", note_id, expected_version
+                    ),
+                )
+            else:
+                notes_db.soft_delete_note(note_id, expected_version)
             return {
                 "action": "archived",
                 "note_id": note_id,

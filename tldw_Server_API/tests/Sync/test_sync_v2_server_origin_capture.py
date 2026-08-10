@@ -15,14 +15,23 @@ from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncMaterializationPredecessorError,
+    SyncStoreError,
+)
 from tldw_Server_API.app.core.Sync.v2.materializers import (
     ChatConversationMaterializer,
     ChatMessageMaterializer,
     MaterializationResult,
     NotesMaterializer,
 )
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, M1_SYNC_OPERATIONS, SyncEnvelope
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    M1_SYNC_OPERATIONS,
+    SyncConflictCreate,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
+)
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -243,6 +252,7 @@ def test_note_create_appends_server_origin_envelope_before_projection_and_pulls(
     note = chacha_db.get_note_by_id("note-server-1")
     assert note is not None
     assert note["title"] == "Server note"
+    assert note["client_id"] == chacha_db.client_id
     assert result.envelope.domain == "notes.note"
     assert result.envelope.device_id == SERVER_ORIGIN_DEVICE_ID
     assert result.envelope.encryption_metadata["policy"] == "server_trusted_v1"
@@ -258,6 +268,137 @@ def test_note_create_appends_server_origin_envelope_before_projection_and_pulls(
     )
     assert [item.client_envelope_id for item in pulled.envelopes] == [
         result.envelope.client_envelope_id
+    ]
+
+
+def test_server_origin_capture_uses_repointed_head_after_conflict_skip(
+    sync_service: SyncV2Service,
+) -> None:
+    baseline = capture_server_origin_mutation(
+        sync_service,
+        user_id="user-1",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-after-skip",
+        payload={"title": "Baseline", "content": "Projected"},
+        source="server_api",
+    ).envelope
+    source = sync_service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=baseline.dataset_id,
+            client_envelope_id="env-server-conflict",
+            domain="notes.note",
+            operation="upsert",
+            object_id="note-after-skip",
+            device_id="offline-device",
+            client_sequence=1,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=(baseline.object_revision or 0) + 1,
+            payload={"title": "Conflict", "content": "Never projected"},
+            payload_hash="sha256:server-conflict",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            status="accepted",
+        )
+    )
+    source = sync_service.store.mark_envelope_apply_status(
+        source.server_cursor,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    conflict = sync_service.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-server-origin",
+            dataset_id=source.dataset_id,
+            domain=source.domain,
+            entity_id=source.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=source.client_envelope_id,
+            server_sequence=source.server_cursor,
+        )
+    )
+    sync_service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=source.dataset_id,
+        conflict_id=conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="frontend-device",
+    )
+
+    successor = capture_server_origin_mutation(
+        sync_service,
+        user_id="user-1",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-after-skip",
+        payload={"title": "Successor", "content": "Uses projected baseline"},
+        source="server_api",
+    ).envelope
+
+    assert successor.apply_status == "applied"
+    assert successor.base_server_cursor == baseline.server_cursor
+
+
+def test_server_origin_capture_does_not_queue_behind_unresolved_accepted_conflict(
+    sync_service: SyncV2Service,
+) -> None:
+    dataset = next(
+        item
+        for item in sync_service.store.list_datasets_for_user("user-1")
+        if item.metadata.get("default_personal") is True
+    )
+    source = sync_service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=dataset.dataset_id,
+            client_envelope_id="env-server-unresolved",
+            domain="notes.note",
+            operation="upsert",
+            object_id="note-unresolved",
+            device_id="offline-device",
+            client_sequence=1,
+            object_revision=1,
+            payload={"title": "Conflict", "content": "Never projected"},
+            payload_hash="sha256:server-unresolved",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            status="accepted",
+        )
+    )
+    source = sync_service.store.mark_envelope_apply_status(
+        source.server_cursor,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    sync_service.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-server-unresolved",
+            dataset_id=source.dataset_id,
+            domain=source.domain,
+            entity_id=source.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=source.client_envelope_id,
+            server_sequence=source.server_cursor,
+        )
+    )
+
+    with pytest.raises(SyncMaterializationPredecessorError):
+        capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain="notes.note",
+            operation="upsert",
+            object_id="note-must-not-queue",
+            payload={"title": "Later", "content": "Blocked"},
+            source="server_api",
+        )
+
+    accepted = sync_service.store.list_envelopes_after(
+        dataset.dataset_id,
+        0,
+        status="accepted",
+    )
+    assert [item.client_envelope_id for item in accepted] == [
+        "env-server-unresolved"
     ]
 
 
@@ -337,7 +478,9 @@ def test_chat_conversation_and_message_server_origin_envelopes_are_materialized(
         source="server_frontend",
     )
 
-    assert chacha_db.get_conversation_by_id("chat-server-1") is not None
+    stored_conversation = chacha_db.get_conversation_by_id("chat-server-1")
+    assert stored_conversation is not None
+    assert stored_conversation["client_id"] == chacha_db.client_id
     assert chacha_db.get_message_by_id("message-server-1") is not None
     pulled = sync_service.pull(
         user_id="user-1",
@@ -541,6 +684,97 @@ def test_materialization_failure_leaves_replayable_failed_envelope_and_profile_s
     domains = {item.domain: item for item in status.domain_status}
     assert domains["notes.note"].failed_apply_count == 1
     assert domains["notes.note"].last_apply_status == "failed"
+
+
+def test_server_origin_capture_without_materializer_does_not_report_pending_success(
+    tmp_path: Path,
+) -> None:
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
+        ),
+        settings=SyncV2Settings(
+            supported_domains=["notes.note"],
+            operations={"notes.note": ["upsert", "tombstone"]},
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.bootstrap_profile(
+        user_id="user-1",
+        mode="server_frontend",
+        device_id="frontend-device",
+        requested_domains=["notes.note"],
+    )
+
+    with pytest.raises(SyncServerOriginMaterializationError) as exc_info:
+        capture_server_origin_mutation(
+            service,
+            user_id="user-1",
+            domain="notes.note",
+            operation="upsert",
+            object_id="note-pending-apply",
+            payload={"title": "Pending", "content": "No materializer."},
+            source="server_api",
+            stable_key="pending-capture",
+        )
+
+    assert exc_info.value.envelope.apply_status == "pending"
+
+
+@pytest.mark.parametrize("initial_apply_status", ["pending", "failed"])
+def test_server_origin_capture_retries_legacy_nonapplied_idempotent_envelope(
+    tmp_path: Path,
+    chacha_db: CharactersRAGDB,
+    initial_apply_status: str,
+) -> None:
+    initial_materializers = (
+        {}
+        if initial_apply_status == "pending"
+        else {"notes.note": _FailingApplyMaterializer()}
+    )
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")),
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
+        ),
+        materializers=initial_materializers,
+        settings=SyncV2Settings(
+            supported_domains=["notes.note"],
+            operations={"notes.note": ["upsert", "tombstone"]},
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.bootstrap_profile(
+        user_id="user-1",
+        mode="server_frontend",
+        device_id="frontend-device",
+        requested_domains=["notes.note"],
+    )
+    kwargs = {
+        "user_id": "user-1",
+        "domain": "notes.note",
+        "operation": "upsert",
+        "object_id": "note-legacy-retry",
+        "payload": {"title": "Retry", "content": "Legacy non-applied capture."},
+        "source": "server_api",
+        "stable_key": "legacy-retry",
+    }
+    with pytest.raises(SyncServerOriginMaterializationError):
+        capture_server_origin_mutation(service, **kwargs)
+    initial = service.store.list_envelopes_after(
+        service.profile(user_id="user-1").active_dataset_id or "",
+        0,
+        domains=["notes.note"],
+        limit=1,
+    )[0]
+    assert initial.apply_status == initial_apply_status
+    service.materializers["notes.note"] = NotesMaterializer(chacha_db)
+
+    retried = capture_server_origin_mutation(service, **kwargs)
+
+    assert retried.envelope.apply_status == "applied"
+    assert chacha_db.get_note_by_id("note-legacy-retry") is not None
 
 
 def test_materialization_conflict_reports_accepted_conflict_envelope(tmp_path: Path) -> None:

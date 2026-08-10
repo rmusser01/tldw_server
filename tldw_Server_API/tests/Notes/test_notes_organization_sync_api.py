@@ -11,7 +11,10 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+    NotesOrganizationSyncStore,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterRejected,
@@ -32,6 +35,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
 )
+from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 from tldw_Server_API.app.core.Sync.v2.notes_organization_bootstrap import (
     NotesOrganizationBootstrapper,
 )
@@ -875,6 +879,7 @@ def test_direct_inactive_sync_preserves_local_keyword_collection_and_folder_writ
 
 
 def test_direct_coordinator_covers_non_exposed_folder_and_folder_link_planners(
+    monkeypatch: pytest.MonkeyPatch,
     chacha_db: CharactersRAGDB,
     sync_service: SyncV2Service,
 ) -> None:
@@ -932,6 +937,11 @@ def test_direct_coordinator_covers_non_exposed_folder_and_folder_link_planners(
         source="coordinator-test",
         idempotency_key="coordinator-folder-link",
     )
+    monkeypatch.setattr(
+        NotesOrganizationSyncStore,
+        "snapshot",
+        lambda _self: pytest.fail("relationship result must not load a full snapshot"),
+    )
     assert link.load_result() is True
     unlink = coordinator.plan_relationship(
         "notes.folder_link",
@@ -952,6 +962,135 @@ def test_direct_coordinator_covers_non_exposed_folder_and_folder_link_planners(
         idempotency_key="coordinator-folder-delete",
     )
     assert chacha_db.get_note_folder_by_path("Moved") is None
+
+
+@pytest.mark.parametrize(
+    ("case", "foreign_endpoint"),
+    [
+        ("note_keyword", "subject"),
+        ("note_keyword", "keyword"),
+        ("conversation_keyword", "subject"),
+        ("conversation_keyword", "keyword"),
+        ("collection_keyword", "collection"),
+        ("collection_keyword", "keyword"),
+        ("folder_note", "note"),
+        ("folder_note", "folder"),
+    ],
+)
+def test_relationship_present_requires_both_endpoints_owned_by_current_client(
+    case: str,
+    foreign_endpoint: str,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    note_id = "11111111-1111-4111-8111-111111111111"
+    conversation_id = "22222222-2222-4222-8222-222222222222"
+    keyword_sync_id = "33333333-3333-4333-8333-333333333333"
+    collection_sync_id = "44444444-4444-4444-8444-444444444444"
+    folder_sync_id = "55555555-5555-4555-8555-555555555555"
+    projection = NotesOrganizationSyncStore(chacha_db)
+    chacha_db.add_note("Owner-scoped note", "Body", note_id=note_id)
+    chacha_db.add_conversation(
+        {
+            "id": conversation_id,
+            "title": "Owner-scoped conversation",
+            "assistant_kind": "persona",
+            "assistant_id": "assistant-1",
+            "scope_type": "global",
+        }
+    )
+    projection.apply_resource(
+        domain="notes.keyword",
+        object_id=keyword_sync_id,
+        operation="upsert",
+        payload={"keyword": "Owner scoped"},
+    )
+    projection.apply_resource(
+        domain="notes.keyword_collection",
+        object_id=collection_sync_id,
+        operation="upsert",
+        payload={"name": "Owner scoped", "parent_sync_id": None},
+    )
+    projection.apply_resource(
+        domain="notes.folder",
+        object_id=folder_sync_id,
+        operation="upsert",
+        payload={"name": "Owner scoped", "parent_sync_id": None},
+    )
+    domain, payload, endpoint_rows = {
+        "note_keyword": (
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": note_id,
+                "keyword_sync_id": keyword_sync_id,
+            },
+            {
+                "subject": ("notes", "id", note_id),
+                "keyword": ("keywords", "sync_id", keyword_sync_id),
+            },
+        ),
+        "conversation_keyword": (
+            "notes.keyword_link",
+            {
+                "subject_type": "conversation",
+                "subject_id": conversation_id,
+                "keyword_sync_id": keyword_sync_id,
+            },
+            {
+                "subject": ("conversations", "id", conversation_id),
+                "keyword": ("keywords", "sync_id", keyword_sync_id),
+            },
+        ),
+        "collection_keyword": (
+            "notes.keyword_collection_link",
+            {
+                "collection_sync_id": collection_sync_id,
+                "keyword_sync_id": keyword_sync_id,
+            },
+            {
+                "collection": (
+                    "keyword_collections",
+                    "sync_id",
+                    collection_sync_id,
+                ),
+                "keyword": ("keywords", "sync_id", keyword_sync_id),
+            },
+        ),
+        "folder_note": (
+            "notes.folder_link",
+            {"note_id": note_id, "folder_sync_id": folder_sync_id},
+            {
+                "note": ("notes", "id", note_id),
+                "folder": ("note_folders", "sync_id", folder_sync_id),
+            },
+        ),
+    }[case]
+    object_id = organization_link_id(domain, list(payload.values()))
+    projection.apply_relationship(
+        domain=domain,
+        object_id=object_id,
+        operation="upsert",
+        payload=payload,
+        routing_metadata={},
+    )
+    assert projection.relationship_present(
+        domain=domain,
+        object_id=object_id,
+        payload=payload,
+    ) is True
+
+    table, identity_column, identity = endpoint_rows[foreign_endpoint]
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            f"UPDATE {table} SET client_id = ? WHERE {identity_column} = ?",  # nosec B608
+            ("other-owner", identity),
+        )
+
+    assert projection.relationship_present(
+        domain=domain,
+        object_id=object_id,
+        payload=payload,
+    ) is False
 
 
 def test_direct_relationship_relink_restores_current_tombstones(
@@ -1526,6 +1665,45 @@ def test_literal_import_create_uses_one_compound_note_keyword_group(
         "notes.keyword_link",
     ]
     assert len({item.mutation_group_id for item in direct}) == 1
+
+
+def test_active_import_create_copy_never_falls_back_to_direct_note_insert(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    direct_add_calls = 0
+    original_add_note = chacha_db.add_note
+
+    def count_direct_add(*args, **kwargs):
+        nonlocal direct_add_calls
+        direct_add_calls += 1
+        return original_add_note(*args, **kwargs)
+
+    def reject_canonical_capture(*args, **kwargs):
+        raise ConflictError("injected canonical conflict", entity="notes")
+
+    monkeypatch.setattr(chacha_db, "add_note", count_direct_add)
+    monkeypatch.setattr(notes_endpoint, "_capture_compound_note", reject_canonical_capture)
+
+    response = client.post(
+        "/api/v1/notes/import",
+        json={
+            "duplicate_strategy": "create_copy",
+            "items": [
+                {
+                    "file_name": "copy.json",
+                    "format": "json",
+                    "content": json.dumps([{"title": "Copy", "content": "Body"}]),
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["failed_count"] == 1
+    assert response.json()["created_count"] == 0
+    assert direct_add_calls == 0
 
 
 def test_literal_import_overwrite_uses_one_compound_note_keyword_group(

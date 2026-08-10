@@ -347,6 +347,7 @@ class SyncV2ProfileManager:
             last_apply_status=last.apply_status if last is not None else None,
             last_apply_result=last_apply_result,
             repair_status=_repair_status(
+                summary.pending_apply_count,
                 summary.failed_apply_count,
                 summary.last_failed_envelope,
             ),
@@ -452,11 +453,15 @@ def _last_apply_result(envelope: SyncEnvelope | None) -> dict[str, Any]:
 
 
 def _repair_status(
+    pending_apply_count: int,
     failed_apply_count: int,
     last_failed: SyncEnvelope | None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "status": "repair_needed" if failed_apply_count else "healthy",
+        "status": (
+            "repair_needed" if pending_apply_count or failed_apply_count else "healthy"
+        ),
+        "pending_apply_count": pending_apply_count,
         "failed_apply_count": failed_apply_count,
     }
     if last_failed is not None:

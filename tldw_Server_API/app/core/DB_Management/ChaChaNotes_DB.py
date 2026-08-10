@@ -86,7 +86,9 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
 )
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  # noqa: E402
+    build_chacha_rls_sql,
     build_source_review_rls_sql,
+    build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
 )
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
@@ -648,7 +650,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 55  # Schema v55 adds stable Notes organization identities
+    _CURRENT_SCHEMA_VERSION = 57  # Schema v57 owner-scopes shared Notes organization resources
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -7443,6 +7445,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (52, "_migrate_from_v52_to_v53"),
             (53, "_migrate_from_v53_to_v54"),
             (54, "_migrate_from_v54_to_v55"),
+            (55, "_migrate_from_v55_to_v56"),
+            (56, "_migrate_from_v56_to_v57"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -9074,6 +9078,1117 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         self._set_schema_version_postgres(conn, 55)
 
+    @staticmethod
+    def _web_clipper_v56_rekey_plan(rows: list[Any]) -> list[tuple[str, str, str]]:
+        """Validate legacy clip mappings and return ``(clip, old, new)`` rekeys."""
+        plan: list[tuple[str, str, str]] = []
+        targets: set[str] = set()
+        for row in rows:
+            clip_id = str(row["clip_id"])
+            note_id = str(row["note_id"])
+            if row["existing_note_id"] is None:
+                raise SchemaError(f"WebClipper mapping '{clip_id}' references a missing note.")  # noqa: TRY003
+            if clip_id != note_id:
+                raise SchemaError(f"WebClipper v55 mapping '{clip_id}' has inconsistent identities.")  # noqa: TRY003
+            try:
+                parsed = uuid.UUID(note_id)
+            except ValueError:
+                digest = hashlib.sha256(
+                    f"web-clipper-migration:notes.note:{clip_id}".encode()
+                ).hexdigest()
+                replacement = str(uuid.UUID(digest[:32], version=4))
+                if replacement in targets:
+                    raise SchemaError("WebClipper note rekey collision detected.") from None  # noqa: TRY003
+                targets.add(replacement)
+                plan.append((clip_id, note_id, replacement))
+                continue
+            if parsed.version != 4 or str(parsed) != note_id:
+                raise SchemaError(  # noqa: TRY003
+                    f"WebClipper note '{note_id}' is a noncanonical UUID; explicit migration is required."
+                )
+        return plan
+
+    @staticmethod
+    def _quoted_sqlite_identifier(value: str) -> str:
+        """Quote an identifier obtained from SQLite schema metadata."""
+        return '"' + value.replace('"', '""') + '"'
+
+    def _migrate_from_v55_to_v56(self, conn: sqlite3.Connection) -> None:
+        """Decouple public WebClipper keys and atomically rekey legacy notes."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V55 to V56 for DB: {self.db_path_str}...")
+        try:
+            tables = self._sqlite_table_names(conn)
+            if "note_clipper_documents" not in tables:
+                self._ensure_web_clipper_schema_sqlite(conn)
+                conn.execute(
+                    "UPDATE db_schema_version SET version = 56 WHERE schema_name = ? AND version < 56",
+                    (self._SCHEMA_NAME,),
+                )
+                return
+
+            rows = conn.execute(
+                """
+                SELECT d.clip_id, d.note_id, n.id AS existing_note_id
+                  FROM note_clipper_documents d
+                  LEFT JOIN notes n ON n.id = d.note_id
+                 ORDER BY d.clip_id
+                """
+            ).fetchall()
+            plan = self._web_clipper_v56_rekey_plan(rows)
+            old_ids = [old_id for _, old_id, _ in plan]
+
+            for _, old_id, replacement in plan:
+                if conn.execute("SELECT 1 FROM notes WHERE id = ?", (replacement,)).fetchone():
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note rekey target '{replacement}' already exists."
+                    )
+                if conn.execute(
+                    "SELECT 1 FROM sync_log "
+                    "WHERE entity = 'notes' AND entity_id = ? LIMIT 1",
+                    (replacement,),
+                ).fetchone():
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note rekey target '{replacement}' already has Sync history."
+                    )
+                invalid_payloads = conn.execute(
+                    "SELECT COUNT(*) FROM sync_log "
+                    "WHERE entity = 'notes' AND entity_id = ? "
+                    "AND CASE WHEN json_valid(payload) "
+                    "THEN json_type(payload) <> 'object' "
+                    "OR (SELECT COUNT(*) FROM json_each(sync_log.payload) "
+                    "WHERE key = 'id') <> 1 "
+                    "OR COALESCE(json_type(payload, '$.id'), '') <> 'text' "
+                    "OR COALESCE(CAST(json_extract(payload, '$.id') AS TEXT), '') <> ? "
+                    "ELSE 1 END",
+                    (old_id, old_id),
+                ).fetchone()[0]
+                if invalid_payloads:
+                    raise SchemaError("WebClipper legacy sync_log payload cannot be verified.")  # noqa: TRY003
+
+            for table_name, id_column in (
+                ("sync_envelopes", "entity_id"),
+                ("sync_object_state", "object_id"),
+            ):
+                if not old_ids or table_name not in tables:
+                    continue
+                columns = {
+                    str(row[1])
+                    for row in conn.execute(
+                        f"PRAGMA table_info({self._quoted_sqlite_identifier(table_name)})"  # nosec B608
+                    ).fetchall()
+                }
+                if "domain" not in columns or id_column not in columns:
+                    raise SchemaError("Co-located canonical Sync history cannot be verified.")  # noqa: TRY003
+                for old_id in old_ids:
+                    found = conn.execute(
+                        f"SELECT 1 FROM {self._quoted_sqlite_identifier(table_name)} "  # nosec B608
+                        f"WHERE domain = ? AND {self._quoted_sqlite_identifier(id_column)} = ? LIMIT 1",
+                        ("notes.note", old_id),
+                    ).fetchone()
+                    if found:
+                        raise SchemaError(  # noqa: TRY003
+                            f"WebClipper note '{old_id}' has canonical Sync history; explicit migration is required."
+                        )
+                for _, _, replacement in plan:
+                    found = conn.execute(
+                        f"SELECT 1 FROM {self._quoted_sqlite_identifier(table_name)} "  # nosec B608
+                        f"WHERE domain = ? AND {self._quoted_sqlite_identifier(id_column)} = ? LIMIT 1",
+                        ("notes.note", replacement),
+                    ).fetchone()
+                    if found:
+                        raise SchemaError(  # noqa: TRY003
+                            f"WebClipper note rekey target '{replacement}' already has canonical Sync history."
+                        )
+
+            if old_ids:
+                for table_name in tables:
+                    if table_name.startswith("sqlite_"):
+                        continue
+                    quoted_table = self._quoted_sqlite_identifier(table_name)
+                    for foreign_key in conn.execute(
+                        f"PRAGMA foreign_key_list({quoted_table})"  # nosec B608
+                    ).fetchall():
+                        if str(foreign_key["table"]) != "notes":
+                            continue
+                        if str(foreign_key["on_update"]).upper() == "CASCADE":
+                            continue
+                        column_name = str(foreign_key["from"] or "")
+                        if not column_name:
+                            raise SchemaError("A Notes foreign-key reference cannot be verified.")  # noqa: TRY003
+                        quoted_column = self._quoted_sqlite_identifier(column_name)
+                        for old_id in old_ids:
+                            referenced = conn.execute(
+                                f"SELECT 1 FROM {quoted_table} WHERE {quoted_column} = ? LIMIT 1",  # nosec B608
+                                (old_id,),
+                            ).fetchone()
+                            if referenced:
+                                raise SchemaError(  # noqa: TRY003
+                                    f"Cannot rekey WebClipper note '{old_id}': live non-cascading reference "
+                                    f"from {table_name}.{column_name}."
+                                )
+
+            for table_name in tables:
+                if table_name.startswith("sqlite_") or table_name in {
+                    "note_clipper_documents",
+                    "note_clipper_workspace_placements",
+                }:
+                    continue
+                quoted_table = self._quoted_sqlite_identifier(table_name)
+                for foreign_key in conn.execute(
+                    f"PRAGMA foreign_key_list({quoted_table})"  # nosec B608
+                ).fetchall():
+                    if str(foreign_key["table"]) in {
+                        "note_clipper_documents",
+                        "note_clipper_workspace_placements",
+                    }:
+                        raise SchemaError(  # noqa: TRY003
+                            f"Cannot rebuild WebClipper sidecars while {table_name} declares an external reference."
+                        )
+
+            legacy_documents = "note_clipper_documents_v55"
+            legacy_placements = "note_clipper_workspace_placements_v55"
+            if legacy_documents in tables or legacy_placements in tables:
+                raise SchemaError("WebClipper v56 temporary migration tables already exist.")  # noqa: TRY003
+            has_placements = "note_clipper_workspace_placements" in tables
+            if has_placements:
+                conn.execute(
+                    "ALTER TABLE note_clipper_workspace_placements "
+                    "RENAME TO note_clipper_workspace_placements_v55"
+                )
+            conn.execute(
+                "ALTER TABLE note_clipper_documents RENAME TO note_clipper_documents_v55"
+            )
+            self._ensure_web_clipper_schema_sqlite(conn)
+            conn.execute(
+                """
+                INSERT INTO note_clipper_documents(
+                  clip_id, note_id, clip_type, source_url, source_title,
+                  capture_metadata_json, analysis_json, content_budget_json,
+                  source_note_version, created_at, last_modified, deleted
+                )
+                SELECT clip_id, note_id, clip_type, source_url, source_title,
+                       capture_metadata_json, analysis_json, content_budget_json,
+                       source_note_version, created_at, last_modified, deleted
+                  FROM note_clipper_documents_v55
+                """
+            )
+            if has_placements:
+                conn.execute(
+                    """
+                    INSERT INTO note_clipper_workspace_placements(
+                      clip_id, workspace_id, workspace_note_id, source_note_id,
+                      source_note_version, created_at, last_modified, deleted
+                    )
+                    SELECT clip_id, workspace_id, workspace_note_id, source_note_id,
+                           source_note_version, created_at, last_modified, deleted
+                      FROM note_clipper_workspace_placements_v55
+                    """
+                )
+            copied_documents = conn.execute(
+                "SELECT COUNT(*) FROM note_clipper_documents"
+            ).fetchone()[0]
+            legacy_document_count = conn.execute(
+                "SELECT COUNT(*) FROM note_clipper_documents_v55"
+            ).fetchone()[0]
+            copied_placements = conn.execute(
+                "SELECT COUNT(*) FROM note_clipper_workspace_placements"
+            ).fetchone()[0]
+            legacy_placement_count = (
+                conn.execute(
+                    "SELECT COUNT(*) FROM note_clipper_workspace_placements_v55"
+                ).fetchone()[0]
+                if has_placements
+                else 0
+            )
+            if copied_documents != legacy_document_count or copied_placements != legacy_placement_count:
+                raise SchemaError("WebClipper v56 sidecar copy count verification failed.")  # noqa: TRY003
+            if has_placements:
+                conn.execute("DROP TABLE note_clipper_workspace_placements_v55")
+            conn.execute("DROP TABLE note_clipper_documents_v55")
+            self._ensure_web_clipper_schema_sqlite(conn)
+
+            for clip_id, old_id, replacement in plan:
+                conn.execute("UPDATE notes SET id = ? WHERE id = ?", (replacement, old_id))
+                conn.execute(
+                    "UPDATE sync_log SET entity_id = ?, payload = json_set(payload, '$.id', ?) "
+                    "WHERE entity = 'notes' AND entity_id = ?",
+                    (replacement, replacement, old_id),
+                )
+                invalid_rewrites = conn.execute(
+                    "SELECT COUNT(*) FROM sync_log "
+                    "WHERE entity = 'notes' AND entity_id = ? "
+                    "AND CASE WHEN json_valid(payload) "
+                    "THEN json_type(payload) <> 'object' "
+                    "OR (SELECT COUNT(*) FROM json_each(sync_log.payload) "
+                    "WHERE key = 'id') <> 1 "
+                    "OR COALESCE(json_type(payload, '$.id'), '') <> 'text' "
+                    "OR COALESCE(CAST(json_extract(payload, '$.id') AS TEXT), '') <> ? "
+                    "ELSE 1 END",
+                    (replacement, replacement),
+                ).fetchone()[0]
+                if invalid_rewrites:
+                    raise SchemaError("WebClipper sync_log payload rewrite verification failed.")  # noqa: TRY003
+                mapping = conn.execute(
+                    "SELECT note_id FROM note_clipper_documents WHERE clip_id = ?",
+                    (clip_id,),
+                ).fetchone()
+                if mapping is None or str(mapping[0]) != replacement:
+                    raise SchemaError("WebClipper v56 mapping verification failed.")  # noqa: TRY003
+
+            mismatched_placements = conn.execute(
+                """
+                SELECT COUNT(*)
+                  FROM note_clipper_workspace_placements p
+                  JOIN note_clipper_documents d ON d.clip_id = p.clip_id
+                 WHERE p.source_note_id <> d.note_id
+                """
+            ).fetchone()[0]
+            if mismatched_placements:
+                raise SchemaError("WebClipper v56 placement verification failed.")  # noqa: TRY003
+            foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if foreign_key_errors:
+                raise SchemaError("WebClipper v56 foreign-key integrity verification failed.")  # noqa: TRY003
+            conn.execute(
+                "UPDATE db_schema_version SET version = 56 WHERE schema_name = ? AND version < 56",
+                (self._SCHEMA_NAME,),
+            )
+            if self._get_db_version(conn) != 56:
+                raise SchemaError("WebClipper V55->V56 migration failed version verification.")  # noqa: TRY003
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V56 completed.")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Migration V55->V56 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _quoted_postgres_identifier(value: str) -> str:
+        """Quote a simple PostgreSQL identifier obtained from catalog metadata."""
+        if not _SAFE_IDENTIFIER_RE.fullmatch(value):
+            raise SchemaError(f"Unsafe PostgreSQL schema identifier: {value!r}.")  # noqa: TRY003
+        return f'"{value}"'
+
+    def _migrate_from_v55_to_v56_postgres(self, conn: Any) -> None:
+        """Owner-scope and rekey WebClipper rows in one serialized transaction."""
+        backend = self.backend
+        if not backend.table_exists("note_clipper_documents", connection=conn):
+            self._ensure_web_clipper_schema_postgres(conn)
+            self._set_schema_version_postgres(conn, 56)
+            return
+
+        has_placements = backend.table_exists(
+            "note_clipper_workspace_placements", connection=conn
+        )
+        sync_tables = tuple(
+            table_name
+            for table_name in ("sync_envelopes", "sync_object_state")
+            if backend.table_exists(table_name, connection=conn)
+        )
+        lock_tables = ["notes", "workspaces", "sync_log", "note_clipper_documents"]
+        if has_placements:
+            lock_tables.append("note_clipper_workspace_placements")
+        lock_tables.extend(sync_tables)
+        backend.execute(
+            f"LOCK TABLE {', '.join(lock_tables)} IN ACCESS EXCLUSIVE MODE",  # nosec B608
+            connection=conn,
+        )
+
+        rls_state = backend.execute(
+            """
+            SELECT notes_table.relrowsecurity,
+                   notes_table.relforcerowsecurity,
+                   notes_table.relowner = current_user::regrole AS is_schema_owner
+              FROM pg_class notes_table
+             WHERE notes_table.oid = 'notes'::regclass
+            """,
+            connection=conn,
+        ).first
+        if rls_state is None or not bool(rls_state.get("is_schema_owner")):
+            raise SchemaError(  # noqa: TRY003
+                "WebClipper v56 requires the verified PostgreSQL schema-owner migration path."
+            )
+        rls_enabled = bool(rls_state.get("relrowsecurity"))
+        rls_forced = bool(rls_state.get("relforcerowsecurity"))
+        if rls_forced and not rls_enabled:
+            raise SchemaError("PostgreSQL notes RLS state cannot be verified.")  # noqa: TRY003
+        if rls_forced:
+            backend.execute(
+                "ALTER TABLE notes NO FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ADD COLUMN IF NOT EXISTS client_id TEXT",
+            connection=conn,
+        )
+        if has_placements:
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements "
+                "ADD COLUMN IF NOT EXISTS client_id TEXT",
+                connection=conn,
+            )
+
+        invalid_owners = backend.execute(
+            """
+            SELECT COUNT(*) AS invalid_owner_count
+              FROM note_clipper_documents document
+              LEFT JOIN notes note ON note.id = document.note_id
+             WHERE note.id IS NULL
+                OR note.client_id IS NULL
+                OR BTRIM(note.client_id) = ''
+                OR note.client_id <> BTRIM(note.client_id)
+                OR BTRIM(note.client_id) !~ '^[1-9][0-9]*$'
+                OR (
+                     document.client_id IS NOT NULL
+                     AND document.client_id IS DISTINCT FROM note.client_id
+                   )
+            """,
+            connection=conn,
+        ).scalar
+        if int(invalid_owners or 0):
+            raise SchemaError(  # noqa: TRY003
+                "Cannot migrate WebClipper mappings: an authoritative note owner is missing or invalid."
+            )
+
+        if has_placements:
+            invalid_placement_owners = backend.execute(
+                """
+                SELECT COUNT(*) AS invalid_owner_count
+                  FROM note_clipper_workspace_placements placement
+                  LEFT JOIN note_clipper_documents document
+                    ON document.clip_id = placement.clip_id
+                  LEFT JOIN notes owner_note
+                    ON owner_note.id = document.note_id
+                  LEFT JOIN notes source_note
+                    ON source_note.id = placement.source_note_id
+                  LEFT JOIN workspaces workspace
+                    ON workspace.id = placement.workspace_id
+                 WHERE document.clip_id IS NULL
+                    OR owner_note.id IS NULL
+                    OR placement.source_note_id IS DISTINCT FROM document.note_id
+                    OR source_note.client_id IS DISTINCT FROM owner_note.client_id
+                    OR workspace.client_id IS DISTINCT FROM owner_note.client_id
+                    OR (
+                         document.client_id IS NOT NULL
+                         AND document.client_id IS DISTINCT FROM owner_note.client_id
+                       )
+                    OR (
+                         placement.client_id IS NOT NULL
+                         AND placement.client_id IS DISTINCT FROM owner_note.client_id
+                       )
+                """,
+                connection=conn,
+            ).scalar
+            if int(invalid_placement_owners or 0):
+                raise SchemaError(  # noqa: TRY003
+                    "Cannot migrate WebClipper placements: owner relationships are invalid."
+                )
+
+        rows = backend.execute(
+            """
+            SELECT document.clip_id,
+                   document.note_id,
+                   note.id AS existing_note_id,
+                   note.client_id AS owner_client_id
+              FROM note_clipper_documents document
+              LEFT JOIN notes note ON note.id = document.note_id
+             ORDER BY note.client_id, document.clip_id
+            """,
+            connection=conn,
+        ).rows
+        plan = self._web_clipper_v56_rekey_plan(rows)
+        owner_by_clip_id = {
+            str(row["clip_id"]): str(row["owner_client_id"])
+            for row in rows
+        }
+        old_ids = [old_id for _, old_id, _ in plan]
+        for clip_id, _, replacement in plan:
+            collision = backend.execute(
+                "SELECT 1 FROM notes WHERE id = %s LIMIT 1",
+                (replacement,),
+                connection=conn,
+            ).first
+            if collision:
+                raise SchemaError(f"WebClipper note rekey target '{replacement}' already exists.")  # noqa: TRY003
+            owner_client_id = owner_by_clip_id[clip_id]
+            sync_log_collision = backend.execute(
+                "SELECT 1 FROM sync_log "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s LIMIT 1",
+                (owner_client_id, "notes", replacement),
+                connection=conn,
+            ).first
+            if sync_log_collision:
+                raise SchemaError(  # noqa: TRY003
+                    f"WebClipper note rekey target '{replacement}' already has Sync history."
+                )
+
+        for table_name, id_column in (
+            ("sync_envelopes", "entity_id"),
+            ("sync_object_state", "object_id"),
+        ):
+            if not old_ids or table_name not in sync_tables:
+                continue
+            for old_id in old_ids:
+                found = backend.execute(
+                    f"SELECT 1 FROM {table_name} "  # nosec B608
+                    f"WHERE domain = %s AND {id_column} = %s LIMIT 1",
+                    ("notes.note", old_id),
+                    connection=conn,
+                ).first
+                if found:
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note '{old_id}' has canonical Sync history; explicit migration is required."
+                    )
+            for _, _, replacement in plan:
+                found = backend.execute(
+                    f"SELECT 1 FROM {table_name} "  # nosec B608
+                    f"WHERE domain = %s AND {id_column} = %s LIMIT 1",
+                    ("notes.note", replacement),
+                    connection=conn,
+                ).first
+                if found:
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note rekey target '{replacement}' already has canonical Sync history."
+                    )
+
+        if old_ids:
+            foreign_keys = backend.execute(
+                """
+                SELECT c.conname,
+                       ns.nspname AS table_schema,
+                       rel.relname AS table_name,
+                       att.attname AS column_name,
+                       c.confupdtype AS on_update
+                  FROM pg_constraint c
+                  JOIN pg_class rel ON rel.oid = c.conrelid
+                  JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                  JOIN LATERAL unnest(c.conkey) AS key(attnum) ON TRUE
+                  JOIN pg_attribute att
+                    ON att.attrelid = c.conrelid AND att.attnum = key.attnum
+                 WHERE c.contype = 'f' AND c.confrelid = 'notes'::regclass
+                """,
+                connection=conn,
+            ).rows
+            for foreign_key in foreign_keys:
+                if str(foreign_key["on_update"]) == "c":
+                    continue
+                schema_name = str(foreign_key["table_schema"])
+                table_name = str(foreign_key["table_name"])
+                column_name = str(foreign_key["column_name"])
+                qualified_table = (
+                    f"{self._quoted_postgres_identifier(schema_name)}."
+                    f"{self._quoted_postgres_identifier(table_name)}"
+                )
+                quoted_column = self._quoted_postgres_identifier(column_name)
+                for old_id in old_ids:
+                    found = backend.execute(
+                        f"SELECT 1 FROM {qualified_table} WHERE {quoted_column} = %s LIMIT 1",  # nosec B608
+                        (old_id,),
+                        connection=conn,
+                    ).first
+                    if found:
+                        raise SchemaError(  # noqa: TRY003
+                            f"Cannot rekey WebClipper note '{old_id}': live non-cascading reference "
+                            f"from {table_name}.{column_name}."
+                        )
+
+        constraints = backend.execute(
+            """
+            SELECT c.conname,
+                   c.contype,
+                   pg_get_constraintdef(c.oid) AS definition,
+                   ARRAY(
+                     SELECT a.attname
+                       FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
+                       JOIN pg_attribute a
+                         ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                      ORDER BY key.ord
+                   ) AS columns
+              FROM pg_constraint c
+             WHERE c.conrelid = 'note_clipper_documents'::regclass
+            """,
+            connection=conn,
+        ).rows
+        has_clip_primary_key = any(
+            str(constraint["contype"]) == "p"
+            and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
+            for constraint in constraints
+        )
+        has_unique_note_id = any(
+            str(constraint["contype"]) == "u"
+            and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
+            for constraint in constraints
+        )
+        has_cascading_note_fk = any(
+            str(constraint["contype"]) == "f"
+            and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
+            and re.search(
+                r"REFERENCES\s+(?:\w+\.)?notes\s*\(",
+                str(constraint.get("definition") or "").replace('"', ""),
+                re.IGNORECASE,
+            )
+            and "ON UPDATE CASCADE" in str(constraint.get("definition") or "").upper()
+            for constraint in constraints
+        )
+        if not (has_clip_primary_key and has_unique_note_id and has_cascading_note_fk):
+            raise SchemaError("WebClipper durable note mapping constraints cannot be verified.")  # noqa: TRY003
+
+        placement_constraints: list[Any] = []
+        if has_placements:
+            placement_constraints = backend.execute(
+                """
+                SELECT c.conname,
+                       c.contype,
+                       pg_get_constraintdef(c.oid) AS definition,
+                       ARRAY(
+                         SELECT a.attname
+                           FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
+                           JOIN pg_attribute a
+                             ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                          ORDER BY key.ord
+                       ) AS columns
+                  FROM pg_constraint c
+                 WHERE c.conrelid = 'note_clipper_workspace_placements'::regclass
+                """,
+                connection=conn,
+            ).rows
+            has_placement_primary_key = any(
+                str(constraint["contype"]) == "p"
+                and [str(column) for column in (constraint.get("columns") or [])]
+                == ["clip_id", "workspace_id"]
+                for constraint in placement_constraints
+            )
+            has_document_fk = any(
+                str(constraint["contype"]) == "f"
+                and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
+                and "REFERENCES note_clipper_documents" in str(
+                    constraint.get("definition") or ""
+                ).replace('"', "")
+                for constraint in placement_constraints
+            )
+            if not (has_placement_primary_key and has_document_fk):
+                raise SchemaError("WebClipper placement constraints cannot be verified.")  # noqa: TRY003
+
+        for constraint in placement_constraints:
+            constraint_type = str(constraint["contype"])
+            columns = [str(column) for column in (constraint.get("columns") or [])]
+            definition = str(constraint.get("definition") or "").replace('"', "")
+            if not (
+                (constraint_type == "p" and columns == ["clip_id", "workspace_id"])
+                or (
+                    constraint_type == "f"
+                    and columns == ["clip_id"]
+                    and "REFERENCES note_clipper_documents" in definition
+                )
+            ):
+                continue
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements DROP CONSTRAINT "
+                f"{self._quoted_postgres_identifier(str(constraint['conname']))}",  # nosec B608
+                connection=conn,
+            )
+
+        for constraint in constraints:
+            constraint_name = str(constraint["conname"])
+            constraint_type = str(constraint["contype"])
+            definition = str(constraint.get("definition") or "")
+            columns = [str(column) for column in (constraint.get("columns") or [])]
+            normalized_definition = definition.replace('"', "")
+            is_clip_fk = constraint_type == "f" and columns == ["clip_id"]
+            is_legacy_clip_fk = is_clip_fk and bool(
+                re.search(r"REFERENCES\s+(?:\w+\.)?notes\s*\(", normalized_definition, re.IGNORECASE)
+            )
+            if is_clip_fk and not is_legacy_clip_fk:
+                raise SchemaError("WebClipper clip_id has an unverifiable PostgreSQL reference.")  # noqa: TRY003
+            is_legacy_identity_check = constraint_type == "c" and bool(
+                re.search(
+                    r"(?:clip_id\s*=\s*note_id|note_id\s*=\s*clip_id)",
+                    normalized_definition,
+                )
+            )
+            if (
+                constraint_type == "c"
+                and "clip_id" in normalized_definition
+                and "note_id" in normalized_definition
+                and not is_legacy_identity_check
+            ):
+                raise SchemaError("WebClipper identity check constraint cannot be verified.")  # noqa: TRY003
+            should_drop = (
+                is_legacy_clip_fk
+                or is_legacy_identity_check
+                or (constraint_type == "p" and columns == ["clip_id"])
+                or (constraint_type == "u" and columns == ["note_id"])
+            )
+            if should_drop:
+                backend.execute(
+                    "ALTER TABLE note_clipper_documents DROP CONSTRAINT "
+                    f"{self._quoted_postgres_identifier(constraint_name)}",  # nosec B608
+                    connection=conn,
+                )
+
+        backend.execute(
+            """
+            UPDATE note_clipper_documents document
+               SET client_id = note.client_id
+              FROM notes note
+             WHERE note.id = document.note_id
+            """,
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ALTER COLUMN client_id SET NOT NULL",
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ADD CONSTRAINT "
+            "note_clipper_documents_pkey PRIMARY KEY (client_id, clip_id)",
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ADD CONSTRAINT "
+            "note_clipper_documents_client_note_key UNIQUE (client_id, note_id)",
+            connection=conn,
+        )
+
+        if has_placements:
+            backend.execute(
+                """
+                UPDATE note_clipper_workspace_placements placement
+                   SET client_id = document.client_id
+                  FROM note_clipper_documents document
+                 WHERE document.clip_id = placement.clip_id
+                """,
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements "
+                "ALTER COLUMN client_id SET NOT NULL",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements ADD CONSTRAINT "
+                "note_clipper_workspace_placements_pkey "
+                "PRIMARY KEY (client_id, clip_id, workspace_id)",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements ADD CONSTRAINT "
+                "note_clipper_workspace_placements_document_fkey "
+                "FOREIGN KEY (client_id, clip_id) "
+                "REFERENCES note_clipper_documents(client_id, clip_id) "
+                "ON DELETE CASCADE ON UPDATE CASCADE",
+                connection=conn,
+            )
+
+        for index_name in (
+            "idx_note_clipper_documents_note_id",
+            "idx_note_clipper_workspace_placements_workspace",
+            "idx_note_clipper_workspace_placements_source_note",
+        ):
+            backend.execute(
+                f"DROP INDEX IF EXISTS {self._quoted_postgres_identifier(index_name)}",  # nosec B608
+                connection=conn,
+            )
+
+        for clip_id, old_id, replacement in plan:
+            owner_client_id = owner_by_clip_id[clip_id]
+            invalid_payloads = backend.execute(
+                "SELECT COUNT(*) FROM sync_log "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s "
+                "AND (jsonb_typeof(payload::jsonb) IS DISTINCT FROM 'object' "
+                "OR jsonb_typeof(payload::jsonb -> 'id') IS DISTINCT FROM 'string' "
+                "OR (payload::jsonb ->> 'id') IS DISTINCT FROM %s)",
+                (owner_client_id, "notes", old_id, old_id),
+                connection=conn,
+            ).scalar
+            if int(invalid_payloads or 0):
+                raise SchemaError("WebClipper legacy sync_log payload cannot be verified.")  # noqa: TRY003
+            backend.execute(
+                "UPDATE notes SET id = %s WHERE client_id = %s AND id = %s",
+                (replacement, owner_client_id, old_id),
+                connection=conn,
+            )
+            backend.execute(
+                "UPDATE sync_log SET entity_id = %s, "
+                "payload = jsonb_set(payload::jsonb, '{id}', to_jsonb(%s::text), true)::text "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s",
+                (replacement, replacement, owner_client_id, "notes", old_id),
+                connection=conn,
+            )
+            invalid_rewrites = backend.execute(
+                "SELECT COUNT(*) FROM sync_log "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s "
+                "AND (jsonb_typeof(payload::jsonb) IS DISTINCT FROM 'object' "
+                "OR jsonb_typeof(payload::jsonb -> 'id') IS DISTINCT FROM 'string' "
+                "OR (payload::jsonb ->> 'id') IS DISTINCT FROM %s)",
+                (owner_client_id, "notes", replacement, replacement),
+                connection=conn,
+            ).scalar
+            if int(invalid_rewrites or 0):
+                raise SchemaError("WebClipper sync_log payload rewrite verification failed.")  # noqa: TRY003
+            mapping = backend.execute(
+                "SELECT note_id FROM note_clipper_documents "
+                "WHERE client_id = %s AND clip_id = %s",
+                (owner_client_id, clip_id),
+                connection=conn,
+            ).first
+            if mapping is None or str(mapping["note_id"]) != replacement:
+                raise SchemaError("WebClipper v56 mapping verification failed.")  # noqa: TRY003
+
+        if has_placements:
+            mismatched = backend.execute(
+                """
+                SELECT COUNT(*)
+                  FROM note_clipper_workspace_placements placement
+                  JOIN note_clipper_documents document
+                    ON document.client_id = placement.client_id
+                   AND document.clip_id = placement.clip_id
+                 WHERE placement.source_note_id <> document.note_id
+                """,
+                connection=conn,
+            ).scalar
+            if int(mismatched or 0):
+                raise SchemaError("WebClipper v56 placement verification failed.")  # noqa: TRY003
+
+        if rls_forced:
+            backend.execute(
+                "ALTER TABLE notes FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+        self._ensure_web_clipper_schema_postgres(conn)
+        if has_placements:
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements VALIDATE CONSTRAINT "
+                "note_clipper_workspace_placements_document_fkey",
+                connection=conn,
+            )
+        self._set_schema_version_postgres(conn, 56)
+
+    def _migrate_from_v56_to_v57(self, conn: sqlite3.Connection) -> None:
+        """Advance per-user SQLite without applying shared PostgreSQL tenancy rules."""
+        try:
+            conn.execute(
+                "UPDATE db_schema_version SET version = 57 "
+                "WHERE schema_name = ? AND version < 57",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 57:
+                raise SchemaError(  # noqa: TRY003
+                    f"[{self._SCHEMA_NAME}] Migration V56->V57 failed version check. "
+                    f"Expected 57, got: {final_version}"
+                )
+        except sqlite3.Error as exc:
+            raise SchemaError(
+                f"Migration V56->V57 failed for '{self._SCHEMA_NAME}': {exc}"
+            ) from exc  # noqa: TRY003
+
+    def _migrate_from_v56_to_v57_postgres(self, conn: Any) -> None:
+        """Owner-scope shared Notes organization uniqueness without guessing owners."""
+        backend = self.backend
+        locked_tables = (
+            "chacha_keywords",
+            "collection_keywords",
+            "conversation_keywords",
+            "conversations",
+            "keyword_collections",
+            "note_folder_memberships",
+            "note_folder_source_memberships",
+            "note_folder_sync_suppressions",
+            "note_folders",
+            "note_keywords",
+            "notes",
+        )
+        backend.execute(
+            """
+            LOCK TABLE
+              chacha_keywords,
+              collection_keywords,
+              conversation_keywords,
+              conversations,
+              keyword_collections,
+              note_folder_memberships,
+              note_folder_source_memberships,
+              note_folder_sync_suppressions,
+              note_folders,
+              note_keywords,
+              notes
+            IN SHARE ROW EXCLUSIVE MODE
+            """,
+            connection=conn,
+        )
+        rls_states = backend.execute(
+            """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   table_row.relowner = current_user::regrole AS is_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row
+                ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname IN (
+                 'chacha_keywords',
+                 'collection_keywords',
+                 'conversation_keywords',
+                 'conversations',
+                 'keyword_collections',
+                 'note_folder_memberships',
+                 'note_folder_source_memberships',
+                 'note_folder_sync_suppressions',
+                 'note_folders',
+                 'note_keywords',
+                 'notes'
+               )
+            """,
+            connection=conn,
+        ).rows
+        state_by_table = {
+            str(row["table_name"]): row
+            for row in rls_states
+        }
+        if set(state_by_table) != set(locked_tables) or any(
+            not bool(state_by_table[table_name].get("is_schema_owner"))
+            for table_name in locked_tables
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes organization v57 requires the verified PostgreSQL "
+                "schema-owner migration path for every locked table."
+            )
+        forced_rls_tables: list[str] = []
+        for table_name in locked_tables:
+            state = state_by_table[table_name]
+            rls_enabled = bool(state.get("relrowsecurity"))
+            rls_forced = bool(state.get("relforcerowsecurity"))
+            if rls_forced and not rls_enabled:
+                raise SchemaError(  # noqa: TRY003
+                    f"PostgreSQL RLS state cannot be verified for {table_name}."
+                )
+            if not rls_forced:
+                continue
+            backend.execute(
+                f"ALTER TABLE {self._quoted_postgres_identifier(table_name)} "  # nosec B608
+                "NO FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+            forced_rls_tables.append(table_name)
+
+        resource_tables = (
+            "chacha_keywords",
+            "keyword_collections",
+            "note_folders",
+        )
+        for table_name in resource_tables:
+            invalid_owners = backend.execute(
+                f"""
+                SELECT COUNT(*)
+                  FROM {table_name}
+                 WHERE client_id IS NULL
+                    OR BTRIM(client_id) = ''
+                    OR client_id <> BTRIM(client_id)
+                    OR BTRIM(client_id) !~ '^[1-9][0-9]*$'
+                """,  # nosec B608 -- table names are fixed migration constants.
+                connection=conn,
+            ).scalar
+            if int(invalid_owners or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {table_name}: {int(invalid_owners)} row(s) lack "
+                    "a canonical authenticated owner. Refusing to infer ownership."
+                )
+
+        collision_checks = (
+            ("chacha_keywords", "sync_id", None),
+            ("chacha_keywords", "LOWER(keyword)", None),
+            ("keyword_collections", "sync_id", None),
+            ("keyword_collections", "LOWER(name)", None),
+            ("note_folders", "sync_id", None),
+            ("note_folders", "LOWER(path)", "deleted = FALSE"),
+        )
+        for table_name, key_expression, predicate in collision_checks:
+            where_clause = f" WHERE {predicate}" if predicate else ""
+            collisions = backend.execute(
+                f"""
+                SELECT COUNT(*)
+                  FROM (
+                    SELECT client_id, {key_expression}
+                      FROM {table_name}{where_clause}
+                     GROUP BY client_id, {key_expression}
+                    HAVING COUNT(*) > 1
+                  ) duplicate_owner_keys
+                """,  # nosec B608 -- all SQL fragments are fixed migration constants.
+                connection=conn,
+            ).scalar
+            if int(collisions or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {table_name} owner-scoped uniqueness: "
+                    f"{int(collisions)} colliding owner/key group(s)."
+                )
+
+        ownership_checks = (
+            (
+                "keyword collection hierarchy",
+                """
+                SELECT COUNT(*)
+                  FROM keyword_collections AS child
+                  JOIN keyword_collections AS parent ON parent.id = child.parent_id
+                 WHERE child.client_id IS DISTINCT FROM parent.client_id
+                """,
+            ),
+            (
+                "folder hierarchy",
+                """
+                SELECT COUNT(*)
+                  FROM note_folders AS child
+                  JOIN note_folders AS parent ON parent.id = child.parent_id
+                 WHERE child.client_id IS DISTINCT FROM parent.client_id
+                """,
+            ),
+            (
+                "note keyword link",
+                """
+                SELECT COUNT(*)
+                  FROM note_keywords AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
+                 WHERE note.client_id IS DISTINCT FROM keyword.client_id
+                """,
+            ),
+            (
+                "conversation keyword link",
+                """
+                SELECT COUNT(*)
+                  FROM conversation_keywords AS link
+                  JOIN conversations AS conversation ON conversation.id = link.conversation_id
+                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
+                 WHERE conversation.client_id IS DISTINCT FROM keyword.client_id
+                """,
+            ),
+            (
+                "collection keyword link",
+                """
+                SELECT COUNT(*)
+                  FROM collection_keywords AS link
+                  JOIN keyword_collections AS collection ON collection.id = link.collection_id
+                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
+                 WHERE collection.client_id IS DISTINCT FROM keyword.client_id
+                """,
+            ),
+            (
+                "note folder membership",
+                """
+                SELECT COUNT(*)
+                  FROM note_folder_memberships AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN note_folders AS folder ON folder.id = link.folder_id
+                 WHERE note.client_id IS DISTINCT FROM folder.client_id
+                """,
+            ),
+            (
+                "note folder source membership",
+                """
+                SELECT COUNT(*)
+                  FROM note_folder_source_memberships AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN note_folders AS folder ON folder.id = link.folder_id
+                 WHERE note.client_id IS DISTINCT FROM folder.client_id
+                """,
+            ),
+            (
+                "note folder suppression",
+                """
+                SELECT COUNT(*)
+                  FROM note_folder_sync_suppressions AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN note_folders AS folder ON folder.id = link.folder_id
+                 WHERE note.client_id IS DISTINCT FROM folder.client_id
+                """,
+            ),
+        )
+        for relationship_name, statement in ownership_checks:
+            cross_owner_rows = backend.execute(statement, connection=conn).scalar
+            if int(cross_owner_rows or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {relationship_name}: {int(cross_owner_rows)} "
+                    "cross-owner relation(s) require authoritative repair."
+                )
+
+        constraints = backend.execute(
+            """
+            SELECT rel.relname AS table_name,
+                   constraint_row.conname,
+                   ARRAY(
+                     SELECT attribute_row.attname
+                       FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum, ord)
+                       JOIN pg_attribute attribute_row
+                         ON attribute_row.attrelid = constraint_row.conrelid
+                        AND attribute_row.attnum = key.attnum
+                      ORDER BY key.ord
+                   ) AS columns
+              FROM pg_constraint constraint_row
+              JOIN pg_class rel ON rel.oid = constraint_row.conrelid
+              JOIN pg_namespace namespace_row ON namespace_row.oid = rel.relnamespace
+             WHERE constraint_row.contype = 'u'
+               AND namespace_row.nspname = current_schema()
+               AND rel.relname IN ('chacha_keywords', 'keyword_collections', 'note_folders')
+            """,
+            connection=conn,
+        ).rows
+        natural_key_columns = {
+            "chacha_keywords": ["keyword"],
+            "keyword_collections": ["name"],
+            "note_folders": ["path"],
+        }
+        for constraint in constraints:
+            table_name = str(constraint["table_name"])
+            columns = [str(column) for column in (constraint.get("columns") or [])]
+            if columns != natural_key_columns.get(table_name):
+                continue
+            quoted_table = self._quoted_postgres_identifier(table_name)
+            quoted_constraint = self._quoted_postgres_identifier(str(constraint["conname"]))
+            backend.execute(
+                f"ALTER TABLE {quoted_table} DROP CONSTRAINT IF EXISTS {quoted_constraint}",  # nosec B608
+                connection=conn,
+            )
+
+        for index_name in (
+            "idx_keywords_sync_id_unique",
+            "idx_keyword_collections_sync_id_unique",
+            "idx_note_folders_sync_id_unique",
+            "idx_note_folders_path_lower",
+        ):
+            backend.execute(
+                f"DROP INDEX IF EXISTS {self._quoted_postgres_identifier(index_name)}",  # nosec B608
+                connection=conn,
+            )
+
+        owner_indexes = (
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_sync_id_unique "
+            "ON chacha_keywords(client_id, sync_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_keyword_lower_unique "
+            "ON chacha_keywords(client_id, LOWER(keyword))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_sync_id_unique "
+            "ON keyword_collections(client_id, sync_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_name_lower_unique "
+            "ON keyword_collections(client_id, LOWER(name))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique "
+            "ON note_folders(client_id, sync_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
+            "ON note_folders(client_id, LOWER(path)) WHERE deleted = FALSE",
+        )
+        for statement in owner_indexes:
+            backend.execute(statement, connection=conn)
+
+        for table_name in forced_rls_tables:
+            backend.execute(
+                f"ALTER TABLE {self._quoted_postgres_identifier(table_name)} "  # nosec B608
+                "FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+        self._set_schema_version_postgres(conn, 57)
+
+    def _ensure_chacha_rls_postgres(self, conn: Any) -> None:
+        """Install the complete ChaCha policy set after all schema migrations."""
+        for statement in build_chacha_rls_sql():
+            self.backend.execute(statement, connection=conn)
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -9495,7 +10610,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               SELECT
                 id,
                 FIRST_VALUE(id) OVER (
-                  PARTITION BY LOWER(path)
+                  PARTITION BY client_id, LOWER(path)
                   ORDER BY id ASC
                 ) AS canonical_id
               FROM note_folders
@@ -9532,7 +10647,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE note_folders DROP CONSTRAINT IF EXISTS note_folders_path_key",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique ON note_folders(sync_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique ON note_folders(client_id, sync_id)",
             """
             CREATE TABLE IF NOT EXISTS note_folder_memberships(
               note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -9641,7 +10756,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                  WHERE schemaname = current_schema()
                    AND tablename = 'note_folders'
                    AND indexname = 'idx_note_folders_path_lower'
-                   AND indexdef NOT ILIKE '%WHERE%deleted%'
+                   AND (
+                     indexdef NOT ILIKE '%client_id%'
+                     OR indexdef NOT ILIKE '%WHERE%deleted%'
+                   )
               ) THEN
                 DROP INDEX idx_note_folders_path_lower;
               END IF;
@@ -9649,7 +10767,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             (
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
-                "ON note_folders(LOWER(path)) WHERE deleted = FALSE"
+                "ON note_folders(client_id, LOWER(path)) WHERE deleted = FALSE"
             ),
         ]
         for statement in statements:
@@ -9715,7 +10833,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS note_clipper_documents(
-                  clip_id               TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                  clip_id               TEXT PRIMARY KEY,
                   note_id               TEXT NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
                   clip_type             TEXT NOT NULL,
                   source_url            TEXT,
@@ -9726,8 +10844,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   source_note_version   INTEGER,
                   created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   last_modified         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  deleted               BOOLEAN NOT NULL DEFAULT 0,
-                  CHECK(clip_id = note_id)
+                  deleted               BOOLEAN NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -9765,8 +10882,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         statements = [
             """
             CREATE TABLE IF NOT EXISTS note_clipper_documents(
-              clip_id               TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              note_id               TEXT NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              client_id             TEXT NOT NULL,
+              clip_id               TEXT NOT NULL,
+              note_id               TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
               clip_type             TEXT NOT NULL,
               source_url            TEXT,
               source_title          TEXT,
@@ -9777,13 +10895,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               last_modified         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               deleted               BOOLEAN NOT NULL DEFAULT FALSE,
-              CHECK(clip_id = note_id)
+              PRIMARY KEY (client_id, clip_id),
+              UNIQUE (client_id, note_id)
             )
             """,
-            "CREATE INDEX IF NOT EXISTS idx_note_clipper_documents_note_id ON note_clipper_documents(note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_documents_note_id ON note_clipper_documents(client_id, note_id)",
             """
             CREATE TABLE IF NOT EXISTS note_clipper_workspace_placements(
-              clip_id             TEXT NOT NULL REFERENCES note_clipper_documents(clip_id) ON DELETE CASCADE ON UPDATE CASCADE,
+              client_id           TEXT NOT NULL,
+              clip_id             TEXT NOT NULL,
               workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE ON UPDATE CASCADE,
               workspace_note_id   INTEGER,
               source_note_id      TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -9791,13 +10911,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               last_modified       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               deleted             BOOLEAN NOT NULL DEFAULT FALSE,
-              PRIMARY KEY (clip_id, workspace_id)
+              PRIMARY KEY (client_id, clip_id, workspace_id),
+              FOREIGN KEY (client_id, clip_id)
+                REFERENCES note_clipper_documents(client_id, clip_id)
+                ON DELETE CASCADE ON UPDATE CASCADE
             )
             """,
-            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_workspace ON note_clipper_workspace_placements(workspace_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_source_note ON note_clipper_workspace_placements(source_note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_workspace ON note_clipper_workspace_placements(client_id, workspace_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_source_note ON note_clipper_workspace_placements(client_id, source_note_id)",
         ]
         for statement in statements:
+            self.backend.execute(statement, connection=conn)
+        for statement in build_web_clipper_rls_sql():
             self.backend.execute(statement, connection=conn)
 
     @staticmethod
@@ -9817,6 +10942,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
         raise InputError(f"{field_name} must be a mapping, list, JSON string, or None.")  # noqa: TRY003
 
+    @staticmethod
+    def _is_canonical_uuid4(value: str) -> bool:
+        try:
+            parsed = uuid.UUID(value)
+        except (AttributeError, ValueError):
+            return False
+        return parsed.version == 4 and str(parsed) == value
+
     def _fetch_note_clipper_document_row(
         self,
         *,
@@ -9827,8 +10960,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any] | None:
         if column not in {"clip_id", "note_id"}:
             raise InputError("Unsupported note clipper document lookup column.")  # noqa: TRY003
-        query = f"SELECT * FROM note_clipper_documents WHERE {column} = ?"  # nosec B608
-        params: list[Any] = [value]
+        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"SELECT * FROM note_clipper_documents WHERE {owner_clause}{column} = ?"  # nosec B608
+        params: list[Any] = []
+        if owner_clause:
+            params.append(self.client_id)
+        params.append(value)
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
@@ -9853,12 +10990,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_note_clipper_workspace_placements(self, clip_id: str) -> list[dict[str, Any]]:
         """Return active workspace placements for a clip."""
-        query = (
-            "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
-            "FROM note_clipper_workspace_placements WHERE clip_id = ? AND deleted = ? "
-            "ORDER BY workspace_id"
-        )
-        params = (clip_id, False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if self.backend_type == BackendType.POSTGRESQL:
+            query = (
+                "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
+                "FROM note_clipper_workspace_placements "
+                "WHERE client_id = ? AND clip_id = ? AND deleted = ? ORDER BY workspace_id"
+            )
+            params = (self.client_id, clip_id, False)
+        else:
+            query = (
+                "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
+                "FROM note_clipper_workspace_placements "
+                "WHERE clip_id = ? AND deleted = ? ORDER BY workspace_id"
+            )
+            params = (clip_id, 0)
         cursor = self.execute_query(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
@@ -9874,33 +11019,49 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         flag_value = deleted_value if deleted else active_value
         now = self._get_current_utc_timestamp_iso()
 
+        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_params: tuple[Any, ...] = (self.client_id,) if owner_clause else ()
         document = conn.execute(
-            "SELECT clip_id FROM note_clipper_documents WHERE note_id = ?",
-            (note_id,),
+            f"SELECT clip_id FROM note_clipper_documents WHERE {owner_clause}note_id = ?",  # nosec B608
+            (*owner_params, note_id),
         ).fetchone()
         if document is None:
             return
         clip_id = document["clip_id"]
         conn.execute(
-            "UPDATE note_clipper_documents SET deleted = ?, last_modified = ? WHERE clip_id = ?",
-            (flag_value, now, clip_id),
+            f"UPDATE note_clipper_documents SET deleted = ?, last_modified = ? "  # nosec B608
+            f"WHERE {owner_clause}clip_id = ?",
+            (flag_value, now, *owner_params, clip_id),
         )
         conn.execute(
-            "UPDATE note_clipper_workspace_placements SET deleted = ?, last_modified = ? WHERE clip_id = ?",
-            (flag_value, now, clip_id),
+            f"UPDATE note_clipper_workspace_placements SET deleted = ?, last_modified = ? "  # nosec B608
+            f"WHERE {owner_clause}clip_id = ?",
+            (flag_value, now, *owner_params, clip_id),
         )
 
     def _delete_note_clipper_sidecars(self, note_id: str, *, conn: sqlite3.Connection) -> None:
+        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_params: tuple[Any, ...] = (self.client_id,) if owner_clause else ()
         document = conn.execute(
-            "SELECT clip_id FROM note_clipper_documents WHERE note_id = ?",
-            (note_id,),
+            f"SELECT clip_id FROM note_clipper_documents WHERE {owner_clause}note_id = ?",  # nosec B608
+            (*owner_params, note_id),
         ).fetchone()
         if document is None:
-            conn.execute("DELETE FROM note_clipper_workspace_placements WHERE source_note_id = ?", (note_id,))
+            conn.execute(
+                f"DELETE FROM note_clipper_workspace_placements "  # nosec B608
+                f"WHERE {owner_clause}source_note_id = ?",
+                (*owner_params, note_id),
+            )
             return
         clip_id = document["clip_id"]
-        conn.execute("DELETE FROM note_clipper_workspace_placements WHERE clip_id = ?", (clip_id,))
-        conn.execute("DELETE FROM note_clipper_documents WHERE clip_id = ?", (clip_id,))
+        conn.execute(
+            f"DELETE FROM note_clipper_workspace_placements WHERE {owner_clause}clip_id = ?",  # nosec B608
+            (*owner_params, clip_id),
+        )
+        conn.execute(
+            f"DELETE FROM note_clipper_documents WHERE {owner_clause}clip_id = ?",  # nosec B608
+            (*owner_params, clip_id),
+        )
 
     def upsert_note_clipper_document(
         self,
@@ -9921,8 +11082,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_clip_type = str(clip_type).strip()
         if not normalized_clip_id or not normalized_note_id:
             raise InputError("clip_id and note_id are required.")  # noqa: TRY003
-        if normalized_clip_id != normalized_note_id:
-            raise InputError("clip_id and note_id must match for the canonical clip record.")  # noqa: TRY003
+        if not self._is_canonical_uuid4(normalized_note_id):
+            raise InputError("note_id must be a canonical UUIDv4 string.")  # noqa: TRY003
         if not normalized_clip_type:
             raise InputError("clip_type cannot be empty.")  # noqa: TRY003
         if source_note_version is not None and (not isinstance(source_note_version, int) or source_note_version < 1):
@@ -9933,24 +11094,43 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         analysis_json = self._serialize_note_clipper_json_field(enrichments, "enrichments")
         content_budget_json = self._serialize_note_clipper_json_field(content_budget, "content_budget")
         deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
-        query = (
-            "INSERT INTO note_clipper_documents ("
-            "clip_id, note_id, clip_type, source_url, source_title, capture_metadata_json, "
-            "analysis_json, content_budget_json, source_note_version, created_at, last_modified, deleted"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(clip_id) DO UPDATE SET "
-            "note_id = excluded.note_id, "
-            "clip_type = excluded.clip_type, "
-            "source_url = excluded.source_url, "
-            "source_title = excluded.source_title, "
-            "capture_metadata_json = excluded.capture_metadata_json, "
-            "analysis_json = excluded.analysis_json, "
-            "content_budget_json = excluded.content_budget_json, "
-            "source_note_version = excluded.source_note_version, "
-            "last_modified = excluded.last_modified, "
-            "deleted = excluded.deleted"
-        )
+        postgres = self.backend_type == BackendType.POSTGRESQL
+        if postgres:
+            query = (
+                "INSERT INTO note_clipper_documents ("
+                "client_id, clip_id, note_id, clip_type, source_url, source_title, capture_metadata_json, "
+                "analysis_json, content_budget_json, source_note_version, created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(client_id, clip_id) DO UPDATE SET "
+                "clip_type = excluded.clip_type, "
+                "source_url = excluded.source_url, "
+                "source_title = excluded.source_title, "
+                "capture_metadata_json = excluded.capture_metadata_json, "
+                "analysis_json = excluded.analysis_json, "
+                "content_budget_json = excluded.content_budget_json, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
+        else:
+            query = (
+                "INSERT INTO note_clipper_documents ("
+                "clip_id, note_id, clip_type, source_url, source_title, capture_metadata_json, "
+                "analysis_json, content_budget_json, source_note_version, created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(clip_id) DO UPDATE SET "
+                "clip_type = excluded.clip_type, "
+                "source_url = excluded.source_url, "
+                "source_title = excluded.source_title, "
+                "capture_metadata_json = excluded.capture_metadata_json, "
+                "analysis_json = excluded.analysis_json, "
+                "content_budget_json = excluded.content_budget_json, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
         params = (
+            *((self.client_id,) if postgres else ()),
             normalized_clip_id,
             normalized_note_id,
             normalized_clip_type,
@@ -9966,9 +11146,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            owner_clause = "client_id = ? AND " if postgres else ""
+            owner_params: tuple[Any, ...] = (self.client_id,) if postgres else ()
+            existing_mapping = inner_conn.execute(
+                f"SELECT note_id FROM note_clipper_documents WHERE {owner_clause}clip_id = ?",  # nosec B608
+                (*owner_params, normalized_clip_id),
+            ).fetchone()
+            if (
+                existing_mapping is not None
+                and str(existing_mapping["note_id"]) != normalized_note_id
+            ):
+                raise ConflictError(
+                    "Clip ID is already mapped to a different canonical note.",
+                    entity="note_clipper_documents",
+                    entity_id=normalized_clip_id,
+                )
             note_row = inner_conn.execute(
-                "SELECT id FROM notes WHERE id = ? AND deleted = ?",
+                f"SELECT id FROM notes WHERE {owner_clause}id = ? AND deleted = ?",  # nosec B608
                 (
+                    *owner_params,
                     normalized_note_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
                 ),
@@ -9984,7 +11180,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             document = self._fetch_note_clipper_document_row(
                 column="clip_id",
                 value=normalized_clip_id,
-                conn=inner_conn if isinstance(inner_conn, sqlite3.Connection) else None,
+                conn=inner_conn,
             )
             if document is None:
                 raise CharactersRAGDBError(
@@ -10009,43 +11205,47 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any]:
         normalized_clip_id = str(clip_id).strip()
         normalized_workspace_id = str(workspace_id).strip()
-        normalized_source_note_id = str(source_note_id).strip() if source_note_id is not None else normalized_clip_id
         if not normalized_clip_id or not normalized_workspace_id:
             raise InputError("clip_id and workspace_id are required.")  # noqa: TRY003
-        if normalized_source_note_id != normalized_clip_id:
-            raise InputError("source_note_id must match clip_id for the canonical clip placement.")  # noqa: TRY003
         if source_note_version is not None and (not isinstance(source_note_version, int) or source_note_version < 1):
             raise InputError("source_note_version must be an integer >= 1 when provided.")  # noqa: TRY003
 
         now = self._get_current_utc_timestamp_iso()
         deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
-        query = (
-            "INSERT INTO note_clipper_workspace_placements ("
-            "clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version, "
-            "created_at, last_modified, deleted"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(clip_id, workspace_id) DO UPDATE SET "
-            "workspace_note_id = excluded.workspace_note_id, "
-            "source_note_id = excluded.source_note_id, "
-            "source_note_version = excluded.source_note_version, "
-            "last_modified = excluded.last_modified, "
-            "deleted = excluded.deleted"
-        )
-        params = (
-            normalized_clip_id,
-            normalized_workspace_id,
-            workspace_note_id,
-            normalized_source_note_id,
-            source_note_version,
-            now,
-            now,
-            deleted_value,
-        )
-
+        postgres = self.backend_type == BackendType.POSTGRESQL
+        if postgres:
+            query = (
+                "INSERT INTO note_clipper_workspace_placements ("
+                "client_id, clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version, "
+                "created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(client_id, clip_id, workspace_id) DO UPDATE SET "
+                "workspace_note_id = excluded.workspace_note_id, "
+                "source_note_id = excluded.source_note_id, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
+        else:
+            query = (
+                "INSERT INTO note_clipper_workspace_placements ("
+                "clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version, "
+                "created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(clip_id, workspace_id) DO UPDATE SET "
+                "workspace_note_id = excluded.workspace_note_id, "
+                "source_note_id = excluded.source_note_id, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            owner_clause = "client_id = ? AND " if postgres else ""
+            owner_params: tuple[Any, ...] = (self.client_id,) if postgres else ()
             workspace_row = inner_conn.execute(
-                "SELECT id FROM workspaces WHERE id = ? AND deleted = ?",
+                f"SELECT id FROM workspaces WHERE {owner_clause}id = ? AND deleted = ?",  # nosec B608
                 (
+                    *owner_params,
                     normalized_workspace_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
                 ),
@@ -10057,8 +11257,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity_id=normalized_workspace_id,
                 )
             clip_row = inner_conn.execute(
-                "SELECT clip_id FROM note_clipper_documents WHERE clip_id = ? AND deleted = ?",
+                f"SELECT clip_id, note_id FROM note_clipper_documents "  # nosec B608
+                f"WHERE {owner_clause}clip_id = ? AND deleted = ?",
                 (
+                    *owner_params,
                     normalized_clip_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
                 ),
@@ -10069,12 +11271,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity="note_clipper_documents",
                     entity_id=normalized_clip_id,
                 )
+            canonical_note_id = str(clip_row["note_id"])
+            normalized_source_note_id = (
+                str(source_note_id).strip()
+                if source_note_id is not None
+                else canonical_note_id
+            )
+            if normalized_source_note_id != canonical_note_id:
+                raise InputError(
+                    "source_note_id must match the clip document note_id."
+                )  # noqa: TRY003
+            params = (
+                *owner_params,
+                normalized_clip_id,
+                normalized_workspace_id,
+                workspace_note_id,
+                normalized_source_note_id,
+                source_note_version,
+                now,
+                now,
+                deleted_value,
+            )
             prepared_query, prepared_params = self._prepare_backend_statement(query, params)
             inner_conn.execute(prepared_query, prepared_params or ())
             result = inner_conn.execute(
                 "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
-                "FROM note_clipper_workspace_placements WHERE clip_id = ? AND workspace_id = ? AND deleted = ?",
+                f"FROM note_clipper_workspace_placements WHERE {owner_clause}clip_id = ? "  # nosec B608
+                "AND workspace_id = ? AND deleted = ?",
                 (
+                    *owner_params,
                     normalized_clip_id,
                     normalized_workspace_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
@@ -11671,6 +12896,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 55 and current_db_version == 54:
                         self._migrate_from_v54_to_v55(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 56 and current_db_version == 55:
+                        self._migrate_from_v55_to_v56(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 57 and current_db_version == 56:
+                        self._migrate_from_v56_to_v57(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -12084,6 +13315,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 55 and current_db_version == 54:
                     self._migrate_from_v54_to_v55(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 56 and current_db_version == 55:
+                    self._migrate_from_v55_to_v56(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 57 and current_db_version == 56:
+                    self._migrate_from_v56_to_v57(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -15823,9 +17060,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
             if not schema_exists:
                 self._apply_schema_v4_postgres(conn)
-                current_version = 4
-            else:
-                current_version = self._get_schema_version_postgres(conn)
+            current_version = self._get_schema_version_postgres(conn, lock=True)
 
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
@@ -16015,6 +17250,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._ensure_note_folder_schema_postgres(conn)
                 self._migrate_from_v54_to_v55_postgres(conn)
                 current_version = 55
+            if current_version < 56:
+                self._migrate_from_v55_to_v56_postgres(conn)
+                current_version = 56
+            if current_version < 57:
+                self._migrate_from_v56_to_v57_postgres(conn)
+                current_version = 57
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -16042,6 +17283,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
+            self._ensure_chacha_rls_postgres(conn)
 
             if current_version < target_version:
                 logger.warning(
@@ -16663,9 +17905,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS as _e:
             logger.debug(f"Skipping ensure flashcards tsvector after migration to v{expected_version}: {_e}")
 
-    def _get_schema_version_postgres(self, conn) -> int:
+    def _get_schema_version_postgres(self, conn, *, lock: bool = False) -> int:
+        query = (
+            "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1 FOR UPDATE"
+            if lock
+            else "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1"
+        )
         result = self.backend.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1",
+            query,
             (self._SCHEMA_NAME,),
             connection=conn,
         )

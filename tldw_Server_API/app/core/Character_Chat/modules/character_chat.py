@@ -1166,6 +1166,7 @@ def post_message_to_conversation(
     image_data: Optional[bytes] = None,
     image_mime_type: Optional[str] = None,
     sender_override: Optional[str] = None,
+    owner_user_id: int | str | None = None,
 ) -> Optional[str]:
     """Post a new message to a specified conversation."""
 
@@ -1261,7 +1262,8 @@ def post_message_to_conversation(
             try:
                 from tldw_Server_API.app.core.Chat.conversation_enrichment import schedule_auto_tagging
 
-                schedule_auto_tagging(db, conversation_id)
+                if owner_user_id is not None:
+                    schedule_auto_tagging(db, conversation_id, owner_user_id=owner_user_id)
             except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(
                     'Auto-tagging trigger skipped for conversation {}: {}',

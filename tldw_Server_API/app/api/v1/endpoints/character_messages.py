@@ -488,6 +488,7 @@ async def send_message(
                 image_data=image_data,
                 image_mime_type=image_mime_type,
                 sender_override=sender_override,
+                owner_user_id=current_user.id,
             )
 
             if not created_id:

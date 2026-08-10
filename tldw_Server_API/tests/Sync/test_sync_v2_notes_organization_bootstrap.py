@@ -37,6 +37,7 @@ COLLECTION_CHILD_ID = "55555555-5555-4555-8555-555555555555"
 FOLDER_PARENT_ID = "66666666-6666-4666-8666-666666666666"
 FOLDER_CHILD_ID = "77777777-7777-4777-8777-777777777777"
 REPAIR_KEYWORD_ID = "88888888-8888-4888-8888-888888888888"
+FOREIGN_KEYWORD_ID = "99999999-9999-4999-8999-999999999999"
 
 
 def _service(tmp_path: Path) -> tuple[SyncV2Service, SyncV2Store, CharactersRAGDB]:
@@ -165,6 +166,40 @@ def test_bootstrap_captures_in_dependency_order_without_replaying_product_state(
     assert (parent.server_cursor or 0) < (child.server_cursor or 0)
     relationship = next(item for item in envelopes if item.domain == "notes.keyword_link")
     assert relationship.routing_metadata["bootstrap_capture"] is True
+    note_db.close_connection()
+
+
+def test_bootstrap_excludes_organization_rows_owned_by_another_tenant(
+    tmp_path: Path,
+) -> None:
+    service, store, note_db = _service(tmp_path)
+    projection = _seed_source(note_db, store)
+    with note_db.transaction() as connection:
+        connection.execute(
+            "INSERT INTO keywords(sync_id, keyword, client_id) VALUES (?, ?, ?)",
+            (FOREIGN_KEYWORD_ID, "Other tenant private keyword", "user-2"),
+        )
+
+    result = NotesOrganizationBootstrapper(note_db).bootstrap(
+        service=service,
+        user_id="user-1",
+        dataset=store.get_dataset("dataset-1"),
+    )
+
+    assert result.metadata["notes_organization_v1"]["state"] == "ready"
+    assert all(
+        envelope.object_id != FOREIGN_KEYWORD_ID
+        for envelope in _organization_envelopes(store)
+    )
+    assert projection.get_resource("notes.keyword", FOREIGN_KEYWORD_ID) is None
+    with note_db.transaction() as connection:
+        foreign = connection.execute(
+            "SELECT deleted, client_id FROM keywords WHERE sync_id = ?",
+            (FOREIGN_KEYWORD_ID,),
+        ).fetchone()
+    assert foreign is not None
+    assert bool(foreign["deleted"]) is False
+    assert foreign["client_id"] == "user-2"
     note_db.close_connection()
 
 

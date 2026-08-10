@@ -24,6 +24,8 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     SyncDeviceUpsert,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
     SyncObjectState,
 )
 from tldw_Server_API.app.core.Sync.v2.security import (
@@ -200,7 +202,15 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
                 },
                 "additional_properties": False,
             },
-            "tombstone": {"operation": "tombstone"},
+            "tombstone": {
+                "required": ["subject_type", "subject_id", "keyword_sync_id"],
+                "properties": {
+                    "subject_type": {"enum": ["note", "conversation"]},
+                    "subject_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
         },
         "notes.keyword_collection": {
             "schema_version": 1,
@@ -226,7 +236,14 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
                 },
                 "additional_properties": False,
             },
-            "tombstone": {"operation": "tombstone"},
+            "tombstone": {
+                "required": ["collection_sync_id", "keyword_sync_id"],
+                "properties": {
+                    "collection_sync_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
         },
         "notes.folder": {
             "schema_version": 1,
@@ -252,7 +269,14 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
                 },
                 "additional_properties": False,
             },
-            "tombstone": {"operation": "tombstone"},
+            "tombstone": {
+                "required": ["note_id", "folder_sync_id"],
+                "properties": {
+                    "note_id": {"type": "string"},
+                    "folder_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
         },
     }
     assert body["warnings"] == []
@@ -1050,7 +1074,7 @@ def test_datasets_enroll_endpoint_fails_closed_when_encryption_is_not_ready(
             "scope_type": "personal",
             "domains": list(M1_SYNC_DOMAINS),
             "encryption_policy": "server_trusted_v1",
-            "metadata": {"default_personal": True, "client_family": "chatbook"},
+            "metadata": {"label": "ordinary-enrollment"},
         },
     )
 
@@ -1077,6 +1101,118 @@ def _note_envelope_json(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+def test_public_pull_converter_strips_only_server_local_organization_routing() -> None:
+    routing_metadata = {
+        "notes_keyword_merge_response": {
+            "source_keyword_id": 41,
+            "target_keyword_id": 42,
+        },
+        "notes_folder_origin_provenance": {
+            "operation": "source_upsert",
+            "source_id": 73,
+        },
+        "notes_ingestion_expected_product_version": 19,
+        "bootstrap_capture": True,
+        "provenance": {"origin": "synthetic-client"},
+    }
+    envelope = SyncEnvelope(
+        dataset_id="dataset-1",
+        client_envelope_id="env-internal-routing",
+        domain="notes.keyword",
+        operation="tombstone",
+        object_id="11111111-1111-4111-8111-111111111111",
+        server_cursor=1,
+        payload={},
+        payload_hash="sha256:internal-routing",
+        routing_metadata=routing_metadata,
+        mutation_group_id="group-public-1",
+        mutation_step=0,
+        mutation_step_count=1,
+        mutation_plan_hash="a" * 64,
+    )
+
+    public = sync_endpoint._api_envelope_from_core(
+        envelope,
+        encryption_policy="server_trusted_v1",
+    )
+
+    assert public.routing_metadata == {
+        "bootstrap_capture": True,
+        "provenance": {"origin": "synthetic-client"},
+    }
+    assert public.mutation_group_id == "group-public-1"
+    assert public.mutation_step == 0
+    assert public.mutation_step_count == 1
+    assert public.mutation_plan_hash == "a" * 64
+    assert envelope.routing_metadata == routing_metadata
+
+
+def test_pull_endpoint_preserves_group_metadata_without_internal_routing(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+    client = _client_for_service(service)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "client_type": "chatbook",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": ["notes.note"],
+            "encryption_policy": "server_trusted_v1",
+        },
+    ).status_code == 200
+    service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id="env-grouped-pull",
+            domain="notes.note",
+            operation="upsert",
+            object_id="note-grouped",
+            device_id="server-origin",
+            client_sequence=1,
+            object_revision=1,
+            payload={"title": "Grouped", "content": "Body"},
+            payload_hash="sha256:grouped-pull",
+            routing_metadata={
+                "notes_keyword_merge_response": {
+                    "source_keyword_id": 41,
+                    "target_keyword_id": 42,
+                },
+                "bootstrap_capture": True,
+            },
+            mutation_group_id="group-pull-1",
+            mutation_step=0,
+            mutation_step_count=1,
+            mutation_plan_hash="b" * 64,
+        )
+    )
+
+    response = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "cursor": "0",
+            "domain": "notes.note",
+        },
+    )
+
+    assert response.status_code == 200
+    envelope = response.json()["envelopes"][0]
+    assert envelope["mutation_group_id"] == "group-pull-1"
+    assert envelope["mutation_step"] == 0
+    assert envelope["mutation_step_count"] == 1
+    assert envelope["mutation_plan_hash"] == "b" * 64
+    assert envelope["routing_metadata"] == {"bootstrap_capture": True}
 
 
 def test_push_and_pull_endpoint_expose_apply_outcomes_for_replayable_failures(

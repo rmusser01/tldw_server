@@ -19,6 +19,13 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     SchemaError,
 )
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    active_coordinator,
+    capture_note_tombstone,
+    capture_note_upsert,
+    capture_plan,
+    stable_note_id,
+)
 
 #
 #######################################################################################################################
@@ -150,8 +157,7 @@ class NotesInteropService:
         db = self._get_db(user_id)
         if hasattr(db, "create_note"):
             return db.create_note(title=title, content=content, user_id=user_id)
-        # Real DB path
-        return db.add_note(title=title, content=content, note_id=None)
+        return self.add_note(user_id=user_id, title=title, content=content)
 
     def add_note(self, user_id: str, title: str, content: str, note_id: Optional[str] = None) -> str:
         """
@@ -171,6 +177,22 @@ class NotesInteropService:
             ValueError: If user_id is invalid.
         """
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            key = coordinator.request_fingerprint(
+                "notes-interop.note.create",
+                {"note_id": note_id, "title": title, "content": content},
+            )
+            captured_id = note_id or stable_note_id("notes-interop", key)
+            capture_note_upsert(
+                coordinator,
+                note_id=captured_id,
+                title=title,
+                content=content,
+                source="notes-interop",
+                key=key,
+            )
+            return captured_id
         # ChaChaDB's add_note returns `str | None` in its type hint.
         # Current implementation of ChaChaDB.add_note returns `str` on success or raises.
         created_note_id = db.add_note(title=title, content=content, note_id=note_id)
@@ -224,6 +246,22 @@ class NotesInteropService:
             # `update_data` is expected to be a dict; rely on ChaChaNotes_DB to validate keys.
             db = self._get_db(user_id)
             coerced_version = _coerce_expected_version(expected_version)
+            coordinator = active_coordinator(db, user_id=user_id)
+            if coordinator is not None:
+                current = db.get_note_by_id(note_id)
+                if current is None:
+                    return False
+                capture_note_upsert(
+                    coordinator,
+                    note_id=note_id,
+                    title=str(update_data.get("title", current.get("title") or "")),
+                    content=str(update_data.get("content", current.get("content") or "")),
+                    conversation_id=current.get("conversation_id"),
+                    message_id=current.get("message_id"),
+                    expected_version=coerced_version,
+                    source="notes-interop",
+                )
+                return True
             return db.update_note(note_id=note_id, update_data=update_data, expected_version=coerced_version)
 
         # Keyword/modern path
@@ -245,19 +283,58 @@ class NotesInteropService:
         if content is not None:
             data["content"] = content
         coerced_version = _coerce_expected_version(expected_version)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            current = db.get_note_by_id(note_id)
+            if current is None:
+                return False
+            capture_note_upsert(
+                coordinator,
+                note_id=note_id,
+                title=str(data.get("title", current.get("title") or "")),
+                content=str(data.get("content", current.get("content") or "")),
+                conversation_id=current.get("conversation_id"),
+                message_id=current.get("message_id"),
+                expected_version=coerced_version,
+                source="notes-interop",
+            )
+            return True
         return db.update_note(note_id=note_id, update_data=data, expected_version=coerced_version)
 
     def delete_note(self, *, note_id: str, user_id: str) -> Any:
-        """Delete a note for tests. Uses mock-style `delete_note` if available, else soft delete requires version."""
+        """Delete a note through active Sync, or use the legacy inactive path."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            current = db.get_note_by_id(note_id=note_id, include_deleted=True)
+            if current is None:
+                return False
+            expected_version = int(current["version"])
+            if bool(current.get("deleted")):
+                expected_version -= 1
+            capture_note_tombstone(
+                coordinator,
+                note_id=note_id,
+                expected_version=expected_version,
+                source="notes-interop",
+            )
+            return True
         if hasattr(db, "delete_note"):
             return db.delete_note(note_id)
-        # Real DB requires expected_version; tests that hit real DB use API not this method.
-        raise CharactersRAGDBError("delete_note without version not supported on real DB path")
+        raise CharactersRAGDBError("delete_note is not supported by this database")
 
     def soft_delete_note(self, user_id: str, note_id: str, expected_version: int) -> bool:
         """Soft-deletes a note for the given user with optimistic locking."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            capture_note_tombstone(
+                coordinator,
+                note_id=note_id,
+                expected_version=expected_version,
+                source="notes-interop",
+            )
+            return True
         return db.soft_delete_note(note_id=note_id, expected_version=expected_version)
 
     def search_notes(self, *args, **kwargs) -> list[dict[str, Any]]:
@@ -308,6 +385,14 @@ class NotesInteropService:
     def link_note_keyword(self, *, note_id: str, keyword_id: int, user_id: str) -> Any:
         """Link note to keyword. Uses mock-style `link_note_keyword` if available."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            return self._set_note_keyword_link(
+                coordinator,
+                note_id=note_id,
+                keyword_id=keyword_id,
+                present=True,
+            )
         if hasattr(db, "link_note_keyword"):
             return db.link_note_keyword(note_id, keyword_id)
         return db.link_note_to_keyword(note_id=note_id, keyword_id=keyword_id)
@@ -315,11 +400,27 @@ class NotesInteropService:
     def link_note_to_keyword(self, user_id: str, note_id: str, keyword_id: int) -> bool:
         """Links a note to a keyword for the given user."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            return self._set_note_keyword_link(
+                coordinator,
+                note_id=note_id,
+                keyword_id=keyword_id,
+                present=True,
+            )
         return db.link_note_to_keyword(note_id=note_id, keyword_id=keyword_id)
 
     def unlink_note_keyword(self, *, note_id: str, keyword_id: int, user_id: str) -> Any:
         """Unlink note from keyword. Uses mock-style `unlink_note_keyword` if available."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            return self._set_note_keyword_link(
+                coordinator,
+                note_id=note_id,
+                keyword_id=keyword_id,
+                present=False,
+            )
         if hasattr(db, "unlink_note_keyword"):
             return db.unlink_note_keyword(note_id, keyword_id)
         return db.unlink_note_from_keyword(note_id=note_id, keyword_id=keyword_id)
@@ -327,6 +428,14 @@ class NotesInteropService:
     def unlink_note_from_keyword(self, user_id: str, note_id: str, keyword_id: int) -> bool:
         """Unlinks a note from a keyword for the given user."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            return self._set_note_keyword_link(
+                coordinator,
+                note_id=note_id,
+                keyword_id=keyword_id,
+                present=False,
+            )
         return db.unlink_note_from_keyword(note_id=note_id, keyword_id=keyword_id)
 
     def get_keywords_for_note(self, user_id: str, note_id: str) -> list[dict[str, Any]]:
@@ -345,6 +454,9 @@ class NotesInteropService:
     def create_keyword(self, *, keyword: str, user_id: str) -> Optional[int]:
         """Create a keyword. Uses mock-style `create_keyword` if available, else DB `add_keyword`."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            return self._capture_keyword_create(coordinator, keyword)
         if hasattr(db, "create_keyword"):
             return db.create_keyword(keyword=keyword, user_id=user_id)
         return db.add_keyword(keyword_text=keyword)
@@ -352,6 +464,9 @@ class NotesInteropService:
     def add_keyword(self, user_id: str, keyword_text: str) -> Optional[int]:
         """Adds a new keyword for the specified user. Returns keyword ID."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            return self._capture_keyword_create(coordinator, keyword_text)
         return db.add_keyword(keyword_text=keyword_text)
 
     def get_keyword(self, *, keyword_id: int, user_id: str) -> Optional[dict[str, Any]]:
@@ -379,6 +494,16 @@ class NotesInteropService:
     def delete_keyword(self, *, keyword_id: int, user_id: str) -> Any:
         """Delete a keyword for tests. Uses mock-style `delete_keyword` if available, else soft delete requires version."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            keyword = db.get_keyword_by_id(keyword_id=keyword_id)
+            if keyword is None:
+                raise CharactersRAGDBError("Keyword not found")
+            return self._capture_keyword_delete(
+                coordinator,
+                keyword_id=keyword_id,
+                expected_version=int(keyword["version"]),
+            )
         if hasattr(db, "delete_keyword"):
             return db.delete_keyword(keyword_id)
         raise CharactersRAGDBError("delete_keyword without version not supported on real DB path")
@@ -386,7 +511,83 @@ class NotesInteropService:
     def soft_delete_keyword(self, user_id: str, keyword_id: int, expected_version: int) -> bool:
         """Soft-deletes a keyword for the given user with optimistic locking."""
         db = self._get_db(user_id)
+        coordinator = active_coordinator(db, user_id=user_id)
+        if coordinator is not None:
+            return self._capture_keyword_delete(
+                coordinator,
+                keyword_id=keyword_id,
+                expected_version=expected_version,
+            )
         return db.soft_delete_keyword(keyword_id=keyword_id, expected_version=expected_version)
+
+    @staticmethod
+    def _capture_keyword_delete(coordinator, *, keyword_id: int, expected_version: int) -> bool:
+        fields = {"keyword_id": keyword_id, "expected_version": expected_version}
+        key = coordinator.request_fingerprint("notes-interop.keyword.delete", fields)
+        replay = coordinator.replay_request_plan(
+            source="notes-interop",
+            idempotency_key=key,
+            request_fingerprint=key,
+            result_domain=None,
+        )
+        if replay is None:
+            replay = coordinator.bind_request(
+                coordinator.plan_resource_delete(
+                    "notes.keyword",
+                    keyword_id,
+                    expected_version=expected_version,
+                ),
+                key,
+            )
+        capture_plan(coordinator, replay, source="notes-interop", key=key)
+        return True
+
+    @staticmethod
+    def _capture_keyword_create(coordinator, keyword: str) -> int:
+        key = coordinator.request_fingerprint(
+            "notes-interop.keyword.create",
+            {"keyword": str(keyword or "").strip()},
+        )
+        result = capture_plan(
+            coordinator,
+            coordinator.plan_keyword_create(keyword, idempotency_key=key),
+            source="notes-interop",
+            key=key,
+        )
+        if not isinstance(result, dict) or result.get("id") is None:
+            raise CharactersRAGDBError("Captured keyword could not be reloaded")
+        return int(result["id"])
+
+    def _set_note_keyword_link(
+        self,
+        coordinator,
+        *,
+        note_id: str,
+        keyword_id: int,
+        present: bool,
+    ) -> bool:
+        keyword = coordinator.note_db.get_keyword_by_id(keyword_id)
+        if keyword is None:
+            raise CharactersRAGDBError("Keyword not found")
+        fields = {
+            "note_id": note_id,
+            "keyword_sync_id": str(keyword["sync_id"]),
+            "present": present,
+        }
+        key = coordinator.request_fingerprint("notes-interop.keyword.link", fields)
+        plan = coordinator.plan_relationship(
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": note_id,
+                "keyword_sync_id": str(keyword["sync_id"]),
+            },
+            present,
+            source="notes-interop",
+            idempotency_key=key,
+        )
+        capture_plan(coordinator, plan, source="notes-interop", key=key)
+        return True
 
     def search_keywords(
         self,

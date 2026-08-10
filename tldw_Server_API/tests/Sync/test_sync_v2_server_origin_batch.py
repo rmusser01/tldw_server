@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from threading import Barrier, Event, Lock
 
 import pytest
 
@@ -29,6 +31,7 @@ from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+    ServerOriginBatchResult,
     ServerOriginMutationStep,
     SyncServerOriginBatchIdempotencyConflictError,
     SyncServerOriginBatchMaterializationError,
@@ -212,6 +215,25 @@ def _capture(
     )
 
 
+def test_trusted_bootstrap_id_requires_source_step_verifier(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, materializer = batch_service
+
+    with pytest.raises(SyncStoreError, match="bootstrap.*verifier"):
+        capture_server_origin_mutation_batch(
+            service=service,
+            user_id="user-1",
+            steps=[_step("bootstrap-unverified")],
+            source="notes-organization-bootstrap",
+            idempotency_key="bootstrap-unverified",
+            trusted_notes_organization_bootstrap_id="bootstrap-1",
+        )
+
+    assert materializer.calls == []
+    assert service.store.list_envelopes_after("dataset-1", 0) == []
+
+
 def test_batch_evaluates_updates_parents_and_relationships_against_planned_heads(
     batch_service: tuple[SyncV2Service, _RecordingMaterializer],
 ) -> None:
@@ -323,9 +345,18 @@ def test_failed_step_preserves_applied_prefix_and_resume_starts_at_failure(
 
 def test_conflicted_step_blocks_itself_and_every_later_step(
     batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service, materializer = batch_service
     materializer.conflict_at = 1
+    observed_connections: list[object | None] = []
+    original_insert = service.store.db.insert_conflict
+
+    def record_insert(conflict, *, connection=None):
+        observed_connections.append(connection)
+        return original_insert(conflict, connection=connection)
+
+    monkeypatch.setattr(service.store.db, "insert_conflict", record_insert)
 
     with pytest.raises(SyncServerOriginBatchMaterializationError) as exc_info:
         _capture(service, [_step(f"folder-{index}") for index in range(3)])
@@ -337,6 +368,9 @@ def test_conflicted_step_blocks_itself_and_every_later_step(
         "pending",
     ]
     assert materializer.calls == [0, 1]
+    assert len(service.store.list_conflicts("dataset-1")) == 1
+    assert len(observed_connections) == 1
+    assert observed_connections[0] is not None
 
     with pytest.raises(SyncServerOriginBatchMaterializationError):
         resume_server_origin_mutation_group(
@@ -396,6 +430,180 @@ def test_same_idempotency_key_replays_group_and_changed_plan_conflicts(
     with pytest.raises(SyncServerOriginBatchIdempotencyConflictError) as exc_info:
         _capture(service, [_step("folder-1"), _step("folder-changed")])
     assert exc_info.value.error_code == "sync_server_origin_batch_idempotency_conflict"
+
+
+def test_concurrent_groups_cannot_append_from_the_same_canonical_head(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _ = batch_service
+    _capture(service, [_step("folder-1", payload={"name": "Original"})], key="seed")
+    append_barrier = Barrier(2)
+    original_append = service.store.insert_envelopes_atomic
+
+    def append_after_both_preflights(envelopes, **kwargs):
+        append_barrier.wait()
+        return original_append(envelopes, **kwargs)
+
+    monkeypatch.setattr(
+        service.store,
+        "insert_envelopes_atomic",
+        append_after_both_preflights,
+    )
+
+    def capture(name: str, key: str):
+        try:
+            return _capture(
+                service,
+                [_step("folder-1", payload={"name": name})],
+                key=key,
+            )
+        except Exception as exc:  # noqa: BLE001 - the losing result is asserted below.
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda item: capture(*item),
+                [("First", "concurrent-1"), ("Second", "concurrent-2")],
+            )
+        )
+
+    successes = [result for result in results if isinstance(result, ServerOriginBatchResult)]
+    failures = [result for result in results if isinstance(result, Exception)]
+    history = service.store.list_envelopes_for_entity(
+        "dataset-1",
+        "chat.conversation",
+        entity_id="folder-1",
+        limit=10,
+    )
+
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert getattr(failures[0], "error_code", None) == "sync_server_origin_batch_append_failed"
+    assert len([envelope for envelope in history if envelope.status == "accepted"]) == 2
+
+
+def test_later_appended_group_waits_for_earlier_pending_projection(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _ = batch_service
+    first_appended = Event()
+    release_first = Event()
+    original_append = service.store.insert_envelopes_atomic
+
+    def pause_first_after_append(envelopes, **kwargs):
+        inserted = original_append(envelopes, **kwargs)
+        if inserted[0].payload["name"] == "First":
+            first_appended.set()
+            assert release_first.wait(5)
+        return inserted
+
+    monkeypatch.setattr(service.store, "insert_envelopes_atomic", pause_first_after_append)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(
+            _capture,
+            service,
+            [_step("folder-first", payload={"name": "First"})],
+            key="cursor-order-first",
+        )
+        assert first_appended.wait(5)
+        try:
+            second: object = _capture(
+                service,
+                [_step("folder-second", payload={"name": "Second"})],
+                key="cursor-order-second",
+            )
+        except Exception as exc:  # noqa: BLE001 - retryable result asserted below.
+            second = exc
+        finally:
+            release_first.set()
+        first = first_future.result()
+
+    assert first.fully_applied is True
+    assert isinstance(second, SyncServerOriginBatchMaterializationError)
+    assert second.retryable is True
+    assert [item.apply_status for item in second.result.envelopes] == ["pending"]
+
+    resumed = resume_server_origin_mutation_group(
+        service=service,
+        dataset_id="dataset-1",
+        mutation_group_id=second.result.envelopes[0].mutation_group_id or "",
+    )
+    assert resumed.fully_applied is True
+
+
+def test_sqlite_dataset_materialization_guard_serializes_nonoverlapping_groups(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, _ = batch_service
+    stored = _capture(service, [_step("folder-1"), _step("folder-2")])
+    second_group = tuple(
+        replace(
+            envelope,
+            object_id=f"unrelated-{envelope.object_id}",
+            mutation_group_id="second-logical-group",
+        )
+        for envelope in stored.envelopes
+    )
+    start = Barrier(2)
+    state_lock = Lock()
+    overlap = Event()
+    active: set[str] = set()
+
+    def hold_group(group_id: str, envelopes: tuple[SyncEnvelope, ...]) -> None:
+        start.wait()
+        with service.store.materialization_guard(envelopes):
+            with state_lock:
+                if active:
+                    overlap.set()
+                active.add(group_id)
+            overlap.wait(0.2)
+            with state_lock:
+                active.remove(group_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(hold_group, "first", stored.envelopes),
+            executor.submit(hold_group, "second", second_group),
+        ]
+        for future in futures:
+            future.result()
+
+    assert not overlap.is_set()
+    assert service.store.db.execute(
+        "SELECT COUNT(*) AS count FROM sync_materialization_locks WHERE dataset_id = ?",
+        ("dataset-1",),
+    ).rows[0]["count"] == 1
+
+
+def test_materialization_does_not_advance_past_earlier_conflicted_envelope(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, _ = batch_service
+    blocker = _capture(service, [_step("folder-blocker")], key="conflicted-blocker")
+    blocker_cursor = blocker.envelopes[0].server_cursor
+    assert blocker_cursor is not None
+    service.store.mark_envelope_apply_status(blocker_cursor, apply_status="conflict")
+    later = service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id="later-after-conflict",
+            domain="chat.conversation",
+            operation="upsert",
+            object_id="unrelated-later-object",
+            object_revision=1,
+            payload={"name": "Later"},
+            payload_hash="sha256:later",
+            status="accepted",
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="sync_projection_predecessor_unresolved"):
+        with service.store.materialization_guard([later]):
+            pass
 
 
 def test_organization_domain_write_requires_ready_metadata_when_present(

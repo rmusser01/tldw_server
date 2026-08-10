@@ -15,7 +15,11 @@ from .adapters import (
     SyncAdapterContext,
     SyncHead,
 )
-from .errors import SyncIdempotencyConflictError, SyncStoreError
+from .errors import (
+    SyncIdempotencyConflictError,
+    SyncMaterializationPredecessorError,
+    SyncStoreError,
+)
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     NOTES_ORGANIZATION_DOMAINS,
@@ -28,6 +32,7 @@ from .models import (
 )
 from .mutation_group_validation import (
     StoredMutationGroupValidationError,
+    materialization_group_view,
     mutation_group_plan_hash,
     validate_stored_mutation_group,
 )
@@ -37,6 +42,7 @@ from .server_origin import (
     canonical_payload_hash,
 )
 from .service import SyncV2Service
+from .store import SyncV2Store
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +122,11 @@ def capture_server_origin_mutation_batch(
     normalized_key = idempotency_key.strip()
     if not normalized_key:
         raise SyncStoreError("Sync server-origin mutation batch requires an idempotency key")
+    if (
+        trusted_notes_organization_bootstrap_id is not None
+        and bootstrap_step_verifier is None
+    ):
+        raise SyncStoreError("Sync bootstrap capture requires a source-step verifier")
 
     dataset = _active_default_personal_dataset(service, user_id)
     _require_batch_write_ready(
@@ -388,26 +399,65 @@ def _materialize_group(
         dataset_id=dataset.dataset_id,
         mutation_group_id=group[0].mutation_group_id or "",
     )
-    _validate_apply_status_vector(group)
-    for index, envelope in enumerate(group):
-        if envelope.apply_status == "applied":
+    try:
+        with service.store.materialization_guard(
+            group,
+            require_predecessors=bootstrap_id is None,
+        ) as guarded_store:
+            group = guarded_store.list_mutation_group(
+                dataset.dataset_id,
+                group[0].mutation_group_id or "",
+            )
+            _validate_apply_status_vector(group)
+            result, retryable = _materialize_group_guarded(
+                service=service,
+                store=guarded_store,
+                dataset=dataset,
+                group=group,
+                bootstrap_id=bootstrap_id,
+                bootstrap_step_verifier=bootstrap_step_verifier,
+            )
+    except SyncIdempotencyConflictError:
+        raise
+    except SyncMaterializationPredecessorError as exc:
+        raise _materialization_error(dataset, group, retryable=exc.retryable) from exc
+    except Exception as exc:  # noqa: BLE001 - storage/commit failures are retryable.
+        raise _materialization_error(dataset, group, retryable=True) from exc
+    if retryable is not None:
+        raise SyncServerOriginBatchMaterializationError(result, retryable=retryable)
+    return result
+
+
+def _materialize_group_guarded(
+    *,
+    service: SyncV2Service,
+    store: SyncV2Store,
+    dataset: SyncDataset,
+    group: list[SyncEnvelope],
+    bootstrap_id: str | None,
+    bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None,
+) -> tuple[ServerOriginBatchResult, bool | None]:
+    """Project a complete group while the caller retains all object locks."""
+
+    for index, envelope in enumerate(materialization_group_view(group)):
+        if envelope.apply_status in {"applied", "superseded"}:
             continue
         if envelope.apply_status == "conflict":
-            raise _materialization_error(dataset, group, retryable=False)
+            return _materialization_result(dataset, group), False
         if bootstrap_id is not None and bootstrap_step_verifier is not None:
             if envelope.server_cursor is None or not bootstrap_step_verifier(envelope):
-                raise _materialization_error(dataset, group, retryable=True)
-            service.store.mark_bootstrap_envelope_verified(
+                return _materialization_result(dataset, group), True
+            store.mark_bootstrap_envelope_verified(
                 envelope.server_cursor,
                 bootstrap_id=bootstrap_id,
             )
-            group = service.store.list_mutation_group(
+            group = store.list_mutation_group(
                 dataset.dataset_id,
                 envelope.mutation_group_id or "",
             )
             continue
-        materialization = service._materialize_envelope(envelope)
-        group = service.store.list_mutation_group(
+        materialization = service._materialize_envelope(envelope, store=store)
+        group = store.list_mutation_group(
             dataset.dataset_id,
             envelope.mutation_group_id or "",
         )
@@ -417,48 +467,61 @@ def _materialize_group(
                 raise SyncIdempotencyConflictError(
                     "Sync stored mutation group step has no server cursor"
                 )
-            service.store.mark_envelope_apply_status(
+            store.mark_envelope_apply_status(
                 current.server_cursor,
                 apply_status="failed",
                 apply_error_code="sync_projection_materializer_missing",
                 apply_error_message="Projection materializer is not registered",
             )
-            group = service.store.list_mutation_group(
+            group = store.list_mutation_group(
                 dataset.dataset_id,
                 current.mutation_group_id or "",
             )
-            raise _materialization_error(dataset, group, retryable=True)
+            return _materialization_result(dataset, group), True
         if materialization.status == "conflict" or current.apply_status == "conflict":
-            raise _materialization_error(dataset, group, retryable=False)
+            return _materialization_result(dataset, group), False
         if materialization.status == "failed" or current.apply_status == "failed":
-            raise _materialization_error(dataset, group, retryable=True)
+            return _materialization_result(dataset, group), True
         if current.apply_status != "applied":
             if current.server_cursor is None:
                 raise SyncIdempotencyConflictError(
                     "Sync stored mutation group step has no server cursor"
                 )
-            service.store.mark_envelope_apply_status(
+            store.mark_envelope_apply_status(
                 current.server_cursor,
                 apply_status="failed",
                 apply_error_code="sync_projection_status_missing",
                 apply_error_message="Projection did not record applied status",
             )
-            group = service.store.list_mutation_group(
+            group = store.list_mutation_group(
                 dataset.dataset_id,
                 current.mutation_group_id or "",
             )
-            raise _materialization_error(dataset, group, retryable=True)
+            return _materialization_result(dataset, group), True
     return ServerOriginBatchResult(
         dataset=dataset,
         envelopes=tuple(group),
-        fully_applied=all(envelope.apply_status == "applied" for envelope in group),
+        fully_applied=all(
+            envelope.apply_status in {"applied", "superseded"} for envelope in group
+        ),
+    ), None
+
+
+def _materialization_result(
+    dataset: SyncDataset,
+    envelopes: Sequence[SyncEnvelope],
+) -> ServerOriginBatchResult:
+    return ServerOriginBatchResult(
+        dataset=dataset,
+        envelopes=tuple(envelopes),
+        fully_applied=False,
     )
 
 
 def _validate_apply_status_vector(envelopes: Sequence[SyncEnvelope]) -> None:
     seen_non_applied = False
     for envelope in envelopes:
-        if envelope.apply_status == "applied":
+        if envelope.apply_status in {"applied", "superseded"}:
             if seen_non_applied:
                 raise SyncIdempotencyConflictError(
                     "Sync stored mutation group contains a non-prefix applied step"
@@ -474,11 +537,7 @@ def _materialization_error(
     retryable: bool,
 ) -> SyncServerOriginBatchMaterializationError:
     return SyncServerOriginBatchMaterializationError(
-        ServerOriginBatchResult(
-            dataset=dataset,
-            envelopes=tuple(envelopes),
-            fully_applied=False,
-        ),
+        _materialization_result(dataset, envelopes),
         retryable=retryable,
     )
 

@@ -91,6 +91,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRetentionDryRunRequest,
     SyncRetentionDryRunResponse,
     SyncV2Envelope,
+    SyncV2EnvelopeResponse,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
@@ -388,10 +389,18 @@ def _api_envelope_from_core(
     envelope: Any,
     *,
     encryption_policy: str = "client_private_v1",
-) -> SyncV2Envelope:
+) -> SyncV2EnvelopeResponse:
     payload = asdict(envelope)
+    routing_metadata = dict(payload.get("routing_metadata") or {})
+    for key in (
+        "notes_folder_origin_provenance",
+        "notes_ingestion_expected_product_version",
+        "notes_keyword_merge_response",
+    ):
+        routing_metadata.pop(key, None)
+    payload["routing_metadata"] = routing_metadata
     payload["encryption_policy"] = encryption_policy
-    return SyncV2Envelope(**payload)
+    return SyncV2EnvelopeResponse(**payload)
 
 
 def _api_conflict_from_core(conflict: Any) -> SyncConflictRecord:
