@@ -4544,6 +4544,7 @@ async def create_chat_session(
                         character_name=raw_name,
                         message_content=content,
                         is_user_message=False,
+                        owner_user_id=current_user.id,
                     )
                     # Update in-memory message count (best-effort)
                     with contextlib.suppress(_CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS):
@@ -6815,6 +6816,7 @@ async def character_chat_completion(
                     message_content=body.append_user_message,
                     is_user_message=True,
                     sender_override="user",
+                    owner_user_id=current_user.id,
                 )
                 if not appended_user_id:
                     raise HTTPException(
@@ -6831,6 +6833,7 @@ async def character_chat_completion(
                 message_content=assistant_content_for_storage,
                 is_user_message=False,
                 parent_message_id=appended_user_id,
+                owner_user_id=current_user.id,
             )
             if not assistant_msg_id:
                 raise HTTPException(
@@ -8102,6 +8105,7 @@ async def persist_streamed_assistant_message(
                 message_id=requested_assistant_message_id,
                 parent_message_id=body.user_message_id,
                 ranking=body.ranking if getattr(body, "ranking", None) is not None else None,
+                owner_user_id=current_user.id,
             )
         except ConflictError:
             if not requested_assistant_message_id:

@@ -48,6 +48,7 @@ def save_chat_history_to_db_wrapper(
     media_content_for_char_assoc: dict[str, Any] | None,
     media_name_for_char_assoc: str | None = None,
     character_name_for_chat: str | None = None,
+    owner_user_id: int | str | None = None,
 ) -> tuple[str | None, str]:
     """
     Persist a chat history into the ChaChaNotes database, creating or updating a conversation record.
@@ -358,7 +359,12 @@ def save_chat_history_to_db_wrapper(
                     try:
                         from tldw_Server_API.app.core.Chat.conversation_enrichment import schedule_auto_tagging
 
-                        schedule_auto_tagging(db, current_conversation_id)
+                        if owner_user_id is not None:
+                            schedule_auto_tagging(
+                                db,
+                                current_conversation_id,
+                                owner_user_id=owner_user_id,
+                            )
                     except Exception as exc:
                         logging.debug(
                             "Auto-tagging trigger skipped for conversation %s: %s",

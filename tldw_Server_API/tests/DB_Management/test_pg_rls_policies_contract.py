@@ -86,6 +86,137 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "client_id = current_setting('app.current_user_id', true)" in sql
 
 
+def test_chacha_rls_includes_web_clipper_owner_read_and_write_policies():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "client_id = current_setting('app.current_user_id', true)"
+
+    for table in (
+        "note_clipper_documents",
+        "note_clipper_workspace_placements",
+    ):
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        assert policy.count(owner) >= 2
+
+
+def test_chacha_web_clipper_rls_derives_owner_from_every_endpoint():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    expected_endpoint_checks = {
+        "note_clipper_documents": (
+            "note.id = note_clipper_documents.note_id",
+            f"note.client_id = {owner}",
+        ),
+        "note_clipper_workspace_placements": (
+            "document.client_id = note_clipper_workspace_placements.client_id",
+            "document.clip_id = note_clipper_workspace_placements.clip_id",
+            "document.note_id = note_clipper_workspace_placements.source_note_id",
+            "workspace.id = note_clipper_workspace_placements.workspace_id",
+            f"workspace.client_id = {owner}",
+            "note.id = note_clipper_workspace_placements.source_note_id",
+            f"note.client_id = {owner}",
+        ),
+    }
+
+    for table, checks in expected_endpoint_checks.items():
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        using, with_check = policy.split("WITH CHECK", 1)
+        for check in checks:
+            assert check in using
+            assert check in with_check
+
+
+def test_chacha_rls_covers_every_notes_organization_resource_and_derived_table():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    tables = (
+        "chacha_keywords",
+        "keyword_collections",
+        "note_folders",
+        "note_keywords",
+        "conversation_keywords",
+        "collection_keywords",
+        "note_folder_memberships",
+        "note_folder_source_memberships",
+        "note_folder_source_keys",
+        "note_folder_sync_suppressions",
+    )
+
+    for table in tables:
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in sql
+
+    for table in ("chacha_keywords", "keyword_collections", "note_folders"):
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (client_id = current_setting('app.current_user_id', true))" in policy
+        assert "WITH CHECK (client_id = current_setting('app.current_user_id', true))" in policy
+
+
+def test_chacha_notes_organization_link_rls_derives_owner_from_every_endpoint():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    expected_endpoint_checks = {
+        "note_keywords": (
+            "note.id = note_keywords.note_id",
+            f"note.client_id = {owner}",
+            "keyword.id = note_keywords.keyword_id",
+            f"keyword.client_id = {owner}",
+        ),
+        "conversation_keywords": (
+            "conversation.id = conversation_keywords.conversation_id",
+            f"conversation.client_id = {owner}",
+            "keyword.id = conversation_keywords.keyword_id",
+            f"keyword.client_id = {owner}",
+        ),
+        "collection_keywords": (
+            "collection.id = collection_keywords.collection_id",
+            f"collection.client_id = {owner}",
+            "keyword.id = collection_keywords.keyword_id",
+            f"keyword.client_id = {owner}",
+        ),
+        "note_folder_memberships": (
+            "note.id = note_folder_memberships.note_id",
+            f"note.client_id = {owner}",
+            "folder.id = note_folder_memberships.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+        "note_folder_source_memberships": (
+            "note.id = note_folder_source_memberships.note_id",
+            f"note.client_id = {owner}",
+            "folder.id = note_folder_source_memberships.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+        "note_folder_source_keys": (
+            "folder.id = note_folder_source_keys.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+        "note_folder_sync_suppressions": (
+            "note.id = note_folder_sync_suppressions.note_id",
+            f"note.client_id = {owner}",
+            "folder.id = note_folder_sync_suppressions.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+    }
+
+    for table, checks in expected_endpoint_checks.items():
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        for check in checks:
+            assert check in policy
+
+
 def test_chacha_rls_includes_source_review_read_and_write_policies():
     sql = "\n".join(build_chacha_rls_sql())
 

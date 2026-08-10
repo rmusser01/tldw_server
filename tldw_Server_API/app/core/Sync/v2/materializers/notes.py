@@ -13,6 +13,36 @@ from ..models import SyncEnvelope, SyncObjectState, validate_notes_note_upsert_p
 from ..store import SyncV2Store
 from .base import MaterializationResult
 
+_INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
+_SERVER_ORIGIN_DEVICE_ID = "server-origin"
+
+
+def _trusted_ingestion_expected_version(
+    envelope: SyncEnvelope,
+    note_db: CharactersRAGDB,
+) -> int | None:
+    """Return an owner-bound local ingestion projection precondition."""
+
+    routing = envelope.routing_metadata
+    if (
+        envelope.domain != "notes.note"
+        or envelope.operation != "upsert"
+        or envelope.device_id != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("source") != "notes-ingestion"
+        or routing.get("origin") != "server"
+        or routing.get("server_device_id") != _SERVER_ORIGIN_DEVICE_ID
+        or routing.get("server_owner_user_id") != str(note_db.client_id)
+    ):
+        return None
+    expected_version = routing.get(_INGESTION_EXPECTED_VERSION_KEY)
+    if (
+        isinstance(expected_version, bool)
+        or not isinstance(expected_version, int)
+        or expected_version < 0
+    ):
+        return None
+    return expected_version
+
 
 @dataclass(slots=True)
 class NotesMaterializer:
@@ -85,21 +115,40 @@ class NotesMaterializer:
         try:
             if envelope.operation == "upsert":
                 payload = _note_payload(envelope.payload)
+                expected_product_version = _trusted_ingestion_expected_version(
+                    envelope,
+                    self.note_db,
+                )
+                projection_timestamp = None
+                if expected_product_version is not None:
+                    if object_revision != expected_product_version + 1:
+                        raise ValueError(
+                            "Trusted ingestion product revision is inconsistent"
+                        )
+                    projection_timestamp = (
+                        envelope.server_timestamp or envelope.received_at_server
+                    )
+                    if not projection_timestamp:
+                        raise ValueError(
+                            "Trusted ingestion envelope is missing a server timestamp"
+                        )
                 self.note_db.upsert_note_from_sync(
                     note_id=envelope.object_id,
                     title=payload["title"],
                     content=payload["content"],
                     conversation_id=payload.get("conversation_id"),
                     message_id=payload.get("message_id"),
-                    sync_client_id=_projection_client_id(envelope),
+                    sync_client_id=_projection_client_id(self.note_db),
                     object_revision=object_revision,
                     object_hash=object_hash,
+                    expected_product_version=expected_product_version,
+                    projection_timestamp=projection_timestamp,
                 )
                 deleted = False
             elif envelope.operation == "tombstone":
                 self.note_db.tombstone_note_from_sync(
                     note_id=envelope.object_id,
-                    sync_client_id=_projection_client_id(envelope),
+                    sync_client_id=_projection_client_id(self.note_db),
                     object_revision=object_revision,
                     object_hash=object_hash,
                 )
@@ -234,12 +283,8 @@ def _note_payload(payload: dict[str, Any]) -> dict[str, str | None]:
     return validate_notes_note_upsert_payload(payload)
 
 
-def _projection_client_id(envelope: SyncEnvelope) -> str:
-    if envelope.routing_metadata.get("origin") == "server":
-        client_id = envelope.routing_metadata.get("server_owner_user_id")
-        if isinstance(client_id, str) and client_id.strip():
-            return client_id.strip()
-    return envelope.device_id or "sync-v2"
+def _projection_client_id(note_db: CharactersRAGDB) -> str:
+    return str(note_db.client_id)
 
 
 def _conflict_result(

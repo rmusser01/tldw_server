@@ -65,3 +65,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-031](031-notes-capability-sync-domains.md) | Accepted | Use versioned Sync v2 domains for mutable Notes capabilities, with lossless core-note payloads and base-aware restore intent. |
 | [ADR-032](032-mcp-unified-multi-revision-stdio-protocol.md) | Superseded by ADR-033 | Original strict multi-revision stdio decision; replaced after public-contract hardening. |
 | [ADR-033](033-mcp-unified-stdio-contract-hardening.md) | Accepted | Harden the reusable stdio API for arbitrary JSON outputs, typed IDs, bounded pagination/results, safe errors, and portable streams. |
+| [ADR-034](034-durable-server-origin-sync-mutation-batches.md) | Accepted | Persist complete server-origin Sync mutation plans atomically, then materialize them in ordered, resumable steps. |
+| [ADR-035](035-canonical-folder-link-suppression-preserves-source-provenance.md) | Accepted | Materialize canonical folder-link tombstones with local suppressions while preserving source-ingestion provenance. |
+| [ADR-036](036-web-clipper-external-identity-mapping.md) | Accepted | Map owner-scoped public Web Clipper IDs to separate canonical Notes UUIDs and migrate legacy mappings safely. |

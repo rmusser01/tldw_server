@@ -85,6 +85,9 @@ def test_sqlite_v52_to_v53_preserves_existing_group_column_and_is_rerunnable(tmp
 
 
 def test_postgres_initializer_routes_v52_through_v53_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ReachedV53Error(Exception):
+        pass
+
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     db._backend = _FakeBackend()
     db._uses_shared_content_backend = False
@@ -92,17 +95,27 @@ def test_postgres_initializer_routes_v52_through_v53_script(monkeypatch: pytest.
     db._local = SimpleNamespace()
 
     applied_scripts: list[tuple[str, int | None]] = []
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn: 52)
+    schema_version_locks: list[bool] = []
+
+    def _schema_version(_conn: object, *, lock: bool = False) -> int:
+        schema_version_locks.append(lock)
+        return 52
+
+    monkeypatch.setattr(db, "_get_schema_version_postgres", _schema_version)
     monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
 
     def _record_script(script: str, conn, expected_version=None):
         applied_scripts.append((script, expected_version))
+        if expected_version == 53:
+            raise _ReachedV53Error
 
     monkeypatch.setattr(db, "_apply_postgres_migration_script", _record_script)
 
-    db._initialize_schema_postgres()
+    with pytest.raises(_ReachedV53Error):
+        db._initialize_schema_postgres()
 
     assert (CharactersRAGDB._MIGRATION_SQL_V52_TO_V53_POSTGRES, 53) in applied_scripts
+    assert schema_version_locks == [True]
 
 
 def test_postgres_v53_script_adds_emq_group_columns_and_updates_version() -> None:

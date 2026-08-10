@@ -195,6 +195,15 @@ def create_timestamped_data(base_data: Dict[str, Any], client_id: str) -> Dict[s
     # For NoteResponse specifically
     if 'title' in base_data and 'content' not in base_data:  # Heuristic: if it looks like a note
         base_data.setdefault('content', 'Default test content')
+    if "id" in base_data and "sync_id" not in base_data:
+        if "keyword" in base_data:
+            base_data["sync_id"] = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"test-keyword:{base_data['id']}")
+            )
+        elif "name" in base_data and "path" not in base_data:
+            base_data["sync_id"] = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"test-collection:{base_data['id']}")
+            )
 
     return {**default_data, **base_data}
 
@@ -228,6 +237,7 @@ def test_create_note(client: TestClient):
 
 def test_get_note_includes_folders(client: TestClient):
     note_id_val = str(uuid.uuid4())
+    folder_sync_id = str(uuid.uuid4())
     expected_db_client_id = "test_api_client_for_user_db"
     mock_chacha_db_instance.get_note_by_id.return_value = create_timestamped_data(
         {"id": note_id_val, "title": "Note", "content": "Body"},
@@ -235,14 +245,28 @@ def test_get_note_includes_folders(client: TestClient):
     )
     mock_chacha_db_instance.get_keywords_for_note.return_value = []
     mock_chacha_db_instance.get_note_folders_for_note.return_value = [
-        {"id": 1, "name": "docs", "path": "docs", "parent_id": None}
+        {
+            "id": 1,
+            "sync_id": folder_sync_id,
+            "name": "docs",
+            "path": "docs",
+            "parent_id": None,
+        }
     ]
 
     response = client.get(f"/api/v1/notes/{note_id_val}")
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert data["folders"] == [{"id": 1, "name": "docs", "path": "docs", "parent_id": None}]
+    assert data["folders"] == [
+        {
+            "id": 1,
+            "sync_id": folder_sync_id,
+            "name": "docs",
+            "path": "docs",
+            "parent_id": None,
+        }
+    ]
 
 
 def test_create_note_keyword_conflict_refetch(client: TestClient):

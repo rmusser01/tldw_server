@@ -3,16 +3,18 @@ from __future__ import annotations
 """Helpers for Sync v2 adapter head-version conflict checks."""
 
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, TypeVar
 
-from ..adapters import AdapterConflict, SyncAdapterContext
-from ..models import SyncEnvelope, SyncEnvelopeCreate
+from ..adapters import AdapterConflict, SyncAdapterContext, SyncHead
+from ..models import SyncEnvelopeCreate
+
+SyncHeadT = TypeVar("SyncHeadT", bound=SyncHead)
 
 
 def prior_envelopes(
     envelope: SyncEnvelopeCreate,
     context: SyncAdapterContext | None,
-) -> list[SyncEnvelope]:
+) -> list[SyncHead]:
     """Return accepted prior envelopes excluding an idempotent copy of the incoming one."""
 
     return [
@@ -22,15 +24,24 @@ def prior_envelopes(
     ]
 
 
-def current_head(prior: Iterable[SyncEnvelope]) -> SyncEnvelope | None:
-    """Return the highest-sequence accepted envelope for the entity identity."""
+def current_head(prior: Iterable[SyncHeadT]) -> SyncHeadT | None:
+    """Return the latest planned head or highest-sequence stored head."""
 
-    return max(prior, key=lambda item: item.server_sequence, default=None)
+    indexed = list(enumerate(prior))
+    if not indexed:
+        return None
+    return max(
+        indexed,
+        key=lambda pair: (
+            pair[1].server_sequence is None,
+            pair[0] if pair[1].server_sequence is None else pair[1].server_sequence,
+        ),
+    )[1]
 
 
 def incoming_references_head(
     envelope: SyncEnvelopeCreate,
-    head: SyncEnvelope | None,
+    head: SyncHead | None,
 ) -> bool:
     """Return whether the incoming envelope is explicitly based on the current head."""
 
@@ -55,9 +66,9 @@ def incoming_references_head(
 
 def delete_update_conflict(
     envelope: SyncEnvelopeCreate,
-    prior: list[SyncEnvelope],
+    prior: list[SyncHead],
     *,
-    is_delete: Callable[[SyncEnvelope | SyncEnvelopeCreate], bool],
+    is_delete: Callable[[SyncHead], bool],
     conflict_factory: Callable[[SyncEnvelopeCreate], AdapterConflict],
 ) -> AdapterConflict | None:
     """Conflict delete-vs-update only when the incoming change is not based on head."""
@@ -70,7 +81,7 @@ def delete_update_conflict(
     return conflict_factory(envelope)
 
 
-def _dependency_references_head(dependency: dict[str, Any], head: SyncEnvelope) -> bool:
+def _dependency_references_head(dependency: dict[str, Any], head: SyncHead) -> bool:
     if _same_token(dependency.get("client_envelope_id"), head.client_envelope_id):
         return True
     if _same_token(dependency.get("envelope_id"), head.client_envelope_id):
@@ -88,7 +99,7 @@ def _dependency_references_head(dependency: dict[str, Any], head: SyncEnvelope) 
     )
 
 
-def _dependency_matches_entity(dependency: dict[str, Any], head: SyncEnvelope) -> bool:
+def _dependency_matches_entity(dependency: dict[str, Any], head: SyncHead) -> bool:
     entity_id = dependency.get("entity_id")
     stable_key = dependency.get("stable_key")
     if entity_id is not None and not _same_token(entity_id, head.entity_id):

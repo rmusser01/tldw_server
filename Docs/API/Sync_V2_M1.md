@@ -1,7 +1,7 @@
 # Sync v2 M1 API Contract
 
-Date: 2026-05-23
-Status: Locked for M1 implementation
+Date: 2026-08-09
+Status: Locked for M1 implementation, including the Notes organization extension
 Scope: Server-connected Chatbook personal sync only
 
 ## Overview
@@ -16,7 +16,7 @@ All endpoints are authenticated and scoped to the current user:
 /api/v1/sync
 ```
 
-M1 public domains are exactly:
+The base M1 personal profile domains are:
 
 - `notes.note`
 - `chat.conversation`
@@ -30,6 +30,177 @@ The required `attachment.ref` payload metadata fields are `attachment_id`,
 `parent_domain`, `parent_object_id`, `content_type`, `size_bytes`,
 `payload_hash`, and `availability`.
 
+The additive Notes organization capability is one indivisible six-domain group:
+
+- `notes.keyword`
+- `notes.keyword_link`
+- `notes.keyword_collection`
+- `notes.keyword_collection_link`
+- `notes.folder`
+- `notes.folder_link`
+
+The group is available only on datasets whose organization bootstrap is `ready`.
+A dataset or device that has only the base profile remains valid.
+
+## Notes organization version 1
+
+### Domain schemas and operations
+
+All six domains use schema version `1`, encryption policy
+`server_trusted_v1`, and exactly the operations `upsert` and `tombstone`.
+Unknown payload fields are rejected.
+
+| Domain | `upsert` payload | `tombstone` payload |
+| --- | --- | --- |
+| `notes.keyword` | Required `keyword`: stripped, non-empty string, maximum 100 characters. | Empty object `{}`. |
+| `notes.keyword_link` | Required `subject_type`: `note` or `conversation`; required `subject_id`; required canonical UUIDv4 `keyword_sync_id`. A note subject ID is a canonical UUIDv4; a conversation subject ID is the existing stable conversation string ID. | The same three identity fields as `upsert`. |
+| `notes.keyword_collection` | Required `name`: stripped, non-empty string, maximum 255 characters; optional `parent_sync_id`: canonical UUIDv4 or `null` (default `null`). | Empty object `{}`. |
+| `notes.keyword_collection_link` | Required canonical UUIDv4 fields `collection_sync_id` and `keyword_sync_id`. | The same two identity fields as `upsert`. |
+| `notes.folder` | Required `name`: stripped, non-empty string, maximum 500 characters; optional `parent_sync_id`: canonical UUIDv4 or `null` (default `null`). | Empty object `{}`. |
+| `notes.folder_link` | Required canonical UUIDv4 fields `note_id` and `folder_sync_id`. | The same two identity fields as `upsert`. |
+
+Resource `object_id` values for keywords, collections, and folders are canonical
+lowercase, hyphenated RFC 4122 UUIDv4 strings. Existing integer database and REST
+IDs remain local compatibility keys only. They are never accepted as canonical
+Sync identity and never cross a device boundary.
+
+Relationship `object_id` values are deterministic. Build this JSON object:
+
+```json
+{"domain":"<domain>","members":["<member-1>","<member-2>"],"schema_version":1}
+```
+
+Use the domain's ordered member tuple:
+
+- `notes.keyword_link`: `[subject_type, subject_id, keyword_sync_id]`
+- `notes.keyword_collection_link`: `[collection_sync_id, keyword_sync_id]`
+- `notes.folder_link`: `[note_id, folder_sync_id]`
+
+Serialize as UTF-8 JSON with keys sorted, separators `,` and `:` (no insignificant
+whitespace), and non-ASCII characters left unescaped. Hash those exact bytes with
+SHA-256 and format the ID as
+`<domain>:sha256:<lowercase-hex-digest>`.
+
+These full normative hash-only vectors fix byte-level interoperability. Their
+short member strings are algorithm fixtures, not valid resource UUID examples:
+
+| Domain and members | Exact canonical JSON | Result |
+| --- | --- | --- |
+| `notes.keyword_link`, `["note","note-123","kw-456"]` | `{"domain":"notes.keyword_link","members":["note","note-123","kw-456"],"schema_version":1}` | `notes.keyword_link:sha256:10f9eab3be80b6e439ce1bcf8fae952527bde7d7e026d0e227f0a87ada963be0` |
+| `notes.keyword_collection_link`, `["collection-123","kw-456"]` | `{"domain":"notes.keyword_collection_link","members":["collection-123","kw-456"],"schema_version":1}` | `notes.keyword_collection_link:sha256:e9427c2d8bc4cfa8586130bc1fcc54cf432ca6dbb3df77bab3e65033b6148199` |
+| `notes.folder_link`, `["note-123","folder-456"]` | `{"domain":"notes.folder_link","members":["note-123","folder-456"],"schema_version":1}` | `notes.folder_link:sha256:9076b60d9d8476f852736928ef3661cb06d9ba55696dd4504657c753f414b670` |
+
+Link tombstones retain their identity fields because the hash cannot be reversed
+to find a local join row. Resource tombstones use their resource `object_id` and
+an empty payload.
+
+### Enrollment, bootstrap, and readiness
+
+The six domains are enrolled as one capability group; partial enrollment is
+invalid. An existing dataset is not upgraded by merely adding domain strings.
+A capable client requests all six through profile bootstrap, which:
+
+1. records `initializing` in the Sync store and blocks organization push, pull,
+   and server-origin mutation;
+2. snapshots active and soft-deleted resources plus current relationships;
+3. durably appends resource upserts parent-before-child, relationship upserts,
+   and then existing resource tombstones;
+4. verifies every captured envelope against the product snapshot without
+   transiently restoring deleted resources; and
+5. publishes `ready` only after all six counts and projections verify.
+
+Interruption resumes under the same bootstrap ID. A failed verification publishes
+`failed` plus a safe repair summary and remains fail closed. The trusted
+`bootstrap_capture` routing flag can preserve a verified dormant relationship only
+for server-origin capture while state is `initializing`; it is not accepted from a
+client and is not a general restore bypass.
+
+An organization mutation requires all six domains and `ready`. A missing or partial
+group returns `notes_organization_sync_domains_incomplete`; `initializing` or
+`failed` returns `notes_organization_sync_not_ready`. Dependency domains also must
+be enrolled: note links require `notes.note`, and conversation keyword links require
+`chat.conversation`.
+
+Implicit pulls are device-aware. With no explicit domain filter, the server uses
+the requesting device's stored requested/supported-domain intersection. Upgrading
+the shared dataset from a capable device therefore does not leak organization
+envelopes to a legacy device that never advertised the six domains. Explicit
+unsupported or not-ready requests still fail closed.
+
+### Durable append and resumable materialization
+
+Per [ADR-034](../ADR/034-durable-server-origin-sync-mutation-batches.md), a
+compound REST mutation is preflighted into an immutable list of primitive
+envelopes. Every step carries a mutation-group ID, zero-based step, total step
+count, and canonical plan hash. The complete plan is appended in one transaction
+to the per-user Sync envelope store before any product write. Reusing a group ID
+with different content is an idempotency conflict.
+
+That transaction does **not** include `ChaChaNotes.db`; there is no cross-database
+atomicity claim. After durable append, materializers project one step at a time in
+group order. A failure or conflict stops the group and leaves later steps pending.
+Retry loads the persisted plan, preserves its order, skips the applied prefix, and
+resumes at the first non-applied step. If the product already has the exact intended
+post-state, retry completes Sync bookkeeping without duplicating the product write.
+The complete canonical plan can be pull-visible while product projection repair is
+still pending.
+
+### Hierarchy, membership, deletes, merge, and conflicts
+
+Collection and folder `parent_sync_id` values are canonical; integer `parent_id`
+and folder `path` are local projections. Parent assignment verifies same-owner
+existence, active state, no self-parent, no cycle, finite ancestry, and applicable
+case-insensitive name/path uniqueness. Folder moves rewrite an active descendant
+subtree in one product transaction. Restore applies parents before children,
+resources before dependent relationships, and required live/link operations before
+tombstones. A complete stored mutation group remains one ordered unit.
+
+Soft-deleting a resource never cascades canonical link tombstones or clears child
+parent pointers. Relationships remain as dormant canonical state and become visible
+again when the resource is restored. Creating a new link to an already-deleted
+dependency conflicts. Hard cleanup is outside this contract.
+
+`notes.folder_link` represents effective user-visible membership. On the originating
+server the effective set is:
+
+```text
+(manual memberships UNION source memberships) MINUS Sync suppressions
+```
+
+Per [ADR-035](../ADR/035-canonical-folder-link-suppression-preserves-source-provenance.md),
+a canonical upsert clears the pair's suppression and ensures the manual projection;
+a canonical tombstone removes the manual projection and adds a suppression without
+deleting source provenance. Source IDs, source keys, and import bookkeeping remain
+local. Origin-only provenance routing metadata is honored only by the authenticated
+origin server; remote materializers ignore it and apply the canonical link payload.
+
+Resource changes are whole-object optimistic updates. Stale renames, parent changes,
+deletes, hierarchy changes, ownership mismatches, and case-insensitive uniqueness
+collisions are explicit conflicts rather than field merges. Restoring a tombstoned
+link requires `routing_metadata.restore_intent: true` and the exact current
+tombstone base.
+
+Keyword merge is a REST coordinator operation, not a Sync wire operation. Its
+persisted group first upserts missing target memberships, then tombstones source
+memberships, then tombstones the source keyword. An unresolved conflict blocks that
+step and every later step. Active flashcard membership blocks an active-Sync merge
+with `notes_keyword_merge_unsynchronized_dependency`; flashcard links are not moved
+or silently deleted.
+
+Restore preview reports counts and safe current-state actions for all six domains.
+Repair never synthesizes a missing group or skips a blocked conflict. Group repair
+observability contains only `mutation_group_id`, `failing_step`, `error_code`,
+`retry_result`, and `state`; it contains no names, note content, source values,
+filesystem paths, credentials, idempotency keys, or raw database errors.
+
+### Explicit non-goals
+
+This extension does not synchronize flashcards or `flashcard_keywords`; source
+provenance tables; FTS rows; local counts or timestamps; derived folder paths;
+integer database IDs; or a compound `merge` wire operation. It does not make
+product and Sync databases atomically commit together, and it does not grant a
+remote device authority over server-local ingestion provenance.
+
 ## Shared Types
 
 ### Capability Shape
@@ -41,13 +212,37 @@ The required `attachment.ref` payload metadata fields are `attachment_id`,
     "notes.note",
     "chat.conversation",
     "chat.message",
-    "attachment.ref"
+    "attachment.ref",
+    "workspaces.workspace",
+    "workspaces.source_ref",
+    "source_cache.entry",
+    "media.item",
+    "media.keyword",
+    "media.keyword_link",
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link"
   ],
   "operations": {
     "notes.note": ["upsert", "tombstone"],
     "chat.conversation": ["upsert", "tombstone"],
     "chat.message": ["append", "tombstone"],
-    "attachment.ref": ["upsert", "tombstone"]
+    "attachment.ref": ["upsert", "tombstone"],
+    "workspaces.workspace": ["upsert", "tombstone"],
+    "workspaces.source_ref": ["upsert", "tombstone"],
+    "source_cache.entry": ["upsert", "tombstone"],
+    "media.item": ["upsert", "tombstone"],
+    "media.keyword": ["upsert", "tombstone"],
+    "media.keyword_link": ["upsert", "tombstone"],
+    "notes.keyword": ["upsert", "tombstone"],
+    "notes.keyword_link": ["upsert", "tombstone"],
+    "notes.keyword_collection": ["upsert", "tombstone"],
+    "notes.keyword_collection_link": ["upsert", "tombstone"],
+    "notes.folder": ["upsert", "tombstone"],
+    "notes.folder_link": ["upsert", "tombstone"]
   },
   "encryption": {
     "policy": "server_trusted_v1",
@@ -136,6 +331,19 @@ Whole-object domains require `base_server_cursor`, `base_object_revision`, and
 fields. The server assigns canonical `server_cursor` and `object_revision`
 values.
 
+Client timestamps are normalized to one UTC ISO-8601 representation before
+persistence and mutation-group hashing. This includes native timezone-aware
+timestamps returned by PostgreSQL `TIMESTAMPTZ`, so reloading a stored group does
+not change its immutable plan fingerprint. A `Z` suffix remains valid input.
+For immutable groups stored before this normalization, validation uses a bounded
+compatibility set over the complete plan: the exact timestamp spelling retained
+by SQLite, and the exact UTC `Z` spelling when PostgreSQL has reloaded that value
+as a native UTC timestamp. PostgreSQL `TIMESTAMPTZ` cannot recover an arbitrary
+original non-UTC offset spelling after reload; the server-origin clock used by
+production emitted canonical UTC, while the historical bootstrap path also used
+the reconstructible UTC `Z` form. All other envelope fingerprint fields remain
+strict.
+
 `chat.message` append envelopes dedupe by stable message `object_id` plus
 `payload_hash`. Matching duplicates are idempotent. A duplicate message ID with
 a different payload hash creates a conflict.
@@ -185,13 +393,37 @@ Returns the current Sync v2 profile without creating durable sync state.
       "notes.note",
       "chat.conversation",
       "chat.message",
-      "attachment.ref"
+      "attachment.ref",
+      "workspaces.workspace",
+      "workspaces.source_ref",
+      "source_cache.entry",
+      "media.item",
+      "media.keyword",
+      "media.keyword_link",
+      "notes.keyword",
+      "notes.keyword_link",
+      "notes.keyword_collection",
+      "notes.keyword_collection_link",
+      "notes.folder",
+      "notes.folder_link"
     ],
     "operations": {
       "notes.note": ["upsert", "tombstone"],
       "chat.conversation": ["upsert", "tombstone"],
       "chat.message": ["append", "tombstone"],
-      "attachment.ref": ["upsert", "tombstone"]
+      "attachment.ref": ["upsert", "tombstone"],
+      "workspaces.workspace": ["upsert", "tombstone"],
+      "workspaces.source_ref": ["upsert", "tombstone"],
+      "source_cache.entry": ["upsert", "tombstone"],
+      "media.item": ["upsert", "tombstone"],
+      "media.keyword": ["upsert", "tombstone"],
+      "media.keyword_link": ["upsert", "tombstone"],
+      "notes.keyword": ["upsert", "tombstone"],
+      "notes.keyword_link": ["upsert", "tombstone"],
+      "notes.keyword_collection": ["upsert", "tombstone"],
+      "notes.keyword_collection_link": ["upsert", "tombstone"],
+      "notes.folder": ["upsert", "tombstone"],
+      "notes.folder_link": ["upsert", "tombstone"]
     },
     "encryption": {
       "policy": "server_trusted_v1",
@@ -340,13 +572,37 @@ pushing envelopes.
       "notes.note",
       "chat.conversation",
       "chat.message",
-      "attachment.ref"
+      "attachment.ref",
+      "workspaces.workspace",
+      "workspaces.source_ref",
+      "source_cache.entry",
+      "media.item",
+      "media.keyword",
+      "media.keyword_link",
+      "notes.keyword",
+      "notes.keyword_link",
+      "notes.keyword_collection",
+      "notes.keyword_collection_link",
+      "notes.folder",
+      "notes.folder_link"
     ],
     "operations": {
       "notes.note": ["upsert", "tombstone"],
       "chat.conversation": ["upsert", "tombstone"],
       "chat.message": ["append", "tombstone"],
-      "attachment.ref": ["upsert", "tombstone"]
+      "attachment.ref": ["upsert", "tombstone"],
+      "workspaces.workspace": ["upsert", "tombstone"],
+      "workspaces.source_ref": ["upsert", "tombstone"],
+      "source_cache.entry": ["upsert", "tombstone"],
+      "media.item": ["upsert", "tombstone"],
+      "media.keyword": ["upsert", "tombstone"],
+      "media.keyword_link": ["upsert", "tombstone"],
+      "notes.keyword": ["upsert", "tombstone"],
+      "notes.keyword_link": ["upsert", "tombstone"],
+      "notes.keyword_collection": ["upsert", "tombstone"],
+      "notes.keyword_collection_link": ["upsert", "tombstone"],
+      "notes.folder": ["upsert", "tombstone"],
+      "notes.folder_link": ["upsert", "tombstone"]
     },
     "encryption": {
       "policy": "server_trusted_v1",
@@ -517,14 +773,124 @@ repair flow.
 Compares server envelopes against a local inventory and returns a restore plan.
 Clean profile restore uses the same endpoint with an empty `local_inventory`.
 The response includes available datasets/domains, latest per-domain cursors,
-safe applies, tombstones, missing blobs, attachment-reference summaries,
+one canonical `ordered_actions` plan, compatibility safe applies and tombstones,
+missing blobs, attachment-reference summaries,
 envelope ranges needed for local apply, and encryption/key status.
+
+Restore planning preserves each complete stored mutation group and chronological
+revisions of the same identity. Applicable resource, hierarchy, and relationship
+dependencies are ordered before their consumers. Tombstones are ordered after
+compatible live and relationship work, but this is not a blanket override of
+history: an immutable historical tombstone group remains before a later exact
+restore of the same identity. A contradictory dependency or chronology graph
+fails closed with `sync_restore_plan_invalid`.
+
+The planner enforces hard chronology, dependency, and complete-group edges, then
+uses a deterministic ready-unit priority that chooses compatible live work before
+an otherwise-ready tombstone. Preview is bounded to 50,000 scanned candidates,
+10,000 ordered actions, and 1,000 members in any expanded mutation group. Exceeding
+one of those ceilings returns HTTP 413 with
+`sync_restore_candidate_limit_exceeded`, `sync_restore_action_limit_exceeded`, or
+`sync_restore_group_limit_exceeded` respectively. The 1,000-member ceiling is
+shared by atomic append, restore, and repair. Atomic append rejects an oversized
+group before writing, while persisted-group reads fetch at most 1,001 rows and
+reject an oversized legacy or corrupt group before constructing public actions or
+materialization models.
+
+Restore-preview request lists are bounded before service planning: `dataset_ids`
+and `domains` accept at most 100 entries each, while `selected_object_ids`,
+`selected_attachment_ids`, and `local_inventory` accept at most 10,000 entries
+each. Repeated dataset IDs are deduplicated in first-seen order before access
+checks and planning, so they never duplicate datasets or actions in the response.
+
+`ordered_actions` is the only executable object-action sequence. Its zero-based
+`plan_index` values are stable across the complete returned multi-dataset plan.
+Each row contains only `plan_index`, `action`, `dataset_id`, `domain`, `object_id`,
+`operation`, `server_cursor`, optional
+`mutation_group_id`/`mutation_step`/`mutation_step_count`, and an optional stable
+`code`. The required `dataset_id` disambiguates identical domain/object identities
+in different datasets. A row never contains payload data, labels, content, local
+paths or keys, raw errors, or routing metadata. Complete group steps have the same
+opaque group ID and step count and remain adjacent in ascending step order.
+
+The action is `apply`, `tombstone`, `noop`, or `conflict`. A conflict's safe `code`
+describes its category and blocks execution of the plan. `safe_applies`,
+`object_conflicts`, and `tombstones` remain compatibility category views, and the
+existing counts are derived from the same ordered plan; concatenating those arrays
+does not reconstruct execution order.
+
+Classification simulates the local inventory sequentially without changing product
+state. An earlier planned tombstone therefore changes the state used to classify a
+later exact restore. If the initial inventory already matches that later live head,
+the later action is still `apply`, not `noop`, because the preceding tombstone would
+otherwise undo the final state. Likewise, when the initial inventory matches the
+final planned live head, earlier historical live revisions remain executable
+`apply` actions and the final head is reapplied. A divergent local object that does
+not match the final planned state remains a conflict. In particular, a tombstone
+may advance simulation only when the local identity is absent, already matches the
+tombstone, matches the tombstone's explicit live base, was produced by an earlier
+planned action, or initially matches the later final action for that same dataset
+and identity. Otherwise the tombstone is a conflict and does not make later work
+appear safe.
+
+An accepted envelope whose stored apply status is `conflict` is also retained in
+`ordered_actions` as a blocking `conflict` with safe code
+`sync_restore_stored_apply_conflict`. A complete stored group is expanded before
+classification, so neither a conflicted singleton nor a conflicted group can be
+silently replaced by an older executable head. Stored raw error text is never
+returned. For example:
+
+```json
+{
+  "ordered_actions": [
+    {
+      "plan_index": 0,
+      "action": "tombstone",
+      "dataset_id": "dataset-example-1",
+      "domain": "notes.keyword",
+      "object_id": "11111111-1111-4111-8111-111111111111",
+      "operation": "tombstone",
+      "server_cursor": 41,
+      "mutation_group_id": "server-origin-group-0001",
+      "mutation_step": 0,
+      "mutation_step_count": 2,
+      "code": null
+    },
+    {
+      "plan_index": 1,
+      "action": "tombstone",
+      "dataset_id": "dataset-example-1",
+      "domain": "notes.folder",
+      "object_id": "22222222-2222-4222-8222-222222222222",
+      "operation": "tombstone",
+      "server_cursor": 42,
+      "mutation_group_id": "server-origin-group-0001",
+      "mutation_step": 1,
+      "mutation_step_count": 2,
+      "code": null
+    },
+    {
+      "plan_index": 2,
+      "action": "apply",
+      "dataset_id": "dataset-example-1",
+      "domain": "notes.keyword",
+      "object_id": "11111111-1111-4111-8111-111111111111",
+      "operation": "upsert",
+      "server_cursor": 43,
+      "mutation_group_id": null,
+      "mutation_step": null,
+      "mutation_step_count": null,
+      "code": null
+    }
+  ]
+}
+```
 
 ### Request
 
 ```json
 {
-  "dataset_id": "ds_personal_01HZZ0",
+  "dataset_ids": ["ds_personal_01HZZ0"],
   "device_id": "dev_chatbook_laptop",
   "client_profile_id": "chatbook_profile_main",
   "target_profile": {
@@ -869,10 +1235,18 @@ repair against another user's dataset.
 }
 ```
 
-If `domains` is empty, the server selects all M1 domains that have registered
-materializers. `failed_only=true` limits repair to envelopes whose last
-projection apply status was failed. `since_cursor` is inclusive of work after
-that cursor and must be non-negative.
+If `domains` is empty, the server selects enrolled domains that have registered
+materializers. `failed_only=true` selects accepted work that is not yet applied,
+including pending-only mutation groups and single envelopes. A group resumes at
+its first unapplied step and processes only its required ordered suffix.
+`since_cursor` is inclusive of work after that cursor and must be non-negative.
+The optional `limit` is a soft envelope limit over complete replay units: once a
+mutation group is admitted, its required suffix is kept intact even if that one
+group makes the response exceed `limit`. No group may exceed 1,000 members; an
+oversized group fails closed with HTTP 413 and
+`sync_restore_group_limit_exceeded`. `to_cursor` includes every member processed
+from an admitted group, including members beyond the page cursor that discovered
+the group.
 
 ### Response
 
@@ -915,9 +1289,27 @@ that cursor and must be non-negative.
 ```
 
 Envelope-level repair errors include `server_cursor`, `client_envelope_id`,
-`domain`, `object_id`, `error_code`, and a safe `message`. A response status of
-`repair_needed` means at least one envelope failed replay or replay produced a
-conflict that requires explicit review.
+`domain`, `object_id`, a stable `error_code`, and a null message; raw exception
+text is not returned. A response status of `repair_needed` means at least one
+envelope failed replay, produced a conflict, or was skipped and remains pending,
+including work blocked by an unavailable materializer. Only a run with no failed,
+conflicting, or skipped work reports `healthy`.
+
+Mutation-group results appear under `repair_status.mutation_groups`. For example:
+
+```json
+{
+  "mutation_group_id": "server-origin-group-0001",
+  "failing_step": 2,
+  "error_code": "notes_organization_base_conflict",
+  "retry_result": "blocked",
+  "state": "conflict"
+}
+```
+
+An applied prefix is never re-run merely to reach a failed suffix. A conflict is
+reported at its exact step, blocks every later step, and is not converted into a
+skip. The group object contains only the five fields shown above.
 
 ## Envelope Examples
 

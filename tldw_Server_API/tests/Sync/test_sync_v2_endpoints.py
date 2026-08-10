@@ -14,14 +14,20 @@ from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
+    NotesOrganizationDomainAdapter,
+)
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     SyncDeviceUpsert,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
     SyncObjectState,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -60,6 +66,10 @@ def _not_ready_encryption():
 def _registry() -> SyncAdapterRegistry:
     return SyncAdapterRegistry(
         [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
+        + [
+            NotesOrganizationDomainAdapter(domain=domain)
+            for domain in NOTES_ORGANIZATION_DOMAINS
+        ]
     )
 
 
@@ -165,6 +175,109 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
         "operation": "upsert",
         "routing_metadata": {"restore_intent": True},
         "requires_current_base": True,
+    }
+    assert {
+        domain: body["domain_schemas"][domain]
+        for domain in NOTES_ORGANIZATION_DOMAINS
+    } == {
+        "notes.keyword": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["keyword"],
+                "properties": {"keyword": {"type": "string", "max_length": 100}},
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_link": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["subject_type", "subject_id", "keyword_sync_id"],
+                "properties": {
+                    "subject_type": {"enum": ["note", "conversation"]},
+                    "subject_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {
+                "required": ["subject_type", "subject_id", "keyword_sync_id"],
+                "properties": {
+                    "subject_type": {"enum": ["note", "conversation"]},
+                    "subject_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+        },
+        "notes.keyword_collection": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 255},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_collection_link": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["collection_sync_id", "keyword_sync_id"],
+                "properties": {
+                    "collection_sync_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {
+                "required": ["collection_sync_id", "keyword_sync_id"],
+                "properties": {
+                    "collection_sync_id": {"type": "string"},
+                    "keyword_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+        },
+        "notes.folder": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 500},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.folder_link": {
+            "schema_version": 1,
+            "encryption_policy": "server_trusted_v1",
+            "upsert": {
+                "required": ["note_id", "folder_sync_id"],
+                "properties": {
+                    "note_id": {"type": "string"},
+                    "folder_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {
+                "required": ["note_id", "folder_sync_id"],
+                "properties": {
+                    "note_id": {"type": "string"},
+                    "folder_sync_id": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+        },
     }
     assert body["warnings"] == []
 
@@ -471,6 +584,103 @@ def test_profile_bootstrap_endpoint_idempotently_creates_dataset_and_device(
     assert len(sync_service.store.list_devices_for_user("user-1")) == 1
 
 
+def test_profile_bootstrap_rejects_reserved_server_origin_device_id(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    registration = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "server-origin",
+            "display_name": "Client",
+            "client_type": "chatbook",
+        },
+    )
+    response = client.post(
+        "/api/v1/sync/profile/bootstrap",
+        json={
+            "client_family": "chatbook",
+            "mode": "offline_sync",
+            "device_id": "server-origin",
+            "device_name": "Client",
+        },
+    )
+
+    expected_detail = {
+        "error_code": "reserved_device_id",
+        "message": "The requested Sync device identifier is reserved.",
+    }
+    assert registration.status_code == response.status_code == 400
+    assert registration.json()["detail"] == response.json()["detail"] == expected_detail
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+    assert sync_service.store.list_devices_for_user("user-1") == []
+
+
+def test_profile_endpoint_exposes_only_typed_notes_organization_summary(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    dataset = sync_service.store.get_or_create_default_personal_dataset("user-1")
+    bootstrap_id = "private-bootstrap-id"
+    sync_service.store.begin_notes_organization_bootstrap(
+        dataset.dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id=bootstrap_id,
+    )
+
+    initializing = client.get("/api/v1/sync/profile")
+    assert initializing.status_code == 200
+    assert initializing.json()["dataset"]["domains"] == [
+        *M1_SYNC_DOMAINS,
+        *NOTES_ORGANIZATION_DOMAINS,
+    ]
+    assert initializing.json()["dataset"]["notes_organization"] == {
+        "state": "initializing",
+        "captured_count": 0,
+        "expected_count": 0,
+        "error_code": None,
+    }
+
+    sync_service.store.transition_notes_organization_bootstrap(
+        dataset.dataset_id,
+        bootstrap_id=bootstrap_id,
+        expected_state="initializing",
+        state="ready",
+        captured_count=0,
+        expected_count=0,
+        ready_verifier=lambda: True,
+    )
+    ready = client.get("/api/v1/sync/profile")
+    assert ready.status_code == 200
+    assert ready.json()["dataset"]["notes_organization"] == {
+        "state": "ready",
+        "captured_count": 0,
+        "expected_count": 0,
+        "error_code": None,
+    }
+
+    sync_service.store.transition_notes_organization_bootstrap(
+        dataset.dataset_id,
+        bootstrap_id=bootstrap_id,
+        expected_state="ready",
+        state="failed",
+        captured_count=3,
+        expected_count=4,
+        error_code="notes_organization_bootstrap_source_invalid",
+    )
+    failed = client.get("/api/v1/sync/profile")
+    assert failed.status_code == 200
+    assert failed.json()["dataset"]["notes_organization"] == {
+        "state": "failed",
+        "captured_count": 3,
+        "expected_count": 4,
+        "error_code": "notes_organization_bootstrap_source_invalid",
+    }
+    serialized = failed.text
+    assert bootstrap_id not in serialized
+    assert "notes_organization_v1" not in serialized
+
+
 def test_profile_bootstrap_endpoint_reuses_omitted_device_by_client_profile_id(
     tmp_path: Path,
 ) -> None:
@@ -613,7 +823,7 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
             "scope_type": "personal",
             "domains": list(M1_SYNC_DOMAINS),
             "encryption_policy": "server_trusted_v1",
-            "metadata": {"default_personal": True, "client_family": "chatbook"},
+            "metadata": {"label": "internal-caller"},
         },
     )
 
@@ -626,6 +836,42 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
     assert enrolled.json()["encryption_policy"] == "server_trusted_v1"
     assert enrolled.json()["domains"] == list(M1_SYNC_DOMAINS)
     assert enrolled.json()["key_setup_required"] is False
+    assert enrolled.json()["metadata"] == {"label": "internal-caller"}
+
+
+def test_dataset_enroll_endpoint_rejects_and_never_echoes_forged_server_metadata(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    forged = {
+        "default_personal": True,
+        "client_family": "chatbook",
+        "notes_organization_v1": {
+            "state": "ready",
+            "bootstrap_id": "client-forged",
+            "captured_count": 1,
+            "expected_count": 1,
+        },
+    }
+
+    response = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "forged-dataset",
+            "scope_type": "personal",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+            "metadata": forged,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_reserved_dataset_enrollment",
+        "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+    }
+    assert "client-forged" not in response.text
+    assert sync_service.store.list_datasets_for_user("user-1") == []
 
 
 def test_key_recovery_bundle_validation_error_does_not_expose_wrapped_material(
@@ -828,7 +1074,7 @@ def test_datasets_enroll_endpoint_fails_closed_when_encryption_is_not_ready(
             "scope_type": "personal",
             "domains": list(M1_SYNC_DOMAINS),
             "encryption_policy": "server_trusted_v1",
-            "metadata": {"default_personal": True, "client_family": "chatbook"},
+            "metadata": {"label": "ordinary-enrollment"},
         },
     )
 
@@ -855,6 +1101,118 @@ def _note_envelope_json(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+def test_public_pull_converter_strips_only_server_local_organization_routing() -> None:
+    routing_metadata = {
+        "notes_keyword_merge_response": {
+            "source_keyword_id": 41,
+            "target_keyword_id": 42,
+        },
+        "notes_folder_origin_provenance": {
+            "operation": "source_upsert",
+            "source_id": 73,
+        },
+        "notes_ingestion_expected_product_version": 19,
+        "bootstrap_capture": True,
+        "provenance": {"origin": "synthetic-client"},
+    }
+    envelope = SyncEnvelope(
+        dataset_id="dataset-1",
+        client_envelope_id="env-internal-routing",
+        domain="notes.keyword",
+        operation="tombstone",
+        object_id="11111111-1111-4111-8111-111111111111",
+        server_cursor=1,
+        payload={},
+        payload_hash="sha256:internal-routing",
+        routing_metadata=routing_metadata,
+        mutation_group_id="group-public-1",
+        mutation_step=0,
+        mutation_step_count=1,
+        mutation_plan_hash="a" * 64,
+    )
+
+    public = sync_endpoint._api_envelope_from_core(
+        envelope,
+        encryption_policy="server_trusted_v1",
+    )
+
+    assert public.routing_metadata == {
+        "bootstrap_capture": True,
+        "provenance": {"origin": "synthetic-client"},
+    }
+    assert public.mutation_group_id == "group-public-1"
+    assert public.mutation_step == 0
+    assert public.mutation_step_count == 1
+    assert public.mutation_plan_hash == "a" * 64
+    assert envelope.routing_metadata == routing_metadata
+
+
+def test_pull_endpoint_preserves_group_metadata_without_internal_routing(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+    client = _client_for_service(service)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "client_type": "chatbook",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": ["notes.note"],
+            "encryption_policy": "server_trusted_v1",
+        },
+    ).status_code == 200
+    service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id="env-grouped-pull",
+            domain="notes.note",
+            operation="upsert",
+            object_id="note-grouped",
+            device_id="server-origin",
+            client_sequence=1,
+            object_revision=1,
+            payload={"title": "Grouped", "content": "Body"},
+            payload_hash="sha256:grouped-pull",
+            routing_metadata={
+                "notes_keyword_merge_response": {
+                    "source_keyword_id": 41,
+                    "target_keyword_id": 42,
+                },
+                "bootstrap_capture": True,
+            },
+            mutation_group_id="group-pull-1",
+            mutation_step=0,
+            mutation_step_count=1,
+            mutation_plan_hash="b" * 64,
+        )
+    )
+
+    response = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "cursor": "0",
+            "domain": "notes.note",
+        },
+    )
+
+    assert response.status_code == 200
+    envelope = response.json()["envelopes"][0]
+    assert envelope["mutation_group_id"] == "group-pull-1"
+    assert envelope["mutation_step"] == 0
+    assert envelope["mutation_step_count"] == 1
+    assert envelope["mutation_plan_hash"] == "b" * 64
+    assert envelope["routing_metadata"] == {"bootstrap_capture": True}
 
 
 def test_push_and_pull_endpoint_expose_apply_outcomes_for_replayable_failures(

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 """Database helper for per-user Sync v2 storage."""
 
+import hashlib
 import json
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,19 +14,23 @@ from typing import Any
 from urllib.parse import urlparse
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
+    SyncHeadConflictError,
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
+    SyncMaterializationBusyError,
+    SyncMaterializationPredecessorError,
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
+    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_SUPPORTED_OPERATIONS,
     WORKSPACE_SYNC_DOMAINS,
     ConflictStatus,
@@ -66,13 +72,30 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncKeyRotationEnvelopeRange,
     SyncObjectState,
     SyncRestoreManifestStats,
+    normalize_sync_timestamp,
 )
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    SYNC_MUTATION_GROUP_MAX_SIZE,
+)
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
-from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, QueryResult
+from .backends.base import (
+    BackendType,
+    DatabaseBackend,
+    DatabaseConfig,
+    QueryResult,
+)
+from .backends.base import DatabaseError as BackendDatabaseError
 from .backends.factory import DatabaseBackendFactory
 
 SYNC_DB_FILENAME = "Sync_v2.db"
-SYNC_APPLY_STATUSES: set[str] = {"pending", "applied", "failed", "conflict"}
+SYNC_APPLY_STATUSES: set[str] = {
+    "pending",
+    "applied",
+    "failed",
+    "conflict",
+    "superseded",
+}
 _WHOLE_OBJECT_DOMAINS = {"notes.note", "chat.conversation"}
 _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "attachment_id",
@@ -83,6 +106,61 @@ _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "payload_hash",
     "availability",
 }
+
+
+def _is_rebase_required_conflict_source(
+    conflict_row: Mapping[str, Any],
+    envelope_row: Mapping[str, Any],
+) -> bool:
+    """Validate and identify one generated rebase-required conflict source."""
+
+    conflict_marked = (
+        conflict_row.get("conflict_type")
+        == SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+    )
+    envelope_marked = (
+        envelope_row.get("apply_error_code")
+        == SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+    )
+    if conflict_marked != envelope_marked:
+        raise SyncStoreError("Sync rebase conflict marker does not match its source")
+    return conflict_marked
+
+
+def _is_mutation_group_step_unique_error(exc: BaseException) -> bool:
+    """Match PostgreSQL's named mutation-group step uniqueness violation."""
+
+    current: BaseException | None = exc
+    while current is not None:
+        sqlstate = getattr(current, "sqlstate", None) or getattr(
+            current, "pgcode", None
+        )
+        diagnostics = getattr(current, "diag", None)
+        if (
+            sqlstate == "23505"
+            and getattr(diagnostics, "constraint_name", None)
+            == "uq_sync_envelopes_dataset_mutation_group_step"
+        ):
+            return True
+        current = current.__cause__
+    return False
+
+
+def _is_materialization_lock_error(exc: BaseException) -> bool:
+    """Match bounded PostgreSQL/SQLite lock acquisition failures."""
+
+    current: BaseException | None = exc
+    while current is not None:
+        sqlstate = getattr(current, "sqlstate", None) or getattr(
+            current, "pgcode", None
+        )
+        if sqlstate in {"40P01", "55P03"}:
+            return True
+        message = str(current).lower()
+        if "database is locked" in message or "database table is locked" in message:
+            return True
+        current = current.__cause__
+    return False
 
 SYNC_SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_devices (
@@ -215,6 +293,10 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     device_id TEXT,
     client_profile_id TEXT,
     client_sequence INTEGER,
+    mutation_group_id TEXT,
+    mutation_step INTEGER,
+    mutation_step_count INTEGER,
+    mutation_plan_hash TEXT,
     client_timestamp TEXT,
     server_timestamp TEXT NOT NULL,
     base_server_cursor INTEGER,
@@ -250,10 +332,17 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+    ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
     ON sync_envelopes(dataset_id, device_id, server_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+    WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
     ON sync_envelopes(dataset_id, device_id, client_sequence)
     WHERE device_id IS NOT NULL AND client_sequence IS NOT NULL;
@@ -262,6 +351,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_payload_hash
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_failed_apply
     ON sync_envelopes(dataset_id, apply_status, server_sequence)
     WHERE apply_status = 'failed';
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_outstanding_apply
+    ON sync_envelopes(dataset_id, server_sequence)
+    WHERE status = 'accepted' AND apply_status NOT IN ('applied', 'superseded');
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
@@ -280,6 +372,24 @@ CREATE TABLE IF NOT EXISTS sync_object_state (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
     ON sync_object_state(dataset_id, domain, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_current_heads (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    latest_server_cursor INTEGER NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+    ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_materialization_locks (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
 
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
@@ -560,6 +670,10 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     device_id TEXT,
     client_profile_id TEXT,
     client_sequence BIGINT,
+    mutation_group_id TEXT,
+    mutation_step INTEGER,
+    mutation_step_count INTEGER,
+    mutation_plan_hash TEXT,
     client_timestamp TIMESTAMPTZ,
     server_timestamp TIMESTAMPTZ NOT NULL,
     base_server_cursor BIGINT,
@@ -595,10 +709,17 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+    ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
     ON sync_envelopes(dataset_id, device_id, server_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+    WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
     ON sync_envelopes(dataset_id, device_id, client_sequence)
     WHERE device_id IS NOT NULL AND client_sequence IS NOT NULL;
@@ -607,6 +728,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_payload_hash
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_failed_apply
     ON sync_envelopes(dataset_id, apply_status, server_sequence)
     WHERE apply_status = 'failed';
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_outstanding_apply
+    ON sync_envelopes(dataset_id, server_sequence)
+    WHERE status = 'accepted' AND apply_status NOT IN ('applied', 'superseded');
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
@@ -625,6 +749,24 @@ CREATE TABLE IF NOT EXISTS sync_object_state (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
     ON sync_object_state(dataset_id, domain, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_current_heads (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    latest_server_cursor BIGINT NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+    ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_materialization_locks (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
 
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
@@ -819,11 +961,7 @@ def _manifest_attachment_size_class(size_bytes: int) -> str:
 
 
 def _timestamp_to_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
+    return normalize_sync_timestamp(value)
 
 
 def _optional_int_from_storage(value: Any) -> int | None:
@@ -1042,7 +1180,19 @@ def _dataset_from_row(row: dict[str, Any]) -> SyncDataset:
 
 
 def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
-    return SyncEnvelope(
+    raw_created_at_client = row.get("created_at_client") or row.get("client_timestamp")
+    raw_client_timestamp = row.get("client_timestamp") or row.get("created_at_client")
+    created_at_client = (
+        raw_created_at_client
+        if isinstance(raw_created_at_client, str)
+        else _timestamp_to_string(raw_created_at_client)
+    )
+    client_timestamp = (
+        raw_client_timestamp
+        if isinstance(raw_client_timestamp, str)
+        else _timestamp_to_string(raw_client_timestamp)
+    )
+    envelope = SyncEnvelope(
         server_cursor=int(row["server_sequence"]),
         dataset_id=row["dataset_id"],
         client_envelope_id=row["client_envelope_id"],
@@ -1057,11 +1207,19 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
             if row.get("client_sequence") is not None
             else None
         ),
+        mutation_group_id=row.get("mutation_group_id"),
+        mutation_step=_optional_int_from_storage(row.get("mutation_step")),
+        mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
+        mutation_plan_hash=row.get("mutation_plan_hash"),
         stable_key=row.get("stable_key"),
-        created_at_client=row.get("created_at_client") or row.get("client_timestamp"),
-        received_at_server=row.get("received_at_server") or row.get("server_timestamp"),
-        client_timestamp=row.get("client_timestamp") or row.get("created_at_client"),
-        server_timestamp=row.get("server_timestamp") or row.get("received_at_server"),
+        created_at_client=created_at_client,
+        received_at_server=_timestamp_to_string(
+            row.get("received_at_server") or row.get("server_timestamp")
+        ),
+        client_timestamp=client_timestamp,
+        server_timestamp=_timestamp_to_string(
+            row.get("server_timestamp") or row.get("received_at_server")
+        ),
         base_server_cursor=(
             int(row["base_server_cursor"])
             if row.get("base_server_cursor") is not None
@@ -1108,6 +1266,10 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
         apply_error_message=row.get("apply_error_message"),
         applied_at=row.get("applied_at"),
     )
+    if isinstance(raw_created_at_client, str):
+        object.__setattr__(envelope, "created_at_client", created_at_client)
+        object.__setattr__(envelope, "client_timestamp", client_timestamp)
+    return envelope
 
 
 def _cursor_from_row(row: dict[str, Any]) -> SyncDeviceCursor:
@@ -1310,7 +1472,7 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
         "device_id": envelope.device_id,
         "client_profile_id": envelope.client_profile_id,
         "client_sequence": envelope.client_sequence,
-        "created_at_client": envelope.created_at_client,
+        "created_at_client": normalize_sync_timestamp(envelope.created_at_client),
         "base_server_cursor": envelope.base_server_cursor,
         "base_object_revision": envelope.base_object_revision,
         "base_object_hash": envelope.base_object_hash,
@@ -1329,6 +1491,12 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
         "encryption_metadata": envelope.encryption_metadata,
         "adapter_version": envelope.adapter_version,
         "status": envelope.status,
+        **_mutation_group_fingerprint(
+            mutation_group_id=envelope.mutation_group_id,
+            mutation_step=envelope.mutation_step,
+            mutation_step_count=envelope.mutation_step_count,
+            mutation_plan_hash=envelope.mutation_plan_hash,
+        ),
     }
 
 
@@ -1351,7 +1519,9 @@ def _envelope_fingerprint_from_row(
             if row.get("client_sequence") is not None
             else None
         ),
-        "created_at_client": row.get("created_at_client") or row.get("client_timestamp"),
+        "created_at_client": normalize_sync_timestamp(
+            row.get("created_at_client") or row.get("client_timestamp")
+        ),
         "base_server_cursor": (
             int(row["base_server_cursor"])
             if row.get("base_server_cursor") is not None
@@ -1385,10 +1555,33 @@ def _envelope_fingerprint_from_row(
         "encryption_metadata": decode_json(row.get("encryption_metadata_json"), default={}),
         "adapter_version": int(row.get("adapter_version") or row.get("schema_version") or 1),
         "status": row["status"],
+        **_mutation_group_fingerprint(
+            mutation_group_id=row.get("mutation_group_id"),
+            mutation_step=_optional_int_from_storage(row.get("mutation_step")),
+            mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
+            mutation_plan_hash=row.get("mutation_plan_hash"),
+        ),
     }
     if not ignore_client_envelope_id:
         fingerprint["client_envelope_id"] = row["client_envelope_id"]
     return fingerprint
+
+
+def _mutation_group_fingerprint(
+    *,
+    mutation_group_id: Any,
+    mutation_step: Any,
+    mutation_step_count: Any,
+    mutation_plan_hash: Any,
+) -> dict[str, Any]:
+    if mutation_group_id is None:
+        return {}
+    return {
+        "mutation_group_id": mutation_group_id,
+        "mutation_step": mutation_step,
+        "mutation_step_count": mutation_step_count,
+        "mutation_plan_hash": mutation_plan_hash,
+    }
 
 
 def _envelope_sequence_fingerprint_from_create(
@@ -1690,6 +1883,9 @@ class SyncDatabase:
             else SYNC_SQLITE_SCHEMA
         )
         with self.backend.transaction() as conn:
+            current_heads_existed = self.backend.table_exists(
+                "sync_current_heads", connection=conn
+            )
             if self.backend.table_exists("sync_envelopes", connection=conn):
                 self._ensure_envelope_m1_columns(connection=conn)
             if self.backend.table_exists("sync_key_records", connection=conn):
@@ -1701,7 +1897,12 @@ class SyncDatabase:
             self._ensure_background_sync_tables(connection=conn)
             self._ensure_envelope_m1_columns(connection=conn)
             self._ensure_sync_object_state_table(connection=conn)
+            self._ensure_sync_current_heads_table(
+                connection=conn, projection_exists=current_heads_existed
+            )
+            self._ensure_sync_materialization_locks_table(connection=conn)
             self._ensure_envelope_m1_indexes(connection=conn)
+            self._ensure_conflict_indexes(connection=conn)
             self._ensure_key_record_user_id_column(connection=conn)
             self._ensure_key_record_rotation_columns(connection=conn)
             self._ensure_key_record_user_id_index(connection=conn)
@@ -1716,6 +1917,604 @@ class SyncDatabase:
         """Execute a parameterized SQL statement through the configured backend."""
 
         return self.backend.execute(query, params, connection=connection)
+
+    @contextmanager
+    def materialization_transaction(
+        self,
+        keys: Sequence[tuple[str, SyncDomain, str]],
+    ) -> Iterator[Any]:
+        """Serialize product projection and Sync bookkeeping by dataset."""
+
+        ordered_keys = sorted(set(keys))
+        if not ordered_keys:
+            raise SyncStoreError("Sync materialization requires at least one object")
+        try:
+            with self.backend.transaction() as conn:
+                domains_by_dataset: dict[str, set[SyncDomain]] = {}
+                for dataset_id, domain, _object_id in ordered_keys:
+                    domains_by_dataset.setdefault(dataset_id, set()).add(domain)
+                for dataset_id, domains in sorted(domains_by_dataset.items()):
+                    row = self._get_dataset_row_for_update(
+                        dataset_id,
+                        connection=conn,
+                    )
+                    if row is None:
+                        raise SyncDatasetNotFoundError(
+                            f"Sync dataset not found: {dataset_id}"
+                        )
+                    enrolled = _dataset_domains_from_row(row)
+                    for domain in sorted(domains):
+                        if domain not in enrolled:
+                            raise SyncInvalidDomainError(
+                                "Sync domain is not enrolled for dataset "
+                                f"{dataset_id}: {domain}"
+                            )
+                for dataset_id in sorted(domains_by_dataset):
+                    self._lock_materialization_dataset(dataset_id, connection=conn)
+                yield conn
+        except Exception as exc:
+            if _is_materialization_lock_error(exc):
+                raise SyncMaterializationBusyError() from exc
+            raise
+
+    def _lock_materialization_dataset(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any,
+    ) -> None:
+        """Acquire one reusable durable dataset projection lock in the caller's tx."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.execute("SET LOCAL lock_timeout = '10s'", connection=connection)
+        self.execute(
+            """
+            INSERT INTO sync_materialization_locks (
+                dataset_id, domain, object_id, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT (dataset_id, domain, object_id)
+            DO UPDATE SET updated_at = excluded.updated_at
+            """,
+            (dataset_id, "*", "*", utcnow_iso()),
+            connection=connection,
+        )
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        row = _first(
+            self.execute(
+                """
+                SELECT dataset_id FROM sync_materialization_locks
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                """
+                + suffix,  # nosec B608 - suffix is a backend-controlled SQL literal.
+                (dataset_id, "*", "*"),
+                connection=connection,
+            )
+        )
+        if row is None:
+            raise SyncStoreError("sync_materialization_lock_unavailable")
+
+    def require_materialization_predecessors_applied(
+        self,
+        envelopes: Sequence[SyncEnvelope],
+        *,
+        connection: Any,
+    ) -> None:
+        """Prevent a projection unit from advancing past earlier unresolved work."""
+
+        cursors_by_dataset: dict[str, list[int]] = {}
+        for envelope in envelopes:
+            if envelope.status != "accepted" or envelope.server_cursor is None:
+                raise SyncStoreError("Sync materialization requires stored accepted envelopes")
+            cursors_by_dataset.setdefault(envelope.dataset_id, []).append(
+                envelope.server_cursor
+            )
+        for dataset_id, cursors in sorted(cursors_by_dataset.items()):
+            predecessor = _first(
+                self.execute(
+                    """
+                    SELECT server_sequence, apply_status
+                      FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND status = 'accepted'
+                       AND server_sequence < ?
+                       AND apply_status NOT IN ('applied', 'superseded')
+                     ORDER BY server_sequence ASC
+                     LIMIT 1
+                    """,
+                    (dataset_id, min(cursors)),
+                    connection=connection,
+                )
+            )
+            if predecessor is not None:
+                raise SyncMaterializationPredecessorError(
+                    apply_status=str(predecessor.get("apply_status") or "pending")
+                )
+
+    def require_conflict_resolution_predecessors_applied(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Evaluate readiness at the claimed conflict's logical cursor."""
+
+        conflict_row, envelope_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        source_cursor = int(conflict_row["server_sequence"])
+        predecessor = _first(
+            self.execute(
+                """
+                SELECT server_sequence, apply_status
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND status = 'accepted'
+                   AND server_sequence < ?
+                   AND apply_status NOT IN ('applied', 'superseded')
+                 ORDER BY server_sequence ASC
+                 LIMIT 1
+                """,
+                (dataset_id, source_cursor),
+                connection=connection,
+            )
+        )
+        if predecessor is not None:
+            raise SyncMaterializationPredecessorError(
+                apply_status=str(predecessor.get("apply_status") or "pending")
+            )
+        return _envelope_from_row(envelope_row)
+
+    def terminalize_claimed_conflict_envelope(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        apply_error_code: str,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Mark exactly the claimed, unprojected conflict source superseded."""
+
+        _conflict_row, envelope_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        cursor = int(envelope_row["server_sequence"])
+        result = self.execute(
+            """
+            UPDATE sync_envelopes
+               SET apply_status = 'superseded',
+                   apply_error_code = ?,
+                   apply_error_message = NULL,
+                   applied_at = NULL
+             WHERE server_sequence = ?
+               AND apply_status IN ('pending', 'failed', 'conflict')
+            """,
+            (apply_error_code, cursor),
+            connection=connection,
+        )
+        if result.rowcount == 0:
+            raise SyncStoreError("Sync conflict source could not be terminalized")
+        self._repoint_current_head_from_unprojected_row(
+            envelope_row,
+            connection=connection,
+        )
+        updated = _first(
+            self.execute(
+                "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                (cursor,),
+                connection=connection,
+            )
+        )
+        if updated is None:
+            raise SyncStoreError("Sync conflict source envelope was not found")
+        return _envelope_from_row(updated)
+
+    def stage_later_claimed_conflict_rebase_plan(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> tuple[int, ...]:
+        """Validate and freeze the bounded later-row rebase plan."""
+
+        conflict_row, _source_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        rows = self._validated_later_conflict_rebase_rows(
+            dataset_id=dataset_id,
+            source_cursor=int(conflict_row["server_sequence"]),
+            connection=connection,
+        )
+        return tuple(int(row["server_sequence"]) for row in rows)
+
+    def rebase_later_claimed_conflict_envelopes(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        expected_server_cursors: Sequence[int] | None = None,
+        connection: Any,
+    ) -> list[SyncConflict]:
+        """Convert bounded legacy work queued after a claimed source into conflicts."""
+
+        conflict_row, _source_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        source_cursor = int(conflict_row["server_sequence"])
+        rows = self._validated_later_conflict_rebase_rows(
+            dataset_id=dataset_id,
+            source_cursor=source_cursor,
+            connection=connection,
+        )
+        planned_cursors = tuple(int(row["server_sequence"]) for row in rows)
+        if (
+            expected_server_cursors is not None
+            and planned_cursors != tuple(expected_server_cursors)
+        ):
+            raise SyncStoreError("sync_conflict_resolution_rebase_plan_changed")
+
+        conflicts: list[SyncConflict] = []
+        for row in rows:
+            previous_apply_status = str(row.get("apply_status") or "pending")
+            cursor = int(row["server_sequence"])
+            self.execute(
+                """
+                UPDATE sync_envelopes
+                   SET apply_status = 'conflict',
+                       apply_error_code = ?,
+                       apply_error_message = ?,
+                       applied_at = NULL
+                 WHERE server_sequence = ?
+                   AND status = 'accepted'
+                   AND apply_status NOT IN ('applied', 'superseded')
+                """,
+                (
+                    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
+                    "Queued change requires review after conflict resolution",
+                    cursor,
+                ),
+                connection=connection,
+            )
+            conflicts.append(
+                self._upsert_rebase_required_conflict(
+                    row,
+                    source_conflict_id=conflict_id,
+                    source_cursor=source_cursor,
+                    previous_apply_status=previous_apply_status,
+                    connection=connection,
+                )
+            )
+            self._repoint_current_head_from_unprojected_row(
+                row,
+                connection=connection,
+            )
+        return conflicts
+
+    def _validated_later_conflict_rebase_rows(
+        self,
+        *,
+        dataset_id: str,
+        source_cursor: int,
+        connection: Any,
+    ) -> list[dict[str, Any]]:
+        """Return the bounded plan after validating every existing conflict row."""
+
+        rows = self.execute(
+            """
+            SELECT *
+              FROM sync_envelopes
+             WHERE dataset_id = ?
+               AND status = 'accepted'
+               AND server_sequence > ?
+               AND apply_status NOT IN ('applied', 'superseded')
+             ORDER BY server_sequence ASC
+             LIMIT ?
+            """,
+            (dataset_id, source_cursor, SYNC_MUTATION_GROUP_MAX_SIZE + 1),
+            connection=connection,
+        ).rows
+        if len(rows) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_conflict_resolution_rebase_limit_exceeded")
+        for row in rows:
+            existing = self._get_conflict_for_rebase_envelope(
+                row,
+                connection=connection,
+            )
+            if existing is not None:
+                self._require_compatible_rebase_conflict_record(existing, row)
+        return rows
+
+    def _get_conflict_for_rebase_envelope(
+        self,
+        envelope_row: Mapping[str, Any],
+        *,
+        connection: Any,
+    ) -> dict[str, Any] | None:
+        return _first(
+            self.execute(
+                """
+                SELECT * FROM sync_conflicts
+                 WHERE dataset_id = ?
+                   AND local_envelope_id = ?
+                   AND server_sequence = ?
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["client_envelope_id"],
+                    int(envelope_row["server_sequence"]),
+                ),
+                connection=connection,
+            )
+        )
+
+    @staticmethod
+    def _require_compatible_rebase_conflict_record(
+        conflict_row: Mapping[str, Any],
+        envelope_row: Mapping[str, Any],
+    ) -> None:
+        identity_matches = (
+            conflict_row.get("dataset_id") == envelope_row.get("dataset_id")
+            and conflict_row.get("local_envelope_id")
+            == envelope_row.get("client_envelope_id")
+            and conflict_row.get("server_sequence")
+            == envelope_row.get("server_sequence")
+            and conflict_row.get("domain") == envelope_row.get("domain")
+            and conflict_row.get("entity_id") == envelope_row.get("entity_id")
+        )
+        if (
+            not identity_matches
+            or conflict_row.get("status") != "unresolved"
+            or _conflict_row_has_resolution_claim(conflict_row)
+        ):
+            raise SyncStoreError(
+                "sync_conflict_resolution_rebase_record_incompatible"
+            )
+
+    def _upsert_rebase_required_conflict(
+        self,
+        envelope_row: dict[str, Any],
+        *,
+        source_conflict_id: str,
+        source_cursor: int,
+        previous_apply_status: str,
+        connection: Any,
+    ) -> SyncConflict:
+        cursor = int(envelope_row["server_sequence"])
+        existing = self._get_conflict_for_rebase_envelope(
+            envelope_row,
+            connection=connection,
+        )
+        metadata: dict[str, Any] = {
+            "source_conflict_id": source_conflict_id,
+            "source_server_cursor": source_cursor,
+            "previous_apply_status": previous_apply_status,
+        }
+        if existing is not None:
+            self._require_compatible_rebase_conflict_record(existing, envelope_row)
+            if existing.get("conflict_type") != (
+                SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+            ):
+                metadata["previous_conflict_type"] = existing.get("conflict_type")
+                metadata["previous_conflict_metadata"] = decode_json(
+                    existing.get("metadata_json"),
+                    default={},
+                )
+            else:
+                return _conflict_from_row(existing)
+            self.execute(
+                """
+                UPDATE sync_conflicts
+                   SET conflict_type = ?,
+                       metadata_json = ?
+                 WHERE conflict_id = ? AND status = 'unresolved'
+                """,
+                (
+                    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
+                    encode_json(metadata, default={}),
+                    existing["conflict_id"],
+                ),
+                connection=connection,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                    (existing["conflict_id"],),
+                    connection=connection,
+                )
+            )
+            if updated is None:
+                raise SyncStoreError("Sync rebase conflict could not be stored")
+            return _conflict_from_row(updated)
+
+        digest = hashlib.sha256(
+            (
+                f"{envelope_row['dataset_id']}\0"
+                f"{envelope_row['client_envelope_id']}\0{cursor}"
+            ).encode()
+        ).hexdigest()
+        return self.insert_conflict(
+            SyncConflictCreate(
+                conflict_id=f"conflict-rebase-{digest}",
+                dataset_id=str(envelope_row["dataset_id"]),
+                domain=str(envelope_row["domain"]),  # type: ignore[arg-type]
+                entity_id=str(envelope_row["entity_id"]),
+                conflict_type=SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
+                local_envelope_id=str(envelope_row["client_envelope_id"]),
+                server_sequence=cursor,
+                metadata=metadata,
+            ),
+            connection=connection,
+        )
+
+    def _repoint_current_head_from_unprojected_row(
+        self,
+        envelope_row: dict[str, Any],
+        *,
+        connection: Any,
+    ) -> None:
+        """Conditionally restore the latest applied head hidden by one row."""
+
+        cursor = int(envelope_row["server_sequence"])
+        head = _first(
+            self.execute(
+                """
+                SELECT latest_server_cursor
+                  FROM sync_current_heads
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["domain"],
+                    envelope_row["entity_id"],
+                ),
+                connection=connection,
+            )
+        )
+        if head is None or int(head["latest_server_cursor"]) != cursor:
+            return
+        projected = _first(
+            self.execute(
+                """
+                SELECT server_sequence
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                   AND server_sequence < ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["domain"],
+                    envelope_row["entity_id"],
+                    cursor,
+                ),
+                connection=connection,
+            )
+        )
+        if projected is None:
+            self.execute(
+                """
+                DELETE FROM sync_current_heads
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                   AND latest_server_cursor = ?
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["domain"],
+                    envelope_row["entity_id"],
+                    cursor,
+                ),
+                connection=connection,
+            )
+            return
+        self.execute(
+            """
+            UPDATE sync_current_heads
+               SET latest_server_cursor = ?
+             WHERE dataset_id = ? AND domain = ? AND object_id = ?
+               AND latest_server_cursor = ?
+            """,
+            (
+                projected["server_sequence"],
+                envelope_row["dataset_id"],
+                envelope_row["domain"],
+                envelope_row["entity_id"],
+                cursor,
+            ),
+            connection=connection,
+        )
+
+    def _require_claimed_conflict_source(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        conflict_row = _first(
+            self.execute(
+                "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                (conflict_id,),
+                connection=connection,
+            )
+        )
+        if (
+            conflict_row is None
+            or conflict_row.get("dataset_id") != dataset_id
+            or conflict_row.get("server_sequence") is None
+            or conflict_row.get("local_envelope_id") is None
+            or not _conflict_row_matches_resolution_claim(
+                conflict_row,
+                resolved_by_device_id=resolved_by_device_id,
+                resolution_action=resolution_action,
+                resolution_notes=resolution_notes,
+            )
+        ):
+            raise SyncStoreError("Sync conflict resolution claim does not match its source")
+        envelope_row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND client_envelope_id = ?
+                   AND server_sequence = ?
+                """,
+                (
+                    dataset_id,
+                    conflict_row["local_envelope_id"],
+                    conflict_row["server_sequence"],
+                ),
+                connection=connection,
+            )
+        )
+        if (
+            envelope_row is None
+            or envelope_row.get("domain") != conflict_row.get("domain")
+            or envelope_row.get("entity_id") != conflict_row.get("entity_id")
+            or (
+                envelope_row.get("status") == "accepted"
+                and envelope_row.get("apply_status") != "conflict"
+            )
+        ):
+            raise SyncStoreError("Sync conflict source envelope is not unresolved")
+        return conflict_row, envelope_row
 
     def _get_dataset_row(
         self,
@@ -1739,6 +2538,21 @@ class SyncDatabase:
                  WHERE dataset_id = ? AND owner_user_id = ?
                 """,
                 (dataset_id, owner_user_id),
+                connection=connection,
+            )
+        )
+
+    def _get_dataset_row_for_update(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any] | None:
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        return _first(
+            self.execute(
+                "SELECT * FROM sync_datasets WHERE dataset_id = ?" + suffix,  # nosec B608
+                (dataset_id,),
                 connection=connection,
             )
         )
@@ -1767,6 +2581,48 @@ class SyncDatabase:
                 f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
             )
         return row
+
+    def _require_dataset_domain_for_update(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        row = self._get_dataset_row_for_update(dataset_id, connection=connection)
+        if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        if domain not in _dataset_domains_from_row(row):
+            raise SyncInvalidDomainError(
+                f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
+            )
+        return row
+
+    def _require_notes_organization_write_ready(
+        self,
+        row: Mapping[str, Any],
+        domain: SyncDomain,
+        *,
+        trusted_bootstrap_id: str | None = None,
+    ) -> None:
+        if domain not in NOTES_ORGANIZATION_DOMAINS:
+            return
+        if set(NOTES_ORGANIZATION_DOMAINS).difference(_dataset_domains_from_row(dict(row))):
+            raise SyncStoreError("notes_organization_sync_domains_incomplete")
+        metadata = decode_json(row.get("metadata_json"), default={}).get(
+            "notes_organization_v1"
+        )
+        if not isinstance(metadata, Mapping):
+            raise SyncStoreError("notes_organization_sync_not_ready")
+        if metadata.get("state") == "ready":
+            return
+        if (
+            trusted_bootstrap_id is not None
+            and metadata.get("state") == "initializing"
+            and metadata.get("bootstrap_id") == trusted_bootstrap_id
+        ):
+            return
+        raise SyncStoreError("notes_organization_sync_not_ready")
 
     def _get_device_row(
         self,
@@ -1822,7 +2678,11 @@ class SyncDatabase:
         if dataset.scope_type == "personal":
             if dataset.workspace_id is not None:
                 raise SyncStoreError("Personal sync datasets must not include workspace_id")
-            allowed_domains = set(M1_SYNC_DOMAINS).union(SOURCE_CACHE_SYNC_DOMAINS, MEDIA_SYNC_DOMAINS)
+            allowed_domains = set(M1_SYNC_DOMAINS).union(
+                SOURCE_CACHE_SYNC_DOMAINS,
+                MEDIA_SYNC_DOMAINS,
+                NOTES_ORGANIZATION_DOMAINS,
+            )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
                 raise SyncStoreError("Workspace sync datasets require workspace_id")
@@ -1835,6 +2695,18 @@ class SyncDatabase:
                 f"Sync v2 dataset scope {dataset.scope_type} contains unsupported domains: "
                 + ", ".join(invalid_domains)
             )
+        organization_domains = set(dataset.domains).intersection(NOTES_ORGANIZATION_DOMAINS)
+        if organization_domains and organization_domains != set(NOTES_ORGANIZATION_DOMAINS):
+            raise SyncInvalidDomainError("notes_organization_sync_domains_incomplete")
+        if organization_domains:
+            organization_metadata = dataset.metadata.get("notes_organization_v1")
+            state = (
+                organization_metadata.get("state")
+                if isinstance(organization_metadata, Mapping)
+                else None
+            )
+            if state not in {"initializing", "ready", "failed"}:
+                raise SyncStoreError("notes_organization_sync_not_ready")
 
     def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate) -> None:
         if envelope.domain not in SYNC_V2_SUPPORTED_OPERATIONS:
@@ -2798,7 +3670,7 @@ class SyncDatabase:
                           FROM sync_envelopes
                          WHERE dataset_id = ?
                            AND domain = ?
-                           AND apply_status = 'failed'
+                           AND apply_status IN ('pending', 'failed')
                         """,
                         (dataset_id, domain),
                         connection=conn,
@@ -2880,6 +3752,140 @@ class SyncDatabase:
             )
         )
 
+    def begin_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Atomically enroll the complete organization group in initializing state."""
+
+        if not bootstrap_id.strip():
+            raise SyncStoreError("Notes organization bootstrap ID is required")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if (
+                row is None
+                or row.get("owner_user_id") != owner_user_id
+                or row.get("scope_type") != "personal"
+            ):
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_organization_v1")
+            if isinstance(current, Mapping) and current.get("state") in {
+                "initializing",
+                "ready",
+            }:
+                return _dataset_from_row(row)
+
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            for domain in NOTES_ORGANIZATION_DOMAINS:
+                if domain not in enrolled:
+                    enrolled.append(domain)
+            metadata["notes_organization_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "captured_count": 0,
+                "expected_count": 0,
+                "error_code": None,
+            }
+            now = utcnow_iso()
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    now,
+                    dataset_id,
+                ),
+                connection=conn,
+            )
+            for domain in NOTES_ORGANIZATION_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=conn,
+                )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset bootstrap update was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable Notes organization bootstrap transition."""
+
+        if expected_state not in {"initializing", "ready", "failed"} or state not in {
+            "initializing",
+            "ready",
+            "failed",
+        }:
+            raise SyncStoreError("Notes organization bootstrap state is invalid")
+        if captured_count < 0 or expected_count < 0:
+            raise SyncStoreError("Notes organization bootstrap counts are invalid")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if row is None:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_organization_v1")
+            if not isinstance(current, Mapping) or (
+                current.get("bootstrap_id") != bootstrap_id
+                or current.get("state") != expected_state
+            ):
+                raise SyncStoreError("notes_organization_bootstrap_compare_and_set_failed")
+            domains = set(_dataset_domains_from_row(row))
+            if set(NOTES_ORGANIZATION_DOMAINS).difference(domains):
+                raise SyncStoreError("notes_organization_sync_domains_incomplete")
+            if state == "ready":
+                if captured_count != expected_count or ready_verifier is None or not ready_verifier():
+                    raise SyncStoreError("notes_organization_bootstrap_verification_failed")
+                placeholders = ", ".join("?" for _ in NOTES_ORGANIZATION_DOMAINS)
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? "
+                        f"AND domain IN ({placeholders}) "  # nosec B608
+                        "AND status = 'accepted' "
+                        "AND apply_status NOT IN ('applied', 'superseded')",
+                        (dataset_id, *NOTES_ORGANIZATION_DOMAINS),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_organization_bootstrap_verification_failed")
+                error_code = None
+            metadata["notes_organization_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? WHERE dataset_id = ?",
+                (encode_json(metadata, default={}), utcnow_iso(), dataset_id),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
     def _find_existing_envelope_for_idempotency(
         self,
         envelope: SyncEnvelopeCreate,
@@ -2949,11 +3955,12 @@ class SyncDatabase:
     ) -> SyncEnvelope | None:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
-            self._require_dataset_domain(
+            dataset_row = self._require_dataset_domain(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
             )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
                 connection=conn,
@@ -2962,14 +3969,74 @@ class SyncDatabase:
             return None
         return _envelope_from_row(existing)
 
-    def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
+    def _require_no_unresolved_materialization_conflict(
+        self,
+        dataset_id: str,
+        *,
+        envelope_status: str,
+        connection: Any,
+    ) -> None:
+        """Reject new accepted history while a projected conflict needs review."""
+
+        if envelope_status != "accepted":
+            return
+        blocker = self.get_unresolved_materialization_conflict(
+            dataset_id,
+            connection=connection,
+        )
+        if blocker is not None:
+            raise SyncMaterializationPredecessorError(
+                apply_status="conflict",
+                conflict_id=blocker.conflict_id,
+                domain=blocker.domain,
+                entity_id=blocker.entity_id,
+                server_sequence=blocker.server_sequence,
+            )
+
+    def get_unresolved_materialization_conflict(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncConflict | None:
+        """Return the earliest accepted projection conflict for a dataset."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT conflict.*
+                  FROM sync_conflicts AS conflict
+                  JOIN sync_envelopes AS envelope
+                    ON envelope.dataset_id = conflict.dataset_id
+                   AND envelope.client_envelope_id = conflict.local_envelope_id
+                   AND envelope.server_sequence = conflict.server_sequence
+                 WHERE conflict.dataset_id = ?
+                   AND conflict.status = 'unresolved'
+                   AND envelope.status = 'accepted'
+                   AND envelope.apply_status = 'conflict'
+                 ORDER BY envelope.server_sequence ASC
+                 LIMIT 1
+                """,
+                (dataset_id,),
+                connection=connection,
+            )
+        )
+        return None if row is None else _conflict_from_row(row)
+
+    def insert_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
         self._validate_envelope_contract(envelope)
-        with self.backend.transaction() as conn:
-            self._require_dataset_domain(
+        with self.backend.transaction(connection) as conn:
+            dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
             )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
 
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
@@ -2978,65 +4045,376 @@ class SyncDatabase:
             if existing is not None:
                 return _envelope_from_row(existing)
 
-            now = utcnow_iso()
+            self._require_no_unresolved_materialization_conflict(
+                envelope.dataset_id,
+                envelope_status=envelope.status,
+                connection=conn,
+            )
+            self._require_expected_current_head(envelope, connection=conn)
+            return self._insert_envelope_in_transaction(envelope, connection=conn)
+
+    def insert_claimed_conflict_resolution_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        conflict_id: str,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Append a claimed resolution under the caller's dataset authority."""
+
+        self._validate_envelope_contract(envelope)
+        with self.backend.transaction(connection) as conn:
+            dataset_row = self._require_dataset_domain(
+                envelope.dataset_id,
+                envelope.domain,
+                connection=conn,
+            )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
+            conflict_row, source_row = self._require_claimed_conflict_source(
+                conflict_id,
+                dataset_id=dataset_id,
+                resolved_by_device_id=resolved_by_device_id,
+                resolution_action=resolution_action,
+                resolution_notes=resolution_notes,
+                connection=conn,
+            )
+            existing = self._find_existing_envelope_for_idempotency(
+                envelope,
+                connection=conn,
+            )
+            if existing is not None:
+                return _envelope_from_row(existing)
+
+            source_is_rebase_required = _is_rebase_required_conflict_source(
+                conflict_row,
+                source_row,
+            )
+            if (
+                envelope.dataset_id != source_row.get("dataset_id")
+                or envelope.domain != source_row.get("domain")
+                or (
+                    resolution_action == "overwrite"
+                    and envelope.object_id != source_row.get("entity_id")
+                )
+                or (
+                    resolution_action == "duplicate_rename"
+                    and envelope.object_id == source_row.get("entity_id")
+                )
+            ):
+                raise SyncHeadConflictError()
+            if resolution_action in {"overwrite", "duplicate_rename"}:
+                snapshot_cursor = (
+                    None
+                    if source_row.get("status") != "accepted"
+                    or source_is_rebase_required
+                    else int(source_row["server_sequence"])
+                )
+                self._require_expected_applied_head(
+                    envelope,
+                    through_server_cursor=snapshot_cursor,
+                    connection=conn,
+                )
+            else:
+                self._require_expected_current_head(envelope, connection=conn)
+            return self._insert_envelope_in_transaction(envelope, connection=conn)
+
+    def list_latest_applied_heads(
+        self,
+        dataset_id: str,
+        *,
+        through_server_cursor: int | None = None,
+        connection: Any,
+    ) -> list[SyncEnvelope]:
+        """Return one immutable latest-applied head per identity at a cursor."""
+
+        if through_server_cursor is None:
+            query = """
+                SELECT envelope.*
+                  FROM sync_envelopes AS envelope
+                 WHERE envelope.dataset_id = ?
+                   AND envelope.status = 'accepted'
+                   AND envelope.apply_status = 'applied'
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM sync_envelopes AS newer
+                         WHERE newer.dataset_id = envelope.dataset_id
+                           AND newer.domain = envelope.domain
+                           AND newer.entity_id = envelope.entity_id
+                           AND newer.status = 'accepted'
+                           AND newer.apply_status = 'applied'
+                           AND newer.server_sequence > envelope.server_sequence
+                   )
+                 ORDER BY envelope.domain ASC, envelope.entity_id ASC
+            """
+            params = (dataset_id,)
+        else:
+            query = """
+                SELECT envelope.*
+                  FROM sync_envelopes AS envelope
+                 WHERE envelope.dataset_id = ?
+                   AND envelope.status = 'accepted'
+                   AND envelope.apply_status = 'applied'
+                   AND envelope.server_sequence <= ?
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM sync_envelopes AS newer
+                         WHERE newer.dataset_id = envelope.dataset_id
+                           AND newer.domain = envelope.domain
+                           AND newer.entity_id = envelope.entity_id
+                           AND newer.status = 'accepted'
+                           AND newer.apply_status = 'applied'
+                           AND newer.server_sequence > envelope.server_sequence
+                           AND newer.server_sequence <= ?
+                   )
+                 ORDER BY envelope.domain ASC, envelope.entity_id ASC
+            """
+            params = (dataset_id, through_server_cursor, through_server_cursor)
+        rows = self.execute(
+            query,
+            params,
+            connection=connection,
+        ).rows
+        return [_envelope_from_row(row) for row in rows]
+
+    def _require_expected_applied_head(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        through_server_cursor: int | None,
+        connection: Any,
+    ) -> None:
+        if through_server_cursor is None:
+            query = """
+                SELECT *
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+            """
+            params = (envelope.dataset_id, envelope.domain, envelope.object_id)
+        else:
+            query = """
+                SELECT *
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                   AND server_sequence <= ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+            """
+            params = (
+                envelope.dataset_id,
+                envelope.domain,
+                envelope.object_id,
+                through_server_cursor,
+            )
+        projected = _first(
+            self.execute(
+                query,
+                params,
+                connection=connection,
+            )
+        )
+        expected = (
+            None,
+            None,
+            None,
+        ) if projected is None else (
+            int(projected["server_sequence"]),
+            projected.get("object_revision"),
+            projected.get("payload_hash"),
+        )
+        if (
+            envelope.base_server_cursor,
+            envelope.base_object_revision,
+            envelope.base_object_hash,
+        ) != expected:
+            raise SyncHeadConflictError()
+
+    def get_latest_applied_predecessor(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        connection: Any,
+    ) -> SyncEnvelope | None:
+        """Return the projected base immediately preceding one canonical envelope."""
+
+        if envelope.server_cursor is None:
+            raise SyncStoreError("Stored Sync envelope is missing its server cursor")
+        row = _first(
             self.execute(
                 """
-                INSERT INTO sync_envelopes (
-                    dataset_id, domain, entity_id, stable_key, operation,
-                    client_envelope_id, device_id, client_profile_id, client_sequence,
-                    client_timestamp, server_timestamp, base_server_cursor,
-                    base_object_revision, base_object_hash, object_revision, parent_id,
-                    schema_version, base_version, entity_version, dependency_json,
-                    routing_metadata_json, payload_ciphertext, payload_json,
-                    payload_clear_json, payload_hash, payload_size_bytes,
-                    created_at_client, received_at_server, deleted,
-                    encryption_metadata_json, adapter_version, status, apply_status,
-                    apply_error_code, apply_error_message, applied_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                SELECT *
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                   AND server_sequence < ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
                 """,
                 (
                     envelope.dataset_id,
                     envelope.domain,
                     envelope.object_id,
-                    envelope.stable_key,
-                    envelope.operation,
-                    envelope.client_envelope_id,
-                    envelope.device_id,
-                    envelope.client_profile_id,
-                    envelope.client_sequence,
-                    envelope.client_timestamp,
-                    now,
-                    envelope.base_server_cursor,
-                    envelope.base_object_revision,
-                    envelope.base_object_hash,
-                    envelope.object_revision,
-                    envelope.parent_id,
-                    envelope.schema_version,
-                    _version_to_storage(envelope.base_version),
-                    _version_to_storage(envelope.entity_version),
-                    encode_json(envelope.dependencies, default=[]),
-                    encode_json(envelope.routing_metadata, default={}),
-                    envelope.payload_ciphertext,
-                    encode_json(envelope.payload, default={}),
-                    encode_json(envelope.payload_clear, default={}),
-                    envelope.payload_hash,
-                    envelope.payload_size_bytes,
-                    envelope.created_at_client,
-                    now,
-                    1 if envelope.deleted else 0,
-                    encode_json(envelope.encryption_metadata, default={}),
-                    envelope.adapter_version,
-                    envelope.status,
-                    envelope.apply_status,
-                    envelope.apply_error_code,
-                    envelope.apply_error_message,
-                    envelope.applied_at,
+                    envelope.server_cursor,
                 ),
-                connection=conn,
+                connection=connection,
             )
-            sequence = self.backend.get_last_insert_id(connection=conn)
-            if sequence is None:
+        )
+        return None if row is None else _envelope_from_row(row)
+
+    def _require_expected_current_head(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any,
+        planned_head: SyncEnvelopeCreate | None = None,
+    ) -> None:
+        """CAS one accepted envelope against its preflighted object head."""
+
+        if envelope.status != "accepted":
+            return
+        if planned_head is not None:
+            expected_cursor = 0
+            expected_revision = planned_head.object_revision
+            expected_hash = planned_head.payload_hash
+        else:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT envelope.*
+                      FROM sync_current_heads AS head
+                      JOIN sync_envelopes AS envelope
+                        ON envelope.server_sequence = head.latest_server_cursor
+                     WHERE head.dataset_id = ?
+                       AND head.domain = ?
+                       AND head.object_id = ?
+                    """,
+                    (envelope.dataset_id, envelope.domain, envelope.object_id),
+                    connection=connection,
+                )
+            )
+            if row is None:
+                if any(
+                    value is not None
+                    for value in (
+                        envelope.base_server_cursor,
+                        envelope.base_object_revision,
+                        envelope.base_object_hash,
+                    )
+                ):
+                    raise SyncHeadConflictError()
+                return
+            current = _envelope_from_row(row)
+            expected_cursor = current.server_cursor
+            expected_revision = current.object_revision
+            expected_hash = current.payload_hash
+
+        if (
+            envelope.base_server_cursor != expected_cursor
+            or envelope.base_object_revision != expected_revision
+            or envelope.base_object_hash != expected_hash
+        ):
+            raise SyncHeadConflictError()
+
+    def _insert_envelope_in_transaction(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any,
+    ) -> SyncEnvelope:
+        now = utcnow_iso()
+        self.execute(
+            """
+            INSERT INTO sync_envelopes (
+                dataset_id, domain, entity_id, stable_key, operation,
+                client_envelope_id, device_id, client_profile_id, client_sequence,
+                mutation_group_id, mutation_step, mutation_step_count,
+                mutation_plan_hash, client_timestamp, server_timestamp,
+                base_server_cursor, base_object_revision, base_object_hash,
+                object_revision, parent_id, schema_version, base_version,
+                entity_version, dependency_json, routing_metadata_json,
+                payload_ciphertext, payload_json, payload_clear_json, payload_hash,
+                payload_size_bytes, created_at_client, received_at_server, deleted,
+                encryption_metadata_json, adapter_version, status, apply_status,
+                apply_error_code, apply_error_message, applied_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                envelope.dataset_id,
+                envelope.domain,
+                envelope.object_id,
+                envelope.stable_key,
+                envelope.operation,
+                envelope.client_envelope_id,
+                envelope.device_id,
+                envelope.client_profile_id,
+                envelope.client_sequence,
+                envelope.mutation_group_id,
+                envelope.mutation_step,
+                envelope.mutation_step_count,
+                envelope.mutation_plan_hash,
+                envelope.client_timestamp,
+                now,
+                envelope.base_server_cursor,
+                envelope.base_object_revision,
+                envelope.base_object_hash,
+                envelope.object_revision,
+                envelope.parent_id,
+                envelope.schema_version,
+                _version_to_storage(envelope.base_version),
+                _version_to_storage(envelope.entity_version),
+                encode_json(envelope.dependencies, default=[]),
+                encode_json(envelope.routing_metadata, default={}),
+                envelope.payload_ciphertext,
+                encode_json(envelope.payload, default={}),
+                encode_json(envelope.payload_clear, default={}),
+                envelope.payload_hash,
+                envelope.payload_size_bytes,
+                envelope.created_at_client,
+                now,
+                1 if envelope.deleted else 0,
+                encode_json(envelope.encryption_metadata, default={}),
+                envelope.adapter_version,
+                envelope.status,
+                envelope.apply_status,
+                envelope.apply_error_code,
+                envelope.apply_error_message,
+                envelope.applied_at,
+            ),
+            connection=connection,
+        )
+        sequence = self.backend.get_last_insert_id(connection=connection)
+        if sequence is None:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                    """,
+                    (envelope.dataset_id, envelope.client_envelope_id),
+                    connection=connection,
+                )
+            )
+        else:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (sequence,),
+                    connection=connection,
+                )
+            )
+            if (
+                row is None
+                or row.get("dataset_id") != envelope.dataset_id
+                or row.get("client_envelope_id") != envelope.client_envelope_id
+            ):
                 row = _first(
                     self.execute(
                         """
@@ -3044,52 +4422,279 @@ class SyncDatabase:
                          WHERE dataset_id = ? AND client_envelope_id = ?
                         """,
                         (envelope.dataset_id, envelope.client_envelope_id),
-                        connection=conn,
+                        connection=connection,
                     )
                 )
-            else:
-                row = _first(
-                    self.execute(
-                        "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
-                        (sequence,),
-                        connection=conn,
-                    )
-                )
-                if (
-                    row is None
-                    or row.get("dataset_id") != envelope.dataset_id
-                    or row.get("client_envelope_id") != envelope.client_envelope_id
-                ):
-                    row = _first(
-                        self.execute(
-                            """
-                            SELECT * FROM sync_envelopes
-                             WHERE dataset_id = ? AND client_envelope_id = ?
-                            """,
-                            (envelope.dataset_id, envelope.client_envelope_id),
-                            connection=conn,
-                        )
-                    )
-            if row is None:
-                raise SyncStoreError(
-                    "Sync envelope insert did not produce a retrievable record"
-                )
-            if (
-                _envelope_fingerprint_from_row(row)
-                != _envelope_fingerprint_from_create(envelope)
-            ):
-                raise SyncIdempotencyConflictError(
-                    "Sync envelope idempotency key was reused with different content"
-                )
-            inserted = _envelope_from_row(row)
-            self._ensure_domain_state(
-                dataset_id=inserted.dataset_id,
-                domain=inserted.domain,
-                adapter_version=inserted.adapter_version,
-                server_sequence=inserted.server_sequence,
-                connection=conn,
+        if row is None:
+            raise SyncStoreError("Sync envelope insert did not produce a retrievable record")
+        if (
+            _envelope_fingerprint_from_row(row)
+            != _envelope_fingerprint_from_create(envelope)
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync envelope idempotency key was reused with different content"
             )
-            return inserted
+        inserted = _envelope_from_row(row)
+        if inserted.status == "accepted":
+            self.execute(
+                """
+                INSERT INTO sync_current_heads (
+                    dataset_id, domain, object_id, latest_server_cursor
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT (dataset_id, domain, object_id)
+                DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+                 WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+                """,
+                (
+                    inserted.dataset_id,
+                    inserted.domain,
+                    inserted.object_id,
+                    inserted.server_cursor,
+                ),
+                connection=connection,
+            )
+        self._ensure_domain_state(
+            dataset_id=inserted.dataset_id,
+            domain=inserted.domain,
+            adapter_version=inserted.adapter_version,
+            server_sequence=inserted.server_sequence,
+            connection=connection,
+        )
+        return inserted
+
+    def insert_envelopes_atomic(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+        *,
+        trusted_notes_organization_bootstrap_id: str | None = None,
+    ) -> list[SyncEnvelope]:
+        """Insert one complete validated group or return its exact stored replay."""
+
+        submitted_plan = list(envelopes)
+        try:
+            plan = self._validate_mutation_group_plan(submitted_plan)
+        except SyncStoreError as exc:
+            if self._has_existing_mutation_group(submitted_plan):
+                raise SyncIdempotencyConflictError(
+                    "Sync mutation group idempotency key was reused with different content"
+                ) from exc
+            raise
+        first = plan[0]
+        mutation_group_id = first.mutation_group_id
+        if mutation_group_id is None:
+            raise SyncStoreError("Atomic Sync append requires mutation group metadata")
+
+        try:
+            with self.backend.transaction() as conn:
+                for envelope in plan:
+                    dataset_row = self._require_dataset_domain_for_update(
+                        envelope.dataset_id,
+                        envelope.domain,
+                        connection=conn,
+                    )
+                    self._require_notes_organization_write_ready(
+                        dataset_row,
+                        envelope.domain,
+                        trusted_bootstrap_id=trusted_notes_organization_bootstrap_id,
+                    )
+
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+                if existing_rows:
+                    return self._matched_mutation_group_replay(plan, existing_rows)
+
+                for envelope in plan:
+                    existing = self._find_existing_envelope_for_idempotency(
+                        envelope,
+                        connection=conn,
+                    )
+                    if existing is not None:
+                        raise SyncIdempotencyConflictError(
+                            "Sync mutation group idempotency key was reused with different content"
+                        )
+
+                self._require_no_unresolved_materialization_conflict(
+                    first.dataset_id,
+                    envelope_status=first.status,
+                    connection=conn,
+                )
+                planned_heads: dict[tuple[str, str], SyncEnvelopeCreate] = {}
+                for envelope in plan:
+                    key = (envelope.domain, envelope.object_id)
+                    self._require_expected_current_head(
+                        envelope,
+                        connection=conn,
+                        planned_head=planned_heads.get(key),
+                    )
+                    if envelope.status == "accepted":
+                        planned_heads[key] = envelope
+
+                return [
+                    self._insert_envelope_in_transaction(envelope, connection=conn)
+                    for envelope in plan
+                ]
+        except SyncHeadConflictError:
+            with self.backend.transaction() as conn:
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+            if not existing_rows:
+                raise
+            return self._matched_mutation_group_replay(plan, existing_rows)
+        except BackendDatabaseError as exc:
+            if not _is_mutation_group_step_unique_error(exc):
+                raise
+            with self.backend.transaction() as conn:
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+            if not existing_rows:
+                raise
+            return self._matched_mutation_group_replay(plan, existing_rows)
+
+    def _has_existing_mutation_group(
+        self,
+        plan: Sequence[SyncEnvelopeCreate],
+    ) -> bool:
+        identities = {
+            (envelope.dataset_id, envelope.mutation_group_id)
+            for envelope in plan
+            if envelope.mutation_group_id is not None
+        }
+        if not identities:
+            return False
+        with self.backend.transaction() as conn:
+            return any(
+                self._list_mutation_group_rows(
+                    dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+                for dataset_id, mutation_group_id in identities
+            )
+
+    def _validate_mutation_group_plan(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+    ) -> list[SyncEnvelopeCreate]:
+        plan = list(envelopes)
+        if not plan:
+            raise SyncStoreError("Sync mutation group must contain at least one envelope")
+        if len(plan) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_restore_group_limit_exceeded")
+        for envelope in plan:
+            self._validate_envelope_contract(envelope)
+
+        first = plan[0]
+        if (
+            first.mutation_group_id is None
+            or first.mutation_step_count is None
+            or first.mutation_plan_hash is None
+        ):
+            raise SyncStoreError("Atomic Sync append requires mutation group metadata")
+        expected_metadata = (
+            first.dataset_id,
+            first.mutation_group_id,
+            first.mutation_step_count,
+            first.mutation_plan_hash,
+        )
+        if any(
+            (
+                envelope.dataset_id,
+                envelope.mutation_group_id,
+                envelope.mutation_step_count,
+                envelope.mutation_plan_hash,
+            )
+            != expected_metadata
+            for envelope in plan
+        ):
+            raise SyncStoreError(
+                "Sync mutation group envelopes must share dataset, group, count, and hash"
+            )
+        if [envelope.mutation_step for envelope in plan] != list(
+            range(first.mutation_step_count)
+        ):
+            raise SyncStoreError(
+                "Sync mutation group steps must exactly match the ordered complete plan"
+            )
+        client_envelope_ids = [envelope.client_envelope_id for envelope in plan]
+        if len(set(client_envelope_ids)) != len(client_envelope_ids):
+            raise SyncStoreError("Sync mutation group client envelope ids must be unique")
+        client_sequence_keys = [
+            (envelope.device_id, envelope.client_sequence)
+            for envelope in plan
+            if envelope.device_id is not None and envelope.client_sequence is not None
+        ]
+        if len(set(client_sequence_keys)) != len(client_sequence_keys):
+            raise SyncStoreError("Sync mutation group client sequence keys must be unique")
+        return plan
+
+    def _list_mutation_group_rows(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = self.execute(
+            """
+            SELECT * FROM sync_envelopes
+             WHERE dataset_id = ? AND mutation_group_id = ?
+             ORDER BY mutation_step ASC
+             LIMIT ?
+            """,
+            (
+                dataset_id,
+                mutation_group_id,
+                SYNC_MUTATION_GROUP_MAX_SIZE + 1,
+            ),
+            connection=connection,
+        ).rows
+        if len(rows) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_restore_group_limit_exceeded")
+        return rows
+
+    def _matched_mutation_group_replay(
+        self,
+        plan: Sequence[SyncEnvelopeCreate],
+        existing_rows: Sequence[dict[str, Any]],
+    ) -> list[SyncEnvelope]:
+        if len(plan) != len(existing_rows) or any(
+            _envelope_fingerprint_from_create(envelope)
+            != _envelope_fingerprint_from_row(row)
+            for envelope, row in zip(plan, existing_rows)
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync mutation group idempotency key was reused with different content"
+            )
+        return [_envelope_from_row(row) for row in existing_rows]
+
+    def list_mutation_group(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> list[SyncEnvelope]:
+        """Return a complete mutation group ordered by zero-based step."""
+
+        if not mutation_group_id.strip():
+            raise SyncStoreError("Sync mutation group id must be non-empty")
+        return [
+            _envelope_from_row(row)
+            for row in self._list_mutation_group_rows(
+                dataset_id,
+                mutation_group_id,
+                connection=connection,
+            )
+        ]
 
     def list_envelopes_after(
         self,
@@ -3100,6 +4705,7 @@ class SyncDatabase:
         domains: Sequence[SyncDomain] | None = None,
         status: str | Sequence[str] | None = None,
         exclude_device_id: str | None = None,
+        connection: Any | None = None,
     ) -> list[SyncEnvelope]:
         if limit < 1:
             return []
@@ -3128,7 +4734,7 @@ class SyncDatabase:
             params.append(exclude_device_id)
         sql += " ORDER BY server_sequence ASC LIMIT ?"
         params.append(limit)
-        result = self.execute(sql, tuple(params))
+        result = self.execute(sql, tuple(params), connection=connection)
         return [_envelope_from_row(row) for row in result.rows]
 
     def summarize_domain_envelopes(
@@ -3251,11 +4857,57 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_envelope_from_row(row) for row in result.rows]
 
+    def get_envelope_for_entity_at_or_before(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str,
+        server_sequence: int,
+    ) -> SyncEnvelope | None:
+        """Return the newest accepted entity envelope at one durable boundary."""
+
+        if server_sequence < 1:
+            return None
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain = ?
+                   AND status = 'accepted'
+                   AND entity_id = ?
+                   AND server_sequence <= ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+                """,
+                (dataset_id, domain, entity_id, server_sequence),
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
+    def get_envelope_by_server_cursor(
+        self,
+        server_cursor: int,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        row = _first(
+            self.execute(
+                "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                (server_cursor,),
+                connection=connection,
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
     def get_object_state(
         self,
         dataset_id: str,
         domain: SyncDomain,
         object_id: str,
+        *,
+        connection: Any | None = None,
     ) -> SyncObjectState | None:
         row = _first(
             self.execute(
@@ -3264,15 +4916,78 @@ class SyncDatabase:
                  WHERE dataset_id = ? AND domain = ? AND object_id = ?
                 """,
                 (dataset_id, domain, object_id),
+                connection=connection,
             )
         )
         if row is None:
             return None
         return _object_state_from_row(row)
 
-    def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
+    def get_current_head(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Return one canonical head through the maintained head projection."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT envelope.*
+                  FROM sync_current_heads AS head
+                  JOIN sync_envelopes AS envelope
+                    ON envelope.server_sequence = head.latest_server_cursor
+                 WHERE head.dataset_id = ?
+                   AND head.domain = ?
+                   AND head.object_id = ?
+                """,
+                (dataset_id, domain, object_id),
+                connection=connection,
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
+    def list_current_heads(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        limit: int,
+        offset: int,
+        connection: Any | None = None,
+    ) -> list[SyncEnvelope]:
+        """Return one bounded owner-scoped page from the head projection."""
+
+        if limit < 1 or limit > 1000:
+            raise SyncStoreError("Sync current-head limit must be between 1 and 1000")
+        if offset < 0:
+            raise SyncStoreError("Sync current-head offset must be non-negative")
+        rows = self.execute(
+            """
+            SELECT envelope.*
+              FROM sync_current_heads AS head
+              JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = head.latest_server_cursor
+             WHERE head.dataset_id = ? AND head.domain = ?
+             ORDER BY head.object_id ASC
+             LIMIT ? OFFSET ?
+            """,
+            (dataset_id, domain, limit, offset),
+            connection=connection,
+        ).rows
+        return [_envelope_from_row(row) for row in rows]
+
+    def upsert_object_state(
+        self,
+        state: SyncObjectState,
+        *,
+        connection: Any | None = None,
+    ) -> SyncObjectState:
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(state.dataset_id, state.domain, connection=conn)
             self.execute(
                 """
@@ -3288,6 +5003,7 @@ class SyncDatabase:
                     latest_server_cursor = excluded.latest_server_cursor,
                     deleted = excluded.deleted,
                     updated_at = excluded.updated_at
+                WHERE excluded.latest_server_cursor > sync_object_state.latest_server_cursor
                 """,
                 (
                     state.dataset_id,
@@ -3311,7 +5027,26 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
-        return _object_state_from_row(row)
+        stored = _object_state_from_row(row)
+        if (
+            stored.dataset_id,
+            stored.domain,
+            stored.object_id,
+            stored.object_revision,
+            stored.object_hash,
+            stored.latest_server_cursor,
+            stored.deleted,
+        ) != (
+            state.dataset_id,
+            state.domain,
+            state.object_id,
+            state.object_revision,
+            state.object_hash,
+            state.latest_server_cursor,
+            state.deleted,
+        ):
+            raise SyncStoreError("sync_object_state_stale_write")
+        return stored
 
     def mark_envelope_apply_status(
         self,
@@ -3320,12 +5055,13 @@ class SyncDatabase:
         apply_status: SyncApplyStatus,
         apply_error_code: str | None = None,
         apply_error_message: str | None = None,
+        connection: Any | None = None,
     ) -> SyncEnvelope:
         if apply_status not in SYNC_APPLY_STATUSES:
             raise SyncStoreError(f"Invalid Sync envelope apply status: {apply_status}")
         now = utcnow_iso()
         applied_at = now if apply_status == "applied" else None
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self.execute(
                 """
                 UPDATE sync_envelopes
@@ -3354,6 +5090,185 @@ class SyncDatabase:
         if row is None:
             raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
         return _envelope_from_row(row)
+
+    def mark_bootstrap_envelope_verified(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
+        """Atomically record a source-verified bootstrap step without product replay."""
+
+        if connection is None:
+            source = _first(
+                self.execute(
+                    "SELECT dataset_id, domain, entity_id FROM sync_envelopes "
+                    "WHERE server_sequence = ?",
+                    (server_cursor,),
+                )
+            )
+            if source is None:
+                raise SyncStoreError(
+                    f"Sync envelope not found for server cursor: {server_cursor}"
+                )
+            with self.materialization_transaction(
+                [(str(source["dataset_id"]), source["domain"], str(source["entity_id"]))]
+            ) as guarded_connection:
+                return self.mark_bootstrap_envelope_verified(
+                    server_cursor,
+                    bootstrap_id=bootstrap_id,
+                    connection=guarded_connection,
+                )
+
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
+            dataset_row = self._require_dataset_domain(
+                str(row["dataset_id"]), row["domain"], connection=conn
+            )
+            self._require_notes_organization_write_ready(
+                dataset_row,
+                row["domain"],
+                trusted_bootstrap_id=bootstrap_id,
+            )
+            now = utcnow_iso()
+            self.upsert_object_state(
+                SyncObjectState(
+                    dataset_id=str(row["dataset_id"]),
+                    domain=row["domain"],
+                    object_id=str(row["entity_id"]),
+                    object_revision=int(row.get("object_revision") or 1),
+                    object_hash=str(row.get("payload_hash") or ""),
+                    latest_server_cursor=server_cursor,
+                    deleted=row.get("operation") == "tombstone",
+                ),
+                connection=conn,
+            )
+            self.execute(
+                "UPDATE sync_envelopes SET apply_status = 'applied', apply_error_code = NULL, "
+                "apply_error_message = NULL, applied_at = ? WHERE server_sequence = ?",
+                (now, server_cursor),
+                connection=conn,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+        return _envelope_from_row(updated)
+
+    def reconcile_bootstrap_envelope_superseded(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        superseded_by_cursor: int,
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
+        """Audit-reconcile a stale step after its correction is current and applied."""
+
+        if superseded_by_cursor <= server_cursor:
+            raise SyncStoreError("Bootstrap correction must follow the stale step")
+        if connection is None:
+            source = _first(
+                self.execute(
+                    "SELECT dataset_id, domain, entity_id FROM sync_envelopes "
+                    "WHERE server_sequence = ?",
+                    (server_cursor,),
+                )
+            )
+            if source is None:
+                raise SyncStoreError("Bootstrap reconciliation envelope was not found")
+            with self.materialization_transaction(
+                [(str(source["dataset_id"]), source["domain"], str(source["entity_id"]))]
+            ) as guarded_connection:
+                return self.reconcile_bootstrap_envelope_superseded(
+                    server_cursor,
+                    bootstrap_id=bootstrap_id,
+                    superseded_by_cursor=superseded_by_cursor,
+                    connection=guarded_connection,
+                )
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            correction = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (superseded_by_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None or correction is None:
+                raise SyncStoreError("Bootstrap reconciliation envelope was not found")
+            dataset_row = self._require_dataset_domain(
+                str(row["dataset_id"]), row["domain"], connection=conn
+            )
+            self._require_notes_organization_write_ready(
+                dataset_row,
+                row["domain"],
+                trusted_bootstrap_id=bootstrap_id,
+            )
+            correction_metadata = decode_json(
+                correction.get("routing_metadata_json"), default={}
+            )
+            if (
+                correction.get("dataset_id") != row.get("dataset_id")
+                or correction.get("domain") != row.get("domain")
+                or correction.get("entity_id") != row.get("entity_id")
+                or correction.get("status") != "accepted"
+                or correction.get("apply_status") != "applied"
+                or correction_metadata.get("source")
+                != "notes-organization-bootstrap"
+            ):
+                raise SyncStoreError("Bootstrap correction is not durably applied")
+            head = _first(
+                self.execute(
+                    """
+                    SELECT latest_server_cursor FROM sync_current_heads
+                     WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                    """,
+                    (row["dataset_id"], row["domain"], row["entity_id"]),
+                    connection=conn,
+                )
+            )
+            if head is None or int(head["latest_server_cursor"]) != superseded_by_cursor:
+                raise SyncStoreError("Bootstrap correction is not the current head")
+            now = utcnow_iso()
+            self.execute(
+                """
+                UPDATE sync_envelopes
+                   SET apply_status = 'applied',
+                       apply_error_code = 'sync_bootstrap_superseded',
+                       apply_error_message = NULL,
+                       applied_at = ?
+                 WHERE server_sequence = ?
+                """,
+                (now, server_cursor),
+                connection=conn,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+        return _envelope_from_row(updated)
 
     def list_failed_applies(
         self,
@@ -3474,9 +5389,14 @@ class SyncDatabase:
             return None
         return _cursor_from_row(row)
 
-    def insert_conflict(self, conflict: SyncConflictCreate) -> SyncConflict:
+    def insert_conflict(
+        self,
+        conflict: SyncConflictCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncConflict:
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(conflict.dataset_id, conflict.domain, connection=conn)
             existing = _first(
                 self.execute(
@@ -3486,7 +5406,26 @@ class SyncDatabase:
                 )
             )
             if existing:
-                return _conflict_from_row(existing)
+                return self._require_matching_conflict(existing, conflict)
+            if conflict.local_envelope_id is not None and conflict.server_sequence is not None:
+                existing = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_conflicts
+                         WHERE dataset_id = ?
+                           AND local_envelope_id = ?
+                           AND server_sequence = ?
+                        """,
+                        (
+                            conflict.dataset_id,
+                            conflict.local_envelope_id,
+                            conflict.server_sequence,
+                        ),
+                        connection=conn,
+                    )
+                )
+                if existing is not None:
+                    return self._require_matching_conflict(existing, conflict)
             self.execute(
                 """
                 INSERT INTO sync_conflicts (
@@ -3495,6 +5434,7 @@ class SyncDatabase:
                     server_sequence, metadata_json, created_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
                 """,
                 (
                     conflict.conflict_id,
@@ -3519,6 +5459,62 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
+            if (
+                row is None
+                and conflict.local_envelope_id is not None
+                and conflict.server_sequence is not None
+            ):
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_conflicts
+                         WHERE dataset_id = ?
+                           AND local_envelope_id = ?
+                           AND server_sequence = ?
+                        """,
+                        (
+                            conflict.dataset_id,
+                            conflict.local_envelope_id,
+                            conflict.server_sequence,
+                        ),
+                        connection=conn,
+                    )
+                )
+            if row is None:
+                raise SyncStoreError("Sync conflict could not be stored")
+            return self._require_matching_conflict(row, conflict)
+
+    @staticmethod
+    def _require_matching_conflict(
+        row: dict[str, Any],
+        conflict: SyncConflictCreate,
+    ) -> SyncConflict:
+        expected = (
+            conflict.dataset_id,
+            conflict.domain,
+            conflict.entity_id,
+            conflict.conflict_type,
+            conflict.base_envelope_id,
+            conflict.local_envelope_id,
+            conflict.remote_envelope_id,
+            conflict.server_sequence,
+            dict(conflict.metadata),
+        )
+        actual = (
+            row.get("dataset_id"),
+            row.get("domain"),
+            row.get("entity_id"),
+            row.get("conflict_type"),
+            row.get("base_envelope_id"),
+            row.get("local_envelope_id"),
+            row.get("remote_envelope_id"),
+            row.get("server_sequence"),
+            decode_json(row.get("metadata_json"), default={}),
+        )
+        if actual != expected:
+            raise SyncIdempotencyConflictError(
+                "Sync conflict identity was reused with different content"
+            )
         return _conflict_from_row(row)
 
     def list_conflicts(
@@ -3536,13 +5532,19 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_conflict_from_row(row) for row in result.rows]
 
-    def get_conflict(self, conflict_id: str) -> SyncConflict | None:
+    def get_conflict(
+        self,
+        conflict_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncConflict | None:
         """Return a conflict by ID without scanning dataset conflict lists."""
 
         row = _first(
             self.execute(
                 "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
                 (conflict_id,),
+                connection=connection,
             )
         )
         if row is None:
@@ -3555,6 +5557,7 @@ class SyncDatabase:
         *,
         local_envelope_id: str,
         server_sequence: int | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict | None:
         """Return an unresolved conflict already recorded for a local envelope."""
 
@@ -3569,7 +5572,7 @@ class SyncDatabase:
             sql += " AND server_sequence = ?"
             params.append(server_sequence)
         sql += " ORDER BY created_at ASC, conflict_id ASC LIMIT 1"
-        row = _first(self.execute(sql, tuple(params)))
+        row = _first(self.execute(sql, tuple(params), connection=connection))
         if row is None:
             return None
         return _conflict_from_row(row)
@@ -3582,8 +5585,9 @@ class SyncDatabase:
         resolved_by_device_id: str | None = None,
         resolution_action: str | None = None,
         resolution_notes: str | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict:
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
@@ -3647,8 +5651,9 @@ class SyncDatabase:
         resolved_by_device_id: str | None = None,
         resolution_action: str | None = None,
         resolution_notes: str | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict:
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
@@ -3721,6 +5726,7 @@ class SyncDatabase:
         resolved_by_device_id: str | None = None,
         resolution_action: str | None = None,
         resolution_notes: str | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict:
         def _matches_resolution(row: dict[str, Any]) -> bool:
             if row["status"] != status:
@@ -3737,7 +5743,7 @@ class SyncDatabase:
             )
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
@@ -5309,6 +7315,10 @@ class SyncDatabase:
             column_specs = {
                 "client_profile_id": "TEXT",
                 "client_sequence": "BIGINT",
+                "mutation_group_id": "TEXT",
+                "mutation_step": "INTEGER",
+                "mutation_step_count": "INTEGER",
+                "mutation_plan_hash": "TEXT",
                 "base_server_cursor": "BIGINT",
                 "base_object_revision": "BIGINT",
                 "base_object_hash": "TEXT",
@@ -5330,6 +7340,10 @@ class SyncDatabase:
             column_specs = {
                 "client_profile_id": "TEXT",
                 "client_sequence": "INTEGER",
+                "mutation_group_id": "TEXT",
+                "mutation_step": "INTEGER",
+                "mutation_step_count": "INTEGER",
+                "mutation_plan_hash": "TEXT",
                 "base_server_cursor": "INTEGER",
                 "base_object_revision": "INTEGER",
                 "base_object_hash": "TEXT",
@@ -5393,11 +7407,137 @@ class SyncDatabase:
             connection=connection,
         )
 
+    def _ensure_sync_current_heads_table(
+        self, *, connection: Any, projection_exists: bool
+    ) -> None:
+        cursor_type = "BIGINT" if self.backend_type == BackendType.POSTGRESQL else "INTEGER"
+        self.backend.create_tables(
+            f"""
+            CREATE TABLE IF NOT EXISTS sync_current_heads (
+                dataset_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                latest_server_cursor {cursor_type} NOT NULL,
+                PRIMARY KEY (dataset_id, domain, object_id)
+            )
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+                ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id)
+            """,
+            connection=connection,
+        )
+        invalid_heads = self.execute(
+            """
+            SELECT heads.dataset_id, heads.domain, heads.object_id
+              FROM sync_current_heads AS heads
+              LEFT JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = heads.latest_server_cursor
+               AND envelope.dataset_id = heads.dataset_id
+               AND envelope.domain = heads.domain
+               AND envelope.entity_id = heads.object_id
+             WHERE envelope.server_sequence IS NULL
+                OR envelope.status <> 'accepted'
+                OR envelope.apply_status = 'superseded'
+            """,
+            connection=connection,
+        ).rows
+        for head in invalid_heads:
+            latest = _first(
+                self.execute(
+                    """
+                    SELECT server_sequence
+                     FROM sync_envelopes
+                     WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                       AND status = 'accepted'
+                       AND apply_status <> 'superseded'
+                     ORDER BY server_sequence DESC
+                     LIMIT 1
+                    """,
+                    (head["dataset_id"], head["domain"], head["object_id"]),
+                    connection=connection,
+                )
+            )
+            if latest is None:
+                self.execute(
+                    """
+                    DELETE FROM sync_current_heads
+                     WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                    """,
+                    (head["dataset_id"], head["domain"], head["object_id"]),
+                    connection=connection,
+                )
+                continue
+            self.execute(
+                """
+                UPDATE sync_current_heads
+                   SET latest_server_cursor = ?
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                """,
+                (
+                    latest["server_sequence"],
+                    head["dataset_id"],
+                    head["domain"],
+                    head["object_id"],
+                ),
+                connection=connection,
+            )
+        if not projection_exists:
+            self.execute(
+                """
+                INSERT INTO sync_current_heads (
+                    dataset_id, domain, object_id, latest_server_cursor
+                )
+                SELECT dataset_id, domain, entity_id, MAX(server_sequence)
+                  FROM sync_envelopes
+                 WHERE status = 'accepted'
+                   AND apply_status <> 'superseded'
+                 GROUP BY dataset_id, domain, entity_id
+                ON CONFLICT (dataset_id, domain, object_id)
+                DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+                 WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+                """,
+                connection=connection,
+            )
+
+    def _ensure_sync_materialization_locks_table(self, *, connection: Any) -> None:
+        timestamp_type = (
+            "TIMESTAMPTZ" if self.backend_type == BackendType.POSTGRESQL else "TEXT"
+        )
+        self.backend.create_tables(
+            f"""
+            CREATE TABLE IF NOT EXISTS sync_materialization_locks (
+                dataset_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                PRIMARY KEY (dataset_id, domain, object_id)
+            )
+            """,
+            connection=connection,
+        )
+
     def _ensure_envelope_m1_indexes(self, *, connection: Any) -> None:
         statements = [
             """
             CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
                 ON sync_envelopes(dataset_id, domain, entity_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+                ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+                ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+                WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+                ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
             """,
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
@@ -5413,9 +7553,121 @@ class SyncDatabase:
                 ON sync_envelopes(dataset_id, apply_status, server_sequence)
                 WHERE apply_status = 'failed'
             """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_outstanding_apply
+                ON sync_envelopes(dataset_id, server_sequence)
+                WHERE status = 'accepted'
+                  AND apply_status NOT IN ('applied', 'superseded')
+            """,
         ]
         for statement in statements:
             self.execute(statement, connection=connection)
+
+    def _ensure_conflict_indexes(self, *, connection: Any) -> None:
+        if self._conflict_identity_index_exists(connection=connection):
+            return
+        self._dedupe_legacy_conflict_identities(connection=connection)
+        self.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_conflicts_dataset_envelope_cursor
+                ON sync_conflicts(dataset_id, local_envelope_id, server_sequence)
+                WHERE local_envelope_id IS NOT NULL AND server_sequence IS NOT NULL
+            """,
+            connection=connection,
+        )
+
+    def _conflict_identity_index_exists(self, *, connection: Any) -> bool:
+        index_name = "uq_sync_conflicts_dataset_envelope_cursor"
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT indexname
+                      FROM pg_indexes
+                     WHERE schemaname = current_schema()
+                       AND tablename = ?
+                       AND indexname = ?
+                    """,
+                    ("sync_conflicts", index_name),
+                    connection=connection,
+                )
+            )
+            return row is not None
+        rows = self.execute(
+            "PRAGMA index_list(sync_conflicts)",
+            connection=connection,
+        ).rows
+        return any(str(row.get("name")) == index_name for row in rows)
+
+    def _dedupe_legacy_conflict_identities(self, *, connection: Any) -> None:
+        rows = self.execute(
+            """
+            SELECT *
+              FROM sync_conflicts
+             WHERE local_envelope_id IS NOT NULL
+               AND server_sequence IS NOT NULL
+             ORDER BY dataset_id, local_envelope_id, server_sequence,
+                      created_at, conflict_id
+            """,
+            connection=connection,
+        ).rows
+        grouped: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+        for row in rows:
+            key = (
+                str(row["dataset_id"]),
+                str(row["local_envelope_id"]),
+                int(row["server_sequence"]),
+            )
+            grouped.setdefault(key, []).append(row)
+
+        losers: list[str] = []
+        for duplicates in grouped.values():
+            if len(duplicates) < 2:
+                continue
+            winner = min(
+                duplicates,
+                key=lambda row: (str(row.get("created_at") or ""), str(row["conflict_id"])),
+            )
+            fingerprint = self._legacy_conflict_fingerprint(winner)
+            if any(
+                self._legacy_conflict_fingerprint(row) != fingerprint
+                for row in duplicates
+            ):
+                raise SyncStoreError(
+                    "Sync conflict index migration found incompatible legacy duplicates"
+                )
+            losers.extend(
+                str(row["conflict_id"])
+                for row in duplicates
+                if row["conflict_id"] != winner["conflict_id"]
+            )
+
+        for conflict_id in sorted(losers):
+            self.execute(
+                "DELETE FROM sync_conflicts WHERE conflict_id = ?",
+                (conflict_id,),
+                connection=connection,
+            )
+
+    @staticmethod
+    def _legacy_conflict_fingerprint(row: Mapping[str, Any]) -> tuple[Any, ...]:
+        return (
+            row.get("dataset_id"),
+            row.get("domain"),
+            row.get("entity_id"),
+            row.get("conflict_type"),
+            row.get("status"),
+            row.get("base_envelope_id"),
+            row.get("local_envelope_id"),
+            row.get("remote_envelope_id"),
+            row.get("server_sequence"),
+            encode_json(decode_json(row.get("metadata_json"), default={}), default={}),
+            row.get("resolved_by_envelope_id"),
+            row.get("resolved_by_device_id"),
+            row.get("resolution_action"),
+            row.get("resolution_notes"),
+            row.get("resolved_at"),
+        )
 
     def _ensure_key_record_user_id_column(self, *, connection: Any) -> None:
         columns = {

@@ -35,7 +35,21 @@ M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref
 WORKSPACE_DOMAINS = ["workspaces.workspace", "workspaces.source_ref"]
 SOURCE_CACHE_DOMAINS = ["source_cache.entry"]
 MEDIA_DOMAINS = ["media.item", "media.keyword", "media.keyword_link"]
-SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS + MEDIA_DOMAINS
+NOTES_ORGANIZATION_DOMAINS = (
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+)
+SUPPORTED_DOMAINS = (
+    M1_DOMAINS
+    + WORKSPACE_DOMAINS
+    + SOURCE_CACHE_DOMAINS
+    + MEDIA_DOMAINS
+    + list(NOTES_ORGANIZATION_DOMAINS)
+)
 
 
 def _encryption_policy_model_classes():
@@ -96,6 +110,12 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "media.item": ["upsert", "tombstone"],
         "media.keyword": ["upsert", "tombstone"],
         "media.keyword_link": ["upsert", "tombstone"],
+        "notes.keyword": ["upsert", "tombstone"],
+        "notes.keyword_link": ["upsert", "tombstone"],
+        "notes.keyword_collection": ["upsert", "tombstone"],
+        "notes.keyword_collection_link": ["upsert", "tombstone"],
+        "notes.folder": ["upsert", "tombstone"],
+        "notes.folder_link": ["upsert", "tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
@@ -122,6 +142,61 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         },
     }
     assert "client_private_v1" not in capabilities.model_dump_json()
+
+
+@pytest.mark.parametrize("domain", NOTES_ORGANIZATION_DOMAINS)
+def test_notes_organization_schema_is_server_trusted_v1(domain: str) -> None:
+    assert domain in core_sync_models.SyncDomain.__args__
+    schema = core_sync_models.sync_v2_domain_schemas()[domain]
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert {"upsert", "tombstone"}.issubset(schema)
+
+    capability_schema = SyncCapabilitiesResponse().domain_schemas[domain]
+    assert capability_schema == schema
+
+
+@pytest.mark.parametrize(
+    ("domain", "payload"),
+    [
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": "11111111-1111-4111-8111-111111111111",
+                "keyword_sync_id": "22222222-2222-4222-8222-222222222222",
+            },
+        ),
+        (
+            "notes.keyword_collection_link",
+            {
+                "collection_sync_id": "33333333-3333-4333-8333-333333333333",
+                "keyword_sync_id": "22222222-2222-4222-8222-222222222222",
+            },
+        ),
+        (
+            "notes.folder_link",
+            {
+                "note_id": "11111111-1111-4111-8111-111111111111",
+                "folder_sync_id": "44444444-4444-4444-8444-444444444444",
+            },
+        ),
+    ],
+)
+def test_link_tombstone_capability_payload_parses_strictly(
+    domain: str,
+    payload: dict[str, object],
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+        parse_notes_organization_payload,
+    )
+
+    descriptor = SyncCapabilitiesResponse().domain_schemas[domain]["tombstone"]
+    derived_payload = {field: payload[field] for field in descriptor["required"]}
+
+    assert parse_notes_organization_payload(
+        domain, "tombstone", derived_payload
+    ) == payload
 
 
 @pytest.mark.parametrize(
@@ -579,6 +654,128 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
     assert envelope.encryption_metadata == {"policy": "server_trusted_v1"}
 
 
+def test_core_sync_mutation_group_metadata_round_trips() -> None:
+    expected_sha256 = "a" * 64
+    create = core_sync_models.SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id="env-group-0",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-1",
+        mutation_group_id="mutation-group-1",
+        mutation_step=0,
+        mutation_step_count=3,
+        mutation_plan_hash=expected_sha256,
+    )
+    envelope = CoreSyncEnvelope(
+        dataset_id=create.dataset_id,
+        client_envelope_id=create.client_envelope_id,
+        domain=create.domain,
+        operation=create.operation,
+        object_id=create.object_id,
+        server_cursor=101,
+        mutation_group_id=create.mutation_group_id,
+        mutation_step=create.mutation_step,
+        mutation_step_count=create.mutation_step_count,
+        mutation_plan_hash=create.mutation_plan_hash,
+    )
+
+    assert envelope.mutation_group_id == "mutation-group-1"
+    assert envelope.mutation_step == 0
+    assert envelope.mutation_step_count == 3
+    assert envelope.mutation_plan_hash == expected_sha256
+
+
+def test_core_sync_mutation_group_metadata_allows_legacy_absence() -> None:
+    create = core_sync_models.SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id="env-legacy",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-1",
+    )
+    envelope = CoreSyncEnvelope(
+        dataset_id=create.dataset_id,
+        client_envelope_id=create.client_envelope_id,
+        domain=create.domain,
+        operation=create.operation,
+        object_id=create.object_id,
+        server_cursor=101,
+    )
+
+    assert create.mutation_group_id is None
+    assert create.mutation_step is None
+    assert create.mutation_step_count is None
+    assert create.mutation_plan_hash is None
+    assert envelope.mutation_group_id is None
+    assert envelope.mutation_step is None
+    assert envelope.mutation_step_count is None
+    assert envelope.mutation_plan_hash is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"mutation_group_id": "group-1"},
+        {
+            "mutation_group_id": "   ",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": -1,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 1,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 0,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "A" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 63,
+        },
+    ],
+)
+@pytest.mark.parametrize("stored", [False, True])
+def test_core_sync_mutation_group_metadata_rejects_partial_or_invalid_values(
+    overrides: dict[str, object],
+    stored: bool,
+) -> None:
+    values = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-group-0",
+        "domain": "notes.note",
+        "operation": "upsert",
+        "object_id": "note-1",
+        **overrides,
+    }
+    model = CoreSyncEnvelope if stored else core_sync_models.SyncEnvelopeCreate
+    if stored:
+        values["server_cursor"] = 101
+
+    with pytest.raises(ValueError, match="mutation group"):
+        model(**values)
+
+
 def test_sync_envelope_accepts_source_cache_entry_domain():
     envelope = SyncV2Envelope.model_validate(
         _m1_envelope_payload(
@@ -769,6 +966,32 @@ def test_core_envelope_mapping_strips_api_only_server_fields_before_persistence(
     assert core_envelope.received_at_server is None
     assert core_envelope.status == "accepted"
     assert core_envelope.apply_status == "pending"
+
+
+def test_api_sync_responses_accept_terminal_superseded_apply_status():
+    envelope = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(
+            envelope_id="srv_env_000000000001",
+            server_cursor=1,
+            status="accepted",
+            apply_status="superseded",
+        )
+    )
+    response = SyncPushResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "accepted": [
+                {
+                    "client_envelope_id": "env-1",
+                    "server_cursor": 1,
+                    "apply_status": "superseded",
+                }
+            ],
+        }
+    )
+
+    assert envelope.apply_status == "superseded"
+    assert response.accepted[0].apply_status == "superseded"
 
 
 def test_conflict_resolution_request_uses_locked_m1_batch_shape():
@@ -1013,6 +1236,30 @@ def test_push_request_allows_dataset_mismatch_for_per_envelope_outcomes():
     )
 
     assert request.envelopes[0].dataset_id == "dataset-2"
+
+
+def test_push_request_cannot_set_server_assigned_mutation_group_metadata() -> None:
+    request = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _m1_envelope_payload(
+                    mutation_group_id="client-group",
+                    mutation_step=0,
+                    mutation_step_count=1,
+                    mutation_plan_hash="a" * 64,
+                )
+            ],
+        }
+    )
+
+    core = _core_envelope_from_api(request.envelopes[0])
+
+    assert core.mutation_group_id is None
+    assert core.mutation_step is None
+    assert core.mutation_step_count is None
+    assert core.mutation_plan_hash is None
 
 
 def test_push_request_rejects_oversized_envelope_batches():

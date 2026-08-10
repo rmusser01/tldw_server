@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
+    _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
+    _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES,
     BackendConnectionWrapper,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
     FTSQueryTranslator,
     InputError,
-    _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
-    _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES,
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
-)
-from tldw_Server_API.app.core.DB_Management.backends.base import (
-    DatabaseError as BackendDatabaseError,
 )
 
 if TYPE_CHECKING:
@@ -33,6 +34,21 @@ class NoteStore:
     def _deleted_value(self, deleted: bool) -> bool | int:
         """Return the backend-native value for a soft-delete flag."""
         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
+
+    @staticmethod
+    def _timestamps_equal(actual: object, expected: str) -> bool:
+        if str(actual) == expected:
+            return True
+        try:
+            actual_time = datetime.fromisoformat(str(actual).replace("Z", "+00:00"))
+            expected_time = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if actual_time.tzinfo is None:
+            actual_time = actual_time.replace(tzinfo=timezone.utc)
+        if expected_time.tzinfo is None:
+            expected_time = expected_time.replace(tzinfo=timezone.utc)
+        return actual_time.astimezone(timezone.utc) == expected_time.astimezone(timezone.utc)
 
     # ------------------------------------------------------------------
     # Note creation
@@ -112,6 +128,8 @@ class NoteStore:
         sync_client_id: str,
         object_revision: int,
         object_hash: str,
+        expected_product_version: int | None = None,
+        projection_timestamp: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> bool:
         """Create or update a note projection from an accepted Sync v2 envelope."""
@@ -128,7 +146,7 @@ class NoteStore:
         if object_revision < 1:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
-        now = self._db._get_current_utc_timestamp_iso()
+        now = projection_timestamp or self._db._get_current_utc_timestamp_iso()
         normalized_conversation_id = self._db._normalize_nullable_text(conversation_id)
         normalized_message_id = self._db._normalize_nullable_text(message_id)
         query = """
@@ -147,6 +165,14 @@ class NoteStore:
                 conversation_id = excluded.conversation_id,
                 message_id = excluded.message_id
         """
+        insert_if_absent_query = """
+            INSERT INTO notes (
+                id, title, content, last_modified, client_id, version, deleted,
+                created_at, conversation_id, message_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING
+        """
         params = (
             normalized_note_id,
             exact_title,
@@ -162,7 +188,67 @@ class NoteStore:
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
-                transaction_conn.execute(query, params)
+                if expected_product_version is None:
+                    transaction_conn.execute(query, params)
+                elif expected_product_version == 0:
+                    cursor = transaction_conn.execute(insert_if_absent_query, params)
+                    if cursor.rowcount == 0:
+                        if self._matches_ingestion_postcondition(
+                            transaction_conn,
+                            note_id=normalized_note_id,
+                            title=exact_title,
+                            content=content,
+                            conversation_id=normalized_conversation_id,
+                            message_id=normalized_message_id,
+                            sync_client_id=sync_client_id,
+                            object_revision=object_revision,
+                            projection_timestamp=now,
+                            include_created_at=True,
+                        ):
+                            return False
+                        raise ConflictError(
+                            "Note projection changed after ingestion planning",
+                            entity="notes",
+                            entity_id=normalized_note_id,
+                        )
+                else:
+                    cursor = transaction_conn.execute(
+                        "UPDATE notes SET title = ?, content = ?, last_modified = ?, "
+                        "client_id = ?, version = ?, deleted = ?, conversation_id = ?, "
+                        "message_id = ? WHERE id = ? AND version = ? AND deleted = ?",
+                        (
+                            exact_title,
+                            content,
+                            now,
+                            sync_client_id,
+                            object_revision,
+                            self._deleted_value(False),
+                            normalized_conversation_id,
+                            normalized_message_id,
+                            normalized_note_id,
+                            expected_product_version,
+                            self._deleted_value(False),
+                        ),
+                    )
+                    if cursor.rowcount == 0:
+                        if self._matches_ingestion_postcondition(
+                            transaction_conn,
+                            note_id=normalized_note_id,
+                            title=exact_title,
+                            content=content,
+                            conversation_id=normalized_conversation_id,
+                            message_id=normalized_message_id,
+                            sync_client_id=sync_client_id,
+                            object_revision=object_revision,
+                            projection_timestamp=now,
+                            include_created_at=False,
+                        ):
+                            return False
+                        raise ConflictError(
+                            "Note projection changed after ingestion planning",
+                            entity="notes",
+                            entity_id=normalized_note_id,
+                        )
                 logger.info("Upserted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
 
@@ -183,6 +269,45 @@ class NoteStore:
         except CharactersRAGDBError:
             logger.error("Database error upserting synced note ID {}.", normalized_note_id, exc_info=True)
             raise
+
+    def _matches_ingestion_postcondition(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        note_id: str,
+        title: str,
+        content: str,
+        conversation_id: str | None,
+        message_id: str | None,
+        sync_client_id: str,
+        object_revision: int,
+        projection_timestamp: str,
+        include_created_at: bool,
+    ) -> bool:
+        row = conn.execute(
+            "SELECT id, title, content, last_modified, client_id, version, deleted, "
+            "created_at, conversation_id, message_id FROM notes WHERE id = ?",
+            (note_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        matches = (
+            str(row["id"]) == note_id
+            and row["title"] == title
+            and row["content"] == content
+            and str(row["client_id"]) == sync_client_id
+            and int(row["version"]) == object_revision
+            and not bool(row["deleted"])
+            and row["conversation_id"] == conversation_id
+            and row["message_id"] == message_id
+            and self._timestamps_equal(row["last_modified"], projection_timestamp)
+        )
+        if include_created_at:
+            matches = matches and self._timestamps_equal(
+                row["created_at"],
+                projection_timestamp,
+            )
+        return matches
 
     def tombstone_note_from_sync(
         self,
@@ -753,7 +878,7 @@ class NoteStore:
                 f"WHERE nk.note_id IN ({ph}) AND k.deleted = ? "
                 f"ORDER BY nk.note_id ASC, k.id ASC"
             )
-            cur = self._db.execute_query(query, tuple([*batch, self._deleted_value(False)]))
+            cur = self._db.execute_query(query, (*batch, self._deleted_value(False)))
             for row in cur.fetchall():
                 r = dict(row) if hasattr(row, "keys") else {
                     "note_id": row[0], "keyword_id": row[1], "keyword": row[2],

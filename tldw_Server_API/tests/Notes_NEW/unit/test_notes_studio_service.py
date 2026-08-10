@@ -15,7 +15,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -57,6 +56,7 @@ async def _test_generation_adapter(request: dict[str, object], _context: dict[st
 
 def _service(db: CharactersRAGDB, **kwargs) -> NotesStudioService:
     kwargs.setdefault("generation_adapter", _test_generation_adapter)
+    kwargs.setdefault("user_id", "notes_studio_unit")
     return NotesStudioService(db=db, **kwargs)
 
 
@@ -158,7 +158,11 @@ def test_derive_uses_canonical_payload_title_for_note_row_and_markdown(studio_db
             }
         }
 
-    service = NotesStudioService(db=db, generation_adapter=_generation_adapter)
+    service = NotesStudioService(
+        db=db,
+        user_id="notes_studio_unit",
+        generation_adapter=_generation_adapter,
+    )
 
     result = _derive_note(
         service,

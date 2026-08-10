@@ -2,13 +2,17 @@
 
 import ast
 import inspect
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
+from tldw_Server_API.app.core.DB_Management.Sync_DB import _envelope_from_row
 
 pytestmark = pytest.mark.unit
 
@@ -36,6 +40,21 @@ _DELEGATED_NOTE_METHODS = {
     "upsert_note_from_sync",
     "tombstone_note_from_sync",
 }
+
+
+def _postgres_datetime_envelope(server_timestamp: datetime):
+    return _envelope_from_row(
+        {
+            "server_sequence": 1,
+            "dataset_id": "dataset-1",
+            "client_envelope_id": "env-postgres-timestamp",
+            "domain": "notes.note",
+            "entity_id": "sync-note-postgres-time",
+            "operation": "upsert",
+            "server_timestamp": server_timestamp,
+            "status": "accepted",
+        }
+    )
 
 
 def _class_method_names(class_obj: type[object]) -> set[str]:
@@ -183,6 +202,141 @@ class TestNoteStoreSyncHelpers:
         assert after["client_id"] == "device-2"
         assert after["version"] == 2
         assert after["created_at"] == before["created_at"]
+
+    def test_ingestion_guard_accepts_exact_intended_postcondition(self, db):
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-guard",
+        )
+        kwargs = {
+            "note_id": "sync-note-guard",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": "2026-08-09T08:00:00+00:00",
+        }
+
+        assert db.upsert_note_from_sync(**kwargs) is True
+        after_product_commit = db.get_note_by_id("sync-note-guard")
+        assert db.upsert_note_from_sync(**kwargs) is False
+        assert db.get_note_by_id("sync-note-guard") == after_product_commit
+
+    def test_ingestion_guard_rejects_divergent_same_version_postcondition(self, db):
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-diverged",
+        )
+        kwargs = {
+            "note_id": "sync-note-diverged",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": "2026-08-09T08:00:00+00:00",
+        }
+        db.upsert_note_from_sync(**kwargs)
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET content = ? WHERE id = ?",
+                ("Diverged", "sync-note-diverged"),
+            )
+
+        with pytest.raises(ConflictError, match="changed after ingestion planning"):
+            db.upsert_note_from_sync(**kwargs)
+
+    def test_postgres_datetime_recovery_accepts_equivalent_utc_offset_without_write(
+        self,
+        db,
+    ):
+        envelope = _postgres_datetime_envelope(
+            datetime(
+                2026,
+                8,
+                9,
+                1,
+                tzinfo=timezone(timedelta(hours=-7)),
+            )
+        )
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-postgres-time",
+        )
+        kwargs = {
+            "note_id": "sync-note-postgres-time",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": envelope.server_timestamp,
+        }
+        assert db.upsert_note_from_sync(**kwargs) is True
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET last_modified = ? WHERE id = ?",
+                ("2026-08-09T08:00:00+00:00", "sync-note-postgres-time"),
+            )
+        after_product_commit = db.get_note_by_id("sync-note-postgres-time")
+
+        assert db.upsert_note_from_sync(**kwargs) is False
+        assert db.get_note_by_id("sync-note-postgres-time") == after_product_commit
+        assert envelope.server_timestamp == "2026-08-09T01:00:00-07:00"
+
+    @pytest.mark.parametrize(
+        "stored_timestamp",
+        ["2026-08-09T08:00:01+00:00", "invalid-timestamp"],
+    )
+    def test_postgres_datetime_recovery_rejects_different_timestamp(
+        self,
+        db,
+        stored_timestamp,
+    ):
+        envelope = _postgres_datetime_envelope(
+            datetime(2026, 8, 9, 8, tzinfo=timezone.utc)
+        )
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-postgres-time",
+        )
+        kwargs = {
+            "note_id": "sync-note-postgres-time",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": envelope.server_timestamp,
+        }
+        db.upsert_note_from_sync(**kwargs)
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET last_modified = ? WHERE id = ?",
+                (stored_timestamp, "sync-note-postgres-time"),
+            )
+        divergent = db.get_note_by_id("sync-note-postgres-time")
+
+        with pytest.raises(ConflictError, match="changed after ingestion planning"):
+            db.upsert_note_from_sync(**kwargs)
+        assert db.get_note_by_id("sync-note-postgres-time") == divergent
 
     def test_tombstone_note_from_sync_soft_deletes_existing_note(self, db):
         db.upsert_note_from_sync(

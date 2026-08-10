@@ -7,6 +7,8 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.core.Sync.v2.models import (
+    NOTES_ORGANIZATION_DOMAINS,
+    NOTES_ORGANIZATION_SYNC_OPERATIONS,
     sync_v2_domain_schemas,
     validate_notes_note_upsert_payload,
 )
@@ -22,6 +24,12 @@ SyncDomain = Literal[
     "media.item",
     "media.keyword",
     "media.keyword_link",
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -35,9 +43,10 @@ SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
 SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
-SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
+SyncApplyStatus = Literal["pending", "applied", "failed", "conflict", "superseded"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
+SyncRestoreOrderedActionKind = Literal["apply", "tombstone", "noop", "conflict"]
 SyncDeviceStatus = Literal["pending_authorization", "active", "paused", "revoked"]
 SyncDeviceAuthorizationStatus = Literal["pending", "approved", "rejected"]
 SyncBackgroundLeaseStatus = Literal["acquired", "refreshed", "held_by_other"]
@@ -104,12 +113,14 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(WORKSPACE_SYNC_DOMAINS)
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
+    + list(NOTES_ORGANIZATION_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
+    **NOTES_ORGANIZATION_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
@@ -752,6 +763,17 @@ class SyncProfileDeviceStatusResponse(BaseModel):
     client_version: str | None = None
 
 
+class SyncNotesOrganizationStatusResponse(BaseModel):
+    """Safe Notes organization bootstrap progress exposed to clients."""
+
+    state: Literal["initializing", "ready", "failed"]
+    captured_count: int = Field(0, ge=0)
+    expected_count: int = Field(0, ge=0)
+    error_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncProfileDatasetStatusResponse(BaseModel):
     """Default personal dataset metadata in profile responses."""
 
@@ -765,6 +787,7 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     server_frontend_mutation_enabled: bool = True
     server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
+    notes_organization: SyncNotesOrganizationStatusResponse | None = None
 
 
 class SyncProfileDomainStatusResponse(BaseModel):
@@ -878,12 +901,15 @@ class SyncRestorePreviewRequest(BaseModel):
     """Client inventory request for a Sync v2 M1 restore preview."""
 
     device_id: str | None = None
-    dataset_ids: list[str] = Field(default_factory=list)
-    domains: list[SyncDomain] = Field(default_factory=list)
-    selected_object_ids: list[str] = Field(default_factory=list)
-    selected_attachment_ids: list[str] = Field(default_factory=list)
+    dataset_ids: list[str] = Field(default_factory=list, max_length=100)
+    domains: list[SyncDomain] = Field(default_factory=list, max_length=100)
+    selected_object_ids: list[str] = Field(default_factory=list, max_length=10_000)
+    selected_attachment_ids: list[str] = Field(default_factory=list, max_length=10_000)
     metadata_only: bool = False
-    local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(default_factory=list)
+    local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(
+        default_factory=list,
+        max_length=10_000,
+    )
     attachment_availability: dict[str, str] = Field(default_factory=dict)
 
 
@@ -946,6 +972,24 @@ class SyncRestorePreviewObjectConflict(BaseModel):
     message: str | None = None
 
 
+class SyncRestoreOrderedAction(BaseModel):
+    """One content-free action in canonical restore execution order."""
+
+    plan_index: int = Field(..., ge=0)
+    action: SyncRestoreOrderedActionKind
+    dataset_id: str
+    domain: SyncDomain
+    object_id: str
+    operation: SyncOperation
+    server_cursor: int = Field(..., ge=0)
+    mutation_group_id: str | None = None
+    mutation_step: int | None = Field(None, ge=0)
+    mutation_step_count: int | None = Field(None, ge=1)
+    code: str | None = None
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
 class SyncRestorePreviewAttachmentRef(BaseModel):
     """Attachment metadata surfaced in a restore preview."""
 
@@ -976,6 +1020,7 @@ class SyncRestorePreviewResponse(BaseModel):
     """Non-mutating Sync v2 M1 restore preview response."""
 
     datasets: list[SyncRestorePreviewDataset] = Field(default_factory=list)
+    ordered_actions: list[SyncRestoreOrderedAction] = Field(default_factory=list)
     safe_applies: list[SyncRestorePreviewObject] = Field(default_factory=list)
     object_conflicts: list[SyncRestorePreviewObjectConflict] = Field(default_factory=list)
     tombstones: list[SyncRestorePreviewObject] = Field(default_factory=list)
@@ -1289,6 +1334,15 @@ class SyncV2Envelope(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class SyncV2EnvelopeResponse(SyncV2Envelope):
+    """Server envelope fields returned by pull but never accepted from push."""
+
+    mutation_group_id: str | None = None
+    mutation_step: int | None = Field(None, ge=0)
+    mutation_step_count: int | None = Field(None, ge=1)
+    mutation_plan_hash: str | None = None
+
+
 class SyncPushOptions(BaseModel):
     """Client push behavior flags from the locked Sync v2 M1 contract."""
 
@@ -1384,7 +1438,7 @@ class SyncPullResponse(BaseModel):
     """Stable cursor-ordered envelopes returned by pull."""
 
     dataset_id: str
-    envelopes: list[SyncV2Envelope] = Field(default_factory=list)
+    envelopes: list[SyncV2EnvelopeResponse] = Field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
 
@@ -1762,6 +1816,7 @@ __all__ = [
     "SyncProfileBootstrapMode",
     "SyncProfileBootstrapRequest",
     "SyncProfileBootstrapResponse",
+    "SyncNotesOrganizationStatusResponse",
     "SyncProfileDatasetStatusResponse",
     "SyncProfileDeviceStatusResponse",
     "SyncProfileDomainStatusResponse",
@@ -1786,6 +1841,7 @@ __all__ = [
     "SyncRestoreManifestDevice",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestResponse",
+    "SyncRestoreOrderedAction",
     "SyncRestorePreviewAttachmentRef",
     "SyncRestorePreviewDataset",
     "SyncRestorePreviewRequest",
@@ -1796,6 +1852,7 @@ __all__ = [
     "SyncRestoreCompletenessStatus",
     "SyncRestoreDomainCompleteness",
     "SyncV2Envelope",
+    "SyncV2EnvelopeResponse",
     "WORKSPACE_SYNC_DOMAINS",
     "WORKSPACE_SYNC_OPERATIONS",
 ]

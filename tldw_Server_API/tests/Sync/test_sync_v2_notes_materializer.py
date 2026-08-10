@@ -107,6 +107,22 @@ def _push_one(
     )
 
 
+def _push_one_through_materializer_conflict(
+    service: SyncV2Service,
+    envelope: SyncEnvelopeCreate,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Store accepted stale history only for focused product-conflict tests."""
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            service.store.db,
+            "_require_expected_current_head",
+            lambda *args, **kwargs: None,
+        )
+        return _push_one(service, envelope)
+
+
 def test_clean_notes_note_upsert_creates_normal_chacha_note(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -119,6 +135,7 @@ def test_clean_notes_note_upsert_creates_normal_chacha_note(
     assert note is not None
     assert note["title"] == "Trip notes"
     assert note["content"] == "Packed outline and research links."
+    assert note["client_id"] == chacha_db.client_id
     state = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
     assert state is not None
     assert state.object_revision == 1
@@ -287,6 +304,7 @@ def test_stale_base_creates_whole_object_conflict_without_overwriting_projection
     chacha_db: CharactersRAGDB,
     base_revision: int,
     base_hash: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _note_envelope())
     base = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
@@ -307,7 +325,7 @@ def test_stale_base_creates_whole_object_conflict_without_overwriting_projection
     current = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
     assert current is not None
 
-    result = _push_one(
+    result = _push_one_through_materializer_conflict(
         sync_service,
         _note_envelope(
             client_envelope_id=f"env-stale-{base_revision}",
@@ -319,6 +337,7 @@ def test_stale_base_creates_whole_object_conflict_without_overwriting_projection
             payload={"title": "Stale edit", "content": "Do not apply."},
             payload_hash=f"sha256:stale-{base_revision}",
         ),
+        monkeypatch,
     )
 
     assert result.accepted == []
@@ -442,6 +461,7 @@ def test_push_stop_on_conflict_rejects_remaining_envelopes(
 
 def test_pull_paginates_across_hidden_materialization_conflict(
     sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sync_service.register_device(
         user_id="user-1",
@@ -452,7 +472,7 @@ def test_pull_paginates_across_hidden_materialization_conflict(
     _push_one(sync_service, _note_envelope())
     base = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
     assert base is not None
-    stale = _push_one(
+    stale = _push_one_through_materializer_conflict(
         sync_service,
         _note_envelope(
             client_envelope_id="env-stale",
@@ -464,6 +484,14 @@ def test_pull_paginates_across_hidden_materialization_conflict(
             payload={"title": "Stale edit", "content": "Do not apply."},
             payload_hash="sha256:stale-v2",
         ),
+        monkeypatch,
+    )
+    conflict = sync_service.store.list_conflicts("dataset-1")[0]
+    sync_service.resolve_conflict(
+        user_id="user-1",
+        conflict_id=conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="device-1",
     )
     visible_update = _push_one(
         sync_service,
@@ -790,6 +818,27 @@ def test_restore_intent_upsert_cannot_create_a_missing_note(
     assert result.accepted == []
     assert len(result.conflicts) == 1
     assert chacha_db.get_note_by_id("note-1", include_deleted=True) is None
+
+
+def test_remote_ingestion_version_precondition_is_ignored(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    result = _push_one(
+        sync_service,
+        _note_envelope(
+            routing_metadata={
+                "source": "notes-ingestion",
+                "origin": "server",
+                "server_device_id": "server-origin",
+                "server_owner_user_id": "server-user-1",
+                "notes_ingestion_expected_product_version": 999,
+            },
+        ),
+    )
+
+    assert [item.client_envelope_id for item in result.accepted] == ["env-create"]
+    assert chacha_db.get_note_by_id("note-1")["title"] == "Trip notes"
 
 
 def test_apply_failure_marks_accepted_envelope_failed_and_replayable(

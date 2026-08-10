@@ -107,8 +107,7 @@ def capture_server_origin_mutation(
                 or not _payload_matches_idempotent_replay(accepted, payload, payload_hash)
             ):
                 raise SyncServerOriginIdempotencyConflictError(accepted)
-            if accepted.apply_status in {"failed", "conflict"}:
-                raise SyncServerOriginMaterializationError(accepted)
+            accepted = _require_capture_applied(service, accepted)
             return ServerOriginCaptureResult(dataset=dataset, envelope=accepted)
 
     state = service.store.get_object_state(dataset.dataset_id, domain, object_id)
@@ -163,11 +162,24 @@ def capture_server_origin_mutation(
         raise SyncStoreError("Sync server-origin mutation was not accepted")
 
     inserted = service.store.insert_envelope(envelope)
-    materialization = service._materialize_envelope(inserted)
-    inserted = service._envelope_snapshot(inserted)
-    if materialization.status in {"failed", "conflict"}:
-        raise SyncServerOriginMaterializationError(inserted)
+    inserted = _require_capture_applied(service, inserted)
     return ServerOriginCaptureResult(dataset=dataset, envelope=inserted)
+
+
+def _require_capture_applied(
+    service: SyncV2Service,
+    envelope: SyncEnvelope,
+) -> SyncEnvelope:
+    """Retry replayable capture debt and return only a durably applied envelope."""
+
+    if envelope.apply_status in {"conflict", "superseded"}:
+        raise SyncServerOriginMaterializationError(envelope)
+    if envelope.apply_status != "applied":
+        service._materialize_envelope(envelope)
+        envelope = service._envelope_snapshot(envelope)
+    if envelope.apply_status != "applied":
+        raise SyncServerOriginMaterializationError(envelope)
+    return envelope
 
 
 def capture_server_origin_note_restore(
@@ -248,18 +260,21 @@ def stable_server_origin_envelope_id(
 
 
 def get_active_server_origin_sync_service_for_user(user_id: str) -> SyncV2Service | None:
-    """Return a Sync v2 service only when the user has an active personal profile."""
+    """Return the active personal service, preserving lookup failures."""
 
     from .factory import sync_v2_service_for_user, sync_v2_storage_exists_for_user
 
     if not sync_v2_storage_exists_for_user(user_id):
         return None
     service = sync_v2_service_for_user(user_id)
-    try:
-        _active_default_personal_dataset(service, user_id)
-    except SyncStoreError:
-        return None
-    return service
+    for dataset in service.store.list_datasets_for_user(user_id):
+        if (
+            dataset.scope_type == "personal"
+            and dataset.metadata.get("default_personal") is True
+            and dataset.metadata.get("client_family") == "chatbook"
+        ):
+            return service
+    return None
 
 
 def canonical_payload_hash(payload: dict[str, object]) -> tuple[str, int]:

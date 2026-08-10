@@ -2,10 +2,14 @@ from __future__ import annotations
 
 """Core-facing Sync v2 store facade."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from copy import copy
+from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 
+from .errors import SyncStoreError
 from .models import (
     ConflictStatus,
     SyncApplyStatus,
@@ -52,8 +56,32 @@ from .models import (
 class SyncV2Store:
     """Core Sync v2 persistence interface backed by DB_Management."""
 
-    def __init__(self, db: SyncDatabase) -> None:
+    def __init__(self, db: SyncDatabase, *, connection: Any | None = None) -> None:
         self.db = db
+        self._connection = connection
+
+    @contextmanager
+    def materialization_guard(
+        self,
+        envelopes: Sequence[SyncEnvelope | SyncEnvelopeCreate],
+        *,
+        require_predecessors: bool = True,
+    ) -> Iterator[SyncV2Store]:
+        """Hold the durable dataset lock and one Sync transaction for projection."""
+
+        keys = [
+            (envelope.dataset_id, envelope.domain, envelope.object_id)
+            for envelope in envelopes
+        ]
+        with self.db.materialization_transaction(keys) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            if require_predecessors:
+                self.db.require_materialization_predecessors_applied(
+                    envelopes,
+                    connection=connection,
+                )
+            yield guarded
 
     def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
         return self.db.upsert_device(device)
@@ -182,8 +210,117 @@ class SyncV2Store:
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         return self.db.get_or_create_default_personal_dataset(user_id)
 
+    def begin_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        return self.db.begin_notes_organization_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+        )
+
+    def transition_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        return self.db.transition_notes_organization_bootstrap(
+            dataset_id,
+            bootstrap_id=bootstrap_id,
+            expected_state=expected_state,
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            error_code=error_code,
+            ready_verifier=ready_verifier,
+        )
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
-        return self.db.insert_envelope(envelope)
+        return self.db.insert_envelope(envelope, connection=self._connection)
+
+    def insert_claimed_conflict_resolution_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        conflict_id: str,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+    ) -> SyncEnvelope:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict resolution requires a dataset guard")
+        return self.db.insert_claimed_conflict_resolution_envelope(
+            envelope,
+            conflict_id=conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=self._connection,
+        )
+
+    def get_latest_applied_predecessor(
+        self,
+        envelope: SyncEnvelope,
+    ) -> SyncEnvelope | None:
+        if self._connection is None:
+            raise SyncStoreError("Sync projected-base lookup requires a dataset guard")
+        return self.db.get_latest_applied_predecessor(
+            envelope,
+            connection=self._connection,
+        )
+
+    def list_latest_applied_heads(
+        self,
+        dataset_id: str,
+        *,
+        through_server_cursor: int | None = None,
+    ) -> list[SyncEnvelope]:
+        if self._connection is None:
+            raise SyncStoreError("Sync projected-head lookup requires a dataset guard")
+        return self.db.list_latest_applied_heads(
+            dataset_id,
+            through_server_cursor=through_server_cursor,
+            connection=self._connection,
+        )
+
+    def insert_envelopes_atomic(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+        *,
+        trusted_notes_organization_bootstrap_id: str | None = None,
+    ) -> list[SyncEnvelope]:
+        """Insert one complete validated group or return its exact stored replay."""
+
+        return self.db.insert_envelopes_atomic(
+            envelopes,
+            trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+        )
+
+    def list_mutation_group(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+    ) -> list[SyncEnvelope]:
+        """Return a complete mutation group ordered by zero-based step."""
+
+        return self.db.list_mutation_group(
+            dataset_id,
+            mutation_group_id,
+            connection=self._connection,
+        )
 
     def get_existing_envelope_for_idempotency(
         self,
@@ -208,6 +345,7 @@ class SyncV2Store:
             domains=domains,
             status=status,
             exclude_device_id=exclude_device_id,
+            connection=self._connection,
         )
 
     def summarize_domain_envelopes(
@@ -234,16 +372,77 @@ class SyncV2Store:
             limit=limit,
         )
 
+    def get_envelope_for_entity_at_or_before(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str,
+        server_sequence: int,
+    ) -> SyncEnvelope | None:
+        """Return one accepted entity envelope at a durable sequence boundary."""
+
+        return self.db.get_envelope_for_entity_at_or_before(
+            dataset_id,
+            domain,
+            entity_id=entity_id,
+            server_sequence=server_sequence,
+        )
+
+    def get_envelope_by_server_cursor(self, server_cursor: int) -> SyncEnvelope | None:
+        return self.db.get_envelope_by_server_cursor(
+            server_cursor,
+            connection=self._connection,
+        )
+
     def get_object_state(
         self,
         dataset_id: str,
         domain: SyncDomain,
         object_id: str,
     ) -> SyncObjectState | None:
-        return self.db.get_object_state(dataset_id, domain, object_id)
+        return self.db.get_object_state(
+            dataset_id,
+            domain,
+            object_id,
+            connection=self._connection,
+        )
+
+    def get_current_head(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+    ) -> SyncEnvelope | None:
+        """Return the canonical current head for one dataset-scoped object."""
+
+        return self.db.get_current_head(
+            dataset_id,
+            domain,
+            object_id,
+            connection=self._connection,
+        )
+
+    def list_current_heads(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[SyncEnvelope]:
+        """Return a bounded page of canonical heads for one dataset domain."""
+
+        return self.db.list_current_heads(
+            dataset_id,
+            domain,
+            limit=limit,
+            offset=offset,
+            connection=self._connection,
+        )
 
     def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
-        return self.db.upsert_object_state(state)
+        return self.db.upsert_object_state(state, connection=self._connection)
 
     def mark_envelope_apply_status(
         self,
@@ -258,6 +457,37 @@ class SyncV2Store:
             apply_status=apply_status,
             apply_error_code=apply_error_code,
             apply_error_message=apply_error_message,
+            connection=self._connection,
+        )
+
+    def mark_bootstrap_envelope_verified(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+    ) -> SyncEnvelope:
+        """Record a verified bootstrap step as applied without product replay."""
+
+        return self.db.mark_bootstrap_envelope_verified(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            connection=self._connection,
+        )
+
+    def reconcile_bootstrap_envelope_superseded(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        superseded_by_cursor: int,
+    ) -> SyncEnvelope:
+        """Mark stale bootstrap history applied without regressing object state."""
+
+        return self.db.reconcile_bootstrap_envelope_superseded(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            superseded_by_cursor=superseded_by_cursor,
+            connection=self._connection,
         )
 
     def list_failed_applies(
@@ -293,7 +523,7 @@ class SyncV2Store:
         return self.db.get_device_cursor(dataset_id, device_id, domain)
 
     def insert_conflict(self, conflict: SyncConflictCreate) -> SyncConflict:
-        return self.db.insert_conflict(conflict)
+        return self.db.insert_conflict(conflict, connection=self._connection)
 
     def list_conflicts(
         self,
@@ -304,7 +534,7 @@ class SyncV2Store:
         return self.db.list_conflicts(dataset_id, status=status)
 
     def get_conflict(self, conflict_id: str) -> SyncConflict | None:
-        return self.db.get_conflict(conflict_id)
+        return self.db.get_conflict(conflict_id, connection=self._connection)
 
     def get_unresolved_conflict_for_envelope(
         self,
@@ -317,6 +547,16 @@ class SyncV2Store:
             dataset_id,
             local_envelope_id=local_envelope_id,
             server_sequence=server_sequence,
+            connection=self._connection,
+        )
+
+    def get_unresolved_materialization_conflict(
+        self,
+        dataset_id: str,
+    ) -> SyncConflict | None:
+        return self.db.get_unresolved_materialization_conflict(
+            dataset_id,
+            connection=self._connection,
         )
 
     def claim_conflict_resolution(
@@ -334,6 +574,7 @@ class SyncV2Store:
             resolved_by_device_id=resolved_by_device_id,
             resolution_action=resolution_action,
             resolution_notes=resolution_notes,
+            connection=self._connection,
         )
 
     def release_conflict_resolution_claim(
@@ -351,6 +592,93 @@ class SyncV2Store:
             resolved_by_device_id=resolved_by_device_id,
             resolution_action=resolution_action,
             resolution_notes=resolution_notes,
+            connection=self._connection,
+        )
+
+    def require_conflict_resolution_predecessors_applied(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+    ) -> SyncEnvelope:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict resolution requires a dataset guard")
+        return self.db.require_conflict_resolution_predecessors_applied(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=self._connection,
+        )
+
+    def terminalize_claimed_conflict_envelope(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        apply_error_code: str,
+    ) -> SyncEnvelope:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict terminalization requires a dataset guard")
+        return self.db.terminalize_claimed_conflict_envelope(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            apply_error_code=apply_error_code,
+            connection=self._connection,
+        )
+
+    def rebase_later_claimed_conflict_envelopes(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        expected_server_cursors: Sequence[int] | None = None,
+    ) -> list[SyncConflict]:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict rebasing requires a dataset guard")
+        return self.db.rebase_later_claimed_conflict_envelopes(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            expected_server_cursors=expected_server_cursors,
+            connection=self._connection,
+        )
+
+    def stage_later_claimed_conflict_rebase_plan(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+    ) -> tuple[int, ...]:
+        """Validate and freeze later-row rebase work before product projection."""
+
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict rebasing requires a dataset guard")
+        return self.db.stage_later_claimed_conflict_rebase_plan(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=self._connection,
         )
 
     def resolve_conflict(
@@ -374,6 +702,7 @@ class SyncV2Store:
             resolved_by_device_id=resolved_by_device_id,
             resolution_action=resolution_action,
             resolution_notes=resolution_notes,
+            connection=self._connection,
         )
 
     def store_key_record(self, record: SyncKeyRecordCreate) -> SyncKeyRecord:

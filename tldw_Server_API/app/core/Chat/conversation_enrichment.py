@@ -15,6 +15,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    active_coordinator,
+    replace_keywords,
+)
 from tldw_Server_API.app.core.testing import is_test_mode
 
 AUTO_TAG_MIN_NEW_MESSAGES = 3
@@ -134,7 +138,22 @@ def _replace_conversation_keywords(
     db: CharactersRAGDB,
     conversation_id: str,
     keywords: list[str],
+    *,
+    owner_user_id: int | str,
+    coordinator=None,
+    preflighted: bool = False,
 ) -> None:
+    if not preflighted:
+        coordinator = active_coordinator(db, user_id=owner_user_id)
+    if coordinator is not None:
+        replace_keywords(
+            coordinator,
+            subject_type="conversation",
+            subject_id=conversation_id,
+            keywords=keywords,
+            source="conversation-enrichment",
+        )
+        return
     existing = db.get_keywords_for_conversation(conversation_id)
     existing_map = {
         str(k.get("keyword") or "").strip().lower(): int(k.get("id"))
@@ -213,6 +232,7 @@ def auto_tag_conversation(
     db: CharactersRAGDB,
     conversation_id: str,
     *,
+    owner_user_id: int | str,
     force: bool = False,
     min_new_messages: int = AUTO_TAG_MIN_NEW_MESSAGES,
     trigger_clustering: bool = True,
@@ -258,6 +278,8 @@ def auto_tag_conversation(
     if not topic_label and keywords:
         topic_label = keywords[0].replace("-", " ").title()
 
+    keyword_coordinator = active_coordinator(db, user_id=owner_user_id)
+
     update_ok = _update_conversation_with_retry(
         db,
         conversation_id,
@@ -270,7 +292,14 @@ def auto_tag_conversation(
     )
 
     if update_ok:
-        _replace_conversation_keywords(db, conversation_id, keywords)
+        _replace_conversation_keywords(
+            db,
+            conversation_id,
+            keywords,
+            owner_user_id=owner_user_id,
+            coordinator=keyword_coordinator,
+            preflighted=True,
+        )
 
     if trigger_clustering and update_ok:
         schedule_conversation_clustering(db)
@@ -326,6 +355,7 @@ def schedule_auto_tagging(
     db: CharactersRAGDB,
     conversation_id: str,
     *,
+    owner_user_id: int | str,
     force: bool = False,
     min_new_messages: int = AUTO_TAG_MIN_NEW_MESSAGES,
 ) -> None:
@@ -333,6 +363,7 @@ def schedule_auto_tagging(
         auto_tag_conversation(
             db,
             conversation_id,
+            owner_user_id=owner_user_id,
             force=force,
             min_new_messages=min_new_messages,
         )
@@ -343,6 +374,7 @@ def schedule_auto_tagging(
             auto_tag_conversation(
                 db,
                 conversation_id,
+                owner_user_id=owner_user_id,
                 force=force,
                 min_new_messages=min_new_messages,
             )

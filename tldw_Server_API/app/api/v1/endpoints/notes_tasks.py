@@ -7,13 +7,17 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
     User,
     get_rate_limiter_dep,
     get_request_user,
     rbac_rate_limit,
+)
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
+    NOTES_SYNC_EXCEPTIONS,
+    notes_sync_http_error,
 )
 from tldw_Server_API.app.api.v1.schemas.notes_tasks_schemas import (
     TaskActivityListResponse,
@@ -83,6 +87,8 @@ async def _check_rate_limit(rate_limiter: RateLimiter, current_user: User, actio
 def _handle_task_error(exc: Exception) -> None:
     if isinstance(exc, HTTPException):
         raise exc
+    if isinstance(exc, NOTES_SYNC_EXCEPTIONS):
+        raise notes_sync_http_error(exc) from exc
     if isinstance(exc, InputError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if isinstance(exc, ConflictError):

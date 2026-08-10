@@ -6,24 +6,13 @@ import base64
 import hashlib
 import json
 import mimetypes
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from tldw_Server_API.app.core.WebClipper.schemas import (
-    WebClipperAttachmentRecord,
-    WebClipperEnrichmentPayload,
-    WebClipperEnrichmentResponse,
-    WebClipperSaveRequest,
-    WebClipperSaveResponse,
-    WebClipperSavedNote,
-    WebClipperStatusResponse,
-    WebClipperWorkspacePlacement,
-    validate_capture_metadata_json_size,
-)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     CharactersRAGDB,
@@ -34,11 +23,32 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError as MediaConflictError,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError as MediaInputError,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_repository import MediaRepository
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    active_coordinator,
+    capture_note_upsert,
+    stable_note_id,
+)
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
+from tldw_Server_API.app.core.WebClipper.schemas import (
+    WebClipperAttachmentRecord,
+    WebClipperEnrichmentPayload,
+    WebClipperEnrichmentResponse,
+    WebClipperSavedNote,
+    WebClipperSaveRequest,
+    WebClipperSaveResponse,
+    WebClipperStatusResponse,
+    WebClipperWorkspacePlacement,
+    validate_capture_metadata_json_size,
+)
 
 _NOTES_ATTACHMENTS_DIRNAME = "notes_attachments"
 _NOTES_ATTACHMENT_META_SUFFIX = ".meta.json"
@@ -66,6 +76,9 @@ _TRUNCATION_MARKER = "Truncated. Full extract preserved in clip metadata."
 _ENRICHMENT_SECTION_START = "<!-- web-clipper-enrichment:start -->"
 _ENRICHMENT_SECTION_END = "<!-- web-clipper-enrichment:end -->"
 _WEB_CLIPPER_SOURCE_PREFIX = "web-clipper"
+_WEB_CLIPPER_CAPTURE_ROUTING_KEY = "web_clipper_capture_v1"
+_MAX_CAPTURED_AT_LENGTH = 128
+_MAX_CLIP_ID_LENGTH = 256
 WorkspaceSourceJobEnqueuer = Callable[[str, dict[str, Any]], None]
 
 
@@ -85,6 +98,7 @@ class WebClipperService:
 
     def save_clip(self, request: WebClipperSaveRequest) -> WebClipperSaveResponse:
         """Create or update the canonical note and optional workspace placement."""
+        existing_document = self._document_for_save(request.clip_id)
         warnings: list[str] = []
         analysis_state = self._current_analysis_state(request.clip_id)
         self._record_requested_enhancements(analysis_state, request)
@@ -95,14 +109,27 @@ class WebClipperService:
             fallback_full_extract=request.content.full_extract,
         )
         note_title = self._resolve_note_title(request)
+        note_id = self._note_id_for_clip(request.clip_id, existing_document)
+        coordinator = active_coordinator(self.db, user_id=self.user_id)
         try:
-            with self.db.transaction() as conn:
-                existing_note = self._fetch_note_row(request.clip_id, conn=conn)
-                existing_document = self.db._fetch_note_clipper_document_row(
-                    column="clip_id",
-                    value=request.clip_id,
-                    conn=conn,
+            if coordinator is not None:
+                request_fingerprint = self._active_sync_request_fingerprint(
+                    coordinator,
+                    request,
                 )
+                replay = coordinator.replay_request_plan(
+                    source="web-clipper",
+                    idempotency_key=request_fingerprint,
+                    request_fingerprint=request_fingerprint,
+                    result_domain="notes.note",
+                )
+                existing_note = self.db.get_note_by_id(note_id)
+                if replay is None and existing_note is not None and existing_document is None:
+                    raise _ClipIdCollisionError(
+                        "The canonical WebClipper note identity is already in use.",
+                        entity="notes",
+                        entity_id=note_id,
+                    )
                 capture_metadata = self._merge_capture_metadata(existing_document, request)
                 note_content = self._render_note_content(
                     request=request,
@@ -110,53 +137,119 @@ class WebClipperService:
                     analysis=analysis_state,
                     capture_metadata=capture_metadata,
                 )
-                if existing_note is not None and existing_document is None:
-                    raise _ClipIdCollisionError(
-                        "A non-clipper note already exists with this clip_id.",
-                        entity="notes",
-                        entity_id=request.clip_id,
+                folder_paths: list[str] | None = None
+                if request.note.folder_id is not None:
+                    folder = next(
+                        (row for row in self.db.list_note_folders() if int(row["id"]) == int(request.note.folder_id)),
+                        None,
                     )
-                if existing_note is None:
-                    note_id = self.db.add_note(
-                        title=note_title,
-                        content=note_content,
-                        note_id=request.clip_id,
-                        conn=conn,
-                    )
-                    if note_id is None:
-                        raise CharactersRAGDBError("Failed to create canonical clip note.")  # noqa: TRY003
-                else:
-                    updates: dict[str, Any] = {}
-                    if str(existing_note.get("title") or "") != note_title:
-                        updates["title"] = note_title
-                    if str(existing_note.get("content") or "") != note_content:
-                        updates["content"] = note_content
-                    if updates:
-                        self.db.update_note(
-                            note_id=request.clip_id,
-                            update_data=updates,
-                            expected_version=int(existing_note["version"]),
-                            conn=conn,
-                        )
-
-                persisted_note = self._fetch_note_row(request.clip_id, conn=conn)
-                if persisted_note is None:
-                    raise CharactersRAGDBError("Canonical clip note could not be reloaded after save.")  # noqa: TRY003
-
+                    if folder is None:
+                        warnings.append(f"Folder '{request.note.folder_id}' was not found.")
+                    else:
+                        folder_paths = [str(folder["path"])]
+                persisted_note = capture_note_upsert(
+                    coordinator,
+                    note_id=note_id,
+                    title=note_title,
+                    content=note_content,
+                    keywords=request.note.keywords,
+                    folder_paths=folder_paths,
+                    expected_version=(int(existing_note["version"]) if existing_note is not None else None),
+                    source="web-clipper",
+                    key=request_fingerprint,
+                    request_fingerprint=request_fingerprint,
+                    server_routing_metadata=self._capture_routing_metadata(capture_metadata),
+                )
+                if replay is not None:
+                    note_content = str(persisted_note.get("content") or "")
+                    captured_at = self._capture_date_from_replay(replay, note_id=note_id)
+                    if not captured_at:
+                        raise SyncStoreError("WebClipper replay metadata is incomplete")
+                    capture_metadata["captured_at"] = captured_at
+                    try:
+                        capture_metadata = validate_capture_metadata_json_size(capture_metadata)
+                    except ValueError as exc:
+                        raise InputError(str(exc)) from exc
                 current_analysis_state = self._current_analysis_state(request.clip_id)
                 self._record_requested_enhancements(current_analysis_state, request)
-                self.db.upsert_note_clipper_document(
-                    clip_id=request.clip_id,
-                    note_id=request.clip_id,
-                    clip_type=request.clip_type,
-                    source_url=request.source_url,
-                    source_title=request.source_title,
-                    capture_metadata=capture_metadata,
-                    enrichments=current_analysis_state,
-                    content_budget=content_budget,
-                    source_note_version=int(persisted_note["version"]),
-                    conn=conn,
-                )
+                try:
+                    self.db.upsert_note_clipper_document(
+                        clip_id=request.clip_id,
+                        note_id=note_id,
+                        clip_type=request.clip_type,
+                        source_url=request.source_url,
+                        source_title=request.source_title,
+                        capture_metadata=capture_metadata,
+                        enrichments=current_analysis_state,
+                        content_budget=content_budget,
+                        source_note_version=int(persisted_note["version"]),
+                    )
+                except ConflictError:
+                    raise
+                except CharactersRAGDBError as exc:
+                    raise SyncStoreError("WebClipper sidecar projection is incomplete") from exc
+            else:
+                with self.db.transaction() as conn:
+                    existing_document = self._document_for_save(
+                        request.clip_id,
+                        conn=conn,
+                    )
+                    note_id = self._note_id_for_clip(request.clip_id, existing_document)
+                    existing_note = self._fetch_note_row(note_id, conn=conn)
+                    capture_metadata = self._merge_capture_metadata(existing_document, request)
+                    note_content = self._render_note_content(
+                        request=request,
+                        visible_body=visible_body,
+                        analysis=analysis_state,
+                        capture_metadata=capture_metadata,
+                    )
+                    if existing_note is not None and existing_document is None:
+                        raise _ClipIdCollisionError(
+                            "The canonical WebClipper note identity is already in use.",
+                            entity="notes",
+                            entity_id=note_id,
+                        )
+                    if existing_note is None:
+                        created_note_id = self.db.add_note(
+                            title=note_title,
+                            content=note_content,
+                            note_id=note_id,
+                            conn=conn,
+                        )
+                        if created_note_id is None:
+                            raise CharactersRAGDBError("Failed to create canonical clip note.")  # noqa: TRY003
+                    else:
+                        updates: dict[str, Any] = {}
+                        if str(existing_note.get("title") or "") != note_title:
+                            updates["title"] = note_title
+                        if str(existing_note.get("content") or "") != note_content:
+                            updates["content"] = note_content
+                        if updates:
+                            self.db.update_note(
+                                note_id=note_id,
+                                update_data=updates,
+                                expected_version=int(existing_note["version"]),
+                                conn=conn,
+                            )
+
+                    persisted_note = self._fetch_note_row(note_id, conn=conn)
+                    if persisted_note is None:
+                        raise CharactersRAGDBError("Canonical clip note could not be reloaded after save.")  # noqa: TRY003
+
+                    current_analysis_state = self._current_analysis_state(request.clip_id)
+                    self._record_requested_enhancements(current_analysis_state, request)
+                    self.db.upsert_note_clipper_document(
+                        clip_id=request.clip_id,
+                        note_id=note_id,
+                        clip_type=request.clip_type,
+                        source_url=request.source_url,
+                        source_title=request.source_title,
+                        capture_metadata=capture_metadata,
+                        enrichments=current_analysis_state,
+                        content_budget=content_budget,
+                        source_note_version=int(persisted_note["version"]),
+                        conn=conn,
+                    )
         except _ClipIdCollisionError:
             raise
         except (CharactersRAGDBError, ConflictError) as exc:
@@ -167,18 +260,20 @@ class WebClipperService:
                 workspace_placement=None,
                 attachments=[],
                 warnings=[f"Canonical note save failed: {exc}"],
-                note_id=request.clip_id,
+                note_id=note_id,
                 workspace_placement_saved=False,
                 workspace_placement_count=0,
             )
 
-        note_summary = self._build_note_summary(self._require_note(request.clip_id))
+        note_id = str(persisted_note["id"])
+        note_summary = self._build_note_summary(self._require_note(note_id))
 
-        self._sync_keywords(request.clip_id, request.note.keywords, warnings)
-        self._sync_note_folder(request.clip_id, request.note.folder_id, warnings)
+        if coordinator is None:
+            self._sync_keywords(note_id, request.note.keywords, warnings)
+            self._sync_note_folder(note_id, request.note.folder_id, warnings)
 
         attachments = self._persist_attachments(
-            note_id=request.clip_id,
+            note_id=note_id,
             attachments=[*request.attachments, *generated_attachments],
             warnings=warnings,
         )
@@ -224,17 +319,24 @@ class WebClipperService:
         }
         latest_analysis_state = self._current_analysis_state(request.clip_id)
         self._record_requested_enhancements(latest_analysis_state, request)
-        self.db.upsert_note_clipper_document(
-            clip_id=request.clip_id,
-            note_id=request.clip_id,
-            clip_type=request.clip_type,
-            source_url=request.source_url,
-            source_title=request.source_title,
-            capture_metadata=capture_metadata,
-            enrichments=latest_analysis_state,
-            content_budget=final_content_budget,
-            source_note_version=note_summary.version,
-        )
+        try:
+            self.db.upsert_note_clipper_document(
+                clip_id=request.clip_id,
+                note_id=note_id,
+                clip_type=request.clip_type,
+                source_url=request.source_url,
+                source_title=request.source_title,
+                capture_metadata=capture_metadata,
+                enrichments=latest_analysis_state,
+                content_budget=final_content_budget,
+                source_note_version=note_summary.version,
+            )
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as exc:
+            if coordinator is not None:
+                raise SyncStoreError("WebClipper sidecar projection is incomplete") from exc
+            raise
         return WebClipperSaveResponse(
             clip_id=request.clip_id,
             status=status,
@@ -249,12 +351,14 @@ class WebClipperService:
 
     def get_clip_status(self, clip_id: str) -> WebClipperStatusResponse:
         """Return the canonical note, placements, attachments, and analysis for a clip."""
+        clip_id = self._normalized_clip_id(clip_id)
         clip_document = self._require_clip_document(clip_id)
-        note = self._require_note(clip_id)
+        note_id = str(clip_document["note_id"])
+        note = self._require_note(note_id)
         placements = [
             self._placement_response_from_row(row) for row in self.db.list_note_clipper_workspace_placements(clip_id)
         ]
-        attachments = self._list_attachments(note_id=clip_id)
+        attachments = self._list_attachments(note_id=note_id)
         analysis = self._normalize_json_dict(clip_document.get("analysis_json"))
         content_budget = self._normalize_json_dict(clip_document.get("content_budget_json"))
         status = str(content_budget.get("last_save_status") or "saved")
@@ -276,11 +380,13 @@ class WebClipperService:
         payload: WebClipperEnrichmentPayload,
     ) -> WebClipperEnrichmentResponse:
         """Persist OCR/VLM structured output and append inline summaries safely."""
+        clip_id = self._normalized_clip_id(clip_id)
         if payload.clip_id != clip_id:
             raise InputError("clip_id path and payload clip_id must match.")  # noqa: TRY003
 
         clip_document = self._require_clip_document(clip_id)
-        note = self._require_note(clip_id)
+        note_id = str(clip_document["note_id"])
+        note = self._require_note(note_id)
         analysis = self._normalize_json_dict(clip_document.get("analysis_json"))
 
         trimmed_summary = self._truncate_inline_summary(
@@ -311,18 +417,31 @@ class WebClipperService:
                     capture_metadata=self._normalize_json_dict(clip_document.get("capture_metadata_json")),
                 )
                 if next_content != str(note.get("content") or ""):
-                    self.db.update_note(
-                        note_id=clip_id,
-                        update_data={"content": next_content},
-                        expected_version=current_note_version,
-                    )
-                    note = self._require_note(clip_id)
+                    coordinator = active_coordinator(self.db, user_id=self.user_id)
+                    if coordinator is not None:
+                        capture_note_upsert(
+                            coordinator,
+                            note_id=note_id,
+                            title=str(note.get("title") or ""),
+                            content=next_content,
+                            conversation_id=note.get("conversation_id"),
+                            message_id=note.get("message_id"),
+                            expected_version=current_note_version,
+                            source="web-clipper-enrichment",
+                        )
+                    else:
+                        self.db.update_note(
+                            note_id=note_id,
+                            update_data={"content": next_content},
+                            expected_version=current_note_version,
+                        )
+                    note = self._require_note(note_id)
                     current_note_version = int(note["version"])
                 inline_applied = True
 
         self.db.upsert_note_clipper_document(
             clip_id=clip_id,
-            note_id=clip_id,
+            note_id=note_id,
             clip_type=str(clip_document.get("clip_type") or "clip"),
             source_url=clip_document.get("source_url"),
             source_title=clip_document.get("source_title"),
@@ -348,6 +467,136 @@ class WebClipperService:
         if not title:
             raise InputError("Note title cannot be empty.")  # noqa: TRY003
         return title
+
+    @staticmethod
+    def _active_sync_request_fingerprint(coordinator: Any, request: WebClipperSaveRequest) -> str:
+        """Hash normalized client intent without generated timestamps or versions."""
+
+        def digest(value: str | None) -> str | None:
+            if value is None:
+                return None
+            return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+        workspace = request.workspace
+        fields = {
+            "clip_id": request.clip_id.strip(),
+            "clip_type": request.clip_type.strip(),
+            "source_url": request.source_url.strip(),
+            "source_title": request.source_title.strip(),
+            "destination_mode": request.destination_mode,
+            "note": {
+                "title": request.note.title.strip() if request.note.title else None,
+                "comment": request.note.comment.strip() if request.note.comment else None,
+                "folder_id": request.note.folder_id,
+                "keywords": [keyword.strip() for keyword in request.note.keywords],
+            },
+            "workspace": (
+                {
+                    "workspace_id": workspace.workspace_id.strip(),
+                    "default_review_state": workspace.default_review_state,
+                }
+                if workspace is not None
+                else None
+            ),
+            "content": {
+                "visible_body": digest(request.content.visible_body),
+                "full_extract": digest(request.content.full_extract),
+                "selected_text": digest(request.content.selected_text),
+            },
+            "attachments": [
+                {
+                    "slot": attachment.slot.strip(),
+                    "file_name": attachment.file_name.strip() if attachment.file_name else None,
+                    "media_type": attachment.media_type.strip(),
+                    "text_content": digest(attachment.text_content),
+                    "content_base64": digest(attachment.content_base64),
+                    "source_url": attachment.source_url.strip() if attachment.source_url else None,
+                }
+                for attachment in request.attachments
+            ],
+            "enhancements": {
+                "run_ocr": request.enhancements.run_ocr,
+                "run_vlm": request.enhancements.run_vlm,
+            },
+            "capture_metadata": dict(request.capture_metadata),
+        }
+        return coordinator.request_fingerprint("web-clipper.save", fields)
+
+    @staticmethod
+    def _normalized_captured_at(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        if (
+            not normalized
+            or normalized != value
+            or len(normalized) > _MAX_CAPTURED_AT_LENGTH
+            or any(character in normalized for character in ("\r", "\n", "\x00"))
+        ):
+            return None
+        return normalized
+
+    @staticmethod
+    def _normalized_clip_id(value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized or len(normalized) > _MAX_CLIP_ID_LENGTH:
+            raise InputError("clip_id must contain 1 to 256 non-whitespace characters")
+        return normalized
+
+    @classmethod
+    def _capture_routing_metadata(
+        cls,
+        capture_metadata: Mapping[str, object],
+    ) -> dict[str, object]:
+        captured_at = cls._normalized_captured_at(capture_metadata.get("captured_at"))
+        if captured_at is None:
+            raise InputError("WebClipper captured_at metadata is invalid")
+        return {
+            _WEB_CLIPPER_CAPTURE_ROUTING_KEY: {"captured_at": captured_at},
+        }
+
+    @classmethod
+    def _capture_date_from_replay(cls, replay: Any, *, note_id: str) -> str | None:
+        note_steps = [step for step in replay.steps if step.domain == "notes.note" and step.object_id == note_id]
+        if len(note_steps) != 1:
+            return None
+        metadata = note_steps[0].routing_metadata.get(_WEB_CLIPPER_CAPTURE_ROUTING_KEY)
+        if not isinstance(metadata, Mapping):
+            return None
+        return cls._normalized_captured_at(metadata.get("captured_at"))
+
+    def _note_id_for_clip(
+        self,
+        clip_id: str,
+        document: dict[str, Any] | None,
+    ) -> str:
+        """Resolve the private canonical note identity for a public clip id."""
+        if document is not None:
+            return str(document["note_id"])
+        return stable_note_id(
+            "web-clipper",
+            f"{self.user_id}\0{self._normalized_clip_id(clip_id)}",
+        )
+
+    def _document_for_save(
+        self,
+        clip_id: str,
+        *,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
+        document = self.db._fetch_note_clipper_document_row(
+            column="clip_id",
+            value=self._normalized_clip_id(clip_id),
+            conn=conn,
+            include_deleted=True,
+        )
+        if document is not None and bool(document.get("deleted")):
+            raise _ClipIdCollisionError(
+                "The clip is deleted; restore it before saving again.",
+                entity="note_clipper_documents",
+                entity_id=self._normalized_clip_id(clip_id),
+            )
+        return document
 
     def _record_requested_enhancements(
         self,
@@ -391,6 +640,10 @@ class WebClipperService:
         )
         merged.update(request.capture_metadata)
         merged.setdefault("captured_at", datetime.now(timezone.utc).isoformat())
+        captured_at = self._normalized_captured_at(merged.get("captured_at"))
+        if captured_at is None:
+            raise InputError("WebClipper captured_at metadata is invalid")
+        merged["captured_at"] = captured_at
         try:
             return validate_capture_metadata_json_size(merged)
         except ValueError as exc:
@@ -716,9 +969,7 @@ class WebClipperService:
                 encoding="utf-8",
             )
         except OSError as exc:
-            raise CharactersRAGDBError(
-                f"Attachment persistence failed for slot '{attachment.slot}'."
-            ) from exc  # noqa: TRY003
+            raise CharactersRAGDBError(f"Attachment persistence failed for slot '{attachment.slot}'.") from exc  # noqa: TRY003
         return self._attachment_response(note_id=note_id, file_path=target_path)
 
     def _ensure_workspace_placement(
@@ -747,7 +998,7 @@ class WebClipperService:
                     clip_id=request.clip_id,
                     workspace_id=request.workspace.workspace_id,
                     workspace_note_id=workspace_note_id,
-                    source_note_id=request.clip_id,
+                    source_note_id=note_summary.id,
                     source_note_version=note_summary.version,
                 )
                 return self._placement_response_from_row(
@@ -772,7 +1023,7 @@ class WebClipperService:
             clip_id=request.clip_id,
             workspace_id=request.workspace.workspace_id,
             workspace_note_id=int(workspace_note["id"]),
-            source_note_id=request.clip_id,
+            source_note_id=note_summary.id,
             source_note_version=note_summary.version,
         )
         return self._placement_response_from_row(placement_row)
@@ -959,9 +1210,7 @@ class WebClipperService:
     def _require_clip_document(self, clip_id: str) -> dict[str, Any]:
         document = self.db.get_note_clipper_document_by_clip_id(clip_id)
         if document is None:
-            raise ConflictError(
-                "Clip document not found.", entity="note_clipper_documents", entity_id=clip_id
-            )  # noqa: TRY003
+            raise ConflictError("Clip document not found.", entity="note_clipper_documents", entity_id=clip_id)  # noqa: TRY003
         return document
 
     def _fetch_note_row(self, note_id: str, *, conn: Any) -> dict[str, Any] | None:

@@ -11,7 +11,9 @@ from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
     SyncConflictCreate,
+    SyncDataset,
     SyncEnvelopeCreate,
 )
 from tldw_Server_API.app.core.Sync.v2.security import (
@@ -53,6 +55,7 @@ def _service(
     encryption=None,
     id_factory=None,
     scan_limit: int = 100,
+    dataset_bootstrapper=None,
 ) -> tuple[SyncV2Service, SyncV2Store]:
     store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_profile.db"))
     service = SyncV2Service(
@@ -64,8 +67,24 @@ def _service(
             server_trusted_encryption=encryption or _ready_encryption(),
             restore_manifest_scan_limit=scan_limit,
         ),
+        dataset_bootstrapper=dataset_bootstrapper,
     )
     return service, store
+
+
+class _PausedOrganizationBootstrapper:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def bootstrap(
+        self,
+        *,
+        service: SyncV2Service,
+        user_id: str,
+        dataset: SyncDataset,
+    ) -> SyncDataset:
+        self.calls.append((user_id, dataset.dataset_id))
+        return service.store.get_dataset(dataset.dataset_id) or dataset
 
 
 def _note_envelope(**overrides) -> SyncEnvelopeCreate:
@@ -316,6 +335,11 @@ def test_profile_status_reports_profile_and_per_domain_apply_health(tmp_path: Pa
     assert domains["notes.note"].envelope_count == 1
     assert domains["notes.note"].pending_apply_count == 1
     assert domains["notes.note"].failed_apply_count == 0
+    assert domains["notes.note"].repair_status == {
+        "status": "repair_needed",
+        "pending_apply_count": 1,
+        "failed_apply_count": 0,
+    }
     assert domains["notes.note"].last_apply_status == "pending"
     assert domains["notes.note"].last_apply_result["server_cursor"] == note.server_cursor
     assert domains["chat.message"].envelope_count == 1
@@ -397,3 +421,111 @@ def test_bootstrap_refuses_when_server_trusted_encryption_is_not_ready(tmp_path:
     assert profile.warnings[0]["code"] == "sync_encryption_attestation_required"
     assert store.list_datasets_for_user("user-1") == []
     assert store.list_devices_for_user("user-1") == []
+
+
+def test_notes_organization_subset_enrollment_is_rejected_without_mutation(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+
+    with pytest.raises(
+        SyncStoreError,
+        match="notes_organization_sync_domains_incomplete",
+    ):
+        service.bootstrap_profile(
+            user_id="user-1",
+            mode="offline_sync",
+            device_id="device-1",
+            requested_domains=["notes.keyword"],
+        )
+
+    assert store.list_datasets_for_user("user-1") == []
+    assert store.list_devices_for_user("user-1") == []
+
+
+def test_notes_organization_full_enrollment_is_atomic_initializing_and_safe(
+    tmp_path: Path,
+) -> None:
+    bootstrapper = _PausedOrganizationBootstrapper()
+    service, store = _service(tmp_path, dataset_bootstrapper=bootstrapper)
+    requested = [*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]
+
+    first = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=requested,
+    )
+    second = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=requested,
+    )
+
+    assert first.dataset is not None
+    assert first.dataset.domains == requested
+    assert first.dataset.notes_organization == {
+        "state": "initializing",
+        "captured_count": 0,
+        "expected_count": 0,
+        "error_code": None,
+    }
+    assert second.dataset is not None
+    assert second.dataset.notes_organization == first.dataset.notes_organization
+    assert bootstrapper.calls == [
+        ("user-1", first.dataset.dataset_id),
+        ("user-1", first.dataset.dataset_id),
+    ]
+    stored = store.get_dataset(first.dataset.dataset_id)
+    assert stored is not None
+    metadata = stored.metadata["notes_organization_v1"]
+    assert metadata["state"] == "initializing"
+    assert isinstance(metadata["bootstrap_id"], str)
+    assert metadata["bootstrap_id"]
+    assert not hasattr(first.dataset, "bootstrap_id")
+    device = store.get_device("user-1", "device-1")
+    assert device is not None
+    assert device.capabilities["requested_domains"] == requested
+
+
+def test_notes_organization_failed_profile_exposes_only_safe_summary(
+    tmp_path: Path,
+) -> None:
+    bootstrapper = _PausedOrganizationBootstrapper()
+    service, store = _service(tmp_path, dataset_bootstrapper=bootstrapper)
+    requested = [*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]
+    profile = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=requested,
+    )
+    assert profile.dataset is not None
+    stored = store.get_dataset(profile.dataset.dataset_id)
+    assert stored is not None
+    bootstrap_id = stored.metadata["notes_organization_v1"]["bootstrap_id"]
+
+    store.transition_notes_organization_bootstrap(
+        stored.dataset_id,
+        bootstrap_id=bootstrap_id,
+        expected_state="initializing",
+        state="failed",
+        captured_count=3,
+        expected_count=4,
+        error_code="notes_organization_bootstrap_source_invalid",
+    )
+    failed = service.profile_status(
+        user_id="user-1",
+        dataset_id=stored.dataset_id,
+        device_id="device-1",
+    )
+
+    assert failed.dataset is not None
+    assert failed.dataset.notes_organization == {
+        "state": "failed",
+        "captured_count": 3,
+        "expected_count": 4,
+        "error_code": "notes_organization_bootstrap_source_invalid",
+    }
+    assert "bootstrap_id" not in failed.dataset.notes_organization

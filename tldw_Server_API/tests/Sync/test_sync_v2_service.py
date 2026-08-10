@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
+from threading import Barrier, Event
 from typing import cast
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
@@ -17,28 +22,45 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
 )
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaMetadataAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
+    SyncMaterializationBusyError,
     SyncStoreError,
 )
-from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
+from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult, NotesMaterializer
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
+    NotesOrganizationMaterializer,
+)
 from tldw_Server_API.app.core.Sync.v2.models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
+    M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    SyncConflict,
     SyncConflictCreate,
     SyncDataset,
+    SyncDatasetCreate,
     SyncDeviceCursor,
     SyncDeviceUpsert,
     SyncDomain,
+    SyncEnvelope,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
     SyncObjectState,
 )
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    mutation_group_plan_hash,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
+from tldw_Server_API.tests.Sync.notes_organization_test_support import (
+    build_ready_notes_sync_stack,
+)
 
 
 def _clock() -> str:
@@ -175,6 +197,49 @@ def _m1_note_envelope(**overrides) -> SyncEnvelopeCreate:
     }
     payload.update(overrides)
     return SyncEnvelopeCreate(**payload)
+
+
+def _store_pulled_envelope_at_canonical_cursor(
+    store: SyncV2Store,
+    envelope: SyncEnvelope,
+) -> SyncEnvelope:
+    """Store a pulled envelope with its canonical cursor in a fresh SQLite store."""
+
+    assert envelope.server_cursor is not None
+    if envelope.server_cursor > 1:
+        with store.db.backend.transaction() as connection:
+            store.db.execute(
+                "UPDATE sqlite_sequence SET seq = ? WHERE name = 'sync_envelopes'",
+                (envelope.server_cursor - 1,),
+                connection=connection,
+            )
+    stored = store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=envelope.dataset_id,
+            client_envelope_id=envelope.client_envelope_id,
+            domain=envelope.domain,
+            operation=envelope.operation,
+            object_id=envelope.object_id,
+            device_id=envelope.device_id,
+            client_sequence=envelope.client_sequence,
+            base_server_cursor=envelope.base_server_cursor,
+            base_object_revision=envelope.base_object_revision,
+            base_object_hash=envelope.base_object_hash,
+            object_revision=envelope.object_revision,
+            schema_version=envelope.schema_version,
+            routing_metadata=envelope.routing_metadata,
+            payload=envelope.payload,
+            payload_hash=envelope.payload_hash,
+            created_at_client=envelope.created_at_client,
+            deleted=envelope.deleted,
+            encryption_metadata=envelope.encryption_metadata,
+            adapter_version=envelope.adapter_version,
+            status="accepted",
+            apply_status="pending",
+        )
+    )
+    assert stored.server_cursor == envelope.server_cursor
+    return stored
 
 
 def _workspace_envelope(**overrides) -> SyncEnvelopeCreate:
@@ -339,6 +404,222 @@ class _RaisingMaterializer:
         raise RuntimeError("projection exploded at /private/user-data")
 
 
+class _AcceptedConflictThenApplyMaterializer(_OutcomeMaterializer):
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.release_resolution: Event | None = None
+        self.resolution_entered = Event()
+        self.later_entered = Event()
+
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        self.calls.append(envelope.client_envelope_id)
+        if envelope.client_envelope_id == "env-materialization-conflict":
+            assert envelope.server_cursor is not None
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="conflict",
+                apply_error_code="projection_conflict",
+                apply_error_message="review required",
+            )
+            return MaterializationResult(
+                status="conflict",
+                conflict_type="projection_conflict",
+                error_code="projection_conflict",
+            )
+        if envelope.client_envelope_id == "env-resolution-copy":
+            self.resolution_entered.set()
+            if self.release_resolution is not None:
+                assert self.release_resolution.wait(timeout=5)
+        if envelope.client_envelope_id == "env-after-resolution":
+            self.later_entered.set()
+        return super().apply(envelope, store=store)
+
+
+def _accepted_materialization_conflict_service(
+    sync_store: SyncV2Store,
+    *,
+    real_notes_adapter: bool = False,
+) -> tuple[SyncV2Service, _AcceptedConflictThenApplyMaterializer]:
+    materializer = _AcceptedConflictThenApplyMaterializer()
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry(
+            [
+                NotesDomainAdapter()
+                if real_notes_adapter
+                else StaticSyncAdapter(
+                    domain="notes.note",
+                    supported_adapter_versions={1},
+                )
+            ]
+        ),
+        materializers={"notes.note": materializer},
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    _register_devices(service, "user-1", "device-1", "device-2")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    return service, materializer
+
+
+def _accepted_conflict_after_applied_predecessor(
+    sync_store: SyncV2Store,
+    note_db: CharactersRAGDB,
+) -> tuple[SyncV2Service, SyncEnvelope, SyncEnvelope, SyncConflict]:
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry([NotesDomainAdapter()]),
+        materializers={"notes.note": NotesMaterializer(note_db)},
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    _register_devices(service, "user-1", "device-1", "device-2")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    baseline_result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-applied-predecessor",
+                object_id="note-original",
+                client_sequence=1,
+                object_revision=1,
+                payload={"title": "Applied", "content": "Projected baseline"},
+                payload_hash="sha256:applied",
+            )
+        ],
+    )
+    baseline = sync_store.get_envelope_by_server_cursor(
+        baseline_result.accepted[0].server_sequence
+    )
+    assert baseline is not None
+    source = sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-materialization-conflict",
+            object_id="note-original",
+            client_sequence=2,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash="sha256:applied",
+            object_revision=2,
+            payload={"title": "Conflict", "content": "Never projected"},
+            payload_hash="sha256:conflict",
+            status="accepted",
+        )
+    )
+    source = sync_store.mark_envelope_apply_status(
+        source.server_cursor,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-materialization",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            entity_id="note-original",
+            conflict_type="projection_conflict",
+            local_envelope_id=source.client_envelope_id,
+            server_sequence=source.server_cursor,
+        )
+    )
+    return service, baseline, source, conflict
+
+
+def _accepted_keyword_conflict_after_applied_predecessor(
+    tmp_path: Path,
+) -> tuple[CharactersRAGDB, SyncV2Store, SyncV2Service, str, SyncEnvelope, SyncEnvelope, SyncConflict]:
+    note_db, sync_store, service = build_ready_notes_sync_stack(tmp_path)
+    profile = service.profile(user_id="user-1", device_id="frontend-device")
+    dataset_id = profile.active_dataset_id
+    assert dataset_id is not None
+    service.register_device(
+        user_id="user-1",
+        display_name="device-2",
+        client_type="chatbook",
+        device_id="device-2",
+        capabilities={
+            "requested_domains": [*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]
+        },
+    )
+    keyword_id = "11111111-1111-4111-8111-111111111111"
+    baseline_result = service.push(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        device_id="frontend-device",
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-keyword-baseline",
+                domain="notes.keyword",
+                operation="upsert",
+                object_id=keyword_id,
+                device_id="frontend-device",
+                client_sequence=1,
+                object_revision=1,
+                schema_version=1,
+                payload={"keyword": "Baseline"},
+                payload_hash="sha256:keyword-baseline",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+            )
+        ],
+    )
+    baseline = sync_store.get_envelope_by_server_cursor(
+        baseline_result.accepted[0].server_sequence
+    )
+    assert baseline is not None
+    source = sync_store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id="env-keyword-conflict-source",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=keyword_id,
+            device_id="frontend-device",
+            client_sequence=2,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=2,
+            schema_version=1,
+            payload={"keyword": "Never projected"},
+            payload_hash="sha256:keyword-conflict",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            adapter_version=1,
+            status="accepted",
+        )
+    )
+    source = sync_store.mark_envelope_apply_status(
+        source.server_cursor,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-keyword-materialization",
+            dataset_id=dataset_id,
+            domain="notes.keyword",
+            entity_id=keyword_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=source.client_envelope_id,
+            server_sequence=source.server_cursor,
+        )
+    )
+    return note_db, sync_store, service, dataset_id, baseline, source, conflict
+
+
 def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
     sync_service: SyncV2Service,
 ):
@@ -357,7 +638,24 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "media.item",
         "media.keyword",
         "media.keyword_link",
+        "notes.keyword",
+        "notes.keyword_link",
+        "notes.keyword_collection",
+        "notes.keyword_collection_link",
+        "notes.folder",
+        "notes.folder_link",
     ]
+    assert {
+        domain: capabilities.operations[domain]
+        for domain in NOTES_ORGANIZATION_DOMAINS
+    } == {
+        "notes.keyword": ["upsert", "tombstone"],
+        "notes.keyword_link": ["upsert", "tombstone"],
+        "notes.keyword_collection": ["upsert", "tombstone"],
+        "notes.keyword_collection_link": ["upsert", "tombstone"],
+        "notes.folder": ["upsert", "tombstone"],
+        "notes.folder_link": ["upsert", "tombstone"],
+    }
     assert capabilities.max_batch_size == 10
     assert capabilities.max_envelope_payload_bytes == 1024
     assert capabilities.max_attachment_bytes == 4096
@@ -726,6 +1024,82 @@ def test_background_policy_lease_and_status_aggregation(
     assert notes_status.last_successful_pull_at is not None
 
 
+def test_background_health_counts_pending_projection_as_replayable(
+    sync_service: SyncV2Service,
+    sync_store: SyncV2Store,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-pending-projection",
+            object_id="note-pending",
+            device_id="device-1",
+            client_sequence=1,
+            payload_hash="sha256:note-pending",
+            apply_status="pending",
+        )
+    )
+
+    status = sync_service.background_status(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+    )
+
+    notes_status = {item.domain: item for item in status.domains}["notes.note"]
+    assert notes_status.replayable_failures == 1
+    assert status.replayable_failure_count == 1
+
+
+def test_push_lock_timeout_stays_pending_and_surfaces_in_background_health(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
+        ),
+        materializers={"notes.note": _OutcomeMaterializer()},
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    @contextmanager
+    def busy_guard(*args, **kwargs):
+        raise SyncMaterializationBusyError()
+        yield  # pragma: no cover - required for the contextmanager protocol.
+
+    monkeypatch.setattr(sync_store, "materialization_guard", busy_guard)
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_m1_note_envelope()],
+    )
+    status = service.background_status(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+    )
+
+    assert result.rejected == []
+    assert result.conflicts == []
+    assert result.accepted[0].apply_status == "pending"
+    assert status.replayable_failure_count == 1
+
+
 def test_background_sync_rejects_revoked_devices(sync_service: SyncV2Service) -> None:
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1")
     sync_service.revoke_device(user_id="user-1", device_id="device-1", reason="lost")
@@ -772,6 +1146,38 @@ def test_dataset_enrollment_rejects_cross_user_dataset_takeover(sync_service: Sy
 
     with pytest.raises(SyncStoreError):
         sync_service.enroll_dataset(user_id="user-2", dataset_id="shared-dataset")
+
+
+def test_public_dataset_enrollment_rejects_notes_organization_and_reserved_metadata(
+    sync_service: SyncV2Service,
+) -> None:
+    forged_metadata = {
+        "default_personal": True,
+        "client_family": "chatbook",
+        "notes_organization_v1": {
+            "state": "ready",
+            "bootstrap_id": "client-forged",
+            "captured_count": 1,
+            "expected_count": 1,
+        },
+    }
+
+    with pytest.raises(SyncStoreError, match="sync_reserved_dataset_enrollment"):
+        sync_service.enroll_dataset(
+            user_id="user-1",
+            dataset_id="forged-org",
+            domains=[*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS],
+            metadata=forged_metadata,
+        )
+    with pytest.raises(SyncStoreError, match="sync_reserved_dataset_enrollment"):
+        sync_service.enroll_dataset(
+            user_id="user-1",
+            dataset_id="forged-markers",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata=forged_metadata,
+        )
+
+    assert sync_service.store.list_datasets_for_user("user-1") == []
 
 
 def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
@@ -1365,6 +1771,74 @@ def test_push_returns_per_envelope_accepted_rejected_and_conflict_outcomes(
     assert result.next_cursor == str(result.conflicts[0].server_sequence)
 
 
+def test_concurrent_client_pushes_from_same_head_create_one_reviewable_conflict(
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    seed = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                payload={"title": "Original", "content": "Body"},
+                payload_hash="sha256:original",
+                object_revision=1,
+            )
+        ],
+    )
+    seed_cursor = seed.accepted[0].server_sequence
+    append_barrier = Barrier(2)
+    original_insert = sync_service.store.insert_envelope
+
+    def insert_after_both_preflights(envelope):
+        if envelope.status == "accepted":
+            append_barrier.wait()
+        return original_insert(envelope)
+
+    monkeypatch.setattr(sync_service.store, "insert_envelope", insert_after_both_preflights)
+
+    def push(device_id: str, envelope_id: str, title: str):
+        return sync_service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id=device_id,
+            envelopes=[
+                _m1_note_envelope(
+                    client_envelope_id=envelope_id,
+                    device_id=device_id,
+                    client_sequence=2,
+                    payload={"title": title, "content": "Body"},
+                    payload_hash=f"sha256:{title.lower()}",
+                    object_revision=2,
+                    base_server_cursor=seed_cursor,
+                    base_object_revision=1,
+                    base_object_hash="sha256:original",
+                )
+            ],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda item: push(*item),
+                [
+                    ("device-1", "env-concurrent-1", "First"),
+                    ("device-2", "env-concurrent-2", "Second"),
+                ],
+            )
+        )
+
+    assert sum(len(result.accepted) for result in results) == 1
+    assert sum(len(result.conflicts) for result in results) == 1
+    assert sum(len(result.rejected) for result in results) == 0
+
+
 def test_m1_push_reports_apply_outcomes_and_failed_projection_is_replayable(
     sync_store: SyncV2Store,
 ):
@@ -1940,6 +2414,7 @@ def test_resolve_conflict_stores_resolution_envelope(sync_store: SyncV2Store):
     service = SyncV2Service(
         store=sync_store,
         adapters=registry,
+        materializers={"notes.note": _OutcomeMaterializer()},
         clock=_clock,
         id_factory=lambda prefix: f"{prefix}-generated",
     )
@@ -1952,6 +2427,7 @@ def test_resolve_conflict_stores_resolution_envelope(sync_store: SyncV2Store):
         envelopes=[_envelope(client_envelope_id="env-conflict")],
     )
     conflict_id = pushed.conflicts[0].conflict_id
+    original_conflict_cursor = pushed.conflicts[0].server_sequence
 
     resolved = service.resolve_conflict(
         user_id="user-1",
@@ -1973,7 +2449,8 @@ def test_resolve_conflict_stores_resolution_envelope(sync_store: SyncV2Store):
 
     assert resolved.status == "resolved"
     assert resolved.resolved_by_envelope_id == pulled.envelopes[0].envelope_id
-    assert resolved.server_cursor == pulled.envelopes[0].server_cursor
+    assert resolved.server_cursor == original_conflict_cursor
+    assert resolved.server_cursor != pulled.envelopes[0].server_cursor
     assert resolved.resolution_action == "overwrite"
     assert [envelope.client_envelope_id for envelope in pulled.envelopes] == ["env-resolution"]
     assert pulled.envelopes[0].status == "accepted"
@@ -2000,6 +2477,7 @@ def test_resolve_conflict_duplicate_rename_accepts_distinct_object_id(
     service = SyncV2Service(
         store=sync_store,
         adapters=registry,
+        materializers={"notes.note": _OutcomeMaterializer()},
         clock=_clock,
         id_factory=lambda prefix: f"{prefix}-generated",
     )
@@ -2052,8 +2530,8 @@ def test_resolve_conflict_duplicate_rename_accepts_distinct_object_id(
     assert resolved.resolved_by_envelope_id == pulled.envelopes[0].envelope_id
     assert resolved.resolved_by_envelope_id.startswith("srv_env_")
     assert resolved.resolved_by_envelope_id != "env-resolution-copy"
-    assert resolved.server_cursor == pulled.envelopes[0].server_cursor
-    assert resolved.server_cursor != original_conflict_cursor
+    assert resolved.server_cursor == original_conflict_cursor
+    assert resolved.server_cursor != pulled.envelopes[0].server_cursor
 
 
 def test_resolve_conflict_overwrite_materializes_resolution_envelope(
@@ -2136,6 +2614,2181 @@ def test_resolve_conflict_overwrite_materializes_resolution_envelope(
     ]
 
 
+def test_accepted_materialization_conflict_duplicate_resolution_terminalizes_predecessor(
+    sync_store: SyncV2Store,
+) -> None:
+    service, materializer = _accepted_materialization_conflict_service(sync_store)
+    source_create = _m1_note_envelope(
+        client_envelope_id="env-materialization-conflict",
+        object_id="note-original",
+        object_revision=1,
+        payload_hash="sha256:original",
+    )
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[source_create],
+    )
+    conflict = pushed.conflicts[0]
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=conflict.conflict_id,
+        action="duplicate_rename",
+        resolved_by_device_id="device-1",
+        resolution_envelope=_m1_note_envelope(
+            client_envelope_id="env-resolution-copy",
+            object_id="note-copy",
+            client_sequence=2,
+            object_revision=1,
+            payload_hash="sha256:copy",
+        ),
+    )
+    envelopes = sync_store.list_envelopes_after("dataset-1", 0, status=None)
+    source = next(
+        item
+        for item in envelopes
+        if item.client_envelope_id == "env-materialization-conflict"
+    )
+    resolution = next(
+        item for item in envelopes if item.client_envelope_id == "env-resolution-copy"
+    )
+    replayed_source = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[source_create],
+    )
+
+    assert resolved.status == "resolved"
+    assert source.apply_status == "superseded"
+    assert source.apply_error_code == "sync_conflict_superseded"
+    assert resolution.apply_status == "applied"
+    assert replayed_source.accepted[0].apply_status == "superseded"
+    assert materializer.calls.count("env-materialization-conflict") == 1
+
+
+def test_accepted_conflict_overwrite_materializes_from_last_applied_predecessor(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+) -> None:
+    note_db = CharactersRAGDB(
+        db_path=str(tmp_path / "conflict-overwrite-notes.db"),
+        client_id="user-1",
+    )
+    service, baseline, source, conflict = _accepted_conflict_after_applied_predecessor(
+        sync_store,
+        note_db,
+    )
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="device-1",
+        resolution_envelope=_m1_note_envelope(
+            client_envelope_id="env-overwrite",
+            object_id="note-original",
+            client_sequence=3,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=2,
+            payload={"title": "Resolved", "content": "Projected replacement"},
+            payload_hash="sha256:resolved",
+        ),
+    )
+
+    head = sync_store.get_current_head("dataset-1", "notes.note", "note-original")
+    state = sync_store.get_object_state("dataset-1", "notes.note", "note-original")
+    note = note_db.get_note_by_id("note-original")
+    pulled = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor=0,
+        domains=["notes.note"],
+    )
+    client_store = SyncV2Store(
+        SyncDatabase(sqlite_path=tmp_path / "fresh-client-sync.db")
+    )
+    client_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note"],
+        )
+    )
+    client_db = CharactersRAGDB(
+        db_path=str(tmp_path / "fresh-client-notes.db"),
+        client_id="user-1",
+    )
+    client_materializer = NotesMaterializer(client_db)
+    client_results = []
+    for envelope in pulled.envelopes:
+        stored = client_store.insert_envelope(
+            SyncEnvelopeCreate(
+                dataset_id=envelope.dataset_id,
+                client_envelope_id=envelope.client_envelope_id,
+                domain=envelope.domain,
+                operation=envelope.operation,
+                object_id=envelope.object_id,
+                device_id=envelope.device_id,
+                client_sequence=envelope.client_sequence,
+                base_server_cursor=envelope.base_server_cursor,
+                base_object_revision=envelope.base_object_revision,
+                base_object_hash=envelope.base_object_hash,
+                object_revision=envelope.object_revision,
+                payload=envelope.payload,
+                payload_hash=envelope.payload_hash,
+                created_at_client=envelope.created_at_client,
+                deleted=envelope.deleted,
+                encryption_metadata=envelope.encryption_metadata,
+                status="accepted",
+                apply_status="pending",
+            )
+        )
+        client_results.append(client_materializer.apply(stored, store=client_store))
+    client_note = client_db.get_note_by_id("note-original")
+    assert resolved.status == "resolved"
+    assert head is not None and head.client_envelope_id == "env-overwrite"
+    assert state is not None and state.latest_server_cursor == head.server_cursor
+    assert state.object_revision == 2
+    assert baseline.server_cursor < source.server_cursor < head.server_cursor
+    assert note is not None and note["title"] == "Resolved"
+    assert [item.client_envelope_id for item in pulled.envelopes] == [
+        "env-applied-predecessor",
+        "env-overwrite",
+    ]
+    assert pulled.envelopes[1].base_server_cursor == baseline.server_cursor
+    assert pulled.envelopes[1].base_object_revision == baseline.object_revision
+    assert pulled.envelopes[1].base_object_hash == baseline.payload_hash
+    assert [result.status for result in client_results] == ["applied", "applied"]
+    assert client_note is not None and client_note["title"] == "Resolved"
+    assert "Never projected" not in str(pulled)
+
+
+def test_accepted_keyword_conflict_overwrite_evaluates_against_projected_predecessor(
+    tmp_path: Path,
+) -> None:
+    (
+        _note_db,
+        sync_store,
+        service,
+        dataset_id,
+        baseline,
+        source,
+        conflict,
+    ) = _accepted_keyword_conflict_after_applied_predecessor(tmp_path)
+    with sync_store.db.backend.transaction() as connection:
+        later_duplicate = sync_store.db._insert_envelope_in_transaction(
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-later-duplicate-keyword",
+                domain="notes.keyword",
+                operation="upsert",
+                object_id="99999999-9999-4999-8999-999999999999",
+                device_id="frontend-device",
+                client_sequence=3,
+                object_revision=1,
+                schema_version=1,
+                payload={"keyword": "Resolved"},
+                payload_hash="sha256:later-duplicate-keyword",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+                status="accepted",
+            ),
+            connection=connection,
+        )
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id="env-keyword-resolution",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=source.object_id,
+            device_id="frontend-device",
+            client_sequence=4,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=2,
+            schema_version=1,
+            payload={"keyword": "Resolved"},
+            payload_hash="sha256:keyword-resolution",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            adapter_version=1,
+        ),
+    )
+
+    head = sync_store.get_current_head(dataset_id, "notes.keyword", source.object_id)
+    later = sync_store.get_envelope_by_server_cursor(later_duplicate.server_cursor)
+    assert resolved.status == "resolved"
+    assert head is not None and head.client_envelope_id == "env-keyword-resolution"
+    assert head.apply_status == "applied"
+    assert later is not None and later.apply_error_code == (
+        "sync_rebase_required_after_conflict_resolution"
+    )
+
+
+def test_original_conflict_context_is_one_complete_source_cursor_snapshot(
+    sync_store: SyncV2Store,
+) -> None:
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
+        ),
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    sync_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note"],
+        )
+    )
+    source_baseline = sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-snapshot-source-baseline",
+            object_id="note-source",
+            client_sequence=1,
+            object_revision=1,
+            payload_hash="sha256:source-baseline",
+        )
+    )
+    source_baseline = sync_store.mark_envelope_apply_status(
+        source_baseline.server_cursor,
+        apply_status="applied",
+    )
+    dependency_baseline = sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-snapshot-dependency-baseline",
+            object_id="note-dependency",
+            client_sequence=2,
+            object_revision=1,
+            payload_hash="sha256:dependency-baseline",
+        )
+    )
+    dependency_baseline = sync_store.mark_envelope_apply_status(
+        dependency_baseline.server_cursor,
+        apply_status="applied",
+    )
+    source = sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-snapshot-source-conflict",
+            object_id="note-source",
+            client_sequence=3,
+            base_server_cursor=source_baseline.server_cursor,
+            base_object_revision=source_baseline.object_revision,
+            base_object_hash=source_baseline.payload_hash,
+            object_revision=2,
+            payload_hash="sha256:source-conflict",
+            status="accepted",
+        )
+    )
+    source = sync_store.mark_envelope_apply_status(
+        source.server_cursor,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-complete-snapshot",
+            dataset_id="dataset-1",
+            domain=source.domain,
+            entity_id=source.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=source.client_envelope_id,
+            server_sequence=source.server_cursor,
+        )
+    )
+    with sync_store.db.backend.transaction() as connection:
+        later_dependency = sync_store.db._insert_envelope_in_transaction(
+            _m1_note_envelope(
+                client_envelope_id="env-snapshot-later-dependency",
+                object_id="note-dependency",
+                client_sequence=4,
+                base_server_cursor=dependency_baseline.server_cursor,
+                base_object_revision=dependency_baseline.object_revision,
+                base_object_hash=dependency_baseline.payload_hash,
+                object_revision=2,
+                payload_hash="sha256:later-dependency",
+                status="accepted",
+            ),
+            connection=connection,
+        )
+    dataset = sync_store.get_dataset("dataset-1")
+    assert dataset is not None
+
+    with sync_store.materialization_guard(
+        [source], require_predecessors=False
+    ) as guarded_store:
+        context = service._conflict_resolution_adapter_context(
+            dataset,
+            conflict=conflict,
+            source=source,
+            resolution_envelope=_m1_note_envelope(
+                client_envelope_id="env-snapshot-resolution",
+                object_id=source.object_id,
+                client_sequence=5,
+                base_server_cursor=source_baseline.server_cursor,
+                base_object_revision=source_baseline.object_revision,
+                base_object_hash=source_baseline.payload_hash,
+                object_revision=2,
+            ),
+            action="overwrite",
+            store=guarded_store,
+        )
+        dependency = context.get_head("notes.note", "note-dependency")
+        listed = {
+            item.object_id: item for item in context.list_heads("notes.note")
+        }
+
+    assert later_dependency.server_cursor > source.server_cursor
+    assert dependency is not None
+    assert dependency.server_cursor == dependency_baseline.server_cursor
+    assert listed["note-dependency"].server_cursor == (
+        dependency_baseline.server_cursor
+    )
+    assert listed["note-source"].server_cursor == source_baseline.server_cursor
+
+
+def test_rebase_conflict_append_uses_current_applied_head_not_physical_predecessor(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note"],
+        )
+    )
+    baseline = sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-rebase-c1",
+            object_id="note-rebase",
+            client_sequence=1,
+            object_revision=1,
+            payload_hash="sha256:rebase-c1",
+        )
+    )
+    baseline = sync_store.mark_envelope_apply_status(
+        baseline.server_cursor,
+        apply_status="applied",
+    )
+    with sync_store.db.backend.transaction() as connection:
+        queued = sync_store.db._insert_envelope_in_transaction(
+            _m1_note_envelope(
+                client_envelope_id="env-rebase-c3",
+                object_id="note-rebase",
+                client_sequence=3,
+                base_server_cursor=baseline.server_cursor,
+                base_object_revision=baseline.object_revision,
+                base_object_hash=baseline.payload_hash,
+                object_revision=2,
+                payload_hash="sha256:rebase-c3",
+                status="accepted",
+                apply_status="conflict",
+                apply_error_code="sync_rebase_required_after_conflict_resolution",
+            ),
+            connection=connection,
+        )
+        replacement = sync_store.db._insert_envelope_in_transaction(
+            _m1_note_envelope(
+                client_envelope_id="env-rebase-c4",
+                object_id="note-rebase",
+                client_sequence=4,
+                base_server_cursor=baseline.server_cursor,
+                base_object_revision=baseline.object_revision,
+                base_object_hash=baseline.payload_hash,
+                object_revision=2,
+                payload_hash="sha256:rebase-c4",
+                status="accepted",
+                apply_status="applied",
+            ),
+            connection=connection,
+        )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-rebase-current-head",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            entity_id=queued.object_id,
+            conflict_type="sync_rebase_required_after_conflict_resolution",
+            local_envelope_id=queued.client_envelope_id,
+            server_sequence=queued.server_cursor,
+        )
+    )
+    resolution = _m1_note_envelope(
+        client_envelope_id="env-rebase-c5",
+        object_id="note-rebase",
+        client_sequence=5,
+        base_server_cursor=replacement.server_cursor,
+        base_object_revision=replacement.object_revision,
+        base_object_hash=replacement.payload_hash,
+        object_revision=3,
+        payload_hash="sha256:rebase-c5",
+        status="accepted",
+    )
+
+    with sync_store.materialization_guard(
+        [queued], require_predecessors=False
+    ) as guarded_store:
+        guarded_store.claim_conflict_resolution(
+            conflict.conflict_id,
+            dataset_id="dataset-1",
+            resolved_by_device_id="device-1",
+            resolution_action="overwrite",
+            resolution_notes=None,
+        )
+        inserted = guarded_store.insert_claimed_conflict_resolution_envelope(
+            resolution,
+            conflict_id=conflict.conflict_id,
+            dataset_id="dataset-1",
+            resolved_by_device_id="device-1",
+            resolution_action="overwrite",
+            resolution_notes=None,
+        )
+
+    assert inserted.base_server_cursor == replacement.server_cursor
+    assert inserted.server_cursor > replacement.server_cursor
+
+
+def test_rebase_conflict_overwrite_uses_current_note_replacement_chain_on_fresh_pull(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+) -> None:
+    note_db = CharactersRAGDB(
+        db_path=str(tmp_path / "rebase-current-notes.db"),
+        client_id="user-1",
+    )
+    service, baseline, source, conflict = _accepted_conflict_after_applied_predecessor(
+        sync_store,
+        note_db,
+    )
+    with sync_store.db.backend.transaction() as connection:
+        queued = sync_store.db._insert_envelope_in_transaction(
+            _m1_note_envelope(
+                client_envelope_id="env-note-c3-queued",
+                object_id=source.object_id,
+                client_sequence=3,
+                base_server_cursor=baseline.server_cursor,
+                base_object_revision=baseline.object_revision,
+                base_object_hash=baseline.payload_hash,
+                object_revision=2,
+                payload={"title": "Queued", "content": "Must rebase"},
+                payload_hash="sha256:note-c3",
+                status="accepted",
+            ),
+            connection=connection,
+        )
+    service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="device-1",
+        resolution_envelope=_m1_note_envelope(
+            client_envelope_id="env-note-c4-replacement",
+            object_id=source.object_id,
+            client_sequence=4,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=2,
+            payload={"title": "Replacement", "content": "Applied c4"},
+            payload_hash="sha256:note-c4",
+        ),
+    )
+    replacement = sync_store.get_current_head(
+        "dataset-1", "notes.note", source.object_id
+    )
+    rebase_conflict = sync_store.get_unresolved_conflict_for_envelope(
+        "dataset-1",
+        local_envelope_id=queued.client_envelope_id,
+        server_sequence=queued.server_cursor,
+    )
+    assert replacement is not None
+    assert rebase_conflict is not None
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=rebase_conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="device-1",
+        resolution_envelope=_m1_note_envelope(
+            client_envelope_id="env-note-c5-rebased",
+            object_id=source.object_id,
+            client_sequence=5,
+            base_server_cursor=replacement.server_cursor,
+            base_object_revision=replacement.object_revision,
+            base_object_hash=replacement.payload_hash,
+            object_revision=3,
+            payload={"title": "Rebased", "content": "Applied c5"},
+            payload_hash="sha256:note-c5",
+        ),
+    )
+
+    head = sync_store.get_current_head("dataset-1", "notes.note", source.object_id)
+    state = sync_store.get_object_state("dataset-1", "notes.note", source.object_id)
+    pulled = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor=0,
+        domains=["notes.note"],
+    )
+    assert resolved.status == "resolved"
+    assert [item.client_envelope_id for item in pulled.envelopes] == [
+        "env-applied-predecessor",
+        "env-note-c4-replacement",
+        "env-note-c5-rebased",
+    ]
+    assert pulled.envelopes[1].base_server_cursor == baseline.server_cursor
+    assert pulled.envelopes[2].base_server_cursor == replacement.server_cursor
+    assert head is not None and head.client_envelope_id == "env-note-c5-rebased"
+    assert state is not None and state.latest_server_cursor == head.server_cursor
+    assert state.object_revision == 3
+
+    client_store = SyncV2Store(
+        SyncDatabase(sqlite_path=tmp_path / "rebase-fresh-client-sync.db")
+    )
+    client_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note"],
+        )
+    )
+    client_db = CharactersRAGDB(
+        db_path=str(tmp_path / "rebase-fresh-client-notes.db"),
+        client_id="user-1",
+    )
+    client_materializer = NotesMaterializer(client_db)
+    results = [
+        client_materializer.apply(
+            _store_pulled_envelope_at_canonical_cursor(client_store, envelope),
+            store=client_store,
+        )
+        for envelope in pulled.envelopes
+    ]
+    client_note = client_db.get_note_by_id(source.object_id)
+    assert [item.status for item in results] == ["applied", "applied", "applied"]
+    assert client_note is not None and client_note["title"] == "Rebased"
+
+
+def test_rebase_conflict_overwrite_uses_current_keyword_replacement(
+    tmp_path: Path,
+) -> None:
+    (
+        _note_db,
+        sync_store,
+        service,
+        dataset_id,
+        baseline,
+        source,
+        conflict,
+    ) = _accepted_keyword_conflict_after_applied_predecessor(tmp_path)
+    with sync_store.db.backend.transaction() as connection:
+        queued = sync_store.db._insert_envelope_in_transaction(
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-keyword-c3-queued",
+                domain="notes.keyword",
+                operation="upsert",
+                object_id=source.object_id,
+                device_id="frontend-device",
+                client_sequence=3,
+                base_server_cursor=baseline.server_cursor,
+                base_object_revision=baseline.object_revision,
+                base_object_hash=baseline.payload_hash,
+                object_revision=2,
+                schema_version=1,
+                payload={"keyword": "Queued"},
+                payload_hash="sha256:keyword-c3",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+                status="accepted",
+            ),
+            connection=connection,
+        )
+    service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id="env-keyword-c4-replacement",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=source.object_id,
+            device_id="frontend-device",
+            client_sequence=4,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=2,
+            schema_version=1,
+            payload={"keyword": "Replacement"},
+            payload_hash="sha256:keyword-c4",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            adapter_version=1,
+        ),
+    )
+    replacement = sync_store.get_current_head(
+        dataset_id, "notes.keyword", source.object_id
+    )
+    rebase_conflict = sync_store.get_unresolved_conflict_for_envelope(
+        dataset_id,
+        local_envelope_id=queued.client_envelope_id,
+        server_sequence=queued.server_cursor,
+    )
+    assert replacement is not None
+    assert rebase_conflict is not None
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=rebase_conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id="env-keyword-c5-rebased",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=source.object_id,
+            device_id="frontend-device",
+            client_sequence=5,
+            base_server_cursor=replacement.server_cursor,
+            base_object_revision=replacement.object_revision,
+            base_object_hash=replacement.payload_hash,
+            object_revision=3,
+            schema_version=1,
+            payload={"keyword": "Rebased"},
+            payload_hash="sha256:keyword-c5",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            adapter_version=1,
+        ),
+    )
+    head = sync_store.get_current_head(dataset_id, "notes.keyword", source.object_id)
+    state = sync_store.get_object_state(dataset_id, "notes.keyword", source.object_id)
+    pulled = service.pull(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        device_id="device-2",
+        cursor=0,
+        domains=["notes.keyword"],
+    )
+    assert resolved.status == "resolved"
+    assert head is not None and head.client_envelope_id == "env-keyword-c5-rebased"
+    assert state is not None and state.latest_server_cursor == head.server_cursor
+    assert state.object_revision == 3
+    assert [item.client_envelope_id for item in pulled.envelopes] == [
+        "env-keyword-baseline",
+        "env-keyword-c4-replacement",
+        "env-keyword-c5-rebased",
+    ]
+    assert pulled.envelopes[2].base_server_cursor == replacement.server_cursor
+
+    client_store = SyncV2Store(
+        SyncDatabase(sqlite_path=tmp_path / "rebase-fresh-keyword-sync.db")
+    )
+    client_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id=dataset_id,
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=list(NOTES_ORGANIZATION_DOMAINS),
+            metadata={"notes_organization_v1": {"state": "ready"}},
+        )
+    )
+    client_db = CharactersRAGDB(
+        db_path=str(tmp_path / "rebase-fresh-keyword-notes.db"),
+        client_id="user-1",
+    )
+    client_materializer = NotesOrganizationMaterializer(client_db, "notes.keyword")
+    results = [
+        client_materializer.apply(
+            _store_pulled_envelope_at_canonical_cursor(client_store, envelope),
+            store=client_store,
+        )
+        for envelope in pulled.envelopes
+    ]
+    client_state = client_store.get_object_state(
+        dataset_id, "notes.keyword", source.object_id
+    )
+    assert [item.status for item in results] == ["applied", "applied", "applied"]
+    assert client_state is not None
+    assert client_state.latest_server_cursor == pulled.envelopes[-1].server_cursor
+    assert client_state.object_revision == 3
+
+
+def test_original_conflict_snapshot_excludes_later_queued_dependency(
+    tmp_path: Path,
+) -> None:
+    _note_db, sync_store, service = build_ready_notes_sync_stack(tmp_path)
+    dataset_id = service.profile(
+        user_id="user-1", device_id="frontend-device"
+    ).active_dataset_id
+    assert dataset_id is not None
+    note_id = "55555555-5555-4555-8555-555555555555"
+    keyword_id = "66666666-6666-4666-8666-666666666666"
+    note_result = service.push(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        device_id="frontend-device",
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-snapshot-note",
+                domain="notes.note",
+                operation="upsert",
+                object_id=note_id,
+                device_id="frontend-device",
+                client_sequence=1,
+                object_revision=1,
+                schema_version=1,
+                payload={"title": "Snapshot", "content": "Applied note"},
+                payload_hash="sha256:snapshot-note",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+            )
+        ],
+    )
+    assert note_result.accepted
+    link_id = organization_link_id(
+        "notes.keyword_link", ["note", note_id, keyword_id]
+    )
+    source_create = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id="env-snapshot-link-conflict",
+        domain="notes.keyword_link",
+        operation="upsert",
+        object_id=link_id,
+        device_id="frontend-device",
+        client_sequence=2,
+        object_revision=1,
+        schema_version=1,
+        payload={
+            "subject_type": "note",
+            "subject_id": note_id,
+            "keyword_sync_id": keyword_id,
+        },
+        payload_hash="sha256:snapshot-link-conflict",
+        encryption_metadata={"policy": "server_trusted_v1"},
+        adapter_version=1,
+        status="accepted",
+    )
+    with sync_store.db.backend.transaction() as connection:
+        source = sync_store.db._insert_envelope_in_transaction(
+            source_create,
+            connection=connection,
+        )
+    source = sync_store.mark_envelope_apply_status(
+        source.server_cursor,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-snapshot-link",
+            dataset_id=dataset_id,
+            domain=source.domain,
+            entity_id=source.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=source.client_envelope_id,
+            server_sequence=source.server_cursor,
+        )
+    )
+    with sync_store.db.backend.transaction() as connection:
+        later_keyword = sync_store.db._insert_envelope_in_transaction(
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-snapshot-later-keyword",
+                domain="notes.keyword",
+                operation="upsert",
+                object_id=keyword_id,
+                device_id="frontend-device",
+                client_sequence=3,
+                object_revision=1,
+                schema_version=1,
+                payload={"keyword": "Later dependency"},
+                payload_hash="sha256:snapshot-later-keyword",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+                status="accepted",
+            ),
+            connection=connection,
+        )
+
+    with pytest.raises(SyncStoreError, match="resolution envelope was not accepted"):
+        service.resolve_conflict(
+            user_id="user-1",
+            dataset_id=dataset_id,
+            conflict_id=conflict.conflict_id,
+            action="overwrite",
+            resolved_by_device_id="frontend-device",
+            resolution_envelope=replace(
+                source_create,
+                client_envelope_id="env-snapshot-link-resolution",
+                client_sequence=4,
+                status="pending",
+            ),
+        )
+    stored_later = sync_store.get_envelope_by_server_cursor(later_keyword.server_cursor)
+    stored_conflict = sync_store.get_conflict(conflict.conflict_id)
+    assert stored_later is not None and stored_later.apply_status == "pending"
+    assert stored_conflict is not None and stored_conflict.status == "unresolved"
+    assert stored_conflict.resolution_action is None
+
+
+@pytest.mark.parametrize("action", ["skip", "duplicate_rename"])
+def test_terminalized_conflict_repoints_head_for_same_object_successor(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+    action: str,
+) -> None:
+    note_db = CharactersRAGDB(
+        db_path=str(tmp_path / f"conflict-{action}-notes.db"),
+        client_id="user-1",
+    )
+    service, baseline, _source, conflict = _accepted_conflict_after_applied_predecessor(
+        sync_store,
+        note_db,
+    )
+    resolution = (
+        _m1_note_envelope(
+            client_envelope_id="env-resolution-copy",
+            object_id="note-copy",
+            client_sequence=3,
+            object_revision=1,
+            payload={"title": "Copy", "content": "Projected copy"},
+            payload_hash="sha256:copy",
+        )
+        if action == "duplicate_rename"
+        else None
+    )
+
+    service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=conflict.conflict_id,
+        action=action,
+        resolved_by_device_id="device-1",
+        resolution_envelope=resolution,
+    )
+    head = sync_store.get_current_head("dataset-1", "notes.note", "note-original")
+    preview = service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note"],
+    )
+    successor = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id=f"env-after-{action}",
+                object_id="note-original",
+                device_id="device-2",
+                client_sequence=1,
+                base_server_cursor=baseline.server_cursor,
+                base_object_revision=baseline.object_revision,
+                base_object_hash=baseline.payload_hash,
+                object_revision=2,
+                payload={"title": "Successor", "content": "After resolution"},
+                payload_hash="sha256:successor",
+            )
+        ],
+    )
+
+    assert head is not None and head.server_cursor == baseline.server_cursor
+    assert baseline.server_cursor in [item.server_cursor for item in preview.ordered_actions]
+    assert all(
+        item.server_cursor != _source.server_cursor
+        for item in preview.ordered_actions
+    )
+    if action == "duplicate_rename":
+        assert {item.object_id for item in preview.ordered_actions} == {
+            "note-original",
+            "note-copy",
+        }
+    else:
+        assert {item.object_id for item in preview.ordered_actions} == {
+            "note-original"
+        }
+    assert successor.accepted[0].apply_status == "applied"
+
+
+def test_restore_group_expansion_never_emits_superseded_sibling(
+    sync_store: SyncV2Store,
+) -> None:
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
+        ),
+        materializers={},
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    draft_group = [
+            _m1_note_envelope(
+                client_envelope_id="env-group-superseded",
+                object_id="note-superseded",
+                client_sequence=1,
+                object_revision=1,
+                payload_hash="sha256:group-superseded",
+                mutation_group_id="server-origin-restore-superseded",
+                mutation_step=0,
+                mutation_step_count=2,
+                mutation_plan_hash="a" * 64,
+            ),
+            _m1_note_envelope(
+                client_envelope_id="env-group-active",
+                object_id="note-active",
+                client_sequence=2,
+                object_revision=1,
+                payload_hash="sha256:group-active",
+                mutation_group_id="server-origin-restore-superseded",
+                mutation_step=1,
+                mutation_step_count=2,
+                mutation_plan_hash="a" * 64,
+            ),
+        ]
+    plan_hash = mutation_group_plan_hash(draft_group)
+    group = sync_store.insert_envelopes_atomic(
+        [replace(envelope, mutation_plan_hash=plan_hash) for envelope in draft_group]
+    )
+    sync_store.mark_envelope_apply_status(
+        group[0].server_cursor,
+        apply_status="superseded",
+        apply_error_code="sync_conflict_skipped",
+    )
+    sync_store.mark_envelope_apply_status(
+        group[1].server_cursor,
+        apply_status="applied",
+    )
+
+    preview = service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note"],
+    )
+
+    assert [item.server_cursor for item in preview.ordered_actions] == [
+        group[1].server_cursor
+    ]
+
+
+@pytest.mark.parametrize("action", ["skip", "overwrite"])
+def test_conflict_resolution_converts_later_legacy_pending_cursor_to_rebase_conflict(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+    action: str,
+) -> None:
+    note_db = CharactersRAGDB(
+        db_path=str(tmp_path / f"conflict-order-{action}.db"),
+        client_id="user-1",
+    )
+    service, baseline, source, conflict = _accepted_conflict_after_applied_predecessor(
+        sync_store,
+        note_db,
+    )
+    intervening_create = _m1_note_envelope(
+            client_envelope_id="env-intervening-pending",
+            object_id="note-other",
+            client_sequence=3,
+            object_revision=1,
+            payload={"title": "Pending", "content": "Must project first"},
+            payload_hash="sha256:pending",
+            status="accepted",
+        )
+    # Explicitly model a row queued by an older server before the append gate.
+    with sync_store.db.backend.transaction() as connection:
+        intervening = sync_store.db._insert_envelope_in_transaction(
+            intervening_create,
+            connection=connection,
+        )
+    resolution = (
+        _m1_note_envelope(
+            client_envelope_id="env-ordered-resolution",
+            object_id="note-original",
+            client_sequence=4,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=2,
+            payload={"title": "Resolved", "content": "Must wait"},
+            payload_hash="sha256:ordered-resolution",
+        )
+        if action == "overwrite"
+        else None
+    )
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=conflict.conflict_id,
+        action=action,
+        resolved_by_device_id="device-1",
+        resolution_envelope=resolution,
+    )
+    rebased = sync_store.get_envelope_by_server_cursor(intervening.server_cursor)
+    rebase_conflict = sync_store.get_unresolved_conflict_for_envelope(
+        "dataset-1",
+        local_envelope_id=intervening.client_envelope_id,
+        server_sequence=intervening.server_cursor,
+    )
+    stored = sync_store.list_envelopes_after("dataset-1", 0, status=None)
+    assert intervening.server_cursor > source.server_cursor
+    assert resolved.status in {"dismissed", "resolved"}
+    assert rebased is not None and rebased.apply_status == "conflict"
+    assert rebased.apply_error_code == "sync_rebase_required_after_conflict_resolution"
+    assert rebase_conflict is not None
+    assert rebase_conflict.conflict_type == "sync_rebase_required_after_conflict_resolution"
+    assert sync_store.get_conflict(conflict.conflict_id).status != "unresolved"
+    assert (action == "skip") == all(
+        item.client_envelope_id != "env-ordered-resolution" for item in stored
+    )
+
+
+def test_conflict_resolution_reuses_later_legacy_conflict_record_idempotently(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+) -> None:
+    note_db = CharactersRAGDB(
+        db_path=str(tmp_path / "conflict-existing-rebase.db"),
+        client_id="user-1",
+    )
+    service, _baseline, source, conflict = _accepted_conflict_after_applied_predecessor(
+        sync_store,
+        note_db,
+    )
+    with sync_store.db.backend.transaction() as connection:
+        later = sync_store.db._insert_envelope_in_transaction(
+            _m1_note_envelope(
+                client_envelope_id="env-existing-later-conflict",
+                object_id="note-existing-later-conflict",
+                client_sequence=3,
+                object_revision=1,
+                payload_hash="sha256:existing-later-conflict",
+                status="accepted",
+            ),
+            connection=connection,
+        )
+    later = sync_store.mark_envelope_apply_status(
+        later.server_cursor,
+        apply_status="conflict",
+        apply_error_code="legacy_projection_conflict",
+    )
+    existing = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-existing-later",
+            dataset_id="dataset-1",
+            domain=later.domain,
+            entity_id=later.object_id,
+            conflict_type="legacy_projection_conflict",
+            base_envelope_id="base-envelope-audit",
+            local_envelope_id=later.client_envelope_id,
+            remote_envelope_id="remote-envelope-audit",
+            server_sequence=later.server_cursor,
+            metadata={"legacy_reason": "projection"},
+        )
+    )
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="device-1",
+    )
+    replayed = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="device-1",
+    )
+    rebased = sync_store.get_conflict(existing.conflict_id)
+
+    assert resolved == replayed
+    assert source.server_cursor < later.server_cursor
+    assert rebased is not None
+    assert rebased.conflict_id == existing.conflict_id
+    assert rebased.conflict_type == "sync_rebase_required_after_conflict_resolution"
+    assert rebased.base_envelope_id == "base-envelope-audit"
+    assert rebased.remote_envelope_id == "remote-envelope-audit"
+    assert rebased.metadata["previous_conflict_type"] == "legacy_projection_conflict"
+    assert rebased.metadata["previous_conflict_metadata"] == {
+        "legacy_reason": "projection"
+    }
+    assert len(sync_store.list_conflicts("dataset-1")) == 2
+
+
+def test_conflict_resolution_rebases_later_dependency_and_paginates_without_queued_history(
+    tmp_path: Path,
+) -> None:
+    (
+        _note_db,
+        sync_store,
+        service,
+        dataset_id,
+        baseline,
+        source,
+        conflict,
+    ) = _accepted_keyword_conflict_after_applied_predecessor(tmp_path)
+    note_id = "22222222-2222-4222-8222-222222222222"
+    relationship_id = organization_link_id(
+        "notes.keyword_link",
+        ["note", note_id, source.object_id],
+    )
+    relationship_create = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id="env-legacy-dependent-link",
+        domain="notes.keyword_link",
+        operation="upsert",
+        object_id=relationship_id,
+        device_id="frontend-device",
+        client_sequence=3,
+        object_revision=1,
+        schema_version=1,
+        payload={
+            "subject_type": "note",
+            "subject_id": note_id,
+            "keyword_sync_id": source.object_id,
+        },
+        payload_hash="sha256:legacy-dependent-link",
+        encryption_metadata={"policy": "server_trusted_v1"},
+        adapter_version=1,
+        status="accepted",
+    )
+    unrelated_id = "33333333-3333-4333-8333-333333333333"
+    unrelated_create = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id="env-legacy-unrelated-keyword",
+        domain="notes.keyword",
+        operation="upsert",
+        object_id=unrelated_id,
+        device_id="frontend-device",
+        client_sequence=4,
+        object_revision=1,
+        schema_version=1,
+        payload={"keyword": "Unrelated queued change"},
+        payload_hash="sha256:legacy-unrelated-keyword",
+        encryption_metadata={"policy": "server_trusted_v1"},
+        adapter_version=1,
+        status="accepted",
+    )
+    with sync_store.db.backend.transaction() as connection:
+        relationship = sync_store.db._insert_envelope_in_transaction(
+            relationship_create,
+            connection=connection,
+        )
+        unrelated = sync_store.db._insert_envelope_in_transaction(
+            unrelated_create,
+            connection=connection,
+        )
+
+    cursor = "0"
+    pulled_ids: list[str] = []
+    while True:
+        page = service.pull(
+            user_id="user-1",
+            dataset_id=dataset_id,
+            device_id="device-2",
+            cursor=cursor,
+            domains=["notes.keyword", "notes.keyword_link"],
+            page_size=1,
+            include_own_changes=True,
+        )
+        pulled_ids.extend(item.client_envelope_id for item in page.envelopes)
+        assert page.next_cursor != cursor or not page.has_more
+        cursor = page.next_cursor or cursor
+        if not page.has_more:
+            break
+
+    assert relationship.client_envelope_id not in pulled_ids
+    assert unrelated.client_envelope_id not in pulled_ids
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id="env-keyword-replacement-before-rebase",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=source.object_id,
+            device_id="frontend-device",
+            client_sequence=5,
+            base_server_cursor=baseline.server_cursor,
+            base_object_revision=baseline.object_revision,
+            base_object_hash=baseline.payload_hash,
+            object_revision=2,
+            schema_version=1,
+            payload={"keyword": "Replacement"},
+            payload_hash="sha256:keyword-replacement-before-rebase",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            adapter_version=1,
+        ),
+    )
+
+    assert resolved.status == "resolved"
+    rebase_conflicts = []
+    for queued in (relationship, unrelated):
+        stored = sync_store.get_envelope_by_server_cursor(queued.server_cursor)
+        assert stored is not None and stored.apply_status == "conflict"
+        assert stored.apply_error_code == "sync_rebase_required_after_conflict_resolution"
+        recorded = sync_store.get_unresolved_conflict_for_envelope(
+            dataset_id,
+            local_envelope_id=queued.client_envelope_id,
+            server_sequence=queued.server_cursor,
+        )
+        assert recorded is not None
+        assert recorded.conflict_type == "sync_rebase_required_after_conflict_resolution"
+        rebase_conflicts.append(recorded)
+        assert sync_store.get_current_head(
+            dataset_id,
+            queued.domain,
+            queued.object_id,
+        ) is None
+
+    cursor = "0"
+    after_resolution_ids: list[str] = []
+    while True:
+        page = service.pull(
+            user_id="user-1",
+            dataset_id=dataset_id,
+            device_id="device-2",
+            cursor=cursor,
+            domains=["notes.keyword", "notes.keyword_link"],
+            page_size=1,
+            include_own_changes=True,
+        )
+        after_resolution_ids.extend(
+            item.client_envelope_id for item in page.envelopes
+        )
+        cursor = page.next_cursor or cursor
+        if not page.has_more:
+            break
+    assert "env-keyword-replacement-before-rebase" in after_resolution_ids
+    assert relationship.client_envelope_id not in after_resolution_ids
+    assert unrelated.client_envelope_id not in after_resolution_ids
+
+    blocked = service.push(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        device_id="device-2",
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-after-rebase-required",
+                domain="notes.keyword",
+                operation="upsert",
+                object_id="44444444-4444-4444-8444-444444444444",
+                device_id="device-2",
+                client_sequence=1,
+                object_revision=1,
+                schema_version=1,
+                payload={"keyword": "Must wait"},
+                payload_hash="sha256:after-rebase-required",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+            )
+        ],
+    )
+    assert blocked.accepted == []
+    assert [item.conflict_id for item in blocked.conflicts] == [
+        rebase_conflicts[0].conflict_id
+    ]
+
+
+def test_generated_rebase_conflicts_preserve_original_provenance_when_resolved_in_order(
+    tmp_path: Path,
+) -> None:
+    (
+        note_db,
+        sync_store,
+        service,
+        dataset_id,
+        baseline,
+        source,
+        original_conflict,
+    ) = _accepted_keyword_conflict_after_applied_predecessor(tmp_path)
+    note_id = "22222222-2222-4222-8222-222222222222"
+    relationship_id = organization_link_id(
+        "notes.keyword_link",
+        ["note", note_id, source.object_id],
+    )
+    with sync_store.db.backend.transaction() as connection:
+        note = sync_store.db._insert_envelope_in_transaction(
+            _m1_note_envelope(
+                dataset_id=dataset_id,
+                client_envelope_id="env-rebase-chain-note",
+                object_id=note_id,
+                device_id="frontend-device",
+                client_sequence=3,
+                object_revision=1,
+                payload={"title": "Dependency", "content": "Applied directly"},
+                payload_hash="sha256:rebase-chain-note",
+                status="accepted",
+            ),
+            connection=connection,
+        )
+    with sync_store.materialization_guard(
+        [note],
+        require_predecessors=False,
+    ) as guarded_store:
+        assert NotesMaterializer(note_db).apply(note, store=guarded_store).status == "applied"
+
+    with sync_store.db.backend.transaction() as connection:
+        queued_keyword = sync_store.db._insert_envelope_in_transaction(
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-rebase-chain-keyword",
+                domain="notes.keyword",
+                operation="upsert",
+                object_id=source.object_id,
+                device_id="frontend-device",
+                client_sequence=4,
+                base_server_cursor=source.server_cursor,
+                base_object_revision=source.object_revision,
+                base_object_hash=source.payload_hash,
+                object_revision=3,
+                schema_version=1,
+                payload={"keyword": "Queued same identity"},
+                payload_hash="sha256:rebase-chain-keyword",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+                status="accepted",
+            ),
+            connection=connection,
+        )
+        queued_relationship = sync_store.db._insert_envelope_in_transaction(
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-rebase-chain-link",
+                domain="notes.keyword_link",
+                operation="upsert",
+                object_id=relationship_id,
+                device_id="frontend-device",
+                client_sequence=5,
+                object_revision=1,
+                schema_version=1,
+                payload={
+                    "subject_type": "note",
+                    "subject_id": note_id,
+                    "keyword_sync_id": source.object_id,
+                },
+                payload_hash="sha256:rebase-chain-link",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+                status="accepted",
+            ),
+            connection=connection,
+        )
+
+    original_resolution_request = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id="env-rebase-chain-original-resolution",
+        domain="notes.keyword",
+        operation="upsert",
+        object_id=source.object_id,
+        device_id="frontend-device",
+        client_sequence=6,
+        base_server_cursor=baseline.server_cursor,
+        base_object_revision=baseline.object_revision,
+        base_object_hash=baseline.payload_hash,
+        object_revision=2,
+        schema_version=1,
+        payload={"keyword": "Original replacement"},
+        payload_hash="sha256:rebase-chain-original-resolution",
+        encryption_metadata={"policy": "server_trusted_v1"},
+        adapter_version=1,
+    )
+    original_resolution = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=original_conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=original_resolution_request,
+    )
+    assert original_resolution == service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=original_conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=original_resolution_request,
+    )
+    keyword_conflict = sync_store.get_unresolved_conflict_for_envelope(
+        dataset_id,
+        local_envelope_id=queued_keyword.client_envelope_id,
+        server_sequence=queued_keyword.server_cursor,
+    )
+    relationship_conflict = sync_store.get_unresolved_conflict_for_envelope(
+        dataset_id,
+        local_envelope_id=queued_relationship.client_envelope_id,
+        server_sequence=queued_relationship.server_cursor,
+    )
+    assert keyword_conflict is not None and relationship_conflict is not None
+    relationship_audit = (
+        relationship_conflict.conflict_id,
+        dict(relationship_conflict.metadata),
+    )
+    assert relationship_conflict.metadata["source_conflict_id"] == (
+        original_conflict.conflict_id
+    )
+
+    skipped = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=keyword_conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="frontend-device",
+    )
+    assert skipped == service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=keyword_conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="frontend-device",
+    )
+    preserved_relationship_conflict = sync_store.get_conflict(
+        relationship_conflict.conflict_id
+    )
+    assert preserved_relationship_conflict is not None
+    assert preserved_relationship_conflict.status == "unresolved"
+    assert (
+        preserved_relationship_conflict.conflict_id,
+        dict(preserved_relationship_conflict.metadata),
+    ) == relationship_audit
+
+    relationship_resolution_request = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id="env-rebase-chain-link-resolution",
+        domain="notes.keyword_link",
+        operation="upsert",
+        object_id=relationship_id,
+        device_id="frontend-device",
+        client_sequence=7,
+        object_revision=1,
+        schema_version=1,
+        payload={
+            "subject_type": "note",
+            "subject_id": note_id,
+            "keyword_sync_id": source.object_id,
+        },
+        payload_hash="sha256:rebase-chain-link-resolution",
+        encryption_metadata={"policy": "server_trusted_v1"},
+        adapter_version=1,
+    )
+    relationship_resolution = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=relationship_conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=relationship_resolution_request,
+    )
+    assert relationship_resolution == service.resolve_conflict(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        conflict_id=relationship_conflict.conflict_id,
+        action="overwrite",
+        resolved_by_device_id="frontend-device",
+        resolution_envelope=relationship_resolution_request,
+    )
+
+    unblocked = service.push(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        device_id="device-2",
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id="env-rebase-chain-after",
+                domain="notes.keyword",
+                operation="upsert",
+                object_id="44444444-4444-4444-8444-444444444444",
+                device_id="device-2",
+                client_sequence=1,
+                object_revision=1,
+                schema_version=1,
+                payload={"keyword": "After chain"},
+                payload_hash="sha256:rebase-chain-after",
+                encryption_metadata={"policy": "server_trusted_v1"},
+                adapter_version=1,
+            )
+        ],
+    )
+    assert len(unblocked.accepted) == 1
+
+    keyword_head = sync_store.get_current_head(
+        dataset_id,
+        "notes.keyword",
+        source.object_id,
+    )
+    relationship_head = sync_store.get_current_head(
+        dataset_id,
+        "notes.keyword_link",
+        relationship_id,
+    )
+    keyword_state = sync_store.get_object_state(
+        dataset_id,
+        "notes.keyword",
+        source.object_id,
+    )
+    relationship_state = sync_store.get_object_state(
+        dataset_id,
+        "notes.keyword_link",
+        relationship_id,
+    )
+    assert keyword_head is not None
+    assert keyword_head.client_envelope_id == original_resolution_request.client_envelope_id
+    assert keyword_state is not None
+    assert keyword_state.latest_server_cursor == keyword_head.server_cursor
+    assert relationship_head is not None
+    assert relationship_head.client_envelope_id == (
+        relationship_resolution_request.client_envelope_id
+    )
+    assert relationship_state is not None
+    assert relationship_state.latest_server_cursor == relationship_head.server_cursor
+
+    cursor = "0"
+    pulled_ids: list[str] = []
+    while True:
+        page = service.pull(
+            user_id="user-1",
+            dataset_id=dataset_id,
+            device_id="device-2",
+            cursor=cursor,
+            domains=["notes.note", "notes.keyword", "notes.keyword_link"],
+            page_size=1,
+            include_own_changes=True,
+        )
+        pulled_ids.extend(item.client_envelope_id for item in page.envelopes)
+        cursor = page.next_cursor or cursor
+        if not page.has_more:
+            break
+    assert queued_keyword.client_envelope_id not in pulled_ids
+    assert queued_relationship.client_envelope_id not in pulled_ids
+    assert source.client_envelope_id not in pulled_ids
+    assert original_resolution_request.client_envelope_id in pulled_ids
+    assert relationship_resolution_request.client_envelope_id in pulled_ids
+    assert "env-rebase-chain-after" in pulled_ids
+
+
+def test_conflict_resolution_fails_safe_when_later_rebase_scan_exceeds_group_cap(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_db = CharactersRAGDB(
+        db_path=str(tmp_path / "conflict-rebase-limit.db"),
+        client_id="user-1",
+    )
+    service, _baseline, source, conflict = _accepted_conflict_after_applied_predecessor(
+        sync_store,
+        note_db,
+    )
+    queued: list[SyncEnvelope] = []
+    with sync_store.db.backend.transaction() as connection:
+        for sequence in (3, 4):
+            queued.append(
+                sync_store.db._insert_envelope_in_transaction(
+                    _m1_note_envelope(
+                        client_envelope_id=f"env-rebase-limit-{sequence}",
+                        object_id=f"note-rebase-limit-{sequence}",
+                        client_sequence=sequence,
+                        object_revision=1,
+                        payload_hash=f"sha256:rebase-limit-{sequence}",
+                        status="accepted",
+                    ),
+                    connection=connection,
+                )
+            )
+    monkeypatch.setattr(sync_db_module, "SYNC_MUTATION_GROUP_MAX_SIZE", 1)
+    resolution = _m1_note_envelope(
+        client_envelope_id="env-rebase-limit-resolution",
+        object_id="note-original",
+        client_sequence=5,
+        base_server_cursor=_baseline.server_cursor,
+        base_object_revision=_baseline.object_revision,
+        base_object_hash=_baseline.payload_hash,
+        object_revision=2,
+        payload={"title": "Must not project", "content": "Limit validation failed"},
+        payload_hash="sha256:rebase-limit-resolution",
+    )
+
+    with pytest.raises(
+        SyncStoreError,
+        match="sync_conflict_resolution_rebase_limit_exceeded",
+    ):
+        service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=conflict.conflict_id,
+            action="overwrite",
+            resolved_by_device_id="device-1",
+            resolution_envelope=resolution,
+        )
+
+    stored_source = sync_store.get_envelope_by_server_cursor(source.server_cursor)
+    assert stored_source is not None and stored_source.apply_status == "conflict"
+    assert sync_store.get_conflict(conflict.conflict_id).status == "unresolved"
+    assert all(
+        sync_store.get_envelope_by_server_cursor(item.server_cursor).apply_status == "pending"
+        for item in queued
+    )
+    note = note_db.get_note_by_id("note-original")
+    assert note is not None
+    assert note["title"] == "Applied"
+    assert note["content"] == "Projected baseline"
+
+
+def test_conflict_resolution_validates_incompatible_rebase_record_before_product_write(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+) -> None:
+    note_db = CharactersRAGDB(
+        db_path=str(tmp_path / "conflict-rebase-incompatible.db"),
+        client_id="user-1",
+    )
+    service, baseline, source, conflict = _accepted_conflict_after_applied_predecessor(
+        sync_store,
+        note_db,
+    )
+    with sync_store.db.backend.transaction() as connection:
+        later = sync_store.db._insert_envelope_in_transaction(
+            _m1_note_envelope(
+                client_envelope_id="env-incompatible-later-conflict",
+                object_id="note-incompatible-later-conflict",
+                client_sequence=3,
+                object_revision=1,
+                payload_hash="sha256:incompatible-later-conflict",
+                status="accepted",
+            ),
+            connection=connection,
+        )
+    existing = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-incompatible-later",
+            dataset_id="dataset-1",
+            domain=later.domain,
+            entity_id=later.object_id,
+            conflict_type="legacy_projection_conflict",
+            local_envelope_id=later.client_envelope_id,
+            server_sequence=later.server_cursor,
+        )
+    )
+    sync_store.resolve_conflict(
+        existing.conflict_id,
+        dataset_id="dataset-1",
+        server_cursor=later.server_cursor,
+        status="dismissed",
+        resolution_action="skip",
+    )
+
+    with pytest.raises(
+        SyncStoreError,
+        match="sync_conflict_resolution_rebase_record_incompatible",
+    ):
+        service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=conflict.conflict_id,
+            action="overwrite",
+            resolved_by_device_id="device-1",
+            resolution_envelope=_m1_note_envelope(
+                client_envelope_id="env-incompatible-resolution",
+                object_id="note-original",
+                client_sequence=4,
+                base_server_cursor=baseline.server_cursor,
+                base_object_revision=baseline.object_revision,
+                base_object_hash=baseline.payload_hash,
+                object_revision=2,
+                payload={"title": "Must not project", "content": "Bad plan"},
+                payload_hash="sha256:incompatible-resolution",
+            ),
+        )
+
+    note = note_db.get_note_by_id("note-original")
+    assert note is not None
+    assert note["title"] == "Applied"
+    assert note["content"] == "Projected baseline"
+    assert all(
+        envelope.client_envelope_id != "env-incompatible-resolution"
+        for envelope in sync_store.list_envelopes_after(
+            "dataset-1",
+            0,
+            status=None,
+        )
+    )
+    stored_source = sync_store.get_envelope_by_server_cursor(source.server_cursor)
+    assert stored_source is not None and stored_source.apply_status == "conflict"
+
+
+def test_unresolved_accepted_materialization_conflict_blocks_new_client_append(
+    sync_store: SyncV2Store,
+) -> None:
+    service, _materializer = _accepted_materialization_conflict_service(sync_store)
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-materialization-conflict",
+                object_id="note-original",
+                object_revision=1,
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+    later = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-must-not-queue",
+                object_id="note-later",
+                device_id="device-2",
+                client_sequence=1,
+                object_revision=1,
+                payload_hash="sha256:later",
+            )
+        ],
+    )
+    accepted = sync_store.list_envelopes_after(
+        "dataset-1",
+        0,
+        status="accepted",
+    )
+
+    assert len(pushed.conflicts) == 1
+    assert later.accepted == []
+    assert len(later.conflicts) == 1
+    assert later.conflicts[0].conflict_id == pushed.conflicts[0].conflict_id
+    assert [item.client_envelope_id for item in accepted] == [
+        "env-materialization-conflict"
+    ]
+    assert len(sync_store.list_envelopes_after("dataset-1", 0, status=None)) == 1
+    assert len(sync_store.list_conflicts("dataset-1")) == 1
+
+
+def test_preflight_note_conflicts_reuse_accepted_materialization_blocker_without_writes(
+    sync_store: SyncV2Store,
+) -> None:
+    service, _materializer = _accepted_materialization_conflict_service(
+        sync_store,
+        real_notes_adapter=True,
+    )
+    blocked = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-materialization-conflict",
+                object_id="note-original",
+                object_revision=1,
+                payload={"title": "Blocked", "content": "Never projected"},
+                payload_hash="sha256:blocked",
+            )
+        ],
+    )
+    blocker = blocked.conflicts[0]
+    history_count = len(sync_store.list_envelopes_after("dataset-1", 0, status=None))
+    conflict_count = len(sync_store.list_conflicts("dataset-1"))
+
+    results = [
+        service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            envelopes=[
+                _m1_note_envelope(
+                    client_envelope_id=f"env-unique-preflight-{sequence}",
+                    object_id="note-original",
+                    device_id="device-2",
+                    client_sequence=sequence,
+                    base_server_cursor=0,
+                    base_object_revision=0,
+                    base_object_hash="sha256:stale",
+                    object_revision=2,
+                    payload={"title": f"Changed {sequence}", "content": "Unique"},
+                    payload_hash=f"sha256:unique-{sequence}",
+                )
+            ],
+        )
+        for sequence in (1, 2)
+    ]
+
+    assert [result.conflicts[0].conflict_id for result in results] == [
+        blocker.conflict_id,
+        blocker.conflict_id,
+    ]
+    assert all(result.accepted == [] and result.rejected == [] for result in results)
+    assert len(sync_store.list_envelopes_after("dataset-1", 0, status=None)) == history_count
+    assert len(sync_store.list_conflicts("dataset-1")) == conflict_count
+
+
+def test_preflight_conflict_rechecks_materialization_blocker_after_evaluation_race(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _materializer = _accepted_materialization_conflict_service(
+        sync_store,
+        real_notes_adapter=True,
+    )
+    baseline_result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-race-baseline",
+                object_id="note-race",
+                object_revision=1,
+                payload={"title": "Baseline", "content": "Applied"},
+                payload_hash="sha256:race-baseline",
+            )
+        ],
+    )
+    baseline = sync_store.get_envelope_by_server_cursor(
+        baseline_result.accepted[0].server_sequence
+    )
+    assert baseline is not None
+    evaluated = Event()
+    release = Event()
+    original_evaluate = service._evaluate_envelope
+
+    def blocking_evaluate(dataset, envelope, *, context=None):
+        outcome = original_evaluate(dataset, envelope, context=context)
+        if envelope.client_envelope_id == "env-racing-preflight":
+            assert isinstance(outcome, AdapterConflict)
+            evaluated.set()
+            assert release.wait(timeout=5)
+        return outcome
+
+    monkeypatch.setattr(service, "_evaluate_envelope", blocking_evaluate)
+    racing = _m1_note_envelope(
+        client_envelope_id="env-racing-preflight",
+        object_id="note-race",
+        device_id="device-2",
+        client_sequence=1,
+        base_server_cursor=0,
+        base_object_revision=0,
+        base_object_hash="sha256:stale",
+        object_revision=2,
+        payload={"title": "Racing", "content": "Changed"},
+        payload_hash="sha256:racing",
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            service.push,
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            envelopes=[racing],
+        )
+        assert evaluated.wait(timeout=5)
+        source = sync_store.insert_envelope(
+            _m1_note_envelope(
+                client_envelope_id="env-race-blocker",
+                object_id="note-blocker",
+                client_sequence=2,
+                object_revision=1,
+                payload={"title": "Blocker", "content": "Never projected"},
+                payload_hash="sha256:race-blocker",
+                status="accepted",
+            )
+        )
+        source = sync_store.mark_envelope_apply_status(
+            source.server_cursor,
+            apply_status="conflict",
+            apply_error_code="projection_conflict",
+        )
+        blocker = sync_store.insert_conflict(
+            SyncConflictCreate(
+                conflict_id="conflict-race-blocker",
+                dataset_id="dataset-1",
+                domain="notes.note",
+                entity_id=source.object_id,
+                conflict_type="projection_conflict",
+                local_envelope_id=source.client_envelope_id,
+                server_sequence=source.server_cursor,
+            )
+        )
+        release.set()
+        result = future.result(timeout=5)
+
+    assert result.accepted == [] and result.rejected == []
+    assert [item.conflict_id for item in result.conflicts] == [blocker.conflict_id]
+    assert all(
+        item.client_envelope_id != racing.client_envelope_id
+        for item in sync_store.list_envelopes_after("dataset-1", 0, status=None)
+    )
+
+
+def test_push_records_materialization_conflict_in_bound_sync_transaction(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _materializer = _accepted_materialization_conflict_service(sync_store)
+    observed_connections: list[object | None] = []
+    original_insert = sync_store.db.insert_conflict
+
+    def record_insert(conflict, *, connection=None):
+        observed_connections.append(connection)
+        return original_insert(conflict, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "insert_conflict", record_insert)
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-materialization-conflict",
+                object_id="note-original",
+                object_revision=1,
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+
+    assert len(result.conflicts) == 1
+    assert len(observed_connections) == 1
+    assert observed_connections[0] is not None
+
+
+def test_skip_terminalizes_accepted_conflict_and_unblocks_later_projection(
+    sync_store: SyncV2Store,
+) -> None:
+    service, _materializer = _accepted_materialization_conflict_service(sync_store)
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-materialization-conflict",
+                object_id="note-original",
+                object_revision=1,
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+
+    dismissed = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=pushed.conflicts[0].conflict_id,
+        action="skip",
+        resolved_by_device_id="device-1",
+    )
+    later = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-after-resolution",
+                object_id="note-later",
+                device_id="device-2",
+                client_sequence=1,
+                object_revision=1,
+                payload_hash="sha256:later",
+            )
+        ],
+    )
+    source = next(
+        item
+        for item in sync_store.list_envelopes_after("dataset-1", 0, status=None)
+        if item.client_envelope_id == "env-materialization-conflict"
+    )
+
+    assert dismissed.status == "dismissed"
+    assert source.apply_status == "superseded"
+    assert source.apply_error_code == "sync_conflict_skipped"
+    assert later.accepted[0].apply_status == "applied"
+
+
+def test_skip_holds_dataset_guard_until_terminalization_and_resolution_commit(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, materializer = _accepted_materialization_conflict_service(sync_store)
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-materialization-conflict",
+                object_id="note-original",
+                object_revision=1,
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+    resolve_entered = Event()
+    release_resolve = Event()
+    original_resolve = sync_store.db.resolve_conflict
+
+    def blocking_resolve(*args, **kwargs):
+        resolve_entered.set()
+        assert release_resolve.wait(timeout=5)
+        return original_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(sync_store.db, "resolve_conflict", blocking_resolve)
+
+    def skip():
+        return service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=pushed.conflicts[0].conflict_id,
+            action="skip",
+            resolved_by_device_id="device-1",
+        )
+
+    def push_later():
+        return service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            envelopes=[
+                _m1_note_envelope(
+                    client_envelope_id="env-after-resolution",
+                    object_id="note-later",
+                    device_id="device-2",
+                    client_sequence=1,
+                    object_revision=1,
+                    payload_hash="sha256:later",
+                )
+            ],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        skipping = pool.submit(skip)
+        assert resolve_entered.wait(timeout=5)
+        later = pool.submit(push_later)
+        assert not later.done()
+        assert not materializer.later_entered.wait(timeout=0.2)
+        assert not later.done()
+        release_resolve.set()
+        assert skipping.result(timeout=5).status == "dismissed"
+        assert later.result(timeout=5).accepted[0].apply_status == "applied"
+
+    assert materializer.later_entered.is_set()
+
+
+def test_resolution_guard_serializes_later_projection_until_conflict_is_terminal(
+    sync_store: SyncV2Store,
+) -> None:
+    service, materializer = _accepted_materialization_conflict_service(sync_store)
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-materialization-conflict",
+                object_id="note-original",
+                object_revision=1,
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+    release_resolution = Event()
+    materializer.release_resolution = release_resolution
+
+    def resolve():
+        return service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=pushed.conflicts[0].conflict_id,
+            action="duplicate_rename",
+            resolved_by_device_id="device-1",
+            resolution_envelope=_m1_note_envelope(
+                client_envelope_id="env-resolution-copy",
+                object_id="note-copy",
+                client_sequence=2,
+                object_revision=1,
+                payload_hash="sha256:copy",
+            ),
+        )
+
+    def push_later():
+        return service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            envelopes=[
+                _m1_note_envelope(
+                    client_envelope_id="env-after-resolution",
+                    object_id="note-later",
+                    device_id="device-2",
+                    client_sequence=1,
+                    object_revision=1,
+                    payload_hash="sha256:later",
+                )
+            ],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        resolving = pool.submit(resolve)
+        assert materializer.resolution_entered.wait(timeout=5)
+        later = pool.submit(push_later)
+        assert not materializer.later_entered.wait(timeout=0.2)
+        release_resolution.set()
+        assert resolving.result(timeout=5).status == "resolved"
+        assert later.result(timeout=5).accepted[0].apply_status == "applied"
+
+    assert materializer.later_entered.is_set()
+
+
 @pytest.mark.parametrize(
     ("object_id", "expected_apply_status"),
     [
@@ -2216,14 +4869,13 @@ def test_resolve_conflict_rejects_unapplied_resolution_envelope_without_closing_
         )
     conflict = sync_store.get_conflict(conflict_id)
     envelopes = sync_store.list_envelopes_after("dataset-1", 0, status=None)
-    resolution_envelope = next(
-        item for item in envelopes if item.client_envelope_id == f"env-resolution-{expected_apply_status}"
-    )
 
     assert conflict.status == "unresolved"
     assert conflict.resolution_action is None
-    assert resolution_envelope.status == "accepted"
-    assert resolution_envelope.apply_status == expected_apply_status
+    assert all(
+        item.client_envelope_id != f"env-resolution-{expected_apply_status}"
+        for item in envelopes
+    )
 
 
 @pytest.mark.parametrize(
@@ -2332,7 +4984,6 @@ def test_resolve_conflict_rejects_preclaimed_resolution_before_materialization(
 )
 def test_resolve_conflict_releases_claim_when_resolution_envelope_does_not_apply(
     sync_store: SyncV2Store,
-    monkeypatch: pytest.MonkeyPatch,
     object_id: str,
     expected_apply_status: str,
 ):
@@ -2380,24 +5031,6 @@ def test_resolve_conflict_releases_claim_when_resolution_envelope_does_not_apply
         ],
     )
     conflict_id = pushed.conflicts[0].conflict_id
-    original_insert = sync_store.insert_envelope
-
-    def insert_and_mark_claim(envelope: SyncEnvelopeCreate):
-        inserted = original_insert(envelope)
-        sync_store.db.execute(
-            """
-            UPDATE sync_conflicts
-               SET resolution_action = ?,
-                   resolved_by_device_id = ?,
-                   resolution_notes = ?
-             WHERE conflict_id = ?
-            """,
-            ("overwrite", "device-1", "cleanup claim", conflict_id),
-        )
-        return inserted
-
-    monkeypatch.setattr(sync_store, "insert_envelope", insert_and_mark_claim)
-
     with pytest.raises(SyncStoreError, match="resolution envelope was not applied"):
         service.resolve_conflict(
             user_id="user-1",
@@ -2416,17 +5049,16 @@ def test_resolve_conflict_releases_claim_when_resolution_envelope_does_not_apply
         )
     conflict = sync_store.get_conflict(conflict_id)
     envelopes = sync_store.list_envelopes_after("dataset-1", 0, status=None)
-    resolution_envelope = next(
-        item for item in envelopes if item.client_envelope_id == f"env-cleanup-{expected_apply_status}"
-    )
 
     assert conflict.status == "unresolved"
     assert conflict.resolution_action is None
     assert conflict.resolved_by_device_id is None
     assert conflict.resolution_notes is None
     assert conflict.resolved_by_envelope_id is None
-    assert resolution_envelope.status == "accepted"
-    assert resolution_envelope.apply_status == expected_apply_status
+    assert all(
+        item.client_envelope_id != f"env-cleanup-{expected_apply_status}"
+        for item in envelopes
+    )
 
 
 def test_resolve_conflict_skip_persists_m1_action_without_mutating_envelopes(
@@ -2488,9 +5120,9 @@ def test_resolve_conflict_skip_persists_m1_action_without_mutating_envelopes(
     assert resolved.status == "dismissed"
     assert resolved.resolution_action == "skip"
     assert resolved.resolved_by_envelope_id is None
-    assert [(item.envelope_id, item.status, item.apply_status) for item in after] == [
-        (item.envelope_id, item.status, item.apply_status) for item in before
-    ]
+    assert [item.envelope_id for item in after] == [item.envelope_id for item in before]
+    assert after[0].apply_status == "superseded"
+    assert after[0].apply_error_code == "sync_conflict_skipped"
 
 
 def test_resolve_conflict_replay_same_resolved_decision_is_idempotent(
@@ -3834,6 +6466,101 @@ def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     assert first_pull.next_cursor == "1"
     assert second_pull.envelopes == []
     assert second_pull.next_cursor == "1"
+
+
+def test_implicit_pull_isolates_legacy_device_and_rejects_explicit_unsupported_domain(
+    sync_store: SyncV2Store,
+) -> None:
+    registry = SyncAdapterRegistry(
+        [
+            StaticSyncAdapter(domain=domain, supported_adapter_versions={1})
+            for domain in [*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]
+        ]
+    )
+    service = SyncV2Service(store=sync_store, adapters=registry, clock=_clock)
+    legacy_domains = list(M1_SYNC_DOMAINS)
+    upgraded_domains = [*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]
+    service.register_device(
+        user_id="user-1",
+        display_name="Legacy",
+        client_type="chatbook",
+        device_id="legacy-device",
+        capabilities={"requested_domains": legacy_domains},
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Upgraded",
+        client_type="chatbook",
+        device_id="upgraded-device",
+        capabilities={"requested_domains": upgraded_domains},
+    )
+    sync_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            domains=upgraded_domains,
+            metadata={
+                "notes_organization_v1": {
+                    "bootstrap_id": "internal-bootstrap-id",
+                    "state": "ready",
+                    "captured_count": 1,
+                    "expected_count": 1,
+                    "error_code": None,
+                }
+            },
+        )
+    )
+    sync_store.insert_envelope(
+        _m1_note_envelope(
+            dataset_id="dataset-1",
+            client_envelope_id="core-note",
+            object_id="note-core",
+            device_id="upgraded-device",
+        )
+    )
+    sync_store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id="organization-keyword",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id="11111111-1111-4111-8111-111111111111",
+            device_id="upgraded-device",
+            object_revision=1,
+            payload={"keyword": "Research"},
+            payload_hash="sha256:organization-keyword",
+        )
+    )
+
+    legacy = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="legacy-device",
+        cursor=0,
+        include_own_changes=True,
+    )
+    upgraded = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="upgraded-device",
+        cursor=0,
+        include_own_changes=True,
+    )
+
+    assert [item.domain for item in legacy.envelopes] == ["notes.note"]
+    assert {item.domain for item in upgraded.envelopes} == {
+        "notes.note",
+        "notes.keyword",
+    }
+    with pytest.raises(SyncStoreError, match="sync_device_domain_not_supported"):
+        service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="legacy-device",
+            cursor=0,
+            domains=["notes.keyword"],
+            include_own_changes=True,
+        )
 
 
 def test_pull_does_not_persist_empty_explicit_high_cursor(sync_service: SyncV2Service):

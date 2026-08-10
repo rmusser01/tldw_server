@@ -18,7 +18,6 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
-    Response,
     status,
 )
 from fastapi.responses import StreamingResponse
@@ -26,6 +25,10 @@ from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
+    ALLOWED_SYNC_OPERATIONS,
+    ALLOWED_SYNC_SEND_ENTITIES,
+)
 
 #
 # Local Imports
@@ -88,10 +91,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRetentionDryRunRequest,
     SyncRetentionDryRunResponse,
     SyncV2Envelope,
-)
-from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
-    ALLOWED_SYNC_OPERATIONS,
-    ALLOWED_SYNC_SEND_ENTITIES,
+    SyncV2EnvelopeResponse,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
@@ -186,6 +186,22 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "reserved device identifier" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "reserved_device_id",
+                    "message": "The requested Sync device identifier is reserved.",
+                },
+            )
+        if "sync_reserved_dataset_enrollment" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_reserved_dataset_enrollment",
+                    "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+                },
+            )
         if "sync_blob_transfer_not_supported" in lowered:
             return HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -205,6 +221,23 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     ),
                 },
             )
+        restore_limit_messages = {
+            "sync_restore_candidate_limit_exceeded": (
+                "Sync restore preview exceeds the server candidate limit."
+            ),
+            "sync_restore_action_limit_exceeded": (
+                "Sync restore preview exceeds the server action limit."
+            ),
+            "sync_restore_group_limit_exceeded": (
+                "Sync restore mutation group exceeds the server size limit."
+            ),
+        }
+        for error_code, message in restore_limit_messages.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail={"error_code": error_code, "message": message},
+                )
         if "attachment payload exceeds" in lowered:
             return HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -356,10 +389,18 @@ def _api_envelope_from_core(
     envelope: Any,
     *,
     encryption_policy: str = "client_private_v1",
-) -> SyncV2Envelope:
+) -> SyncV2EnvelopeResponse:
     payload = asdict(envelope)
+    routing_metadata = dict(payload.get("routing_metadata") or {})
+    for key in (
+        "notes_folder_origin_provenance",
+        "notes_ingestion_expected_product_version",
+        "notes_keyword_merge_response",
+    ):
+        routing_metadata.pop(key, None)
+    payload["routing_metadata"] = routing_metadata
     payload["encryption_policy"] = encryption_policy
-    return SyncV2Envelope(**payload)
+    return SyncV2EnvelopeResponse(**payload)
 
 
 def _api_conflict_from_core(conflict: Any) -> SyncConflictRecord:

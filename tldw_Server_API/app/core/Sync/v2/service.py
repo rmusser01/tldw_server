@@ -26,14 +26,19 @@ from .adapters import (
 )
 from .blob_store import LocalSyncBlobStore, SyncBlobStoreError
 from .errors import (
+    SyncHeadConflictError,
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
+    SyncMaterializationBusyError,
+    SyncMaterializationPredecessorError,
     SyncStoreError,
 )
 from .materializers import MaterializationResult, SyncMaterializer
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_ENCRYPTION_POLICIES,
     SYNC_V2_SUPPORTED_DOMAINS,
     SYNC_V2_SUPPORTED_OPERATIONS,
@@ -83,17 +88,24 @@ from .models import (
     client_private_server_frontend_limitation_warning,
     sync_v2_domain_schemas,
 )
+from .mutation_group_validation import (
+    StoredMutationGroupValidationError,
+    validate_stored_mutation_group,
+)
 from .profile import SyncProfileStatus, SyncV2ProfileManager
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
 from .restore import (
     OBJECT_RESTORE_DOMAINS,
     WHOLE_OBJECT_RESTORE_DOMAINS,
+    LocalRestoreInventoryItem,
+    RestorePlanningError,
     attachment_available_locally,
     attachment_restore_status,
     attachment_verified_locally,
     build_local_inventory_index,
     find_local_inventory_item,
     local_inventory_matches,
+    order_restore_envelopes,
     restore_action_for_domain,
 )
 from .security import (
@@ -106,6 +118,12 @@ from .store import SyncV2Store
 
 SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
 SYNC_KEY_RECOVERY_MAX_WRAPPED_KEY_BYTES = 64 * 1024
+_SERVER_ORIGIN_DEVICE_ID = "server-origin"
+
+
+def _require_client_device_id(device_id: str) -> None:
+    if device_id == _SERVER_ORIGIN_DEVICE_ID:
+        raise SyncStoreError("Sync server-origin is a reserved device identifier")
 
 
 def _safe_projection_error_message(exc: Exception) -> str:
@@ -165,6 +183,8 @@ class SyncV2Settings:
         default_factory=server_trusted_encryption_status_from_env
     )
     restore_manifest_scan_limit: int = 10_000
+    restore_preview_candidate_limit: int = 50_000
+    restore_preview_action_limit: int = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,6 +516,23 @@ class SyncRestorePreviewObjectConflict:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncRestoreOrderedAction:
+    """One safe, executable step in the canonical restore-preview plan."""
+
+    plan_index: int
+    action: str
+    dataset_id: str
+    domain: SyncDomain
+    object_id: str
+    operation: SyncOperation
+    server_cursor: int
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncRestorePreviewAttachmentRef:
     dataset_id: str
     attachment_id: str
@@ -522,6 +559,7 @@ class SyncRestorePreviewWarning:
 @dataclass(frozen=True, slots=True)
 class SyncRestorePreview:
     datasets: list[SyncRestorePreviewDataset] = field(default_factory=list)
+    ordered_actions: list[SyncRestoreOrderedAction] = field(default_factory=list)
     safe_applies: list[SyncRestorePreviewObject] = field(default_factory=list)
     object_conflicts: list[SyncRestorePreviewObjectConflict] = field(default_factory=list)
     tombstones: list[SyncRestorePreviewObject] = field(default_factory=list)
@@ -554,6 +592,7 @@ class SyncV2Service:
         blob_store: LocalSyncBlobStore | None = None,
         settings: SyncV2Settings | None = None,
         workspace_access_checker: WorkspaceAccessChecker | None = None,
+        dataset_bootstrapper: object | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -563,6 +602,7 @@ class SyncV2Service:
         self.blob_store = blob_store
         self.settings = settings or SyncV2Settings()
         self.workspace_access_checker = workspace_access_checker
+        self.dataset_bootstrapper = dataset_bootstrapper
 
     def capabilities(self) -> SyncV2Capabilities:
         blob_transfer: dict[str, object] = {"supported": False}
@@ -622,9 +662,11 @@ class SyncV2Service:
         client_version: str | None = None,
         capabilities: dict[str, object] | None = None,
     ) -> SyncDeviceRegistration:
+        resolved_device_id = device_id or self.id_factory("device")
+        _require_client_device_id(resolved_device_id)
         device = self.store.upsert_device(
             SyncDeviceUpsert(
-                device_id=device_id or self.id_factory("device"),
+                device_id=resolved_device_id,
                 user_id=user_id,
                 display_name=display_name,
                 client_type=client_type,
@@ -1271,6 +1313,17 @@ class SyncV2Service:
         workspace_id: str | None = None,
         metadata: dict[str, object] | None = None,
     ) -> SyncDatasetEnrollment:
+        requested_domains = set(domains or ())
+        requested_metadata = dict(metadata or {})
+        reserved_metadata = {
+            "notes_organization_v1",
+            "default_personal",
+            "client_family",
+        }
+        if requested_domains.intersection(NOTES_ORGANIZATION_DOMAINS) or reserved_metadata.intersection(
+            requested_metadata
+        ):
+            raise SyncStoreError("sync_reserved_dataset_enrollment")
         self._require_server_trusted_encryption_ready()
         if scope_type == "workspace":
             self._require_workspace_sync_access(user_id=user_id, workspace_id=workspace_id)
@@ -1285,7 +1338,7 @@ class SyncV2Service:
                 encryption_policy=encryption_policy,
                 domains=enrolled_domains,
                 workspace_id=workspace_id,
-                metadata=dict(metadata or {}),
+                metadata=requested_metadata,
             )
         )
         return SyncDatasetEnrollment(
@@ -1319,6 +1372,8 @@ class SyncV2Service:
     ) -> SyncProfileStatus:
         """Idempotently bootstrap the user's default Sync v2 M1 profile."""
 
+        if device_id is not None:
+            _require_client_device_id(device_id)
         return self._profile_manager().bootstrap_profile(
             user_id=user_id,
             mode=mode,
@@ -1358,6 +1413,18 @@ class SyncV2Service:
     ) -> SyncPushResult:
         # The top-level cursor is a client dataset checkpoint; object conflict checks use envelope bases.
         _ = base_server_cursor
+        if device_id == _SERVER_ORIGIN_DEVICE_ID:
+            return SyncPushResult(
+                dataset_id=dataset_id,
+                rejected=[
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="reserved_device_id",
+                        message="Sync device identifier is reserved for server use",
+                    )
+                    for envelope in envelopes
+                ],
+            )
         self._require_registered_device(user_id, device_id)
         try:
             dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
@@ -1479,13 +1546,24 @@ class SyncV2Service:
                 continue
             if isinstance(outcome, AdapterConflict):
                 try:
-                    conflicts.append(self._store_conflict(dataset, envelope, outcome))
+                    conflicts.append(
+                        self._store_preflight_conflict(dataset, envelope, outcome)
+                    )
                 except SyncIdempotencyConflictError:
                     rejected.append(
                         SyncPushRejected(
                             client_envelope_id=envelope.client_envelope_id,
                             error_code="idempotency_conflict",
                             message="Sync envelope ID was reused with different content",
+                        )
+                    )
+                except SyncMaterializationBusyError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="sync_projection_busy",
+                            message="Projection is busy; retry later",
+                            retryable=True,
                         )
                     )
                 if stop_on_conflict:
@@ -1512,7 +1590,63 @@ class SyncV2Service:
                     )
                 )
                 continue
-            if inserted.apply_status != "applied":
+            except SyncHeadConflictError:
+                outcome = AdapterConflict(
+                    client_envelope_id=envelope.client_envelope_id,
+                    domain=envelope.domain,
+                    entity_id=envelope.object_id,
+                    conflict_type="stale_base_state",
+                    message="Sync object changed after request preflight",
+                )
+                try:
+                    conflicts.append(
+                        self._store_preflight_conflict(dataset, envelope, outcome)
+                    )
+                except SyncIdempotencyConflictError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="idempotency_conflict",
+                            message="Sync envelope ID was reused with different content",
+                        )
+                    )
+                except SyncMaterializationBusyError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="sync_projection_busy",
+                            message="Projection is busy; retry later",
+                            retryable=True,
+                        )
+                    )
+                if stop_on_conflict:
+                    stopped_after_conflict = True
+                continue
+            except SyncMaterializationPredecessorError as exc:
+                if exc.conflict_id and exc.domain and exc.entity_id:
+                    conflicts.append(
+                        SyncPushConflict(
+                            conflict_id=exc.conflict_id,
+                            client_envelope_id=envelope.client_envelope_id,
+                            domain=exc.domain,  # type: ignore[arg-type]
+                            entity_id=exc.entity_id,
+                            server_sequence=exc.server_sequence,
+                            message="An unresolved materialization conflict must be resolved before appending more changes",
+                        )
+                    )
+                else:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="sync_projection_predecessor_unresolved",
+                            message="An unresolved materialization conflict must be resolved before appending more changes",
+                            retryable=True,
+                        )
+                    )
+                if stop_on_conflict:
+                    stopped_after_conflict = True
+                continue
+            if inserted.apply_status not in {"applied", "superseded"}:
                 materialization = self._materialize_envelope(inserted)
                 inserted = self._envelope_snapshot(inserted)
                 if materialization.status == "conflict":
@@ -1550,12 +1684,12 @@ class SyncV2Service:
         page_size: int | None = None,
         include_own_changes: bool = False,
     ) -> SyncPullResult:
-        self._require_registered_device(user_id, device_id)
+        device = self._require_registered_device(user_id, device_id)
         if page_size is not None and page_size < 1:
             raise SyncStoreError("Sync pull page_size must be greater than zero")
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
 
-        selected_domains = self._selected_domains(dataset, domains)
+        selected_domains = self._selected_pull_domains(dataset, device, domains)
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
         raw_envelopes, visible = self._scan_pull_page(
@@ -1646,8 +1780,13 @@ class SyncV2Service:
         selected_attachment_id_set = _normalize_selection_set(selected_attachment_ids)
         local_index = build_local_inventory_index(local_inventory)
         datasets = self._accessible_datasets(user_id=user_id, dataset_ids=dataset_ids)
+        if self.settings.restore_preview_candidate_limit < 1:
+            raise SyncStoreError("sync_restore_candidate_limit_invalid")
+        if self.settings.restore_preview_action_limit < 1:
+            raise SyncStoreError("sync_restore_action_limit_invalid")
 
         preview_datasets: list[SyncRestorePreviewDataset] = []
+        ordered_actions: list[SyncRestoreOrderedAction] = []
         safe_applies: list[SyncRestorePreviewObject] = []
         object_conflicts: list[SyncRestorePreviewObjectConflict] = []
         tombstones: list[SyncRestorePreviewObject] = []
@@ -1658,6 +1797,9 @@ class SyncV2Service:
         total_counts: dict[str, int] = {}
         key_status: dict[str, dict[str, bool]] = {}
         warnings: list[SyncRestorePreviewWarning] = []
+        planned_inventory_keys: set[tuple[str, SyncDomain, str]] = set()
+        candidate_count = 0
+        planned_action_count = 0
 
         for dataset in datasets:
             dataset_domains = [
@@ -1684,13 +1826,18 @@ class SyncV2Service:
                 )
             for domain, count in stats.approximate_counts.items():
                 total_counts[domain] = total_counts.get(domain, 0) + count
-            domain_envelopes = {
-                domain: self._list_restore_preview_domain_envelopes(
+            domain_envelopes: dict[SyncDomain, list[SyncEnvelope]] = {}
+            for domain in dataset_domains:
+                envelopes = self._list_restore_preview_domain_envelopes(
                     dataset_id=dataset.dataset_id,
                     domain=domain,
+                    max_candidates=(
+                        self.settings.restore_preview_candidate_limit
+                        - candidate_count
+                    ),
                 )
-                for domain in dataset_domains
-            }
+                candidate_count += len(envelopes)
+                domain_envelopes[domain] = envelopes
             latest_cursors: dict[str, int] = {}
             dataset_ranges: list[SyncRestorePreviewEnvelopeRange] = []
             for domain, envelopes in domain_envelopes.items():
@@ -1728,15 +1875,39 @@ class SyncV2Service:
                 if domain not in OBJECT_RESTORE_DOMAINS:
                     continue
                 for envelope in domain_envelopes.get(domain, []):
-                    if envelope.apply_status == "conflict":
-                        continue
-                    if selected_object_id_set and envelope.object_id not in selected_object_id_set:
+                    if envelope.apply_status == "superseded":
                         continue
                     latest_object_envelopes[(domain, envelope.object_id)] = envelope
-            for (domain, object_id), envelope in sorted(
-                latest_object_envelopes.items(),
-                key=lambda item: item[1].server_cursor or 0,
-            ):
+            selected_envelopes = [
+                envelope
+                for envelope in latest_object_envelopes.values()
+                if not selected_object_id_set or envelope.object_id in selected_object_id_set
+            ]
+            try:
+                restore_envelopes = self._expand_restore_mutation_groups(
+                    dataset_id=dataset.dataset_id,
+                    envelopes=selected_envelopes,
+                    latest_object_envelopes=latest_object_envelopes,
+                    selected_domains=selected_domains,
+                    selected_object_ids=selected_object_id_set,
+                )
+                remaining_actions = (
+                    self.settings.restore_preview_action_limit - planned_action_count
+                )
+                if len(restore_envelopes) > remaining_actions:
+                    raise SyncStoreError("sync_restore_action_limit_exceeded")
+                ordered_restore_envelopes = order_restore_envelopes(
+                    restore_envelopes,
+                    max_actions=remaining_actions,
+                )
+                planned_action_count += len(ordered_restore_envelopes)
+            except (RestorePlanningError, StoredMutationGroupValidationError) as exc:
+                raise SyncStoreError("sync_restore_plan_invalid") from exc
+            restore_fingerprints: list[tuple[int | None, str | None, bool]] = []
+            final_plan_index_by_identity: dict[tuple[SyncDomain, str], int] = {}
+            for plan_index, envelope in enumerate(ordered_restore_envelopes):
+                domain = envelope.domain
+                object_id = envelope.object_id
                 object_state = self.store.get_object_state(dataset.dataset_id, domain, object_id)
                 server_revision = (
                     object_state.object_revision
@@ -1755,6 +1926,32 @@ class SyncV2Service:
                     if object_state is not None and object_state.latest_server_cursor == envelope.server_cursor
                     else envelope.operation == "tombstone" or envelope.deleted
                 )
+                restore_fingerprints.append((server_revision, server_hash, deleted))
+                final_plan_index_by_identity[(domain, object_id)] = plan_index
+
+            initially_matching_final_keys: set[tuple[str, SyncDomain, str]] = set()
+            for (domain, object_id), plan_index in final_plan_index_by_identity.items():
+                local_item = find_local_inventory_item(
+                    local_index,
+                    dataset_id=dataset.dataset_id,
+                    domain=domain,
+                    object_id=object_id,
+                )
+                server_revision, server_hash, deleted = restore_fingerprints[plan_index]
+                if local_item is not None and local_inventory_matches(
+                    local_item,
+                    object_revision=server_revision,
+                    object_hash=server_hash,
+                    deleted=deleted,
+                ):
+                    initially_matching_final_keys.add(
+                        (dataset.dataset_id, domain, object_id)
+                    )
+
+            for plan_index, envelope in enumerate(ordered_restore_envelopes):
+                domain = envelope.domain
+                object_id = envelope.object_id
+                server_revision, server_hash, deleted = restore_fingerprints[plan_index]
                 local_item = find_local_inventory_item(
                     local_index,
                     dataset_id=dataset.dataset_id,
@@ -1770,7 +1967,129 @@ class SyncV2Service:
                         deleted=deleted,
                     )
                 )
+                inventory_key = (dataset.dataset_id, domain, object_id)
+                if envelope.apply_status == "conflict":
+                    conflict_type = "stored_apply_conflict"
+                    object_conflicts.append(
+                        SyncRestorePreviewObjectConflict(
+                            dataset_id=dataset.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            conflict_type=conflict_type,
+                            server_revision=server_revision,
+                            server_hash=server_hash,
+                            server_cursor=envelope.server_cursor,
+                            server_deleted=deleted,
+                            local_revision=(
+                                local_item.object_revision
+                                if local_item is not None
+                                else None
+                            ),
+                            local_hash=(
+                                local_item.object_hash
+                                if local_item is not None
+                                else None
+                            ),
+                            local_deleted=(
+                                local_item.deleted if local_item is not None else False
+                            ),
+                            message="Stored restore candidate is blocked by an apply conflict.",
+                        )
+                    )
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="conflict",
+                            dataset_id=envelope.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                            code="sync_restore_stored_apply_conflict",
+                        )
+                    )
+                    continue
+                local_matches_tombstone_base = (
+                    deleted
+                    and local_item is not None
+                    and (
+                        envelope.base_object_revision is not None
+                        or envelope.base_object_hash is not None
+                    )
+                    and local_inventory_matches(
+                        local_item,
+                        object_revision=envelope.base_object_revision,
+                        object_hash=envelope.base_object_hash,
+                        deleted=False,
+                    )
+                )
+                can_apply = (
+                    local_item is None
+                    or local_matches
+                    or local_matches_tombstone_base
+                    or inventory_key in planned_inventory_keys
+                    or (
+                        inventory_key in initially_matching_final_keys
+                        and plan_index
+                        < final_plan_index_by_identity[(domain, object_id)]
+                    )
+                )
+                if not can_apply:
+                    conflict_type = (
+                        "whole_object_conflict"
+                        if domain in WHOLE_OBJECT_RESTORE_DOMAINS
+                        else "stable_id_conflict"
+                    )
+                    object_conflicts.append(
+                        SyncRestorePreviewObjectConflict(
+                            dataset_id=dataset.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            conflict_type=conflict_type,
+                            server_revision=server_revision,
+                            server_hash=server_hash,
+                            server_cursor=envelope.server_cursor,
+                            server_deleted=deleted,
+                            local_revision=local_item.object_revision,
+                            local_hash=local_item.object_hash,
+                            local_deleted=local_item.deleted,
+                            message="Local object differs from the server restore candidate.",
+                        )
+                    )
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="conflict",
+                            dataset_id=envelope.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                            code=conflict_type,
+                        )
+                    )
+                    continue
                 if deleted:
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="tombstone",
+                            dataset_id=envelope.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                        )
+                    )
                     tombstones.append(
                         SyncRestorePreviewObject(
                             dataset_id=dataset.dataset_id,
@@ -1791,18 +2110,46 @@ class SyncV2Service:
                             parent_id=envelope.parent_id,
                         )
                     )
+                    local_index[inventory_key] = LocalRestoreInventoryItem(
+                        dataset_id=dataset.dataset_id,
+                        domain=domain,
+                        object_id=object_id,
+                        object_revision=server_revision,
+                        object_hash=server_hash,
+                        deleted=True,
+                    )
+                    planned_inventory_keys.add(inventory_key)
                     continue
-                if local_item is None or local_matches:
+                if can_apply:
+                    action = (
+                        "noop"
+                        if local_matches
+                        else restore_action_for_domain(
+                            domain,
+                            deleted=False,
+                            local_present=False,
+                        )
+                    )
+                    ordered_actions.append(
+                        SyncRestoreOrderedAction(
+                            plan_index=len(ordered_actions),
+                            action="noop" if action == "noop" else "apply",
+                            dataset_id=envelope.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            operation=envelope.operation,
+                            server_cursor=envelope.server_cursor or 0,
+                            mutation_group_id=envelope.mutation_group_id,
+                            mutation_step=envelope.mutation_step,
+                            mutation_step_count=envelope.mutation_step_count,
+                        )
+                    )
                     safe_applies.append(
                         SyncRestorePreviewObject(
                             dataset_id=dataset.dataset_id,
                             domain=domain,
                             object_id=object_id,
-                            action=restore_action_for_domain(
-                                domain,
-                                deleted=False,
-                                local_present=local_item is not None,
-                            ),
+                            action=action,
                             server_revision=server_revision,
                             server_hash=server_hash,
                             server_cursor=envelope.server_cursor,
@@ -1813,28 +2160,16 @@ class SyncV2Service:
                             parent_id=envelope.parent_id,
                         )
                     )
-                    continue
-                conflict_type = (
-                    "whole_object_conflict"
-                    if domain in WHOLE_OBJECT_RESTORE_DOMAINS
-                    else "stable_id_conflict"
-                )
-                object_conflicts.append(
-                    SyncRestorePreviewObjectConflict(
+                    local_index[inventory_key] = LocalRestoreInventoryItem(
                         dataset_id=dataset.dataset_id,
                         domain=domain,
                         object_id=object_id,
-                        conflict_type=conflict_type,
-                        server_revision=server_revision,
-                        server_hash=server_hash,
-                        server_cursor=envelope.server_cursor,
-                        server_deleted=False,
-                        local_revision=local_item.object_revision,
-                        local_hash=local_item.object_hash,
-                        local_deleted=local_item.deleted,
-                        message="Local object differs from the server restore candidate.",
+                        object_revision=server_revision,
+                        object_hash=server_hash,
+                        deleted=False,
                     )
-                )
+                    planned_inventory_keys.add(inventory_key)
+                    continue
 
             seen_refs: set[tuple[str, str]] = set()
             latest_attachment_envelopes: dict[str, SyncEnvelope] = {}
@@ -1962,6 +2297,7 @@ class SyncV2Service:
 
         return SyncRestorePreview(
             datasets=preview_datasets,
+            ordered_actions=ordered_actions,
             safe_applies=safe_applies,
             object_conflicts=object_conflicts,
             tombstones=tombstones,
@@ -2008,18 +2344,32 @@ class SyncV2Service:
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         selected_domains = self._selected_domains(dataset, domains)
 
-        def _repair_materialize(envelope: SyncEnvelope) -> MaterializationResult:
-            materialization = self._materialize_envelope(envelope)
+        def _repair_materialize(
+            envelope: SyncEnvelope,
+            store: SyncV2Store | None,
+        ) -> MaterializationResult:
+            materialization = self._materialize_envelope(envelope, store=store)
             if materialization.status == "conflict":
-                snapshot = self._envelope_snapshot(envelope)
-                self._store_materialization_conflict(dataset, snapshot, materialization)
+                snapshot = self._envelope_snapshot(envelope, store=store)
+                self._store_materialization_conflict(
+                    dataset,
+                    snapshot,
+                    materialization,
+                    store=store,
+                )
             return materialization
+
+        def _repair_snapshot(
+            envelope: SyncEnvelope,
+            store: SyncV2Store | None,
+        ) -> SyncEnvelope:
+            return self._envelope_snapshot(envelope, store=store)
 
         return SyncReplayRepairer(
             store=self.store,
             materializers=self.materializers,
             materialize=_repair_materialize,
-            snapshot=self._envelope_snapshot,
+            snapshot=_repair_snapshot,
             scan_limit=self.settings.restore_manifest_scan_limit,
         ).run(
             dataset_id=dataset.dataset_id,
@@ -2515,12 +2865,11 @@ class SyncV2Service:
             raise SyncStoreError("Sync conflict is already resolved")
         if resolved_by_device_id is not None:
             self._require_registered_device(user_id, resolved_by_device_id)
-        resolution_server_cursor: int | None = None
         if action in {"overwrite", "duplicate_rename"} and resolution_envelope is None:
             raise SyncStoreError(f"Sync {action} requires a resolution envelope")
         if action == "skip" and resolution_envelope is not None:
             raise SyncStoreError(f"Sync {action} must not include a resolution envelope")
-        resolution_claim: tuple[str | None, str, str | None] | None = None
+        resolution_device_id = resolved_by_device_id
         if resolution_envelope is not None:
             resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
             self._require_registered_device(user_id, resolution_device_id or "")
@@ -2541,73 +2890,121 @@ class SyncV2Service:
                 raise SyncStoreError("Sync resolution envelope device_id must match resolved_by_device_id")
             if self._payload_exceeds_size_limit(resolution_envelope):
                 raise SyncStoreError("Sync resolution envelope payload exceeds the server size limit")
-            try:
-                outcome = self._evaluate_envelope(dataset, resolution_envelope)
-            except PrivatePayloadValidationError as exc:
-                raise SyncStoreError("Sync resolution envelope private payload validation failed") from exc
-            if not isinstance(outcome, AdapterAccepted):
-                raise SyncStoreError("Sync resolution envelope was not accepted")
-            self.store.claim_conflict_resolution(
+
+        if conflict.server_sequence is None:
+            raise SyncStoreError("Sync conflict has no canonical source envelope")
+        source = self.store.get_envelope_by_server_cursor(conflict.server_sequence)
+        if (
+            source is None
+            or source.dataset_id != dataset.dataset_id
+            or source.client_envelope_id != conflict.local_envelope_id
+            or source.domain != conflict.domain
+            or source.object_id != conflict.entity_id
+        ):
+            raise SyncStoreError("Sync conflict source envelope was not found")
+
+        with self.store.materialization_guard(
+            [source],
+            require_predecessors=False,
+        ) as guarded_store:
+            claimed_conflict = guarded_store.claim_conflict_resolution(
                 conflict_id,
                 dataset_id=dataset.dataset_id,
                 resolved_by_device_id=resolution_device_id,
                 resolution_action=action,
                 resolution_notes=notes,
             )
-            resolution_claim = (resolution_device_id, action, notes)
-            try:
-                inserted = self.store.insert_envelope(
+            guarded_source = guarded_store.require_conflict_resolution_predecessors_applied(
+                conflict_id,
+                dataset_id=dataset.dataset_id,
+                resolved_by_device_id=resolution_device_id,
+                resolution_action=action,
+                resolution_notes=notes,
+            )
+            rebase_plan = guarded_store.stage_later_claimed_conflict_rebase_plan(
+                conflict_id,
+                dataset_id=dataset.dataset_id,
+                resolved_by_device_id=resolution_device_id,
+                resolution_action=action,
+                resolution_notes=notes,
+            )
+            inserted: SyncEnvelope | None = None
+            if resolution_envelope is not None:
+                resolution_context = self._conflict_resolution_adapter_context(
+                    dataset,
+                    conflict=claimed_conflict,
+                    source=guarded_source,
+                    resolution_envelope=resolution_envelope,
+                    action=action,
+                    store=guarded_store,
+                )
+                try:
+                    outcome = self._evaluate_envelope(
+                        dataset,
+                        resolution_envelope,
+                        context=resolution_context,
+                    )
+                except PrivatePayloadValidationError as exc:
+                    raise SyncStoreError(
+                        "Sync resolution envelope private payload validation failed"
+                    ) from exc
+                if not isinstance(outcome, AdapterAccepted):
+                    raise SyncStoreError("Sync resolution envelope was not accepted")
+                inserted = guarded_store.insert_claimed_conflict_resolution_envelope(
                     replace(
                         resolution_envelope,
                         device_id=resolution_device_id,
                         status="accepted",
-                    )
-                )
-                if inserted.apply_status != "applied":
-                    materialization = self._materialize_envelope(inserted)
-                    inserted = self._envelope_snapshot(inserted)
-                    if materialization.status == "conflict":
-                        self._store_materialization_conflict(dataset, inserted, materialization)
-                    if materialization.status in {"failed", "conflict"} or inserted.apply_status in {
-                        "failed",
-                        "conflict",
-                    }:
-                        raise SyncStoreError("Sync resolution envelope was not applied")
-            except Exception:
-                self.store.release_conflict_resolution_claim(
-                    conflict_id,
+                    ),
+                    conflict_id=conflict_id,
                     dataset_id=dataset.dataset_id,
                     resolved_by_device_id=resolution_device_id,
                     resolution_action=action,
                     resolution_notes=notes,
                 )
-                raise
-            resolved_by_envelope_id = inserted.envelope_id
-            resolution_server_cursor = inserted.server_cursor
-            resolved_by_device_id = resolution_device_id
-        resolved_status: ConflictStatus = "dismissed" if action == "skip" else "resolved"
-        try:
-            return self.store.resolve_conflict(
+            if inserted is not None:
+                if inserted.apply_status != "applied":
+                    materialization = self._materialize_envelope(
+                        inserted,
+                        store=guarded_store,
+                    )
+                    inserted = self._envelope_snapshot(inserted, store=guarded_store)
+                    if materialization.status != "applied" or inserted.apply_status != "applied":
+                        raise SyncStoreError("Sync resolution envelope was not applied")
+                resolved_by_envelope_id = inserted.envelope_id
+            guarded_store.rebase_later_claimed_conflict_envelopes(
                 conflict_id,
                 dataset_id=dataset.dataset_id,
-                server_cursor=resolution_server_cursor,
+                resolved_by_device_id=resolution_device_id,
+                resolution_action=action,
+                resolution_notes=notes,
+                expected_server_cursors=rebase_plan,
+            )
+            guarded_store.terminalize_claimed_conflict_envelope(
+                conflict_id,
+                dataset_id=dataset.dataset_id,
+                resolved_by_device_id=resolution_device_id,
+                resolution_action=action,
+                resolution_notes=notes,
+                apply_error_code=(
+                    "sync_conflict_skipped"
+                    if action == "skip"
+                    else "sync_conflict_superseded"
+                ),
+            )
+            resolved_status: ConflictStatus = (
+                "dismissed" if action == "skip" else "resolved"
+            )
+            return guarded_store.resolve_conflict(
+                conflict_id,
+                dataset_id=dataset.dataset_id,
+                server_cursor=conflict.server_sequence,
                 status=resolved_status,
                 resolved_by_envelope_id=resolved_by_envelope_id,
-                resolved_by_device_id=resolved_by_device_id,
+                resolved_by_device_id=resolution_device_id,
                 resolution_action=action,
                 resolution_notes=notes,
             )
-        except Exception:
-            if resolution_claim is not None:
-                claim_device_id, claim_action, claim_notes = resolution_claim
-                self.store.release_conflict_resolution_claim(
-                    conflict_id,
-                    dataset_id=dataset.dataset_id,
-                    resolved_by_device_id=claim_device_id,
-                    resolution_action=claim_action,
-                    resolution_notes=claim_notes,
-                )
-            raise
 
     def _is_conflict_resolution_replay(
         self,
@@ -3020,10 +3417,68 @@ class SyncV2Service:
             new_key_record=self._key_rotation_record_summary(new_record),
         )
 
+    def _conflict_resolution_adapter_context(
+        self,
+        dataset: SyncDataset,
+        *,
+        conflict: SyncConflict,
+        source: SyncEnvelope,
+        resolution_envelope: SyncEnvelopeCreate,
+        action: str,
+        store: SyncV2Store,
+    ) -> SyncAdapterContext:
+        """Build a bound projected-head view for one claimed resolution."""
+
+        del action
+        conflict_marked = (
+            conflict.conflict_type
+            == SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+        )
+        source_marked = (
+            source.apply_error_code
+            == SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+        )
+        if conflict_marked != source_marked:
+            raise SyncStoreError("Sync rebase conflict marker does not match its source")
+        through_server_cursor = (
+            None
+            if source.status != "accepted" or conflict_marked
+            else source.server_cursor
+        )
+        snapshot = {
+            (head.domain, head.object_id): head
+            for head in store.list_latest_applied_heads(
+                dataset.dataset_id,
+                through_server_cursor=through_server_cursor,
+            )
+        }
+
+        def get_head(domain: SyncDomain, object_id: str) -> SyncEnvelope | None:
+            return snapshot.get((domain, object_id))
+
+        def list_heads(domain: SyncDomain) -> tuple[SyncEnvelope, ...]:
+            return tuple(
+                head
+                for (head_domain, _object_id), head in snapshot.items()
+                if head_domain == domain
+            )
+
+        current = get_head(
+            resolution_envelope.domain,
+            resolution_envelope.object_id,
+        )
+        return SyncAdapterContext(
+            prior_envelopes=(current,) if current is not None else (),
+            get_head=get_head,
+            list_heads=list_heads,
+        )
+
     def _evaluate_envelope(
         self,
         dataset: SyncDataset,
         envelope: SyncEnvelopeCreate,
+        *,
+        context: SyncAdapterContext | None = None,
     ) -> AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred:
         if envelope.adapter_version not in self.adapters.get(envelope.domain).supported_adapter_versions:
             return AdapterRejected(
@@ -3036,17 +3491,48 @@ class SyncV2Service:
                 payload_ciphertext=envelope.payload_ciphertext,
                 payload_clear=envelope.payload_clear,
             )
-        context = SyncAdapterContext(
-            prior_envelopes=self.store.list_envelopes_for_entity(
+        if context is None:
+            current = self.store.get_current_head(
                 dataset.dataset_id,
                 envelope.domain,
-                entity_id=envelope.entity_id,
-                stable_key=envelope.stable_key,
-                limit=100,
+                envelope.object_id,
             )
-        )
+            context = SyncAdapterContext(
+                prior_envelopes=(current,) if current is not None else (),
+                get_head=lambda domain, object_id: self.store.get_current_head(
+                    dataset.dataset_id, domain, object_id
+                ),
+                list_heads=lambda domain: self._list_current_heads_for_adapter(
+                    dataset.dataset_id, domain
+                ),
+            )
         adapter = self.adapters.get(envelope.domain)
         return _call_adapter_evaluate(adapter, envelope, dataset=dataset, context=context)
+
+    def _list_current_heads_for_adapter(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        store: SyncV2Store | None = None,
+    ) -> tuple[SyncEnvelope, ...]:
+        """Load current heads through bounded pages for adapter-wide checks."""
+
+        page_size = 1000
+        offset = 0
+        heads: list[SyncEnvelope] = []
+        active_store = store or self.store
+        while True:
+            page = active_store.list_current_heads(
+                dataset_id,
+                domain,
+                limit=page_size,
+                offset=offset,
+            )
+            heads.extend(page)
+            if len(page) < page_size:
+                return tuple(heads)
+            offset += page_size
 
     def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:
         if not device_id:
@@ -3085,7 +3571,7 @@ class SyncV2Service:
         if dataset_ids:
             return [
                 self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-                for dataset_id in dataset_ids
+                for dataset_id in dict.fromkeys(dataset_ids)
             ]
         datasets: list[SyncDataset] = []
         for dataset in self.store.list_datasets_for_user(user_id):
@@ -3511,9 +3997,12 @@ class SyncV2Service:
         dataset: SyncDataset,
         envelope: SyncEnvelopeCreate,
         outcome: AdapterConflict,
+        *,
+        store: SyncV2Store | None = None,
     ) -> SyncPushConflict:
-        inserted = self.store.insert_envelope(replace(envelope, status="conflict"))
-        existing = self.store.get_unresolved_conflict_for_envelope(
+        active_store = store or self.store
+        inserted = active_store.insert_envelope(replace(envelope, status="conflict"))
+        existing = active_store.get_unresolved_conflict_for_envelope(
             dataset.dataset_id,
             local_envelope_id=envelope.client_envelope_id,
             server_sequence=inserted.server_sequence,
@@ -3527,7 +4016,7 @@ class SyncV2Service:
                 server_sequence=existing.server_sequence,
                 message=outcome.message,
             )
-        conflict = self.store.insert_conflict(
+        conflict = active_store.insert_conflict(
             SyncConflictCreate(
                 conflict_id=self.id_factory("conflict"),
                 dataset_id=dataset.dataset_id,
@@ -3548,17 +4037,88 @@ class SyncV2Service:
             message=outcome.message,
         )
 
-    def _materialize_envelope(self, envelope: SyncEnvelope) -> MaterializationResult:
+    def _store_preflight_conflict(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelopeCreate,
+        outcome: AdapterConflict,
+    ) -> SyncPushConflict:
+        """Atomically prefer an accepted projection blocker over preflight history."""
+
+        with self.store.materialization_guard(
+            [envelope],
+            require_predecessors=False,
+        ) as guarded_store:
+            blocker = guarded_store.get_unresolved_materialization_conflict(
+                dataset.dataset_id
+            )
+            if blocker is not None:
+                return SyncPushConflict(
+                    conflict_id=blocker.conflict_id,
+                    client_envelope_id=envelope.client_envelope_id,
+                    domain=blocker.domain,
+                    entity_id=blocker.entity_id,
+                    server_sequence=blocker.server_sequence,
+                    message=(
+                        "An unresolved materialization conflict must be resolved "
+                        "before appending more changes"
+                    ),
+                )
+            return self._store_conflict(
+                dataset,
+                envelope,
+                outcome,
+                store=guarded_store,
+            )
+
+    def _materialize_envelope(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store | None = None,
+    ) -> MaterializationResult:
         materializer = self.materializers.get(envelope.domain)
         if materializer is None:
             return MaterializationResult(status="skipped")
+        if envelope.apply_status == "superseded":
+            return MaterializationResult(status="skipped")
+        if store is None:
+            try:
+                with self.store.materialization_guard([envelope]) as guarded_store:
+                    return self._materialize_envelope(envelope, store=guarded_store)
+            except SyncMaterializationBusyError:
+                return MaterializationResult(
+                    status="failed",
+                    error_code="sync_projection_busy",
+                    message="Projection is busy; retry later",
+                )
+            except SyncMaterializationPredecessorError:
+                return MaterializationResult(
+                    status="failed",
+                    error_code="sync_projection_predecessor_unresolved",
+                    message="An earlier projection must finish first",
+                )
+            except Exception as exc:  # noqa: BLE001 - commit/lock failures are retryable.
+                return MaterializationResult(
+                    status="failed",
+                    error_code="sync_projection_failed",
+                    message=_safe_projection_error_message(exc),
+                )
         try:
-            return materializer.apply(envelope, store=self.store)
+            result = materializer.apply(envelope, store=store)
+            if result.status == "conflict":
+                self._store_materialization_conflict(
+                    envelope.dataset_id,
+                    self._envelope_snapshot(envelope, store=store),
+                    result,
+                    store=store,
+                )
+            return result
         except Exception as exc:  # noqa: BLE001 - materializer failures are captured as replayable sync state.
             error_code = "sync_projection_failed"
             error_message = _safe_projection_error_message(exc)
             if envelope.server_cursor is not None:
-                self.store.mark_envelope_apply_status(
+                store.mark_envelope_apply_status(
                     envelope.server_cursor,
                     apply_status="failed",
                     apply_error_code=error_code,
@@ -3570,12 +4130,17 @@ class SyncV2Service:
                 message=error_message,
             )
 
-    def _envelope_snapshot(self, envelope: SyncEnvelope) -> SyncEnvelope:
+    def _envelope_snapshot(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store | None = None,
+    ) -> SyncEnvelope:
         """Reload an envelope after projection updates apply status fields."""
 
         if envelope.server_cursor is None:
             return envelope
-        candidates = self.store.list_envelopes_after(
+        candidates = (store or self.store).list_envelopes_after(
             envelope.dataset_id,
             max(envelope.server_cursor - 1, 0),
             limit=1,
@@ -3609,12 +4174,16 @@ class SyncV2Service:
 
     def _store_materialization_conflict(
         self,
-        dataset: SyncDataset,
+        dataset: SyncDataset | str,
         envelope: SyncEnvelope,
         result: MaterializationResult,
+        *,
+        store: SyncV2Store | None = None,
     ) -> SyncPushConflict:
-        existing = self.store.get_unresolved_conflict_for_envelope(
-            dataset.dataset_id,
+        sync_store = store or self.store
+        dataset_id = dataset.dataset_id if isinstance(dataset, SyncDataset) else dataset
+        existing = sync_store.get_unresolved_conflict_for_envelope(
+            dataset_id,
             local_envelope_id=envelope.client_envelope_id,
             server_sequence=envelope.server_sequence,
         )
@@ -3627,10 +4196,10 @@ class SyncV2Service:
                 server_sequence=existing.server_sequence,
                 message=result.message,
             )
-        conflict = self.store.insert_conflict(
+        conflict = sync_store.insert_conflict(
             SyncConflictCreate(
                 conflict_id=self.id_factory("conflict"),
-                dataset_id=dataset.dataset_id,
+                dataset_id=dataset_id,
                 domain=envelope.domain,
                 entity_id=envelope.entity_id,
                 conflict_type=result.conflict_type or "materialization_conflict",
@@ -3684,12 +4253,37 @@ class SyncV2Service:
         requested = list(domains or dataset.domains)
         return [domain for domain in requested if domain in allowed and self.adapters.has_domain(domain)]
 
+    def _selected_pull_domains(
+        self,
+        dataset: SyncDataset,
+        device: SyncDevice,
+        domains: Sequence[SyncDomain] | None,
+    ) -> list[SyncDomain]:
+        requested_by_device = _device_requested_domains(device)
+        device_set = set(requested_by_device)
+        if domains is not None:
+            unsupported = sorted(set(domains).difference(device_set))
+            if unsupported:
+                raise SyncStoreError("sync_device_domain_not_supported")
+            requested = list(domains)
+        else:
+            requested = requested_by_device
+        selected = self._selected_domains(dataset, requested)
+        if set(selected).intersection(NOTES_ORGANIZATION_DOMAINS):
+            metadata = dataset.metadata.get("notes_organization_v1")
+            state = metadata.get("state") if isinstance(metadata, Mapping) else None
+            if state != "ready":
+                raise SyncStoreError("notes_organization_sync_not_ready")
+        return selected
+
     def _profile_manager(self) -> SyncV2ProfileManager:
         return SyncV2ProfileManager(
             store=self.store,
             capabilities_factory=self.capabilities,
             id_factory=self.id_factory,
             scan_limit=self.settings.restore_manifest_scan_limit,
+            service=self,
+            dataset_bootstrapper=self.dataset_bootstrapper,
         )
 
     def _update_cursors(
@@ -3727,14 +4321,94 @@ class SyncV2Service:
             status="accepted",
             exclude_device_id=None if include_own_changes else device_id,
         )
-        visible = [envelope for envelope in raw if envelope.apply_status != "conflict"]
+        blocker = self.store.get_unresolved_materialization_conflict(dataset_id)
+        blocker_cursor = (
+            blocker.server_sequence
+            if blocker is not None
+            and blocker.conflict_type
+            != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+            else None
+        )
+        visible = [
+            envelope
+            for envelope in raw
+            if envelope.apply_status not in {"conflict", "superseded"}
+            and (
+                blocker_cursor is None
+                or envelope.server_sequence < blocker_cursor
+            )
+        ]
         return raw, visible
+
+    def _expand_restore_mutation_groups(
+        self,
+        *,
+        dataset_id: str,
+        envelopes: Sequence[SyncEnvelope],
+        latest_object_envelopes: Mapping[tuple[SyncDomain, str], SyncEnvelope],
+        selected_domains: set[SyncDomain],
+        selected_object_ids: set[str],
+    ) -> list[SyncEnvelope]:
+        """Expand selected restore heads to complete persisted mutation units."""
+
+        candidates = {
+            (envelope.server_cursor, envelope.client_envelope_id): envelope
+            for envelope in envelopes
+        }
+        queued = list(envelopes)
+        processed_groups: set[str] = set()
+        while queued:
+            envelope = queued.pop()
+            group_id = envelope.mutation_group_id
+            if not group_id or group_id in processed_groups:
+                continue
+            group = self.store.list_mutation_group(dataset_id, group_id)
+            validate_stored_mutation_group(
+                group,
+                dataset_id=dataset_id,
+                mutation_group_id=group_id,
+            )
+            active_group = [
+                member for member in group if member.apply_status != "superseded"
+            ]
+            group_was_terminally_split = len(active_group) != len(group)
+            if selected_domains and any(
+                member.domain not in selected_domains for member in active_group
+            ):
+                raise RestorePlanningError("Restore domain filter splits a mutation group")
+            if selected_object_ids and any(
+                member.object_id not in selected_object_ids for member in active_group
+            ):
+                raise RestorePlanningError("Restore object filter splits a mutation group")
+            processed_groups.add(group_id)
+            for member in active_group:
+                if member.domain not in OBJECT_RESTORE_DOMAINS:
+                    raise RestorePlanningError("Restore mutation group contains unsupported domain")
+                restore_member = member
+                if group_was_terminally_split:
+                    restore_member = replace(
+                        member,
+                        mutation_group_id=None,
+                        mutation_step=None,
+                        mutation_step_count=None,
+                        mutation_plan_hash=None,
+                    )
+                candidates[(member.server_cursor, member.client_envelope_id)] = restore_member
+                latest = latest_object_envelopes.get((member.domain, member.object_id))
+                if latest is None or latest.server_cursor == member.server_cursor:
+                    continue
+                key = (latest.server_cursor, latest.client_envelope_id)
+                if key not in candidates:
+                    candidates[key] = latest
+                    queued.append(latest)
+        return list(candidates.values())
 
     def _list_restore_preview_domain_envelopes(
         self,
         *,
         dataset_id: str,
         domain: SyncDomain,
+        max_candidates: int,
     ) -> list[SyncEnvelope]:
         page_limit = self.settings.restore_manifest_scan_limit
         if page_limit < 1:
@@ -3742,21 +4416,27 @@ class SyncV2Service:
         envelopes: list[SyncEnvelope] = []
         since_sequence = 0
         while True:
+            request_limit = min(
+                page_limit,
+                max(1, max_candidates - len(envelopes) + 1),
+            )
             page = self.store.list_envelopes_after(
                 dataset_id,
                 since_sequence,
-                limit=page_limit,
+                limit=request_limit,
                 domains=[domain],
                 status="accepted",
             )
             if not page:
                 break
             envelopes.extend(page)
+            if len(envelopes) > max_candidates:
+                raise SyncStoreError("sync_restore_candidate_limit_exceeded")
             next_sequence = max(envelope.server_sequence for envelope in page)
             if next_sequence <= since_sequence:
                 raise SyncStoreError("Sync restore manifest cursor did not advance")
             since_sequence = next_sequence
-            if len(page) < page_limit:
+            if len(page) < request_limit:
                 break
         return envelopes
 
@@ -4154,6 +4834,21 @@ def _append_warning_once(
     if code and any(item.get("code") == code for item in warnings):
         return warnings
     return [*warnings, warning]
+
+
+def _device_requested_domains(device: SyncDevice) -> list[SyncDomain]:
+    raw_requested = device.capabilities.get("requested_domains")
+    requested = (
+        [item for item in raw_requested if isinstance(item, str)]
+        if isinstance(raw_requested, list)
+        else list(M1_SYNC_DOMAINS)
+    )
+    raw_supported = device.capabilities.get("supported_domains")
+    if isinstance(raw_supported, list):
+        supported = {item for item in raw_supported if isinstance(item, str)}
+        requested = [item for item in requested if item in supported]
+    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    return [item for item in requested if item in known]
 
 
 def _call_adapter_evaluate(

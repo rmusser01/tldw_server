@@ -144,6 +144,22 @@ def _push_one(service: SyncV2Service, envelope: SyncEnvelopeCreate):
     )
 
 
+def _push_one_through_materializer_conflict(
+    service: SyncV2Service,
+    envelope: SyncEnvelopeCreate,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Store accepted stale history only for focused product-conflict tests."""
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            service.store.db,
+            "_require_expected_current_head",
+            lambda *args, **kwargs: None,
+        )
+        return _push_one(service, envelope)
+
+
 def test_chat_conversation_upsert_update_and_tombstone_project_to_chacha(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -156,6 +172,7 @@ def test_chat_conversation_upsert_update_and_tombstone_project_to_chacha(
     assert created["title"] == "Planning chat"
     assert created["assistant_kind"] == "persona"
     assert created["assistant_id"] == "sync-assistant"
+    assert created["client_id"] == chacha_db.client_id
 
     base = sync_service.store.get_object_state("dataset-1", "chat.conversation", "conv-1")
     assert base is not None
@@ -216,6 +233,7 @@ def test_chat_conversation_upsert_update_and_tombstone_project_to_chacha(
 def test_stale_conversation_base_conflicts_without_overwriting_projection(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     base = sync_service.store.get_object_state("dataset-1", "chat.conversation", "conv-1")
@@ -234,7 +252,7 @@ def test_stale_conversation_base_conflicts_without_overwriting_projection(
         ),
     )
 
-    stale = _push_one(
+    stale = _push_one_through_materializer_conflict(
         sync_service,
         _conversation_envelope(
             client_envelope_id="env-conv-stale",
@@ -246,6 +264,7 @@ def test_stale_conversation_base_conflicts_without_overwriting_projection(
             payload={"title": "Stale edit", "assistant_kind": "persona", "assistant_id": "sync-assistant"},
             payload_hash="sha256:conv-stale",
         ),
+        monkeypatch,
     )
 
     assert stale.accepted == []
@@ -261,6 +280,7 @@ def test_stale_conversation_base_conflicts_without_overwriting_projection(
 def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable_id(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     first = _push_one(sync_service, _message_envelope())
@@ -275,18 +295,19 @@ def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable
     assert metadata["extra"]["sync_v2"]["stable_message_id"] == "msg-1"
     assert metadata["extra"]["sync_v2"]["payload_hash"] == "sha256:msg-v1"
 
-    duplicate = _push_one(
+    duplicate = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-duplicate",
             client_sequence=3,
         ),
+        monkeypatch,
     )
 
     assert [item.client_envelope_id for item in duplicate.accepted] == ["env-msg-duplicate"]
     assert chacha_db.count_messages_for_conversation("conv-1", include_deleted=True) == 1
 
-    divergent = _push_one(
+    divergent = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-divergent",
@@ -299,6 +320,7 @@ def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable
             },
             payload_hash="sha256:msg-v2",
         ),
+        monkeypatch,
     )
 
     assert divergent.accepted == []
@@ -319,6 +341,7 @@ def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable
 def test_divergent_message_conflicts_even_when_existing_metadata_is_missing(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     _push_one(sync_service, _message_envelope())
@@ -326,7 +349,7 @@ def test_divergent_message_conflicts_even_when_existing_metadata_is_missing(
     assert base is not None
     chacha_db.execute_query("DELETE FROM message_metadata WHERE message_id = ?", ("msg-1",), commit=True)
 
-    divergent = _push_one(
+    divergent = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-divergent-missing-meta",
@@ -339,6 +362,7 @@ def test_divergent_message_conflicts_even_when_existing_metadata_is_missing(
             },
             payload_hash="sha256:msg-v2",
         ),
+        monkeypatch,
     )
 
     assert divergent.accepted == []
@@ -449,6 +473,11 @@ def test_retry_after_failed_message_conflict_status_keeps_conflict(
     )
 
     monkeypatch.setattr(sync_service.store, "mark_envelope_apply_status", _fail_first_conflict_mark)
+    monkeypatch.setattr(
+        sync_service.store.db,
+        "_require_expected_current_head",
+        lambda *args, **kwargs: None,
+    )
     first_attempt = _push_one(sync_service, divergent)
     monkeypatch.undo()
 
@@ -514,11 +543,12 @@ def test_message_tombstone_soft_deletes_message_without_deleting_conversation(
 def test_message_tombstone_requires_matching_base_state(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     _push_one(sync_service, _message_envelope())
 
-    result = _push_one(
+    result = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-delete-missing-base",
@@ -529,6 +559,7 @@ def test_message_tombstone_requires_matching_base_state(
             payload_hash="sha256:msg-delete",
             deleted=True,
         ),
+        monkeypatch,
     )
 
     assert result.accepted == []
@@ -544,6 +575,7 @@ def test_message_tombstone_requires_matching_base_state(
 def test_message_tombstone_deletes_canonical_projection_when_conflict_sorts_first(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     _push_one(
@@ -559,7 +591,7 @@ def test_message_tombstone_deletes_canonical_projection_when_conflict_sorts_firs
     )
     base = sync_service.store.get_object_state("dataset-1", "chat.message", "msg-1")
     assert base is not None
-    _push_one(
+    _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-divergent-earlier",
@@ -572,10 +604,18 @@ def test_message_tombstone_deletes_canonical_projection_when_conflict_sorts_firs
             },
             payload_hash="sha256:msg-v2",
         ),
+        monkeypatch,
     )
     versions_before = chacha_db.get_messages_by_sync_stable_id("msg-1", include_deleted=True)
     assert len(versions_before) == 2
     assert versions_before[0]["content"] == "Earlier conflicting message"
+    conflict = sync_service.store.list_conflicts("dataset-1")[0]
+    sync_service.resolve_conflict(
+        user_id="user-1",
+        conflict_id=conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="device-1",
+    )
 
     tombstone = _push_one(
         sync_service,

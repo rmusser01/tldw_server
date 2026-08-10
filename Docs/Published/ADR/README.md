@@ -62,3 +62,9 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-028](028-security-restricted-legacy-pickle-compatibility.md) | Accepted | Use Security restricted pickle helpers only for explicitly gated legacy compatibility paths, not as a general-purpose serialization format. |
 | [ADR-029](029-tldw-frontend-static-pypi-bundle.md) | Proposed | Allow a guarded static `tldw-frontend` export in `tldw-server` PyPI releases while forbidding source, cache, standalone, model, database, and admin UI artifacts. |
 | [ADR-030](030-configured-local-llm-egress-policy.md) | Accepted | Allow only an exact server-configured local LLM origin through scoped checked egress without weakening global SSRF defaults. |
+| [ADR-031](031-notes-capability-sync-domains.md) | Accepted | Use versioned Sync v2 domains for mutable Notes capabilities, with lossless core-note payloads and base-aware restore intent. |
+| [ADR-032](032-mcp-unified-multi-revision-stdio-protocol.md) | Superseded by ADR-033 | Original strict multi-revision stdio decision; replaced after public-contract hardening. |
+| [ADR-033](033-mcp-unified-stdio-contract-hardening.md) | Accepted | Harden the reusable stdio API for arbitrary JSON outputs, typed IDs, bounded pagination/results, safe errors, and portable streams. |
+| [ADR-034](034-durable-server-origin-sync-mutation-batches.md) | Accepted | Persist complete server-origin Sync mutation plans atomically, then materialize them in ordered, resumable steps. |
+| [ADR-035](035-canonical-folder-link-suppression-preserves-source-provenance.md) | Accepted | Materialize canonical folder-link tombstones with local suppressions while preserving source-ingestion provenance. |
+| [ADR-036](036-web-clipper-external-identity-mapping.md) | Accepted | Map owner-scoped public Web Clipper IDs to separate canonical Notes UUIDs and migrate legacy mappings safely. |

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Internal storage models for Sync v2 M1."""
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 SyncDomain = Literal[
@@ -17,6 +19,12 @@ SyncDomain = Literal[
     "media.item",
     "media.keyword",
     "media.keyword_link",
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -29,7 +37,7 @@ EncryptionPolicy = Literal[
 SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
 SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
-SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
+SyncApplyStatus = Literal["pending", "applied", "failed", "conflict", "superseded"]
 SyncBlobAvailabilityStatus = Literal[
     "metadata_only",
     "uploading",
@@ -38,6 +46,26 @@ SyncBlobAvailabilityStatus = Literal[
     "quarantined",
     "deleted",
 ]
+
+
+def normalize_sync_timestamp(value: object | None) -> str | None:
+    """Normalize backend-native and ISO timestamps to the canonical UTC string."""
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value)
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 SyncBlobUploadStatus = Literal[
     "created",
     "uploading",
@@ -69,6 +97,17 @@ M1_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "chat.message": ["append", "tombstone"],
     "attachment.ref": ["upsert", "tombstone"],
 }
+NOTES_ORGANIZATION_DOMAINS: tuple[SyncDomain, ...] = (
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+)
+NOTES_ORGANIZATION_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in NOTES_ORGANIZATION_DOMAINS
+}
 WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
     "workspaces.workspace",
     "workspaces.source_ref",
@@ -96,12 +135,14 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(WORKSPACE_SYNC_DOMAINS)
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
+    + list(NOTES_ORGANIZATION_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
+    **NOTES_ORGANIZATION_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
@@ -116,6 +157,9 @@ STRICT_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "client_private_v1",
 ]
 CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE = "sync_server_frontend_client_private_disabled"
+SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION = (
+    "sync_rebase_required_after_conflict_resolution"
+)
 CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE = (
     "Server-front-end mutation is disabled for client_private_v1 datasets "
     "because opaque fields cannot be inspected or re-encrypted by the server."
@@ -143,6 +187,31 @@ SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
 def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     """Return client-discoverable payload contracts for versioned Sync domains."""
 
+    keyword_link_schema = {
+        "required": ["subject_type", "subject_id", "keyword_sync_id"],
+        "properties": {
+            "subject_type": {"enum": ["note", "conversation"]},
+            "subject_id": {"type": "string"},
+            "keyword_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
+    collection_link_schema = {
+        "required": ["collection_sync_id", "keyword_sync_id"],
+        "properties": {
+            "collection_sync_id": {"type": "string"},
+            "keyword_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
+    folder_link_schema = {
+        "required": ["note_id", "folder_sync_id"],
+        "properties": {
+            "note_id": {"type": "string"},
+            "folder_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
     return {
         "notes.note": {
             "schema_version": 1,
@@ -163,7 +232,61 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
                 "routing_metadata": {"restore_intent": True},
                 "requires_current_base": True,
             },
-        }
+        },
+        "notes.keyword": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["keyword"],
+                "properties": {"keyword": {"type": "string", "max_length": 100}},
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": keyword_link_schema,
+            "tombstone": keyword_link_schema,
+        },
+        "notes.keyword_collection": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 255},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_collection_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": collection_link_schema,
+            "tombstone": collection_link_schema,
+        },
+        "notes.folder": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 500},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.folder_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": folder_link_schema,
+            "tombstone": folder_link_schema,
+        },
     }
 
 
@@ -611,8 +734,18 @@ class SyncEnvelopeCreate:
     entity_version: str | int | None = None
     client_timestamp: str | None = None
     server_timestamp: str | None = None
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    mutation_plan_hash: str | None = None
 
     def __post_init__(self) -> None:
+        _validate_mutation_group_metadata(
+            mutation_group_id=self.mutation_group_id,
+            mutation_step=self.mutation_step,
+            mutation_step_count=self.mutation_step_count,
+            mutation_plan_hash=self.mutation_plan_hash,
+        )
         object_id = _coalesce_identity(self.object_id, self.entity_id, field_name="object_id")
         payload, payload_clear = _coalesce_payload(self.payload, self.payload_clear)
         object.__setattr__(self, "object_id", object_id)
@@ -624,10 +757,11 @@ class SyncEnvelopeCreate:
         object.__setattr__(self, "payload_clear", payload_clear)
         object.__setattr__(self, "schema_version", self.schema_version or self.adapter_version)
         object.__setattr__(self, "adapter_version", self.adapter_version or self.schema_version)
-        if self.created_at_client is None and self.client_timestamp is not None:
-            object.__setattr__(self, "created_at_client", self.client_timestamp)
-        if self.client_timestamp is None and self.created_at_client is not None:
-            object.__setattr__(self, "client_timestamp", self.created_at_client)
+        created_at_client = normalize_sync_timestamp(
+            self.created_at_client or self.client_timestamp
+        )
+        object.__setattr__(self, "created_at_client", created_at_client)
+        object.__setattr__(self, "client_timestamp", created_at_client)
         if self.received_at_server is None and self.server_timestamp is not None:
             object.__setattr__(self, "received_at_server", self.server_timestamp)
         if self.server_timestamp is None and self.received_at_server is not None:
@@ -682,8 +816,18 @@ class SyncEnvelope:
     entity_version: str | int | None = None
     client_timestamp: str | None = None
     server_timestamp: str | None = None
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    mutation_plan_hash: str | None = None
 
     def __post_init__(self) -> None:
+        _validate_mutation_group_metadata(
+            mutation_group_id=self.mutation_group_id,
+            mutation_step=self.mutation_step,
+            mutation_step_count=self.mutation_step_count,
+            mutation_plan_hash=self.mutation_plan_hash,
+        )
         object_id = _coalesce_identity(self.object_id, self.entity_id, field_name="object_id")
         server_cursor = self.server_cursor if self.server_cursor is not None else self.server_sequence
         if server_cursor is None:
@@ -697,10 +841,11 @@ class SyncEnvelope:
         object.__setattr__(self, "payload_clear", payload_clear)
         object.__setattr__(self, "schema_version", self.schema_version or self.adapter_version)
         object.__setattr__(self, "adapter_version", self.adapter_version or self.schema_version)
-        if self.created_at_client is None and self.client_timestamp is not None:
-            object.__setattr__(self, "created_at_client", self.client_timestamp)
-        if self.client_timestamp is None and self.created_at_client is not None:
-            object.__setattr__(self, "client_timestamp", self.created_at_client)
+        created_at_client = normalize_sync_timestamp(
+            self.created_at_client or self.client_timestamp
+        )
+        object.__setattr__(self, "created_at_client", created_at_client)
+        object.__setattr__(self, "client_timestamp", created_at_client)
         if self.received_at_server is None and self.server_timestamp is not None:
             object.__setattr__(self, "received_at_server", self.server_timestamp)
         if self.server_timestamp is None and self.received_at_server is not None:
@@ -709,6 +854,46 @@ class SyncEnvelope:
             object.__setattr__(self, "base_object_revision", self.base_version)
         if self.object_revision is None and isinstance(self.entity_version, int):
             object.__setattr__(self, "object_revision", self.entity_version)
+
+
+def _validate_mutation_group_metadata(
+    *,
+    mutation_group_id: str | None,
+    mutation_step: int | None,
+    mutation_step_count: int | None,
+    mutation_plan_hash: str | None,
+) -> None:
+    values = (
+        mutation_group_id,
+        mutation_step,
+        mutation_step_count,
+        mutation_plan_hash,
+    )
+    if all(value is None for value in values):
+        return
+    if any(value is None for value in values):
+        raise ValueError("Sync mutation group metadata must be supplied as a complete set")
+    if not isinstance(mutation_group_id, str) or not mutation_group_id.strip():
+        raise ValueError("Sync mutation group id must be a non-empty string")
+    if (
+        isinstance(mutation_step, bool)
+        or not isinstance(mutation_step, int)
+        or mutation_step < 0
+    ):
+        raise ValueError("Sync mutation group step must be a zero-based integer")
+    if (
+        isinstance(mutation_step_count, bool)
+        or not isinstance(mutation_step_count, int)
+        or mutation_step_count <= 0
+    ):
+        raise ValueError("Sync mutation group step count must be a positive integer")
+    if mutation_step >= mutation_step_count:
+        raise ValueError("Sync mutation group step must be less than its step count")
+    if (
+        not isinstance(mutation_plan_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", mutation_plan_hash) is None
+    ):
+        raise ValueError("Sync mutation group plan hash must be lowercase SHA-256 hex")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1212,6 +1397,8 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "NOTES_ORGANIZATION_DOMAINS",
+    "NOTES_ORGANIZATION_SYNC_OPERATIONS",
     "NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS",
     "NOTES_NOTE_CONTENT_MAX_CHARS",
     "NOTES_NOTE_TITLE_MAX_CHARS",

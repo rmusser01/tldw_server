@@ -41,6 +41,14 @@ class PromptImprovementError(RuntimeError):
         self.code = code
 
 
+class NotesOrganizationValidationError(ValueError):
+    """Validation failure with a stable Notes organization Sync error code."""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
 class PromptImprovementDispatchError(RuntimeError):
     """Sanitized infrastructure failure for endpoint error mapping."""
 

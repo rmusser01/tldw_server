@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 
 from ..DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from ..DB_Management.db_path_utils import DatabasePaths
+from ..Notes.organization_capture import active_coordinator, capture_note_upsert, stable_note_id
 from ..Templating.template_renderer import (
     TemplateContext,
     TemplateEnv,
@@ -4779,6 +4780,7 @@ class ChatbookService:
                             "import_external_ref": import_external_ref,
                             "source_meta": source_meta,
                         },
+                        owner_user_id=self.user_id,
                     )
                     if mirror_result.final_collection_id is not None:
                         mirrored_folder_ids.add(mirror_result.final_collection_id)
@@ -6795,8 +6797,27 @@ class ChatbookService:
                 elif existing and conflict_resolution == ConflictResolution.RENAME:
                     note_title = self._generate_unique_name(note_title, "note")
 
-                # Create note
-                new_note_id = self.db.add_note(title=note_title, content=note_content)
+                coordinator = active_coordinator(self.db, user_id=self.user_id)
+                if coordinator is not None:
+                    key = coordinator.request_fingerprint(
+                        "chatbook.note.import",
+                        {
+                            "source_note_id": note_id,
+                            "title": note_title,
+                            "content": note_content,
+                        },
+                    )
+                    new_note_id = stable_note_id("chatbook-import", key)
+                    capture_note_upsert(
+                        coordinator,
+                        note_id=new_note_id,
+                        title=note_title,
+                        content=note_content,
+                        source="chatbook-import",
+                        key=key,
+                    )
+                else:
+                    new_note_id = self.db.add_note(title=note_title, content=note_content)
 
                 if new_note_id:
                     status.successful_items += 1
