@@ -4,7 +4,7 @@
 
 **Goal:** Make Notes keywords, keyword collections, folders, and their user-visible memberships durable Sync v2 state on SQLite and PostgreSQL without breaking integer REST identifiers, legacy devices, or existing datasets.
 
-**Architecture:** Implement the six-domain contract approved in the design and ADR-032 as a vertical extension of the existing strict `notes.note` path. Stable product-store identities and deterministic relationship IDs feed strict domain adapters; accepted compound mutations are atomically appended to the Sync store as ordered groups and then materialized, resumably, into a per-user ChaChaNotes database. Existing datasets enter an explicit initializing state while current organization state is captured, and active-Sync REST routes use one small Notes organization coordinator rather than maintaining a parallel write path.
+**Architecture:** Implement the six-domain contract approved in the design and ADR-034 as a vertical extension of the existing strict `notes.note` path. Stable product-store identities and deterministic relationship IDs feed strict domain adapters; accepted compound mutations are atomically appended to the Sync store as ordered groups and then materialized, resumably, into a per-user ChaChaNotes database. Existing datasets enter an explicit initializing state while current organization state is captured, and active-Sync REST routes use one small Notes organization coordinator rather than maintaining a parallel write path.
 
 **Tech Stack:** Python 3.11+, FastAPI/Pydantic, SQLite and PostgreSQL database adapters, Sync v2 envelope store and materializers, pytest/pytest-asyncio, Bandit and Ruff.
 
@@ -12,7 +12,7 @@
 
 - Execute tasks in order and one at a time. Do not parallelize tests or implementation work.
 - Apply test-driven development for every behavior change: write the named focused test, run it and observe the specified failure, implement the smallest production change, then rerun the same test.
-- Treat `Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md`, `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`, and `Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md` as normative.
+- Treat `Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md`, `Docs/ADR/034-durable-server-origin-sync-mutation-batches.md`, and `Docs/ADR/035-canonical-folder-link-suppression-preserves-source-provenance.md` as normative.
 - Preserve existing integer REST and storage IDs. Only canonical Sync identities use resource `sync_id` values or deterministic relationship hashes.
 - Never publish part of a mutation group to the Sync log. Product materialization may be a durable applied prefix, but it must resume in `mutation_step` order and must not skip a failed or conflicted step.
 - The six organization domains are one enrollment/readiness group. Partial enrollment and writes while `initializing` or `failed` must fail closed.
@@ -187,7 +187,7 @@ Expected: both focused test commands pass.
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py`
 - Create: `tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py`
-- Create: `Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md`
+- Create: `Docs/ADR/035-canonical-folder-link-suppression-preserves-source-provenance.md`
 - Modify: `Docs/ADR/README.md`
 - Modify: `Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md`
 - Modify: `tldw_Server_API/app/api/v1/schemas/notes_schemas.py`
@@ -309,7 +309,7 @@ class NotesOrganizationSyncStore:
 
 The class receives one initialized per-user `CharactersRAGDB`. Each public apply method uses one ChaCha transaction. Folder subtree path updates happen inside that transaction. `routing_metadata.bootstrap_capture` and origin provenance deltas are not interpreted here until Tasks 6 and 9.
 
-Implement ADR-033 in fresh SQLite/PostgreSQL schemas and the v54-to-v55 migration.
+Implement ADR-035 in fresh SQLite/PostgreSQL schemas and the v54-to-v55 migration.
 `note_folder_sync_suppressions` has one unique `(note_id, folder_id)` pair. Folder
 relationship reads and snapshots use `(manual UNION source) MINUS suppression`.
 Canonical folder-link upsert removes suppression and ensures the manual row;
@@ -339,7 +339,7 @@ pytest -q tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_
 pytest -q tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py -k "sync_id or hierarchy or soft_delete"
 pytest -q tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_postgres_contract.py
 git diff --check
-git add Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md Docs/ADR/README.md Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py tldw_Server_API/app/api/v1/schemas/notes_schemas.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders_postgres.py tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_postgres_contract.py
+git add Docs/ADR/035-canonical-folder-link-suppression-preserves-source-provenance.md Docs/ADR/README.md Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py tldw_Server_API/app/api/v1/schemas/notes_schemas.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_keyword_store.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders.py tldw_Server_API/tests/ChaChaNotesDB/test_note_folders_postgres.py tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_postgres_contract.py
 git commit -m "feat(notes): add stable organization identities"
 ```
 
@@ -1201,7 +1201,7 @@ Update all eight acceptance criteria and Definition of Done checkboxes, add conc
 
 ```text
 ADR required: yes
-ADR path: Docs/ADR/032-durable-server-origin-sync-mutation-batches.md
+ADR path: Docs/ADR/034-durable-server-origin-sync-mutation-batches.md
 Reason: This task adds a durable cross-database mutation-group contract, domain ownership boundaries, bootstrap policy, and long-lived Sync semantics.
 ```
 

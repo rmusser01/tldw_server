@@ -338,7 +338,12 @@ def _keyword_link_envelope(
 
 
 def _organization_tombstone(
-    *, client_envelope_id: str, domain: str, object_id: str, object_revision: int = 2
+    *,
+    client_envelope_id: str,
+    domain: str,
+    object_id: str,
+    object_revision: int = 2,
+    **overrides: Any,
 ) -> SyncEnvelopeCreate:
     return _organization_envelope(
         client_envelope_id=client_envelope_id,
@@ -348,6 +353,7 @@ def _organization_tombstone(
         object_revision=object_revision,
         payload={},
         payload_hash=f"sha256:{client_envelope_id}",
+        **overrides,
     )
 
 
@@ -792,6 +798,9 @@ def test_spec_fix_restore_keeps_historical_group_before_superseding_head(
             client_envelope_id="env-history-b-v2",
             object_id=keyword_b,
             object_revision=2,
+            base_server_cursor=stored[1].server_cursor,
+            base_object_revision=stored[1].object_revision,
+            base_object_hash=stored[1].payload_hash,
             payload={"keyword": "B2"},
             payload_hash="sha256:history-b-v2",
         )
@@ -844,6 +853,9 @@ def test_provider_selection_internal_group_precedes_later_resource_revision(
             client_envelope_id="env-provider-keyword-v2",
             object_id=keyword_id,
             object_revision=2,
+            base_server_cursor=group[0].server_cursor,
+            base_object_revision=group[0].object_revision,
+            base_object_hash=group[0].payload_hash,
             payload={"keyword": "Synthetic keyword v2"},
             payload_hash="sha256:provider-keyword-v2",
         )
@@ -969,6 +981,9 @@ def test_provider_selection_prefers_latest_earlier_revision_over_later_revision(
                 client_envelope_id="env-history-keyword-v2",
                 object_id=keyword_id,
                 object_revision=2,
+                base_server_cursor=first_group[0].server_cursor,
+                base_object_revision=first_group[0].object_revision,
+                base_object_hash=first_group[0].payload_hash,
                 payload={"keyword": "Synthetic keyword v2"},
                 payload_hash="sha256:history-keyword-v2",
             ),
@@ -993,6 +1008,9 @@ def test_provider_selection_prefers_latest_earlier_revision_over_later_revision(
             client_envelope_id="env-history-keyword-v3",
             object_id=keyword_id,
             object_revision=3,
+            base_server_cursor=second_group[0].server_cursor,
+            base_object_revision=second_group[0].object_revision,
+            base_object_hash=second_group[0].payload_hash,
             payload={"keyword": "Synthetic keyword v3"},
             payload_hash="sha256:history-keyword-v3",
         )
@@ -1395,6 +1413,9 @@ def test_code_quality_i3_stored_conflict_group_blocks_restore_without_older_head
             client_envelope_id="env-stored-conflict-keyword-v2",
             object_id=keyword_id,
             object_revision=2,
+            base_server_cursor=older.server_cursor,
+            base_object_revision=older.object_revision,
+            base_object_hash=older.payload_hash,
             payload_hash="sha256:stored-conflict-v2",
         ),
         _organization_envelope(
@@ -1839,7 +1860,7 @@ def test_tombstone_graph_keeps_latest_tombstones_after_live_relationship(
     note = sync_service.store.insert_envelope(
         _note_envelope(client_envelope_id="env-dormant-note", object_id=note_id)
     )
-    sync_service.store.insert_envelope(
+    keyword = sync_service.store.insert_envelope(
         _organization_envelope(
             client_envelope_id="env-dormant-keyword", object_id=keyword_id
         )
@@ -1858,6 +1879,9 @@ def test_tombstone_graph_keeps_latest_tombstones_after_live_relationship(
                 client_envelope_id="env-dormant-keyword-tombstone",
                 domain="notes.keyword",
                 object_id=keyword_id,
+                base_server_cursor=keyword.server_cursor,
+                base_object_revision=keyword.object_revision,
+                base_object_hash=keyword.payload_hash,
             ),
             _organization_tombstone(
                 client_envelope_id="env-dormant-folder-tombstone",
@@ -2192,7 +2216,7 @@ def test_notes_organization_restore_preview_counts_and_orders_complete_state(
         ),
     )
     sync_service.store.insert_envelopes_atomic(group)
-    sync_service.store.insert_envelope(
+    keyword = sync_service.store.insert_envelope(
         _organization_envelope(
             client_envelope_id="env-keyword",
             object_id=keyword_id,
@@ -2214,6 +2238,9 @@ def test_notes_organization_restore_preview_counts_and_orders_complete_state(
             operation="tombstone",
             object_id=keyword_id,
             object_revision=2,
+            base_server_cursor=keyword.server_cursor,
+            base_object_revision=keyword.object_revision,
+            base_object_hash=keyword.payload_hash,
             payload={},
             payload_hash="sha256:keyword-tombstone",
         )

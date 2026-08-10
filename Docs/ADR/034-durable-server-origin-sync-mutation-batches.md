@@ -1,4 +1,4 @@
-# ADR-032: Durable server-origin Sync mutation batches
+# ADR-034: Durable server-origin Sync mutation batches
 
 **Status:** Accepted
 **Date:** 2026-08-08

@@ -119,7 +119,7 @@ class WebClipperService:
                 )
                 replay = coordinator.replay_request_plan(
                     source="web-clipper",
-                    idempotency_key=note_id,
+                    idempotency_key=request_fingerprint,
                     request_fingerprint=request_fingerprint,
                     result_domain="notes.note",
                 )
@@ -156,7 +156,7 @@ class WebClipperService:
                     folder_paths=folder_paths,
                     expected_version=(int(existing_note["version"]) if existing_note is not None else None),
                     source="web-clipper",
-                    key=note_id,
+                    key=request_fingerprint,
                     request_fingerprint=request_fingerprint,
                     server_routing_metadata=self._capture_routing_metadata(capture_metadata),
                 )

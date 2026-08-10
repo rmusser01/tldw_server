@@ -155,6 +155,25 @@ class NotesOrganizationSyncStore:
         with self._db.transaction() as conn:
             return self._get_resource_locked(conn, domain, sync_id)
 
+    def get_resource_row_by_local_id(
+        self,
+        domain: SyncDomain,
+        local_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return one owner-scoped resource row by its local product identity."""
+
+        table, _ = self._table(domain)
+        query = f"SELECT * FROM {table} WHERE id = ? AND client_id = ?"  # nosec B608
+        params: list[object] = [int(local_id), self._owner_id]
+        if not include_deleted:
+            query += " AND deleted = ?"
+            params.append(self._deleted_value(False))
+        with self._db.transaction() as conn:
+            row = conn.execute(query, tuple(params)).fetchone()
+        return dict(row) if row is not None else None
+
     def snapshot(self) -> OrganizationSnapshot:
         """Return a transactionally consistent organization snapshot."""
 

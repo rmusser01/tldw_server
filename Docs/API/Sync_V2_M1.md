@@ -129,7 +129,7 @@ unsupported or not-ready requests still fail closed.
 
 ### Durable append and resumable materialization
 
-Per [ADR-032](../ADR/032-durable-server-origin-sync-mutation-batches.md), a
+Per [ADR-034](../ADR/034-durable-server-origin-sync-mutation-batches.md), a
 compound REST mutation is preflighted into an immutable list of primitive
 envelopes. Every step carries a mutation-group ID, zero-based step, total step
 count, and canonical plan hash. The complete plan is appended in one transaction
@@ -167,7 +167,7 @@ server the effective set is:
 (manual memberships UNION source memberships) MINUS Sync suppressions
 ```
 
-Per [ADR-033](../ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md),
+Per [ADR-035](../ADR/035-canonical-folder-link-suppression-preserves-source-provenance.md),
 a canonical upsert clears the pair's suppression and ensures the manual projection;
 a canonical tombstone removes the manual projection and adds a suppression without
 deleting source provenance. Source IDs, source keys, and import bookkeeping remain

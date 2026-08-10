@@ -10,6 +10,8 @@ from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
+from tldw_Server_API.app.core.exceptions import NotesOrganizationValidationError
+
 from .models import NOTES_ORGANIZATION_DOMAINS, SyncDomain
 
 _RESOURCE_DOMAINS = frozenset(
@@ -24,14 +26,6 @@ _LINK_MEMBERS: dict[str, tuple[str, ...]] = {
     "notes.keyword_collection_link": ("collection_sync_id", "keyword_sync_id"),
     "notes.folder_link": ("note_id", "folder_sync_id"),
 }
-
-
-class NotesOrganizationValidationError(ValueError):
-    """Validation failure with a stable Notes organization Sync error code."""
-
-    def __init__(self, error_code: str, message: str) -> None:
-        super().__init__(message)
-        self.error_code = error_code
 
 
 class KeywordUpsertPayload(BaseModel):

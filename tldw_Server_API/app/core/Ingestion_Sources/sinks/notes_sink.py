@@ -1,11 +1,17 @@
+"""Apply canonical ingestion-source changes to owner-scoped Notes storage."""
+
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 from tldw_Server_API.app.core.Notes.organization_capture import capture_note_tombstone
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
@@ -22,6 +28,8 @@ _INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
 
 
 def _title_from_text(relative_path: str, text: str) -> str:
+    """Return the first content heading or a path-derived fallback title."""
+
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -37,6 +45,8 @@ def _title_from_text(relative_path: str, text: str) -> str:
 
 
 def _expected_version(binding: dict[str, Any]) -> int:
+    """Extract the optimistic Notes version from one ingestion binding."""
+
     raw = (
         binding.get("current_version")
         or binding.get("version")
@@ -67,7 +77,11 @@ def _folder_paths_from_relative_path(relative_path: str) -> list[str]:
     return folder_paths
 
 
-def _active_organization_coordinator(notes_db) -> NotesOrganizationCoordinator | None:
+def _active_organization_coordinator(
+    notes_db: CharactersRAGDB,
+) -> NotesOrganizationCoordinator | None:
+    """Return the active owner-bound organization coordinator, when enabled."""
+
     user_id = str(getattr(notes_db, "client_id", "") or "").strip()
     if not user_id:
         return None
@@ -82,6 +96,8 @@ def _active_organization_coordinator(notes_db) -> NotesOrganizationCoordinator |
 
 
 def _source_folder_request_key(*parts: object) -> str:
+    """Hash one ingestion mutation identity without retaining source content."""
+
     encoded = ":".join(str(part) for part in parts).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -89,9 +105,11 @@ def _source_folder_request_key(*parts: object) -> str:
 def _capture_source_folder_steps(
     coordinator: NotesOrganizationCoordinator,
     *,
-    steps,
+    steps: Sequence[ServerOriginMutationStep],
     request_key: str,
 ) -> None:
+    """Capture a complete ingestion folder plan and require full projection."""
+
     if not steps:
         return
     result = coordinator.capture(
@@ -112,6 +130,8 @@ def _capture_ingestion_note(
     request_key: str,
     expected_version: int | None = None,
 ) -> None:
+    """Capture or replay one ingestion-owned canonical note mutation."""
+
     request_fingerprint = coordinator.request_fingerprint(
         "ingestion.note.upsert",
         {
@@ -192,6 +212,8 @@ def _sync_source_folders_with_coordinator(
     source_id: int,
     folder_paths: list[str],
 ) -> None:
+    """Reconcile ingestion-derived folder provenance through canonical Sync."""
+
     coordinator.require_ready()
     for path in folder_paths:
         if coordinator.note_db.get_note_folder_by_path(path) is not None:
@@ -276,12 +298,14 @@ def _sync_source_folders_with_coordinator(
 
 
 def apply_notes_change(
-    notes_db,
+    notes_db: CharactersRAGDB,
     *,
     binding: dict[str, Any] | None,
     change: dict[str, Any],
     policy: str,
 ) -> dict[str, Any]:
+    """Apply one normalized ingestion change using active Sync when configured."""
+
     sync_status = None if not binding else binding.get("sync_status")
     if binding and sync_status == "conflict_detached":
         return {"action": "skipped_detached", "sync_status": "conflict_detached"}

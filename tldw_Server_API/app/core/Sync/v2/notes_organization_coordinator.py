@@ -35,11 +35,6 @@ from .server_origin_batch import (
 )
 from .service import SyncV2Service
 
-_RESOURCE_TABLES: dict[SyncDomain, tuple[str, str]] = {
-    "notes.keyword": ("keywords", "keyword"),
-    "notes.keyword_collection": ("keyword_collections", "name"),
-    "notes.folder": ("note_folders", "name"),
-}
 _REQUEST_FINGERPRINT_KEY = "notes_organization_request_fingerprint"
 _RESPONSE_STATUS_KEY = "notes_organization_response_status"
 _NOTE_RESPONSE_KEY = "notes_organization_note_response"
@@ -1091,18 +1086,13 @@ class NotesOrganizationCoordinator:
         )
 
     def _resource_row(self, domain: SyncDomain, local_id: int) -> dict[str, Any]:
-        try:
-            logical_table, _ = _RESOURCE_TABLES[domain]
-        except KeyError as exc:
-            raise InputError("Unsupported organization resource domain") from exc
-        table = self.note_db._map_table_for_backend(logical_table)
-        row = self.note_db.execute_query(
-            f"SELECT * FROM {table} WHERE id = ? AND deleted = ?",  # nosec B608
-            (local_id, False if self.note_db.backend_type.value == "postgresql" else 0),
-        ).fetchone()
+        row = NotesOrganizationSyncStore(self.note_db).get_resource_row_by_local_id(
+            domain,
+            local_id,
+        )
         if row is None:
             raise NotesOrganizationResourceNotFoundError()
-        return dict(row)
+        return row
 
     def _load_resource_row(self, domain: SyncDomain, sync_id: str) -> dict[str, Any]:
         resource = NotesOrganizationSyncStore(self.note_db).get_resource(domain, sync_id)
@@ -1196,15 +1186,14 @@ class NotesOrganizationCoordinator:
         resource = NotesOrganizationSyncStore(self.note_db).get_resource(domain, sync_id)
         if resource is None:
             raise SyncStoreError("Materialized organization resource was not found")
-        logical_table, _ = _RESOURCE_TABLES[domain]
-        table = self.note_db._map_table_for_backend(logical_table)
-        row = self.note_db.execute_query(
-            f"SELECT * FROM {table} WHERE id = ?",  # nosec B608
-            (resource.local_id,),
-        ).fetchone()
+        row = NotesOrganizationSyncStore(self.note_db).get_resource_row_by_local_id(
+            domain,
+            resource.local_id,
+            include_deleted=True,
+        )
         if row is None:
             raise SyncStoreError("Materialized organization resource was not found")
-        result = dict(row)
+        result = row
         if domain == "notes.keyword":
             result.update(
                 {

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 from urllib.parse import quote
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 #
 # 3rd-party Libraries
@@ -117,6 +117,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # Corrected
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    compound_note_id,
+    compound_note_request_fingerprint,
+    plan_compound_note,
+)
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
 from tldw_Server_API.app.core.Notes_Tasks import NotesTaskService, TaskActor
 from tldw_Server_API.app.core.Personalization import (
@@ -151,7 +156,6 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     server_origin_stable_key,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
-    ServerOriginMutationStep,
     SyncServerOriginBatchAppendError,
     SyncServerOriginBatchIdempotencyConflictError,
     SyncServerOriginBatchMaterializationError,
@@ -490,87 +494,6 @@ def _capture_notes_organization_plan(
         raise
     except Exception as exc:  # noqa: BLE001 - all Sync failures receive a safe HTTP map.
         raise _note_sync_http_error(exc) from exc
-
-
-def _compound_note_step(
-    *,
-    note_id: str,
-    payload: dict[str, object],
-    request_key: str,
-) -> ServerOriginMutationStep:
-    return ServerOriginMutationStep(
-        domain="notes.note",
-        operation="upsert",
-        object_id=note_id,
-        payload=payload,
-        stable_key=server_origin_stable_key(
-            source="notes-api",
-            domain="notes.note",
-            operation="upsert",
-            idempotency_key=request_key,
-        ),
-    )
-
-
-def _compound_note_id(request_key: str) -> str:
-    digest = hashlib.sha256(f"notes.note:{request_key}".encode()).hexdigest()
-    return str(UUID(digest[:32], version=4))
-
-
-def _compound_note_request_fingerprint(
-    coordinator: NotesOrganizationCoordinator,
-    *,
-    operation: str,
-    note_id: str,
-    note_fields: dict[str, object],
-    keywords: list[str] | None,
-    folder_paths: list[str] | None,
-    expected_version: int | None = None,
-) -> str:
-    return coordinator.request_fingerprint(
-        operation,
-        {
-            "note_id": note_id,
-            "note_fields": note_fields,
-            "keywords": keywords,
-            "folder_paths": folder_paths,
-            "expected_version": expected_version,
-        },
-    )
-
-
-def _capture_compound_note(
-    coordinator: NotesOrganizationCoordinator,
-    *,
-    note_id: str,
-    note_payload: dict[str, object],
-    keywords: list[str] | None,
-    folder_paths: list[str] | None,
-    request_key: str,
-    request_fingerprint: str,
-    response_status: int | None = None,
-) -> dict[str, Any]:
-    plan = coordinator.plan_note_with_organization(
-        note_step=_compound_note_step(
-            note_id=note_id,
-            payload=note_payload,
-            request_key=request_key,
-        ),
-        keywords=keywords,
-        folder_paths=folder_paths,
-    )
-    plan = coordinator.bind_request(plan, request_fingerprint)
-    if response_status is not None:
-        plan = coordinator.bind_response_status(plan, response_status)
-    result = _capture_notes_organization_plan(
-        coordinator,
-        plan,
-        idempotency_key=request_key,
-        source="notes-api",
-    )
-    if not isinstance(result, dict):
-        raise SyncStoreError("Compound note projection did not return a note")
-    return result
 
 
 def _reconcile_note_tasks_after_save(
@@ -1604,7 +1527,7 @@ async def create_note(
         note_id = (
             note_in.id
             or (
-                _compound_note_id(request_key)
+                compound_note_id(request_key)
                 if organization_supplied
                 else server_origin_object_id("notes.note", idempotency_key)
                 if sync_service is not None
@@ -1635,7 +1558,7 @@ async def create_note(
         }
         request_fingerprint: str | None = None
         if coordinator is not None:
-            request_fingerprint = _compound_note_request_fingerprint(
+            request_fingerprint = compound_note_request_fingerprint(
                 coordinator,
                 operation="note.create",
                 note_id=note_id,
@@ -1703,7 +1626,7 @@ async def create_note(
             "message_id": message_id,
         }
         if coordinator is not None and compound_note is None:
-            compound_note = _capture_compound_note(
+            compound_plan = plan_compound_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=note_payload,
@@ -1712,6 +1635,15 @@ async def create_note(
                 request_key=request_key,
                 request_fingerprint=request_fingerprint or "",
             )
+            compound_result = _capture_notes_organization_plan(
+                coordinator,
+                compound_plan,
+                idempotency_key=request_key,
+                source="notes-api",
+            )
+            if not isinstance(compound_result, dict):
+                raise SyncStoreError("Compound note projection did not return a note")
+            compound_note = compound_result
         elif sync_service is not None and compound_note is None:
             try:
                 capture_server_origin_mutation(
@@ -2508,9 +2440,9 @@ async def import_notes(
                             imported_id
                             if imported_id
                             and payload.duplicate_strategy != "create_copy"
-                            else _compound_note_id(request_key)
+                            else compound_note_id(request_key)
                         )
-                        request_fingerprint = _compound_note_request_fingerprint(
+                        request_fingerprint = compound_note_request_fingerprint(
                             coordinator,
                             operation=f"note.import.{payload.duplicate_strategy}",
                             note_id=request_note_id,
@@ -2558,7 +2490,7 @@ async def import_notes(
                             projected_note = dict(existing_note)
                             projected_note.update(update_patch)
                             note_payload = _note_payload_from_row(projected_note)
-                            overwritten_note = _capture_compound_note(
+                            overwrite_plan = plan_compound_note(
                                 coordinator,
                                 note_id=str(imported_id),
                                 note_payload=note_payload,
@@ -2568,6 +2500,17 @@ async def import_notes(
                                 request_fingerprint=request_fingerprint or "",
                                 response_status=status.HTTP_200_OK,
                             )
+                            overwrite_result = _capture_notes_organization_plan(
+                                coordinator,
+                                overwrite_plan,
+                                idempotency_key=request_key,
+                                source="notes-api",
+                            )
+                            if not isinstance(overwrite_result, dict):
+                                raise SyncStoreError(
+                                    "Compound note projection did not return a note"
+                                )
+                            overwritten_note = overwrite_result
                         else:
                             expected_version = int(existing_note.get("version", 1))
                             db.update_note(
@@ -2604,12 +2547,12 @@ async def import_notes(
                     create_with_id = None if payload.duplicate_strategy == "create_copy" else imported_id
                     if coordinator is not None:
                         created_note_id = str(
-                            create_with_id or _compound_note_id(request_key)
+                            create_with_id or compound_note_id(request_key)
                         )
                         note_payload = raw_note_payload
                         request_fingerprint = (
                             request_fingerprint
-                            or _compound_note_request_fingerprint(
+                            or compound_note_request_fingerprint(
                                 coordinator,
                                 operation=f"note.import.{payload.duplicate_strategy}",
                                 note_id=created_note_id,
@@ -2618,7 +2561,7 @@ async def import_notes(
                                 folder_paths=None,
                             )
                         )
-                        created_note = _capture_compound_note(
+                        create_plan = plan_compound_note(
                             coordinator,
                             note_id=created_note_id,
                             note_payload=note_payload,
@@ -2628,6 +2571,17 @@ async def import_notes(
                             request_fingerprint=request_fingerprint,
                             response_status=status.HTTP_201_CREATED,
                         )
+                        create_result = _capture_notes_organization_plan(
+                            coordinator,
+                            create_plan,
+                            idempotency_key=request_key,
+                            source="notes-api",
+                        )
+                        if not isinstance(create_result, dict):
+                            raise SyncStoreError(
+                                "Compound note projection did not return a note"
+                            )
+                        created_note = create_result
                     else:
                         created_note_id = db.add_note(
                             title=parsed_note["title"],
@@ -4570,7 +4524,7 @@ async def update_note(
         compound_note: dict[str, Any] | None = None
         compound_replayed = False
         if coordinator is not None:
-            request_fingerprint = _compound_note_request_fingerprint(
+            request_fingerprint = compound_note_request_fingerprint(
                 coordinator,
                 operation="note.update",
                 note_id=note_id,
@@ -4668,7 +4622,7 @@ async def update_note(
                 )
             projected_note = dict(current_note)
             projected_note.update(update_data)
-            compound_note = _capture_compound_note(
+            compound_plan = plan_compound_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=_note_payload_from_row(projected_note),
@@ -4677,6 +4631,15 @@ async def update_note(
                 request_key=request_key,
                 request_fingerprint=request_fingerprint or "",
             )
+            compound_result = _capture_notes_organization_plan(
+                coordinator,
+                compound_plan,
+                idempotency_key=request_key,
+                source="notes-api",
+            )
+            if not isinstance(compound_result, dict):
+                raise SyncStoreError("Compound note projection did not return a note")
+            compound_note = compound_result
         elif compound_note is None and update_data:
             if sync_service is not None:
                 current_note = _get_current_note()
@@ -4836,7 +4799,7 @@ async def patch_note(
         compound_note: dict[str, Any] | None = None
         compound_replayed = False
         if coordinator is not None:
-            request_fingerprint = _compound_note_request_fingerprint(
+            request_fingerprint = compound_note_request_fingerprint(
                 coordinator,
                 operation="note.patch",
                 note_id=note_id,
@@ -4915,7 +4878,7 @@ async def patch_note(
                 )
             payload = _note_payload_from_row(current)
             payload.update(update_data)
-            compound_note = _capture_compound_note(
+            compound_plan = plan_compound_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=payload,
@@ -4924,6 +4887,15 @@ async def patch_note(
                 request_key=request_key,
                 request_fingerprint=request_fingerprint or "",
             )
+            compound_result = _capture_notes_organization_plan(
+                coordinator,
+                compound_plan,
+                idempotency_key=request_key,
+                source="notes-api",
+            )
+            if not isinstance(compound_result, dict):
+                raise SyncStoreError("Compound note projection did not return a note")
+            compound_note = compound_result
         elif compound_note is None and update_data:
             if sync_service is not None:
                 current = _get_current_note()
@@ -5274,7 +5246,7 @@ async def bulk_create_notes(
             organization_supplied = keywords_supplied or folders_supplied
             item_key = f"{bulk_request_key}:{item_index}"
             note_id = item.id or (
-                _compound_note_id(item_key)
+                compound_note_id(item_key)
                 if sync_service is not None and organization_supplied
                 else str(uuid4())
             )
@@ -5290,7 +5262,7 @@ async def bulk_create_notes(
             compound_note: dict[str, Any] | None = None
             request_fingerprint: str | None = None
             if coordinator is not None:
-                request_fingerprint = _compound_note_request_fingerprint(
+                request_fingerprint = compound_note_request_fingerprint(
                     coordinator,
                     operation="note.bulk_create",
                     note_id=note_id,
@@ -5368,7 +5340,7 @@ async def bulk_create_notes(
                 "message_id": message_id,
             }
             if coordinator is not None and compound_note is None:
-                compound_note = _capture_compound_note(
+                compound_plan = plan_compound_note(
                     coordinator,
                     note_id=note_id,
                     note_payload=note_payload,
@@ -5377,6 +5349,17 @@ async def bulk_create_notes(
                     request_key=item_key,
                     request_fingerprint=request_fingerprint or "",
                 )
+                compound_result = _capture_notes_organization_plan(
+                    coordinator,
+                    compound_plan,
+                    idempotency_key=item_key,
+                    source="notes-api",
+                )
+                if not isinstance(compound_result, dict):
+                    raise SyncStoreError(
+                        "Compound note projection did not return a note"
+                    )
+                compound_note = compound_result
             elif sync_service is not None and compound_note is None:
                 try:
                     capture_server_origin_mutation(

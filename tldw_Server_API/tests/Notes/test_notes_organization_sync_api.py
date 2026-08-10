@@ -1684,7 +1684,7 @@ def test_active_import_create_copy_never_falls_back_to_direct_note_insert(
         raise ConflictError("injected canonical conflict", entity="notes")
 
     monkeypatch.setattr(chacha_db, "add_note", count_direct_add)
-    monkeypatch.setattr(notes_endpoint, "_capture_compound_note", reject_canonical_capture)
+    monkeypatch.setattr(notes_endpoint, "plan_compound_note", reject_canonical_capture)
 
     response = client.post(
         "/api/v1/notes/import",

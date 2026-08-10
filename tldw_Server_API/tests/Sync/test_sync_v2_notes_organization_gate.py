@@ -273,7 +273,9 @@ def test_postgres_ready_transition_serializes_before_concurrent_append(
     assert str(append_errors[0]) == "notes_organization_sync_not_ready"
     assert first_store.list_current_heads(
         "dataset-1",
-        domains=["notes.keyword"],
+        "notes.keyword",
+        limit=1000,
+        offset=0,
     ) == []
 
 

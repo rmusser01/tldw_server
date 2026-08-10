@@ -1,11 +1,11 @@
-# ADR-033: Canonical folder-link suppression preserves source provenance
+# ADR-035: Canonical folder-link suppression preserves source provenance
 
 **Status:** Accepted
 **Date:** 2026-08-08
 **Backfilled from:** not backfilled
 **Decision owner:** TASK-13003 requester and implementation review
 **Related task:** TASK-13003
-**Related ADRs:** `Docs/ADR/020-db-management-per-user-paths-and-content-backend.md`, `Docs/ADR/031-notes-capability-sync-domains.md`, `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`
+**Related ADRs:** `Docs/ADR/020-db-management-per-user-paths-and-content-backend.md`, `Docs/ADR/031-notes-capability-sync-domains.md`, `Docs/ADR/034-durable-server-origin-sync-mutation-batches.md`
 **Related spec/plan:** `Docs/superpowers/specs/2026-08-08-notes-organization-sync-design.md`, `Docs/superpowers/plans/2026-08-08-notes-organization-sync-implementation-plan.md`
 
 ## Decision

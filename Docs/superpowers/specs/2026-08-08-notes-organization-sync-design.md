@@ -4,7 +4,7 @@
 - **Task:** TASK-13003
 - **Status:** Approved design; implementation planning and execution remain separate gates
 - **Depends on:** TASK-13002 and ADR-031
-- **Architecture decisions:** `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`, `Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md`
+- **Architecture decisions:** `Docs/ADR/034-durable-server-origin-sync-mutation-batches.md`, `Docs/ADR/035-canonical-folder-link-suppression-preserves-source-provenance.md`
 - **Reviewed server baseline:** `dev` at `a495e252c1319a6e44c20a259e92fa94c0107627`
 
 ## Purpose
@@ -36,7 +36,7 @@ hierarchies, effective memberships, optimistic versions, and per-user materializ
 store.
 
 The same review found that the Sync store has only `insert_envelope()`. Compound
-organization operations therefore require ADR-032's atomic batch-append seam before
+organization operations therefore require ADR-034's atomic batch-append seam before
 they can safely use Sync as the write authority.
 
 Focused baseline verification on the isolated task worktree passed before design
@@ -213,7 +213,7 @@ stores a local `note_folder_sync_suppressions` pair for each canonical folder-li
 tombstone. Effective membership is the manual/source union minus suppressions. A
 canonical upsert clears the matching suppression and ensures the manual projection;
 a tombstone removes the manual projection and creates the suppression. The table is
-derived projection state, not a Sync domain. ADR-033 records this ownership boundary.
+derived projection state, not a Sync domain. ADR-035 records this ownership boundary.
 
 ## Existing-dataset bootstrap
 
@@ -327,7 +327,7 @@ maintained locally.
 
 ## Durable server-origin mutation groups
 
-ADR-032 defines the shared infrastructure. Each compound REST operation is
+ADR-034 defines the shared infrastructure. Each compound REST operation is
 preflighted into an immutable ordered list of primitive envelopes. The plan is
 evaluated in memory against current heads plus earlier planned steps, assigned a
 group ID, step indexes, total count, and canonical plan hash, and appended through
@@ -531,7 +531,7 @@ keys, or secret-bearing configuration.
 
 ADR required: yes
 
-ADR path: `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`
+ADR path: `Docs/ADR/034-durable-server-origin-sync-mutation-batches.md`
 
 Reason: TASK-13003 changes the Sync storage contract, cross-database mutation
 boundary, recovery policy, and long-lived service interface for compound writes.

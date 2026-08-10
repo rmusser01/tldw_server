@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationCoordinator,
     PlannedNotesMutation,
 )
+from tldw_Server_API.app.core.Sync.v2.server_origin import server_origin_stable_key
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     ServerOriginMutationStep,
 )
@@ -49,6 +50,72 @@ def stable_note_id(source: str, key: str) -> str:
 
     digest = hashlib.sha256(f"{source}:notes.note:{key}".encode()).hexdigest()
     return str(UUID(digest[:32], version=4))
+
+
+def compound_note_id(request_key: str) -> str:
+    """Derive the stable note identity for one compound Notes API request."""
+
+    digest = hashlib.sha256(f"notes.note:{request_key}".encode()).hexdigest()
+    return str(UUID(digest[:32], version=4))
+
+
+def compound_note_request_fingerprint(
+    coordinator: NotesOrganizationCoordinator,
+    *,
+    operation: str,
+    note_id: str,
+    note_fields: Mapping[str, object],
+    keywords: Sequence[str] | None,
+    folder_paths: Sequence[str] | None,
+    expected_version: int | None = None,
+) -> str:
+    """Hash the immutable inputs for one compound Notes API request."""
+
+    return coordinator.request_fingerprint(
+        operation,
+        {
+            "note_id": note_id,
+            "note_fields": dict(note_fields),
+            "keywords": list(keywords) if keywords is not None else None,
+            "folder_paths": list(folder_paths) if folder_paths is not None else None,
+            "expected_version": expected_version,
+        },
+    )
+
+
+def plan_compound_note(
+    coordinator: NotesOrganizationCoordinator,
+    *,
+    note_id: str,
+    note_payload: Mapping[str, object],
+    keywords: Sequence[str] | None,
+    folder_paths: Sequence[str] | None,
+    request_key: str,
+    request_fingerprint: str,
+    response_status: int | None = None,
+) -> PlannedNotesMutation:
+    """Build one request-bound note-and-organization mutation plan."""
+
+    plan = coordinator.plan_note_with_organization(
+        note_step=ServerOriginMutationStep(
+            domain="notes.note",
+            operation="upsert",
+            object_id=note_id,
+            payload=dict(note_payload),
+            stable_key=server_origin_stable_key(
+                source="notes-api",
+                domain="notes.note",
+                operation="upsert",
+                idempotency_key=request_key,
+            ),
+        ),
+        keywords=keywords,
+        folder_paths=folder_paths,
+    )
+    plan = coordinator.bind_request(plan, request_fingerprint)
+    if response_status is not None:
+        plan = coordinator.bind_response_status(plan, response_status)
+    return plan
 
 
 def capture_plan(

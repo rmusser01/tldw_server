@@ -19,9 +19,6 @@ from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationDomainsIncompleteError,
     NotesOrganizationNotReadyError,
 )
-from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
-    SyncServerOriginBatchIdempotencyConflictError,
-)
 from tldw_Server_API.app.core.WebClipper.schemas import WebClipperSaveRequest
 from tldw_Server_API.app.core.WebClipper.service import WebClipperService
 from tldw_Server_API.tests.Sync.notes_organization_test_support import (
@@ -167,7 +164,7 @@ def test_active_exact_retry_reuses_envelopes_version_and_response(
     ]
 
 
-def test_active_same_clip_id_with_different_request_conflicts(
+def test_active_same_clip_id_with_new_intent_creates_versioned_update(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -176,14 +173,21 @@ def test_active_same_clip_id_with_different_request_conflicts(
     clipper = WebClipperService(db=db, user_id="user-1")
     first = _request()
 
-    clipper.save_clip(first)
+    created = clipper.save_clip(first)
     first_envelopes = _clip_envelopes(sync_store)
 
-    with pytest.raises(SyncServerOriginBatchIdempotencyConflictError):
-        clipper.save_clip(_request(title="Different title"))
+    updated_request = _request(title="Different title")
+    updated = clipper.save_clip(updated_request)
+    retried = clipper.save_clip(updated_request)
 
+    updated_envelopes = _clip_envelopes(sync_store)
+    assert updated.note_id == created.note_id
+    assert updated.note.title == "Different title"
+    assert updated.note.version == created.note.version + 1
+    assert retried == updated
+    assert len(updated_envelopes) == len(first_envelopes) + 1
     assert [envelope.client_envelope_id for envelope in _clip_envelopes(sync_store)] == [
-        envelope.client_envelope_id for envelope in first_envelopes
+        envelope.client_envelope_id for envelope in updated_envelopes
     ]
 
 
@@ -274,9 +278,21 @@ def test_active_retry_repairs_sidecar_after_post_projection_write_failure(
     assert repaired_document["capture_metadata_json"]["captured_at"] == durable_capture
     assert [envelope.client_envelope_id for envelope in _clip_envelopes(sync_store)] == first_envelope_ids
 
-    with pytest.raises(SyncServerOriginBatchIdempotencyConflictError):
-        clipper.save_clip(_request(title="Different title", keywords=["alpha"]))
-    assert [envelope.client_envelope_id for envelope in _clip_envelopes(sync_store)] == first_envelope_ids
+    changed_request = _request(title="Different title", keywords=["alpha"])
+    changed = clipper.save_clip(changed_request)
+    changed_envelope_ids = [
+        envelope.client_envelope_id for envelope in _clip_envelopes(sync_store)
+    ]
+
+    assert changed.note_id == repaired.note_id
+    assert changed.note.title == "Different title"
+    assert changed.note.version == repaired.note.version + 1
+    assert len(changed_envelope_ids) == len(first_envelope_ids) + 1
+
+    assert clipper.save_clip(changed_request) == changed
+    assert [
+        envelope.client_envelope_id for envelope in _clip_envelopes(sync_store)
+    ] == changed_envelope_ids
 
 
 @pytest.mark.parametrize(

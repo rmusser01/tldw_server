@@ -1,10 +1,10 @@
-# ADR-034: Web Clipper external identity mapping
+# ADR-036: Web Clipper external identity mapping
 
 **Status:** Accepted
 **Date:** 2026-08-09
 **Decision owner:** TASK-13003 final implementation review
 **Related task:** TASK-13003
-**Related ADRs:** `Docs/ADR/031-notes-capability-sync-domains.md`, `Docs/ADR/032-durable-server-origin-sync-mutation-batches.md`, `Docs/ADR/033-canonical-folder-link-suppression-preserves-source-provenance.md`
+**Related ADRs:** `Docs/ADR/031-notes-capability-sync-domains.md`, `Docs/ADR/034-durable-server-origin-sync-mutation-batches.md`, `Docs/ADR/035-canonical-folder-link-suppression-preserves-source-provenance.md`
 **Related design:** `Docs/superpowers/specs/2026-04-03-browser-extension-web-clipper-design.md`
 
 ## Decision
@@ -43,7 +43,7 @@ responses return the normalized public `clip_id`, while the existing `note.id` a
 compatibility `note_id` fields return the canonical note UUID.
 
 Active-Sync saves use a privacy-safe stable key derived from owner plus `clip_id`
-for the complete ADR-032 mutation group. The stored request fingerprint binds the
+for the complete ADR-034 mutation group. The stored request fingerprint binds the
 normalized note content and organization request to that key. An exact retry
 reuses the same group, note version, and response identity; a different request
 using the same `clip_id` is a stable HTTP 409 idempotency conflict. Server-authored
@@ -170,6 +170,6 @@ The schema receives one linear migration on both SQLite and PostgreSQL. Legacy
 non-UUID clip notes change their internal note ID once, while the public clip ID and
 workspace/source identities remain stable. Canonical UUID notes are not rekeyed.
 
-ADR-032 still governs append-before-projection and exact group replay. ADR-033 still
+ADR-034 still governs append-before-projection and exact group replay. ADR-035 still
 governs folder-link projection. This ADR changes only the Web Clipper public-to-
 canonical identity boundary and its migration.
