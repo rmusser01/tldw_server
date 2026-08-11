@@ -250,6 +250,7 @@ class AttachmentRefAdapter:
         )
         try:
             payload = parse_attachment_ref_v2_payload(
+                envelope.operation,
                 envelope.payload or envelope.payload_clear
             )
             validate_attachment_ref_v2_object_id(envelope.object_id)
@@ -261,18 +262,24 @@ class AttachmentRefAdapter:
                 raise AttachmentRefV2ValidationError(
                     "attachment.ref v2 object_id must match attachment_id"
                 )
-            canonical_hash = attachment_ref_v2_object_hash(payload)
+            canonical_hash = attachment_ref_v2_object_hash(
+                envelope.operation,
+                payload,
+                object_revision=envelope.object_revision,
+            )
             if envelope.payload_hash != canonical_hash:
                 raise AttachmentRefV2ValidationError(
                     "attachment.ref v2 payload_hash must match the canonical object hash"
                 )
             validate_attachment_ref_v2(
+                envelope.operation,
                 payload,
                 envelope_created_at_client=envelope.created_at_client or "",
                 authenticated_device_id=envelope.device_id or "",
                 prior_payload=(
                     (head.payload or head.payload_clear) if head is not None else None
                 ),
+                prior_operation=head.operation if head is not None else None,
                 trusted_server_origin=(
                     context.trusted_server_origin if context is not None else False
                 ),
@@ -426,7 +433,7 @@ def extract_attachment_ref_metadata(
     payload = envelope.payload or envelope.payload_clear
     if envelope.adapter_version == 2:
         try:
-            parsed = parse_attachment_ref_v2_payload(payload)
+            parsed = parse_attachment_ref_v2_payload(envelope.operation, payload)
         except AttachmentRefV2ValidationError as exc:
             raise AttachmentRefValidationError(
                 "attachment_ref_v2_payload_invalid",

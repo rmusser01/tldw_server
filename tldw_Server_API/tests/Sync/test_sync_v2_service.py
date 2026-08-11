@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
     AdapterConflict,
     AdapterRejected,
+    AttachmentRefAdapter,
     StaticSyncAdapter,
     SyncAdapterRegistry,
 )
@@ -968,6 +969,48 @@ def test_attachment_ref_adapter_version_capabilities_require_gate_and_readiness(
     )
     assert capabilities["supported_adapter_versions"]["attachment.ref"] == [1, 2]
     assert capabilities["writable_adapter_versions"]["attachment.ref"] == expected
+
+
+def test_core_capabilities_without_dataset_are_conservative(
+    sync_service: SyncV2Service,
+) -> None:
+    capabilities = sync_service.capabilities()
+
+    assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
+    assert capabilities.writable_adapter_versions["attachment.ref"] == []
+
+
+@pytest.mark.parametrize(
+    ("gate_enabled", "state", "expected"),
+    [
+        (False, "ready", []),
+        (True, "initializing", []),
+        (True, "ready", [2]),
+    ],
+)
+def test_core_capabilities_bind_attachment_writability_to_selected_dataset(
+    sync_service: SyncV2Service,
+    gate_enabled: bool,
+    state: str,
+    expected: list[int],
+) -> None:
+    sync_service.adapters.register(
+        AttachmentRefAdapter(v2_writes_enabled=gate_enabled)
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+        metadata={"notes_attachment_v2": {"state": state}},
+    )
+
+    capabilities = sync_service.capabilities(
+        user_id="user-1",
+        dataset_id="dataset-1",
+    )
+
+    assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
+    assert capabilities.writable_adapter_versions["attachment.ref"] == expected
 
 
 def test_device_registration_creates_and_refreshes_same_device(sync_service: SyncV2Service):
@@ -2213,6 +2256,91 @@ def test_push_rejects_unsupported_adapter_versions_per_envelope(sync_service: Sy
     assert result.accepted == []
     assert result.rejected[0].client_envelope_id == "env-1"
     assert result.rejected[0].error_code == "unsupported_adapter_version"
+
+
+def test_push_treats_omitted_device_adapter_map_as_v1_only(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.adapters.register(
+        StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    result = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(adapter_version=2)],
+    )
+
+    assert result.accepted == []
+    assert result.rejected[0].error_code == "device_adapter_version_not_advertised"
+    assert sync_service.store.list_envelopes_after("dataset-1", 0) == []
+
+
+def test_push_accepts_adapter_version_advertised_by_registered_device(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.adapters.register(
+        StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})
+    )
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="device-1",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={"supported_adapter_versions": {"notes.note": [1, 2]}},
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    result = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(adapter_version=2)],
+    )
+
+    assert len(result.accepted) == 1
+    assert result.rejected == []
+
+
+def test_push_rejects_version_not_requested_for_envelope_domain(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.adapters.register(
+        StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})
+    )
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="device-1",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={"supported_adapter_versions": {"attachment.ref": [2]}},
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    result = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(adapter_version=2)],
+    )
+
+    assert result.accepted == []
+    assert result.rejected[0].error_code == "device_adapter_version_not_advertised"
+    assert sync_service.store.list_envelopes_after("dataset-1", 0) == []
 
 
 def test_push_rejects_mismatched_device_id_and_fills_missing_device_id(

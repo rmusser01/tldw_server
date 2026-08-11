@@ -193,6 +193,20 @@ def _attachment_v2_payload(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
+def _attachment_v2_tombstone_payload(**overrides: Any) -> dict[str, Any]:
+    payload = _attachment_v2_payload(
+        last_modified="2026-08-11T20:31:00+00:00",
+    )
+    payload.update(
+        {
+            "deleted_at": "2026-08-11T20:31:00+00:00",
+            "reason": "removed",
+        }
+    )
+    payload.update(overrides)
+    return payload
+
+
 def _attachment_v2_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     contract = _attachment_ref_v2_module()
     payload = overrides.pop("payload", _attachment_v2_payload())
@@ -208,12 +222,19 @@ def _attachment_v2_envelope(**overrides: Any) -> SyncEnvelopeCreate:
         "adapter_version": 2,
         "object_revision": 1,
         "payload": payload,
-        "payload_hash": contract.attachment_ref_v2_object_hash(payload),
         "created_at_client": ATTACHMENT_V2_TIMESTAMP,
         "encryption_metadata": {"policy": "server_trusted_v1"},
         "routing_metadata": {},
     }
     values.update(overrides)
+    values.setdefault(
+        "payload_hash",
+        contract.attachment_ref_v2_object_hash(
+            values["operation"],
+            payload,
+            object_revision=values["object_revision"],
+        ),
+    )
     return SyncEnvelopeCreate(**values)
 
 
@@ -263,12 +284,18 @@ def test_attachment_ref_v2_payload_is_exact_and_strict(
     contract = _attachment_ref_v2_module()
 
     with pytest.raises(contract.AttachmentRefV2ValidationError, match=message):
-        contract.parse_attachment_ref_v2_payload(_attachment_v2_payload(**overrides))
+        contract.parse_attachment_ref_v2_payload(
+            "upsert",
+            _attachment_v2_payload(**overrides),
+        )
 
 
 def test_attachment_ref_v2_restore_intent_is_routing_metadata_only() -> None:
     contract = _attachment_ref_v2_module()
-    parsed = contract.parse_attachment_ref_v2_payload(_attachment_v2_payload())
+    parsed = contract.parse_attachment_ref_v2_payload(
+        "upsert",
+        _attachment_v2_payload(),
+    )
 
     assert "restore_intent" not in parsed.model_dump(mode="json")
     assert contract.validate_attachment_ref_v2_routing_metadata(
@@ -295,8 +322,85 @@ def test_attachment_ref_v2_restore_intent_requires_literal_true(
 def test_attachment_ref_v2_canonical_object_hash_has_exact_vector() -> None:
     contract = _attachment_ref_v2_module()
 
-    assert contract.attachment_ref_v2_object_hash(_attachment_v2_payload()) == (
-        "sha256:4baf97b7774cb9c4a4b27571ce5aa3454980dc4097ddeb174e650e62237dbb55"
+    assert contract.attachment_ref_v2_object_hash(
+        "upsert",
+        _attachment_v2_payload(),
+        object_revision=1,
+    ) == (
+        "sha256:04d1fb35d8be65f0a23b73ab8365ff156e0b06f9d174a484d1cc040af360eac6"
+    )
+
+
+def test_attachment_ref_v2_tombstone_is_a_strict_complete_snapshot() -> None:
+    contract = _attachment_ref_v2_module()
+    tombstone = _attachment_v2_tombstone_payload()
+
+    parsed = contract.parse_attachment_ref_v2_payload("tombstone", tombstone)
+    assert parsed.deleted_at == "2026-08-11T20:31:00+00:00"
+    assert parsed.reason == "removed"
+
+    with pytest.raises(contract.AttachmentRefV2ValidationError):
+        contract.parse_attachment_ref_v2_payload("tombstone", _attachment_v2_payload())
+    with pytest.raises(contract.AttachmentRefV2ValidationError):
+        contract.parse_attachment_ref_v2_payload("upsert", tombstone)
+    with pytest.raises(contract.AttachmentRefV2ValidationError):
+        contract.parse_attachment_ref_v2_payload(
+            "tombstone",
+            _attachment_v2_tombstone_payload(reason="x" * 257),
+        )
+
+
+def test_attachment_ref_v2_tombstone_provenance_binds_deleted_at() -> None:
+    contract = _attachment_ref_v2_module()
+    prior = contract.parse_attachment_ref_v2_payload(
+        "upsert",
+        _attachment_v2_payload(),
+    )
+
+    accepted = contract.validate_attachment_ref_v2(
+        "tombstone",
+        _attachment_v2_tombstone_payload(),
+        envelope_created_at_client="2026-08-11T20:31:00+00:00",
+        authenticated_device_id="device-2",
+        prior_payload=prior,
+        prior_operation="upsert",
+    )
+    assert accepted.deleted_at == accepted.last_modified
+
+    with pytest.raises(contract.AttachmentRefV2ValidationError, match="deleted_at"):
+        contract.validate_attachment_ref_v2(
+            "tombstone",
+            _attachment_v2_tombstone_payload(
+                deleted_at="2026-08-11T20:32:00+00:00"
+            ),
+            envelope_created_at_client="2026-08-11T20:31:00+00:00",
+            authenticated_device_id="device-2",
+            prior_payload=prior,
+            prior_operation="upsert",
+        )
+
+
+def test_attachment_ref_v2_object_hash_binds_revision_and_lifecycle() -> None:
+    contract = _attachment_ref_v2_module()
+    live_v1 = contract.attachment_ref_v2_object_hash(
+        "upsert",
+        _attachment_v2_payload(),
+        object_revision=1,
+    )
+    live_v2 = contract.attachment_ref_v2_object_hash(
+        "upsert",
+        _attachment_v2_payload(),
+        object_revision=2,
+    )
+    tombstone_v2 = contract.attachment_ref_v2_object_hash(
+        "tombstone",
+        _attachment_v2_tombstone_payload(),
+        object_revision=2,
+    )
+
+    assert len({live_v1, live_v2, tombstone_v2}) == 3
+    assert tombstone_v2 == (
+        "sha256:a1233681df93f6d194f35e518938646e91d66172557ee0f138a06f75d23d6eae"
     )
 
 
@@ -305,11 +409,13 @@ def test_attachment_ref_v2_provenance_acceptance_vectors() -> None:
     normalized_client_time = "2026-08-11T20:30:00+00:00"
 
     client = contract.validate_attachment_ref_v2(
+        "upsert",
         _attachment_v2_payload(),
         envelope_created_at_client="2026-08-11T13:30:00-07:00",
         authenticated_device_id="device-1",
     )
     server = contract.validate_attachment_ref_v2(
+        "upsert",
         _attachment_v2_payload(created_by="server-origin"),
         envelope_created_at_client=normalized_client_time,
         authenticated_device_id="server-origin",
@@ -333,6 +439,7 @@ def test_attachment_ref_v2_legacy_provenance_requires_verified_bootstrap() -> No
 
     with pytest.raises(contract.AttachmentRefV2ValidationError, match="provenance"):
         contract.validate_attachment_ref_v2(
+            "upsert",
             legacy,
             envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
             authenticated_device_id="server-origin",
@@ -341,6 +448,7 @@ def test_attachment_ref_v2_legacy_provenance_requires_verified_bootstrap() -> No
         )
 
     accepted = contract.validate_attachment_ref_v2(
+        "upsert",
         legacy,
         envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
         authenticated_device_id="server-origin",
@@ -354,14 +462,19 @@ def test_attachment_ref_v2_legacy_provenance_requires_verified_bootstrap() -> No
 
 def test_attachment_ref_v2_updates_preserve_creation_fields_and_mutation_time() -> None:
     contract = _attachment_ref_v2_module()
-    prior = contract.parse_attachment_ref_v2_payload(_attachment_v2_payload())
+    prior = contract.parse_attachment_ref_v2_payload(
+        "upsert",
+        _attachment_v2_payload(),
+    )
     modified = "2026-08-11T20:31:00+00:00"
 
     accepted = contract.validate_attachment_ref_v2(
+        "upsert",
         _attachment_v2_payload(file_name="renamed.png", last_modified=modified),
         envelope_created_at_client=modified,
         authenticated_device_id="device-2",
         prior_payload=prior,
+        prior_operation="upsert",
     )
     assert accepted.created_at == prior.created_at
     assert accepted.created_by == prior.created_by
@@ -370,6 +483,7 @@ def test_attachment_ref_v2_updates_preserve_creation_fields_and_mutation_time() 
 
     with pytest.raises(contract.AttachmentRefV2ValidationError, match="immutable"):
         contract.validate_attachment_ref_v2(
+            "upsert",
             _attachment_v2_payload(
                 created_by="device-2",
                 last_modified=modified,
@@ -377,6 +491,7 @@ def test_attachment_ref_v2_updates_preserve_creation_fields_and_mutation_time() 
             envelope_created_at_client=modified,
             authenticated_device_id="device-2",
             prior_payload=prior,
+            prior_operation="upsert",
         )
 
 
@@ -386,15 +501,18 @@ def test_attachment_ref_v2_exact_replay_never_enriches_or_rewrites_payload() -> 
     before = dict(payload)
 
     first = contract.validate_attachment_ref_v2(
+        "upsert",
         payload,
         envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
         authenticated_device_id="device-1",
     )
     replay = contract.validate_attachment_ref_v2(
+        "upsert",
         payload,
         envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
         authenticated_device_id="device-1",
         prior_payload=first,
+        prior_operation="upsert",
     )
 
     assert payload == before

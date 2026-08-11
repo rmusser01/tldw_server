@@ -12,7 +12,11 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
-from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.adapters import (
+    AttachmentRefAdapter,
+    StaticSyncAdapter,
+    SyncAdapterRegistry,
+)
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
@@ -280,6 +284,61 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
         },
     }
     assert body["warnings"] == []
+
+
+@pytest.mark.parametrize(
+    ("gate_enabled", "state", "expected"),
+    [
+        (False, "ready", []),
+        (True, "initializing", []),
+        (True, "ready", [2]),
+    ],
+)
+def test_capabilities_endpoint_reports_selected_dataset_writable_versions(
+    tmp_path: Path,
+    gate_enabled: bool,
+    state: str,
+    expected: list[int],
+) -> None:
+    service = _build_service(tmp_path)
+    service.adapters.register(
+        AttachmentRefAdapter(v2_writes_enabled=gate_enabled)
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+        metadata={"notes_attachment_v2": {"state": state}},
+    )
+
+    response = _client_for_service(service).get(
+        "/api/v1/sync/capabilities",
+        params={"dataset_id": "dataset-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["supported_adapter_versions"]["attachment.ref"] == [1, 2]
+    assert response.json()["writable_adapter_versions"]["attachment.ref"] == expected
+
+
+def test_capabilities_endpoint_hides_unauthorized_selected_dataset(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+    service.enroll_dataset(
+        user_id="user-2",
+        dataset_id="dataset-private",
+        domains=["notes.note", "attachment.ref"],
+        metadata={"notes_attachment_v2": {"state": "ready"}},
+    )
+
+    response = _client_for_service(service).get(
+        "/api/v1/sync/capabilities",
+        params={"dataset_id": "dataset-private"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error_code"] == "sync_resource_not_found"
 
 
 def test_profile_endpoint_is_read_only_when_no_dataset_exists(

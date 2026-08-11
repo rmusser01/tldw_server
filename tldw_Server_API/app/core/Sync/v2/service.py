@@ -87,7 +87,9 @@ from .models import (
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
     client_private_server_frontend_limitation_warning,
+    sync_v2_dataset_writable_adapter_versions,
     sync_v2_domain_schemas,
+    sync_v2_server_supported_adapter_versions,
 )
 from .mutation_group_validation import (
     StoredMutationGroupValidationError,
@@ -153,6 +155,32 @@ def _sha256_bytes(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+def _device_supports_adapter_version(
+    device: SyncDevice,
+    domain: SyncDomain,
+    adapter_version: int,
+) -> bool:
+    """Return whether the stored device negotiation permits one envelope."""
+
+    version_map = device.capabilities.get("supported_adapter_versions")
+    if version_map is None:
+        return adapter_version == 1
+    if not isinstance(version_map, Mapping):
+        return False
+    versions = version_map.get(domain)
+    if not isinstance(versions, Sequence) or isinstance(
+        versions,
+        (str, bytes, bytearray),
+    ):
+        return False
+    return any(
+        not isinstance(version, bool)
+        and isinstance(version, int)
+        and version == adapter_version
+        for version in versions
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class SyncV2Settings:
     """Server settings surfaced through Sync v2 capabilities."""
@@ -202,6 +230,12 @@ class SyncV2Capabilities:
     max_attachment_bytes: int
     domain_schemas: dict[SyncDomain, dict[str, object]] = field(
         default_factory=sync_v2_domain_schemas
+    )
+    supported_adapter_versions: dict[SyncDomain, list[int]] = field(
+        default_factory=sync_v2_server_supported_adapter_versions
+    )
+    writable_adapter_versions: dict[SyncDomain, list[int]] = field(
+        default_factory=sync_v2_dataset_writable_adapter_versions
     )
     quota: dict[str, object] = field(default_factory=dict)
     supports_restore_manifest: bool = True
@@ -607,7 +641,32 @@ class SyncV2Service:
         self.dataset_bootstrapper = dataset_bootstrapper
         self.notes_link_bootstrapper = notes_link_bootstrapper
 
-    def capabilities(self) -> SyncV2Capabilities:
+    def capabilities(
+        self,
+        *,
+        user_id: str | None = None,
+        dataset_id: str | None = None,
+    ) -> SyncV2Capabilities:
+        """Return capabilities, optionally bound to one authorized dataset."""
+
+        dataset_metadata: Mapping[str, object] | None = None
+        if dataset_id is not None:
+            if user_id is None:
+                raise SyncStoreError(
+                    "Sync dataset was not found or is not accessible"
+                )
+            dataset_metadata = self._require_dataset_access(
+                user_id=user_id,
+                dataset_id=dataset_id,
+            ).metadata
+        try:
+            attachment_adapter = self.adapters.get("attachment.ref")
+        except KeyError:
+            attachment_v2_writes_enabled = False
+        else:
+            attachment_v2_writes_enabled = bool(
+                getattr(attachment_adapter, "v2_writes_enabled", False)
+            )
         blob_transfer: dict[str, object] = {"supported": False}
         quota: dict[str, object] = {}
         if self.settings.supports_attachments:
@@ -648,6 +707,11 @@ class SyncV2Service:
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
             domain_schemas=sync_v2_domain_schemas(),
+            supported_adapter_versions=sync_v2_server_supported_adapter_versions(),
+            writable_adapter_versions=sync_v2_dataset_writable_adapter_versions(
+                dataset_metadata,
+                notes_attachment_sync_enabled=attachment_v2_writes_enabled,
+            ),
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
             compatibility_flags=compatibility_flags,
@@ -1432,7 +1496,7 @@ class SyncV2Service:
                     for envelope in envelopes
                 ],
             )
-        self._require_registered_device(user_id, device_id)
+        device = self._require_registered_device(user_id, device_id)
         try:
             dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         except SyncStoreError:
@@ -1506,6 +1570,29 @@ class SyncV2Service:
                         client_envelope_id=envelope.client_envelope_id,
                         error_code="payload_too_large",
                         message="Sync envelope payload exceeds the server size limit",
+                    )
+                )
+                continue
+            if (
+                self.adapters.has_domain(envelope.domain)
+                and self.adapters.supports_version(
+                    envelope.domain,
+                    envelope.adapter_version,
+                )
+                and not _device_supports_adapter_version(
+                    device,
+                    envelope.domain,
+                    envelope.adapter_version,
+                )
+            ):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="device_adapter_version_not_advertised",
+                        message=(
+                            "Sync device did not advertise this adapter version "
+                            f"for {envelope.domain}"
+                        ),
                     )
                 )
                 continue

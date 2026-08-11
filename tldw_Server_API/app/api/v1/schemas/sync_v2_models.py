@@ -1371,7 +1371,10 @@ class SyncV2Envelope(BaseModel):
                     raise ValueError(
                         "attachment.ref adapter version 2 requires schema version 2"
                     )
-                attachment = parse_attachment_ref_v2_payload(self.payload)
+                attachment = parse_attachment_ref_v2_payload(
+                    self.operation,
+                    self.payload,
+                )
                 validate_attachment_ref_v2_object_id(self.object_id)
                 validate_attachment_ref_v2_routing_metadata(
                     self.operation,
@@ -1381,7 +1384,11 @@ class SyncV2Envelope(BaseModel):
                     raise ValueError(
                         "attachment.ref object_id must match payload attachment_id"
                     )
-                if self.payload_hash != attachment_ref_v2_object_hash(attachment):
+                if self.payload_hash != attachment_ref_v2_object_hash(
+                    self.operation,
+                    attachment,
+                    object_revision=self.object_revision,
+                ):
                     raise ValueError(
                         "attachment.ref v2 payload_hash must match the canonical object hash"
                     )

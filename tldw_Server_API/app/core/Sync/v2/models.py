@@ -271,52 +271,65 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "distinct_endpoints": True,
         "undirected_endpoint_order": "source_note_id <= target_note_id",
     }
+    attachment_ref_required = [
+        "attachment_id",
+        "parent_domain",
+        "parent_object_id",
+        "file_name",
+        "original_file_name",
+        "content_type",
+        "size_bytes",
+        "blob_hash",
+        "created_at",
+        "last_modified",
+        "created_by",
+    ]
+    attachment_ref_properties = {
+        "attachment_id": {
+            "type": "string",
+            "format": "uuid4",
+            "canonical_lowercase": True,
+        },
+        "parent_domain": {"enum": ["notes.note"]},
+        "parent_object_id": {
+            "type": "string",
+            "format": "uuid4",
+            "canonical_lowercase": True,
+        },
+        "file_name": {"type": "string"},
+        "original_file_name": {"type": "string"},
+        "content_type": {"type": "string"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "blob_hash": {
+            "type": "string",
+            "format": "sha256",
+            "canonical_lowercase": True,
+        },
+        "created_at": {"type": "string", "format": "date-time"},
+        "last_modified": {"type": "string", "format": "date-time"},
+        "created_by": {"type": "string"},
+    }
     return {
         "attachment.ref": {
             "schema_version": 2,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
             "upsert": {
-                "required": [
-                    "attachment_id",
-                    "parent_domain",
-                    "parent_object_id",
-                    "file_name",
-                    "original_file_name",
-                    "content_type",
-                    "size_bytes",
-                    "blob_hash",
-                    "created_at",
-                    "last_modified",
-                    "created_by",
-                ],
+                "required": attachment_ref_required,
+                "properties": attachment_ref_properties,
+                "additional_properties": False,
+            },
+            "tombstone": {
+                "required": [*attachment_ref_required, "deleted_at"],
                 "properties": {
-                    "attachment_id": {
-                        "type": "string",
-                        "format": "uuid4",
-                        "canonical_lowercase": True,
+                    **attachment_ref_properties,
+                    "deleted_at": {"type": "string", "format": "date-time"},
+                    "reason": {
+                        "type": ["string", "null"],
+                        "max_length": 256,
                     },
-                    "parent_domain": {"enum": ["notes.note"]},
-                    "parent_object_id": {
-                        "type": "string",
-                        "format": "uuid4",
-                        "canonical_lowercase": True,
-                    },
-                    "file_name": {"type": "string"},
-                    "original_file_name": {"type": "string"},
-                    "content_type": {"type": "string"},
-                    "size_bytes": {"type": "integer", "minimum": 1},
-                    "blob_hash": {
-                        "type": "string",
-                        "format": "sha256",
-                        "canonical_lowercase": True,
-                    },
-                    "created_at": {"type": "string", "format": "date-time"},
-                    "last_modified": {"type": "string", "format": "date-time"},
-                    "created_by": {"type": "string"},
                 },
                 "additional_properties": False,
             },
-            "tombstone": {"operation": "tombstone", "whole_object": True},
             "restore": {
                 "operation": "upsert",
                 "routing_metadata": {"restore_intent": True},

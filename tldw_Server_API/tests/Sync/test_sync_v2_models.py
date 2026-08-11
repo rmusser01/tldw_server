@@ -1637,10 +1637,28 @@ def test_attachment_ref_v2_api_envelope_carries_adapter_version() -> None:
             "adapter_version": 2,
             "object_revision": 1,
             "payload": payload,
-            "payload_hash": attachment_refs_v2.attachment_ref_v2_object_hash(payload),
+            "payload_hash": attachment_refs_v2.attachment_ref_v2_object_hash(
+                "upsert",
+                payload,
+                object_revision=1,
+            ),
             "created_at_client": "2026-08-11T20:30:00Z",
         }
     )
 
     assert request.adapter_version == 2
     assert _core_envelope_from_api(request).adapter_version == 2
+
+
+def test_attachment_ref_v2_capability_schema_advertises_strict_tombstones() -> None:
+    schema = SyncCapabilitiesResponse().domain_schemas["attachment.ref"]
+
+    assert schema["tombstone"]["required"] == [
+        *schema["upsert"]["required"],
+        "deleted_at",
+    ]
+    assert schema["tombstone"]["properties"]["reason"] == {
+        "type": ["string", "null"],
+        "max_length": 256,
+    }
+    assert schema["tombstone"]["additional_properties"] is False

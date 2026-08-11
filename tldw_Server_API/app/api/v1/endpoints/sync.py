@@ -533,9 +533,23 @@ def _api_key_record_export(record: Any) -> SyncKeyRecoveryBundleRecord:
     summary="Return Sync v2 protocol capabilities",
 )
 def get_sync_v2_capabilities(
+    dataset_id: str | None = Query(None),
+    user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
-    return _api_capabilities_from_core(service.capabilities())
+    user_id = _sync_user_id(user)
+    try:
+        capabilities = service.capabilities(
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=dataset_id,
+        ) from exc
+    return _api_capabilities_from_core(capabilities)
 
 
 @router.get(

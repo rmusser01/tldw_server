@@ -86,17 +86,42 @@ class AttachmentRefV2Payload(BaseModel):
         return _canonical_timestamp(value)
 
 
-def parse_attachment_ref_v2_payload(
-    payload: Mapping[str, object],
-) -> AttachmentRefV2Payload:
-    """Parse one strict v2 payload without mutating or enriching it."""
+class AttachmentRefV2TombstonePayload(AttachmentRefV2Payload):
+    """Canonical whole-object tombstone for one Notes attachment reference."""
 
-    if not isinstance(payload, Mapping):
+    deleted_at: str
+    reason: str | None = Field(default=None, max_length=256)
+
+    @field_validator("deleted_at")
+    @classmethod
+    def _validate_deleted_at(cls, value: str) -> str:
+        return _canonical_timestamp(value)
+
+
+def parse_attachment_ref_v2_payload(
+    operation: str,
+    payload: Mapping[str, object] | AttachmentRefV2Payload,
+) -> AttachmentRefV2Payload:
+    """Parse one operation-specific strict v2 whole-object payload."""
+
+    if operation not in {"upsert", "tombstone"}:
         raise AttachmentRefV2ValidationError(
-            "attachment.ref v2 payload must be an object"
+            f"unsupported attachment.ref v2 operation: {operation}"
         )
+    if not isinstance(payload, Mapping):
+        if isinstance(payload, AttachmentRefV2Payload):
+            payload = payload.model_dump(mode="json")
+        else:
+            raise AttachmentRefV2ValidationError(
+                "attachment.ref v2 payload must be an object"
+            )
+    model = (
+        AttachmentRefV2Payload
+        if operation == "upsert"
+        else AttachmentRefV2TombstonePayload
+    )
     try:
-        return AttachmentRefV2Payload.model_validate(dict(payload))
+        return model.model_validate(dict(payload))
     except ValidationError as exc:
         message = str(exc).replace(
             "Extra inputs are not permitted", "extra inputs are not permitted"
@@ -105,33 +130,41 @@ def parse_attachment_ref_v2_payload(
 
 
 def validate_attachment_ref_v2(
+    operation: str,
     payload: Mapping[str, object] | AttachmentRefV2Payload,
     *,
     envelope_created_at_client: str,
     authenticated_device_id: str,
     prior_payload: Mapping[str, object] | AttachmentRefV2Payload | None = None,
+    prior_operation: str | None = None,
     trusted_server_origin: bool = False,
     verified_bootstrap: bool = False,
 ) -> AttachmentRefV2Payload:
     """Validate immutable identity and replay-stable creation provenance."""
 
-    parsed = (
-        payload
-        if isinstance(payload, AttachmentRefV2Payload)
-        else parse_attachment_ref_v2_payload(payload)
-    )
+    parsed = parse_attachment_ref_v2_payload(operation, payload)
     prior = None
     if prior_payload is not None:
-        prior = (
-            prior_payload
-            if isinstance(prior_payload, AttachmentRefV2Payload)
-            else parse_attachment_ref_v2_payload(prior_payload)
+        if prior_operation is None:
+            raise AttachmentRefV2ValidationError(
+                "attachment.ref v2 prior operation is required"
+            )
+        prior = parse_attachment_ref_v2_payload(
+            prior_operation,
+            prior_payload,
         )
 
     mutation_timestamp = _normalized_envelope_timestamp(envelope_created_at_client)
     if parsed.last_modified != mutation_timestamp:
         raise AttachmentRefV2ValidationError(
             "attachment.ref v2 provenance requires last_modified to match the canonical mutation timestamp"
+        )
+    if (
+        isinstance(parsed, AttachmentRefV2TombstonePayload)
+        and parsed.deleted_at != mutation_timestamp
+    ):
+        raise AttachmentRefV2ValidationError(
+            "attachment.ref v2 deleted_at must match the canonical mutation timestamp"
         )
 
     if prior is not None:
@@ -204,17 +237,35 @@ def validate_attachment_ref_v2_routing_metadata(
 
 
 def attachment_ref_v2_object_hash(
+    operation: str,
     payload: Mapping[str, object] | AttachmentRefV2Payload,
+    *,
+    object_revision: int,
 ) -> str:
-    """Hash only the canonical semantic attachment payload fields."""
+    """Hash canonical attachment revision and lifecycle semantics."""
 
-    parsed = (
-        payload
-        if isinstance(payload, AttachmentRefV2Payload)
-        else parse_attachment_ref_v2_payload(payload)
+    if (
+        isinstance(object_revision, bool)
+        or not isinstance(object_revision, int)
+        or object_revision < 1
+    ):
+        raise AttachmentRefV2ValidationError(
+            "attachment.ref v2 object_revision must be a positive integer"
+        )
+    parsed = parse_attachment_ref_v2_payload(operation, payload)
+    semantic = parsed.model_dump(mode="json")
+    deleted_at = semantic.pop("deleted_at", None)
+    delete_reason = semantic.pop("reason", None)
+    semantic.update(
+        {
+            "object_revision": object_revision,
+            "deleted": operation == "tombstone",
+            "deleted_at": deleted_at,
+            "delete_reason": delete_reason,
+        }
     )
     canonical = json.dumps(
-        parsed.model_dump(mode="json"),
+        semantic,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -259,6 +310,7 @@ def _canonical_timestamp(value: object) -> str:
 
 __all__ = [
     "AttachmentRefV2Payload",
+    "AttachmentRefV2TombstonePayload",
     "AttachmentRefV2ValidationError",
     "attachment_ref_v2_object_hash",
     "parse_attachment_ref_v2_payload",
