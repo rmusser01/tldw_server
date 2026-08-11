@@ -68,6 +68,18 @@ class NotesLinkStore:
         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
 
     @staticmethod
+    def _encode_properties(properties: object) -> str:
+        """Encode one canonical properties object identically for every lifecycle write."""
+
+        return json.dumps(
+            properties,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+
+    @staticmethod
     def legacy_dict(link: NotesLink) -> dict[str, object]:
         """Return the historical manual-edge response shape."""
 
@@ -244,6 +256,15 @@ class NotesLinkStore:
                 entity_id=link.edge_id,
             )
 
+    @staticmethod
+    def _require_cas_update(cursor: Any, edge_id: str) -> None:
+        if cursor.rowcount != 1:
+            raise ConflictError(
+                "notes.link version conflict",
+                entity="note_edges",
+                entity_id=edge_id,
+            )
+
     def upsert(
         self,
         *,
@@ -289,13 +310,7 @@ class NotesLinkStore:
                             entity="note_edges",
                             entity_id=str(duplicate["edge_id"]),
                         )
-                    properties = json.dumps(
-                        normalized["properties"],
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                        allow_nan=False,
-                    )
+                    properties = self._encode_properties(normalized["properties"])
                     transaction_conn.execute(
                         "INSERT INTO note_edges(edge_id, user_id, from_note_id, to_note_id, type, "
                         "directed, weight, label, properties, created_at, last_modified, created_by, "
@@ -333,16 +348,11 @@ class NotesLinkStore:
                         entity_id=edge_id,
                     )
                 self._require_version(existing, expected_version)
-                properties = json.dumps(
-                    normalized["properties"],
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                    allow_nan=False,
-                )
-                transaction_conn.execute(
+                properties = self._encode_properties(normalized["properties"])
+                cursor = transaction_conn.execute(
                     "UPDATE note_edges SET weight = ?, label = ?, properties = ?, metadata = ?, "
-                    "last_modified = ?, version = ? WHERE edge_id = ? AND user_id = ?",
+                    "last_modified = ?, version = ? WHERE edge_id = ? AND user_id = ? "
+                    "AND version = ?",
                     (
                         normalized["weight"],
                         normalized["label"],
@@ -352,8 +362,10 @@ class NotesLinkStore:
                         existing.version + 1,
                         edge_id,
                         self._owner_id,
+                        existing.version,
                     ),
                 )
+                self._require_cas_update(cursor, edge_id)
                 updated = self._get_locked(transaction_conn, edge_id)
                 if updated is None:
                     raise CharactersRAGDBError("Updated notes.link was not found")
@@ -388,23 +400,26 @@ class NotesLinkStore:
             if self._tombstone_postcondition_matches(existing, normalized):
                 return NotesLinkMutationResult(existing, False)
             self._require_version(existing, expected_version)
-            transaction_conn.execute(
+            properties = self._encode_properties(normalized["properties"])
+            cursor = transaction_conn.execute(
                 "UPDATE note_edges SET weight = ?, label = ?, properties = ?, metadata = ?, "
                 "last_modified = ?, deleted = ?, deleted_at = ?, version = ? "
-                "WHERE edge_id = ? AND user_id = ?",
+                "WHERE edge_id = ? AND user_id = ? AND version = ?",
                 (
                     normalized["weight"],
                     normalized["label"],
-                    json.dumps(normalized["properties"], sort_keys=True, separators=(",", ":")),
-                    json.dumps(normalized["properties"], sort_keys=True, separators=(",", ":")),
+                    properties,
+                    properties,
                     normalized["last_modified"],
                     self._deleted_value(True),
                     normalized["deleted_at"],
                     existing.version + 1,
                     edge_id,
                     self._owner_id,
+                    existing.version,
                 ),
             )
+            self._require_cas_update(cursor, edge_id)
             updated = self._get_locked(transaction_conn, edge_id)
             if updated is None:
                 raise CharactersRAGDBError("Tombstoned notes.link was not found")
@@ -442,17 +457,11 @@ class NotesLinkStore:
                 normalized,
                 allow_deleted=allow_deleted_endpoints,
             )
-            properties = json.dumps(
-                normalized["properties"],
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            )
-            transaction_conn.execute(
+            properties = self._encode_properties(normalized["properties"])
+            cursor = transaction_conn.execute(
                 "UPDATE note_edges SET weight = ?, label = ?, properties = ?, metadata = ?, "
                 "last_modified = ?, deleted = ?, deleted_at = NULL, version = ? "
-                "WHERE edge_id = ? AND user_id = ?",
+                "WHERE edge_id = ? AND user_id = ? AND version = ?",
                 (
                     normalized["weight"],
                     normalized["label"],
@@ -463,8 +472,10 @@ class NotesLinkStore:
                     existing.version + 1,
                     edge_id,
                     self._owner_id,
+                    existing.version,
                 ),
             )
+            self._require_cas_update(cursor, edge_id)
             restored = self._get_locked(transaction_conn, edge_id)
             if restored is None:
                 raise CharactersRAGDBError("Restored notes.link was not found")

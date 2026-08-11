@@ -174,7 +174,13 @@ class NoteLinkUpdate(BaseModel):
     weight: float | None = Field(default=None, ge=0.0)
     label: str | None = Field(default=None, max_length=256)
     properties: dict[str, Any] | None = None
-    metadata: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Legacy full properties map. Supplying metadata replaces the existing properties map; "
+            "omitted properties are removed."
+        ),
+    )
     dataset_id: str | None = Field(default=None, min_length=1, max_length=256)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
@@ -220,6 +226,8 @@ class NoteLinkRestore(BaseModel):
 
 
 def _normalize_optional_nonblank(value: object) -> object:
+    """Trim optional string authority fields and reject blank values."""
+
     if value is None or not isinstance(value, str):
         return value
     normalized = value.strip()

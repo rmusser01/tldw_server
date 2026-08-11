@@ -305,6 +305,18 @@ def test_orphans_endpoint_ignores_tag_membership_and_is_keyset_paginated(
         json={"title": "Orphan B", "content": "plain"},
         headers=headers,
     ).json()["id"]
+    keyword_response = client.post(
+        "/api/v1/notes/keywords/",
+        json={"keyword": "orphan-tag"},
+        headers=headers,
+    )
+    assert keyword_response.status_code == 201, keyword_response.text
+    keyword_id = keyword_response.json()["id"]
+    tag_response = client.post(
+        f"/api/v1/notes/{first}/keywords/{keyword_id}",
+        headers=headers,
+    )
+    assert tag_response.status_code == 200, tag_response.text
 
     page_one = client.get(
         "/api/v1/notes/graph/orphans",

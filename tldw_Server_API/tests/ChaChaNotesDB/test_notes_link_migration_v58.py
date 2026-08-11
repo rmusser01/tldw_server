@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import sqlite3
 from pathlib import Path
@@ -15,6 +16,42 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     SchemaError,
 )
+
+pytestmark = pytest.mark.unit
+
+
+def test_graph_update_triggers_name_only_graph_relevant_columns() -> None:
+    sqlite_source = " ".join(inspect.getsource(CharactersRAGDB._notes_graph_schema_sqlite).split())
+    postgres_statements: list[str] = []
+
+    class _RecordingBackend:
+        def execute(self, query: str, *, connection: object) -> None:
+            assert connection is postgres_connection
+            postgres_statements.append(query)
+
+    class _RecordingDatabase:
+        backend = _RecordingBackend()
+
+    postgres_connection = object()
+    CharactersRAGDB._notes_graph_schema_postgres(
+        _RecordingDatabase(),  # type: ignore[arg-type]
+        postgres_connection,
+    )
+    postgres_sql = " ".join(" ".join(query.split()) for query in postgres_statements)
+
+    note_columns = "title, content, conversation_id, created_at, last_modified, deleted"
+    assert f"AFTER UPDATE OF {note_columns} ON notes" in sqlite_source
+    assert f"UPDATE OF {note_columns} ON notes" in postgres_sql
+    assert "AFTER UPDATE OF keyword, deleted ON keywords" in sqlite_source
+    assert "UPDATE OF keyword, deleted ON chacha_keywords" in postgres_sql
+
+
+def test_postgres_v58_canonical_rows_are_updated_in_one_set_based_statement() -> None:
+    source = inspect.getsource(CharactersRAGDB._migrate_from_v57_to_v58_postgres)
+
+    assert "jsonb_to_recordset" in source
+    assert "for row in canonical_rows:\n            backend.execute" not in source
+
 
 OWNER = "owner-notes-link"
 CREATED_AT = "2026-08-10T12:00:00+00:00"
@@ -283,6 +320,7 @@ def test_sqlite_v57_to_v58_queues_existing_notes_for_projection_rebuild(
         ),
         ({"metadata": "[]"}, None, "metadata"),
         ({"metadata": "{broken"}, None, "metadata"),
+        ({"metadata": json.dumps({"label": 7})}, None, "label"),
         ({"metadata": json.dumps({"label": "x" * 257})}, None, "label"),
         ({"metadata": json.dumps({"a": {"b": {"c": {"d": {"e": True}}}}})}, None, "properties"),
         ({"metadata": json.dumps({str(index): index for index in range(65)})}, None, "properties"),
@@ -454,8 +492,28 @@ def test_postgres_v58_installs_durable_link_constraints() -> None:
         "note_edges_version_check",
     ):
         assert constraint in sql
-    assert "REFERENCES notes(id) ON UPDATE CASCADE" in sql
-    assert "ON DELETE CASCADE" in sql
+    assert (
+        "note_edges_source_note_fkey FOREIGN KEY (from_note_id) "
+        "REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE"
+    ) in sql
+    assert (
+        "note_edges_target_note_fkey FOREIGN KEY (to_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE"
+    ) in sql
+
+
+def test_postgres_graph_trigger_functions_use_one_valid_declare_block() -> None:
+    backend = _PostgresMigrationBackend()
+    db = _postgres_db(backend)
+
+    db._migrate_from_v57_to_v58_postgres(object())
+
+    statements = [statement for statement, _ in backend.calls]
+    notes_changed = next(statement for statement in statements if "FUNCTION notes_graph_notes_changed" in statement)
+    note_keywords_changed = next(
+        statement for statement in statements if "FUNCTION notes_graph_note_keywords_changed" in statement
+    )
+    assert notes_changed.count("DECLARE") == 1
+    assert note_keywords_changed.count("DECLARE") == 1
 
 
 def test_sqlite_migration_map_contains_v57_to_v58_step(tmp_path: Path) -> None:

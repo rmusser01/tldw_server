@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Materialize canonical ``notes.link`` envelopes into one owner's Notes DB."""
+
+from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
@@ -235,12 +235,19 @@ def _mark_applied(envelope: SyncEnvelope, store: SyncV2Store) -> Materialization
         store.mark_envelope_apply_status(envelope.server_cursor, apply_status="applied")
     except Exception as exc:  # noqa: BLE001 - state failure must remain replayable.
         message = _safe_error_message(exc)
-        store.mark_envelope_apply_status(
-            envelope.server_cursor,
-            apply_status="failed",
-            apply_error_code=_ERROR_CODE,
-            apply_error_message=message,
-        )
+        try:
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code=_ERROR_CODE,
+                apply_error_message=message,
+            )
+        except Exception as status_exc:  # noqa: BLE001 - preserve the failed result.
+            logger.warning(
+                "Could not persist failed notes.link apply status for cursor {}: {}",
+                envelope.server_cursor,
+                type(status_exc).__name__,
+            )
         return MaterializationResult(
             status="failed",
             error_code=_ERROR_CODE,

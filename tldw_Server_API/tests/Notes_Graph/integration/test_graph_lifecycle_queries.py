@@ -83,9 +83,8 @@ def test_wikilinks_and_backlinks_read_only_the_persisted_projection(
         raise AssertionError("graph reads must not parse note content")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Notes_Graph.graph_service.extract_wikilinks",
+        "tldw_Server_API.app.core.Notes.wikilinks.parse_wikilinks",
         fail_request_time_parse,
-        raising=False,
     )
     wikilink = _service(graph_db).generate_graph(
         NoteGraphRequest(center_note_id=SOURCE_ID, edge_types=[EdgeType.wikilink])

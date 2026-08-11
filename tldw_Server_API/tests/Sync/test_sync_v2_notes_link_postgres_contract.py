@@ -24,6 +24,8 @@ def test_postgres_initializer_serializes_v58_before_policy_install() -> None:
     source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
 
     assert "_get_schema_version_postgres(conn, lock=True)" in source
+    assert "_migrate_from_v57_to_v58_postgres(conn)" in source
+    assert "_ensure_chacha_rls_postgres(conn)" in source
     migration = source.index("_migrate_from_v57_to_v58_postgres(conn)")
     policy = source.index("_ensure_chacha_rls_postgres(conn)")
     assert migration < policy

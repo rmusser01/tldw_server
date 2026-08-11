@@ -2698,6 +2698,7 @@ class SyncDatabase:
                 SOURCE_CACHE_SYNC_DOMAINS,
                 MEDIA_SYNC_DOMAINS,
                 NOTES_ORGANIZATION_DOMAINS,
+                NOTES_LINK_DOMAINS,
             )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():

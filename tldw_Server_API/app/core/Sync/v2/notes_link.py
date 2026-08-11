@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Strict Sync v2 payload contract for explicit Notes links."""
+
+from __future__ import annotations
 
 import json
 import math
@@ -19,20 +19,17 @@ from pydantic import (
     model_validator,
 )
 
+from tldw_Server_API.app.core.exceptions import NotesLinkValidationError
+
 from .models import normalize_sync_timestamp
-
-NOTES_LINK_WEIGHT_MAX = 1_000_000.0
-NOTES_LINK_LABEL_MAX_CHARS = 256
-NOTES_LINK_PROPERTIES_MAX_KEYS = 64
-NOTES_LINK_PROPERTIES_MAX_DEPTH = 4
-NOTES_LINK_PROPERTIES_MAX_BYTES = 16 * 1024
-NOTES_LINK_REASON_MAX_CHARS = 256
-
-
-class NotesLinkValidationError(ValueError):
-    """Raised when a ``notes.link`` identity or payload is not canonical."""
-
-    error_code = "notes_link_payload_invalid"
+from .notes_link_contract import (
+    NOTES_LINK_LABEL_MAX_CHARS,
+    NOTES_LINK_PROPERTIES_MAX_BYTES,
+    NOTES_LINK_PROPERTIES_MAX_DEPTH,
+    NOTES_LINK_PROPERTIES_MAX_KEYS,
+    NOTES_LINK_REASON_MAX_CHARS,
+    NOTES_LINK_WEIGHT_MAX,
+)
 
 
 class NotesLinkUpsertPayload(BaseModel):
@@ -58,10 +55,16 @@ class NotesLinkUpsertPayload(BaseModel):
 
     @field_validator("weight", mode="before")
     @classmethod
-    def _validate_weight(cls, value: float) -> float:
-        if isinstance(value, bool) or not math.isfinite(value):
+    def _validate_weight(cls, value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError("notes.link weight must be a finite number")
-        return float(value)
+        try:
+            normalized = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("notes.link weight must be a finite number") from exc
+        if not math.isfinite(normalized):
+            raise ValueError("notes.link weight must be a finite number")
+        return normalized
 
     @field_validator("properties")
     @classmethod
@@ -151,8 +154,6 @@ def validate_notes_link_provenance(
                 raise NotesLinkValidationError(f"notes.link {field_name} must match the current object")
         return
 
-    if trusted_bootstrap:
-        return
     if payload.get("created_at") != envelope_timestamp:
         raise NotesLinkValidationError("notes.link created_at must match created_at_client on create")
     if payload.get("created_by") != authenticated_device_id:
@@ -205,7 +206,7 @@ def _canonical_properties(value: object) -> dict[str, Any]:
         raise ValueError("notes.link properties must contain canonical JSON values") from exc
     if len(encoded) > NOTES_LINK_PROPERTIES_MAX_BYTES:
         raise ValueError(f"notes.link properties must not exceed {NOTES_LINK_PROPERTIES_MAX_BYTES} bytes")
-    return dict(value)
+    return cast(dict[str, Any], json.loads(encoded))
 
 
 def _json_depth(value: object) -> int:

@@ -30,6 +30,13 @@ class NoteProjectionState:
 
 
 @dataclass(frozen=True, slots=True)
+class NoteProjectionSource:
+    note_id: str
+    content: str
+    version: int
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectionStatus:
     parser_version: int
     rebuild_state: str
@@ -192,7 +199,7 @@ class NoteGraphProjectionStore:
             query += " AND owner_user_id = ?"
             params += (self._db.client_id,)
         query += " ORDER BY target_note_id"
-        return tuple(str(row[0]) for row in self._db.execute_query(query, params).fetchall())
+        return tuple(str(row["target_note_id"]) for row in self._db.execute_query(query, params).fetchall())
 
     def list_live_outgoing(self, note_id: str) -> tuple[str, ...]:
         query = (
@@ -210,7 +217,7 @@ class NoteGraphProjectionStore:
             query += " AND edge.owner_user_id = ? AND source.client_id = ? AND target.client_id = ?"
             params += (self._db.client_id,) * 3
         query += " ORDER BY edge.target_note_id"
-        return tuple(str(row[0]) for row in self._db.execute_query(query, params).fetchall())
+        return tuple(str(row["target_note_id"]) for row in self._db.execute_query(query, params).fetchall())
 
     def list_live_edges_for_notes(
         self,
@@ -242,7 +249,7 @@ class NoteGraphProjectionStore:
                 query += " AND edge.owner_user_id = ? AND source.client_id = ? AND target.client_id = ?"
                 params.extend((self._db.client_id,) * 3)
             for row in self._db.execute_query(query, tuple(params)).fetchall():
-                results.add((str(row[0]), str(row[1])))
+                results.add((str(row["source_note_id"]), str(row["target_note_id"])))
         return tuple(WikilinkProjectionEdge(*edge) for edge in sorted(results))
 
     def list_orphan_note_ids(
@@ -258,7 +265,7 @@ class NoteGraphProjectionStore:
         live = False if self._postgres else 0
         note_owner_clause = " AND note.client_id = ?" if self._postgres else ""
         query = (
-            "SELECT note.id FROM notes note "
+            "SELECT note.id AS note_id FROM notes note "
             f"WHERE note.deleted = ? AND note.id > ?{note_owner_clause} "  # nosec B608
             "AND NOT EXISTS ("
             "SELECT 1 FROM note_edges manual "
@@ -306,7 +313,29 @@ class NoteGraphProjectionStore:
             params.extend((self._db.client_id,) * 2)
         query += ") ORDER BY note.id LIMIT ?"
         params.append(limit)
-        return tuple(str(row[0]) for row in self._db.execute_query(query, tuple(params)).fetchall())
+        return tuple(str(row["note_id"]) for row in self._db.execute_query(query, tuple(params)).fetchall())
+
+    def get_projection_source(
+        self,
+        note_id: str,
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+    ) -> NoteProjectionSource | None:
+        """Read one owner-bound note through the projection persistence boundary."""
+
+        query = "SELECT id AS note_id, content, version FROM notes WHERE id = ?"
+        params: tuple[object, ...] = (note_id,)
+        if self._postgres:
+            query += " AND client_id = ?"
+            params += (self._db.client_id,)
+        row = conn.execute(query, params).fetchone()
+        if row is None:
+            return None
+        return NoteProjectionSource(
+            note_id=str(row["note_id"]),
+            content=str(row["content"] or ""),
+            version=int(row["version"]),
+        )
 
     def get_note_state(self, note_id: str) -> NoteProjectionState | None:
         query = "SELECT note_id, source_version, parser_version, truncated FROM note_graph_note_state WHERE note_id = ?"
@@ -325,13 +354,13 @@ class NoteGraphProjectionStore:
         )
 
     def count_dirty(self, *, conn: Any | None = None) -> int:
-        query = "SELECT COUNT(*) FROM note_graph_dirty"
+        query = "SELECT COUNT(*) AS dirty_count FROM note_graph_dirty"
         params: tuple[object, ...] = ()
         if self._postgres:
             query += " WHERE owner_user_id = ?"
             params = (self._db.client_id,)
         cursor = conn.execute(query, params) if conn is not None else self._db.execute_query(query, params)
-        return int(cursor.fetchone()[0])
+        return int(cursor.fetchone()["dirty_count"])
 
     def get_revision(self) -> int:
         if self._postgres:
@@ -341,7 +370,7 @@ class NoteGraphProjectionStore:
             ).fetchone()
         else:
             row = self._db.execute_query("SELECT revision FROM note_graph_revisions WHERE singleton_id = 1").fetchone()
-        return int(row[0]) if row else 0
+        return int(row["revision"]) if row else 0
 
     def get_projection_status(self) -> ProjectionStatus:
         if self._postgres:
@@ -357,7 +386,11 @@ class NoteGraphProjectionStore:
             ).fetchone()
         if row is None:
             return ProjectionStatus(1, "ready", None)
-        return ProjectionStatus(int(row[0]), str(row[1]), row[2])
+        return ProjectionStatus(
+            int(row["parser_version"]),
+            str(row["rebuild_state"]),
+            row["rebuild_cursor"],
+        )
 
     def prepare_rebuild(
         self,
@@ -393,14 +426,14 @@ class NoteGraphProjectionStore:
         if not 1 <= limit <= 1_000:
             raise ValueError("limit must be between 1 and 1000")
         status = self._projection_status(conn)
-        query = "SELECT id FROM notes WHERE id > ?"
+        query = "SELECT id AS note_id FROM notes WHERE id > ?"
         params: list[object] = [status.rebuild_cursor or ""]
         if self._postgres:
             query += " AND client_id = ?"
             params.append(self._db.client_id)
         query += " ORDER BY id LIMIT ?"
         params.append(limit)
-        note_ids = [str(row[0]) for row in conn.execute(query, tuple(params)).fetchall()]
+        note_ids = [str(row["note_id"]) for row in conn.execute(query, tuple(params)).fetchall()]
         for note_id in note_ids:
             self._enqueue_dirty(conn, note_id)
         cursor = note_ids[-1] if note_ids else status.rebuild_cursor
@@ -466,7 +499,11 @@ class NoteGraphProjectionStore:
                 "SELECT parser_version, rebuild_state, rebuild_cursor "
                 "FROM note_graph_projection_state WHERE singleton_id = 1"
             ).fetchone()
-        return ProjectionStatus(int(row[0]), str(row[1]), row[2])
+        return ProjectionStatus(
+            int(row["parser_version"]),
+            str(row["rebuild_state"]),
+            row["rebuild_cursor"],
+        )
 
     def _enqueue_dirty(self, conn: Any, note_id: str) -> None:
         if self._postgres:
@@ -516,6 +553,7 @@ class NoteGraphProjectionStore:
 __all__ = [
     "DirtyProjection",
     "NoteGraphProjectionStore",
+    "NoteProjectionSource",
     "NoteProjectionState",
     "ProjectionStatus",
     "WikilinkProjectionEdge",

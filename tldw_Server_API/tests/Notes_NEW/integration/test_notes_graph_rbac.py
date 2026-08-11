@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLink
-from tldw_Server_API.app.core.Sync.v2.models import SyncDataset
+from tldw_Server_API.app.core.Sync.v2.models import DEFAULT_M1_ENCRYPTION_POLICY, SyncDataset
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import NotesLinkPreflightError
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     ServerOriginBatchResult,
@@ -298,6 +298,43 @@ async def test_link_detail_uses_read_authority_without_requiring_write_readiness
     assert result["edge_id"] == edge_id
 
 
+@pytest.mark.asyncio
+async def test_legacy_create_without_edge_id_skips_canonical_follow_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_id = "11111111-1111-4111-8111-111111111111"
+    target_id = "22222222-2222-4222-8222-222222222222"
+
+    class _LinkStore:
+        @staticmethod
+        def get(_edge_id: str) -> None:
+            pytest.fail("empty legacy edge id must not be read")
+
+    class _Db:
+        notes_link_store = _LinkStore()
+
+        @staticmethod
+        def create_manual_note_edge(**_kwargs: object) -> dict[str, object]:
+            return {"from_note_id": source_id, "to_note_id": target_id}
+
+    monkeypatch.setattr(
+        notes_graph_module,
+        "resolve_notes_link_coordinator",
+        lambda **_kwargs: None,
+    )
+    result = await notes_graph_module.create_manual_link(
+        note_id=source_id,
+        link=NoteLinkCreate(to_note_id=target_id),
+        current_user=User(id=1, username="tester", email="t@e.com", is_active=True),
+        db=_Db(),  # type: ignore[arg-type]
+        _=None,
+        __=None,
+        ___=None,
+    )
+
+    assert result["edge"] == {"from_note_id": source_id, "to_note_id": target_id}
+
+
 def test_graph_write_forbidden_with_wrong_scope(client_with_user_override: TestClient):
     bad_token = _make_token(scope="media")
     headers = {"Authorization": f"Bearer {bad_token}"}
@@ -376,10 +413,14 @@ def test_inactive_sync_rejects_supplied_dataset(client_with_user_override: TestC
 
 
 @pytest.mark.parametrize(
-    ("failure", "expected_status"),
+    ("failure", "expected_status", "expected_code"),
     [
-        (NotesLinkPreflightError(), 409),
-        (SyncServerOriginBatchAppendError("group-1"), 503),
+        (NotesLinkPreflightError(), 409, "notes_link_preflight_failed"),
+        (
+            SyncServerOriginBatchAppendError("group-1"),
+            503,
+            "sync_server_origin_batch_append_failed",
+        ),
         (
             SyncServerOriginBatchMaterializationError(
                 ServerOriginBatchResult(
@@ -387,7 +428,7 @@ def test_inactive_sync_rejects_supplied_dataset(client_with_user_override: TestC
                         dataset_id="dataset-1",
                         owner_user_id="1",
                         scope_type="personal",
-                        encryption_policy="server_side_at_rest",
+                        encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
                         domains=["notes.note", "notes.link"],
                         workspace_id=None,
                         metadata={"notes_link_v1": {"state": "ready"}},
@@ -400,6 +441,7 @@ def test_inactive_sync_rejects_supplied_dataset(client_with_user_override: TestC
                 retryable=True,
             ),
             503,
+            "sync_server_origin_batch_materialization_failed",
         ),
     ],
 )
@@ -408,6 +450,7 @@ def test_active_link_capture_failures_have_stable_http_mapping(
     monkeypatch: pytest.MonkeyPatch,
     failure: Exception,
     expected_status: int,
+    expected_code: str,
 ) -> None:
     class _FailingCoordinator:
         def create(self, **_kwargs):
@@ -426,4 +469,4 @@ def test_active_link_capture_failures_have_stable_http_mapping(
         params={"request": "graph"},
     )
     assert response.status_code == expected_status
-    assert isinstance(response.json()["detail"]["error_code"], str)
+    assert response.json()["detail"]["error_code"] == expected_code

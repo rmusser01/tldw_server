@@ -570,7 +570,22 @@ def ensure_prompt_studio_rls(backend: DatabaseBackend) -> bool:
     )
 
 
+def _ensure_chacha_schema(backend: DatabaseBackend) -> None:
+    """Run ChaChaNotes migrations before standalone policy installation."""
+
+    try:
+        if not hasattr(backend, "backend_type") or backend.backend_type.name != "POSTGRESQL":
+            return
+    except Exception:
+        return
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    db = CharactersRAGDB(":memory:", client_id="1", backend=backend)
+    db.close_connection()
+
+
 def ensure_chacha_rls(backend: DatabaseBackend) -> bool:
+    _ensure_chacha_schema(backend)
     return _ensure_rls_policy_set(
         backend,
         name="chacha",

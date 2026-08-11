@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    BackendType,
-    CharactersRAGDB,
-)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Notes.wikilinks import (
     WIKILINK_PARSER_VERSION,
     parse_wikilinks,
@@ -28,21 +25,16 @@ class NoteGraphProjectionService:
         processed = 0
         with self.db.transaction() as conn:
             for claim in store.claim_dirty(limit=limit, conn=conn):
-                query = "SELECT id, content, version FROM notes WHERE id = ?"
-                params: tuple[object, ...] = (claim.note_id,)
-                if self.db.backend_type == BackendType.POSTGRESQL:
-                    query += " AND client_id = ?"
-                    params += (self.db.client_id,)
-                row = conn.execute(query, params).fetchone()
-                if row is None:
+                source = store.get_projection_source(claim.note_id, conn=conn)
+                if source is None:
                     continue
                 projection = parse_wikilinks(
-                    str(row["content"] or ""),
-                    source_note_id=str(row["id"]),
+                    source.content,
+                    source_note_id=source.note_id,
                 )
                 store.replace_projection(
-                    note_id=str(row["id"]),
-                    source_version=int(row["version"]),
+                    note_id=source.note_id,
+                    source_version=source.version,
                     projection=projection,
                     claimed_generation=claim.generation,
                     parser_version=self.parser_version,

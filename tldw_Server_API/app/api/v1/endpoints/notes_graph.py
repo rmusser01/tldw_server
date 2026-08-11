@@ -1,6 +1,3 @@
-import base64
-import hashlib
-import json
 import uuid as _uuid_mod
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -45,6 +42,9 @@ from tldw_Server_API.app.core.Notes_Graph.graph_service import (
     NOTES_GRAPH_ENABLED,
     GraphProjectionNotReadyError,
     NoteGraphService,
+    decode_notes_link_cursor,
+    encode_notes_link_cursor,
+    notes_link_cursor_binding,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
@@ -60,10 +60,11 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
 
 router = APIRouter()
 _GRAPH_CACHE = GraphCache()
-_PAGE_CURSOR_MAX_BYTES = 4 * 1024
 
 
 def _link_response(link: NotesLink) -> dict[str, object]:
+    """Return the complete public representation of one explicit link."""
+
     properties = dict(link.properties)
     metadata = dict(properties)
     if link.label is not None:
@@ -118,60 +119,6 @@ def _graph_dataset_key(*, user_id: str, dataset_id: str | None) -> str:
     if authority is None:
         return f"legacy:{user_id}"
     return authority[1].dataset_id
-
-
-def _page_cursor(*, payload: dict[str, object]) -> str:
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).decode()
-    if len(encoded.encode()) > _PAGE_CURSOR_MAX_BYTES:
-        raise InputError("Notes graph cursor is too large")
-    return encoded
-
-
-def _read_page_cursor(
-    raw: str | None,
-    *,
-    expected: dict[str, object],
-) -> str | None:
-    if raw is None:
-        return None
-    if len(raw.encode()) > _PAGE_CURSOR_MAX_BYTES:
-        raise InputError("Notes graph cursor is too large")
-    try:
-        decoded = base64.b64decode(raw.encode(), altchars=b"-_", validate=True)
-        if len(decoded) > _PAGE_CURSOR_MAX_BYTES:
-            raise InputError("Notes graph cursor is too large")
-        payload = json.loads(decoded.decode())
-    except InputError:
-        raise
-    except Exception as exc:
-        raise InputError("Invalid Notes graph cursor") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("last_id"), str):
-        raise InputError("Invalid Notes graph cursor")
-    if any(payload.get(key) != value for key, value in expected.items()):
-        raise InputError("Notes graph cursor is stale or mismatched")
-    return str(payload["last_id"])
-
-
-def _link_page_binding(
-    *,
-    db: CharactersRAGDB,
-    dataset_key: str,
-    include_deleted: bool,
-    limit: int,
-) -> dict[str, object]:
-    projection = db.note_graph_projection_store
-    status_value = projection.get_projection_status()
-    return {
-        "v": 1,
-        "kind": "notes.link.list",
-        "dataset": hashlib.sha256(dataset_key.encode()).hexdigest(),
-        "revision": projection.get_revision(),
-        "parser": status_value.parser_version,
-        "include_deleted": include_deleted,
-        "limit": limit,
-    }
 
 
 def _link_error(exc: Exception) -> HTTPException:
@@ -593,8 +540,9 @@ async def create_manual_link(
                 metadata=legacy_metadata,
                 created_by=f"user:{current_user.id_str}",
             )
-            if hasattr(db, "notes_link_store"):
-                stored = db.notes_link_store.get(str(edge_response.get("edge_id") or ""))
+            stored_edge_id = str(edge_response.get("edge_id") or "")
+            if stored_edge_id and hasattr(db, "notes_link_store"):
+                stored = db.notes_link_store.get(stored_edge_id)
                 if stored is not None:
                     edge_response = _link_response(stored)
         return {"status": "created", "edge": edge_response}
@@ -626,13 +574,13 @@ async def list_manual_links(
             user_id=owner_id,
             dataset_id=dataset_id,
         )
-        binding = _link_page_binding(
+        binding = notes_link_cursor_binding(
             db=db,
             dataset_key=dataset_key,
             include_deleted=include_deleted,
             limit=limit,
         )
-        after_edge_id = _read_page_cursor(cursor, expected=binding)
+        after_edge_id = decode_notes_link_cursor(cursor, expected=binding)
         links = db.notes_link_store.list_page(
             after_edge_id=after_edge_id,
             limit=limit + 1,
@@ -643,7 +591,7 @@ async def list_manual_links(
         page = links[:limit]
         next_cursor = None
         if has_more and page:
-            next_cursor = _page_cursor(
+            next_cursor = encode_notes_link_cursor(
                 payload={**binding, "last_id": page[-1].edge_id}
             )
         return {

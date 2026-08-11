@@ -21,7 +21,11 @@ OTHER_ID = "33333333-3333-4333-8333-333333333333"
 
 @pytest.fixture()
 def graph_db(tmp_path: Path) -> CharactersRAGDB:
-    return CharactersRAGDB(str(tmp_path / "graph-maintenance.db"), client_id="owner-1")
+    db = CharactersRAGDB(str(tmp_path / "graph-maintenance.db"), client_id="owner-1")
+    try:
+        yield db
+    finally:
+        db.close_connection()
 
 
 def test_normal_note_writes_update_projection_atomically_and_lifecycle_only_hides_edges(

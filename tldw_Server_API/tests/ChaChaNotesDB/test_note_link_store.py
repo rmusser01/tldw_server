@@ -12,6 +12,26 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 
+pytestmark = pytest.mark.unit
+
+
+class _ZeroRowcount:
+    rowcount = 0
+
+
+class _LostCasConnection:
+    """Proxy one transaction while simulating a concurrent version advance."""
+
+    def __init__(self, connection) -> None:
+        self._connection = connection
+        self.update_sql: str | None = None
+
+    def execute(self, sql, parameters=()):
+        if sql.startswith("UPDATE note_edges SET"):
+            self.update_sql = sql
+            return _ZeroRowcount()
+        return self._connection.execute(sql, parameters)
+
 
 def _timestamp(second: int) -> str:
     return datetime(2026, 8, 10, 12, 0, second, tzinfo=timezone.utc).isoformat()
@@ -187,6 +207,98 @@ def test_link_identity_is_immutable_and_versions_are_optimistic(link_db):
             payload=payload,
             expected_version=None,
         )
+
+
+@pytest.mark.parametrize("operation", ["upsert", "tombstone", "restore"])
+def test_link_mutations_enforce_version_with_database_compare_and_swap(link_db, operation):
+    db, store, (first_note_id, second_note_id, _) = link_db
+    edge_id = str(uuid4())
+    created_payload = _payload(first_note_id, second_note_id, modified_at=_timestamp(0))
+    store.upsert(edge_id=edge_id, payload=created_payload, expected_version=None)
+
+    expected_version = 1
+    if operation == "upsert":
+        payload = {**created_payload, "weight": 2.0, "last_modified": _timestamp(1)}
+    elif operation == "tombstone":
+        payload = {
+            **created_payload,
+            "last_modified": _timestamp(1),
+            "deleted_at": _timestamp(1),
+            "reason": "manual-delete",
+        }
+    else:
+        tombstone_payload = {
+            **created_payload,
+            "last_modified": _timestamp(1),
+            "deleted_at": _timestamp(1),
+            "reason": "manual-delete",
+        }
+        store.tombstone(
+            edge_id=edge_id,
+            payload=tombstone_payload,
+            expected_version=expected_version,
+        )
+        expected_version = 2
+        payload = {**created_payload, "last_modified": _timestamp(2)}
+
+    def mutate(conn):
+        return getattr(store, operation)(
+            edge_id=edge_id,
+            payload=payload,
+            expected_version=expected_version,
+            conn=conn,
+        )
+
+    with db.transaction() as connection:
+        proxy = _LostCasConnection(connection)
+        with pytest.raises(ConflictError, match="version"):
+            mutate(proxy)
+
+    assert proxy.update_sql is not None
+    assert "AND version = ?" in proxy.update_sql
+
+
+def test_link_lifecycle_uses_one_canonical_properties_encoding(link_db):
+    db, store, (first_note_id, second_note_id, _) = link_db
+    edge_id = str(uuid4())
+    created_payload = _payload(
+        first_note_id,
+        second_note_id,
+        modified_at=_timestamp(0),
+        properties={"display": "café"},
+    )
+    store.upsert(edge_id=edge_id, payload=created_payload, expected_version=None)
+
+    store.tombstone(
+        edge_id=edge_id,
+        payload={
+            **created_payload,
+            "last_modified": _timestamp(1),
+            "deleted_at": _timestamp(1),
+            "reason": "manual-delete",
+        },
+        expected_version=1,
+    )
+    row = db.execute_query(
+        "SELECT properties, metadata FROM note_edges WHERE edge_id = ?",
+        (edge_id,),
+    ).fetchone()
+
+    assert row["properties"] == '{"display":"café"}'
+    assert row["metadata"] == row["properties"]
+
+
+def test_hard_deleting_an_endpoint_cascades_the_explicit_link(link_db):
+    db, store, (first_note_id, second_note_id, _) = link_db
+    edge_id = str(uuid4())
+    store.upsert(
+        edge_id=edge_id,
+        payload=_payload(first_note_id, second_note_id, modified_at=_timestamp(0)),
+        expected_version=None,
+    )
+
+    assert db.note_store.delete_note(first_note_id, hard_delete=True) is True
+    assert store.get(edge_id) is None
 
 
 def test_public_create_requires_live_owned_endpoints_but_history_can_use_deleted(link_db):

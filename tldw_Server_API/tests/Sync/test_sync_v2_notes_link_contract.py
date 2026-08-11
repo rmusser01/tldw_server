@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_link import (
     NotesLinkValidationError,
     parse_notes_link_payload,
     validate_notes_link_object_id,
+    validate_notes_link_properties,
     validate_notes_link_provenance,
 )
 
@@ -112,6 +113,10 @@ def test_notes_link_object_id_requires_canonical_uuid4(object_id: str) -> None:
         {"weight": -1},
         {"weight": NOTES_LINK_WEIGHT_MAX + 1},
         {"weight": math.inf},
+        {"weight": "1.0"},
+        {"weight": None},
+        {"weight": []},
+        {"weight": {}},
         {"directed": 1},
         {"label": "x" * (NOTES_LINK_LABEL_MAX_CHARS + 1)},
         {"extra": "forbidden"},
@@ -161,6 +166,15 @@ def test_notes_link_accepts_maximum_properties_depth() -> None:
 
     assert parsed["properties"] == properties
     assert NOTES_LINK_PROPERTIES_MAX_DEPTH == 4
+
+
+def test_notes_link_properties_are_detached_from_mutable_input() -> None:
+    properties = {"nested": {"values": ["original"]}}
+
+    parsed = validate_notes_link_properties(properties)
+    properties["nested"]["values"].append("mutated")
+
+    assert parsed == {"nested": {"values": ["original"]}}
 
 
 def test_notes_link_rejects_oversized_tombstone_reason() -> None:

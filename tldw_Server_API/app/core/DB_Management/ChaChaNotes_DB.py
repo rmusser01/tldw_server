@@ -10262,7 +10262,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not isinstance(properties, dict):
             raise SchemaError("Notes link v58 metadata must be a JSON object.")  # noqa: TRY003
 
-        label = properties.get("label") if isinstance(properties.get("label"), str) else None
+        raw_label = properties.get("label")
+        if raw_label is not None and not isinstance(raw_label, str):
+            raise SchemaError("Notes link v58 metadata.label must be a string or null.")  # noqa: TRY003
+        label = raw_label
         if label is not None:
             if len(label) > NOTES_LINK_LABEL_MAX_CHARS:
                 raise SchemaError("Notes link v58 label exceeds the supported bound.")  # noqa: TRY003
@@ -10386,7 +10389,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               UPDATE note_graph_revisions SET revision = revision + 1,
                 updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
             END;
-            CREATE TRIGGER notes_graph_notes_au AFTER UPDATE ON notes BEGIN
+            CREATE TRIGGER notes_graph_notes_au
+            AFTER UPDATE OF title, content, conversation_id, created_at, last_modified, deleted ON notes BEGIN
               INSERT INTO note_graph_dirty(note_id, generation, last_modified)
               VALUES (new.id, 1, CURRENT_TIMESTAMP)
               ON CONFLICT(note_id) DO UPDATE SET
@@ -10416,7 +10420,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               UPDATE note_graph_revisions SET revision = revision + 1,
                 updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
             END;
-            CREATE TRIGGER notes_graph_keywords_au AFTER UPDATE ON keywords BEGIN
+            CREATE TRIGGER notes_graph_keywords_au AFTER UPDATE OF keyword, deleted ON keywords BEGIN
               UPDATE note_graph_revisions SET revision = revision + 1,
                 updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
             END;
@@ -10502,8 +10506,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CREATE TABLE note_edges(
               edge_id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,
-              from_note_id TEXT NOT NULL REFERENCES notes(id) ON UPDATE CASCADE,
-              to_note_id TEXT NOT NULL REFERENCES notes(id) ON UPDATE CASCADE,
+              from_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              to_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
               type TEXT NOT NULL CHECK(type = 'manual'),
               directed INTEGER NOT NULL CHECK(directed IN (0, 1)),
               weight REAL NOT NULL CHECK(weight >= 0 AND weight <= 1000000),
@@ -10654,22 +10658,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             connection=conn,
         )
-        for row in canonical_rows:
-            backend.execute(
-                """
-                UPDATE note_edges
-                   SET weight = %s, label = %s, properties = %s::jsonb, last_modified = created_at,
-                       version = 1, deleted = FALSE, deleted_at = NULL
-                 WHERE edge_id = %s
-                """,
-                (
-                    row["weight"],
-                    row["label"],
-                    json.dumps(row["properties"], sort_keys=True, separators=(",", ":"), allow_nan=False),
-                    row["edge_id"],
-                ),
-                connection=conn,
-            )
+        canonical_payload = json.dumps(
+            [
+                {
+                    "edge_id": row["edge_id"],
+                    "weight": row["weight"],
+                    "label": row["label"],
+                    "properties": row["properties"],
+                }
+                for row in canonical_rows
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        backend.execute(
+            """
+            UPDATE note_edges AS edge
+               SET weight = staged.weight,
+                   label = staged.label,
+                   properties = staged.properties,
+                   last_modified = edge.created_at,
+                   version = 1,
+                   deleted = FALSE,
+                   deleted_at = NULL
+              FROM jsonb_to_recordset(%s::jsonb) AS staged(
+                edge_id TEXT, weight DOUBLE PRECISION, label TEXT, properties JSONB
+              )
+             WHERE edge.edge_id = staged.edge_id
+            """,
+            (canonical_payload,),
+            connection=conn,
+        )
         backend.execute(
             """
             ALTER TABLE note_edges
@@ -10686,14 +10707,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             connection=conn,
         )
+        backend.execute(
+            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_source_note_fkey",
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_target_note_fkey",
+            connection=conn,
+        )
         constraints = (
             (
                 "note_edges_source_note_fkey",
-                "FOREIGN KEY (from_note_id) REFERENCES notes(id) ON UPDATE CASCADE",
+                "FOREIGN KEY (from_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
             ),
             (
                 "note_edges_target_note_fkey",
-                "FOREIGN KEY (to_note_id) REFERENCES notes(id) ON UPDATE CASCADE",
+                "FOREIGN KEY (to_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
             ),
             ("note_edges_manual_type_check", "CHECK (type = 'manual')"),
             ("note_edges_directed_check", "CHECK (directed IN (0, 1))"),
@@ -10845,8 +10874,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             """
             CREATE OR REPLACE FUNCTION notes_graph_notes_changed() RETURNS TRIGGER AS $$
-            DECLARE owner_id TEXT := COALESCE(NEW.client_id, OLD.client_id);
-            DECLARE changed_note_id TEXT := COALESCE(NEW.id, OLD.id);
+            DECLARE
+              owner_id TEXT := COALESCE(NEW.client_id, OLD.client_id);
+              changed_note_id TEXT := COALESCE(NEW.id, OLD.id);
             BEGIN
               IF TG_OP <> 'DELETE' THEN
                 INSERT INTO note_graph_dirty(owner_user_id, note_id, generation, last_modified)
@@ -10860,7 +10890,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             $$ LANGUAGE plpgsql
             """,
             "DROP TRIGGER IF EXISTS notes_graph_notes_changed_trigger ON notes",
-            "CREATE TRIGGER notes_graph_notes_changed_trigger AFTER INSERT OR UPDATE OR DELETE ON notes "
+            "CREATE TRIGGER notes_graph_notes_changed_trigger AFTER INSERT OR DELETE OR UPDATE OF "
+            "title, content, conversation_id, created_at, last_modified, deleted ON notes "
             "FOR EACH ROW EXECUTE FUNCTION notes_graph_notes_changed()",
             """
             CREATE OR REPLACE FUNCTION notes_graph_edges_changed() RETURNS TRIGGER AS $$
@@ -10883,12 +10914,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             $$ LANGUAGE plpgsql
             """,
             "DROP TRIGGER IF EXISTS notes_graph_keywords_changed_trigger ON chacha_keywords",
-            "CREATE TRIGGER notes_graph_keywords_changed_trigger AFTER INSERT OR UPDATE OR DELETE ON chacha_keywords "
+            "CREATE TRIGGER notes_graph_keywords_changed_trigger AFTER INSERT OR DELETE OR UPDATE OF "
+            "keyword, deleted ON chacha_keywords "
             "FOR EACH ROW EXECUTE FUNCTION notes_graph_keywords_changed()",
             """
             CREATE OR REPLACE FUNCTION notes_graph_note_keywords_changed() RETURNS TRIGGER AS $$
-            DECLARE changed_note_id TEXT := COALESCE(NEW.note_id, OLD.note_id);
-            DECLARE owner_id TEXT;
+            DECLARE
+              changed_note_id TEXT := COALESCE(NEW.note_id, OLD.note_id);
+              owner_id TEXT;
             BEGIN
               SELECT client_id INTO owner_id FROM notes WHERE id = changed_note_id;
               IF owner_id IS NOT NULL THEN

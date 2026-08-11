@@ -8,6 +8,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from .notes_link_contract import (
+    NOTES_LINK_LABEL_MAX_CHARS,
+    NOTES_LINK_PROPERTIES_MAX_BYTES,
+    NOTES_LINK_PROPERTIES_MAX_DEPTH,
+    NOTES_LINK_PROPERTIES_MAX_KEYS,
+    NOTES_LINK_REASON_MAX_CHARS,
+    NOTES_LINK_WEIGHT_MAX,
+)
+
 SyncDomain = Literal[
     "notes.note",
     "chat.conversation",
@@ -232,21 +241,33 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "created_by",
     ]
     notes_link_properties = {
-        "source_note_id": {"type": "string", "format": "uuid"},
-        "target_note_id": {"type": "string", "format": "uuid"},
+        "source_note_id": {
+            "type": "string",
+            "format": "uuid4",
+            "canonical_lowercase": True,
+        },
+        "target_note_id": {
+            "type": "string",
+            "format": "uuid4",
+            "canonical_lowercase": True,
+        },
         "type": {"enum": ["manual"]},
         "directed": {"type": "boolean"},
-        "weight": {"type": "number", "minimum": 0, "maximum": 1_000_000},
-        "label": {"type": ["string", "null"], "max_length": 256},
+        "weight": {"type": "number", "minimum": 0, "maximum": NOTES_LINK_WEIGHT_MAX},
+        "label": {"type": ["string", "null"], "max_length": NOTES_LINK_LABEL_MAX_CHARS},
         "properties": {
             "type": "object",
-            "max_properties": 64,
-            "max_depth": 4,
-            "max_bytes": 16_384,
+            "max_properties": NOTES_LINK_PROPERTIES_MAX_KEYS,
+            "max_depth": NOTES_LINK_PROPERTIES_MAX_DEPTH,
+            "max_bytes": NOTES_LINK_PROPERTIES_MAX_BYTES,
         },
         "created_at": {"type": "string", "format": "date-time"},
         "last_modified": {"type": "string", "format": "date-time"},
         "created_by": {"type": "string"},
+    }
+    notes_link_constraints = {
+        "distinct_endpoints": True,
+        "undirected_endpoint_order": "source_note_id <= target_note_id",
     }
     return {
         "notes.note": {
@@ -330,15 +351,20 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
                 "required": notes_link_required,
                 "properties": notes_link_properties,
                 "additional_properties": False,
+                "constraints": notes_link_constraints,
             },
             "tombstone": {
                 "required": [*notes_link_required, "deleted_at"],
                 "properties": {
                     **notes_link_properties,
                     "deleted_at": {"type": "string", "format": "date-time"},
-                    "reason": {"type": ["string", "null"], "max_length": 256},
+                    "reason": {
+                        "type": ["string", "null"],
+                        "max_length": NOTES_LINK_REASON_MAX_CHARS,
+                    },
                 },
                 "additional_properties": False,
+                "constraints": notes_link_constraints,
             },
         },
     }

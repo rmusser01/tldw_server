@@ -68,6 +68,7 @@ POPULAR_TAG_ABSOLUTE_MIN = lambda: _env_int("NOTES_GRAPH_POPULAR_TAG_ABSOLUTE_MI
 _R2_MAX_NODES = 200
 _R2_MAX_EDGES = 800
 _R2_MAX_DEGREE = 20
+_PROJECTION_QUERY_MAX_NOTES = 1_000
 
 # Per-type soft caps
 _NOTE_CAP = 250
@@ -75,6 +76,7 @@ _TAG_CAP = 75
 _SOURCE_CAP = 50
 _CURSOR_MAX_ENCODED_BYTES = 8 * 1024
 _CURSOR_MAX_DECODED_BYTES = 4 * 1024
+_LINK_CURSOR_MAX_BYTES = 4 * 1024
 
 
 class GraphProjectionNotReadyError(InputError):
@@ -190,6 +192,66 @@ def _decode_cursor(
         ):
             raise InputError("Graph cursor is stale or mismatched")
     return payload
+
+
+def encode_notes_link_cursor(*, payload: dict[str, object]) -> str:
+    """Encode one bounded, revision-bound explicit-link page cursor."""
+
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).decode()
+    if len(encoded.encode()) > _LINK_CURSOR_MAX_BYTES:
+        raise InputError("Notes graph cursor is too large")
+    return encoded
+
+
+def decode_notes_link_cursor(
+    raw: str | None,
+    *,
+    expected: dict[str, object],
+) -> str | None:
+    """Decode a link cursor and require its immutable query binding."""
+
+    if raw is None:
+        return None
+    if len(raw.encode()) > _LINK_CURSOR_MAX_BYTES:
+        raise InputError("Notes graph cursor is too large")
+    try:
+        decoded = base64.b64decode(raw.encode(), altchars=b"-_", validate=True)
+        if len(decoded) > _LINK_CURSOR_MAX_BYTES:
+            raise InputError("Notes graph cursor is too large")
+        payload = json.loads(decoded.decode())
+    except InputError:
+        raise
+    except Exception as exc:
+        raise InputError("Invalid Notes graph cursor") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("last_id"), str):
+        raise InputError("Invalid Notes graph cursor")
+    if any(payload.get(key) != value for key, value in expected.items()):
+        raise InputError("Notes graph cursor is stale or mismatched")
+    return str(payload["last_id"])
+
+
+def notes_link_cursor_binding(
+    *,
+    db: CharactersRAGDB,
+    dataset_key: str,
+    include_deleted: bool,
+    limit: int,
+) -> dict[str, object]:
+    """Bind link pagination to one dataset, projection revision, and query."""
+
+    projection = db.note_graph_projection_store
+    projection_status = projection.get_projection_status()
+    return {
+        "v": 1,
+        "kind": "notes.link.list",
+        "dataset": hashlib.sha256(dataset_key.encode()).hexdigest(),
+        "revision": projection.get_revision(),
+        "parser": projection_status.parser_version,
+        "include_deleted": include_deleted,
+        "limit": limit,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -584,7 +646,7 @@ class NoteGraphService:
         requested_max_edges = req.max_edges if req.max_edges is not None else default_max_edges
         requested_max_degree = req.max_degree if req.max_degree is not None else default_max_degree
 
-        eff_max_nodes = min(requested_max_nodes, hard_max_nodes)
+        eff_max_nodes = min(requested_max_nodes, hard_max_nodes, _PROJECTION_QUERY_MAX_NOTES)
         eff_max_edges = min(requested_max_edges, hard_max_edges)
         eff_max_degree = min(requested_max_degree, hard_max_degree)
 
@@ -845,6 +907,14 @@ class NoteGraphService:
         store = getattr(self._db, "note_graph_projection_store", None)
         if isinstance(store, NoteGraphProjectionStore):
             return store
+        required_methods = (
+            "get_projection_status",
+            "get_revision",
+            "count_dirty",
+            "list_live_edges_for_notes",
+        )
+        if any(not callable(getattr(store, method, None)) for method in required_methods):
+            return None
         try:
             status = store.get_projection_status()
         except (AttributeError, TypeError):

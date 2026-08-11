@@ -16,8 +16,12 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterContext,
 )
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
-from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import (
+    NotesLinkMaterializer,
+    _mark_applied,
+)
 from tldw_Server_API.app.core.Sync.v2.models import (
+    DEFAULT_M1_ENCRYPTION_POLICY,
     SyncDataset,
     SyncDatasetCreate,
     SyncEnvelope,
@@ -40,7 +44,7 @@ def _dataset(*, state: str = "ready") -> SyncDataset:
         dataset_id=DATASET_ID,
         owner_user_id=OWNER_ID,
         scope_type="personal",
-        encryption_policy="server_side_at_rest",
+        encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
         domains=["notes.note", "notes.link"],
         workspace_id=None,
         metadata={"notes_link_v1": {"state": state}},
@@ -402,6 +406,7 @@ def test_materializer_applies_and_crash_replay_does_not_repeat_product_write(
     product_revision_before = note_db.execute_query(
         "SELECT revision FROM note_graph_revisions WHERE singleton_id = 1"
     ).fetchone()["revision"]
+    # An exact live postcondition short-circuits the later stale-base replay, as restore does.
     NotesLinkStore(note_db).upsert(
         edge_id=EDGE_ID,
         payload=updated_payload,
@@ -450,3 +455,20 @@ def test_materializer_returns_safe_conflict_for_divergent_product_state(
     assert "payload" not in result.metadata
     stored = sync_store.get_envelope_by_server_cursor(incoming.server_cursor)
     assert stored is not None and stored.apply_status == "conflict"
+
+
+def test_mark_applied_returns_failed_when_status_storage_is_unavailable() -> None:
+    class _UnavailableStore:
+        calls = 0
+
+        def mark_envelope_apply_status(self, *_args, **_kwargs) -> None:
+            self.calls += 1
+            raise RuntimeError("storage unavailable")
+
+    store = _UnavailableStore()
+
+    result = _mark_applied(_head(), store)  # type: ignore[arg-type]
+
+    assert result.status == "failed"
+    assert result.error_code == "notes_link_projection_failed"
+    assert store.calls == 2

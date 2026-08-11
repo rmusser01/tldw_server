@@ -49,6 +49,16 @@ def _test_user() -> User:
     return User(id="user-1", username="user-1")
 
 
+def _stored_envelope(create: SyncEnvelopeCreate, cursor: int) -> SyncEnvelope:
+    fields = {
+        field_name: getattr(create, field_name)
+        for field_name in SyncEnvelopeCreate.__dataclass_fields__
+    }
+    fields["server_cursor"] = cursor
+    fields["server_sequence"] = 1
+    return SyncEnvelope(**fields)
+
+
 @pytest.fixture()
 def sync_service(tmp_path: Path) -> SyncV2Service:
     default_sync_v2_registry.cache_clear()
@@ -562,13 +572,7 @@ def test_notes_link_restore_requires_both_note_providers_but_tombstone_does_not(
         source_note_id="11111111-1111-4111-8111-111111111111",
         target_note_id="22222222-2222-4222-8222-222222222222",
     )
-    stored_fields = {
-        field_name: getattr(create, field_name)
-        for field_name in SyncEnvelopeCreate.__dataclass_fields__
-    }
-    stored_fields["server_cursor"] = 1
-    stored_fields["server_sequence"] = 1
-    live = SyncEnvelope(**stored_fields)
+    live = _stored_envelope(create, 1)
     tombstone = replace(
         live,
         client_envelope_id="env-link-tombstone-no-provider",
@@ -617,19 +621,10 @@ def test_notes_link_restore_uses_later_restored_note_as_identity_provider() -> N
         payload_hash="sha256:restore-source-live",
     )
 
-    def stored(create: SyncEnvelopeCreate, cursor: int) -> SyncEnvelope:
-        fields = {
-            field_name: getattr(create, field_name)
-            for field_name in SyncEnvelopeCreate.__dataclass_fields__
-        }
-        fields["server_cursor"] = cursor
-        fields["server_sequence"] = cursor
-        return SyncEnvelope(**fields)
-
-    source_tombstone = stored(source_tombstone_create, 1)
-    link = stored(link_create, 2)
-    target = stored(target_create, 3)
-    source_restore = stored(source_restore_create, 4)
+    source_tombstone = _stored_envelope(source_tombstone_create, 1)
+    link = _stored_envelope(link_create, 2)
+    target = _stored_envelope(target_create, 3)
+    source_restore = _stored_envelope(source_restore_create, 4)
 
     ordered = order_restore_envelopes(
         [source_tombstone, link, target, source_restore]

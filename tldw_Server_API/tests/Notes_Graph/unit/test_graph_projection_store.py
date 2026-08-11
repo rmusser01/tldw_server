@@ -22,7 +22,11 @@ OTHER_ID = "33333333-3333-4333-8333-333333333333"
 
 @pytest.fixture()
 def graph_db(tmp_path: Path) -> CharactersRAGDB:
-    return CharactersRAGDB(str(tmp_path / "graph-projection.db"), client_id="owner-1")
+    db = CharactersRAGDB(str(tmp_path / "graph-projection.db"), client_id="owner-1")
+    try:
+        yield db
+    finally:
+        db.close_connection()
 
 
 def test_projection_store_retains_unresolved_targets_and_clears_exact_generation(
@@ -136,6 +140,57 @@ def test_postgres_claim_is_owner_scoped_bounded_and_skip_locked() -> None:
     assert "owner_user_id = ?" in calls[0][0]
     assert "LIMIT ? FOR UPDATE SKIP LOCKED" in calls[0][0]
     assert calls[0][1] == ("owner-1", 5)
+
+
+def test_postgres_scalar_projection_reads_use_mapping_columns() -> None:
+    class _Cursor:
+        def __init__(self, row: dict[str, object]) -> None:
+            self._row = row
+
+        def fetchone(self) -> dict[str, object]:
+            return self._row
+
+    class _DB:
+        backend_type = BackendType.POSTGRESQL
+        client_id = "owner-1"
+
+        @staticmethod
+        def execute_query(query: str, _params: tuple[object, ...] = ()) -> _Cursor:
+            if "dirty_count" in query:
+                return _Cursor({"dirty_count": 3})
+            if "FROM note_graph_revisions" in query:
+                return _Cursor({"revision": 7})
+            return _Cursor(
+                {
+                    "parser_version": 2,
+                    "rebuild_state": "running",
+                    "rebuild_cursor": SOURCE_ID,
+                }
+            )
+
+    store = NoteGraphProjectionStore(_DB())  # type: ignore[arg-type]
+
+    assert store.count_dirty() == 3
+    assert store.get_revision() == 7
+    assert store.get_projection_status().parser_version == 2
+    assert store.get_projection_status().rebuild_cursor == SOURCE_ID
+
+
+def test_projection_source_read_is_owner_scoped_db_abstraction(
+    graph_db: CharactersRAGDB,
+) -> None:
+    graph_db.add_note("Source", "body", note_id=SOURCE_ID)
+
+    with graph_db.transaction() as conn:
+        source = graph_db.note_graph_projection_store.get_projection_source(
+            SOURCE_ID,
+            conn=conn,
+        )
+
+    assert source is not None
+    assert source.note_id == SOURCE_ID
+    assert source.content == "body"
+    assert source.version == 1
 
 
 def test_orphan_query_plan_uses_endpoint_indexes_without_relationship_scans(

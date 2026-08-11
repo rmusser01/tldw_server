@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store i
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
+from tldw_Server_API.app.core.Notes_Graph import graph_service as graph_service_module
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
 from tldw_Server_API.app.core.Notes_Graph.graph_service import (
     NoteGraphService,
@@ -210,6 +211,20 @@ class TestSeedlessLargeRejected:
         req = NoteGraphRequest(radius=1)
         with pytest.raises(InputError):
             svc.generate_graph(req)
+
+
+def test_projection_query_node_limit_is_never_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(graph_service_module, "MAX_NODES", lambda: 1_200)
+    db = _mock_db(note_count=0)
+    service = NoteGraphService(user_id="u1", db=db, allow_heavy_limits=True)
+
+    max_nodes, _, _, _ = service._resolve_effective_limits(
+        NoteGraphRequest(radius=1, allow_heavy=True, max_nodes=2_000)
+    )
+
+    assert max_nodes == 1_000
 
 
 class TestTagFilterSeeds:

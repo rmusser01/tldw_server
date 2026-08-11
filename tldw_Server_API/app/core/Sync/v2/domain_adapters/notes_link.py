@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Strict Sync v2 adapter for durable explicit Notes links."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 

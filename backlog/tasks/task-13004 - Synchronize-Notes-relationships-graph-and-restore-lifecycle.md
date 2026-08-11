@@ -1,10 +1,10 @@
 ---
 id: TASK-13004
 title: Synchronize Notes relationships graph and restore lifecycle
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-08-08 20:23'
-updated_date: '2026-08-11 03:14'
+updated_date: '2026-08-11 03:44'
 labels:
   - notes
   - sync-v2

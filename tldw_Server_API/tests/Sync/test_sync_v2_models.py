@@ -171,6 +171,23 @@ def test_notes_link_schema_is_server_trusted_v1_and_separate_from_organization()
     assert schema["schema_version"] == 1
     assert schema["encryption_policy"] == "server_trusted_v1"
     assert set(schema) >= {"upsert", "tombstone"}
+    upsert = schema["upsert"]
+    assert upsert["properties"]["source_note_id"] == {
+        "type": "string",
+        "format": "uuid4",
+        "canonical_lowercase": True,
+    }
+    assert upsert["properties"]["target_note_id"] == {
+        "type": "string",
+        "format": "uuid4",
+        "canonical_lowercase": True,
+    }
+    assert upsert["constraints"] == {
+        "distinct_endpoints": True,
+        "undirected_endpoint_order": "source_note_id <= target_note_id",
+    }
+    assert schema["tombstone"]["constraints"] == upsert["constraints"]
+    assert schema["tombstone"]["properties"]["reason"]["max_length"] == 256
     assert SyncCapabilitiesResponse().domain_schemas["notes.link"] == schema
 
 

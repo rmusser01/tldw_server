@@ -284,7 +284,9 @@ def _notes_link_envelope(
     restore: bool = False,
 ) -> SyncEnvelopeCreate:
     source_note_id, target_note_id = sorted((source_note_id, target_note_id))
-    timestamp = f"2026-08-10T12:00:0{revision - 1}+00:00"
+    if not 1 <= revision <= 10:
+        raise ValueError("notes.link test revisions must be between 1 and 10")
+    timestamp = f"2026-08-10T12:00:{revision - 1:02d}+00:00"
     payload: dict[str, object] = {
         "source_note_id": source_note_id,
         "target_note_id": target_note_id,

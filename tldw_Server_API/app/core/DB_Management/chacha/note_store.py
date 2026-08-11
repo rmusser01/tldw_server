@@ -979,21 +979,26 @@ class NoteStore:
         results: list[dict[str, Any]] = []
         for batch in self._db._chunk_list(note_ids, self._db._SQLITE_PARAM_LIMIT):
             ph = ",".join(["?"] * len(batch))
+            owner_clause = ""
+            owner_params: list[object] = []
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                owner_clause = "AND n.client_id = ? AND c.client_id = ? "
+                owner_params.extend((self._db.client_id, self._db.client_id))
             query = (
                 f"SELECT n.id AS note_id, c.id AS conversation_id, c.source, c.external_ref "  # nosec B608
                 f"FROM notes n "
                 f"JOIN conversations c ON c.id = n.conversation_id "
                 f"WHERE n.id IN ({ph}) AND n.deleted = ? AND c.deleted = ? "
+                f"{owner_clause}"  # nosec B608
                 f"AND c.source IS NOT NULL "
                 f"ORDER BY n.id ASC, c.source ASC, c.external_ref ASC"
             )
-            params: list[object] = [*batch, self._deleted_value(False), self._deleted_value(False)]
-            if self._db.backend_type == BackendType.POSTGRESQL:
-                query = query.replace(
-                    "AND c.source IS NOT NULL ",
-                    "AND n.client_id = ? AND c.client_id = ? AND c.source IS NOT NULL ",
-                )
-                params.extend((self._db.client_id, self._db.client_id))
+            params: list[object] = [
+                *batch,
+                self._deleted_value(False),
+                self._deleted_value(False),
+                *owner_params,
+            ]
             cur = self._db.execute_query(query, tuple(params))
             for row in cur.fetchall():
                 r = dict(row) if hasattr(row, "keys") else {
