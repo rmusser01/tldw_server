@@ -974,6 +974,70 @@ def test_device_patch_rejects_adapter_version_removal_without_mutating_registrat
     assert stored.capabilities["theme"] == "dark"
 
 
+@pytest.mark.parametrize(
+    "requested_domains",
+    [
+        ["unknown.domain"],
+        ["notes.note"] * 101,
+    ],
+)
+def test_device_registration_rejects_invalid_requested_domains_without_version_map(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    requested_domains: list[str],
+) -> None:
+    response = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "invalid-device",
+            "display_name": "Invalid device",
+            "capabilities": {"requested_domains": requested_domains},
+        },
+    )
+
+    assert response.status_code == 422
+    assert sync_service.store.get_device("user-1", "invalid-device") is None
+
+
+@pytest.mark.parametrize(
+    "requested_domains",
+    [
+        ["unknown.domain"],
+        ["notes.note"] * 101,
+    ],
+)
+def test_device_patch_rejects_invalid_requested_domains_without_version_map(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    requested_domains: list[str],
+) -> None:
+    registered = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "supported_domains": ["notes.note"],
+        },
+    )
+    assert registered.status_code == 200
+    original = sync_service.store.get_device("user-1", "device-1")
+    assert original is not None
+
+    response = client.patch(
+        "/api/v1/sync/devices/device-1",
+        json={"capabilities": {"requested_domains": requested_domains}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_validation_failed",
+        "message": "Sync request parameters are invalid.",
+    }
+    stored = sync_service.store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities == original.capabilities
+
+
 def test_partial_registration_adapter_map_defaults_omitted_domain_for_push(
     client: TestClient,
     sync_service: SyncV2Service,
@@ -1019,6 +1083,95 @@ def test_partial_registration_adapter_map_defaults_omitted_domain_for_push(
         "env-note"
     ]
     assert pushed.json()["rejected"] == []
+
+
+def test_public_push_rejects_unattested_attachment_bootstrap_routing_safely(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+        attachment_ref_v2_object_hash,
+    )
+
+    service = _build_service(tmp_path, supports_attachments=True)
+    service.adapters.register(AttachmentRefAdapter(v2_writes_enabled=True))
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        capabilities={
+            "requested_domains": ["attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        },
+    )
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={"notes_attachment_v2": {"state": "ready"}},
+        )
+    )
+    payload = {
+        "attachment_id": "a1111111-1111-4111-8111-111111111111",
+        "parent_domain": "notes.note",
+        "parent_object_id": "b2222222-2222-4222-8222-222222222222",
+        "file_name": "diagram.png",
+        "original_file_name": "diagram.png",
+        "content_type": "image/png",
+        "size_bytes": 42,
+        "blob_hash": "sha256:" + "a" * 64,
+        "created_at": _clock(),
+        "last_modified": _clock(),
+        "created_by": "device-1",
+    }
+    response = _client_for_service(service).post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                {
+                    "dataset_id": "dataset-1",
+                    "client_envelope_id": "env-untrusted-bootstrap",
+                    "device_id": "device-1",
+                    "client_sequence": 1,
+                    "domain": "attachment.ref",
+                    "operation": "upsert",
+                    "object_id": payload["attachment_id"],
+                    "object_revision": 1,
+                    "schema_version": 2,
+                    "adapter_version": 2,
+                    "payload": payload,
+                    "payload_hash": attachment_ref_v2_object_hash(
+                        "upsert",
+                        payload,
+                        object_revision=1,
+                    ),
+                    "created_at_client": _clock(),
+                    "encryption_metadata": {"policy": "server_trusted_v1"},
+                    "routing_metadata": {
+                        "bootstrap_capture": True,
+                        "bootstrap_id": "client-forged-bootstrap",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["accepted"] == []
+    assert response.json()["rejected"] == [
+        {
+            "client_envelope_id": "env-untrusted-bootstrap",
+            "error_code": "attachment_ref_v2_payload_invalid",
+            "message": "attachment.ref v2 payload validation failed",
+            "retryable": False,
+        }
+    ]
+    assert service.store.list_envelopes_after("dataset-1", 0) == []
 
 
 def test_dataset_enroll_endpoint_rejects_and_never_echoes_forged_server_metadata(

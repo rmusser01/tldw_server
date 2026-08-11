@@ -53,7 +53,71 @@ class _LegacyAttachmentRefAdapter:
         context: sync_adapters.SyncAdapterContext | None = None,
     ):
         del dataset
-        return sync_adapters._evaluate_attachment_ref_v1(envelope, context=context)
+        try:
+            metadata = sync_adapters.extract_attachment_ref_metadata(envelope)
+        except sync_adapters.AttachmentRefValidationError as exc:
+            return sync_adapters.AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code=exc.error_code,
+                message=str(exc),
+            )
+        prior = context.prior_envelopes if context is not None else ()
+        conflicting = next(
+            (
+                item
+                for item in prior
+                if item.operation != "tombstone"
+                and _legacy_attachment_identity_matches(item, envelope, metadata)
+                and _legacy_attachment_hash(item) != metadata.payload_hash
+            ),
+            None,
+        )
+        if conflicting is None:
+            return sync_adapters.AdapterAccepted(
+                client_envelope_id=envelope.client_envelope_id
+            )
+        return sync_adapters.AdapterConflict(
+            client_envelope_id=envelope.client_envelope_id,
+            domain="attachment.ref",
+            entity_id=envelope.entity_id,
+            conflict_type="attachment_ref_hash_mismatch",
+            message=(
+                "attachment.ref stable attachment ID was reused with a different "
+                "payload hash"
+            ),
+            metadata={
+                "attachment_id": metadata.attachment_id,
+                "incoming_payload_hash": metadata.payload_hash,
+                "conflicting_payload_hash": _legacy_attachment_hash(conflicting),
+                "conflicting_envelope_id": conflicting.client_envelope_id,
+            },
+        )
+
+
+def _legacy_attachment_identity_matches(
+    prior: Any,
+    incoming: SyncEnvelopeCreate,
+    incoming_metadata: Any,
+) -> bool:
+    prior_payload = prior.payload or prior.payload_clear
+    prior_attachment_id = prior_payload.get("attachment_id")
+    if isinstance(prior_attachment_id, str) and prior_attachment_id.strip():
+        return prior_attachment_id.strip() == incoming_metadata.attachment_id
+    if prior.stable_key and incoming.stable_key:
+        return prior.stable_key == incoming.stable_key
+    return prior.entity_id == incoming.entity_id
+
+
+def _legacy_attachment_hash(envelope: Any) -> str:
+    payload = envelope.payload or envelope.payload_clear
+    payload_hash = payload.get("payload_hash")
+    if isinstance(payload_hash, str) and payload_hash.strip():
+        return payload_hash.strip()
+    return envelope.payload_hash or ""
+
+
+def test_attachment_ref_v1_compatibility_evaluator_is_test_only() -> None:
+    assert not hasattr(sync_adapters, "_evaluate_attachment_ref_v1")
 
 
 @pytest.fixture()

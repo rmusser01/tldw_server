@@ -214,6 +214,16 @@ class AttachmentRefAdapter:
             envelope,
             context,
         )
+        has_bootstrap_routing = any(
+            field_name in envelope.routing_metadata
+            for field_name in ("bootstrap_capture", "bootstrap_id")
+        )
+        if has_bootstrap_routing and not trusted_bootstrap:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="attachment_ref_v2_payload_invalid",
+                message="attachment.ref v2 payload validation failed",
+            )
         if not trusted_bootstrap and not sync_v2_attachment_ref_v2_is_writable(
             dataset,
             notes_attachment_sync_enabled=self.v2_writes_enabled,
@@ -316,51 +326,6 @@ class AttachmentRefAdapter:
             )
 
         return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
-
-
-def _evaluate_attachment_ref_v1(
-    envelope: SyncEnvelopeCreate,
-    *,
-    context: SyncAdapterContext | None,
-) -> SyncAdapterOutcome:
-    """Exercise the frozen legacy contract in compatibility-only tests/read repair."""
-
-    try:
-        metadata = extract_attachment_ref_metadata(envelope)
-    except AttachmentRefValidationError as exc:
-        return AdapterRejected(
-            client_envelope_id=envelope.client_envelope_id,
-            error_code=exc.error_code,
-            message=str(exc),
-        )
-    prior = context.prior_envelopes if context is not None else ()
-    conflicting = next(
-        (
-            item
-            for item in prior
-            if item.operation != "tombstone"
-            and _same_attachment_ref_identity(item, envelope, metadata)
-            and _attachment_ref_hash(item) != metadata.payload_hash
-        ),
-        None,
-    )
-    if conflicting is None:
-        return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
-    return AdapterConflict(
-        client_envelope_id=envelope.client_envelope_id,
-        domain="attachment.ref",
-        entity_id=envelope.entity_id,
-        conflict_type="attachment_ref_hash_mismatch",
-        message=(
-            "attachment.ref stable attachment ID was reused with a different payload hash"
-        ),
-        metadata={
-            "attachment_id": metadata.attachment_id,
-            "incoming_payload_hash": metadata.payload_hash,
-            "conflicting_payload_hash": _attachment_ref_hash(conflicting),
-            "conflicting_envelope_id": conflicting.client_envelope_id,
-        },
-    )
 
 
 def _trusted_attachment_ref_bootstrap(
@@ -478,28 +443,6 @@ def extract_attachment_ref_metadata(
         payload_hash=payload_hash,
         availability=availability,
     )
-
-
-def _same_attachment_ref_identity(
-    prior: SyncHead,
-    incoming: SyncEnvelopeCreate,
-    incoming_metadata: AttachmentRefMetadata,
-) -> bool:
-    prior_payload = prior.payload or prior.payload_clear
-    prior_attachment_id = prior_payload.get("attachment_id")
-    if isinstance(prior_attachment_id, str) and prior_attachment_id.strip():
-        return prior_attachment_id.strip() == incoming_metadata.attachment_id
-    if prior.stable_key and incoming.stable_key and prior.stable_key == incoming.stable_key:
-        return True
-    return prior.entity_id == incoming.entity_id
-
-
-def _attachment_ref_hash(envelope: SyncEnvelope | SyncEnvelopeCreate) -> str:
-    payload = envelope.payload or envelope.payload_clear
-    payload_hash = payload.get("payload_hash")
-    if isinstance(payload_hash, str) and payload_hash.strip():
-        return payload_hash.strip()
-    return envelope.payload_hash or ""
 
 
 def _required_string(payload: Mapping[str, object], key: str) -> str:

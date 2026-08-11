@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_ORGANIZATION_SYNC_OPERATIONS,
     normalize_supported_adapter_versions,
+    normalize_sync_v2_requested_domains,
     sync_v2_dataset_writable_adapter_versions,
     sync_v2_domain_schemas,
     sync_v2_server_supported_adapter_versions,
@@ -358,16 +359,35 @@ class SyncDeviceRegisterRequest(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_supported_adapter_versions(self) -> SyncDeviceRegisterRequest:
+        requested_domains = normalize_sync_v2_requested_domains(
+            self.supported_domains
+        )
+        legacy_requested = self.capabilities.get("requested_domains")
+        if legacy_requested is not None:
+            normalized_legacy_requested = normalize_sync_v2_requested_domains(
+                legacy_requested
+            )
+            if (
+                "supported_domains" in self.model_fields_set
+                and normalized_legacy_requested != requested_domains
+            ):
+                raise ValueError(
+                    "capabilities.requested_domains must match supported_domains"
+                )
+            if "supported_domains" not in self.model_fields_set:
+                requested_domains = normalized_legacy_requested
+        self.supported_domains = requested_domains
         supplied = self.supported_adapter_versions
         if supplied is None:
             supplied = self.capabilities.get("supported_adapter_versions")
         normalized = normalize_supported_adapter_versions(
             supplied,
-            requested_domains=self.supported_domains,
+            requested_domains=requested_domains,
         )
         self.supported_adapter_versions = normalized
         self.capabilities = {
             **self.capabilities,
+            "requested_domains": requested_domains,
             "supported_adapter_versions": normalized,
         }
         return self
@@ -877,12 +897,16 @@ class SyncProfileBootstrapRequest(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_supported_adapter_versions(self) -> SyncProfileBootstrapRequest:
+        requested_domains = normalize_sync_v2_requested_domains(
+            self.requested_domains
+        )
+        self.requested_domains = requested_domains
         supplied = self.supported_adapter_versions
         if supplied is None:
             supplied = self.client_instance.get("supported_adapter_versions")
         normalized = normalize_supported_adapter_versions(
             supplied,
-            requested_domains=self.requested_domains,
+            requested_domains=requested_domains,
         )
         self.supported_adapter_versions = normalized
         self.client_instance = {

@@ -1542,6 +1542,28 @@ def test_device_adapter_version_omission_means_version_one() -> None:
         "notes.note": [1],
         "attachment.ref": [1],
     }
+    assert request.capabilities["requested_domains"] == [
+        "notes.note",
+        "attachment.ref",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("requested_domains", "message"),
+    [
+        (["unknown.domain"], "unknown Sync domain"),
+        (["notes.note"] * 101, "at most 100 domains"),
+    ],
+)
+def test_adapter_version_omission_still_validates_requested_domains(
+    requested_domains: list[str],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        core_sync_models.normalize_supported_adapter_versions(
+            None,
+            requested_domains=requested_domains,
+        )
 
 
 def test_profile_bootstrap_adapter_version_omission_means_version_one() -> None:

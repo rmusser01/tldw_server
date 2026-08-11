@@ -491,6 +491,29 @@ def sync_v2_attachment_ref_v2_is_writable(
     )
 
 
+def normalize_sync_v2_requested_domains(value: object) -> list[SyncDomain]:
+    """Validate, bound, and deduplicate one requested Sync-domain sequence."""
+
+    if not isinstance(value, Sequence) or isinstance(
+        value,
+        (str, bytes, bytearray),
+    ):
+        raise ValueError("requested_domains must be a list")
+    domains = list(value)
+    if len(domains) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
+        raise ValueError(
+            "requested_domains may contain at most "
+            f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
+        )
+    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    for domain in domains:
+        if not isinstance(domain, str) or domain not in known:
+            raise ValueError(
+                f"requested_domains contains unknown Sync domain: {domain}"
+            )
+    return [cast(SyncDomain, domain) for domain in dict.fromkeys(domains)]
+
+
 def normalize_supported_adapter_versions(
     value: object | None,
     *,
@@ -498,7 +521,7 @@ def normalize_supported_adapter_versions(
 ) -> dict[SyncDomain, list[int]]:
     """Validate a bounded device version map; omission preserves version 1."""
 
-    requested = list(dict.fromkeys(requested_domains))
+    requested = normalize_sync_v2_requested_domains(requested_domains)
     if value is None:
         return {cast(SyncDomain, domain): [1] for domain in requested}
     if not isinstance(value, Mapping):

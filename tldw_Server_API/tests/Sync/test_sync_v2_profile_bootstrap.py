@@ -286,6 +286,50 @@ def test_bootstrap_persists_canonical_adapter_map_used_by_push(
     assert result.rejected[0].error_code == "attachment_ref_v2_not_writable"
 
 
+def test_repeat_profile_bootstrap_cannot_downgrade_active_adapter_versions(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    first = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        }
+    )
+    service.bootstrap_profile(
+        user_id="user-1",
+        mode=first.mode,
+        device_id=first.device_id,
+        client_instance=first.client_instance,
+        requested_domains=first.requested_domains,
+    )
+    downgrade = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1]},
+        }
+    )
+
+    with pytest.raises(SyncStoreError, match="cannot remove active versions"):
+        service.bootstrap_profile(
+            user_id="user-1",
+            mode=downgrade.mode,
+            device_id=downgrade.device_id,
+            client_instance=downgrade.client_instance,
+            requested_domains=downgrade.requested_domains,
+        )
+
+    stored = store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1, 2]
+    }
+
+
 def test_bootstrap_adapter_map_omission_remains_v1_only(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
     service.adapters.register(AttachmentRefAdapter(v2_writes_enabled=True))

@@ -179,7 +179,9 @@ class SyncV2ProfileManager:
             canonical_client_instance.pop("supported_adapter_versions", None),
             requested_domains=requested,
         )
-        self.store.upsert_device(
+        if self.service is None:
+            raise SyncStoreError("Sync profile device registration service is unavailable")
+        self.service._upsert_device(
             SyncDeviceUpsert(
                 device_id=resolved_device_id,
                 user_id=user_id,
