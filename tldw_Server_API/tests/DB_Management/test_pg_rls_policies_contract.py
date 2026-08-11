@@ -255,6 +255,26 @@ def test_chacha_notes_link_rls_checks_owner_and_both_note_endpoints() -> None:
         assert policy.count(clause) == 2
 
 
+def test_chacha_note_attachment_rls_checks_registry_and_note_owner_for_reads_and_writes() -> None:
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    policy = sql.split(
+        "CREATE POLICY note_attachments_tenant_isolation ON note_attachments", 1
+    )[1].split(";", 1)[0]
+    owner = "current_setting('app.current_user_id', true)"
+
+    assert "ALTER TABLE IF EXISTS note_attachments ENABLE ROW LEVEL SECURITY" in sql
+    assert "ALTER TABLE IF EXISTS note_attachments FORCE ROW LEVEL SECURITY" in sql
+    assert "USING (" in policy
+    assert "WITH CHECK (" in policy
+    for clause in (
+        f"note_attachments.client_id = {owner}",
+        "note.id = note_attachments.note_id",
+        f"note.client_id = {owner}",
+        "note.client_id = note_attachments.client_id",
+    ):
+        assert policy.count(clause) == 2
+
+
 def test_chacha_rls_includes_source_review_read_and_write_policies():
     sql = "\n".join(build_chacha_rls_sql())
 
