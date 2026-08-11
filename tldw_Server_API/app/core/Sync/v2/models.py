@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, cast
+from uuid import UUID
 
 from .notes_link_contract import (
     NOTES_LINK_LABEL_MAX_CHARS,
@@ -56,6 +57,7 @@ SyncBlobAvailabilityStatus = Literal[
     "quarantined",
     "deleted",
 ]
+SyncAttachmentBindingAvailability = Literal["available", "metadata_only"]
 
 
 def normalize_sync_timestamp(value: object | None) -> str | None:
@@ -1478,6 +1480,105 @@ class SyncAttachment:
         object.__setattr__(self, "entity_id", object_id)
 
 
+def _validate_attachment_binding_identity(
+    *,
+    attachment_id: str,
+    attachment_revision: int,
+    blob_hash: str,
+    size_bytes: int,
+    establishing_server_cursor: int,
+    availability_at_acceptance: SyncAttachmentBindingAvailability,
+) -> None:
+    """Validate immutable attachment-revision binding fields at the store boundary."""
+
+    try:
+        parsed_attachment_id = UUID(attachment_id)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("attachment binding attachment_id must be canonical UUIDv4") from exc
+    if parsed_attachment_id.version != 4 or str(parsed_attachment_id) != attachment_id:
+        raise ValueError("attachment binding attachment_id must be canonical UUIDv4")
+    if isinstance(attachment_revision, bool) or attachment_revision < 1:
+        raise ValueError("attachment binding revision must be positive")
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", blob_hash) is None:
+        raise ValueError("attachment binding blob_hash must be lowercase SHA-256")
+    if isinstance(size_bytes, bool) or size_bytes < 1:
+        raise ValueError("attachment binding size_bytes must be positive")
+    if isinstance(establishing_server_cursor, bool) or establishing_server_cursor < 1:
+        raise ValueError("attachment binding establishing cursor must be positive")
+    if availability_at_acceptance not in {"available", "metadata_only"}:
+        raise ValueError("attachment binding acceptance availability is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentRevisionBindingCreate:
+    """Immutable attachment revision binding accepted by the Sync v2 store."""
+
+    dataset_id: str
+    attachment_id: str
+    attachment_revision: int
+    blob_hash: str
+    size_bytes: int
+    establishing_server_cursor: int
+    availability_at_acceptance: SyncAttachmentBindingAvailability
+    resolved_blob_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip():
+            raise ValueError("attachment binding dataset_id must be non-empty")
+        _validate_attachment_binding_identity(
+            attachment_id=self.attachment_id,
+            attachment_revision=self.attachment_revision,
+            blob_hash=self.blob_hash,
+            size_bytes=self.size_bytes,
+            establishing_server_cursor=self.establishing_server_cursor,
+            availability_at_acceptance=self.availability_at_acceptance,
+        )
+        if self.resolved_blob_id is not None and not self.resolved_blob_id.strip():
+            raise ValueError("attachment binding resolved_blob_id must be non-empty")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentRevisionBinding:
+    """Stored immutable revision identity plus monotonic blob lifecycle pointers."""
+
+    dataset_id: str
+    attachment_id: str
+    attachment_revision: int
+    blob_hash: str
+    size_bytes: int
+    establishing_server_cursor: int
+    availability_at_acceptance: SyncAttachmentBindingAvailability
+    resolved_blob_id: str | None
+    retention_released_at: str | None
+    created_at: str
+
+    def __post_init__(self) -> None:
+        _validate_attachment_binding_identity(
+            attachment_id=self.attachment_id,
+            attachment_revision=self.attachment_revision,
+            blob_hash=self.blob_hash,
+            size_bytes=self.size_bytes,
+            establishing_server_cursor=self.establishing_server_cursor,
+            availability_at_acceptance=self.availability_at_acceptance,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDatasetStorageNamespace:
+    """Server-issued opaque physical storage namespace for one dataset."""
+
+    dataset_id: str
+    owner_user_id: str
+    storage_namespace_id: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip() or not self.owner_user_id.strip():
+            raise ValueError("storage namespace owner and dataset must be non-empty")
+        if re.fullmatch(r"[0-9a-f]{32}", self.storage_namespace_id) is None:
+            raise ValueError("storage namespace ID must be 32 lowercase hexadecimal characters")
+
+
 @dataclass(frozen=True, slots=True)
 class SyncBlobUploadSession:
     """Core metadata for a resumable Sync v2 M2 blob upload session."""
@@ -1697,8 +1798,11 @@ __all__ = [
     "SYNC_V2_SUPPORTED_DOMAINS",
     "SYNC_V2_SUPPORTED_OPERATIONS",
     "SyncApplyStatus",
+    "SyncAttachmentBindingAvailability",
     "SyncAttachment",
     "SyncAttachmentCreate",
+    "SyncAttachmentRevisionBinding",
+    "SyncAttachmentRevisionBindingCreate",
     "SyncBackgroundDomainStatus",
     "SyncBackgroundLease",
     "SyncBackgroundLeaseCreate",
@@ -1720,6 +1824,7 @@ __all__ = [
     "SyncConflictCreate",
     "SyncDataset",
     "SyncDatasetCreate",
+    "SyncDatasetStorageNamespace",
     "SyncDevice",
     "SyncDeviceCursor",
     "SyncDeviceUpsert",

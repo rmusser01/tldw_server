@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.DB_Management.Sync_DB import (
+    SYNC_POSTGRES_SCHEMA,
+    SyncDatabase,
+)
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
-from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.models import (
+    SyncAttachmentRevisionBindingCreate,
+    SyncDatasetCreate,
+    SyncEnvelopeCreate,
+)
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -17,6 +26,134 @@ from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settin
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 pytestmark = pytest.mark.integration
+
+
+def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() -> None:
+    compact_schema = " ".join(SYNC_POSTGRES_SCHEMA.split())
+    ensure_source = inspect.getsource(SyncDatabase._ensure_attachment_binding_tables)
+    lookup_source = inspect.getsource(SyncDatabase.get_attachment_revision_binding)
+    unresolved_source = inspect.getsource(
+        SyncDatabase.list_unresolved_attachment_revision_bindings
+    )
+    resolve_source = inspect.getsource(SyncDatabase.resolve_attachment_revision_binding)
+    blob_lookup_source = inspect.getsource(
+        SyncDatabase._require_exact_available_blob_for_binding
+    )
+    namespace_source = inspect.getsource(SyncDatabase.get_or_create_storage_namespace)
+
+    assert "CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings" in compact_schema
+    assert "PRIMARY KEY (dataset_id, attachment_id, attachment_revision)" in compact_schema
+    assert "attachment_revision > 0" in compact_schema
+    assert "size_bytes > 0" in compact_schema
+    assert "blob_hash ~ '^sha256:[0-9a-f]{64}$'" in compact_schema
+    assert "availability_at_acceptance IN ('available', 'metadata_only')" in compact_schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved ON "
+        "sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, "
+        "attachment_id, attachment_revision) WHERE resolved_blob_id IS NULL AND "
+        "retention_released_at IS NULL"
+    ) in compact_schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob ON "
+        "sync_attachment_revision_bindings(dataset_id, resolved_blob_id)"
+    ) in compact_schema
+    assert "CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces" in compact_schema
+    assert "storage_namespace_id ~ '^[0-9a-f]{32}$'" in compact_schema
+    assert (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_dataset_storage_namespace_id ON "
+        "sync_dataset_storage_namespaces(storage_namespace_id)"
+    ) in compact_schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_sync_dataset_storage_namespaces_owner ON "
+        "sync_dataset_storage_namespaces(owner_user_id, dataset_id)"
+    ) in compact_schema
+    assert "sync_attachment_revision_bindings" in ensure_source
+    assert "sync_dataset_storage_namespaces" in ensure_source
+    assert "dataset_id = ? AND attachment_id = ? AND attachment_revision = ?" in " ".join(
+        lookup_source.split()
+    )
+    assert "LIMIT ?" in unresolved_source
+    assert "ORDER BY establishing_server_cursor, attachment_id, attachment_revision" in " ".join(
+        unresolved_source.split()
+    )
+    assert "resolved_blob_id IS NULL" in unresolved_source
+    assert "retention_released_at IS NULL" in unresolved_source
+    assert "FOR UPDATE" in resolve_source
+    assert "WHERE dataset_id = ? AND blob_id = ?" in " ".join(
+        blob_lookup_source.split()
+    )
+    assert "attachment_id = ?" not in blob_lookup_source
+    assert "owner_user_id" in namespace_source
+    assert "FOR UPDATE" in namespace_source
+
+
+def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_indexes(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = SyncDatabase(backend=backend)
+    store = SyncV2Store(db)
+    try:
+        store.enroll_dataset(
+            SyncDatasetCreate(
+                dataset_id="dataset-binding-pg",
+                owner_user_id="owner-binding-pg",
+                scope_type="personal",
+                encryption_policy="server_trusted_v1",
+                domains=["notes.note", "attachment.ref"],
+            )
+        )
+        store.create_attachment_revision_binding(
+            SyncAttachmentRevisionBindingCreate(
+                dataset_id="dataset-binding-pg",
+                attachment_id="11111111-1111-4111-8111-111111111111",
+                attachment_revision=1,
+                blob_hash="sha256:" + "a" * 64,
+                size_bytes=1,
+                establishing_server_cursor=1,
+                availability_at_acceptance="metadata_only",
+            )
+        )
+        with backend.transaction() as conn:
+            db.execute("SET LOCAL enable_seqscan = off", connection=conn)
+            lookup_rows = db.execute(
+                "EXPLAIN SELECT attachment_id FROM sync_attachment_revision_bindings "
+                "WHERE dataset_id = ? AND attachment_id = ? AND attachment_revision = ?",
+                (
+                    "dataset-binding-pg",
+                    "11111111-1111-4111-8111-111111111111",
+                    1,
+                ),
+                connection=conn,
+            ).rows
+            page_rows = db.execute(
+                "EXPLAIN SELECT attachment_id FROM sync_attachment_revision_bindings "
+                "WHERE dataset_id = ? AND resolved_blob_id IS NULL "
+                "AND retention_released_at IS NULL AND establishing_server_cursor > ? "
+                "ORDER BY establishing_server_cursor, attachment_id, attachment_revision "
+                "LIMIT ?",
+                ("dataset-binding-pg", 0, 1000),
+                connection=conn,
+            ).rows
+            namespace_rows = db.execute(
+                "EXPLAIN SELECT storage_namespace_id FROM sync_dataset_storage_namespaces "
+                "WHERE owner_user_id = ? AND dataset_id = ?",
+                ("owner-binding-pg", "dataset-binding-pg"),
+                connection=conn,
+            ).rows
+        lookup_plan = " ".join(
+            str(next(iter(row.values()))) for row in lookup_rows
+        )
+        page_plan = " ".join(str(next(iter(row.values()))) for row in page_rows)
+        namespace_plan = " ".join(
+            str(next(iter(row.values()))) for row in namespace_rows
+        )
+        assert "sync_attachment_revision_bindings_pkey" in lookup_plan
+        assert "idx_sync_attachment_bindings_unresolved" in page_plan
+        assert "idx_sync_dataset_storage_namespaces_owner" in namespace_plan
+    finally:
+        if db.backend_type == BackendType.POSTGRESQL:
+            backend.get_pool().close_all()
 
 
 def _ready_encryption():

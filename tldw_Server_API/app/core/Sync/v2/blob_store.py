@@ -5,12 +5,18 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Infrastructure.distributed_lock import (
+    FileLock,
+    LockAcquisitionError,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 STREAM_CHUNK_SIZE = 64 * 1024
@@ -54,7 +60,7 @@ class LocalSyncBlobStore:
             if _sha256_file(target) != expected_hash:
                 raise SyncBlobStoreError(
                     "Sync blob chunk storage key already contains different content"
-                )
+                ) from None
         except OSError as exc:
             raise SyncBlobStoreError("Sync blob chunk write failed") from exc
         finally:
@@ -67,12 +73,17 @@ class LocalSyncBlobStore:
         upload_id: str,
         payload_hash: str,
         chunk_indexes: list[int],
+        storage_namespace_id: str | None = None,
     ) -> str:
         """Assemble verified chunks into a committed blob path atomically."""
 
         digest = _hash_digest(payload_hash)
         upload_segment = _safe_segment(upload_id, field_name="upload_id")
-        final_key = f"blobs/sha256/{digest[:2]}/{digest}.blob"
+        final_key = (
+            self.legacy_storage_key(payload_hash)
+            if storage_namespace_id is None
+            else self.namespace_storage_key(storage_namespace_id, payload_hash)
+        )
         final_path = self.resolve_storage_key(final_key)
         final_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = _commit_temp_path(final_path, digest=digest, upload_segment=upload_segment)
@@ -106,6 +117,140 @@ class LocalSyncBlobStore:
             _discard_temp_path(temp_path)
             raise SyncBlobStoreError("Sync blob upload commit failed") from exc
         return final_key
+
+    @staticmethod
+    def legacy_storage_key(payload_hash: str) -> str:
+        """Return the exact historical global content-addressed storage key."""
+
+        digest = _hash_digest(payload_hash)
+        return f"blobs/sha256/{digest[:2]}/{digest}.blob"
+
+    @staticmethod
+    def namespace_storage_key(
+        storage_namespace_id: str,
+        payload_hash: str,
+    ) -> str:
+        """Return a v2 path composed only from an opaque namespace and digest."""
+
+        namespace = _storage_namespace_id(storage_namespace_id)
+        digest = _hash_digest(payload_hash)
+        return f"blobs/v2/{namespace}/{digest}.blob"
+
+    def verify_blob(
+        self,
+        storage_key: str,
+        *,
+        payload_hash: str,
+        expected_size: int,
+    ) -> None:
+        """Verify one contained blob's exact logical size and lowercase digest."""
+
+        if isinstance(expected_size, bool) or expected_size < 1:
+            raise SyncBlobStoreError("expected_size must be positive")
+        _hash_digest(payload_hash)
+        try:
+            path = self.resolve_storage_key(storage_key)
+            if not path.is_file() or path.stat().st_size != expected_size:
+                raise SyncBlobStoreError("Sync blob size does not match expected bytes")
+            if _sha256_file(path) != payload_hash:
+                raise SyncBlobStoreError("Sync blob digest does not match expected bytes")
+        except SyncBlobStoreError:
+            raise
+        except OSError as exc:
+            raise SyncBlobStoreError("Sync blob verification failed") from exc
+
+    def relocate_legacy_blob(
+        self,
+        *,
+        legacy_storage_key: str,
+        storage_namespace_id: str,
+        payload_hash: str,
+        expected_size: int,
+    ) -> str:
+        """Verify/copy/reverify a global key without ever unlinking the source."""
+
+        canonical_legacy_key = self.legacy_storage_key(payload_hash)
+        if legacy_storage_key != canonical_legacy_key:
+            raise SyncBlobStoreError("Sync legacy blob storage key is not canonical")
+        target_key = self.namespace_storage_key(storage_namespace_id, payload_hash)
+        digest = _hash_digest(payload_hash)
+        namespace = _storage_namespace_id(storage_namespace_id)
+        lock_path = self.resolve_storage_key(
+            f"_locks/legacy-relocation/{namespace}.{digest}.lock"
+        )
+        try:
+            with FileLock(lock_path, timeout=10):
+                try:
+                    self.verify_blob(
+                        canonical_legacy_key,
+                        payload_hash=payload_hash,
+                        expected_size=expected_size,
+                    )
+                except SyncBlobStoreError as exc:
+                    raise SyncBlobStoreError(
+                        "Sync legacy blob source failed verification"
+                    ) from exc
+                target = self.resolve_storage_key(target_key)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists():
+                    self.verify_blob(
+                        target_key,
+                        payload_hash=payload_hash,
+                        expected_size=expected_size,
+                    )
+                    return target_key
+
+                source = self.resolve_storage_key(canonical_legacy_key)
+                temp_path = _relocation_temp_path(
+                    target,
+                    digest=digest,
+                    namespace=namespace,
+                )
+                copied_size = 0
+                copied_hash = hashlib.sha256()
+                try:
+                    with _open_regular_file_no_follow(
+                        source,
+                        error_message=(
+                            "Sync legacy blob relocation source could not be opened safely"
+                        ),
+                    ) as source_handle, temp_path.open("wb") as output:
+                        while chunk := source_handle.read(STREAM_CHUNK_SIZE):
+                            copied_size += len(chunk)
+                            copied_hash.update(chunk)
+                            output.write(chunk)
+                    if copied_size != expected_size:
+                        raise SyncBlobStoreError(
+                            "Sync legacy blob size changed during relocation"
+                        )
+                    if "sha256:" + copied_hash.hexdigest() != payload_hash:
+                        raise SyncBlobStoreError(
+                            "Sync legacy blob digest changed during relocation"
+                        )
+                    try:
+                        os.link(temp_path, target)
+                    except FileExistsError:
+                        self.verify_blob(
+                            target_key,
+                            payload_hash=payload_hash,
+                            expected_size=expected_size,
+                        )
+                    finally:
+                        _discard_temp_path(temp_path)
+                except SyncBlobStoreError:
+                    _discard_temp_path(temp_path)
+                    raise
+                except OSError as exc:
+                    _discard_temp_path(temp_path)
+                    raise SyncBlobStoreError("Sync legacy blob relocation failed") from exc
+                self.verify_blob(
+                    target_key,
+                    payload_hash=payload_hash,
+                    expected_size=expected_size,
+                )
+                return target_key
+        except LockAcquisitionError as exc:
+            raise SyncBlobStoreError("Sync legacy blob relocation lock is unavailable") from exc
 
     def read_blob(self, storage_key: str) -> bytes:
         """Read a committed blob by storage key after path-containment checks."""
@@ -178,10 +323,30 @@ def _sha256_file(path: Path) -> str:
     """Return the SHA-256 digest for a file without loading it all into memory."""
 
     hasher = hashlib.sha256()
-    with path.open("rb") as handle:
+    with _open_regular_file_no_follow(
+        path,
+        error_message="Sync blob path could not be opened safely",
+    ) as handle:
         while chunk := handle.read(STREAM_CHUNK_SIZE):
             hasher.update(chunk)
     return "sha256:" + hasher.hexdigest()
+
+
+def _open_regular_file_no_follow(path: Path, *, error_message: str) -> BinaryIO:
+    """Open a regular file without following a last-component symlink race."""
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise SyncBlobStoreError(error_message) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise SyncBlobStoreError(error_message)
+        return os.fdopen(descriptor, "rb")
+    except Exception:
+        os.close(descriptor)
+        raise
 
 
 def _hash_digest(value: str) -> str:
@@ -189,11 +354,19 @@ def _hash_digest(value: str) -> str:
     if not value.startswith(prefix) or len(value) != len(prefix) + 64:
         raise SyncBlobStoreError("payload_hash must be sha256:<64 hex chars>")
     digest = value[len(prefix) :]
-    try:
-        bytes.fromhex(digest)
-    except ValueError as exc:
-        raise SyncBlobStoreError("payload_hash digest must be hex") from exc
+    if any(character not in "0123456789abcdef" for character in digest):
+        raise SyncBlobStoreError("payload_hash digest must be lowercase hex")
     return digest
+
+
+def _storage_namespace_id(value: str) -> str:
+    if len(value) != 32 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise SyncBlobStoreError(
+            "storage_namespace_id must be 32 lowercase hexadecimal characters"
+        )
+    return value
 
 
 def _safe_segment(value: str, *, field_name: str) -> str:
@@ -238,6 +411,18 @@ def _chunk_temp_path(target: Path, *, chunk_index: int) -> Path:
         dir=target.parent,
         prefix=f"{chunk_index}.",
         suffix=".tmp",
+    )
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+    return temp_path
+
+
+def _relocation_temp_path(target: Path, *, digest: str, namespace: str) -> Path:
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        dir=target.parent,
+        prefix=f"{digest}.{namespace}.",
+        suffix=".relocating",
     )
     temp_path = Path(temp_file.name)
     temp_file.close()

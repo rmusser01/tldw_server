@@ -15,6 +15,8 @@ from .models import (
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncAttachmentRevisionBinding,
+    SyncAttachmentRevisionBindingCreate,
     SyncBackgroundDomainStatus,
     SyncBackgroundLease,
     SyncBackgroundLeaseCreate,
@@ -31,6 +33,7 @@ from .models import (
     SyncConflictCreate,
     SyncDataset,
     SyncDatasetCreate,
+    SyncDatasetStorageNamespace,
     SyncDevice,
     SyncDeviceAcknowledgmentSummary,
     SyncDeviceAuthorization,
@@ -792,6 +795,93 @@ class SyncV2Store:
         """Store or deduplicate an encrypted attachment through the DB layer."""
 
         return self.db.store_attachment(attachment)
+
+    def create_attachment_revision_binding(
+        self,
+        binding: SyncAttachmentRevisionBindingCreate,
+    ) -> SyncAttachmentRevisionBinding:
+        return self.db.create_attachment_revision_binding(binding)
+
+    def get_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+    ) -> SyncAttachmentRevisionBinding | None:
+        return self.db.get_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+        )
+
+    def list_unresolved_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        after_establishing_server_cursor: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        return self.db.list_unresolved_attachment_revision_bindings(
+            dataset_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            limit=limit,
+        )
+
+    def resolve_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        blob_id: str,
+    ) -> SyncAttachmentRevisionBinding:
+        return self.db.resolve_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            blob_id=blob_id,
+        )
+
+    def release_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        released_at: str,
+    ) -> SyncAttachmentRevisionBinding:
+        return self.db.release_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            released_at=released_at,
+        )
+
+    def get_or_create_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDatasetStorageNamespace:
+        return self.db.get_or_create_storage_namespace(
+            dataset_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def relocate_legacy_blob(
+        self,
+        blob_store: Any,
+        *,
+        dataset_id: str,
+        owner_user_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject:
+        return self.db.relocate_legacy_blob(
+            blob_store,
+            dataset_id=dataset_id,
+            owner_user_id=owner_user_id,
+            blob_id=blob_id,
+        )
 
     def create_blob_upload_session(
         self,

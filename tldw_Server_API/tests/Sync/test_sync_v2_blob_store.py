@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import tldw_Server_API.app.core.Sync.v2.blob_store as blob_store_module
 from tldw_Server_API.app.core.Sync.v2.blob_store import (
     LocalSyncBlobStore,
     SyncBlobStoreError,
@@ -200,3 +202,243 @@ def test_local_blob_store_rejects_bad_hashes_and_path_escape(tmp_path: Path):
 
     with pytest.raises(SyncBlobStoreError):
         store.resolve_storage_key("../outside")
+
+
+def test_storage_namespace_key_contains_only_opaque_namespace_and_digest(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"namespaced payload"
+    payload_hash = _sha256(payload)
+    namespace = "1" * 32
+    store.write_upload_chunk(
+        upload_id="upload-namespace",
+        chunk_index=0,
+        payload=payload,
+        expected_hash=payload_hash,
+    )
+
+    storage_key = store.commit_upload(
+        upload_id="upload-namespace",
+        payload_hash=payload_hash,
+        chunk_indexes=[0],
+        storage_namespace_id=namespace,
+    )
+
+    assert storage_key == f"blobs/v2/{namespace}/{payload_hash[7:]}.blob"
+    assert store.read_blob(storage_key) == payload
+    assert "dataset" not in storage_key
+    assert "attachment" not in storage_key
+    with pytest.raises(SyncBlobStoreError, match="storage_namespace_id"):
+        store.namespace_storage_key("../owner-dataset", payload_hash)
+    with pytest.raises(SyncBlobStoreError, match="lowercase"):
+        store.namespace_storage_key(namespace.upper().replace("1", "A"), payload_hash)
+    with pytest.raises(SyncBlobStoreError, match="lowercase"):
+        store.namespace_storage_key(namespace, "sha256:" + "A" * 64)
+
+
+def _legacy_blob(store: LocalSyncBlobStore, payload: bytes) -> tuple[str, str]:
+    payload_hash = _sha256(payload)
+    store.write_upload_chunk(
+        upload_id="legacy-upload",
+        chunk_index=0,
+        payload=payload,
+        expected_hash=payload_hash,
+    )
+    legacy_key = store.commit_upload(
+        upload_id="legacy-upload",
+        payload_hash=payload_hash,
+        chunk_indexes=[0],
+    )
+    return legacy_key, payload_hash
+
+
+def test_legacy_blob_relocation_verifies_copies_reverifies_and_keeps_global_key(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy shared bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "2" * 32
+
+    relocated_key = store.relocate_legacy_blob(
+        legacy_storage_key=legacy_key,
+        storage_namespace_id=namespace,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    )
+
+    assert relocated_key == store.namespace_storage_key(namespace, payload_hash)
+    assert store.read_blob(relocated_key) == payload
+    assert store.read_blob(legacy_key) == payload
+    assert store.resolve_storage_key(legacy_key).exists()
+
+
+def test_legacy_blob_relocation_is_idempotent_and_concurrent_safe(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy concurrent bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "3" * 32
+    target_key = store.namespace_storage_key(namespace, payload_hash)
+
+    def relocate() -> str:
+        return store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        keys = list(pool.map(lambda _index: relocate(), range(2)))
+
+    assert keys == [target_key, target_key]
+    assert store.read_blob(target_key) == payload
+    assert store.read_blob(legacy_key) == payload
+
+
+@pytest.mark.parametrize("failure", ["corrupt", "symlink"])
+def test_legacy_blob_relocation_fails_closed_for_invalid_existing_target(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy target bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "5" * 32
+    target_key = store.namespace_storage_key(namespace, payload_hash)
+    target = store.root / target_key
+    target.parent.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside-target.blob"
+    outside.write_bytes(b"outside must remain unchanged")
+    if failure == "corrupt":
+        target.write_bytes(b"corrupt target")
+    else:
+        target.symlink_to(outside)
+
+    with pytest.raises(SyncBlobStoreError):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert store.read_blob(legacy_key) == payload
+    assert outside.read_bytes() == b"outside must remain unchanged"
+    if failure == "corrupt":
+        assert target.read_bytes() == b"corrupt target"
+
+
+def test_legacy_blob_relocation_rejects_source_symlink_swap_after_path_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy race bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    legacy_path = store.resolve_storage_key(legacy_key)
+    outside = tmp_path / "outside-race.blob"
+    outside.write_bytes(payload)
+    original_temp_path = blob_store_module._relocation_temp_path
+
+    def swap_source_after_resolution(
+        target: Path,
+        *,
+        digest: str,
+        namespace: str,
+    ) -> Path:
+        temp_path = original_temp_path(target, digest=digest, namespace=namespace)
+        legacy_path.unlink()
+        legacy_path.symlink_to(outside)
+        return temp_path
+
+    monkeypatch.setattr(
+        blob_store_module,
+        "_relocation_temp_path",
+        swap_source_after_resolution,
+    )
+
+    with pytest.raises(SyncBlobStoreError, match="relocation"):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id="6" * 32,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    target_key = store.namespace_storage_key("6" * 32, payload_hash)
+    assert not (store.root / target_key).exists()
+    assert outside.read_bytes() == payload
+
+
+def test_legacy_blob_relocation_rejects_target_symlink_swap_during_reverification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy target race bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "7" * 32
+    target_key = store.namespace_storage_key(namespace, payload_hash)
+    target = store.root / target_key
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    outside = tmp_path / "outside-target-race.blob"
+    outside.write_bytes(payload)
+    original_hash = blob_store_module._sha256_file
+    swapped = False
+
+    def swap_target_before_hash(path: Path) -> str:
+        nonlocal swapped
+        if path == target and not swapped:
+            swapped = True
+            target.unlink()
+            target.symlink_to(outside)
+        return original_hash(path)
+
+    monkeypatch.setattr(blob_store_module, "_sha256_file", swap_target_before_hash)
+
+    with pytest.raises(SyncBlobStoreError):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert store.read_blob(legacy_key) == payload
+    assert outside.read_bytes() == payload
+
+
+@pytest.mark.parametrize("failure", ["missing", "corrupt", "symlink"])
+def test_legacy_blob_relocation_fails_closed_for_invalid_legacy_source(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy source bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    legacy_path = store.resolve_storage_key(legacy_key)
+    if failure == "missing":
+        legacy_path.unlink()
+    elif failure == "corrupt":
+        legacy_path.write_bytes(b"corrupt")
+    else:
+        outside = tmp_path / "outside.blob"
+        outside.write_bytes(payload)
+        legacy_path.unlink()
+        legacy_path.symlink_to(outside)
+
+    with pytest.raises(SyncBlobStoreError, match="legacy"):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id="4" * 32,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    target_key = store.namespace_storage_key("4" * 32, payload_hash)
+    assert not store.resolve_storage_key(target_key).exists()
