@@ -242,6 +242,7 @@ def _attachment_v2_dataset(
     *,
     state: str = "ready",
     bootstrap_id: str | None = None,
+    encryption_policy: str = "server_trusted_v1",
 ) -> SyncDataset:
     metadata: dict[str, Any] = {"notes_attachment_v2": {"state": state}}
     if bootstrap_id is not None:
@@ -250,7 +251,7 @@ def _attachment_v2_dataset(
         dataset_id="dataset-1",
         owner_user_id="user-1",
         scope_type="personal",
-        encryption_policy="server_trusted_v1",
+        encryption_policy=encryption_policy,
         domains=["notes.note", "attachment.ref"],
         workspace_id=None,
         metadata=metadata,
@@ -317,6 +318,43 @@ def test_attachment_ref_v2_restore_intent_requires_literal_true(
             "upsert",
             {"restore_intent": restore_intent},
         )
+
+
+@pytest.mark.parametrize(
+    "routing_metadata",
+    [
+        {"created_by": "forged-device"},
+        {"available": True},
+        {"resolved_blob_id": "private-blob-id"},
+        {"storage_status": "available"},
+        {"retention_released_at": ATTACHMENT_V2_TIMESTAMP},
+        {"arbitrary": "private-routing-value"},
+    ],
+)
+def test_attachment_ref_v2_routing_metadata_rejects_nonrouting_fields_safely(
+    routing_metadata: dict[str, object],
+) -> None:
+    contract = _attachment_ref_v2_module()
+
+    with pytest.raises(contract.AttachmentRefV2ValidationError) as exc_info:
+        contract.validate_attachment_ref_v2_routing_metadata(
+            "upsert",
+            routing_metadata,
+        )
+
+    assert str(exc_info.value) == (
+        "attachment.ref v2 routing metadata contains unsupported fields"
+    )
+    assert not any(str(value) in str(exc_info.value) for value in routing_metadata.values())
+
+
+def test_attachment_ref_v2_routing_metadata_allows_verified_bootstrap_keys() -> None:
+    contract = _attachment_ref_v2_module()
+
+    assert contract.validate_attachment_ref_v2_routing_metadata(
+        "upsert",
+        {"bootstrap_capture": True, "bootstrap_id": "bootstrap-1"},
+    ) == {"bootstrap_capture": True, "bootstrap_id": "bootstrap-1"}
 
 
 def test_attachment_ref_v2_canonical_object_hash_has_exact_vector() -> None:
@@ -549,7 +587,10 @@ def test_attachment_ref_v2_adapter_rejects_v1_v2_object_id_collision() -> None:
     outcome = AttachmentRefAdapter(v2_writes_enabled=True).evaluate_envelope(
         _attachment_v2_envelope(),
         dataset=_attachment_v2_dataset(),
-        context=SyncAdapterContext(prior_envelopes=(legacy,)),
+        context=SyncAdapterContext(
+            prior_envelopes=(legacy,),
+            supports_attachments=True,
+        ),
     )
 
     assert isinstance(outcome, AdapterConflict)
@@ -572,6 +613,38 @@ def test_attachment_ref_v2_writes_require_gate_and_ready_dataset(
     outcome = AttachmentRefAdapter(v2_writes_enabled=enabled).evaluate_envelope(
         _attachment_v2_envelope(),
         dataset=_attachment_v2_dataset(state=state),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "attachment_ref_v2_not_writable"
+
+
+def test_attachment_ref_v2_writes_require_generic_blob_transfer_gate() -> None:
+    from tldw_Server_API.app.core.Sync.v2.adapters import (
+        AdapterRejected,
+        AttachmentRefAdapter,
+        SyncAdapterContext,
+    )
+
+    outcome = AttachmentRefAdapter(v2_writes_enabled=True).evaluate_envelope(
+        _attachment_v2_envelope(),
+        dataset=_attachment_v2_dataset(),
+        context=SyncAdapterContext(supports_attachments=False),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "attachment_ref_v2_not_writable"
+
+
+def test_attachment_ref_v2_writes_require_server_trusted_encryption_policy() -> None:
+    from tldw_Server_API.app.core.Sync.v2.adapters import (
+        AdapterRejected,
+        AttachmentRefAdapter,
+    )
+
+    outcome = AttachmentRefAdapter(v2_writes_enabled=True).evaluate_envelope(
+        _attachment_v2_envelope(),
+        dataset=_attachment_v2_dataset(encryption_policy="client_private_v1"),
     )
 
     assert isinstance(outcome, AdapterRejected)

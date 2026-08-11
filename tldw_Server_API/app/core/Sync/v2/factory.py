@@ -42,8 +42,6 @@ from .models import (
     SOURCE_CACHE_SYNC_DOMAINS,
     WORKSPACE_SYNC_DOMAINS,
     SyncDomain,
-    sync_v2_dataset_writable_adapter_versions,
-    sync_v2_server_supported_adapter_versions,
 )
 from .notes_link_bootstrap import NotesLinkBootstrapper
 from .notes_organization_bootstrap import NotesOrganizationBootstrapper
@@ -78,24 +76,6 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [NotesOrganizationDomainAdapter(domain=domain) for domain in NOTES_ORGANIZATION_DOMAINS]
         + [NotesLinkDomainAdapter()]
     )
-
-
-def sync_v2_adapter_version_capabilities(
-    dataset_metadata: Mapping[str, object] | None = None,
-) -> dict[str, dict[SyncDomain, list[int]]]:
-    """Return supported and currently writable adapter versions separately."""
-
-    enabled = _sync_v2_bool_env(
-        "SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC",
-        default=False,
-    )
-    return {
-        "supported_adapter_versions": sync_v2_server_supported_adapter_versions(),
-        "writable_adapter_versions": sync_v2_dataset_writable_adapter_versions(
-            dataset_metadata,
-            notes_attachment_sync_enabled=enabled,
-        ),
-    }
 
 
 def sync_v2_service_for_user(user_id: str) -> SyncV2Service:

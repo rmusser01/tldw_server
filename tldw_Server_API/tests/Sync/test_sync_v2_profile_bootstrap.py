@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_ORGANIZATION_DOMAINS,
     SyncConflictCreate,
     SyncDataset,
+    SyncDatasetCreate,
     SyncEnvelopeCreate,
 )
 from tldw_Server_API.app.core.Sync.v2.security import (
@@ -168,6 +169,40 @@ def test_profile_is_read_only_when_no_bootstrap_exists(tmp_path: Path) -> None:
     assert store.list_devices_for_user("user-1") == []
 
 
+def test_profile_capabilities_are_bound_to_active_ready_dataset(tmp_path: Path) -> None:
+    service, store = _service(tmp_path)
+    service.settings = replace(service.settings, supports_attachments=True)
+    service.adapters.register(AttachmentRefAdapter(v2_writes_enabled=True))
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-ready",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_attachment_v2": {"state": "ready"},
+            },
+        )
+    )
+
+    profile = service.profile(user_id="user-1")
+
+    assert profile.active_dataset_id == "dataset-ready"
+    assert profile.capabilities.writable_adapter_versions["notes.note"] == [1]
+    assert profile.capabilities.writable_adapter_versions["attachment.ref"] == [2]
+
+    bootstrap = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=["notes.note", "attachment.ref"],
+    )
+    assert bootstrap.capabilities.writable_adapter_versions["attachment.ref"] == [2]
+
+
 def test_bootstrap_creates_default_dataset_and_is_idempotent(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
 
@@ -286,6 +321,50 @@ def test_bootstrap_adapter_map_omission_remains_v1_only(tmp_path: Path) -> None:
 
     assert result.accepted == []
     assert result.rejected[0].error_code == "device_adapter_version_not_advertised"
+
+
+def test_partial_bootstrap_adapter_map_defaults_omitted_domain_for_push(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    request = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["notes.note", "attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        }
+    )
+
+    profile = service.bootstrap_profile(
+        user_id="user-1",
+        mode=request.mode,
+        device_id=request.device_id,
+        client_instance=request.client_instance,
+        requested_domains=request.requested_domains,
+    )
+
+    stored = store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [2],
+    }
+    assert profile.active_dataset_id is not None
+    result = service.push(
+        user_id="user-1",
+        dataset_id=profile.active_dataset_id,
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                dataset_id=profile.active_dataset_id,
+                device_id="device-1",
+            )
+        ],
+    )
+
+    assert len(result.accepted) == 1
+    assert result.rejected == []
 
 
 def test_bootstrap_supports_server_frontend_with_generated_device_id(tmp_path: Path) -> None:

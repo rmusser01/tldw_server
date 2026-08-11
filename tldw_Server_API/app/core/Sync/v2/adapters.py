@@ -21,6 +21,7 @@ from .models import (
     SyncDomain,
     SyncEnvelope,
     SyncEnvelopeCreate,
+    sync_v2_attachment_ref_v2_is_writable,
 )
 
 ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS: frozenset[str] = frozenset(
@@ -132,6 +133,7 @@ class SyncAdapterContext:
     attachment_ref_bootstrap_id: str | None = None
     bootstrap_relationship_verifier: BootstrapRelationshipVerifier | None = None
     bootstrap_relationship_absence_verifier: BootstrapRelationshipVerifier | None = None
+    supports_attachments: bool = False
 
 
 class SyncDomainAdapter(Protocol):
@@ -212,9 +214,12 @@ class AttachmentRefAdapter:
             envelope,
             context,
         )
-        if not trusted_bootstrap and not _attachment_ref_v2_is_writable(
+        if not trusted_bootstrap and not sync_v2_attachment_ref_v2_is_writable(
             dataset,
-            enabled=self.v2_writes_enabled,
+            notes_attachment_sync_enabled=self.v2_writes_enabled,
+            supports_attachments=(
+                context.supports_attachments if context is not None else False
+            ),
         ):
             return AdapterRejected(
                 client_envelope_id=envelope.client_envelope_id,
@@ -355,22 +360,6 @@ def _evaluate_attachment_ref_v1(
             "conflicting_payload_hash": _attachment_ref_hash(conflicting),
             "conflicting_envelope_id": conflicting.client_envelope_id,
         },
-    )
-
-
-def _attachment_ref_v2_is_writable(
-    dataset: SyncDataset,
-    *,
-    enabled: bool,
-) -> bool:
-    state = dataset.metadata.get("notes_attachment_v2")
-    return bool(
-        enabled
-        and isinstance(state, Mapping)
-        and state.get("state") == "ready"
-        and "notes.note" in dataset.domains
-        and "attachment.ref" in dataset.domains
-        and dataset.encryption_policy == "server_trusted_v1"
     )
 
 

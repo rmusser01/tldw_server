@@ -87,6 +87,7 @@ from .models import (
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
     client_private_server_frontend_limitation_warning,
+    normalize_supported_adapter_versions,
     sync_v2_dataset_writable_adapter_versions,
     sync_v2_domain_schemas,
     sync_v2_server_supported_adapter_versions,
@@ -179,6 +180,90 @@ def _device_supports_adapter_version(
         and version == adapter_version
         for version in versions
     )
+
+
+def _normalize_device_capability_patch(
+    existing: Mapping[str, object],
+    merged: dict[str, object],
+    *,
+    patch: Mapping[str, object],
+) -> dict[str, object]:
+    """Protect negotiated adapter versions while merging ordinary capabilities."""
+
+    existing_versions = existing.get("supported_adapter_versions")
+    patch_versions = patch.get("supported_adapter_versions")
+    patch_requested = patch.get("requested_domains")
+    has_version_patch = "supported_adapter_versions" in patch
+    has_requested_patch = "requested_domains" in patch
+    if not has_version_patch and not has_requested_patch:
+        return merged
+    if has_version_patch and patch_versions is None:
+        raise SyncStoreError("Sync device adapter version capabilities are invalid")
+
+    existing_requested_raw = existing.get("requested_domains")
+    existing_requested = (
+        [item for item in existing_requested_raw if isinstance(item, str)]
+        if isinstance(existing_requested_raw, Sequence)
+        and not isinstance(existing_requested_raw, (str, bytes, bytearray))
+        else []
+    )
+    if isinstance(existing_versions, Mapping):
+        existing_requested.extend(
+            key for key in existing_versions if isinstance(key, str)
+        )
+    elif existing_requested_raw is None:
+        existing_requested = list(M1_SYNC_DOMAINS)
+        existing_supported = existing.get("supported_domains")
+        if isinstance(existing_supported, list):
+            supported = {
+                item for item in existing_supported if isinstance(item, str)
+            }
+            existing_requested = [
+                domain for domain in existing_requested if domain in supported
+            ]
+    requested = list(dict.fromkeys(existing_requested))
+    if patch_requested is not None:
+        if not isinstance(patch_requested, Sequence) or isinstance(
+            patch_requested,
+            (str, bytes, bytearray),
+        ):
+            raise SyncStoreError("Sync device adapter version capabilities are invalid")
+        if any(not isinstance(item, str) for item in patch_requested):
+            raise SyncStoreError("Sync device adapter version capabilities are invalid")
+        requested.extend(item for item in patch_requested if isinstance(item, str))
+    if isinstance(patch_versions, Mapping):
+        requested.extend(key for key in patch_versions if isinstance(key, str))
+    requested = list(dict.fromkeys(requested))
+
+    try:
+        prior = normalize_supported_adapter_versions(
+            existing_versions,
+            requested_domains=existing_requested,
+        )
+        normalized_patch = normalize_supported_adapter_versions(
+            patch_versions,
+            requested_domains=requested,
+        )
+    except ValueError as exc:
+        raise SyncStoreError(
+            "Sync device adapter version capabilities are invalid"
+        ) from exc
+
+    candidate = dict(prior)
+    for domain in requested:
+        candidate.setdefault(domain, [1])
+    if isinstance(patch_versions, Mapping):
+        for domain in patch_versions:
+            candidate[domain] = normalized_patch[domain]
+    for domain, versions in prior.items():
+        if not set(versions).issubset(candidate.get(domain, [])):
+            raise SyncStoreError(
+                "Sync device adapter version capabilities cannot remove active versions"
+            )
+
+    merged["requested_domains"] = requested
+    merged["supported_adapter_versions"] = candidate
+    return merged
 
 
 @dataclass(frozen=True, slots=True)
@@ -649,16 +734,16 @@ class SyncV2Service:
     ) -> SyncV2Capabilities:
         """Return capabilities, optionally bound to one authorized dataset."""
 
-        dataset_metadata: Mapping[str, object] | None = None
+        dataset: SyncDataset | None = None
         if dataset_id is not None:
             if user_id is None:
                 raise SyncStoreError(
                     "Sync dataset was not found or is not accessible"
                 )
-            dataset_metadata = self._require_dataset_access(
+            dataset = self._require_dataset_access(
                 user_id=user_id,
                 dataset_id=dataset_id,
-            ).metadata
+            )
         try:
             attachment_adapter = self.adapters.get("attachment.ref")
         except KeyError:
@@ -709,8 +794,9 @@ class SyncV2Service:
             domain_schemas=sync_v2_domain_schemas(),
             supported_adapter_versions=sync_v2_server_supported_adapter_versions(),
             writable_adapter_versions=sync_v2_dataset_writable_adapter_versions(
-                dataset_metadata,
+                dataset,
                 notes_attachment_sync_enabled=attachment_v2_writes_enabled,
+                supports_attachments=self.settings.supports_attachments,
             ),
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
@@ -731,6 +817,30 @@ class SyncV2Service:
     ) -> SyncDeviceRegistration:
         resolved_device_id = device_id or self.id_factory("device")
         _require_client_device_id(resolved_device_id)
+        updated_capabilities = dict(capabilities or {})
+        existing = self.store.get_device(user_id, resolved_device_id)
+        if existing is not None and existing.status == "active":
+            negotiation_patch = dict(updated_capabilities)
+            if (
+                "supported_adapter_versions" not in negotiation_patch
+                and "supported_adapter_versions" in existing.capabilities
+            ):
+                negotiation_patch["supported_adapter_versions"] = (
+                    existing.capabilities["supported_adapter_versions"]
+                )
+            if (
+                "requested_domains" not in negotiation_patch
+                and "requested_domains" in existing.capabilities
+            ):
+                negotiation_patch["requested_domains"] = existing.capabilities[
+                    "requested_domains"
+                ]
+            if negotiation_patch:
+                updated_capabilities = _normalize_device_capability_patch(
+                    existing.capabilities,
+                    updated_capabilities,
+                    patch=negotiation_patch,
+                )
         device = self.store.upsert_device(
             SyncDeviceUpsert(
                 device_id=resolved_device_id,
@@ -738,7 +848,7 @@ class SyncV2Service:
                 display_name=display_name,
                 client_type=client_type,
                 client_version=client_version,
-                capabilities=dict(capabilities or {}),
+                capabilities=updated_capabilities,
             )
         )
         return SyncDeviceRegistration(device=device, server_capabilities=self.capabilities())
@@ -771,6 +881,14 @@ class SyncV2Service:
         existing = self.store.get_device(user_id, device_id)
         if existing is None:
             raise SyncStoreError("Sync device was not found or is not accessible")
+        updated_capabilities = dict(existing.capabilities)
+        if capabilities is not None:
+            updated_capabilities.update(capabilities)
+            updated_capabilities = _normalize_device_capability_patch(
+                existing.capabilities,
+                updated_capabilities,
+                patch=capabilities,
+            )
         return self.store.upsert_device(
             SyncDeviceUpsert(
                 device_id=existing.device_id,
@@ -782,11 +900,7 @@ class SyncV2Service:
                     if client_version is not None
                     else existing.client_version
                 ),
-                capabilities=(
-                    dict(capabilities)
-                    if capabilities is not None
-                    else dict(existing.capabilities)
-                ),
+                capabilities=updated_capabilities,
                 status=existing.status,
                 user_label=user_label if user_label is not None else existing.user_label,
                 authorized_at=existing.authorized_at,
@@ -1385,6 +1499,7 @@ class SyncV2Service:
         reserved_metadata = {
             "notes_organization_v1",
             "notes_link_v1",
+            "notes_attachment_v2",
             "default_personal",
             "client_family",
         }
@@ -3599,6 +3714,12 @@ class SyncV2Service:
                 list_heads=lambda domain: self._list_current_heads_for_adapter(
                     dataset.dataset_id, domain
                 ),
+                supports_attachments=self.settings.supports_attachments,
+            )
+        else:
+            context = replace(
+                context,
+                supports_attachments=self.settings.supports_attachments,
             )
         adapter = self.adapters.get(envelope.domain)
         return _call_adapter_evaluate(adapter, envelope, dataset=dataset, context=context)

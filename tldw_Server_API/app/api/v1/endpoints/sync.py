@@ -273,6 +273,7 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             or "requested unsupported domains" in lowered
             or "client_family" in lowered
             or "client_profile_id" in lowered
+            or "adapter version capabilities" in lowered
             or "key recovery bundle" in lowered
             or "key rotation" in lowered
             or "wrapping metadata" in lowered

@@ -41,6 +41,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    EncryptionPolicy,
     SyncConflict,
     SyncConflictCreate,
     SyncDataset,
@@ -940,68 +941,69 @@ def test_attachment_ref_v2_rollout_gate_can_be_enabled_explicitly(
     assert adapter.v2_writes_enabled is True
 
 
-@pytest.mark.parametrize(
-    ("gate_value", "state", "expected"),
-    [
-        (None, "ready", []),
-        ("true", "initializing", []),
-        ("true", "failed", []),
-        ("true", "ready", [2]),
-    ],
-)
-def test_attachment_ref_adapter_version_capabilities_require_gate_and_readiness(
-    monkeypatch: pytest.MonkeyPatch,
-    gate_value: str | None,
-    state: str,
-    expected: list[int],
-) -> None:
-    from tldw_Server_API.app.core.Sync.v2.factory import (
-        sync_v2_adapter_version_capabilities,
-    )
-
-    if gate_value is None:
-        monkeypatch.delenv("SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC", raising=False)
-    else:
-        monkeypatch.setenv("SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC", gate_value)
-
-    capabilities = sync_v2_adapter_version_capabilities(
-        {"notes_attachment_v2": {"state": state}}
-    )
-    assert capabilities["supported_adapter_versions"]["attachment.ref"] == [1, 2]
-    assert capabilities["writable_adapter_versions"]["attachment.ref"] == expected
-
-
 def test_core_capabilities_without_dataset_are_conservative(
     sync_service: SyncV2Service,
 ) -> None:
     capabilities = sync_service.capabilities()
 
     assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
-    assert capabilities.writable_adapter_versions["attachment.ref"] == []
+    assert all(not versions for versions in capabilities.writable_adapter_versions.values())
+
+
+def test_core_capabilities_only_report_enrolled_domains_as_writable(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    capabilities = sync_service.capabilities(
+        user_id="user-1",
+        dataset_id="dataset-1",
+    )
+
+    assert capabilities.writable_adapter_versions["notes.note"] == [1]
+    assert capabilities.writable_adapter_versions["chat.conversation"] == []
+    assert capabilities.writable_adapter_versions["media.item"] == []
 
 
 @pytest.mark.parametrize(
-    ("gate_enabled", "state", "expected"),
+    ("gate_enabled", "blob_enabled", "state", "domains", "policy", "expected"),
     [
-        (False, "ready", []),
-        (True, "initializing", []),
-        (True, "ready", [2]),
+        (False, True, "ready", ["notes.note", "attachment.ref"], "server_trusted_v1", []),
+        (True, False, "ready", ["notes.note", "attachment.ref"], "server_trusted_v1", []),
+        (True, True, "initializing", ["notes.note", "attachment.ref"], "server_trusted_v1", []),
+        (True, True, "ready", ["attachment.ref"], "server_trusted_v1", []),
+        (True, True, "ready", ["notes.note", "attachment.ref"], "server_trusted_v1", [2]),
     ],
 )
 def test_core_capabilities_bind_attachment_writability_to_selected_dataset(
     sync_service: SyncV2Service,
     gate_enabled: bool,
+    blob_enabled: bool,
     state: str,
+    domains: list[SyncDomain],
+    policy: EncryptionPolicy,
     expected: list[int],
 ) -> None:
+    sync_service.settings = replace(
+        sync_service.settings,
+        supports_attachments=blob_enabled,
+    )
     sync_service.adapters.register(
         AttachmentRefAdapter(v2_writes_enabled=gate_enabled)
     )
-    sync_service.enroll_dataset(
-        user_id="user-1",
-        dataset_id="dataset-1",
-        domains=["notes.note", "attachment.ref"],
-        metadata={"notes_attachment_v2": {"state": state}},
+    sync_service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy=policy,
+            domains=domains,
+            metadata={"notes_attachment_v2": {"state": state}},
+        )
     )
 
     capabilities = sync_service.capabilities(
@@ -1053,6 +1055,140 @@ def test_device_registration_rejects_cross_user_device_takeover(sync_service: Sy
             client_type="chatbook",
             device_id="shared-device",
         )
+
+
+def test_active_device_registration_cannot_remove_advertised_adapter_versions(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-new",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        },
+    )
+
+    with pytest.raises(SyncStoreError, match="adapter version"):
+        sync_service.register_device(
+            user_id="user-1",
+            display_name="Laptop refreshed",
+            client_type="chatbook",
+            device_id="device-new",
+            capabilities={
+                "requested_domains": ["notes.note"],
+                "supported_adapter_versions": {"notes.note": [2]},
+            },
+        )
+
+    stored = sync_service.store.get_device("user-1", "device-new")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1, 2]
+    }
+
+
+def test_device_capability_patch_merges_and_adds_adapter_versions_monotonically(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-new",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1]},
+            "theme": "dark",
+        },
+    )
+
+    updated = sync_service.update_device(
+        user_id="user-1",
+        device_id="device-new",
+        capabilities={
+            "supported_adapter_versions": {
+                "notes.note": [1, 2],
+                "attachment.ref": [2],
+            },
+            "telemetry": True,
+        },
+    )
+
+    assert updated.capabilities == {
+        "requested_domains": ["notes.note", "attachment.ref"],
+        "supported_adapter_versions": {
+            "notes.note": [1, 2],
+            "attachment.ref": [2],
+        },
+        "theme": "dark",
+        "telemetry": True,
+    }
+
+
+def test_legacy_device_capability_patch_preserves_implicit_v1_versions(
+    sync_service: SyncV2Service,
+) -> None:
+    with pytest.raises(SyncStoreError, match="adapter version"):
+        sync_service.update_device(
+            user_id="user-1",
+            device_id="device-1",
+            capabilities={
+                "supported_adapter_versions": {"attachment.ref": [2]}
+            },
+        )
+
+    updated = sync_service.update_device(
+        user_id="user-1",
+        device_id="device-1",
+        capabilities={
+            "supported_adapter_versions": {"attachment.ref": [1, 2]}
+        },
+    )
+
+    assert updated.capabilities["requested_domains"] == list(M1_SYNC_DOMAINS)
+    assert updated.capabilities["supported_adapter_versions"] == {
+        **{domain: [1] for domain in M1_SYNC_DOMAINS},
+        "attachment.ref": [1, 2],
+    }
+
+
+@pytest.mark.parametrize(
+    "version_map",
+    [
+        {"notes.note": [2]},
+        {"attachment.ref": [True]},
+        None,
+    ],
+)
+def test_device_capability_patch_rejects_removal_or_malformed_adapter_map(
+    sync_service: SyncV2Service,
+    version_map: dict[str, list[object]] | None,
+) -> None:
+    original = sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1]},
+            "theme": "dark",
+        },
+    ).device
+
+    with pytest.raises(SyncStoreError, match="adapter version"):
+        sync_service.update_device(
+            user_id="user-1",
+            device_id="device-1",
+            capabilities={"supported_adapter_versions": version_map},
+        )
+
+    stored = sync_service.store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities == original.capabilities
 
 
 def test_pending_device_cannot_push_until_authorized(sync_service: SyncV2Service):
@@ -2320,9 +2456,9 @@ def test_push_rejects_version_not_requested_for_envelope_domain(
     )
     sync_service.register_device(
         user_id="user-1",
-        display_name="device-1",
+        display_name="device-new",
         client_type="chatbook",
-        device_id="device-1",
+        device_id="device-new",
         capabilities={"supported_adapter_versions": {"attachment.ref": [2]}},
     )
     sync_service.enroll_dataset(
@@ -2334,8 +2470,8 @@ def test_push_rejects_version_not_requested_for_envelope_domain(
     result = sync_service.push(
         user_id="user-1",
         dataset_id="dataset-1",
-        device_id="device-1",
-        envelopes=[_envelope(adapter_version=2)],
+        device_id="device-new",
+        envelopes=[_envelope(adapter_version=2, device_id="device-new")],
     )
 
     assert result.accepted == []

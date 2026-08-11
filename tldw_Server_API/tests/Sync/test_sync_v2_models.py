@@ -1,5 +1,5 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from tldw_Server_API.app.api.v1.endpoints.sync import _core_envelope_from_api
 from tldw_Server_API.app.api.v1.schemas import sync_v2_models as api_sync_models
@@ -1523,7 +1523,7 @@ def test_capabilities_advertise_supported_and_writable_adapter_versions_separate
     assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
     assert capabilities.writable_adapter_versions["attachment.ref"] == []
     assert capabilities.supported_adapter_versions["notes.note"] == [1]
-    assert capabilities.writable_adapter_versions["notes.note"] == [1]
+    assert capabilities.writable_adapter_versions["notes.note"] == []
 
 
 def test_device_adapter_version_omission_means_version_one() -> None:
@@ -1560,6 +1560,38 @@ def test_profile_bootstrap_adapter_version_omission_means_version_one() -> None:
         "notes.note": [1],
         "attachment.ref": [1],
     }
+
+
+@pytest.mark.parametrize(
+    ("request_model", "version_container"),
+    [
+        (api_sync_models.SyncDeviceRegisterRequest, "capabilities"),
+        (api_sync_models.SyncProfileBootstrapRequest, "client_instance"),
+    ],
+)
+def test_partial_adapter_version_map_defaults_omitted_requested_domains_to_v1(
+    request_model: type[BaseModel],
+    version_container: str,
+) -> None:
+    payload: dict[str, object] = {
+        "supported_adapter_versions": {"attachment.ref": [2]},
+    }
+    if request_model is api_sync_models.SyncDeviceRegisterRequest:
+        payload.update(
+            display_name="Versioned device",
+            supported_domains=["notes.note", "attachment.ref"],
+        )
+    else:
+        payload.update(
+            mode="offline_sync",
+            requested_domains=["notes.note", "attachment.ref"],
+        )
+
+    request = request_model.model_validate(payload)
+
+    expected = {"notes.note": [1], "attachment.ref": [2]}
+    assert request.supported_adapter_versions == expected
+    assert getattr(request, version_container)["supported_adapter_versions"] == expected
 
 
 @pytest.mark.parametrize(
@@ -1651,6 +1683,11 @@ def test_attachment_ref_v2_api_envelope_carries_adapter_version() -> None:
 
 
 def test_attachment_ref_v2_capability_schema_advertises_strict_tombstones() -> None:
+    from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+        AttachmentRefV2Payload,
+        AttachmentRefV2TombstonePayload,
+    )
+
     schema = SyncCapabilitiesResponse().domain_schemas["attachment.ref"]
 
     assert schema["tombstone"]["required"] == [
@@ -1662,3 +1699,16 @@ def test_attachment_ref_v2_capability_schema_advertises_strict_tombstones() -> N
         "max_length": 256,
     }
     assert schema["tombstone"]["additional_properties"] is False
+    for operation, model in (
+        ("upsert", AttachmentRefV2Payload),
+        ("tombstone", AttachmentRefV2TombstonePayload),
+    ):
+        generated = model.model_json_schema()
+        advertised = schema[operation]
+        assert advertised["required"] == generated["required"]
+        assert advertised["additional_properties"] is generated["additionalProperties"]
+        for field_name, field_schema in generated["properties"].items():
+            if "minLength" in field_schema:
+                assert advertised["properties"][field_name]["min_length"] == field_schema[
+                    "minLength"
+                ]

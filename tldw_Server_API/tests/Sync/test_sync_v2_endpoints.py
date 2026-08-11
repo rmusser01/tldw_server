@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
+    SyncDatasetCreate,
     SyncDeviceUpsert,
     SyncEnvelope,
     SyncEnvelopeCreate,
@@ -300,15 +301,19 @@ def test_capabilities_endpoint_reports_selected_dataset_writable_versions(
     state: str,
     expected: list[int],
 ) -> None:
-    service = _build_service(tmp_path)
+    service = _build_service(tmp_path, supports_attachments=True)
     service.adapters.register(
         AttachmentRefAdapter(v2_writes_enabled=gate_enabled)
     )
-    service.enroll_dataset(
-        user_id="user-1",
-        dataset_id="dataset-1",
-        domains=["notes.note", "attachment.ref"],
-        metadata={"notes_attachment_v2": {"state": state}},
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={"notes_attachment_v2": {"state": state}},
+        )
     )
 
     response = _client_for_service(service).get(
@@ -325,11 +330,15 @@ def test_capabilities_endpoint_hides_unauthorized_selected_dataset(
     tmp_path: Path,
 ) -> None:
     service = _build_service(tmp_path)
-    service.enroll_dataset(
-        user_id="user-2",
-        dataset_id="dataset-private",
-        domains=["notes.note", "attachment.ref"],
-        metadata={"notes_attachment_v2": {"state": "ready"}},
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-private",
+            owner_user_id="user-2",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={"notes_attachment_v2": {"state": "ready"}},
+        )
     )
 
     response = _client_for_service(service).get(
@@ -926,6 +935,92 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
     assert enrolled.json()["metadata"] == {"label": "internal-caller"}
 
 
+def test_device_patch_rejects_adapter_version_removal_without_mutating_registration(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    registered = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "supported_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+            "capabilities": {"theme": "dark"},
+        },
+    )
+    assert registered.status_code == 200
+
+    response = client.patch(
+        "/api/v1/sync/devices/device-1",
+        json={
+            "capabilities": {
+                "supported_adapter_versions": {"notes.note": [2]},
+                "theme": "light",
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_validation_failed",
+        "message": "Sync request parameters are invalid.",
+    }
+    stored = sync_service.store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1, 2]
+    }
+    assert stored.capabilities["theme"] == "dark"
+
+
+def test_partial_registration_adapter_map_defaults_omitted_domain_for_push(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    registered = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "supported_domains": ["notes.note", "attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        },
+    )
+    enrolled = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": ["notes.note"],
+            "encryption_policy": "server_trusted_v1",
+        },
+    )
+    assert registered.status_code == 200
+    assert enrolled.status_code == 200
+
+    stored = sync_service.store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [2],
+    }
+    pushed = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "base_server_cursor": 0,
+            "envelopes": [_note_envelope_json()],
+        },
+    )
+
+    assert pushed.status_code == 200
+    assert [item["client_envelope_id"] for item in pushed.json()["accepted"]] == [
+        "env-note"
+    ]
+    assert pushed.json()["rejected"] == []
+
+
 def test_dataset_enroll_endpoint_rejects_and_never_echoes_forged_server_metadata(
     client: TestClient,
     sync_service: SyncV2Service,
@@ -958,6 +1053,35 @@ def test_dataset_enroll_endpoint_rejects_and_never_echoes_forged_server_metadata
         "message": "Reserved Sync dataset capabilities require profile bootstrap.",
     }
     assert "client-forged" not in response.text
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+
+
+def test_dataset_enroll_endpoint_rejects_forged_attachment_readiness(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    response = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "forged-attachment-ready",
+            "scope_type": "personal",
+            "domains": ["notes.note", "attachment.ref"],
+            "encryption_policy": "server_trusted_v1",
+            "metadata": {
+                "notes_attachment_v2": {
+                    "state": "ready",
+                    "bootstrap_id": "private-bootstrap-id",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_reserved_dataset_enrollment",
+        "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+    }
+    assert "private-bootstrap-id" not in response.text
     assert sync_service.store.list_datasets_for_user("user-1") == []
 
 

@@ -202,8 +202,47 @@ SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
 ]
 
 
+def _discoverable_pydantic_object_schema(model: type[Any]) -> dict[str, object]:
+    """Translate a Pydantic object schema into the Sync discovery vocabulary."""
+
+    generated = model.model_json_schema()
+    properties: dict[str, object] = {}
+    key_map = {"minLength": "min_length", "maxLength": "max_length"}
+    for field_name, raw_field in generated["properties"].items():
+        field_schema = {
+            key_map.get(key, key): value
+            for key, value in raw_field.items()
+            if key not in {"title", "default", "const", "anyOf"}
+        }
+        if "const" in raw_field:
+            field_schema["enum"] = [raw_field["const"]]
+        if "anyOf" in raw_field:
+            variants = raw_field["anyOf"]
+            field_schema["type"] = [variant["type"] for variant in variants]
+            for variant in variants:
+                if "maxLength" in variant:
+                    field_schema["max_length"] = variant["maxLength"]
+        if field_name in {"attachment_id", "parent_object_id"}:
+            field_schema["canonical_lowercase"] = True
+        elif field_name == "blob_hash":
+            field_schema.update(format="sha256", canonical_lowercase=True)
+        elif field_name in {"created_at", "last_modified", "deleted_at"}:
+            field_schema["format"] = "date-time"
+        properties[field_name] = field_schema
+    return {
+        "required": generated["required"],
+        "properties": properties,
+        "additional_properties": generated["additionalProperties"],
+    }
+
+
 def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     """Return client-discoverable payload contracts for versioned Sync domains."""
+
+    from .attachment_refs_v2 import (
+        AttachmentRefV2Payload,
+        AttachmentRefV2TombstonePayload,
+    )
 
     keyword_link_schema = {
         "required": ["subject_type", "subject_id", "keyword_sync_id"],
@@ -271,65 +310,18 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "distinct_endpoints": True,
         "undirected_endpoint_order": "source_note_id <= target_note_id",
     }
-    attachment_ref_required = [
-        "attachment_id",
-        "parent_domain",
-        "parent_object_id",
-        "file_name",
-        "original_file_name",
-        "content_type",
-        "size_bytes",
-        "blob_hash",
-        "created_at",
-        "last_modified",
-        "created_by",
-    ]
-    attachment_ref_properties = {
-        "attachment_id": {
-            "type": "string",
-            "format": "uuid4",
-            "canonical_lowercase": True,
-        },
-        "parent_domain": {"enum": ["notes.note"]},
-        "parent_object_id": {
-            "type": "string",
-            "format": "uuid4",
-            "canonical_lowercase": True,
-        },
-        "file_name": {"type": "string"},
-        "original_file_name": {"type": "string"},
-        "content_type": {"type": "string"},
-        "size_bytes": {"type": "integer", "minimum": 1},
-        "blob_hash": {
-            "type": "string",
-            "format": "sha256",
-            "canonical_lowercase": True,
-        },
-        "created_at": {"type": "string", "format": "date-time"},
-        "last_modified": {"type": "string", "format": "date-time"},
-        "created_by": {"type": "string"},
-    }
+    attachment_ref_upsert = _discoverable_pydantic_object_schema(
+        AttachmentRefV2Payload
+    )
+    attachment_ref_tombstone = _discoverable_pydantic_object_schema(
+        AttachmentRefV2TombstonePayload
+    )
     return {
         "attachment.ref": {
             "schema_version": 2,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
-            "upsert": {
-                "required": attachment_ref_required,
-                "properties": attachment_ref_properties,
-                "additional_properties": False,
-            },
-            "tombstone": {
-                "required": [*attachment_ref_required, "deleted_at"],
-                "properties": {
-                    **attachment_ref_properties,
-                    "deleted_at": {"type": "string", "format": "date-time"},
-                    "reason": {
-                        "type": ["string", "null"],
-                        "max_length": 256,
-                    },
-                },
-                "additional_properties": False,
-            },
+            "upsert": attachment_ref_upsert,
+            "tombstone": attachment_ref_tombstone,
             "restore": {
                 "operation": "upsert",
                 "routing_metadata": {"restore_intent": True},
@@ -452,25 +444,51 @@ def sync_v2_server_supported_adapter_versions() -> dict[SyncDomain, list[int]]:
 
 
 def sync_v2_dataset_writable_adapter_versions(
-    dataset_metadata: Mapping[str, object] | None = None,
+    dataset: SyncDataset | None = None,
     *,
     notes_attachment_sync_enabled: bool = False,
+    supports_attachments: bool = False,
 ) -> dict[SyncDomain, list[int]]:
-    """Return versions writable for a dataset under the attachment rollout gate."""
+    """Return versions writable under one authoritative dataset/settings gate."""
 
     versions: dict[SyncDomain, list[int]] = {
-        domain: ([] if domain == "attachment.ref" else [1])
+        domain: []
         for domain in SYNC_V2_SUPPORTED_DOMAINS
     }
-    metadata = dataset_metadata or {}
-    attachment_state = metadata.get("notes_attachment_v2")
-    if (
-        notes_attachment_sync_enabled
-        and isinstance(attachment_state, Mapping)
-        and attachment_state.get("state") == "ready"
+    if dataset is None:
+        return versions
+    enrolled = set(dataset.domains)
+    for domain in SYNC_V2_SUPPORTED_DOMAINS:
+        if domain in enrolled and domain != "attachment.ref":
+            versions[domain] = [1]
+    if sync_v2_attachment_ref_v2_is_writable(
+        dataset,
+        notes_attachment_sync_enabled=notes_attachment_sync_enabled,
+        supports_attachments=supports_attachments,
     ):
         versions["attachment.ref"] = [2]
     return versions
+
+
+def sync_v2_attachment_ref_v2_is_writable(
+    dataset: SyncDataset | None,
+    *,
+    notes_attachment_sync_enabled: bool,
+    supports_attachments: bool,
+) -> bool:
+    """Return whether attachment.ref v2 mutations are writable for a dataset."""
+
+    if dataset is None:
+        return False
+    attachment_state = dataset.metadata.get("notes_attachment_v2")
+    return bool(
+        notes_attachment_sync_enabled
+        and supports_attachments
+        and dataset.encryption_policy == DEFAULT_M1_ENCRYPTION_POLICY
+        and {"notes.note", "attachment.ref"}.issubset(dataset.domains)
+        and isinstance(attachment_state, Mapping)
+        and attachment_state.get("state") == "ready"
+    )
 
 
 def normalize_supported_adapter_versions(
@@ -493,7 +511,9 @@ def normalize_supported_adapter_versions(
 
     known = set(SYNC_V2_SUPPORTED_DOMAINS)
     requested_set = set(requested)
-    normalized: dict[SyncDomain, list[int]] = {}
+    normalized: dict[SyncDomain, list[int]] = {
+        cast(SyncDomain, domain): [1] for domain in requested
+    }
     for raw_domain, raw_versions in value.items():
         if not isinstance(raw_domain, str) or raw_domain not in known:
             raise ValueError(

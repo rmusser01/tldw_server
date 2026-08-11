@@ -103,7 +103,7 @@ class SyncV2ProfileManager:
         self,
         *,
         store: SyncV2Store,
-        capabilities_factory: Callable[[], Any],
+        capabilities_factory: Callable[..., Any],
         id_factory: Callable[[str], str],
         scan_limit: int,
         service: Any | None = None,
@@ -259,7 +259,10 @@ class SyncV2ProfileManager:
         device_id: str | None,
         created: bool | None,
     ) -> SyncProfileStatus:
-        capabilities = self.capabilities_factory()
+        capabilities = self.capabilities_factory(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id if dataset is not None else None,
+        )
         device = self._device_status(user_id, device_id)
         dataset_status = _dataset_status(dataset) if dataset is not None else None
         domain_status = (

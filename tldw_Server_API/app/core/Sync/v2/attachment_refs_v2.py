@@ -226,12 +226,26 @@ def validate_attachment_ref_v2_routing_metadata(
     """Validate restore intent without allowing it into the protected payload."""
 
     normalized = dict(routing_metadata)
+    allowed_fields = {"restore_intent", "bootstrap_capture", "bootstrap_id"}
+    if set(normalized).difference(allowed_fields):
+        raise AttachmentRefV2ValidationError(
+            "attachment.ref v2 routing metadata contains unsupported fields"
+        )
     restore_intent = normalized.get("restore_intent")
     if (restore_intent is not None and restore_intent is not True) or (
         restore_intent is True and operation != "upsert"
     ):
         raise AttachmentRefV2ValidationError(
             "attachment.ref v2 restore_intent must be boolean true on an upsert"
+        )
+    bootstrap_capture = normalized.get("bootstrap_capture")
+    bootstrap_id = normalized.get("bootstrap_id")
+    if (bootstrap_capture is not None and bootstrap_capture is not True) or (
+        bootstrap_capture is True
+        and (not isinstance(bootstrap_id, str) or not bootstrap_id)
+    ) or (bootstrap_id is not None and bootstrap_capture is not True):
+        raise AttachmentRefV2ValidationError(
+            "attachment.ref v2 bootstrap routing metadata is invalid"
         )
     return normalized
 
