@@ -4445,10 +4445,17 @@ class SyncDatabase:
             row = _first(
                 self.execute(
                     """
-                    SELECT envelope.*
+                    SELECT envelope.*,
+                           projected.object_revision AS projected_object_revision,
+                           projected.object_hash AS projected_object_hash
                       FROM sync_current_heads AS head
                       JOIN sync_envelopes AS envelope
                         ON envelope.server_sequence = head.latest_server_cursor
+                      LEFT JOIN sync_object_state AS projected
+                        ON projected.dataset_id = head.dataset_id
+                       AND projected.domain = head.domain
+                       AND projected.object_id = head.object_id
+                       AND projected.latest_server_cursor = head.latest_server_cursor
                      WHERE head.dataset_id = ?
                        AND head.domain = ?
                        AND head.object_id = ?
@@ -4470,8 +4477,12 @@ class SyncDatabase:
                 return
             current = _envelope_from_row(row)
             expected_cursor = current.server_cursor
-            expected_revision = current.object_revision
-            expected_hash = current.payload_hash
+            if current.object_revision is None and row.get("projected_object_revision") is not None:
+                expected_revision = int(row["projected_object_revision"])
+                expected_hash = row.get("projected_object_hash")
+            else:
+                expected_revision = current.object_revision
+                expected_hash = current.payload_hash
 
         if (
             envelope.base_server_cursor != expected_cursor

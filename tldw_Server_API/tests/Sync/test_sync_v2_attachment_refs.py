@@ -98,6 +98,7 @@ def _attachment_ref(**overrides: Any) -> SyncEnvelopeCreate:
         "device_id": "device-1",
         "client_sequence": 1,
         "schema_version": 1,
+        "object_revision": 1,
         "payload": _attachment_payload(),
         "payload_hash": "sha256:blob-v1",
         "payload_size_bytes": 128,
@@ -107,6 +108,26 @@ def _attachment_ref(**overrides: Any) -> SyncEnvelopeCreate:
     }
     payload.update(overrides)
     return SyncEnvelopeCreate(**payload)
+
+
+def _attachment_ref_after(
+    service: SyncV2Service,
+    **overrides: Any,
+) -> SyncEnvelopeCreate:
+    state = service.store.get_object_state(
+        "dataset-1",
+        "attachment.ref",
+        overrides.get("object_id", "att-1"),
+    )
+    assert state is not None
+    payload = {
+        "base_server_cursor": state.latest_server_cursor,
+        "base_object_revision": state.object_revision,
+        "base_object_hash": state.object_hash,
+        "object_revision": state.object_revision + 1,
+    }
+    payload.update(overrides)
+    return _attachment_ref(**payload)
 
 
 def _push_one(service: SyncV2Service, envelope: SyncEnvelopeCreate):
@@ -192,9 +213,11 @@ def test_duplicate_attachment_ref_same_payload_is_idempotent(
     first = _push_one(sync_service, _attachment_ref())
     duplicate = _push_one(
         sync_service,
-        _attachment_ref(
+        _attachment_ref_after(
+            sync_service,
             client_envelope_id="env-attachment-duplicate",
             client_sequence=2,
+            object_revision=1,
         ),
     )
 
@@ -296,7 +319,8 @@ def test_stale_upsert_after_tombstone_cannot_resurrect_attachment_ref(
     _push_one(sync_service, _attachment_ref())
     tombstone = _push_one(
         sync_service,
-        _attachment_ref(
+        _attachment_ref_after(
+            sync_service,
             client_envelope_id="env-attachment-tombstone",
             client_sequence=2,
             operation="tombstone",
@@ -310,7 +334,8 @@ def test_stale_upsert_after_tombstone_cannot_resurrect_attachment_ref(
 
     stale_upsert = _push_one(
         sync_service,
-        _attachment_ref(
+        _attachment_ref_after(
+            sync_service,
             client_envelope_id="env-attachment-stale-upsert",
             client_sequence=3,
         ),
@@ -379,7 +404,7 @@ def test_restore_preview_reports_attachment_refs_and_missing_blobs(
             "attachment_id": "att-1",
             "object_id": "att-1",
             "payload_hash": "sha256:blob-v1",
-        }
+        },
     ]
 
 
@@ -390,7 +415,8 @@ def test_restore_preview_omits_tombstoned_attachment_refs(
     _push_one(sync_service, _attachment_ref())
     _push_one(
         sync_service,
-        _attachment_ref(
+        _attachment_ref_after(
+            sync_service,
             client_envelope_id="env-attachment-tombstone",
             client_sequence=2,
             operation="tombstone",
@@ -416,6 +442,98 @@ def test_restore_preview_omits_tombstoned_attachment_refs(
             "payload_hash": None,
         }
     ]
+
+
+def test_public_attachment_revision_round_trips_and_is_valid_for_followup_cas(
+    client: TestClient,
+) -> None:
+    initial = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                {
+                    "dataset_id": "dataset-1",
+                    "client_envelope_id": "env-public-attachment-1",
+                    "device_id": "device-1",
+                    "client_sequence": 10,
+                    "domain": "attachment.ref",
+                    "operation": "upsert",
+                    "object_id": "att-public",
+                    "object_revision": 1,
+                    "payload": _attachment_payload(attachment_id="att-public"),
+                    "payload_hash": "sha256:blob-v1",
+                    "encryption_metadata": {"policy": "server_trusted_v1"},
+                }
+            ],
+        },
+    )
+
+    assert initial.status_code == 200
+    assert initial.json()["accepted"][0]["object_revision"] == 1
+    pulled = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "cursor": "0",
+            "domain": "attachment.ref",
+        },
+    )
+    assert pulled.status_code == 200
+    head = pulled.json()["envelopes"][0]
+    assert head["object_revision"] == 1
+
+    tombstone = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                {
+                    "dataset_id": "dataset-1",
+                    "client_envelope_id": "env-public-attachment-2",
+                    "device_id": "device-1",
+                    "client_sequence": 11,
+                    "domain": "attachment.ref",
+                    "operation": "tombstone",
+                    "object_id": "att-public",
+                    "object_revision": 2,
+                    "base_server_cursor": head["server_cursor"],
+                    "base_object_revision": head["object_revision"],
+                    "base_object_hash": head["payload_hash"],
+                    "payload": _attachment_payload(attachment_id="att-public"),
+                    "payload_hash": "sha256:blob-v1",
+                    "encryption_metadata": {"policy": "server_trusted_v1"},
+                }
+            ],
+        },
+    )
+
+    assert tombstone.status_code == 200
+    assert tombstone.json()["conflicts"] == []
+    assert tombstone.json()["accepted"][0]["object_revision"] == 2
+
+
+def test_revisionless_attachment_head_accepts_its_projected_state_as_base(
+    sync_service: SyncV2Service,
+) -> None:
+    initial = _push_one(sync_service, _attachment_ref(object_revision=None))
+    assert [item.object_revision for item in initial.accepted] == [1]
+
+    tombstone = _push_one(
+        sync_service,
+        _attachment_ref_after(
+            sync_service,
+            client_envelope_id="env-legacy-attachment-tombstone",
+            client_sequence=2,
+            operation="tombstone",
+        ),
+    )
+
+    assert tombstone.conflicts == []
+    assert [item.client_envelope_id for item in tombstone.accepted] == ["env-legacy-attachment-tombstone"]
 
 
 def test_blob_upload_and_download_are_explicitly_unsupported_in_m1(

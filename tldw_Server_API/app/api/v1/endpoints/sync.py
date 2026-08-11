@@ -374,7 +374,6 @@ def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
             "envelope_id",
             "server_cursor",
             "server_sequence",
-            "object_revision",
             "received_at_server",
             "server_timestamp",
             "status",

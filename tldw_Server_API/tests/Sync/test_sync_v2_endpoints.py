@@ -1274,13 +1274,14 @@ def test_push_and_pull_endpoint_expose_apply_outcomes_for_replayable_failures(
         for item in accepted
     ] == [
         ("env-note", 1, 1, "applied"),
-        ("env-failed", 2, None, "failed"),
+        ("env-failed", 2, 1, "failed"),
     ]
     assert accepted[1]["apply_error_code"] == "projection_failed"
     assert "replayable" in accepted[1]["apply_error_message"]
     assert pulled.status_code == 200
     failed = pulled.json()["envelopes"][1]
     assert failed["client_envelope_id"] == "env-failed"
+    assert failed["object_revision"] == 1
     assert failed["apply_status"] == "failed"
     assert failed["apply_error_code"] == "projection_failed"
     assert "replayable" in failed["apply_error_message"]
