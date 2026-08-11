@@ -1,7 +1,7 @@
 ---
-id: TASK-12989
+id: TASK-13010
 title: Extract Jobs batch lease renewal operations atomically
-status: In Progress
+status: Done
 created_date: 2026-08-02 02:14
 labels:
 - jobs
@@ -31,7 +31,7 @@ modified_files:
 - tldw_Server_API/tests/Jobs/property/test_operation_contract_properties.py
 - tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_postgres.py
-updated_date: 2026-08-10 19:17
+updated_date: 2026-08-10 19:38
 ---
 
 ## Description
@@ -60,13 +60,13 @@ Characterize and extract JobManager.batch_renew_leases into dedicated SQLite and
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Approved design recorded at Docs/superpowers/specs/2026-08-01-jobs-batch-lease-renewal-extraction-design.md. Work started on branch codex/jobs-batch-renewal-extraction and was rebased cleanly onto origin/dev 45490da82e. Post-rebase verification at 2c6a987b40 passed 93 focused SQLite/contracts tests, 43 required PostgreSQL/RLS tests with zero skips, 50 neighboring lifecycle/parity tests with 13 PostgreSQL-only skips confined to the non-required SQLite matrix, and 11 required PostgreSQL parity tests with zero skips. Ruff, compileall, diff hygiene, and operation/manager boundary checks passed. Bandit reported zero findings across 9,273 lines in /tmp/bandit_task_12989_post_rebase.json. Independent task and whole-branch reviews found no remaining code issues. PR #2773 follow-up reopened on 2026-08-10 to validate and address three Qodo comments. Validation rejected the fixture-isolation claim because jobs_pg_dsn already depends on the canonical function-scoped pg_temp_db fixture. The validated SQL-construction concern is addressed with psycopg.sql composition for PostgreSQL and fixed SQLite trigger SQL keyed to a constant test identity. The validated SQLite transaction concern is addressed with a savepoint for direct calls inside caller-owned transactions, including regression tests that prove success and failure leave the outer transaction open and failure preserves unrelated caller work. Pre-rebase follow-up verification passed 38 SQLite tests and 35 required real-PostgreSQL tests with zero skips; Ruff, compileall, diff hygiene, and Bandit with zero findings also passed.
+Approved design recorded at Docs/superpowers/specs/2026-08-01-jobs-batch-lease-renewal-extraction-design.md. Work started on branch codex/jobs-batch-renewal-extraction and was rebased cleanly onto origin/dev 45490da82e, then rebased cleanly again onto origin/dev 7b48bcb04f for PR #2773 follow-up. The provisional TASK-12989 identity collided with two records already on dev; independent review validated the tooling problem and this Jobs task was manually renumbered to unique TASK-13010 under the requester's prior approval for narrowly scoped repair of this record. Qodo follow-up validation rejected the fixture-isolation claim because jobs_pg_dsn already depends on the canonical function-scoped pg_temp_db fixture. The validated SQL-construction concern is addressed with psycopg.sql composition for PostgreSQL and fixed SQLite trigger SQL keyed to a constant test identity. The validated SQLite transaction concern is addressed with a savepoint for direct calls inside caller-owned transactions. Independent review then found that a SQLite whole-transaction abort could let cleanup mask the primary error; the final helper preserves the primary error and chains cleanup failure, with RAISE(ROLLBACK) regression coverage. The review also confirmed complete normalization before clock, cursor/RLS, and backend dispatch is the approved behavior; explicit SQLite/PostgreSQL routing coverage and compatibility documentation now lock that precedence. Final post-rebase verification passed 97 focused SQLite/contracts tests, 43 required PostgreSQL/RLS tests with zero skips, 50 neighboring lifecycle/parity tests with 13 PostgreSQL-only skips confined to the non-required SQLite matrix, and 11 required PostgreSQL parity tests with zero skips. Ruff, compileall, diff hygiene, unique-task-ID, and operation/manager boundary checks passed. Bandit reported zero findings across 9,290 lines in /tmp/bandit_task_12989_post_rebase_qodo.json and zero findings for the final 432-line SQLite scope in /tmp/bandit_task_13010_final.json. Independent remediation re-review found no remaining code, test, documentation, or tracker issue.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Extracted atomic batch lease renewal into dedicated SQLite and PostgreSQL lifecycle operations while preserving the JobManager public contract, ordered duplicate attempts, expected no-ops, non-shortening leases, duration clamping, backend-specific clock behavior, PostgreSQL RLS cursor setup, and one atomic scope per batch. Added immutable contracts plus public characterization, direct backend, routing, property, and real-database rollback coverage. Draft pull request: https://github.com/rmusser01/tldw_server/pull/2773. Final rebase and review verification remain in progress. Merge remains blocked until the requester adds the required human-authored Change summary to the pull request; this tracker summary is verification metadata and does not satisfy that policy.
+Extracted atomic batch lease renewal into dedicated SQLite and PostgreSQL lifecycle operations while preserving the JobManager public contract, ordered duplicate attempts, expected no-ops, non-shortening leases, duration clamping, backend-specific clock behavior, PostgreSQL RLS cursor setup, and one atomic scope per batch. Added immutable contracts plus public characterization, direct backend, routing, property, real-database rollback, caller-owned savepoint, and primary-error-precedence coverage. The branch is rebased onto dev 7b48bcb04f and local verification and independent review are clean. Pull request: https://github.com/rmusser01/tldw_server/pull/2773. Merge remains blocked until the requester replaces the pending PR Summary with their required human-authored Change summary; this tracker summary is verification metadata and does not satisfy that policy.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

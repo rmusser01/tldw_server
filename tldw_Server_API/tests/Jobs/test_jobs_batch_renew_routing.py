@@ -35,6 +35,17 @@ class FixedClock:
         return NOW
 
 
+class ExplodingClock:
+    """Record an unexpected clock read before backend dispatch."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def now_utc(self) -> datetime:
+        self.calls += 1
+        raise RuntimeError("clock must not run")
+
+
 def _minimal_manager(backend: str) -> tuple[JobManager, FakeConnection]:
     manager = object.__new__(JobManager)
     connection = FakeConnection()
@@ -127,20 +138,35 @@ def test_batch_renew_opens_connection_before_normalizing_invalid_input(
         )
 
 
-def test_batch_renew_normalizes_every_item_before_backend_dispatch(
+@pytest.mark.parametrize(
+    ("backend", "backend_name"),
+    [("sqlite", "_sqlite_renew_leases_batch"), ("postgres", "_postgres_renew_leases_batch")],
+)
+def test_batch_renew_normalizes_before_clock_cursor_or_backend_dispatch(
     monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    backend_name: str,
 ) -> None:
-    """A later malformed item prevents all backend work and closes the connection."""
+    """A later malformed item wins before clock, cursor, or backend work."""
 
-    manager, connection = _minimal_manager("sqlite")
+    manager, connection = _minimal_manager(backend)
+    clock = ExplodingClock()
+    manager._clock = clock
     called = False
+    cursor_calls = 0
 
-    def backend(*args: Any, **kwargs: Any) -> BatchRenewLeasesResult:
+    def backend_operation(*args: Any, **kwargs: Any) -> BatchRenewLeasesResult:
         nonlocal called
         called = True
         raise AssertionError("backend must not run")
 
-    monkeypatch.setattr(manager_module, "_sqlite_renew_leases_batch", backend, raising=False)
+    def cursor(*args: Any, **kwargs: Any) -> Any:
+        nonlocal cursor_calls
+        cursor_calls += 1
+        raise AssertionError("cursor must not open")
+
+    manager._pg_cursor = cursor
+    monkeypatch.setattr(manager_module, backend_name, backend_operation, raising=False)
 
     with pytest.raises(ValueError):
         manager.batch_renew_leases(
@@ -152,6 +178,8 @@ def test_batch_renew_normalizes_every_item_before_backend_dispatch(
         )
 
     assert called is False
+    assert clock.calls == 0
+    assert cursor_calls == 0
     assert connection.closed is True
 
 

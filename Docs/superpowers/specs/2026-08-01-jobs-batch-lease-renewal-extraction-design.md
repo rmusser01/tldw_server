@@ -3,7 +3,7 @@
 Date: 2026-08-01
 Topic: Atomic Jobs batch lease renewal extraction
 Status: Approved design
-Tracking: TASK-12989
+Tracking: TASK-13010
 
 ## Objective
 
@@ -227,10 +227,16 @@ it must not issue extra classification queries for expected no-ops.
   precedence when both connection setup and input conversion would fail. It
   completes normalization before dispatch, so malformed input cannot occur after
   a backend operation starts mutating rows.
+- Complete normalization intentionally precedes backend clock sampling and
+  PostgreSQL cursor/RLS setup. A malformed item therefore wins over a backend
+  clock or cursor failure, and neither backend hook runs for that command.
 - Clock failures and unexpected SQLite/PostgreSQL errors propagate unchanged.
 - The backend atomic context rolls back every earlier batch update before an
   unexpected exception reaches the facade without closing a caller-owned
   SQLite transaction.
+- If SQLite itself aborts the complete transaction, the savepoint no longer
+  exists and caller-owned work cannot remain open. The original database error
+  remains primary and any savepoint-cleanup failure is chained as its cause.
 - No error is logged and suppressed in the backend operation.
 - Connection-close failures retain the existing non-fatal cleanup behavior.
 
@@ -266,6 +272,8 @@ points do not exist. They cover:
 - duplicate attempts and non-shortening behavior
 - rollback after a later database-triggered failure
 - rollback after a later SQLite clock failure
+- preservation of the primary SQLite error when a trigger aborts the complete
+  caller-owned transaction
 - PostgreSQL once-per-batch and SQLite per-item clock sampling at the operation
   boundary
 
@@ -281,7 +289,8 @@ SQLite uses a disposable per-test database.
 
 Small routing tests verify typed command dispatch to each backend and mapping
 of `applied_count` to the public integer. They do not assert transaction-wrapper
-internals, introspect the Python signature, or add side-effect spies.
+internals or introspect the Python signature. They verify that complete command
+normalization precedes backend clock, cursor, and operation dispatch.
 
 ### Verification gates
 
@@ -304,7 +313,9 @@ modules additionally use `pg_jobs` as an infrastructure marker.
 Mitigation: backend operations own one atomic scope, and durable
 database-trigger tests verify rollback after an earlier successful update.
 Direct SQLite tests additionally prove a savepoint preserves the caller's
-transaction and unrelated uncommitted work.
+transaction and unrelated uncommitted work for ordinary statement failures.
+An explicit whole-transaction abort test proves the original database error is
+preserved even though SQLite necessarily discards the caller transaction.
 
 ### Single-job regression from helper reuse
 

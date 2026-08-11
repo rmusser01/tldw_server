@@ -10,12 +10,14 @@
 
 ## Global Constraints
 
-- Tracking task: `TASK-12989`.
+- Tracking task: `TASK-13010`.
 - Approved design: `Docs/superpowers/specs/2026-08-01-jobs-batch-lease-renewal-extraction-design.md`.
 - Implementation base: `origin/dev` at `5605b9d990` after the design branch rebase.
 - Preserve `JobManager.batch_renew_leases(items: list[dict[str, Any]], *, enforce: bool | None = None) -> int`.
 - Open the backend connection before item normalization to preserve connection-failure precedence.
 - Complete normalization of every item before dispatching any backend mutation.
+- Malformed-item normalization errors intentionally precede backend clock reads,
+  PostgreSQL cursor/RLS setup, and backend dispatch.
 - Preserve input order, duplicate update-attempt counting, expected zero-row no-ops, non-shortening leases, and one atomic transaction for the complete batch.
 - Direct SQLite calls made inside an active caller transaction must isolate the batch with a savepoint, preserving both the outer transaction and unrelated caller-owned work.
 - Preserve PostgreSQL one-clock-sample-per-batch behavior, including one clock call for an empty batch.
@@ -28,7 +30,7 @@
 - Real PostgreSQL evidence is mandatory. Run it with `TLDW_TEST_POSTGRES_REQUIRED=1`; a skip is a failed gate.
 - Run Bandit on every touched production path before completion.
 - The pull request cannot merge until the human requester supplies a `Change summary` explaining what changed and why these transaction and compatibility choices were used.
-- The current Backlog CLI/MCP rewrites duplicate section markers in `TASK-12989`. If that remains true during execution, stop and obtain explicit requester approval before a narrowly scoped manual task-file repair; do not commit malformed tracker output.
+- The original provisional `TASK-12989` collided with two records already on `dev`. The Jobs record was manually renumbered to unique `TASK-13010` after independent review, using the requester's prior approval for narrowly scoped manual repair of this specific task file.
 
 ---
 
@@ -103,7 +105,7 @@ The SQLite result came from the existing batch lifecycle, direct renewal/release
   - Unit coverage for normalization, connection precedence, typed dispatch, and integer mapping.
 - Modify: `tldw_Server_API/app/core/Jobs/manager.py`
   - Replace inline SQL with connection-first normalization and backend dispatch.
-- Modify through Backlog tooling: `TASK-12989`
+- Modify through Backlog tooling: `TASK-13010`
   - Record the approved plan, changed files, verification evidence, pull request, and final summary.
 
 ---
@@ -447,7 +449,7 @@ def test_sqlite_batch_renew_counts_attempts_and_commits_expected_noops(conn):
     assert conn.execute("SELECT leased_until FROM jobs WHERE id = ?", (long_id,)).fetchone()[0] == "2026-01-02 13:00:00"
 ```
 
-Add a `RecordingClock` assertion that calls equal item count, including no-op items; an empty command returns `(0, 0)` with zero calls. Add `FailOnSecondClock` that returns `NOW` once and then raises `RuntimeError("forced clock failure")`; query from a fresh connection and prove the first update rolled back. Add direct-call coverage proving success and failure leave a caller-owned transaction open, with failure rolling back only the batch savepoint while preserving unrelated caller-owned work.
+Add a `RecordingClock` assertion that calls equal item count, including no-op items; an empty command returns `(0, 0)` with zero calls. Add `FailOnSecondClock` that returns `NOW` once and then raises `RuntimeError("forced clock failure")`; query from a fresh connection and prove the first update rolled back. Add direct-call coverage proving success and ordinary statement failure leave a caller-owned transaction open, with failure rolling back only the batch savepoint while preserving unrelated caller-owned work. Add a `RAISE(ROLLBACK, ...)` trigger case proving a whole-transaction abort keeps the original `IntegrityError` primary, chains the missing-savepoint cleanup failure, and necessarily closes the caller transaction.
 
 Add a trigger test scoped to the second job using `RAISE(ABORT, 'forced batch renewal failure')`. After the exception, query from a fresh connection and assert both leases are unchanged.
 
@@ -496,7 +498,7 @@ def renew_leases_batch(
     command: BatchRenewLeasesCommand,
     clock: Callable[[], datetime],
 ) -> BatchRenewLeasesResult:
-    """Renew an ordered SQLite lease batch in one transaction."""
+    """Renew an ordered SQLite lease batch in one atomic scope."""
 
     applied_count = 0
     with _batch_renew_transaction(conn):
@@ -517,7 +519,7 @@ def renew_leases_batch(
         )
 ```
 
-Implement `_batch_renew_transaction` so a fresh connection uses the native connection context, while an already-active connection uses a fixed-name SQLite savepoint that is released on success and rolled back on failure. Import `Callable` and the three batch contracts. Export `renew_leases_batch` from `operations/sqlite/__init__.py`. Do not call `_classify_lifecycle_no_transition` in the batch path.
+Implement `_batch_renew_transaction` so a fresh connection uses the native connection context, while an already-active connection uses a fixed-name SQLite savepoint that is released on success and rolled back on failure. If SQLite aborts the complete transaction and removes the savepoint, re-raise the primary database error with the cleanup error chained. Import `Callable` and the three batch contracts. Export `renew_leases_batch` from `operations/sqlite/__init__.py`. Do not call `_classify_lifecycle_no_transition` in the batch path.
 
 - [ ] **Step 5: Verify SQLite green and single-renewal compatibility**
 
@@ -746,8 +748,9 @@ def test_batch_renew_opens_connection_before_normalizing_invalid_input(monkeypat
         manager.batch_renew_leases([{"job_id": "invalid", "seconds": 30}], enforce=False)
 
 
-def test_batch_renew_normalizes_every_item_before_backend_dispatch(monkeypatch):
+def test_batch_renew_normalizes_before_clock_cursor_or_backend_dispatch(monkeypatch):
     manager, connection = _minimal_manager("sqlite")
+    manager._clock = ExplodingClock()
     called = False
 
     def backend(*args, **kwargs):
@@ -767,6 +770,7 @@ def test_batch_renew_normalizes_every_item_before_backend_dispatch(monkeypatch):
         )
 
     assert called is False
+    assert manager._clock.calls == 0
     assert connection.closed is True
 ```
 
@@ -855,7 +859,7 @@ git commit -m "refactor(jobs): route batch renewal through operations"
 ### Task 6: Run Final Gates And Prepare Review
 
 **Files:**
-- Modify through Backlog tooling: `TASK-12989`
+- Modify through Backlog tooling: `TASK-13010`
 - Review all files listed in the File Structure section.
 
 **Interfaces:**
@@ -953,11 +957,13 @@ Use `superpowers:requesting-code-review` against `origin/dev...HEAD`. Review tra
 
 - [ ] **Step 7: Record verification and prepare the pull request**
 
-Update `TASK-12989` through Backlog tooling with changed files, exact pass/skip counts, Bandit output location, review findings, commit IDs, and the PR URL. Ask the requester for the mandatory human-authored `Change summary`; do not merge without it.
+Update `TASK-13010` through Backlog tooling with changed files, exact pass/skip counts, Bandit output location, review findings, commit IDs, and the PR URL. Ask the requester for the mandatory human-authored `Change summary`; do not merge without it.
 
 If task metadata changes after verification, commit it separately:
 
 ```bash
-git add "backlog/tasks/task-12989 - Extract-Jobs-batch-lease-renewal-operations-atomically.md"
+git add -A -- \
+  "backlog/tasks/task-12989 - Extract-Jobs-batch-lease-renewal-operations-atomically.md" \
+  "backlog/tasks/task-13010 - Extract-Jobs-batch-lease-renewal-operations-atomically.md"
 git commit -m "chore(jobs): record batch renewal verification"
 ```

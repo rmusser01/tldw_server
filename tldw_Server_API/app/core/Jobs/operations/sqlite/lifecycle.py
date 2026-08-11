@@ -252,9 +252,12 @@ def _batch_renew_transaction(conn: sqlite3.Connection) -> Iterator[None]:
     conn.execute("SAVEPOINT jobs_batch_renew_leases")
     try:
         yield
-    except BaseException:
-        conn.execute("ROLLBACK TO SAVEPOINT jobs_batch_renew_leases")
-        conn.execute("RELEASE SAVEPOINT jobs_batch_renew_leases")
+    except BaseException as primary_error:
+        try:
+            conn.execute("ROLLBACK TO SAVEPOINT jobs_batch_renew_leases")
+            conn.execute("RELEASE SAVEPOINT jobs_batch_renew_leases")
+        except BaseException as cleanup_error:
+            raise primary_error from cleanup_error
         raise
     else:
         conn.execute("RELEASE SAVEPOINT jobs_batch_renew_leases")
@@ -299,7 +302,7 @@ def renew_leases_batch(
     command: BatchRenewLeasesCommand,
     clock: Callable[[], datetime],
 ) -> BatchRenewLeasesResult:
-    """Renew an ordered SQLite lease batch in one transaction."""
+    """Renew an ordered SQLite lease batch in one atomic scope."""
 
     applied_count = 0
     with _batch_renew_transaction(conn):
