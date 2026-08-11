@@ -361,6 +361,7 @@ class _PostgresMigrationBackend:
                     "column_name": name,
                     "data_type": data_type,
                     "is_not_null": is_not_null,
+                    "default_expression": _POSTGRES_REGISTRY_DEFAULTS.get(name),
                 }
                 for name, data_type, is_not_null in _POSTGRES_REGISTRY_COLUMNS
             ]
@@ -434,6 +435,8 @@ _POSTGRES_REGISTRY_COLUMNS = [
     ("created_by", "text", True),
     ("source_kind", "text", True),
 ]
+
+_POSTGRES_REGISTRY_DEFAULTS = {"deleted": "false"}
 
 _POSTGRES_REGISTRY_CHECKS = {
     "note_attachments_client_id_check": "CHECK (char_length(btrim(client_id)) > 0)",
@@ -530,6 +533,11 @@ def _postgres_registry_constraint_rows() -> list[dict[str, object]]:
             "constraint_type": "c",
             "constraint_def": definition,
             "referenced_table": None,
+            "referenced_schema": None,
+            "referenced_in_current_schema": False,
+            "constrained_columns": None,
+            "referenced_columns": None,
+            "constraint_validated": True,
             "delete_action": " ",
             "update_action": " ",
         }
@@ -542,6 +550,11 @@ def _postgres_registry_constraint_rows() -> list[dict[str, object]]:
                 "constraint_type": "p",
                 "constraint_def": "PRIMARY KEY (client_id, dataset_id, attachment_id)",
                 "referenced_table": None,
+                "referenced_schema": None,
+                "referenced_in_current_schema": False,
+                "constrained_columns": ["client_id", "dataset_id", "attachment_id"],
+                "referenced_columns": None,
+                "constraint_validated": True,
                 "delete_action": " ",
                 "update_action": " ",
             },
@@ -553,6 +566,11 @@ def _postgres_registry_constraint_rows() -> list[dict[str, object]]:
                     "ON UPDATE RESTRICT ON DELETE RESTRICT"
                 ),
                 "referenced_table": "notes",
+                "referenced_schema": "public",
+                "referenced_in_current_schema": True,
+                "constrained_columns": ["note_id"],
+                "referenced_columns": ["id"],
+                "constraint_validated": True,
                 "delete_action": "r",
                 "update_action": "r",
             },
@@ -563,11 +581,11 @@ def _postgres_registry_constraint_rows() -> list[dict[str, object]]:
 
 def _postgres_registry_policy_row() -> dict[str, object]:
     expression = (
-        "note_attachments.client_id = current_setting('app.current_user_id', true) "
-        "AND EXISTS (SELECT 1 FROM notes AS note "
-        "WHERE note.id = note_attachments.note_id "
-        "AND note.client_id = current_setting('app.current_user_id', true) "
-        "AND note.client_id = note_attachments.client_id)"
+        "((client_id = current_setting('app.current_user_id'::text, true)) "
+        "AND (EXISTS (SELECT 1 FROM notes note "
+        "WHERE ((note.id = note_attachments.note_id) "
+        "AND (note.client_id = current_setting('app.current_user_id'::text, true)) "
+        "AND (note.client_id = note_attachments.client_id)))))"
     )
     return {
         "policy_name": "note_attachments_tenant_isolation",
@@ -607,6 +625,11 @@ class _PostgresCatalogBackend(_PostgresMigrationBackend):
                         "integer" if self.drift == "size_type" and name == "size_bytes" else data_type
                     ),
                     "is_not_null": is_not_null,
+                    "default_expression": (
+                        "true"
+                        if self.drift == "deleted_default" and name == "deleted"
+                        else _POSTGRES_REGISTRY_DEFAULTS.get(name)
+                    ),
                 }
                 for name, data_type, is_not_null in _POSTGRES_REGISTRY_COLUMNS
             ]
@@ -620,6 +643,22 @@ class _PostgresCatalogBackend(_PostgresMigrationBackend):
                     for row in rows
                     if row["constraint_name"] == "note_attachments_source_kind_check"
                 )["constraint_def"] = "CHECK (true)"
+            if self.drift == "unvalidated_constraint":
+                rows[0]["constraint_validated"] = False
+            if self.drift == "fk_schema":
+                foreign_key = next(
+                    row
+                    for row in rows
+                    if row["constraint_name"] == "note_attachments_note_id_fkey"
+                )
+                foreign_key["referenced_schema"] = "other_schema"
+                foreign_key["referenced_in_current_schema"] = False
+            if self.drift == "fk_column":
+                next(
+                    row
+                    for row in rows
+                    if row["constraint_name"] == "note_attachments_note_id_fkey"
+                )["referenced_columns"] = ["client_id"]
             self.calls.append((normalized, params))
             return QueryResult(rows=rows, rowcount=len(rows))
         if "FROM pg_index AS index_row" in normalized:
@@ -644,8 +683,23 @@ class _PostgresCatalogBackend(_PostgresMigrationBackend):
                 policy["using_expression"] = drifted
                 policy["check_expression"] = drifted
             rows = [policy]
+            if self.drift == "or_true_policy":
+                rows[0]["using_expression"] = f"({policy['using_expression']}) OR true"
+                rows[0]["check_expression"] = f"({policy['check_expression']}) OR true"
+            if self.drift == "policy_roles":
+                rows[0]["roles"] = "{public,other_role}"
+            if self.drift == "policy_command":
+                rows[0]["command"] = "SELECT"
+            if self.drift == "policy_permissive":
+                rows[0]["permissive"] = "RESTRICTIVE"
+            if self.drift == "extra_policy" and "policyname =" not in normalized:
+                extra = dict(policy)
+                extra["policy_name"] = "note_attachments_allow_all"
+                extra["using_expression"] = "true"
+                extra["check_expression"] = "true"
+                rows.append(extra)
             self.calls.append((normalized, params))
-            return QueryResult(rows=rows, rowcount=1)
+            return QueryResult(rows=rows, rowcount=len(rows))
         return super().execute(statement, params, connection=connection)
 
 
@@ -765,6 +819,71 @@ def test_postgres_v59_catalog_verifier_rejects_cross_owner_rls_drift() -> None:
 
     with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
         db._verify_note_attachment_schema_postgres(object())
+
+
+@pytest.mark.parametrize(
+    "drift",
+    ["deleted_default", "unvalidated_constraint", "fk_schema", "fk_column"],
+)
+def test_postgres_v59_catalog_verifier_rejects_incomplete_catalog_identity(
+    drift: str,
+) -> None:
+    backend = _PostgresCatalogBackend(drift=drift)
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="catalog|schema|registry|constraint|foreign key"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_rejects_extra_attachment_policy() -> None:
+    backend = _PostgresCatalogBackend(drift="extra_policy")
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_rejects_canonical_policy_or_true() -> None:
+    backend = _PostgresCatalogBackend(drift="or_true_policy")
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+@pytest.mark.parametrize(
+    "drift",
+    ["policy_roles", "policy_command", "policy_permissive"],
+)
+def test_postgres_v59_catalog_verifier_requires_exact_policy_metadata(drift: str) -> None:
+    backend = _PostgresCatalogBackend(drift=drift)
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_uses_complete_fixed_catalog_queries() -> None:
+    backend = _PostgresCatalogBackend()
+    db = _postgres_db(backend)
+
+    db._verify_note_attachment_schema_postgres(object())
+
+    statements = [statement for statement, _ in backend.calls]
+    column_query = next(
+        statement for statement in statements if "FROM pg_attribute AS column_row" in statement
+    )
+    constraint_query = next(
+        statement for statement in statements if "FROM pg_constraint AS constraint_row" in statement
+    )
+    policy_query = next(statement for statement in statements if "FROM pg_policies" in statement)
+    assert "LEFT JOIN pg_attrdef AS default_row" in column_query
+    assert "pg_get_expr(default_row.adbin" in column_query
+    assert "constraint_row.convalidated" in constraint_query
+    assert "unnest(constraint_row.conkey)" in constraint_query
+    assert "unnest(constraint_row.confkey)" in constraint_query
+    assert "referenced_namespace.nspname" in constraint_query
+    assert "policyname =" not in policy_query
 
 
 def test_postgres_current_v59_marker_rejects_missing_live_name_index_after_version_lock() -> None:

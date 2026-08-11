@@ -11053,36 +11053,41 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
 
         expected_columns = (
-            ("client_id", "text", True),
-            ("dataset_id", "text", True),
-            ("attachment_id", "text", True),
-            ("note_id", "text", True),
-            ("file_name", "text", True),
-            ("normalized_file_name", "text", True),
-            ("original_file_name", "text", True),
-            ("content_type", "text", True),
-            ("size_bytes", "bigint", True),
-            ("blob_hash", "text", True),
-            ("object_hash", "text", True),
-            ("version", "bigint", True),
-            ("deleted", "boolean", True),
-            ("deleted_at", "timestamp with time zone", False),
-            ("delete_reason", "text", False),
-            ("created_at", "timestamp with time zone", True),
-            ("last_modified", "timestamp with time zone", True),
-            ("created_by", "text", True),
-            ("source_kind", "text", True),
+            ("client_id", "text", True, None),
+            ("dataset_id", "text", True, None),
+            ("attachment_id", "text", True, None),
+            ("note_id", "text", True, None),
+            ("file_name", "text", True, None),
+            ("normalized_file_name", "text", True, None),
+            ("original_file_name", "text", True, None),
+            ("content_type", "text", True, None),
+            ("size_bytes", "bigint", True, None),
+            ("blob_hash", "text", True, None),
+            ("object_hash", "text", True, None),
+            ("version", "bigint", True, None),
+            ("deleted", "boolean", True, "false"),
+            ("deleted_at", "timestamp with time zone", False, None),
+            ("delete_reason", "text", False, None),
+            ("created_at", "timestamp with time zone", True, None),
+            ("last_modified", "timestamp with time zone", True, None),
+            ("created_by", "text", True, None),
+            ("source_kind", "text", True, None),
         )
         column_rows = backend.execute(
             """
             SELECT column_row.attname AS column_name,
                    format_type(column_row.atttypid, column_row.atttypmod) AS data_type,
-                   column_row.attnotnull AS is_not_null
+                   column_row.attnotnull AS is_not_null,
+                   pg_get_expr(default_row.adbin, default_row.adrelid, false)
+                     AS default_expression
               FROM pg_attribute AS column_row
               JOIN pg_class AS attachment_table
                 ON attachment_table.oid = column_row.attrelid
               JOIN pg_namespace AS attachment_namespace
                 ON attachment_namespace.oid = attachment_table.relnamespace
+              LEFT JOIN pg_attrdef AS default_row
+                ON default_row.adrelid = attachment_table.oid
+               AND default_row.adnum = column_row.attnum
              WHERE attachment_namespace.nspname = current_schema()
                AND attachment_table.relname = 'note_attachments'
                AND column_row.attnum > 0
@@ -11096,6 +11101,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 str(row.get("column_name")),
                 str(row.get("data_type")),
                 bool(row.get("is_not_null")),
+                (
+                    None
+                    if row.get("default_expression") is None
+                    else "".join(str(row.get("default_expression")).lower().split())
+                ),
             )
             for row in column_rows
         )
@@ -11150,6 +11160,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    constraint_row.contype AS constraint_type,
                    pg_get_constraintdef(constraint_row.oid, true) AS constraint_def,
                    referenced_table.relname AS referenced_table,
+                   referenced_namespace.nspname AS referenced_schema,
+                   referenced_namespace.nspname = current_schema()
+                     AS referenced_in_current_schema,
+                   ARRAY(
+                     SELECT local_column.attname
+                       FROM unnest(constraint_row.conkey) WITH ORDINALITY
+                         AS local_key(attnum, ordinality)
+                       JOIN pg_attribute AS local_column
+                         ON local_column.attrelid = attachment_table.oid
+                        AND local_column.attnum = local_key.attnum
+                      ORDER BY local_key.ordinality
+                   ) AS constrained_columns,
+                   CASE
+                     WHEN constraint_row.confrelid = 0 THEN NULL
+                     ELSE ARRAY(
+                       SELECT referenced_column.attname
+                         FROM unnest(constraint_row.confkey) WITH ORDINALITY
+                           AS referenced_key(attnum, ordinality)
+                         JOIN pg_attribute AS referenced_column
+                           ON referenced_column.attrelid = referenced_table.oid
+                          AND referenced_column.attnum = referenced_key.attnum
+                        ORDER BY referenced_key.ordinality
+                     )
+                   END AS referenced_columns,
+                   constraint_row.convalidated AS constraint_validated,
                    constraint_row.confdeltype AS delete_action,
                    constraint_row.confupdtype AS update_action
               FROM pg_constraint AS constraint_row
@@ -11159,9 +11194,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ON attachment_namespace.oid = attachment_table.relnamespace
               LEFT JOIN pg_class AS referenced_table
                 ON referenced_table.oid = constraint_row.confrelid
+              LEFT JOIN pg_namespace AS referenced_namespace
+                ON referenced_namespace.oid = referenced_table.relnamespace
              WHERE attachment_namespace.nspname = current_schema()
                AND attachment_table.relname = 'note_attachments'
-               AND constraint_row.conname LIKE 'note_attachments%'
             """,
             connection=conn,
         ).rows
@@ -11170,6 +11206,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError(  # noqa: TRY003
                 "Notes attachment v59 PostgreSQL registry constraint catalog drifted."
             )
+        if any(not bool(row.get("constraint_validated")) for row in constraints.values()):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry constraint catalog drifted."
+            )
+
+        def _catalog_column_names(value: Any) -> tuple[str, ...]:
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return tuple(part for part in value.strip("{}").split(",") if part)
+            return tuple(str(part) for part in value)
+
         for name, fragments in check_fragments.items():
             row = constraints[name]
             definition = " ".join(str(row.get("constraint_def", "")).lower().split())
@@ -11183,6 +11231,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         primary_definition = " ".join(str(primary.get("constraint_def", "")).lower().split())
         if (
             str(primary.get("constraint_type")) != "p"
+            or _catalog_column_names(primary.get("constrained_columns"))
+            != ("client_id", "dataset_id", "attachment_id")
             or "primary key (client_id, dataset_id, attachment_id)" not in primary_definition
         ):
             raise SchemaError(  # noqa: TRY003
@@ -11195,6 +11245,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if (
             str(foreign_key.get("constraint_type")) != "f"
             or str(foreign_key.get("referenced_table")) != "notes"
+            or not str(foreign_key.get("referenced_schema") or "")
+            or not bool(foreign_key.get("referenced_in_current_schema"))
+            or _catalog_column_names(foreign_key.get("constrained_columns")) != ("note_id",)
+            or _catalog_column_names(foreign_key.get("referenced_columns")) != ("id",)
             or str(foreign_key.get("delete_action")) != "r"
             or str(foreign_key.get("update_action")) != "r"
             or "foreign key (note_id)" not in foreign_definition
@@ -11277,7 +11331,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               FROM pg_policies
              WHERE schemaname = current_schema()
                AND tablename = 'note_attachments'
-               AND policyname = 'note_attachments_tenant_isolation'
+             ORDER BY policyname
             """,
             connection=conn,
         ).rows
@@ -11286,23 +11340,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
             )
         policy = policy_rows[0]
-        owner_setting = "current_setting('app.current_user_id'"
-        fragments = (
-            "exists",
-            "note.id = note_attachments.note_id",
-            "note.client_id = current_setting('app.current_user_id'",
-            "note.client_id = note_attachments.client_id",
+        expected_policy_expression = "".join(
+            (
+                "((client_id = current_setting('app.current_user_id'::text, true)) "
+                "AND (EXISTS (SELECT 1 FROM notes note "
+                "WHERE ((note.id = note_attachments.note_id) "
+                "AND (note.client_id = current_setting('app.current_user_id'::text, true)) "
+                "AND (note.client_id = note_attachments.client_id)))))"
+            ).lower().split()
         )
-        using_expression = " ".join(str(policy.get("using_expression") or "").lower().split())
-        check_expression = " ".join(str(policy.get("check_expression") or "").lower().split())
+        using_expression = "".join(
+            str(policy.get("using_expression") or "").lower().split()
+        )
+        check_expression = "".join(
+            str(policy.get("check_expression") or "").lower().split()
+        )
         if (
-            str(policy.get("permissive")) != "PERMISSIVE"
+            str(policy.get("policy_name")) != "note_attachments_tenant_isolation"
+            or str(policy.get("permissive")) != "PERMISSIVE"
             or str(policy.get("command")) != "ALL"
-            or "public" not in str(policy.get("roles", "")).lower()
-            or any(fragment not in using_expression for fragment in fragments)
-            or any(fragment not in check_expression for fragment in fragments)
-            or using_expression.count(owner_setting) < 2
-            or check_expression.count(owner_setting) < 2
+            or str(policy.get("roles")) != "{public}"
+            or using_expression != expected_policy_expression
+            or check_expression != expected_policy_expression
         ):
             raise SchemaError(  # noqa: TRY003
                 "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
