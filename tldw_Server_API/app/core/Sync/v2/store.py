@@ -246,6 +246,44 @@ class SyncV2Store:
             ready_verifier=ready_verifier,
         )
 
+    def begin_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        return self.db.begin_notes_link_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+        )
+
+    def transition_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        return self.db.transition_notes_link_bootstrap(
+            dataset_id,
+            bootstrap_id=bootstrap_id,
+            expected_state=expected_state,
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            source_hash=source_hash,
+            error_code=error_code,
+            ready_verifier=ready_verifier,
+        )
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope, connection=self._connection)
 

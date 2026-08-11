@@ -10,11 +10,11 @@ import importlib
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.endpoints.notes_graph import _can_use_heavy_graph_limits
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.api.v1.endpoints.notes_graph import _can_use_heavy_graph_limits
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +37,7 @@ def client_and_db(tmp_path, monkeypatch):
     reset_settings()
 
     db_path = tmp_path / "graph_endpoint.db"
-    db = CharactersRAGDB(str(db_path), client_id="integration_user")
+    db = CharactersRAGDB(str(db_path), client_id="1")
 
     async def override_user():
         return User(
@@ -49,8 +49,8 @@ def client_and_db(tmp_path, monkeypatch):
             permissions=["notes.graph.read", "notes.graph.write"],
         )
 
-    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
     from tldw_Server_API.app import main as app_main
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 
     def override_db_dep():
         return db
@@ -117,10 +117,10 @@ def test_graph_returns_manual_links(client_and_db):
         json={"to_note_id": n2, "directed": False},
         headers=h,
     )
-    assert link_resp.status_code == 200
+    assert link_resp.status_code == 200, link_resp.text
 
     resp = client.get(f"/api/v1/notes/graph?center_note_id={n1}&radius=1", headers=h)
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     data = resp.json()
     note_ids = {n["id"] for n in data["nodes"] if n["type"] == "note"}
     assert n1 in note_ids
@@ -134,19 +134,19 @@ def test_graph_returns_wikilink_edges(client_and_db):
     h = _headers()
     n1 = _create_note(client, "A")
     n2 = _create_note(client, "B")
-    # Update note content to include a wikilink
-    # Use direct DB to set content with wikilink
-    db.execute_query(
-        "UPDATE notes SET content = ? WHERE id = ?",
-        (f"See [[id:{n2}]] for details", n1),
-        commit=True,
+    # Use the canonical note writer so the derived graph projection advances
+    # atomically with the note content.
+    db.update_note(
+        n1,
+        {"content": f"See [[id:{n2}]] for details"},
+        expected_version=1,
     )
 
     resp = client.get(
         f"/api/v1/notes/graph?center_note_id={n1}&radius=1&edge_types=wikilink",
         headers=h,
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     data = resp.json()
     wl = [e for e in data["edges"] if e["type"] == "wikilink"]
     assert len(wl) >= 1
@@ -164,7 +164,7 @@ def test_graph_returns_tag_edges(client_and_db):
         f"/api/v1/notes/graph?center_note_id={n1}&radius=1&edge_types=tag_membership",
         headers=h,
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     data = resp.json()
     tm = [e for e in data["edges"] if e["type"] == "tag_membership"]
     assert len(tm) >= 1
@@ -263,7 +263,7 @@ def test_edge_type_filter(client_and_db):
 
     # Only request manual edges
     resp = client.get(
-        f"/api/v1/notes/graph",
+        "/api/v1/notes/graph",
         params={"center_note_id": n1, "edge_types": ["manual"]},
         headers=h,
     )

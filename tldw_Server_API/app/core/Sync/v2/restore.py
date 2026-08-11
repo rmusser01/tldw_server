@@ -22,6 +22,7 @@ OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
         "media.item",
         "media.keyword",
         "media.keyword_link",
+        "notes.link",
         *NOTES_ORGANIZATION_DOMAINS,
     }
 )
@@ -212,6 +213,13 @@ def _restore_dependencies(envelope: SyncEnvelope) -> list[tuple[SyncDomain, str]
         parent_id = payload.get("parent_sync_id")
         if isinstance(parent_id, str) and parent_id:
             dependencies.append((envelope.domain, parent_id))
+    elif envelope.domain == "notes.link":
+        dependencies.extend(
+            [
+                ("notes.note", str(payload.get("source_note_id"))),
+                ("notes.note", str(payload.get("target_note_id"))),
+            ]
+        )
     elif envelope.domain == "notes.keyword_link":
         subject_domain: SyncDomain = (
             "notes.note"

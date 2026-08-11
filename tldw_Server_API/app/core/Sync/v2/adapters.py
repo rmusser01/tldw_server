@@ -120,6 +120,7 @@ class SyncAdapterContext:
     trusted_server_origin: bool = False
     organization_group_state: str | None = None
     organization_bootstrap_id: str | None = None
+    notes_link_bootstrap_id: str | None = None
     bootstrap_relationship_verifier: BootstrapRelationshipVerifier | None = None
     bootstrap_relationship_absence_verifier: BootstrapRelationshipVerifier | None = None
 

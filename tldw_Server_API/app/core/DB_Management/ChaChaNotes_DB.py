@@ -38,6 +38,7 @@ changes in the `sync_log` and in individual records.
 # Imports
 import hashlib  # noqa: E402
 import json  # noqa: E402
+import math  # noqa: E402
 import re  # noqa: E402
 import sqlite3  # noqa: E402
 import tempfile  # noqa: E402
@@ -129,6 +130,13 @@ from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     simulate_fsrs_review_transition,
 )
 from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile  # noqa: E402
+from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
+    NOTES_LINK_LABEL_MAX_CHARS,
+    NOTES_LINK_WEIGHT_MAX,
+    NotesLinkValidationError,
+    validate_notes_link_object_id,
+    validate_notes_link_properties,
+)
 from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa: E402
     bounded_inventory_diagnostics,
     decode_inventory_cursor,
@@ -650,7 +658,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 57  # Schema v57 owner-scopes shared Notes organization resources
+    _CURRENT_SCHEMA_VERSION = 58  # Schema v58 canonicalizes Notes links and graph projections
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -6546,6 +6554,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
             MessageStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store import (
+            NoteGraphProjectionStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
@@ -6556,6 +6568,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.conversation_store = ConversationStore(self)
         self.message_store = MessageStore(self)
         self.note_store = NoteStore(self)
+        self.notes_link_store = NotesLinkStore(self)
+        self.note_graph_projection_store = NoteGraphProjectionStore(self)
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
@@ -7447,6 +7461,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (54, "_migrate_from_v54_to_v55"),
             (55, "_migrate_from_v55_to_v56"),
             (56, "_migrate_from_v56_to_v57"),
+            (57, "_migrate_from_v57_to_v58"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -10184,6 +10199,758 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         self._set_schema_version_postgres(conn, 57)
 
+    @staticmethod
+    def _notes_link_v58_transform_row(
+        row: Mapping[str, Any],
+        *,
+        source_owner: object,
+        target_owner: object,
+    ) -> dict[str, Any]:
+        """Validate one legacy edge and return its canonical v58 values."""
+
+        try:
+            edge_id = validate_notes_link_object_id(str(row["edge_id"]))
+            source_note_id = validate_notes_link_object_id(str(row["from_note_id"]))
+            target_note_id = validate_notes_link_object_id(str(row["to_note_id"]))
+        except (KeyError, NotesLinkValidationError) as exc:
+            raise SchemaError(f"Notes link v58 requires canonical UUIDv4 identity: {exc}") from exc  # noqa: TRY003
+
+        owner = str(row.get("user_id") or "")
+        if not owner:
+            raise SchemaError("Notes link v58 requires a non-empty owner.")  # noqa: TRY003
+        if source_owner is None or target_owner is None:
+            raise SchemaError("Notes link v58 requires both note endpoints to exist.")  # noqa: TRY003
+        if str(source_owner) != owner or str(target_owner) != owner:
+            raise SchemaError("Notes link v58 requires both endpoints to have the same owner.")  # noqa: TRY003
+        if source_note_id == target_note_id:
+            raise SchemaError("Notes link v58 endpoints must differ.")  # noqa: TRY003
+        if row.get("type") != "manual":
+            raise SchemaError("Notes link v58 supports only manual explicit links.")  # noqa: TRY003
+
+        directed_value = row.get("directed")
+        if isinstance(directed_value, bool):
+            directed = directed_value
+        elif isinstance(directed_value, int) and directed_value in (0, 1):
+            directed = bool(directed_value)
+        else:
+            raise SchemaError("Notes link v58 directed must be a strict boolean.")  # noqa: TRY003
+        if not directed and source_note_id > target_note_id:
+            raise SchemaError("Notes link v58 undirected endpoints must use canonical order.")  # noqa: TRY003
+
+        weight_value = 1.0 if row.get("weight") is None else row.get("weight")
+        if isinstance(weight_value, bool):
+            raise SchemaError("Notes link v58 weight is invalid.")  # noqa: TRY003
+        try:
+            weight = float(weight_value)
+        except (TypeError, ValueError) as exc:
+            raise SchemaError("Notes link v58 weight is invalid.") from exc  # noqa: TRY003
+        if not math.isfinite(weight) or not 0 <= weight <= NOTES_LINK_WEIGHT_MAX:
+            raise SchemaError("Notes link v58 weight is outside the supported range.")  # noqa: TRY003
+
+        raw_metadata = row.get("metadata")
+        if raw_metadata is None:
+            properties: object = {}
+        elif isinstance(raw_metadata, str):
+            try:
+                properties = json.loads(raw_metadata)
+            except json.JSONDecodeError as exc:
+                raise SchemaError("Notes link v58 metadata must be valid JSON.") from exc  # noqa: TRY003
+        elif isinstance(raw_metadata, Mapping):
+            properties = dict(raw_metadata)
+        else:
+            raise SchemaError("Notes link v58 metadata must be a JSON object.")  # noqa: TRY003
+        if not isinstance(properties, dict):
+            raise SchemaError("Notes link v58 metadata must be a JSON object.")  # noqa: TRY003
+
+        raw_label = properties.get("label")
+        if raw_label is not None and not isinstance(raw_label, str):
+            raise SchemaError("Notes link v58 metadata.label must be a string or null.")  # noqa: TRY003
+        label = raw_label
+        if label is not None:
+            if len(label) > NOTES_LINK_LABEL_MAX_CHARS:
+                raise SchemaError("Notes link v58 label exceeds the supported bound.")  # noqa: TRY003
+            properties = dict(properties)
+            properties.pop("label")
+        try:
+            canonical_properties = validate_notes_link_properties(properties)
+        except NotesLinkValidationError as exc:
+            raise SchemaError(f"Notes link v58 properties are invalid: {exc}") from exc  # noqa: TRY003
+
+        created_at = row.get("created_at")
+        created_by = str(row.get("created_by") or "")
+        if created_at is None or not created_by:
+            raise SchemaError("Notes link v58 requires stable creation provenance.")  # noqa: TRY003
+        return {
+            "edge_id": edge_id,
+            "user_id": owner,
+            "from_note_id": source_note_id,
+            "to_note_id": target_note_id,
+            "type": "manual",
+            "directed": directed,
+            "weight": weight,
+            "label": label,
+            "properties": canonical_properties,
+            "created_at": created_at,
+            "last_modified": created_at,
+            "created_by": created_by,
+            "version": 1,
+            "deleted": False,
+            "deleted_at": None,
+        }
+
+    @staticmethod
+    def _validate_notes_link_v58_unique(rows: list[Mapping[str, Any]]) -> None:
+        """Fail closed when legacy rows collide under canonical logical identity."""
+
+        identities: set[tuple[str, str, bool, str, str]] = set()
+        edge_ids: set[str] = set()
+        for row in rows:
+            edge_id = str(row["edge_id"])
+            identity = (
+                str(row["user_id"]),
+                str(row["type"]),
+                bool(row["directed"]),
+                str(row["from_note_id"]),
+                str(row["to_note_id"]),
+            )
+            if edge_id in edge_ids or identity in identities:
+                raise SchemaError("Notes link v58 found a duplicate logical edge.")  # noqa: TRY003
+            edge_ids.add(edge_id)
+            identities.add(identity)
+
+    @staticmethod
+    def _notes_graph_schema_sqlite(conn: sqlite3.Connection) -> None:
+        """Create local derived graph state and conservative invalidation triggers."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS note_wikilink_edges(
+              source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              target_note_id TEXT NOT NULL,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(source_note_id, target_note_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_note_wikilink_edges_target
+              ON note_wikilink_edges(target_note_id, source_note_id);
+
+            CREATE TABLE IF NOT EXISTS note_graph_note_state(
+              note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              truncated INTEGER NOT NULL DEFAULT 0 CHECK(truncated IN (0, 1)),
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS note_graph_dirty(
+              note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+              last_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS note_graph_projection_state(
+              singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+              parser_version INTEGER NOT NULL DEFAULT 1 CHECK(parser_version >= 1),
+              rebuild_state TEXT NOT NULL DEFAULT 'ready'
+                CHECK(rebuild_state IN ('ready', 'pending', 'running', 'failed')),
+              rebuild_cursor TEXT,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT OR IGNORE INTO note_graph_projection_state(singleton_id) VALUES (1);
+            CREATE TABLE IF NOT EXISTS note_graph_revisions(
+              singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+              revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT OR IGNORE INTO note_graph_revisions(singleton_id) VALUES (1);
+
+            DROP TRIGGER IF EXISTS notes_graph_notes_ai;
+            DROP TRIGGER IF EXISTS notes_graph_notes_au;
+            DROP TRIGGER IF EXISTS notes_graph_notes_ad;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ai;
+            DROP TRIGGER IF EXISTS notes_graph_edges_au;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ad;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ai;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_au;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ad;
+
+            CREATE TRIGGER notes_graph_notes_ai AFTER INSERT ON notes BEGIN
+              INSERT INTO note_graph_dirty(note_id, generation, last_modified)
+              VALUES (new.id, 1, CURRENT_TIMESTAMP)
+              ON CONFLICT(note_id) DO UPDATE SET
+                generation = generation + 1, last_modified = CURRENT_TIMESTAMP;
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_notes_au
+            AFTER UPDATE OF title, content, conversation_id, created_at, last_modified, deleted ON notes BEGIN
+              INSERT INTO note_graph_dirty(note_id, generation, last_modified)
+              VALUES (new.id, 1, CURRENT_TIMESTAMP)
+              ON CONFLICT(note_id) DO UPDATE SET
+                generation = generation + 1, last_modified = CURRENT_TIMESTAMP;
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_notes_ad AFTER DELETE ON notes BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_edges_ai AFTER INSERT ON note_edges BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_edges_au AFTER UPDATE ON note_edges BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_edges_ad AFTER DELETE ON note_edges BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_keywords_ai AFTER INSERT ON keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_keywords_au AFTER UPDATE OF keyword, deleted ON keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_keywords_ad AFTER DELETE ON keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_note_keywords_ai AFTER INSERT ON note_keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_note_keywords_au AFTER UPDATE ON note_keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_note_keywords_ad AFTER DELETE ON note_keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_conversations_ai AFTER INSERT ON conversations BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_conversations_au
+            AFTER UPDATE OF source, external_ref, deleted ON conversations BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_conversations_ad AFTER DELETE ON conversations BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            """
+        )
+
+    def _migrate_from_v57_to_v58(self, conn: sqlite3.Connection) -> None:
+        """Canonicalize explicit Notes links and install local graph state."""
+
+        if self._get_db_version(conn) >= 58:
+            return
+        conn.executescript(
+            """
+            DROP TRIGGER IF EXISTS notes_graph_notes_ai;
+            DROP TRIGGER IF EXISTS notes_graph_notes_au;
+            DROP TRIGGER IF EXISTS notes_graph_notes_ad;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ai;
+            DROP TRIGGER IF EXISTS notes_graph_edges_au;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ad;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ai;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_au;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ad;
+            """
+        )
+        raw_rows = [dict(row) for row in conn.execute("SELECT * FROM note_edges").fetchall()]
+        canonical_rows: list[dict[str, Any]] = []
+        for raw_row in raw_rows:
+            owners = conn.execute(
+                "SELECT source.client_id AS source_owner, target.client_id AS target_owner "
+                "FROM notes AS source JOIN notes AS target ON target.id = ? "
+                "WHERE source.id = ?",
+                (raw_row.get("to_note_id"), raw_row.get("from_note_id")),
+            ).fetchone()
+            canonical_rows.append(
+                self._notes_link_v58_transform_row(
+                    raw_row,
+                    source_owner=owners["source_owner"] if owners else None,
+                    target_owner=owners["target_owner"] if owners else None,
+                )
+            )
+        self._validate_notes_link_v58_unique(canonical_rows)
+
+        conn.execute("ALTER TABLE note_edges RENAME TO note_edges_v57")
+        conn.execute(
+            """
+            CREATE TABLE note_edges(
+              edge_id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              from_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              to_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              type TEXT NOT NULL CHECK(type = 'manual'),
+              directed INTEGER NOT NULL CHECK(directed IN (0, 1)),
+              weight REAL NOT NULL CHECK(weight >= 0 AND weight <= 1000000),
+              label TEXT CHECK(label IS NULL OR length(label) <= 256),
+              properties TEXT NOT NULL DEFAULT '{}'
+                CHECK(json_valid(properties) AND json_type(properties) = 'object'),
+              created_at TEXT NOT NULL,
+              last_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              created_by TEXT NOT NULL CHECK(length(created_by) > 0),
+              version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
+              deleted_at TEXT,
+              metadata TEXT,
+              CHECK(from_note_id <> to_note_id),
+              UNIQUE(user_id, type, directed, from_note_id, to_note_id)
+            )
+            """
+        )
+        insert_sql = (
+            "INSERT INTO note_edges(edge_id, user_id, from_note_id, to_note_id, type, directed, "
+            "weight, label, properties, created_at, last_modified, created_by, version, deleted, "
+            "deleted_at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        for row in canonical_rows:
+            properties_json = json.dumps(
+                row["properties"],
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            conn.execute(
+                insert_sql,
+                (
+                    row["edge_id"], row["user_id"], row["from_note_id"], row["to_note_id"],
+                    row["type"], int(row["directed"]), row["weight"], row["label"],
+                    properties_json, row["created_at"], row["last_modified"], row["created_by"],
+                    row["version"], int(row["deleted"]), row["deleted_at"], properties_json,
+                ),
+            )
+        conn.execute("DROP TABLE note_edges_v57")
+        conn.executescript(
+            """
+            CREATE INDEX idx_note_edges_owner_live
+              ON note_edges(user_id, deleted, type, edge_id);
+            CREATE INDEX idx_note_edges_from_live
+              ON note_edges(user_id, from_note_id, edge_id) WHERE deleted = 0;
+            CREATE INDEX idx_note_edges_to_live
+              ON note_edges(user_id, to_note_id, edge_id) WHERE deleted = 0;
+            """
+        )
+        self._notes_graph_schema_sqlite(conn)
+        conn.execute(
+            "INSERT INTO note_graph_dirty(note_id, generation, last_modified) "
+            "SELECT id, 1, CURRENT_TIMESTAMP FROM notes WHERE TRUE "
+            "ON CONFLICT(note_id) DO UPDATE SET generation = generation + 1, "
+            "last_modified = CURRENT_TIMESTAMP"
+        )
+        conn.execute(
+            "UPDATE note_graph_projection_state SET parser_version = 1, "
+            "rebuild_state = 'pending', rebuild_cursor = NULL, updated_at = CURRENT_TIMESTAMP "
+            "WHERE singleton_id = 1 AND EXISTS (SELECT 1 FROM notes)"
+        )
+        conn.execute(
+            "UPDATE db_schema_version SET version = 58 WHERE schema_name = ? AND version = 57",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 58:
+            raise SchemaError("Notes link v58 migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v57_to_v58_postgres(self, conn: Any) -> None:
+        """Migrate shared PostgreSQL Notes links under verified schema authority."""
+
+        backend = self.backend
+        locked_tables = (
+            "notes",
+            "note_edges",
+            "chacha_keywords",
+            "note_keywords",
+            "conversations",
+        )
+        backend.execute(
+            "LOCK TABLE notes, note_edges, chacha_keywords, note_keywords, conversations "
+            "IN ACCESS EXCLUSIVE MODE",
+            connection=conn,
+        )
+        states = backend.execute(
+            """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   table_row.relowner = current_user::regrole AS is_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname IN (
+                 'notes', 'note_edges', 'chacha_keywords', 'note_keywords', 'conversations'
+               )
+            """,
+            connection=conn,
+        ).rows
+        state_by_table = {str(row["table_name"]): row for row in states}
+        if set(state_by_table) != set(locked_tables) or any(
+            not bool(state_by_table[table]["is_schema_owner"]) for table in locked_tables
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes link v58 requires the verified PostgreSQL schema-owner migration path."
+            )
+        notes_state = state_by_table["notes"]
+        notes_forced = bool(notes_state["relforcerowsecurity"])
+        if notes_forced and not bool(notes_state["relrowsecurity"]):
+            raise SchemaError("Notes link v58 cannot verify the notes RLS state.")  # noqa: TRY003
+        if notes_forced:
+            backend.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY", connection=conn)
+
+        raw_rows = backend.execute(
+            """
+            SELECT edge.*,
+                   source_note.client_id AS source_owner,
+                   target_note.client_id AS target_owner
+              FROM note_edges AS edge
+              LEFT JOIN notes AS source_note ON source_note.id = edge.from_note_id
+              LEFT JOIN notes AS target_note ON target_note.id = edge.to_note_id
+             ORDER BY edge.edge_id
+            """,
+            connection=conn,
+        ).rows
+        canonical_rows = [
+            self._notes_link_v58_transform_row(
+                row,
+                source_owner=row.get("source_owner"),
+                target_owner=row.get("target_owner"),
+            )
+            for row in raw_rows
+        ]
+        self._validate_notes_link_v58_unique(canonical_rows)
+
+        backend.execute(
+            """
+            ALTER TABLE note_edges
+              ADD COLUMN IF NOT EXISTS label TEXT,
+              ADD COLUMN IF NOT EXISTS properties JSONB,
+              ADD COLUMN IF NOT EXISTS last_modified TIMESTAMPTZ,
+              ADD COLUMN IF NOT EXISTS version INTEGER,
+              ADD COLUMN IF NOT EXISTS deleted BOOLEAN,
+              ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+            """,
+            connection=conn,
+        )
+        canonical_payload = json.dumps(
+            [
+                {
+                    "edge_id": row["edge_id"],
+                    "weight": row["weight"],
+                    "label": row["label"],
+                    "properties": row["properties"],
+                }
+                for row in canonical_rows
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        backend.execute(
+            """
+            UPDATE note_edges AS edge
+               SET weight = staged.weight,
+                   label = staged.label,
+                   properties = staged.properties,
+                   last_modified = edge.created_at,
+                   version = 1,
+                   deleted = FALSE,
+                   deleted_at = NULL
+              FROM jsonb_to_recordset(%s::jsonb) AS staged(
+                edge_id TEXT, weight DOUBLE PRECISION, label TEXT, properties JSONB
+              )
+             WHERE edge.edge_id = staged.edge_id
+            """,
+            (canonical_payload,),
+            connection=conn,
+        )
+        backend.execute(
+            """
+            ALTER TABLE note_edges
+              ALTER COLUMN properties SET DEFAULT '{}'::jsonb,
+              ALTER COLUMN properties SET NOT NULL,
+              ALTER COLUMN weight SET DEFAULT 1.0,
+              ALTER COLUMN weight SET NOT NULL,
+              ALTER COLUMN last_modified SET DEFAULT CURRENT_TIMESTAMP,
+              ALTER COLUMN last_modified SET NOT NULL,
+              ALTER COLUMN version SET DEFAULT 1,
+              ALTER COLUMN version SET NOT NULL,
+              ALTER COLUMN deleted SET DEFAULT FALSE,
+              ALTER COLUMN deleted SET NOT NULL
+            """,
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_source_note_fkey",
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_target_note_fkey",
+            connection=conn,
+        )
+        constraints = (
+            (
+                "note_edges_source_note_fkey",
+                "FOREIGN KEY (from_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
+            ),
+            (
+                "note_edges_target_note_fkey",
+                "FOREIGN KEY (to_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
+            ),
+            ("note_edges_manual_type_check", "CHECK (type = 'manual')"),
+            ("note_edges_directed_check", "CHECK (directed IN (0, 1))"),
+            (
+                "note_edges_weight_check",
+                "CHECK (weight >= 0 AND weight <= 1000000 AND weight NOT IN "
+                "('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8))",
+            ),
+            ("note_edges_label_check", "CHECK (label IS NULL OR char_length(label) <= 256)"),
+            ("note_edges_self_link_check", "CHECK (from_note_id <> to_note_id)"),
+            ("note_edges_version_check", "CHECK (version >= 1)"),
+            (
+                "note_edges_id_check",
+                "CHECK (edge_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            ),
+            (
+                "note_edges_source_id_check",
+                "CHECK (from_note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            ),
+            (
+                "note_edges_target_id_check",
+                "CHECK (to_note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            ),
+            (
+                "note_edges_created_by_check",
+                "CHECK (created_by IS NOT NULL AND char_length(created_by) > 0)",
+            ),
+            (
+                "note_edges_logical_identity_key",
+                "UNIQUE (user_id, type, directed, from_note_id, to_note_id)",
+            ),
+        )
+        for constraint_name, definition in constraints:
+            backend.execute(
+                f"""
+                DO $migration$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                     WHERE conrelid = 'note_edges'::regclass
+                       AND conname = '{constraint_name}'
+                  ) THEN
+                    ALTER TABLE note_edges ADD CONSTRAINT {constraint_name} {definition};
+                  END IF;
+                END
+                $migration$
+                """,  # nosec B608 -- names and definitions are fixed migration constants.
+                connection=conn,
+            )
+        backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_edges_owner_live "
+            "ON note_edges(user_id, deleted, type, edge_id)",
+            connection=conn,
+        )
+        backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_edges_from_live "
+            "ON note_edges(user_id, from_note_id, edge_id) WHERE deleted = FALSE",
+            connection=conn,
+        )
+        backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_edges_to_live "
+            "ON note_edges(user_id, to_note_id, edge_id) WHERE deleted = FALSE",
+            connection=conn,
+        )
+        self._notes_graph_schema_postgres(conn)
+        backend.execute(
+            "INSERT INTO note_graph_dirty(owner_user_id, note_id, generation, last_modified) "
+            "SELECT client_id, id, 1, CURRENT_TIMESTAMP FROM notes "
+            "ON CONFLICT(owner_user_id, note_id) DO UPDATE SET "
+            "generation = note_graph_dirty.generation + 1, last_modified = CURRENT_TIMESTAMP",
+            connection=conn,
+        )
+        backend.execute(
+            "INSERT INTO note_graph_projection_state(owner_user_id, parser_version, rebuild_state, "
+            "rebuild_cursor, updated_at) "
+            "SELECT DISTINCT client_id, 1, 'pending', NULL, CURRENT_TIMESTAMP FROM notes "
+            "ON CONFLICT(owner_user_id) DO UPDATE SET parser_version = 1, "
+            "rebuild_state = 'pending', rebuild_cursor = NULL, updated_at = CURRENT_TIMESTAMP",
+            connection=conn,
+        )
+        if notes_forced:
+            backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
+        self._set_schema_version_postgres(conn, 58)
+
+    def _notes_graph_schema_postgres(self, conn: Any) -> None:
+        """Create owner-scoped graph projections and direct-write invalidation."""
+
+        statements = (
+            """
+            CREATE TABLE IF NOT EXISTS note_wikilink_edges(
+              owner_user_id TEXT NOT NULL,
+              source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              target_note_id TEXT NOT NULL,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(owner_user_id, source_note_id, target_note_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_note_wikilink_edges_target "
+            "ON note_wikilink_edges(owner_user_id, target_note_id, source_note_id)",
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_note_state(
+              owner_user_id TEXT NOT NULL,
+              note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              truncated BOOLEAN NOT NULL DEFAULT FALSE,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(owner_user_id, note_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_dirty(
+              owner_user_id TEXT NOT NULL,
+              note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              generation BIGINT NOT NULL DEFAULT 1 CHECK(generation >= 1),
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(owner_user_id, note_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_projection_state(
+              owner_user_id TEXT PRIMARY KEY,
+              parser_version INTEGER NOT NULL DEFAULT 1 CHECK(parser_version >= 1),
+              rebuild_state TEXT NOT NULL DEFAULT 'ready'
+                CHECK(rebuild_state IN ('ready', 'pending', 'running', 'failed')),
+              rebuild_cursor TEXT,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_revisions(
+              owner_user_id TEXT PRIMARY KEY,
+              revision BIGINT NOT NULL DEFAULT 0 CHECK(revision >= 0),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_bump_revision(owner_id TEXT) RETURNS VOID AS $$
+            BEGIN
+              INSERT INTO note_graph_revisions(owner_user_id, revision, updated_at)
+              VALUES (owner_id, 1, CURRENT_TIMESTAMP)
+              ON CONFLICT(owner_user_id) DO UPDATE SET revision = note_graph_revisions.revision + 1,
+                updated_at = CURRENT_TIMESTAMP;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_notes_changed() RETURNS TRIGGER AS $$
+            DECLARE
+              owner_id TEXT := COALESCE(NEW.client_id, OLD.client_id);
+              changed_note_id TEXT := COALESCE(NEW.id, OLD.id);
+            BEGIN
+              IF TG_OP <> 'DELETE' THEN
+                INSERT INTO note_graph_dirty(owner_user_id, note_id, generation, last_modified)
+                VALUES (owner_id, changed_note_id, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(owner_user_id, note_id) DO UPDATE
+                SET generation = note_graph_dirty.generation + 1, last_modified = CURRENT_TIMESTAMP;
+              END IF;
+              PERFORM notes_graph_bump_revision(owner_id);
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_notes_changed_trigger ON notes",
+            "CREATE TRIGGER notes_graph_notes_changed_trigger AFTER INSERT OR DELETE OR UPDATE OF "
+            "title, content, conversation_id, created_at, last_modified, deleted ON notes "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_notes_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_edges_changed() RETURNS TRIGGER AS $$
+            DECLARE owner_id TEXT := COALESCE(NEW.user_id, OLD.user_id);
+            BEGIN
+              PERFORM notes_graph_bump_revision(owner_id);
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_edges_changed_trigger ON note_edges",
+            "CREATE TRIGGER notes_graph_edges_changed_trigger AFTER INSERT OR UPDATE OR DELETE ON note_edges "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_edges_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_keywords_changed() RETURNS TRIGGER AS $$
+            BEGIN
+              PERFORM notes_graph_bump_revision(COALESCE(NEW.client_id, OLD.client_id));
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_keywords_changed_trigger ON chacha_keywords",
+            "CREATE TRIGGER notes_graph_keywords_changed_trigger AFTER INSERT OR DELETE OR UPDATE OF "
+            "keyword, deleted ON chacha_keywords "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_keywords_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_note_keywords_changed() RETURNS TRIGGER AS $$
+            DECLARE
+              changed_note_id TEXT := COALESCE(NEW.note_id, OLD.note_id);
+              owner_id TEXT;
+            BEGIN
+              SELECT client_id INTO owner_id FROM notes WHERE id = changed_note_id;
+              IF owner_id IS NOT NULL THEN
+                PERFORM notes_graph_bump_revision(owner_id);
+              END IF;
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_note_keywords_changed_trigger ON note_keywords",
+            "CREATE TRIGGER notes_graph_note_keywords_changed_trigger "
+            "AFTER INSERT OR UPDATE OR DELETE ON note_keywords "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_note_keywords_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_conversations_changed() RETURNS TRIGGER AS $$
+            BEGIN
+              PERFORM notes_graph_bump_revision(COALESCE(NEW.client_id, OLD.client_id));
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_conversations_changed_trigger ON conversations",
+            "CREATE TRIGGER notes_graph_conversations_changed_trigger "
+            "AFTER INSERT OR DELETE OR UPDATE OF source, external_ref, deleted ON conversations "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_conversations_changed()",
+        )
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
     def _ensure_chacha_rls_postgres(self, conn: Any) -> None:
         """Install the complete ChaCha policy set after all schema migrations."""
         for statement in build_chacha_rls_sql():
@@ -12902,6 +13669,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 57 and current_db_version == 56:
                         self._migrate_from_v56_to_v57(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 58 and current_db_version == 57:
+                        self._migrate_from_v57_to_v58(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -13321,6 +14091,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 57 and current_db_version == 56:
                     self._migrate_from_v56_to_v57(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 58 and current_db_version == 57:
+                    self._migrate_from_v57_to_v58(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -17256,6 +18029,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 57:
                 self._migrate_from_v56_to_v57_postgres(conn)
                 current_version = 57
+            if current_version < 58:
+                self._migrate_from_v57_to_v58_postgres(conn)
+                current_version = 58
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -18033,149 +18809,70 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         metadata: dict[str, Any] | None = None,
         created_by: str,
     ) -> dict[str, Any]:
-        """Create a manual note edge, enforcing undirected canonicalization and uniqueness.
+        """Create one owner-bound manual link using the canonical lifecycle store."""
 
-        Returns the created edge row as a dict. Raises ConflictError on duplicates.
-        """
-        if not user_id or not from_note_id or not to_note_id or created_by is None or created_by == "":
-            raise InputError("user_id, from_note_id, to_note_id, and created_by are required")  # noqa: TRY003
-
-        # Prevent self-loops for manual edges (regardless of directed flag)
-        if from_note_id == to_note_id:
-            raise InputError("from_note_id and to_note_id must differ (self-loops are not allowed)")  # noqa: TRY003
-
-        # Canonicalize for undirected edges
-        src = from_note_id
-        dst = to_note_id
-        if not directed and src > dst:
-            src, dst = dst, src
-
-        edge_id = self._generate_uuid()
-        now_iso = self._get_current_utc_timestamp_iso()
-        type_str = "manual"
-        # Validate weight
-        import math  # at top-level import preferred; see helper snippet below
-        w = 1.0 if weight is None else float(weight)
-        if not math.isfinite(w) or w < 0:
-            raise InputError("weight must be a finite, non-negative number")  # noqa: TRY003
-
-        try:
-            with self.transaction() as conn:
-                # Ensure endpoints exist (avoid dangling edges)
-                if not conn.execute("SELECT 1 FROM notes WHERE id = ? AND deleted = 0", (src,)).fetchone():
-                    raise InputError("from_note_id not found or deleted")  # noqa: TRY003
-                if not conn.execute("SELECT 1 FROM notes WHERE id = ? AND deleted = 0", (dst,)).fetchone():
-                    raise InputError("to_note_id not found or deleted")  # noqa: TRY003
-                query = (
-                    "INSERT INTO note_edges(edge_id, user_id, from_note_id, to_note_id, type, directed, weight, created_at, created_by, metadata) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                )
-                params = (
-                    edge_id,
-                    str(user_id),
-                    src,
-                    dst,
-                    type_str,
-                    1 if directed else 0,
-                    w,
-                    now_iso,
-                    created_by,
-                    json.dumps(metadata) if metadata is not None else None,
-                )
-                conn.execute(query, params)
-
-                # Log sync event
-                payload = {
-                    "edge_id": edge_id,
-                    "user_id": str(user_id),
-                    "from_note_id": src,
-                    "to_note_id": dst,
-                    "type": type_str,
-                    "directed": bool(directed),
-                    "weight": float(weight) if weight is not None else 1.0,
-                    "created_at": now_iso,
-                    "created_by": created_by,
-                }
-                entity_col = 'entity_id'
-                if self.backend_type == BackendType.POSTGRESQL:
-                    try:
-                        cols = {c.get('name') for c in self.backend.get_table_info('sync_log', connection=conn)}
-                        if 'entity_uuid' in cols and 'entity_id' not in cols:
-                            entity_col = 'entity_uuid'
-                    except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug("sync_log column introspection failed on {}: {}", self.backend_type.value, e)
-                if entity_col not in ("entity_id", "entity_uuid"):
-                    raise CharactersRAGDBError(  # noqa: TRY003
-                        f"Unexpected sync_log id column: {entity_col}"
-                    )
-                conn.execute(
-                    f"INSERT INTO sync_log (entity, {entity_col}, operation, timestamp, client_id, version, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",  # nosec B608
-                    ("note_edges", edge_id, "create", now_iso, self.client_id, 1, json.dumps(payload)),
-                )
-
-                # Fetch inserted row
-                cur = conn.execute(
-                    "SELECT edge_id, user_id, from_note_id, to_note_id, type, directed, weight, created_at, created_by, metadata FROM note_edges WHERE edge_id = ?",
-                    (edge_id,),
-                )
-                row = cur.fetchone()
-                if not row:
-                    raise CharactersRAGDBError("Inserted edge not found")  # noqa: TRY003
-                # Normalize metadata JSON
-                out = dict(row)
-                try:
-                    if out.get("metadata") is not None and isinstance(out.get("metadata"), str):
-                        out["metadata"] = json.loads(out["metadata"])  # type: ignore[arg-type]
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    pass
-                out["directed"] = bool(out.get("directed", 0))
-                return out
-        except sqlite3.IntegrityError as e:
-            msg = str(e).lower()
-            if "unique" in msg or "constraint" in msg:
-                raise ConflictError("Duplicate manual link for this user and endpoints") from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Failed to create manual note edge: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            # Try to detect unique/duplicate
-            msg = str(e).lower()
-            if "duplicate key" in msg or "unique constraint" in msg:
-                raise ConflictError("Duplicate manual link for this user and endpoints") from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Backend error creating manual note edge: {e}") from e  # noqa: TRY003
+        if str(user_id) != str(self.client_id):
+            raise InputError("Manual links must use the authenticated owner")
+        source_note_id, target_note_id = from_note_id, to_note_id
+        if not directed and source_note_id > target_note_id:
+            source_note_id, target_note_id = target_note_id, source_note_id
+        properties = dict(metadata or {})
+        label = properties.pop("label", None)
+        if label is not None and not isinstance(label, str):
+            raise InputError("Manual link metadata.label must be a string or null")
+        timestamp = datetime.fromisoformat(
+            self._get_current_utc_timestamp_iso().replace("Z", "+00:00")
+        ).astimezone(timezone.utc).isoformat()
+        result = self.notes_link_store.upsert(
+            edge_id=self._generate_uuid(),
+            payload={
+                "source_note_id": source_note_id,
+                "target_note_id": target_note_id,
+                "type": "manual",
+                "directed": bool(directed),
+                "weight": 1.0 if weight is None else weight,
+                "label": label,
+                "properties": properties,
+                "created_at": timestamp,
+                "last_modified": timestamp,
+                "created_by": created_by,
+            },
+            expected_version=None,
+        )
+        return self.notes_link_store.legacy_dict(result.link)
 
     def delete_manual_note_edge(self, *, user_id: str, edge_id: str) -> bool:
-        """Delete a manual note edge by id for the given user. Returns True if deleted."""
-        if not user_id or not edge_id:
-            raise InputError("user_id and edge_id are required")  # noqa: TRY003
-        now_iso = self._get_current_utc_timestamp_iso()
-        try:
-            with self.transaction() as conn:
-                cur = conn.execute(
-                    "DELETE FROM note_edges WHERE edge_id = ? AND user_id = ?",
-                    (edge_id, str(user_id)),
-                )
-                deleted = cur.rowcount > 0
-                if deleted:
-                    entity_col = 'entity_id'
-                    if self.backend_type == BackendType.POSTGRESQL:
-                        try:
-                            cols = {c.get('name') for c in self.backend.get_table_info('sync_log', connection=conn)}
-                            if 'entity_uuid' in cols and 'entity_id' not in cols:
-                                entity_col = 'entity_uuid'
-                        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug("sync_log column introspection failed on {}: {}", self.backend_type.value, e)
-                    if entity_col not in ("entity_id", "entity_uuid"):
-                        raise CharactersRAGDBError(  # noqa: TRY003
-                            f"Unexpected sync_log id column: {entity_col}"
-                        )
-                    conn.execute(
-                        f"INSERT INTO sync_log (entity, {entity_col}, operation, timestamp, client_id, version, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",  # nosec B608
-                        ("note_edges", edge_id, "delete", now_iso, self.client_id, 1, json.dumps({"edge_id": edge_id})),
-                    )
-                return deleted
-        except sqlite3.Error as e:
-            raise CharactersRAGDBError(f"Failed to delete manual note edge: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            raise CharactersRAGDBError(f"Backend error deleting manual note edge: {e}") from e  # noqa: TRY003
+        """Soft-delete one owner-bound manual link; repeated deletion is idempotent."""
+
+        if str(user_id) != str(self.client_id):
+            raise InputError("Manual links must use the authenticated owner")
+        existing = self.notes_link_store.get(edge_id)
+        if existing is None:
+            return False
+        if existing.deleted:
+            return True
+        timestamp = datetime.fromisoformat(
+            self._get_current_utc_timestamp_iso().replace("Z", "+00:00")
+        ).astimezone(timezone.utc).isoformat()
+        self.notes_link_store.tombstone(
+            edge_id=edge_id,
+            payload={
+                "source_note_id": existing.source_note_id,
+                "target_note_id": existing.target_note_id,
+                "type": existing.type,
+                "directed": existing.directed,
+                "weight": existing.weight,
+                "label": existing.label,
+                "properties": dict(existing.properties),
+                "created_at": existing.created_at,
+                "last_modified": timestamp,
+                "created_by": existing.created_by,
+                "deleted_at": timestamp,
+                "reason": "legacy-api-delete",
+            },
+            expected_version=existing.version,
+        )
+        return True
 
     # ----------------------
     # Notes Graph: batch query helpers
@@ -18185,33 +18882,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_manual_edges_for_notes(self, user_id: str, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return all manual edges touching any of *note_ids* for *user_id*."""
-        if not note_ids:
+        if str(user_id) != str(self.client_id):
             return []
-        results: list[dict[str, Any]] = []
-        for batch in self._chunk_list(note_ids, self._SQLITE_PARAM_LIMIT):
-            ph = ",".join(["?"] * len(batch))
-            query = (
-                f"SELECT edge_id, user_id, from_note_id, to_note_id, type, directed, weight, "  # nosec B608
-                f"created_at, created_by, metadata "
-                f"FROM note_edges "
-                f"WHERE user_id = ? AND (from_note_id IN ({ph}) OR to_note_id IN ({ph}))"
-            )
-            params = (str(user_id), *batch, *batch)
-            cur = self.execute_query(query, params)
-            for row in cur.fetchall():
-                r = dict(row) if hasattr(row, "keys") else {
-                    "edge_id": row[0], "user_id": row[1], "from_note_id": row[2],
-                    "to_note_id": row[3], "type": row[4], "directed": row[5],
-                    "weight": row[6], "created_at": row[7], "created_by": row[8],
-                    "metadata": row[9],
-                }
-                if isinstance(r.get("metadata"), str):
-                    try:
-                        r["metadata"] = json.loads(r["metadata"])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                results.append(r)
-        return results
+        return [
+            self.notes_link_store.legacy_dict(link)
+            for link in self.notes_link_store.list_for_notes(note_ids)
+        ]
 
     # Note graph helper methods are delegated to NoteStore at module bottom.
 

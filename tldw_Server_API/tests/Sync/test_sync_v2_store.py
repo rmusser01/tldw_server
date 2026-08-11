@@ -1078,6 +1078,19 @@ def test_dataset_enrollment_supports_media_metadata_in_personal_and_workspace_sc
     assert workspace.domains == ["workspaces.source_ref", *media_domains]
 
 
+def test_personal_dataset_enrollment_accepts_notes_link_domain(
+    sync_store: SyncV2Store,
+) -> None:
+    enrolled = sync_store.enroll_dataset(
+        _dataset(
+            dataset_id="personal-notes-link",
+            domains=["notes.note", "notes.link"],
+        )
+    )
+
+    assert enrolled.domains == ["notes.note", "notes.link"]
+
+
 def test_dataset_enrollment_rejects_scope_domain_mismatches(sync_store: SyncV2Store):
     with pytest.raises(SyncInvalidDomainError):
         sync_store.enroll_dataset(_dataset(domains=["workspaces.workspace"]))

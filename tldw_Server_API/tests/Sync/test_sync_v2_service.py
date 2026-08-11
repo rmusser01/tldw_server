@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
+from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import (
@@ -23,6 +24,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaMetadataAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
@@ -30,6 +32,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult, NotesMaterializer
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
     NotesOrganizationMaterializer,
 )
@@ -620,6 +623,185 @@ def _accepted_keyword_conflict_after_applied_predecessor(
     return note_db, sync_store, service, dataset_id, baseline, source, conflict
 
 
+def test_notes_link_concurrent_product_edit_records_safe_conflict_and_skip_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    note_db = CharactersRAGDB(tmp_path / "notes-link-conflict.db", client_id="user-1")
+    source_note_id = "11111111-1111-4111-8111-111111111111"
+    target_note_id = "22222222-2222-4222-8222-222222222222"
+    edge_id = "33333333-3333-4333-8333-333333333333"
+    created_at = "2026-08-10T12:00:00+00:00"
+
+    def link_payload(*, weight: float, modified_at: str) -> dict[str, object]:
+        return {
+            "source_note_id": source_note_id,
+            "target_note_id": target_note_id,
+            "type": "manual",
+            "directed": False,
+            "weight": weight,
+            "label": None,
+            "properties": {},
+            "created_at": created_at,
+            "last_modified": modified_at,
+            "created_by": "device-1",
+        }
+
+    try:
+        for note_id in (source_note_id, target_note_id):
+            note_db.note_store.add_note(note_id, "body", note_id=note_id)
+        sync_store = SyncV2Store(
+            SyncDatabase(sqlite_path=tmp_path / "notes-link-conflict-sync.db")
+        )
+        service = SyncV2Service(
+            store=sync_store,
+            adapters=SyncAdapterRegistry(
+                [
+                    StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1}),
+                    NotesLinkDomainAdapter(),
+                ]
+            ),
+            materializers={"notes.link": NotesLinkMaterializer(note_db)},
+            clock=_clock,
+            id_factory=lambda prefix: f"{prefix}-notes-link",
+            settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+        )
+        _register_devices(service, "user-1", "device-1")
+        service.enroll_dataset(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            domains=["notes.note"],
+        )
+        sync_store.begin_notes_link_bootstrap(
+            "dataset-1",
+            owner_user_id="user-1",
+            bootstrap_id="notes-link-conflict-ready",
+        )
+        sync_store.transition_notes_link_bootstrap(
+            "dataset-1",
+            bootstrap_id="notes-link-conflict-ready",
+            expected_state="initializing",
+            state="ready",
+            captured_count=0,
+            expected_count=0,
+            source_hash=None,
+            ready_verifier=lambda: True,
+        )
+        for index, note_id in enumerate((source_note_id, target_note_id), start=1):
+            note = sync_store.insert_envelope(
+                SyncEnvelopeCreate(
+                    dataset_id="dataset-1",
+                    client_envelope_id=f"env-notes-link-note-{index}",
+                    domain="notes.note",
+                    operation="upsert",
+                    object_id=note_id,
+                    device_id="device-1",
+                    object_revision=1,
+                    payload={"title": note_id, "content": "body"},
+                    payload_hash=f"sha256:notes-link-note-{index}",
+                    created_at_client=created_at,
+                    apply_status="applied",
+                )
+            )
+            sync_store.upsert_object_state(
+                SyncObjectState(
+                    dataset_id="dataset-1",
+                    domain="notes.note",
+                    object_id=note_id,
+                    object_revision=1,
+                    object_hash=note.payload_hash or "",
+                    latest_server_cursor=note.server_cursor or 0,
+                    deleted=False,
+                )
+            )
+        baseline_result = service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            envelopes=[
+                SyncEnvelopeCreate(
+                    dataset_id="dataset-1",
+                    client_envelope_id="env-notes-link-baseline",
+                    domain="notes.link",
+                    operation="upsert",
+                    object_id=edge_id,
+                    device_id="device-1",
+                    client_sequence=1,
+                    object_revision=1,
+                    entity_version=1,
+                    payload=link_payload(weight=1.0, modified_at=created_at),
+                    payload_hash="sha256:notes-link-baseline",
+                    created_at_client=created_at,
+                )
+            ],
+        )
+        baseline = sync_store.get_envelope_by_server_cursor(
+            baseline_result.accepted[0].server_sequence
+        )
+        assert baseline is not None and baseline.apply_status == "applied"
+        NotesLinkStore(note_db).upsert(
+            edge_id=edge_id,
+            payload=link_payload(
+                weight=9.0,
+                modified_at="2026-08-10T12:00:01+00:00",
+            ),
+            expected_version=1,
+        )
+
+        pushed = service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            envelopes=[
+                SyncEnvelopeCreate(
+                    dataset_id="dataset-1",
+                    client_envelope_id="env-notes-link-concurrent",
+                    domain="notes.link",
+                    operation="upsert",
+                    object_id=edge_id,
+                    device_id="device-1",
+                    client_sequence=2,
+                    base_server_cursor=baseline.server_cursor,
+                    base_object_revision=baseline.object_revision,
+                    base_object_hash=baseline.payload_hash,
+                    base_version=1,
+                    object_revision=2,
+                    entity_version=2,
+                    payload=link_payload(
+                        weight=2.0,
+                        modified_at="2026-08-10T12:00:02+00:00",
+                    ),
+                    payload_hash="sha256:notes-link-concurrent",
+                    created_at_client="2026-08-10T12:00:02+00:00",
+                )
+            ],
+        )
+        stored_conflict = sync_store.get_conflict(pushed.conflicts[0].conflict_id)
+        assert stored_conflict is not None
+        assert stored_conflict.conflict_type == "notes_link_product_conflict"
+        assert stored_conflict.metadata == {"reason": "product_state_conflict"}
+        assert "source_note_id" not in str(stored_conflict)
+
+        first = service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=stored_conflict.conflict_id,
+            action="skip",
+            resolved_by_device_id="device-1",
+        )
+        replayed = service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=stored_conflict.conflict_id,
+            action="skip",
+            resolved_by_device_id="device-1",
+        )
+        source = sync_store.get_envelope_by_server_cursor(stored_conflict.server_cursor)
+        assert replayed == first
+        assert source is not None and source.apply_status == "superseded"
+    finally:
+        note_db.close_connection()
+
+
 def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
     sync_service: SyncV2Service,
 ):
@@ -644,6 +826,7 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "notes.keyword_collection_link",
         "notes.folder",
         "notes.folder_link",
+        "notes.link",
     ]
     assert {
         domain: capabilities.operations[domain]
@@ -656,6 +839,7 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "notes.folder": ["upsert", "tombstone"],
         "notes.folder_link": ["upsert", "tombstone"],
     }
+    assert capabilities.operations["notes.link"] == ["upsert", "tombstone"]
     assert capabilities.max_batch_size == 10
     assert capabilities.max_envelope_payload_bytes == 1024
     assert capabilities.max_attachment_bytes == 4096

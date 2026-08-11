@@ -56,6 +56,7 @@ class ServerOriginMutationStep:
     parent_id: str | None = None
     routing_metadata: Mapping[str, object] = field(default_factory=dict)
     stable_key: str | None = None
+    created_at_client: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,7 @@ def capture_server_origin_mutation_batch(
     source: str,
     idempotency_key: str,
     trusted_notes_organization_bootstrap_id: str | None = None,
+    trusted_notes_link_bootstrap_id: str | None = None,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -124,15 +126,20 @@ def capture_server_origin_mutation_batch(
         raise SyncStoreError("Sync server-origin mutation batch requires an idempotency key")
     if (
         trusted_notes_organization_bootstrap_id is not None
-        and bootstrap_step_verifier is None
+        and trusted_notes_link_bootstrap_id is not None
     ):
+        raise SyncStoreError("Only one trusted bootstrap context may be supplied")
+    trusted_bootstrap_id = (
+        trusted_notes_organization_bootstrap_id or trusted_notes_link_bootstrap_id
+    )
+    if trusted_bootstrap_id is not None and bootstrap_step_verifier is None:
         raise SyncStoreError("Sync bootstrap capture requires a source-step verifier")
 
     dataset = _active_default_personal_dataset(service, user_id)
     _require_batch_write_ready(
         dataset,
         {step.domain for step in plan},
-        trusted_bootstrap_id=trusted_notes_organization_bootstrap_id,
+        trusted_bootstrap_id=trusted_bootstrap_id,
     )
     if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
         raise SyncServerOriginMutationNotSupportedError(dataset, plan[0].domain)
@@ -162,7 +169,7 @@ def capture_server_origin_mutation_batch(
             service=service,
             dataset=dataset,
             envelopes=existing,
-            bootstrap_id=trusted_notes_organization_bootstrap_id,
+            bootstrap_id=trusted_bootstrap_id,
             bootstrap_step_verifier=bootstrap_step_verifier,
         )
 
@@ -172,19 +179,20 @@ def capture_server_origin_mutation_batch(
         canonical_steps=canonical_steps,
         mutation_group_id=mutation_group_id,
         mutation_plan_hash=mutation_plan_hash,
-        bootstrap_id=trusted_notes_organization_bootstrap_id,
+        bootstrap_id=trusted_bootstrap_id,
+        notes_link_bootstrap=trusted_notes_link_bootstrap_id is not None,
         bootstrap_relationship_verifier=bootstrap_relationship_verifier,
         bootstrap_relationship_absence_verifier=(
             bootstrap_relationship_absence_verifier
         ),
     )
     try:
-        if trusted_notes_organization_bootstrap_id is None:
+        if trusted_bootstrap_id is None:
             inserted = service.store.insert_envelopes_atomic(envelopes)
         else:
             inserted = service.store.insert_envelopes_atomic(
                 envelopes,
-                trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+                trusted_notes_organization_bootstrap_id=trusted_bootstrap_id,
             )
     except SyncIdempotencyConflictError as exc:
         raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
@@ -194,7 +202,7 @@ def capture_server_origin_mutation_batch(
         service=service,
         dataset=dataset,
         envelopes=inserted,
-        bootstrap_id=trusted_notes_organization_bootstrap_id,
+        bootstrap_id=trusted_bootstrap_id,
         bootstrap_step_verifier=bootstrap_step_verifier,
     )
 
@@ -276,6 +284,7 @@ def _evaluate_plan(
     mutation_group_id: str,
     mutation_plan_hash: str,
     bootstrap_id: str | None = None,
+    notes_link_bootstrap: bool = False,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -334,13 +343,23 @@ def _evaluate_plan(
                 prior_head.object_revision if prior_head is not None else None
             ),
             base_object_hash=prior_head.payload_hash if prior_head is not None else None,
+            base_version=(
+                (
+                    prior_head.entity_version
+                    if prior_head.entity_version is not None
+                    else prior_head.object_revision
+                )
+                if step.domain == "notes.link" and prior_head is not None
+                else None
+            ),
             object_revision=object_revision,
+            entity_version=(object_revision if step.domain == "notes.link" else None),
             parent_id=step.parent_id,
             schema_version=1,
             payload=dict(step.payload),
             payload_hash=payload_hash,
             payload_size_bytes=payload_size,
-            created_at_client=service.clock() or None,
+            created_at_client=step.created_at_client or service.clock() or None,
             deleted=step.operation == "tombstone",
             encryption_metadata={"policy": DEFAULT_M1_ENCRYPTION_POLICY},
             routing_metadata=dict(step.routing_metadata),
@@ -366,7 +385,8 @@ def _evaluate_plan(
             list_heads=list_heads,
             trusted_server_origin=bootstrap_id is not None,
             organization_group_state=("initializing" if bootstrap_id is not None else None),
-            organization_bootstrap_id=bootstrap_id,
+            organization_bootstrap_id=(None if notes_link_bootstrap else bootstrap_id),
+            notes_link_bootstrap_id=(bootstrap_id if notes_link_bootstrap else None),
             bootstrap_relationship_verifier=bootstrap_relationship_verifier,
             bootstrap_relationship_absence_verifier=(
                 bootstrap_relationship_absence_verifier
@@ -595,6 +615,7 @@ def _canonical_step(
         parent_id=step.parent_id,
         routing_metadata=routing_metadata,
         stable_key=step.stable_key,
+        created_at_client=step.created_at_client,
     )
 
 
@@ -607,6 +628,7 @@ def _canonical_step_from_envelope(envelope: SyncEnvelope) -> ServerOriginMutatio
         parent_id=envelope.parent_id,
         routing_metadata=dict(envelope.routing_metadata),
         stable_key=envelope.stable_key,
+        created_at_client=envelope.created_at_client,
     )
 
 
@@ -682,21 +704,30 @@ def _require_batch_write_ready(
         raise SyncStoreError(
             "Sync domains are not enrolled for this dataset: " + ", ".join(missing)
         )
-    if not domains.intersection(NOTES_ORGANIZATION_DOMAINS):
-        return
-    metadata = dataset.metadata.get("notes_organization_v1")
-    state = metadata.get("state") if isinstance(metadata, Mapping) else None
-    current_bootstrap_id = (
-        metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
-    )
-    if state == "ready":
-        return
-    if (
-        state != "initializing"
-        or trusted_bootstrap_id is None
-        or current_bootstrap_id != trusted_bootstrap_id
-    ):
-        raise SyncStoreError("notes_organization_sync_not_ready")
+    if "notes.link" in domains:
+        metadata = dataset.metadata.get("notes_link_v1")
+        state = metadata.get("state") if isinstance(metadata, Mapping) else None
+        current_bootstrap_id = (
+            metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
+        )
+        if state != "ready" and (
+            state != "initializing"
+            or trusted_bootstrap_id is None
+            or current_bootstrap_id != trusted_bootstrap_id
+        ):
+            raise SyncStoreError("notes_link_sync_not_ready")
+    if domains.intersection(NOTES_ORGANIZATION_DOMAINS):
+        metadata = dataset.metadata.get("notes_organization_v1")
+        state = metadata.get("state") if isinstance(metadata, Mapping) else None
+        current_bootstrap_id = (
+            metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
+        )
+        if state != "ready" and (
+            state != "initializing"
+            or trusted_bootstrap_id is None
+            or current_bootstrap_id != trusted_bootstrap_id
+        ):
+            raise SyncStoreError("notes_organization_sync_not_ready")
 
 
 __all__ = [

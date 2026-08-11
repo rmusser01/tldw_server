@@ -10,6 +10,7 @@ from .errors import SyncStoreError
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
+    NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SyncDataset,
     SyncDevice,
@@ -55,6 +56,7 @@ class SyncProfileDatasetStatus:
     server_frontend_mutation_enabled: bool = True
     server_frontend_mutation_blockers: list[str] = field(default_factory=list)
     notes_organization: dict[str, object] | None = None
+    notes_link: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +107,7 @@ class SyncV2ProfileManager:
         scan_limit: int,
         service: Any | None = None,
         dataset_bootstrapper: Any | None = None,
+        notes_link_bootstrapper: Any | None = None,
     ) -> None:
         self.store = store
         self.capabilities_factory = capabilities_factory
@@ -112,6 +115,7 @@ class SyncV2ProfileManager:
         self.scan_limit = scan_limit
         self.service = service
         self.dataset_bootstrapper = dataset_bootstrapper
+        self.notes_link_bootstrapper = notes_link_bootstrapper
 
     def profile(self, *, user_id: str, device_id: str | None = None) -> SyncProfileStatus:
         """Return current profile state without creating devices or datasets."""
@@ -155,6 +159,7 @@ class SyncV2ProfileManager:
         organization_requested = set(requested).intersection(NOTES_ORGANIZATION_DOMAINS)
         if organization_requested and organization_requested != set(NOTES_ORGANIZATION_DOMAINS):
             raise SyncStoreError("notes_organization_sync_domains_incomplete")
+        notes_link_requested = bool(set(requested).intersection(NOTES_LINK_DOMAINS))
         encryption = getattr(capabilities, "encryption", {})
         if not encryption.get("ready", False):
             raise SyncStoreError(
@@ -195,6 +200,20 @@ class SyncV2ProfileManager:
                 if self.service is None:
                     raise SyncStoreError("Notes organization bootstrap service is unavailable")
                 dataset = self.dataset_bootstrapper.bootstrap(
+                    service=self.service,
+                    user_id=user_id,
+                    dataset=dataset,
+                )
+        if notes_link_requested:
+            dataset = self.store.begin_notes_link_bootstrap(
+                dataset.dataset_id,
+                owner_user_id=user_id,
+                bootstrap_id=self.id_factory("notes-link-bootstrap"),
+            )
+            if self.notes_link_bootstrapper is not None:
+                if self.service is None:
+                    raise SyncStoreError("Notes link bootstrap service is unavailable")
+                dataset = self.notes_link_bootstrapper.bootstrap(
                     service=self.service,
                     user_id=user_id,
                     dataset=dataset,
@@ -399,6 +418,7 @@ def _dataset_status(dataset: SyncDataset) -> SyncProfileDatasetStatus:
             dataset.encryption_policy
         ),
         notes_organization=_safe_notes_organization_status(dataset),
+        notes_link=_safe_notes_link_status(dataset),
     )
 
 
@@ -411,6 +431,23 @@ def _safe_notes_organization_status(dataset: SyncDataset) -> dict[str, object] |
     if state not in {"initializing", "ready", "failed"}:
         state = "failed"
         error_code = "notes_organization_bootstrap_state_invalid"
+    return {
+        "state": state,
+        "captured_count": _safe_non_negative_int(metadata.get("captured_count")),
+        "expected_count": _safe_non_negative_int(metadata.get("expected_count")),
+        "error_code": error_code if isinstance(error_code, str) else None,
+    }
+
+
+def _safe_notes_link_status(dataset: SyncDataset) -> dict[str, object] | None:
+    metadata = dataset.metadata.get("notes_link_v1")
+    if not isinstance(metadata, dict):
+        return None
+    state = metadata.get("state")
+    error_code = metadata.get("error_code")
+    if state not in {"initializing", "ready", "failed"}:
+        state = "failed"
+        error_code = "notes_link_bootstrap_state_invalid"
     return {
         "state": state,
         "captured_count": _safe_non_negative_int(metadata.get("captured_count")),

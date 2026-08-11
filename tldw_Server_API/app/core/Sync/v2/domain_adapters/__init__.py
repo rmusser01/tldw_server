@@ -5,6 +5,7 @@ from __future__ import annotations
 from .chat import ChatDomainAdapter
 from .media import MediaCompatibilityAdapter, MediaMetadataAdapter, legacy_media_sync_log_to_envelope
 from .notes import NotesDomainAdapter
+from .notes_link import NotesLinkDomainAdapter
 from .notes_organization import NotesOrganizationDomainAdapter
 from .source_cache import SourceCacheAdapter
 from .workspaces import WorkspacesDomainAdapter
@@ -14,6 +15,7 @@ __all__ = [
     "MediaCompatibilityAdapter",
     "MediaMetadataAdapter",
     "NotesDomainAdapter",
+    "NotesLinkDomainAdapter",
     "NotesOrganizationDomainAdapter",
     "SourceCacheAdapter",
     "WorkspacesDomainAdapter",

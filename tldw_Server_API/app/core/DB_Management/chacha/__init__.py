@@ -3,13 +3,13 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-
 __all__ = [
     "CharacterStore",
     "ConversationStore",
     "KeywordStore",
     "MessageStore",
     "NoteStore",
+    "NotesLinkStore",
     "PersonaStateStore",
 ]
 
@@ -20,6 +20,8 @@ _STORE_MODULES = {
     "KeywordStore": "tldw_Server_API.app.core.DB_Management.chacha.keyword_store",
     "MessageStore": "tldw_Server_API.app.core.DB_Management.chacha.message_store",
     "NoteStore": "tldw_Server_API.app.core.DB_Management.chacha.note_store",
+    "NotesLinkStore": "tldw_Server_API.app.core.DB_Management.chacha.note_link_store",
+    "NoteGraphProjectionStore": "tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store",
     "PersonaStateStore": "tldw_Server_API.app.core.DB_Management.chacha.persona_state_store",
 }
 

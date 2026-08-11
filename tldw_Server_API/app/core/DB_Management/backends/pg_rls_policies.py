@@ -347,8 +347,46 @@ def build_chacha_rls_sql() -> list[str]:
     add(
         """
         CREATE POLICY notes_tenant_isolation ON notes
-          USING (client_id = current_setting('app.current_user_id', true));
+          USING (client_id = current_setting('app.current_user_id', true))
+          WITH CHECK (client_id = current_setting('app.current_user_id', true));
         """
+    )
+
+    note_edge_owner = """
+    note_edges.user_id = current_setting('app.current_user_id', true)
+    AND EXISTS (
+      SELECT 1 FROM notes source_note
+      WHERE source_note.id = note_edges.from_note_id
+        AND source_note.client_id = current_setting('app.current_user_id', true)
+    )
+    AND EXISTS (
+      SELECT 1 FROM notes target_note
+      WHERE target_note.id = note_edges.to_note_id
+        AND target_note.client_id = current_setting('app.current_user_id', true)
+    )
+    """.strip()
+    add_tenant_policy("note_edges", note_edge_owner)
+
+    for table in (
+        "note_graph_dirty",
+        "note_graph_note_state",
+        "note_graph_projection_state",
+        "note_graph_revisions",
+    ):
+        add_tenant_policy(
+            table,
+            "owner_user_id = current_setting('app.current_user_id', true)",
+        )
+    add_tenant_policy(
+        "note_wikilink_edges",
+        """
+        owner_user_id = current_setting('app.current_user_id', true)
+        AND EXISTS (
+          SELECT 1 FROM notes source_note
+          WHERE source_note.id = note_wikilink_edges.source_note_id
+            AND source_note.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
     )
 
     for table in ("chacha_keywords", "keyword_collections", "note_folders"):
@@ -532,7 +570,22 @@ def ensure_prompt_studio_rls(backend: DatabaseBackend) -> bool:
     )
 
 
+def _ensure_chacha_schema(backend: DatabaseBackend) -> None:
+    """Run ChaChaNotes migrations before standalone policy installation."""
+
+    try:
+        if not hasattr(backend, "backend_type") or backend.backend_type.name != "POSTGRESQL":
+            return
+    except Exception:
+        return
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    db = CharactersRAGDB(":memory:", client_id="1", backend=backend)
+    db.close_connection()
+
+
 def ensure_chacha_rls(backend: DatabaseBackend) -> bool:
+    _ensure_chacha_schema(backend)
     return _ensure_rls_policy_set(
         backend,
         name="chacha",

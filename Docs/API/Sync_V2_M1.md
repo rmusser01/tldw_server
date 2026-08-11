@@ -42,6 +42,12 @@ The additive Notes organization capability is one indivisible six-domain group:
 The group is available only on datasets whose organization bootstrap is `ready`.
 A dataset or device that has only the base profile remains valid.
 
+The additive `notes.link` capability synchronizes explicit manual note-to-note
+relationships. It has its own resumable `notes_link_v1` readiness record so an
+already-ready six-domain organization bootstrap does not need to be reopened.
+Wikilinks, backlinks, graph summaries, orphan state, projection queues, and graph
+revisions are deterministic local projections and never Sync domains.
+
 ## Notes organization version 1
 
 ### Domain schemas and operations
@@ -201,6 +207,78 @@ integer database IDs; or a compound `merge` wire operation. It does not make
 product and Sync databases atomically commit together, and it does not grant a
 remote device authority over server-local ingestion provenance.
 
+## Notes link version 1
+
+`notes.link` uses schema version `1`, encryption policy `server_trusted_v1`, and
+exactly the operations `upsert` and `tombstone`. The envelope `object_id` is a
+canonical lowercase UUIDv4 edge ID. Version 1 accepts only explicit `manual`
+note-to-note links; unknown fields and arbitrary relationship types are rejected.
+
+An upsert payload contains `source_note_id`, `target_note_id`, `type`, `directed`,
+`weight`, nullable `label`, bounded canonical `properties`, `created_at`,
+`last_modified`, and `created_by`. Undirected endpoint UUIDs must already be in
+canonical string order on the Sync wire. Directed links preserve source/target
+order. Source, target, type, and direction are immutable for an edge identity;
+retargeting is a tombstone plus a new edge. A tombstone retains the complete
+canonical edge snapshot plus deletion time and a bounded stable reason.
+
+Both endpoint note identities must belong to the dataset owner. A public create
+requires both notes to be live. Historical replay may retain a link whose owned
+endpoint is soft-deleted: the link remains durable but is hidden from graph reads
+until both endpoint notes are restored. Trashing or restoring a note emits no
+incident link mutation and does not change link versions.
+
+### Enrollment and bootstrap
+
+`notes.link` is separate from the indivisible six-domain Notes organization group.
+For the canonical default-personal Notes dataset, profile bootstrap adds the domain
+under the dataset-row lock and records `metadata.notes_link_v1=initializing` with a
+stable bootstrap ID. It then pages existing active and tombstoned explicit links in
+edge-ID order, appends source-verified envelopes after the endpoint `notes.note`
+identities, and verifies the count and canonical fingerprint before publishing
+`ready`. Interruption resumes the same bootstrap; no product row is reapplied.
+
+The six organization domains remain available during this link-only upgrade.
+Link push, pull, and server-origin writes fail closed until `notes_link_v1` is
+ready. Legacy devices that never request `notes.link` remain valid and do not
+receive it through implicit pulls.
+
+### Product API authority and repair
+
+Graph/link endpoints accept an optional `dataset_id`. With active Sync, omission
+selects the user's single active default-personal Notes dataset; a supplied ID must
+identify that exact canonical dataset. With inactive Sync, omission preserves the
+legacy product path, while supplying a dataset fails safely. Active-Sync create,
+update, delete, and restore append a canonical server-origin envelope before the
+product projection; update/delete/restore require `expected_version`. Stable
+idempotency keys make exact retries return the same applied result.
+
+Public list and detail routes are `GET /api/v1/notes/links` and
+`GET /api/v1/notes/links/{edge_id}`. Mutations use the existing
+`POST /api/v1/notes/{note_id}/links`, plus `PATCH`/`DELETE`
+`/api/v1/notes/links/{edge_id}` and
+`POST /api/v1/notes/links/{edge_id}/restore`. Listings use edge-ID keyset order,
+default limit 50, and maximum limit 200. Full properties are returned only after
+owner/dataset authorization.
+
+Restore preview includes `notes.link` as an executable domain. A live link upsert
+is ordered after providers for both endpoint `notes.note` identities, including a
+provider that restores an endpoint; a link tombstone has no live endpoint
+dependency. Missing providers or contradictory group/chronology constraints fail
+closed with `sync_restore_plan_invalid`. Repair uses the normal exact-postcondition
+materializer contract and never synthesizes derived graph state.
+
+### Derived graph lifecycle
+
+Manual links are canonical product/Sync state. Wikilinks and backlinks are parsed
+from synchronized note content into owner-scoped local projections. Graph and
+orphan reads are live-only, bounded, and revision-bound; tag/source nodes and their
+membership edges remain compatible. Manual-only reads remain available during a
+derived rebuild, while a derived-edge or orphan request returns retryable 503 until
+the projection is current. Cache and pagination cursors bind the canonical dataset,
+owner graph revision, parser version, and normalized request, so trash, restore,
+link, membership, or projection changes cannot serve a stale cached page.
+
 ## Shared Types
 
 ### Capability Shape
@@ -224,7 +302,8 @@ remote device authority over server-local ingestion provenance.
     "notes.keyword_collection",
     "notes.keyword_collection_link",
     "notes.folder",
-    "notes.folder_link"
+    "notes.folder_link",
+    "notes.link"
   ],
   "operations": {
     "notes.note": ["upsert", "tombstone"],
@@ -242,7 +321,8 @@ remote device authority over server-local ingestion provenance.
     "notes.keyword_collection": ["upsert", "tombstone"],
     "notes.keyword_collection_link": ["upsert", "tombstone"],
     "notes.folder": ["upsert", "tombstone"],
-    "notes.folder_link": ["upsert", "tombstone"]
+    "notes.folder_link": ["upsert", "tombstone"],
+    "notes.link": ["upsert", "tombstone"]
   },
   "encryption": {
     "policy": "server_trusted_v1",
@@ -405,7 +485,8 @@ Returns the current Sync v2 profile without creating durable sync state.
       "notes.keyword_collection",
       "notes.keyword_collection_link",
       "notes.folder",
-      "notes.folder_link"
+      "notes.folder_link",
+      "notes.link"
     ],
     "operations": {
       "notes.note": ["upsert", "tombstone"],
@@ -423,7 +504,8 @@ Returns the current Sync v2 profile without creating durable sync state.
       "notes.keyword_collection": ["upsert", "tombstone"],
       "notes.keyword_collection_link": ["upsert", "tombstone"],
       "notes.folder": ["upsert", "tombstone"],
-      "notes.folder_link": ["upsert", "tombstone"]
+      "notes.folder_link": ["upsert", "tombstone"],
+      "notes.link": ["upsert", "tombstone"]
     },
     "encryption": {
       "policy": "server_trusted_v1",
@@ -584,7 +666,8 @@ pushing envelopes.
       "notes.keyword_collection",
       "notes.keyword_collection_link",
       "notes.folder",
-      "notes.folder_link"
+      "notes.folder_link",
+      "notes.link"
     ],
     "operations": {
       "notes.note": ["upsert", "tombstone"],
@@ -602,7 +685,8 @@ pushing envelopes.
       "notes.keyword_collection": ["upsert", "tombstone"],
       "notes.keyword_collection_link": ["upsert", "tombstone"],
       "notes.folder": ["upsert", "tombstone"],
-      "notes.folder_link": ["upsert", "tombstone"]
+      "notes.folder_link": ["upsert", "tombstone"],
+      "notes.link": ["upsert", "tombstone"]
     },
     "encryption": {
       "policy": "server_trusted_v1",

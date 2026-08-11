@@ -49,6 +49,12 @@ class NotesOrganizationValidationError(ValueError):
         self.error_code = error_code
 
 
+class NotesLinkValidationError(ValueError):
+    """Validation failure for a non-canonical Notes link payload."""
+
+    error_code = "notes_link_payload_invalid"
+
+
 class PromptImprovementDispatchError(RuntimeError):
     """Sanitized infrastructure failure for endpoint error mapping."""
 

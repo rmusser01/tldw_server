@@ -7,6 +7,8 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.core.Sync.v2.models import (
+    NOTES_LINK_DOMAINS,
+    NOTES_LINK_SYNC_OPERATIONS,
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_ORGANIZATION_SYNC_OPERATIONS,
     sync_v2_domain_schemas,
@@ -30,6 +32,7 @@ SyncDomain = Literal[
     "notes.keyword_collection_link",
     "notes.folder",
     "notes.folder_link",
+    "notes.link",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -114,6 +117,7 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
     + list(NOTES_ORGANIZATION_DOMAINS)
+    + list(NOTES_LINK_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
@@ -121,6 +125,7 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
+    **NOTES_LINK_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
@@ -788,6 +793,7 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     server_frontend_mutation_enabled: bool = True
     server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
     notes_organization: SyncNotesOrganizationStatusResponse | None = None
+    notes_link: SyncNotesOrganizationStatusResponse | None = None
 
 
 class SyncProfileDomainStatusResponse(BaseModel):

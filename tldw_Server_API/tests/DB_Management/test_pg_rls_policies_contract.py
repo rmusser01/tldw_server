@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends import pg_rls_policies as rls_module
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     build_chacha_rls_sql,
@@ -84,6 +85,24 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "CREATE POLICY workspace_resource_memberships_tenant_isolation" in sql
     assert "ON workspace_resource_memberships" in sql
     assert "client_id = current_setting('app.current_user_id', true)" in sql
+
+
+def test_chacha_rls_scopes_graph_projection_state_and_allows_unresolved_targets():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+
+    assert "CREATE POLICY note_graph_note_state_tenant_isolation" in sql
+    state_policy = sql.split(
+        "CREATE POLICY note_graph_note_state_tenant_isolation ON note_graph_note_state",
+        1,
+    )[1].split(";", 1)[0]
+    assert "owner_user_id = current_setting('app.current_user_id', true)" in state_policy
+    policy = sql.split(
+        "CREATE POLICY note_wikilink_edges_tenant_isolation ON note_wikilink_edges",
+        1,
+    )[1].split(";", 1)[0]
+    assert "source_note.id = note_wikilink_edges.source_note_id" in policy
+    assert "source_note.client_id = current_setting('app.current_user_id', true)" in policy
+    assert "target_note.id = note_wikilink_edges.target_note_id" not in policy
 
 
 def test_chacha_rls_includes_web_clipper_owner_read_and_write_policies():
@@ -217,6 +236,25 @@ def test_chacha_notes_organization_link_rls_derives_owner_from_every_endpoint():
             assert check in policy
 
 
+def test_chacha_notes_link_rls_checks_owner_and_both_note_endpoints() -> None:
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    policy = sql.split(
+        "CREATE POLICY note_edges_tenant_isolation ON note_edges", 1
+    )[1].split(";", 1)[0]
+    owner = "current_setting('app.current_user_id', true)"
+
+    assert "USING (" in policy
+    assert "WITH CHECK (" in policy
+    for clause in (
+        f"note_edges.user_id = {owner}",
+        "source_note.id = note_edges.from_note_id",
+        f"source_note.client_id = {owner}",
+        "target_note.id = note_edges.to_note_id",
+        f"target_note.client_id = {owner}",
+    ):
+        assert policy.count(clause) == 2
+
+
 def test_chacha_rls_includes_source_review_read_and_write_policies():
     sql = "\n".join(build_chacha_rls_sql())
 
@@ -243,12 +281,37 @@ def test_chacha_rls_includes_guarded_active_workspace_source_saved_view_policy()
     assert "WITH CHECK" in sql
 
 
-def test_ensure_chacha_rls_uses_the_guarded_saved_view_policy_block():
+def test_ensure_chacha_rls_uses_the_guarded_saved_view_policy_block(
+    monkeypatch: pytest.MonkeyPatch,
+):
     conn = _TxnConn()
     conn.cursor_obj.execute = lambda _sql: None
+    monkeypatch.setattr(rls_module, "_ensure_chacha_schema", lambda _backend: None)
 
     assert ensure_chacha_rls(_Backend(conn)) is True
     assert conn.committed is True
+
+
+def test_ensure_chacha_rls_migrates_schema_before_installing_policies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = SimpleNamespace(backend_type=SimpleNamespace(name="POSTGRESQL"))
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        rls_module,
+        "_ensure_chacha_schema",
+        lambda seen_backend: calls.append("schema") if seen_backend is backend else None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        rls_module,
+        "_ensure_rls_policy_set",
+        lambda seen_backend, **_kwargs: calls.append("policies") or seen_backend is backend,
+    )
+
+    assert rls_module.ensure_chacha_rls(backend) is True
+    assert calls == ["schema", "policies"]
 
 
 def test_run_pg_rls_auto_ensure_logs_success_only_after_both_installers_pass(monkeypatch):

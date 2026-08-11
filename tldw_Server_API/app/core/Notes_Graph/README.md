@@ -6,6 +6,7 @@ Notes_Graph builds bounded graph views over notes using manual note links, wikil
 
 - `graph_service.py` builds note graph responses with node, edge, radius, tag, source, and time filters.
 - `wikilink_parser.py` extracts supported note id wikilinks from note content.
+- `projection_service.py` maintains persistent owner-scoped wikilink projections and rebuild state.
 - `graph_cache.py` provides a TTL cache for graph responses.
 - `formatters.py` converts graph responses to Cytoscape-compatible JSON.
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/notes_graph.py`.
@@ -14,26 +15,29 @@ Notes_Graph builds bounded graph views over notes using manual note links, wikil
 
 ## Responsibilities
 
-- Parse `[[id:<UUID>]]` wikilinks from note text.
-- Build note graph nodes and edges for manual links, wikilinks, backlinks, tag membership, and source membership.
+- Read explicit manual links from canonical `notes.link` product/Sync state.
+- Parse `[[id:<UUID>]]` wikilinks from note text into deterministic local projections; backlinks are the reverse view of the same projection.
+- Build live-only note graph nodes and edges for manual links, wikilinks, backlinks, tag membership, and source membership.
 - Enforce graph caps for node count, edge count, and per-node degree.
-- Support radius-limited graph expansion and neighbor lookups.
-- Optionally cache graph responses by request parameters.
+- Support radius-limited graph expansion, neighbor lookups, and revision-bound keyset orphan pages.
+- Cache graph responses only by canonical dataset, graph revision, parser version, and normalized request.
 - Format graph responses for Cytoscape consumers.
 
 ## Module Map
 
 - `graph_service.py`: graph expansion, pruning, filtering, edge construction, and metrics hooks.
 - `wikilink_parser.py`: supported wikilink extraction.
+- `projection_service.py`: bounded dirty-note processing, parser-version rebuilds, and exact projection repair.
 - `graph_cache.py`: thread-safe TTL cache with max-key eviction.
 - `formatters.py`: Cytoscape response conversion.
 - `__init__.py`: package marker.
 
 ## How It Connects
 
-- `notes_graph.py` exposes graph routes under the notes API surface: `/notes/graph`, `/notes/{note_id}/neighbors`, `POST /notes/{note_id}/links`, and `DELETE /notes/links/{edge_id}`.
+- `notes_graph.py` exposes graph routes under the notes API surface: `/notes/graph`, `/notes/graph/orphans`, `/notes/{note_id}/neighbors`, `POST /notes/{note_id}/links`, and list/detail/PATCH/DELETE/restore operations under `/notes/links`.
 - The endpoint uses ChaChaNotes DB dependencies, AuthNZ permissions, token-scope guards, and rate limiting.
-- Graph data comes from the notes database, note link rows, note content, keywords, and source metadata.
+- `dataset_id` is optional. Active Sync resolves omission to the one active default-personal Notes dataset and rejects any other supplied dataset; inactive omission preserves the legacy product path.
+- Manual links come from owner-scoped canonical link rows. Derived links come from persisted projection rows, not read-time parsing. Tag and source nodes remain compatible projections.
 - Environment variables such as `NOTES_GRAPH_ENABLED`, `NOTES_GRAPH_MAX_NODES`, `NOTES_GRAPH_MAX_EDGES`, `NOTES_GRAPH_MAX_DEGREE`, and cache settings tune runtime behavior.
 
 ## Extension Points
@@ -52,5 +56,8 @@ Notes_Graph builds bounded graph views over notes using manual note links, wikil
 ## Gotchas
 
 - The parser intentionally supports `[[id:<UUID>]]` links, not arbitrary title links.
+- Manual-only graph reads remain available while a derived projection rebuild is pending; derived-edge and orphan reads return retryable 503 until the projection is current.
+- Trashing a note hides its incident manual and derived edges without deleting canonical link history; restoring the note makes those edges visible again when both endpoints are live.
+- Graph cursors are revision-bound pagination hints, never authorization tokens. Authorization and current revision are resolved before cache or cursor use.
 - Radius 2 requests apply stricter built-in caps than caller-supplied maximums.
 - The graph feature can be disabled with `NOTES_GRAPH_ENABLED`.

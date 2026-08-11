@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
+    NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
@@ -2605,6 +2606,21 @@ class SyncDatabase:
         *,
         trusted_bootstrap_id: str | None = None,
     ) -> None:
+        if domain == "notes.link":
+            metadata = decode_json(row.get("metadata_json"), default={}).get(
+                "notes_link_v1"
+            )
+            if not isinstance(metadata, Mapping):
+                raise SyncStoreError("notes_link_sync_not_ready")
+            if metadata.get("state") == "ready":
+                return
+            if (
+                trusted_bootstrap_id is not None
+                and metadata.get("state") == "initializing"
+                and metadata.get("bootstrap_id") == trusted_bootstrap_id
+            ):
+                return
+            raise SyncStoreError("notes_link_sync_not_ready")
         if domain not in NOTES_ORGANIZATION_DOMAINS:
             return
         if set(NOTES_ORGANIZATION_DOMAINS).difference(_dataset_domains_from_row(dict(row))):
@@ -2682,6 +2698,7 @@ class SyncDatabase:
                 SOURCE_CACHE_SYNC_DOMAINS,
                 MEDIA_SYNC_DOMAINS,
                 NOTES_ORGANIZATION_DOMAINS,
+                NOTES_LINK_DOMAINS,
             )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
@@ -3884,6 +3901,147 @@ class SyncDatabase:
             updated = self._get_dataset_row(dataset_id, connection=conn)
             if updated is None:
                 raise SyncStoreError("Sync dataset bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
+    def begin_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Atomically enroll notes.link without changing organization readiness."""
+
+        if not bootstrap_id.strip():
+            raise SyncStoreError("Notes link bootstrap ID is required")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if (
+                row is None
+                or row.get("owner_user_id") != owner_user_id
+                or row.get("scope_type") != "personal"
+            ):
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_link_v1")
+            if isinstance(current, Mapping) and current.get("state") in {
+                "initializing",
+                "ready",
+            }:
+                return _dataset_from_row(row)
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            if "notes.note" not in enrolled:
+                raise SyncStoreError("notes_link_note_domain_missing")
+            if "notes.link" not in enrolled:
+                enrolled.append("notes.link")
+            metadata["notes_link_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "captured_count": 0,
+                "expected_count": 0,
+                "source_hash": None,
+                "error_code": None,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                ),
+                connection=conn,
+            )
+            self._ensure_domain_state(
+                dataset_id=dataset_id,
+                domain="notes.link",
+                adapter_version=1,
+                server_sequence=0,
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset link bootstrap update was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable notes.link bootstrap transition."""
+
+        valid_states = {"initializing", "ready", "failed"}
+        if expected_state not in valid_states or state not in valid_states:
+            raise SyncStoreError("Notes link bootstrap state is invalid")
+        if captured_count < 0 or expected_count < 0 or captured_count > expected_count:
+            raise SyncStoreError("Notes link bootstrap counts are invalid")
+        if source_hash is not None and (
+            len(source_hash) != 64
+            or any(character not in "0123456789abcdef" for character in source_hash)
+        ):
+            raise SyncStoreError("Notes link bootstrap source hash is invalid")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if row is None:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_link_v1")
+            if not isinstance(current, Mapping) or (
+                current.get("bootstrap_id") != bootstrap_id
+                or current.get("state") != expected_state
+            ):
+                raise SyncStoreError("notes_link_bootstrap_compare_and_set_failed")
+            if set(NOTES_LINK_DOMAINS).difference(_dataset_domains_from_row(row)):
+                raise SyncStoreError("notes_link_sync_domain_incomplete")
+            current_hash = current.get("source_hash")
+            if current_hash not in {None, source_hash}:
+                raise SyncStoreError("notes_link_bootstrap_source_changed")
+            if state == "ready":
+                if (
+                    captured_count != expected_count
+                    or ready_verifier is None
+                    or not ready_verifier()
+                ):
+                    raise SyncStoreError("notes_link_bootstrap_verification_failed")
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? AND domain = 'notes.link' "
+                        "AND status = 'accepted' "
+                        "AND apply_status NOT IN ('applied', 'superseded')",
+                        (dataset_id,),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_link_bootstrap_verification_failed")
+                error_code = None
+            metadata["notes_link_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "source_hash": source_hash,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? WHERE dataset_id = ?",
+                (encode_json(metadata, default={}), utcnow_iso(), dataset_id),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset link bootstrap transition was not persisted")
             return _dataset_from_row(updated)
 
     def _find_existing_envelope_for_idempotency(

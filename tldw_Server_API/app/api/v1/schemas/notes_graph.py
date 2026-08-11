@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EdgeType(str, Enum):
@@ -126,9 +126,34 @@ class NoteLinkCreate(BaseModel):
     to_note_id: str = Field(..., min_length=1, description="Target note id to link to")
     directed: bool = Field(False, description="Whether the link is directed; defaults to false")
     weight: float | None = Field(1.0, ge=0.0, description="Optional weight of the link")
+    label: str | None = Field(default=None, max_length=256)
+    properties: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = Field(
         default=None, description="Optional metadata to attach to the link"
     )
+    dataset_id: str | None = Field(default=None, min_length=1, max_length=256)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("dataset_id", "idempotency_key", mode="before")
+    @classmethod
+    def _normalize_authority_fields(cls, value: object) -> object:
+        return _normalize_optional_nonblank(value)
+
+    @model_validator(mode="after")
+    def _normalize_legacy_metadata(self) -> NoteLinkCreate:
+        metadata = dict(self.metadata or {})
+        legacy_label = metadata.pop("label", None)
+        if legacy_label is not None and not isinstance(legacy_label, str):
+            raise ValueError("metadata.label must be a string or null")
+        if self.label is not None and legacy_label is not None and self.label != legacy_label:
+            raise ValueError("label conflicts with metadata.label")
+        overlap = set(metadata).intersection(self.properties or {})
+        if any(metadata[key] != (self.properties or {})[key] for key in overlap):
+            raise ValueError("properties conflict with legacy metadata")
+        self.label = self.label if self.label is not None else legacy_label
+        self.properties = {**metadata, **dict(self.properties or {})}
+        self.metadata = None
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -142,7 +167,80 @@ class NoteLinkCreate(BaseModel):
     )
 
 
+class NoteLinkUpdate(BaseModel):
+    """Mutable presentation update for one explicit link."""
+
+    expected_version: int | None = Field(default=None, ge=1)
+    weight: float | None = Field(default=None, ge=0.0)
+    label: str | None = Field(default=None, max_length=256)
+    properties: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Legacy full properties map. Supplying metadata replaces the existing properties map; "
+            "omitted properties are removed."
+        ),
+    )
+    dataset_id: str | None = Field(default=None, min_length=1, max_length=256)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("dataset_id", "idempotency_key", mode="before")
+    @classmethod
+    def _normalize_authority_fields(cls, value: object) -> object:
+        return _normalize_optional_nonblank(value)
+
+    @model_validator(mode="after")
+    def _normalize_update(self) -> NoteLinkUpdate:
+        if not self.model_fields_set.intersection({"weight", "label", "properties", "metadata"}):
+            raise ValueError("at least one mutable link field is required")
+        metadata = dict(self.metadata or {})
+        if "label" in metadata:
+            legacy_label = metadata.pop("label")
+            if legacy_label is not None and not isinstance(legacy_label, str):
+                raise ValueError("metadata.label must be a string or null")
+            if "label" in self.model_fields_set and self.label != legacy_label:
+                raise ValueError("label conflicts with metadata.label")
+            self.label = legacy_label
+            self.__pydantic_fields_set__.add("label")
+        if metadata or "metadata" in self.model_fields_set:
+            overlap = set(metadata).intersection(self.properties or {})
+            if any(metadata[key] != (self.properties or {})[key] for key in overlap):
+                raise ValueError("properties conflict with legacy metadata")
+            self.properties = {**metadata, **dict(self.properties or {})}
+            self.__pydantic_fields_set__.add("properties")
+        self.metadata = None
+        return self
+
+
+class NoteLinkRestore(BaseModel):
+    """Explicit restore request for one tombstoned link."""
+
+    expected_version: int | None = Field(default=None, ge=1)
+    dataset_id: str | None = Field(default=None, min_length=1, max_length=256)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("dataset_id", "idempotency_key", mode="before")
+    @classmethod
+    def _normalize_authority_fields(cls, value: object) -> object:
+        return _normalize_optional_nonblank(value)
+
+
+def _normalize_optional_nonblank(value: object) -> object:
+    """Trim optional string authority fields and reject blank values."""
+
+    if value is None or not isinstance(value, str):
+        return value
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("value must not be blank")
+    return normalized
+
+
 class NoteGraphRequest(BaseModel):
+    dataset_id: str | None = Field(
+        default=None,
+        description="Canonical default-personal Notes dataset; omitted for automatic resolution",
+    )
     center_note_id: str | None = Field(
         default=None, description="Focal note id for ego expansion"
     )
@@ -163,6 +261,11 @@ class NoteGraphRequest(BaseModel):
     format: GraphFormat = GraphFormat.default
     cursor: str | None = None
     allow_heavy: bool = False
+
+    @field_validator("dataset_id", mode="before")
+    @classmethod
+    def _normalize_dataset_id(cls, value: object) -> object:
+        return _normalize_optional_nonblank(value)
 
     @field_validator("edge_types", mode="before")
     @classmethod
