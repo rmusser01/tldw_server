@@ -441,52 +441,64 @@ _POSTGRES_REGISTRY_DEFAULTS = {"deleted": "false"}
 _POSTGRES_REGISTRY_CHECKS = {
     "note_attachments_client_id_check": "CHECK (char_length(btrim(client_id)) > 0)",
     "note_attachments_dataset_id_check": (
-        "CHECK (char_length(dataset_id) BETWEEN 1 AND 255 AND dataset_id = btrim(dataset_id))"
+        "CHECK (char_length(dataset_id) >= 1 AND char_length(dataset_id) <= 255 "
+        "AND dataset_id = btrim(dataset_id))"
     ),
     "note_attachments_attachment_id_check": (
-        "CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]')"
+        "CHECK (attachment_id ~ "
+        "'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-"
+        "[0-9a-f]{12}$'::text)"
     ),
     "note_attachments_note_id_check": (
-        "CHECK (note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]')"
+        "CHECK (note_id ~ "
+        "'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-"
+        "[0-9a-f]{12}$'::text)"
     ),
     "note_attachments_file_name_check": (
-        "CHECK (char_length(file_name) BETWEEN 1 AND 180 AND file_name = btrim(file_name) "
-        "AND file_name NOT IN ('.', '..') AND position('/' IN file_name) = 0 "
-        "AND position(chr(92) IN file_name) = 0)"
+        "CHECK (char_length(file_name) >= 1 AND char_length(file_name) <= 180 "
+        "AND file_name = btrim(file_name) "
+        "AND (file_name <> ALL (ARRAY['.'::text, '..'::text])) "
+        "AND POSITION(('/'::text) IN (file_name)) = 0 "
+        "AND POSITION((chr(92)) IN (file_name)) = 0)"
     ),
     "note_attachments_normalized_file_name_check": (
-        "CHECK (char_length(normalized_file_name) BETWEEN 1 AND 180 "
-        "AND position('/' IN normalized_file_name) = 0 "
-        "AND position(chr(92) IN normalized_file_name) = 0)"
+        "CHECK (char_length(normalized_file_name) >= 1 "
+        "AND char_length(normalized_file_name) <= 180 "
+        "AND POSITION(('/'::text) IN (normalized_file_name)) = 0 "
+        "AND POSITION((chr(92)) IN (normalized_file_name)) = 0)"
     ),
     "note_attachments_original_file_name_check": (
-        "CHECK (char_length(original_file_name) BETWEEN 1 AND 255 "
+        "CHECK (char_length(original_file_name) >= 1 "
+        "AND char_length(original_file_name) <= 255 "
         "AND octet_length(original_file_name) <= 1024 "
         "AND original_file_name = btrim(original_file_name) "
-        "AND original_file_name NOT IN ('.', '..') "
-        "AND position('/' IN original_file_name) = 0 "
-        "AND position(chr(92) IN original_file_name) = 0)"
+        "AND (original_file_name <> ALL (ARRAY['.'::text, '..'::text])) "
+        "AND POSITION(('/'::text) IN (original_file_name)) = 0 "
+        "AND POSITION((chr(92)) IN (original_file_name)) = 0)"
     ),
     "note_attachments_content_type_check": (
-        "CHECK (char_length(content_type) BETWEEN 1 AND 255 "
-        "AND position('/' IN content_type) > 1)"
+        "CHECK (char_length(content_type) >= 1 AND char_length(content_type) <= 255 "
+        "AND POSITION(('/'::text) IN (content_type)) > 1)"
     ),
     "note_attachments_size_bytes_check": "CHECK (size_bytes >= 1)",
     "note_attachments_blob_hash_check": (
-        "CHECK (blob_hash ~ '^sha256:[0-9a-f]{64}$')"
+        "CHECK (blob_hash ~ '^sha256:[0-9a-f]{64}$'::text)"
     ),
     "note_attachments_object_hash_check": (
-        "CHECK (object_hash ~ '^sha256:[0-9a-f]{64}$')"
+        "CHECK (object_hash ~ '^sha256:[0-9a-f]{64}$'::text)"
     ),
     "note_attachments_version_check": "CHECK (version >= 1)",
-    "note_attachments_delete_reason_check": "CHECK (char_length(delete_reason) <= 256)",
+    "note_attachments_delete_reason_check": (
+        "CHECK (delete_reason IS NULL OR char_length(delete_reason) <= 256)"
+    ),
     "note_attachments_created_by_check": "CHECK (char_length(btrim(created_by)) > 0)",
     "note_attachments_source_kind_check": (
-        "CHECK (source_kind IN ('upload', 'sync', 'legacy_bootstrap'))"
+        "CHECK (source_kind = ANY (ARRAY['upload'::text, 'sync'::text, "
+        "'legacy_bootstrap'::text]))"
     ),
     "note_attachments_check": (
-        "CHECK ((deleted = false AND deleted_at IS NULL AND delete_reason IS NULL) "
-        "OR (deleted = true AND deleted_at IS NOT NULL))"
+        "CHECK (deleted = false AND deleted_at IS NULL AND delete_reason IS NULL "
+        "OR deleted = true AND deleted_at IS NOT NULL)"
     ),
 }
 
@@ -497,7 +509,7 @@ _POSTGRES_REGISTRY_INDEXES = [
         "is_valid": True,
         "is_ready": True,
         "column_names": "client_id,dataset_id,note_id,normalized_file_name",
-        "predicate": "deleted = false",
+        "predicate": "(deleted = false)",
     },
     {
         "index_name": "idx_note_attachments_owner_dataset_note_all_page",
@@ -579,6 +591,10 @@ def _postgres_registry_constraint_rows() -> list[dict[str, object]]:
     return rows
 
 
+def _postgres_whitespace_rendered_check(definition: str) -> str:
+    return definition.replace("CHECK (", "CHECK (\n  ", 1).replace(" AND ", "\n  AND ")
+
+
 def _postgres_registry_policy_row() -> dict[str, object]:
     expression = (
         "((client_id = current_setting('app.current_user_id'::text, true)) "
@@ -637,12 +653,48 @@ class _PostgresCatalogBackend(_PostgresMigrationBackend):
             return QueryResult(rows=rows, rowcount=len(rows))
         if "FROM pg_constraint AS constraint_row" in normalized:
             rows = _postgres_registry_constraint_rows()
+            if (
+                self.drift == "pg18_not_null_constraints"
+                and "constraint_row.contype <> 'n'" not in normalized
+            ):
+                rows.append(
+                    {
+                        "constraint_name": "note_attachments_attachment_id_not_null",
+                        "constraint_type": "n",
+                        "constraint_def": "NOT NULL attachment_id",
+                        "constraint_validated": True,
+                    }
+                )
+            if (
+                self.drift == "extra_unique_constraint"
+                and "constraint_row.contype IN ('c', 'p', 'f')" not in normalized
+            ):
+                rows.append(
+                    {
+                        "constraint_name": "note_attachments_unexpected_unique",
+                        "constraint_type": "u",
+                        "constraint_def": "UNIQUE (client_id, attachment_id)",
+                        "constraint_validated": True,
+                    }
+                )
+            if self.drift == "canonical_catalog_render":
+                for row in rows:
+                    if row["constraint_type"] == "c":
+                        row["constraint_def"] = _postgres_whitespace_rendered_check(
+                            str(row["constraint_def"])
+                        )
             if self.drift == "source_check":
                 next(
                     row
                     for row in rows
                     if row["constraint_name"] == "note_attachments_source_kind_check"
                 )["constraint_def"] = "CHECK (true)"
+            if self.drift == "size_check_or_true":
+                next(
+                    row
+                    for row in rows
+                    if row["constraint_name"] == "note_attachments_size_bytes_check"
+                )["constraint_def"] = "CHECK ((size_bytes >= 1) OR true)"
             if self.drift == "unvalidated_constraint":
                 rows[0]["constraint_validated"] = False
             if self.drift == "fk_schema":
@@ -663,6 +715,10 @@ class _PostgresCatalogBackend(_PostgresMigrationBackend):
             return QueryResult(rows=rows, rowcount=len(rows))
         if "FROM pg_index AS index_row" in normalized:
             rows = [dict(row) for row in _POSTGRES_REGISTRY_INDEXES]
+            if self.drift == "canonical_catalog_render":
+                rows[0]["predicate"] = " ( deleted = false ) "
+            if self.drift == "live_predicate_and_false":
+                rows[0]["predicate"] = "(deleted = false) AND false"
             if self.drift == "missing_live_index":
                 rows = [
                     row
@@ -810,6 +866,44 @@ def test_postgres_v59_catalog_verifier_rejects_type_or_check_drift(drift: str) -
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="catalog|schema|registry"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_rejects_check_with_or_true() -> None:
+    backend = _PostgresCatalogBackend(drift="size_check_or_true")
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="check catalog drifted"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_rejects_live_predicate_with_and_false() -> None:
+    backend = _PostgresCatalogBackend(drift="live_predicate_and_false")
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="index catalog drifted"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_accepts_canonical_catalog_render() -> None:
+    backend = _PostgresCatalogBackend(drift="canonical_catalog_render")
+    db = _postgres_db(backend)
+
+    db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_supports_pg18_not_null_catalog_rows() -> None:
+    backend = _PostgresCatalogBackend(drift="pg18_not_null_constraints")
+    db = _postgres_db(backend)
+
+    db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_rejects_extra_non_null_constraint() -> None:
+    backend = _PostgresCatalogBackend(drift="extra_unique_constraint")
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="constraint catalog drifted"):
         db._verify_note_attachment_schema_postgres(object())
 
 

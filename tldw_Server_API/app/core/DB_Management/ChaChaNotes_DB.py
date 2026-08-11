@@ -11114,43 +11114,43 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "Notes attachment v59 PostgreSQL registry column catalog drifted."
             )
 
-        check_fragments = {
-            "note_attachments_client_id_check": ("client_id", "char_length", "btrim", "> 0"),
-            "note_attachments_dataset_id_check": ("dataset_id", "char_length", "255", "btrim"),
-            "note_attachments_attachment_id_check": (
-                "attachment_id",
-                "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]",
-            ),
-            "note_attachments_note_id_check": (
-                "note_id",
-                "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]",
-            ),
+        # Exact normalized pg_get_constraintdef shapes captured from the v59 DDL.
+        expected_checks = {
+            "note_attachments_client_id_check": "check(char_length(btrim(client_id))>0)",
+            "note_attachments_dataset_id_check": "check(char_length(dataset_id)>=1andchar_length(dataset_id)<=255anddataset_id=btrim(dataset_id))",
+            "note_attachments_attachment_id_check": "check(attachment_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            "note_attachments_note_id_check": "check(note_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
             "note_attachments_file_name_check": (
-                "file_name", "char_length", "180", "btrim", "chr(92)",
+                "check(char_length(file_name)>=1andchar_length(file_name)<=180andfile_name=btrim(file_name)"
+                "and(file_name<>all(array['.','..']))andposition(('/')in(file_name))=0andposition((chr(92))in(file_name))=0)"
             ),
             "note_attachments_normalized_file_name_check": (
-                "normalized_file_name", "char_length", "180", "chr(92)",
+                "check(char_length(normalized_file_name)>=1andchar_length(normalized_file_name)<=180"
+                "andposition(('/')in(normalized_file_name))=0andposition((chr(92))in(normalized_file_name))=0)"
             ),
             "note_attachments_original_file_name_check": (
-                "original_file_name", "char_length", "255", "octet_length", "1024", "chr(92)",
+                "check(char_length(original_file_name)>=1andchar_length(original_file_name)<=255and"
+                "octet_length(original_file_name)<=1024andoriginal_file_name=btrim(original_file_name)"
+                "and(original_file_name<>all(array['.','..']))andposition(('/')in(original_file_name))=0"
+                "andposition((chr(92))in(original_file_name))=0)"
             ),
             "note_attachments_content_type_check": (
-                "content_type", "char_length", "255", "position",
+                "check(char_length(content_type)>=1andchar_length(content_type)<=255andposition(('/')in(content_type))>1)"
             ),
-            "note_attachments_size_bytes_check": ("size_bytes", ">= 1"),
-            "note_attachments_blob_hash_check": ("blob_hash", "sha256:", "[0-9a-f]{64}"),
-            "note_attachments_object_hash_check": ("object_hash", "sha256:", "[0-9a-f]{64}"),
-            "note_attachments_version_check": ("version", ">= 1"),
-            "note_attachments_delete_reason_check": ("delete_reason", "char_length", "256"),
-            "note_attachments_created_by_check": ("created_by", "char_length", "btrim"),
+            "note_attachments_size_bytes_check": "check(size_bytes>=1)",
+            "note_attachments_blob_hash_check": "check(blob_hash~'^sha256:[0-9a-f]{64}$')",
+            "note_attachments_object_hash_check": "check(object_hash~'^sha256:[0-9a-f]{64}$')",
+            "note_attachments_version_check": "check(version>=1)",
+            "note_attachments_delete_reason_check": "check(delete_reasonisnullorchar_length(delete_reason)<=256)",
+            "note_attachments_created_by_check": "check(char_length(btrim(created_by))>0)",
             "note_attachments_source_kind_check": (
-                "source_kind", "upload", "sync", "legacy_bootstrap",
+                "check(source_kind=any(array['upload','sync','legacy_bootstrap']))"
             ),
             "note_attachments_check": (
-                "deleted", "false", "true", "deleted_at", "delete_reason",
+                "check(deleted=falseanddeleted_atisnullanddelete_reasonisnullordeleted=trueanddeleted_atisnotnull)"
             ),
         }
-        constraint_names = tuple(check_fragments) + (
+        constraint_names = tuple(expected_checks) + (
             "note_attachments_pkey",
             "note_attachments_note_id_fkey",
         )
@@ -11198,6 +11198,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ON referenced_namespace.oid = referenced_table.relnamespace
              WHERE attachment_namespace.nspname = current_schema()
                AND attachment_table.relname = 'note_attachments'
+               AND constraint_row.contype <> 'n'
             """,
             connection=conn,
         ).rows
@@ -11218,12 +11219,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 return tuple(part for part in value.strip("{}").split(",") if part)
             return tuple(str(part) for part in value)
 
-        for name, fragments in check_fragments.items():
+        # Compare the complete pg_get_constraintdef result after only cast/whitespace folding.
+        for name, expected_definition in expected_checks.items():
             row = constraints[name]
-            definition = " ".join(str(row.get("constraint_def", "")).lower().split())
-            if str(row.get("constraint_type")) != "c" or any(
-                fragment not in definition for fragment in fragments
-            ):
+            definition = "".join(str(row.get("constraint_def") or "").lower().split())
+            definition = definition.replace("::pg_catalog.text", "").replace("::text", "")
+            if str(row.get("constraint_type")) != "c" or definition != expected_definition:
                 raise SchemaError(  # noqa: TRY003
                     "Notes attachment v59 PostgreSQL registry check catalog drifted."
                 )
@@ -11311,13 +11312,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         for name, (unique, columns, partial) in expected_indexes.items():
             row = indexes[name]
-            predicate = " ".join(str(row.get("predicate") or "").lower().split())
+            predicate = "".join(str(row.get("predicate") or "").lower().split())
             if (
                 bool(row.get("is_unique")) is not unique
                 or not bool(row.get("is_valid"))
                 or not bool(row.get("is_ready"))
                 or str(row.get("column_names")) != columns
-                or (partial and "deleted = false" not in predicate)
+                or (partial and predicate != "(deleted=false)")
                 or (not partial and row.get("predicate") is not None)
             ):
                 raise SchemaError(  # noqa: TRY003
