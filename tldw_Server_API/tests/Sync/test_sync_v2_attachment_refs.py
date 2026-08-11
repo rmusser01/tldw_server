@@ -413,6 +413,62 @@ def test_attachment_ref_v2_filename_rejects_control_characters_before_hashing() 
         )
 
 
+def test_attachment_ref_v2_rejects_filename_whose_casefolded_key_expands_past_limit() -> None:
+    contract = _attachment_ref_v2_module()
+
+    with pytest.raises(
+        contract.AttachmentRefV2ValidationError,
+        match="normalized attachment filename exceeds",
+    ):
+        contract.attachment_ref_v2_object_hash(
+            "upsert",
+            _attachment_v2_payload(file_name=("\u0130" * 176) + ".pdf"),
+            object_revision=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "original_file_name",
+    [
+        "../Report.pdf",
+        "folder/Report.pdf",
+        "folder\\Report.pdf",
+        "folder\uff0fReport.pdf",
+        "\uff0e\uff0e",
+        "bad\x00.pdf",
+        "x" * 256,
+        ("\U0001f4ce" * 256),
+    ],
+)
+def test_attachment_ref_v2_rejects_unsafe_or_oversized_original_filename_before_hashing(
+    original_file_name: str,
+) -> None:
+    contract = _attachment_ref_v2_module()
+
+    with pytest.raises(
+        contract.AttachmentRefV2ValidationError,
+        match="original_file_name",
+    ):
+        contract.attachment_ref_v2_object_hash(
+            "upsert",
+            _attachment_v2_payload(original_file_name=original_file_name),
+            object_revision=1,
+        )
+
+
+def test_attachment_ref_v2_accepts_original_filename_at_utf8_boundary() -> None:
+    contract = _attachment_ref_v2_module()
+    original_file_name = "\U0001f4ce" * 255
+
+    parsed = contract.parse_attachment_ref_v2_payload(
+        "upsert",
+        _attachment_v2_payload(original_file_name=original_file_name),
+    )
+
+    assert len(parsed.original_file_name) == 255
+    assert len(parsed.original_file_name.encode("utf-8")) == 1020
+
+
 def test_attachment_ref_v2_restore_intent_is_routing_metadata_only() -> None:
     contract = _attachment_ref_v2_module()
     parsed = contract.parse_attachment_ref_v2_payload(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import sqlite3
-import unicodedata
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,8 +21,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     NoteAttachmentPolicyError,
-    sanitize_note_attachment_file_name,
+    canonicalize_note_attachment_file_name,
     validate_note_attachment_content_type,
+    validate_note_attachment_original_file_name,
 )
 from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
 
@@ -103,27 +103,19 @@ class NoteAttachmentStore:
             raise InputError("dataset_id must be a non-empty bounded identifier")
         return value
 
-    @staticmethod
-    def _filename(value: object, field_name: str, *, maximum: int) -> str:
-        if not isinstance(value, str) or not value or value != value.strip():
-            raise InputError(f"{field_name} must be a non-empty safe basename")
-        if len(value) > maximum or value in {".", ".."}:
-            raise InputError(f"{field_name} exceeds its safe basename boundary")
-        if "/" in value or "\\" in value or any(ord(character) < 32 for character in value):
-            raise InputError(f"{field_name} must be a safe basename")
-        if field_name == "original_file_name" and len(value.encode("utf-8")) > 1024:
-            raise InputError("original_file_name exceeds its UTF-8 byte boundary")
-        return value
-
     @classmethod
     def _normalized_filename(cls, value: object) -> tuple[str, str]:
         try:
-            file_name = sanitize_note_attachment_file_name(value)
+            return canonicalize_note_attachment_file_name(value)
         except NoteAttachmentPolicyError as exc:
             raise InputError(str(exc)) from exc
-        normalized = unicodedata.normalize("NFKC", file_name).casefold()
-        cls._filename(normalized, "normalized_file_name", maximum=180)
-        return file_name, normalized
+
+    @staticmethod
+    def _original_filename(value: object) -> str:
+        try:
+            return validate_note_attachment_original_file_name(value)
+        except NoteAttachmentPolicyError as exc:
+            raise InputError(str(exc)) from exc
 
     @staticmethod
     def _content_type(value: object) -> str:
@@ -261,11 +253,41 @@ class NoteAttachmentStore:
             )
 
     @staticmethod
+    def _write_constraint_name(exc: BaseException) -> str | None:
+        current: BaseException | None = exc
+        visited: set[int] = set()
+        while current is not None and id(current) not in visited:
+            visited.add(id(current))
+            diagnostic = getattr(current, "diag", None)
+            constraint_name = getattr(diagnostic, "constraint_name", None)
+            if isinstance(constraint_name, str) and constraint_name:
+                return constraint_name.lower()
+            current = current.__cause__ or current.__context__
+        return None
+
+    @staticmethod
     def _translate_write_error(exc: BaseException, attachment_id: str) -> NoReturn:
         message = str(exc).lower()
-        if "unique" in message or "duplicate" in message:
+        constraint_name = NoteAttachmentStore._write_constraint_name(exc)
+        if constraint_name == "uq_note_attachments_live_name" or (
+            "unique constraint failed:" in message
+            and "note_attachments.note_id" in message
+            and "note_attachments.normalized_file_name" in message
+        ):
             raise ConflictError(
                 "Attachment live filename conflict",
+                entity="note_attachments",
+                entity_id=attachment_id,
+            ) from exc
+        if constraint_name == "note_attachments_pkey" or (
+            "unique constraint failed:" in message
+            and "note_attachments.client_id" in message
+            and "note_attachments.dataset_id" in message
+            and "note_attachments.attachment_id" in message
+            and "note_attachments.note_id" not in message
+        ):
+            raise ConflictError(
+                "Attachment identity conflict",
                 entity="note_attachments",
                 entity_id=attachment_id,
             ) from exc
@@ -359,11 +381,7 @@ class NoteAttachmentStore:
         attachment_id = self._uuid4(attachment_id, "attachment_id")
         note_id = self._uuid4(note_id, "note_id")
         file_name, normalized_file_name = self._normalized_filename(file_name)
-        original_file_name = self._filename(
-            original_file_name,
-            "original_file_name",
-            maximum=255,
-        )
+        original_file_name = self._original_filename(original_file_name)
         content_type = self._content_type(content_type)
         size_bytes = self._positive_integer(size_bytes, "size_bytes")
         blob_hash = self._digest(blob_hash, "blob_hash")

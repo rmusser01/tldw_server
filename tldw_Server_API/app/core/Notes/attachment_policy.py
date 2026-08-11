@@ -50,10 +50,10 @@ class NoteAttachmentPolicyError(ValueError):
     """Raised when attachment metadata is outside the canonical Notes policy."""
 
 
-def sanitize_note_attachment_file_name(raw_name: object) -> str:
-    """Return the canonical path-safe Notes attachment filename."""
+def canonicalize_note_attachment_file_name(raw_name: object) -> tuple[str, str]:
+    """Return the canonical display filename and bounded comparison key."""
 
-    input_name = str(raw_name or "").strip()
+    input_name = raw_name.strip() if isinstance(raw_name, str) else ""
     if not input_name:
         raise NoteAttachmentPolicyError("Attachment filename is required")
     normalized_input = unicodedata.normalize("NFKC", input_name)
@@ -88,7 +88,51 @@ def sanitize_note_attachment_file_name(raw_name: object) -> str:
     )
     if not safe_stem:
         safe_stem = "attachment"
-    return f"{safe_stem[:max_stem_len]}{extension}"
+    display_name = f"{safe_stem[:max_stem_len]}{extension}"
+    normalized_key = unicodedata.normalize("NFKC", display_name).casefold()
+    if not 1 <= len(normalized_key) <= NOTE_ATTACHMENT_MAX_FILENAME_LEN:
+        raise NoteAttachmentPolicyError(
+            "The normalized attachment filename exceeds its safe basename boundary"
+        )
+    return display_name, normalized_key
+
+
+def sanitize_note_attachment_file_name(raw_name: object) -> str:
+    """Return the canonical path-safe Notes attachment display filename."""
+
+    return canonicalize_note_attachment_file_name(raw_name)[0]
+
+
+def validate_note_attachment_original_file_name(value: object) -> str:
+    """Return an unchanged original filename after safe-basename validation."""
+
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise NoteAttachmentPolicyError(
+            "Attachment original_file_name must be a non-empty safe basename"
+        )
+    normalized = unicodedata.normalize("NFKC", value)
+    if (
+        len(value) > 255
+        or normalized in {".", ".."}
+        or "/" in normalized
+        or "\\" in normalized
+        or Path(normalized).name != normalized
+        or any(ord(character) < 32 for character in normalized)
+    ):
+        raise NoteAttachmentPolicyError(
+            "Attachment original_file_name exceeds its safe basename boundary"
+        )
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise NoteAttachmentPolicyError(
+            "Attachment original_file_name exceeds its UTF-8 byte boundary"
+        ) from exc
+    if len(encoded) > 1024:
+        raise NoteAttachmentPolicyError(
+            "Attachment original_file_name exceeds its UTF-8 byte boundary"
+        )
+    return value
 
 
 def validate_note_attachment_content_type(value: object) -> str:
@@ -111,6 +155,8 @@ __all__ = [
     "NOTE_ATTACHMENT_ALLOWED_EXTENSIONS",
     "NOTE_ATTACHMENT_MAX_FILENAME_LEN",
     "NoteAttachmentPolicyError",
+    "canonicalize_note_attachment_file_name",
     "sanitize_note_attachment_file_name",
     "validate_note_attachment_content_type",
+    "validate_note_attachment_original_file_name",
 ]

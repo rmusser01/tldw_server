@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from uuid import uuid4
 
 import pytest
@@ -11,14 +10,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig,
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-_LIVE_POSTGRES_DSN = os.getenv("TEST_DATABASE_URL") or os.getenv("POSTGRES_TEST_DSN")
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not str(_LIVE_POSTGRES_DSN or "").lower().startswith("postgres"),
-        reason="A PostgreSQL TEST_DATABASE_URL or POSTGRES_TEST_DSN is required",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 
 def _create_attachment(
@@ -133,6 +125,19 @@ def test_postgres_note_attachments_are_two_owner_isolated_and_indexed(
             ).fetchall()
             plan = " ".join(str(next(iter(dict(row).values()))) for row in plan_rows)
         assert "idx_note_attachments_owner_dataset_note_page" in plan
+
+        with db_a.transaction() as conn:
+            conn.execute("SET LOCAL enable_seqscan = off")
+            all_state_plan_rows = conn.execute(
+                "EXPLAIN SELECT attachment_id FROM note_attachments "
+                "WHERE client_id = ? AND dataset_id = ? AND note_id = ? "
+                "AND attachment_id > ? ORDER BY attachment_id LIMIT ?",
+                (owner_a, dataset_id, note_a, "", 50),
+            ).fetchall()
+            all_state_plan = " ".join(
+                str(next(iter(dict(row).values()))) for row in all_state_plan_rows
+            )
+        assert "idx_note_attachments_owner_dataset_note_all_page" in all_state_plan
 
         with db_a.transaction() as conn:
             conn.execute("SET LOCAL enable_seqscan = off")

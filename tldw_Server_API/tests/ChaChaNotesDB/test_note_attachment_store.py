@@ -8,12 +8,16 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
     InputError,
 )
 from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+    AttachmentRefV2ValidationError,
     attachment_ref_v2_object_hash,
     parse_attachment_ref_v2_payload,
 )
@@ -175,6 +179,48 @@ def test_live_name_uniqueness_uses_unicode_normalization_and_casefold(
     assert other_dataset.dataset_id == OTHER_DATASET
 
 
+def test_duplicate_attachment_identity_is_not_reported_as_filename_conflict(
+    attachment_db: CharactersRAGDB,
+) -> None:
+    _create(attachment_db)
+
+    with pytest.raises(ConflictError, match="identity") as exc_info:
+        _create(attachment_db, file_name="different-name.pdf")
+
+    assert "different-name.pdf" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("constraint_name", "message"),
+    [
+        ("note_attachments_pkey", "identity"),
+        ("uq_note_attachments_live_name", "filename"),
+    ],
+)
+def test_postgres_constraint_mapping_uses_only_safe_stable_conflicts(
+    attachment_db: CharactersRAGDB,
+    constraint_name: str,
+    message: str,
+) -> None:
+    class _Diagnostic:
+        def __init__(self, name: str) -> None:
+            self.constraint_name = name
+
+    class _PostgresIntegrityError(Exception):
+        def __init__(self, name: str) -> None:
+            super().__init__("secret raw database detail")
+            self.diag = _Diagnostic(name)
+
+    wrapped = BackendDatabaseError("PostgreSQL error: secret raw database detail")
+    wrapped.__cause__ = _PostgresIntegrityError(constraint_name)
+
+    with pytest.raises(ConflictError, match=message) as exc_info:
+        _store(attachment_db)._translate_write_error(wrapped, ATTACHMENT_A)
+
+    assert "secret" not in str(exc_info.value)
+    assert constraint_name not in str(exc_info.value)
+
+
 def test_store_semantics_match_attachment_ref_v2_object_hash(
     attachment_db: CharactersRAGDB,
 ) -> None:
@@ -229,6 +275,70 @@ def test_store_semantics_match_attachment_ref_v2_object_hash(
         stored_semantic_payload,
         object_revision=stored.version,
     ) == stored.object_hash
+
+
+def test_store_and_parser_share_expansion_safe_filename_key_boundary(
+    attachment_db: CharactersRAGDB,
+) -> None:
+    expanding_name = ("\u0130" * 176) + ".pdf"
+
+    with pytest.raises(
+        AttachmentRefV2ValidationError,
+        match="normalized attachment filename exceeds",
+    ):
+        parse_attachment_ref_v2_payload(
+            "upsert",
+            {
+                "attachment_id": ATTACHMENT_A,
+                "parent_domain": "notes.note",
+                "parent_object_id": NOTE_ID,
+                "file_name": expanding_name,
+                "original_file_name": "display.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 42,
+                "blob_hash": BLOB_A,
+                "created_at": CREATED_AT,
+                "last_modified": CREATED_AT,
+                "created_by": "device-a",
+            },
+        )
+    with pytest.raises(InputError, match="normalized attachment filename exceeds"):
+        _create(attachment_db, file_name=expanding_name)
+
+
+@pytest.mark.parametrize(
+    "original_file_name",
+    [
+        "../Report.pdf",
+        "folder\\Report.pdf",
+        "folder\uff0fReport.pdf",
+        "\uff0e\uff0e",
+        "x" * 256,
+    ],
+)
+def test_store_and_parser_share_original_filename_boundary(
+    attachment_db: CharactersRAGDB,
+    original_file_name: str,
+) -> None:
+    with pytest.raises(AttachmentRefV2ValidationError, match="original_file_name"):
+        parse_attachment_ref_v2_payload(
+            "upsert",
+            {
+                "attachment_id": ATTACHMENT_A,
+                "parent_domain": "notes.note",
+                "parent_object_id": NOTE_ID,
+                "file_name": "display.pdf",
+                "original_file_name": original_file_name,
+                "content_type": "application/pdf",
+                "size_bytes": 42,
+                "blob_hash": BLOB_A,
+                "created_at": CREATED_AT,
+                "last_modified": CREATED_AT,
+                "created_by": "device-a",
+            },
+        )
+    with pytest.raises(InputError, match="original_file_name"):
+        _create(attachment_db, original_file_name=original_file_name)
 
 
 def test_compare_and_set_updates_mutable_fields_and_rejects_stale_base(
@@ -450,6 +560,26 @@ def test_detail_and_list_use_one_bounded_indexed_query_each(
             ).fetchall()
         )
     assert "idx_note_attachments_owner_dataset_note_page" in plan
+
+
+def test_all_state_page_uses_dedicated_attachment_order_index(
+    attachment_db: CharactersRAGDB,
+) -> None:
+    _create(attachment_db)
+
+    with attachment_db.transaction() as conn:
+        plan = " ".join(
+            str(row[3])
+            for row in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT attachment_id FROM note_attachments "
+                "WHERE client_id = ? AND dataset_id = ? AND note_id = ? "
+                "AND attachment_id > ? ORDER BY attachment_id LIMIT ?",
+                (OWNER, DATASET, NOTE_ID, "", 50),
+            ).fetchall()
+        )
+
+    assert "idx_note_attachments_owner_dataset_note_all_page" in plan
+    assert "USE TEMP B-TREE" not in plan.upper()
 
 
 @pytest.mark.parametrize(

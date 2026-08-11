@@ -143,6 +143,7 @@ def test_sqlite_v58_to_v59_creates_empty_canonical_registry(tmp_path: Path) -> N
             indexes = {str(row[1]) for row in conn.execute("PRAGMA index_list(note_attachments)")}
             assert {
                 "uq_note_attachments_live_name",
+                "idx_note_attachments_owner_dataset_note_all_page",
                 "idx_note_attachments_owner_dataset_note_page",
                 "idx_note_attachments_owner_dataset_blob",
             } <= indexes
@@ -194,6 +195,28 @@ def test_sqlite_v59_rejects_noncanonical_registry_rows(
     overrides: dict[str, object],
 ) -> None:
     db = CharactersRAGDB(str(tmp_path / f"invalid-{uuid4()}.sqlite"), client_id=OWNER)
+    try:
+        db.add_note("Parent", "Body", note_id=NOTE_ID)
+        with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
+            _raw_insert(conn, **overrides)
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"size_bytes": 1.5},
+        {"size_bytes": "not-an-integer"},
+        {"version": 1.5},
+        {"version": "not-an-integer"},
+    ],
+)
+def test_sqlite_v59_rejects_noninteger_storage_classes(
+    tmp_path: Path,
+    overrides: dict[str, object],
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / f"storage-class-{uuid4()}.sqlite"), client_id=OWNER)
     try:
         db.add_note("Parent", "Body", note_id=NOTE_ID)
         with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
@@ -332,6 +355,37 @@ class _PostgresMigrationBackend:
     ) -> QueryResult:
         normalized = " ".join(statement.split())
         self.calls.append((normalized, params))
+        if "FROM pg_attribute AS column_row" in normalized:
+            rows = [
+                {
+                    "column_name": name,
+                    "data_type": data_type,
+                    "is_not_null": is_not_null,
+                }
+                for name, data_type, is_not_null in _POSTGRES_REGISTRY_COLUMNS
+            ]
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if "FROM pg_constraint AS constraint_row" in normalized:
+            rows = _postgres_registry_constraint_rows()
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if "FROM pg_index AS index_row" in normalized:
+            rows = [dict(row) for row in _POSTGRES_REGISTRY_INDEXES]
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if "FROM pg_policies" in normalized:
+            return QueryResult(rows=[_postgres_registry_policy_row()], rowcount=1)
+        if "FROM pg_class AS attachment_table" in normalized:
+            return QueryResult(
+                rows=[
+                    {
+                        "table_name": "note_attachments",
+                        "relrowsecurity": True,
+                        "relforcerowsecurity": True,
+                        "is_schema_owner": self.schema_owner,
+                        "is_current_schema_owner": self.schema_owner,
+                    }
+                ],
+                rowcount=1,
+            )
         if "FROM pg_class AS table_row" in normalized:
             relation_names = ["notes"]
             if "table_row.relname IN ('notes', 'note_attachments')" in normalized:
@@ -357,6 +411,242 @@ class _PostgresMigrationBackend:
         if normalized.startswith("SELECT COUNT("):
             return QueryResult(rows=[{"count": 0}], rowcount=1)
         return QueryResult(rows=[], rowcount=0)
+
+
+_POSTGRES_REGISTRY_COLUMNS = [
+    ("client_id", "text", True),
+    ("dataset_id", "text", True),
+    ("attachment_id", "text", True),
+    ("note_id", "text", True),
+    ("file_name", "text", True),
+    ("normalized_file_name", "text", True),
+    ("original_file_name", "text", True),
+    ("content_type", "text", True),
+    ("size_bytes", "bigint", True),
+    ("blob_hash", "text", True),
+    ("object_hash", "text", True),
+    ("version", "bigint", True),
+    ("deleted", "boolean", True),
+    ("deleted_at", "timestamp with time zone", False),
+    ("delete_reason", "text", False),
+    ("created_at", "timestamp with time zone", True),
+    ("last_modified", "timestamp with time zone", True),
+    ("created_by", "text", True),
+    ("source_kind", "text", True),
+]
+
+_POSTGRES_REGISTRY_CHECKS = {
+    "note_attachments_client_id_check": "CHECK (char_length(btrim(client_id)) > 0)",
+    "note_attachments_dataset_id_check": (
+        "CHECK (char_length(dataset_id) BETWEEN 1 AND 255 AND dataset_id = btrim(dataset_id))"
+    ),
+    "note_attachments_attachment_id_check": (
+        "CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]')"
+    ),
+    "note_attachments_note_id_check": (
+        "CHECK (note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]')"
+    ),
+    "note_attachments_file_name_check": (
+        "CHECK (char_length(file_name) BETWEEN 1 AND 180 AND file_name = btrim(file_name) "
+        "AND file_name NOT IN ('.', '..') AND position('/' IN file_name) = 0 "
+        "AND position(chr(92) IN file_name) = 0)"
+    ),
+    "note_attachments_normalized_file_name_check": (
+        "CHECK (char_length(normalized_file_name) BETWEEN 1 AND 180 "
+        "AND position('/' IN normalized_file_name) = 0 "
+        "AND position(chr(92) IN normalized_file_name) = 0)"
+    ),
+    "note_attachments_original_file_name_check": (
+        "CHECK (char_length(original_file_name) BETWEEN 1 AND 255 "
+        "AND octet_length(original_file_name) <= 1024 "
+        "AND original_file_name = btrim(original_file_name) "
+        "AND original_file_name NOT IN ('.', '..') "
+        "AND position('/' IN original_file_name) = 0 "
+        "AND position(chr(92) IN original_file_name) = 0)"
+    ),
+    "note_attachments_content_type_check": (
+        "CHECK (char_length(content_type) BETWEEN 1 AND 255 "
+        "AND position('/' IN content_type) > 1)"
+    ),
+    "note_attachments_size_bytes_check": "CHECK (size_bytes >= 1)",
+    "note_attachments_blob_hash_check": (
+        "CHECK (blob_hash ~ '^sha256:[0-9a-f]{64}$')"
+    ),
+    "note_attachments_object_hash_check": (
+        "CHECK (object_hash ~ '^sha256:[0-9a-f]{64}$')"
+    ),
+    "note_attachments_version_check": "CHECK (version >= 1)",
+    "note_attachments_delete_reason_check": "CHECK (char_length(delete_reason) <= 256)",
+    "note_attachments_created_by_check": "CHECK (char_length(btrim(created_by)) > 0)",
+    "note_attachments_source_kind_check": (
+        "CHECK (source_kind IN ('upload', 'sync', 'legacy_bootstrap'))"
+    ),
+    "note_attachments_check": (
+        "CHECK ((deleted = false AND deleted_at IS NULL AND delete_reason IS NULL) "
+        "OR (deleted = true AND deleted_at IS NOT NULL))"
+    ),
+}
+
+_POSTGRES_REGISTRY_INDEXES = [
+    {
+        "index_name": "uq_note_attachments_live_name",
+        "is_unique": True,
+        "is_valid": True,
+        "is_ready": True,
+        "column_names": "client_id,dataset_id,note_id,normalized_file_name",
+        "predicate": "deleted = false",
+    },
+    {
+        "index_name": "idx_note_attachments_owner_dataset_note_all_page",
+        "is_unique": False,
+        "is_valid": True,
+        "is_ready": True,
+        "column_names": "client_id,dataset_id,note_id,attachment_id",
+        "predicate": None,
+    },
+    {
+        "index_name": "idx_note_attachments_owner_dataset_note_page",
+        "is_unique": False,
+        "is_valid": True,
+        "is_ready": True,
+        "column_names": "client_id,dataset_id,note_id,deleted,attachment_id",
+        "predicate": None,
+    },
+    {
+        "index_name": "idx_note_attachments_owner_dataset_blob",
+        "is_unique": False,
+        "is_valid": True,
+        "is_ready": True,
+        "column_names": "client_id,dataset_id,blob_hash,attachment_id",
+        "predicate": None,
+    },
+]
+
+
+def _postgres_registry_constraint_rows() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = [
+        {
+            "constraint_name": name,
+            "constraint_type": "c",
+            "constraint_def": definition,
+            "referenced_table": None,
+            "delete_action": " ",
+            "update_action": " ",
+        }
+        for name, definition in _POSTGRES_REGISTRY_CHECKS.items()
+    ]
+    rows.extend(
+        [
+            {
+                "constraint_name": "note_attachments_pkey",
+                "constraint_type": "p",
+                "constraint_def": "PRIMARY KEY (client_id, dataset_id, attachment_id)",
+                "referenced_table": None,
+                "delete_action": " ",
+                "update_action": " ",
+            },
+            {
+                "constraint_name": "note_attachments_note_id_fkey",
+                "constraint_type": "f",
+                "constraint_def": (
+                    "FOREIGN KEY (note_id) REFERENCES notes(id) "
+                    "ON UPDATE RESTRICT ON DELETE RESTRICT"
+                ),
+                "referenced_table": "notes",
+                "delete_action": "r",
+                "update_action": "r",
+            },
+        ]
+    )
+    return rows
+
+
+def _postgres_registry_policy_row() -> dict[str, object]:
+    expression = (
+        "note_attachments.client_id = current_setting('app.current_user_id', true) "
+        "AND EXISTS (SELECT 1 FROM notes AS note "
+        "WHERE note.id = note_attachments.note_id "
+        "AND note.client_id = current_setting('app.current_user_id', true) "
+        "AND note.client_id = note_attachments.client_id)"
+    )
+    return {
+        "policy_name": "note_attachments_tenant_isolation",
+        "permissive": "PERMISSIVE",
+        "roles": "{public}",
+        "command": "ALL",
+        "using_expression": expression,
+        "check_expression": expression,
+    }
+
+
+class _PostgresCatalogBackend(_PostgresMigrationBackend):
+    def __init__(self, *, drift: str | None = None) -> None:
+        super().__init__(registry_exists=True)
+        self.drift = drift
+
+    @contextlib.contextmanager
+    def transaction(self):
+        yield object()
+
+    def execute(
+        self,
+        statement: str,
+        params: object = None,
+        *,
+        connection: object,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        if "SELECT version FROM db_schema_version" in normalized:
+            self.calls.append((normalized, params))
+            return QueryResult(rows=[{"version": 59}], rowcount=1)
+        if "FROM pg_attribute AS column_row" in normalized:
+            rows = [
+                {
+                    "column_name": name,
+                    "data_type": (
+                        "integer" if self.drift == "size_type" and name == "size_bytes" else data_type
+                    ),
+                    "is_not_null": is_not_null,
+                }
+                for name, data_type, is_not_null in _POSTGRES_REGISTRY_COLUMNS
+            ]
+            self.calls.append((normalized, params))
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if "FROM pg_constraint AS constraint_row" in normalized:
+            rows = _postgres_registry_constraint_rows()
+            if self.drift == "source_check":
+                next(
+                    row
+                    for row in rows
+                    if row["constraint_name"] == "note_attachments_source_kind_check"
+                )["constraint_def"] = "CHECK (true)"
+            self.calls.append((normalized, params))
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if "FROM pg_index AS index_row" in normalized:
+            rows = [dict(row) for row in _POSTGRES_REGISTRY_INDEXES]
+            if self.drift == "missing_live_index":
+                rows = [
+                    row
+                    for row in rows
+                    if row["index_name"] != "uq_note_attachments_live_name"
+                ]
+            self.calls.append((normalized, params))
+            return QueryResult(rows=rows, rowcount=len(rows))
+        if "FROM pg_policies" in normalized:
+            policy = _postgres_registry_policy_row()
+            if self.drift == "cross_owner_policy":
+                drifted = (
+                    "note_attachments.client_id = "
+                    "current_setting('app.current_user_id', true) "
+                    "AND note.id = note_attachments.note_id "
+                    "AND note.client_id = 'other-owner' AND notes"
+                )
+                policy["using_expression"] = drifted
+                policy["check_expression"] = drifted
+            rows = [policy]
+            self.calls.append((normalized, params))
+            return QueryResult(rows=rows, rowcount=1)
+        return super().execute(statement, params, connection=connection)
 
 
 def _postgres_db(backend: _PostgresMigrationBackend) -> CharactersRAGDB:
@@ -386,7 +676,9 @@ def test_postgres_v59_migration_uses_verified_lock_rls_and_version_order() -> No
         if "CREATE POLICY note_attachments_tenant_isolation" in sql
     )
     final_catalog_index = max(
-        i for i, sql in enumerate(statements) if "FROM pg_class AS table_row" in sql
+        i
+        for i, sql in enumerate(statements)
+        if "FROM pg_class AS attachment_table" in sql
     )
     version_index = next(i for i, sql in enumerate(statements) if "INSERT INTO db_schema_version" in sql)
 
@@ -407,6 +699,10 @@ def test_postgres_v59_migration_uses_verified_lock_rls_and_version_order() -> No
         "CREATE UNIQUE INDEX uq_note_attachments_live_name "
         "ON note_attachments(client_id, dataset_id, note_id, normalized_file_name) "
         "WHERE deleted = FALSE"
+    ) in statements
+    assert (
+        "CREATE INDEX idx_note_attachments_owner_dataset_note_all_page "
+        "ON note_attachments(client_id, dataset_id, note_id, attachment_id)"
     ) in statements
 
 
@@ -442,6 +738,53 @@ def test_postgres_initializer_locks_schema_version_before_v59_migration() -> Non
     assert source.index("_get_schema_version_postgres(conn, lock=True)") < source.index(
         "_migrate_from_v58_to_v59_postgres(conn)"
     )
+
+
+def test_live_postgres_tenancy_test_delegates_availability_to_shared_fixture() -> None:
+    source_path = Path(__file__).with_name("test_note_attachment_postgres_tenancy.py")
+    source = source_path.read_text(encoding="utf-8")
+
+    assert "pg_database_config" in source
+    assert "pytest.mark.skipif" not in source
+    assert "TEST_DATABASE_URL" not in source
+    assert "POSTGRES_TEST_DSN" not in source
+
+
+@pytest.mark.parametrize("drift", ["size_type", "source_check"])
+def test_postgres_v59_catalog_verifier_rejects_type_or_check_drift(drift: str) -> None:
+    backend = _PostgresCatalogBackend(drift=drift)
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="catalog|schema|registry"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_v59_catalog_verifier_rejects_cross_owner_rls_drift() -> None:
+    backend = _PostgresCatalogBackend(drift="cross_owner_policy")
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
+        db._verify_note_attachment_schema_postgres(object())
+
+
+def test_postgres_current_v59_marker_rejects_missing_live_name_index_after_version_lock() -> None:
+    backend = _PostgresCatalogBackend(drift="missing_live_index")
+    db = _postgres_db(backend)
+
+    with pytest.raises(SchemaError, match="catalog|schema|registry|index"):
+        db._initialize_schema_postgres()
+
+    statements = [statement for statement, _ in backend.calls]
+    version_lock_index = next(
+        i for i, statement in enumerate(statements) if "SELECT version FROM db_schema_version" in statement
+    )
+    registry_lock_index = next(
+        i for i, statement in enumerate(statements) if statement.startswith("LOCK TABLE notes, note_attachments")
+    )
+    catalog_index = next(
+        i for i, statement in enumerate(statements) if "FROM pg_attribute AS column_row" in statement
+    )
+    assert version_lock_index < registry_lock_index < catalog_index
 
 
 class _FailingPostgresTransactionBackend(_PostgresMigrationBackend):

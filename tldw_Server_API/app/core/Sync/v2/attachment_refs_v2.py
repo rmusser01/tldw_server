@@ -23,6 +23,7 @@ from pydantic import (
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     sanitize_note_attachment_file_name,
     validate_note_attachment_content_type,
+    validate_note_attachment_original_file_name,
 )
 
 from .models import normalize_sync_timestamp
@@ -89,6 +90,11 @@ class AttachmentRefV2Payload(BaseModel):
     @classmethod
     def _validate_file_name(cls, value: str) -> str:
         return sanitize_note_attachment_file_name(value)
+
+    @field_validator("original_file_name")
+    @classmethod
+    def _validate_original_file_name(cls, value: str) -> str:
+        return validate_note_attachment_original_file_name(value)
 
     @field_validator("content_type")
     @classmethod
