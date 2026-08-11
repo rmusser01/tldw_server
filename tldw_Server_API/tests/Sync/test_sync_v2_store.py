@@ -8,10 +8,16 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 import tldw_Server_API.app.core.Sync.v2.store as store_module
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
+    DatabaseConfig,
+    QueryResult,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -146,6 +152,50 @@ class _PostgresUniqueDiagnostics:
 class _PostgresMutationGroupUniqueViolation(Exception):
     sqlstate = "23505"
     diag = _PostgresUniqueDiagnostics()
+
+
+class _PostgresDeviceLockBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        self.row = {
+            "device_id": "device-1",
+            "user_id": "user-1",
+            "display_name": "Laptop",
+            "client_type": "chatbook",
+            "client_version": "0.1.0",
+            "capabilities_json": '{"domains":["notes.note"]}',
+            "registered_at": "2026-05-10T00:00:00+00:00",
+            "last_seen_at": "2026-05-10T00:00:00+00:00",
+            "status": "active",
+            "user_label": None,
+            "authorized_at": None,
+            "revoked_at": None,
+            "revoked_reason": None,
+        }
+
+    @contextmanager
+    def transaction(self, connection=None):
+        yield connection or object()
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        if normalized.startswith("SELECT * FROM sync_devices"):
+            return QueryResult(rows=[dict(self.row)], rowcount=1)
+        if normalized.startswith("UPDATE sync_devices"):
+            assert params is not None
+            self.row["display_name"] = params[1]
+            self.row["capabilities_json"] = params[4]
+            self.row["last_seen_at"] = params[5]
+            return QueryResult(rows=[], rowcount=1)
+        return QueryResult(rows=[], rowcount=1)
 
 
 def _inject_postgres_mutation_group_race(
@@ -852,6 +902,26 @@ def test_device_upsert_is_idempotent(sync_store: SyncV2Store):
     assert second.display_name == "Renamed Laptop"
     assert second.capabilities == {"domains": ["notes.note", "chat.conversation"]}
     assert second.last_seen_at >= first.last_seen_at
+
+
+def test_postgres_device_upsert_locks_existing_row_before_update() -> None:
+    backend = _PostgresDeviceLockBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    updated = db.upsert_device(
+        _device(capabilities={"domains": ["notes.note", "attachment.ref"]})
+    )
+
+    assert updated.capabilities == {
+        "domains": ["notes.note", "attachment.ref"]
+    }
+    first_select = next(
+        statement
+        for statement, _params, _connection in backend.calls
+        if statement.startswith("SELECT * FROM sync_devices")
+    )
+    assert first_select.endswith("FOR UPDATE")
 
 
 def test_device_upsert_rejects_cross_user_takeover(sync_store: SyncV2Store):

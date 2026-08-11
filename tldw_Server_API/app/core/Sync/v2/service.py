@@ -272,6 +272,110 @@ def _normalize_device_capability_patch(
     return merged
 
 
+def _validated_device_capabilities(
+    existing: SyncDevice | None,
+    incoming: Mapping[str, object],
+    *,
+    merge_capabilities: bool,
+    negotiation_patch: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Resolve and validate one capability write against the current device."""
+
+    existing_capabilities = existing.capabilities if existing is not None else {}
+    updated = (
+        dict(existing_capabilities)
+        if merge_capabilities and existing is not None
+        else {}
+    )
+    updated.update(incoming)
+    patch = dict(incoming if negotiation_patch is None else negotiation_patch)
+    if existing is not None and existing.status == "active":
+        for field_name in ("requested_domains", "supported_adapter_versions"):
+            if field_name not in patch and field_name in existing_capabilities:
+                patch[field_name] = existing_capabilities[field_name]
+    if not patch:
+        return updated
+    return _normalize_device_capability_patch(
+        existing_capabilities,
+        updated,
+        patch=patch,
+        existing_registration=existing is not None,
+    )
+
+
+def _atomic_negotiation_patch(
+    current: SyncDevice | None,
+    submitted: Mapping[str, object],
+    incoming: Mapping[str, object],
+) -> dict[str, object]:
+    """Union validated negotiation additions with the transaction-current row."""
+
+    patch = dict(incoming)
+    negotiation_fields = {"requested_domains", "supported_adapter_versions"}
+    if not negotiation_fields.intersection(submitted):
+        return patch
+
+    requested: list[SyncDomain] = []
+    version_maps: list[dict[SyncDomain, list[int]]] = []
+    for capabilities in (
+        current.capabilities if current is not None else {},
+        submitted,
+    ):
+        raw_requested = capabilities.get("requested_domains")
+        try:
+            capability_requested = (
+                normalize_sync_v2_requested_domains(raw_requested)
+                if raw_requested is not None
+                else []
+            )
+        except ValueError as exc:
+            raise SyncStoreError(
+                "Sync device adapter version capabilities are invalid"
+            ) from exc
+        raw_versions = capabilities.get("supported_adapter_versions")
+        if isinstance(raw_versions, Mapping):
+            capability_requested.extend(
+                domain for domain in raw_versions if isinstance(domain, str)
+            )
+        elif raw_versions is not None:
+            raise SyncStoreError(
+                "Sync device adapter version capabilities are invalid"
+            )
+        try:
+            capability_requested = normalize_sync_v2_requested_domains(
+                list(dict.fromkeys(capability_requested))
+            )
+            version_maps.append(
+                normalize_supported_adapter_versions(
+                    raw_versions,
+                    requested_domains=capability_requested,
+                )
+            )
+        except ValueError as exc:
+            raise SyncStoreError(
+                "Sync device adapter version capabilities are invalid"
+            ) from exc
+        requested.extend(capability_requested)
+
+    try:
+        requested = normalize_sync_v2_requested_domains(
+            list(dict.fromkeys(requested))
+        )
+    except ValueError as exc:
+        raise SyncStoreError(
+            "Sync device adapter version capabilities are invalid"
+        ) from exc
+    unioned_versions: dict[SyncDomain, list[int]] = {}
+    for version_map in version_maps:
+        for domain, versions in version_map.items():
+            unioned_versions[domain] = sorted(
+                set(unioned_versions.get(domain, ())).union(versions)
+            )
+    patch["requested_domains"] = requested
+    patch["supported_adapter_versions"] = unioned_versions
+    return patch
+
+
 @dataclass(frozen=True, slots=True)
 class SyncV2Settings:
     """Server settings surfaced through Sync v2 capabilities."""
@@ -843,35 +947,29 @@ class SyncV2Service:
     ) -> SyncDevice:
         """Validate negotiation state before every service-owned device upsert."""
 
-        existing = self.store.get_device(device.user_id, device.device_id)
-        updated_capabilities = (
-            dict(existing.capabilities)
-            if merge_capabilities and existing is not None
-            else {}
+        observed = self.store.get_device(device.user_id, device.device_id)
+        submitted_capabilities = _validated_device_capabilities(
+            observed,
+            device.capabilities,
+            merge_capabilities=merge_capabilities,
         )
-        updated_capabilities.update(device.capabilities)
-        negotiation_patch = dict(device.capabilities)
-        if existing is not None and existing.status == "active":
-            for field_name in (
-                "requested_domains",
-                "supported_adapter_versions",
-            ):
-                if (
-                    field_name not in negotiation_patch
-                    and field_name in existing.capabilities
-                ):
-                    negotiation_patch[field_name] = existing.capabilities[
-                        field_name
-                    ]
-        if negotiation_patch:
-            updated_capabilities = _normalize_device_capability_patch(
-                existing.capabilities if existing is not None else {},
-                updated_capabilities,
-                patch=negotiation_patch,
-                existing_registration=existing is not None,
+
+        def resolve_capabilities(current: SyncDevice | None) -> dict[str, object]:
+            negotiation_patch = _atomic_negotiation_patch(
+                current,
+                submitted_capabilities,
+                device.capabilities,
             )
+            return _validated_device_capabilities(
+                current,
+                device.capabilities,
+                merge_capabilities=merge_capabilities,
+                negotiation_patch=negotiation_patch,
+            )
+
         return self.store.upsert_device(
-            replace(device, capabilities=updated_capabilities)
+            replace(device, capabilities=submitted_capabilities),
+            capabilities_resolver=resolve_capabilities,
         )
 
     def list_devices(
@@ -991,18 +1089,19 @@ class SyncV2Service:
         existing = self.store.get_device(user_id, device_id)
         if existing is None or existing.status == "revoked":
             raise SyncStoreError("Sync device was not found or is not accessible")
-        return self.store.upsert_device(
+        return self._upsert_device(
             SyncDeviceUpsert(
                 device_id=existing.device_id,
                 user_id=existing.user_id,
                 display_name=existing.display_name,
                 client_type=existing.client_type,
                 client_version=existing.client_version,
-                capabilities=dict(existing.capabilities),
+                capabilities={},
                 status="paused",
                 user_label=existing.user_label,
                 authorized_at=existing.authorized_at,
-            )
+            ),
+            merge_capabilities=True,
         )
 
     def resume_device(self, *, user_id: str, device_id: str) -> SyncDevice:
@@ -1011,18 +1110,19 @@ class SyncV2Service:
         existing = self.store.get_device(user_id, device_id)
         if existing is None or existing.status in {"revoked", "pending_authorization"}:
             raise SyncStoreError("Sync device was not found or is not accessible")
-        return self.store.upsert_device(
+        return self._upsert_device(
             SyncDeviceUpsert(
                 device_id=existing.device_id,
                 user_id=existing.user_id,
                 display_name=existing.display_name,
                 client_type=existing.client_type,
                 client_version=existing.client_version,
-                capabilities=dict(existing.capabilities),
+                capabilities={},
                 status="active",
                 user_label=existing.user_label,
                 authorized_at=existing.authorized_at or self.clock(),
-            )
+            ),
+            merge_capabilities=True,
         )
 
     def acknowledge_device_state(

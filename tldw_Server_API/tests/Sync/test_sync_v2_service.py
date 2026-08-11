@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from threading import Barrier, Event
+from threading import Barrier, Event, Lock, get_ident
 from typing import cast
 
 import pytest
@@ -1125,6 +1125,66 @@ def test_device_capability_patch_merges_and_adds_adapter_versions_monotonically(
         },
         "theme": "dark",
         "telemetry": True,
+    }
+
+
+def test_concurrent_device_adapter_version_additions_are_unioned_atomically(
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-new",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1]},
+        },
+    )
+    original_get_device = sync_service.store.get_device
+    reads_by_thread: dict[int, int] = {}
+    reads_lock = Lock()
+    prewrite_barrier = Barrier(2)
+
+    def get_device_after_both_service_preflights(
+        user_id: str,
+        device_id: str,
+    ):
+        device = original_get_device(user_id, device_id)
+        if device_id != "device-new":
+            return device
+        thread_id = get_ident()
+        with reads_lock:
+            reads_by_thread[thread_id] = reads_by_thread.get(thread_id, 0) + 1
+            read_count = reads_by_thread[thread_id]
+        if read_count == 2:
+            prewrite_barrier.wait(timeout=5)
+        return device
+
+    monkeypatch.setattr(
+        sync_service.store,
+        "get_device",
+        get_device_after_both_service_preflights,
+    )
+
+    def add_version(version: int):
+        return sync_service.update_device(
+            user_id="user-1",
+            device_id="device-new",
+            capabilities={
+                "supported_adapter_versions": {"notes.note": [1, version]}
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(add_version, [2, 3]))
+
+    assert len(results) == 2
+    stored = original_get_device("user-1", "device-new")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1, 2, 3]
     }
 
 

@@ -2779,12 +2779,26 @@ class SyncDatabase:
                     + ", ".join(sorted(missing))
                 )
 
-    def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
+    def upsert_device(
+        self,
+        device: SyncDeviceUpsert,
+        *,
+        capabilities_resolver: Callable[
+            [SyncDevice | None], dict[str, object]
+        ]
+        | None = None,
+    ) -> SyncDevice:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
+            lock_suffix = (
+                " FOR UPDATE"
+                if self.backend_type == BackendType.POSTGRESQL
+                else ""
+            )
             existing = _first(
                 self.execute(
-                    "SELECT * FROM sync_devices WHERE device_id = ?",
+                    "SELECT * FROM sync_devices WHERE device_id = ?"
+                    + lock_suffix,  # nosec B608
                     (device.device_id,),
                     connection=conn,
                 )
@@ -2796,6 +2810,11 @@ class SyncDatabase:
                     )
                 existing_status = existing.get("status") or (
                     "revoked" if existing.get("revoked_at") else "active"
+                )
+                capabilities = (
+                    capabilities_resolver(_device_from_row(existing))
+                    if capabilities_resolver is not None
+                    else device.capabilities
                 )
                 if existing_status == "revoked" and device.status != "revoked":
                     status = "revoked"
@@ -2833,7 +2852,7 @@ class SyncDatabase:
                         device.display_name,
                         device.client_type,
                         device.client_version,
-                        encode_json(device.capabilities, default={}),
+                        encode_json(capabilities, default={}),
                         now,
                         status,
                         device.user_label or existing.get("user_label"),
@@ -2845,6 +2864,11 @@ class SyncDatabase:
                     connection=conn,
                 )
             else:
+                capabilities = (
+                    capabilities_resolver(None)
+                    if capabilities_resolver is not None
+                    else device.capabilities
+                )
                 status = (
                     "revoked"
                     if device.status == "revoked" or device.revoked_at is not None
@@ -2866,7 +2890,7 @@ class SyncDatabase:
                         device.display_name,
                         device.client_type,
                         device.client_version,
-                        encode_json(device.capabilities, default={}),
+                        encode_json(capabilities, default={}),
                         now,
                         now,
                         status,

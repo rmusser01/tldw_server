@@ -83,8 +83,19 @@ class SyncV2Store:
                 )
             yield guarded
 
-    def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
-        return self.db.upsert_device(device)
+    def upsert_device(
+        self,
+        device: SyncDeviceUpsert,
+        *,
+        capabilities_resolver: Callable[
+            [SyncDevice | None], dict[str, object]
+        ]
+        | None = None,
+    ) -> SyncDevice:
+        return self.db.upsert_device(
+            device,
+            capabilities_resolver=capabilities_resolver,
+        )
 
     def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
         return self.db.get_device(user_id, device_id)
