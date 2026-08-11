@@ -37,6 +37,7 @@ from .materializers import MaterializationResult, SyncMaterializer
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
+    NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_ENCRYPTION_POLICIES,
@@ -593,6 +594,7 @@ class SyncV2Service:
         settings: SyncV2Settings | None = None,
         workspace_access_checker: WorkspaceAccessChecker | None = None,
         dataset_bootstrapper: object | None = None,
+        notes_link_bootstrapper: object | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -603,6 +605,7 @@ class SyncV2Service:
         self.settings = settings or SyncV2Settings()
         self.workspace_access_checker = workspace_access_checker
         self.dataset_bootstrapper = dataset_bootstrapper
+        self.notes_link_bootstrapper = notes_link_bootstrapper
 
     def capabilities(self) -> SyncV2Capabilities:
         blob_transfer: dict[str, object] = {"supported": False}
@@ -1317,11 +1320,15 @@ class SyncV2Service:
         requested_metadata = dict(metadata or {})
         reserved_metadata = {
             "notes_organization_v1",
+            "notes_link_v1",
             "default_personal",
             "client_family",
         }
-        if requested_domains.intersection(NOTES_ORGANIZATION_DOMAINS) or reserved_metadata.intersection(
-            requested_metadata
+        if (
+            requested_domains.intersection(
+                {*NOTES_ORGANIZATION_DOMAINS, *NOTES_LINK_DOMAINS}
+            )
+            or reserved_metadata.intersection(requested_metadata)
         ):
             raise SyncStoreError("sync_reserved_dataset_enrollment")
         self._require_server_trusted_encryption_ready()
@@ -4274,6 +4281,11 @@ class SyncV2Service:
             state = metadata.get("state") if isinstance(metadata, Mapping) else None
             if state != "ready":
                 raise SyncStoreError("notes_organization_sync_not_ready")
+        if "notes.link" in selected:
+            metadata = dataset.metadata.get("notes_link_v1")
+            state = metadata.get("state") if isinstance(metadata, Mapping) else None
+            if state != "ready":
+                raise SyncStoreError("notes_link_sync_not_ready")
         return selected
 
     def _profile_manager(self) -> SyncV2ProfileManager:
@@ -4284,6 +4296,7 @@ class SyncV2Service:
             scan_limit=self.settings.restore_manifest_scan_limit,
             service=self,
             dataset_bootstrapper=self.dataset_bootstrapper,
+            notes_link_bootstrapper=self.notes_link_bootstrapper,
         )
 
     def _update_cursors(

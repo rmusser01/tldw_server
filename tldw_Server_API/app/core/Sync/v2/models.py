@@ -25,6 +25,7 @@ SyncDomain = Literal[
     "notes.keyword_collection_link",
     "notes.folder",
     "notes.folder_link",
+    "notes.link",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -108,6 +109,10 @@ NOTES_ORGANIZATION_DOMAINS: tuple[SyncDomain, ...] = (
 NOTES_ORGANIZATION_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     domain: ["upsert", "tombstone"] for domain in NOTES_ORGANIZATION_DOMAINS
 }
+NOTES_LINK_DOMAINS: tuple[SyncDomain, ...] = ("notes.link",)
+NOTES_LINK_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "notes.link": ["upsert", "tombstone"]
+}
 WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
     "workspaces.workspace",
     "workspaces.source_ref",
@@ -136,6 +141,7 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
     + list(NOTES_ORGANIZATION_DOMAINS)
+    + list(NOTES_LINK_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
@@ -143,6 +149,7 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
+    **NOTES_LINK_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
@@ -211,6 +218,35 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
             "folder_sync_id": {"type": "string"},
         },
         "additional_properties": False,
+    }
+    notes_link_required = [
+        "source_note_id",
+        "target_note_id",
+        "type",
+        "directed",
+        "weight",
+        "label",
+        "properties",
+        "created_at",
+        "last_modified",
+        "created_by",
+    ]
+    notes_link_properties = {
+        "source_note_id": {"type": "string", "format": "uuid"},
+        "target_note_id": {"type": "string", "format": "uuid"},
+        "type": {"enum": ["manual"]},
+        "directed": {"type": "boolean"},
+        "weight": {"type": "number", "minimum": 0, "maximum": 1_000_000},
+        "label": {"type": ["string", "null"], "max_length": 256},
+        "properties": {
+            "type": "object",
+            "max_properties": 64,
+            "max_depth": 4,
+            "max_bytes": 16_384,
+        },
+        "created_at": {"type": "string", "format": "date-time"},
+        "last_modified": {"type": "string", "format": "date-time"},
+        "created_by": {"type": "string"},
     }
     return {
         "notes.note": {
@@ -286,6 +322,24 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
             "upsert": folder_link_schema,
             "tombstone": folder_link_schema,
+        },
+        "notes.link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": notes_link_required,
+                "properties": notes_link_properties,
+                "additional_properties": False,
+            },
+            "tombstone": {
+                "required": [*notes_link_required, "deleted_at"],
+                "properties": {
+                    **notes_link_properties,
+                    "deleted_at": {"type": "string", "format": "date-time"},
+                    "reason": {"type": ["string", "null"], "max_length": 256},
+                },
+                "additional_properties": False,
+            },
         },
     }
 
@@ -1399,6 +1453,8 @@ __all__ = [
     "M1_SYNC_OPERATIONS",
     "NOTES_ORGANIZATION_DOMAINS",
     "NOTES_ORGANIZATION_SYNC_OPERATIONS",
+    "NOTES_LINK_DOMAINS",
+    "NOTES_LINK_SYNC_OPERATIONS",
     "NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS",
     "NOTES_NOTE_CONTENT_MAX_CHARS",
     "NOTES_NOTE_TITLE_MAX_CHARS",

@@ -360,6 +360,13 @@ _chacha_default_char_futures: set[asyncio.Future] = set()
 _chacha_default_char_futures_lock = threading.Lock()
 
 
+def snapshot_cached_chacha_db_instances() -> tuple[CharactersRAGDB, ...]:
+    """Return a lock-protected snapshot of authenticated cached DB instances."""
+
+    with _chacha_db_lock:
+        return tuple(_chacha_db_instances.values())
+
+
 #######################################################################################################################
 
 # --- Helper Functions ---

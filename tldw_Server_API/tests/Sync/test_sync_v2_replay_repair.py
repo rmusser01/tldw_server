@@ -14,12 +14,14 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
 )
@@ -30,6 +32,7 @@ from tldw_Server_API.app.core.Sync.v2.materializers.chat import (
     ChatMessageMaterializer,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
     NotesOrganizationMaterializer,
 )
@@ -108,6 +111,7 @@ def repair_client(repair_service: SyncV2Service) -> TestClient:
 def _registry() -> SyncAdapterRegistry:
     return SyncAdapterRegistry(
         [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
+        + [NotesLinkDomainAdapter()]
         + [
             NotesOrganizationDomainAdapter(domain=domain)
             for domain in NOTES_ORGANIZATION_DOMAINS
@@ -256,6 +260,67 @@ def _enable_ready_notes_organization(store: SyncV2Store) -> None:
     )
 
 
+def _enable_ready_notes_link(store: SyncV2Store) -> None:
+    store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ? "
+        "WHERE dataset_id = ?",
+        (
+            json.dumps([*M1_SYNC_DOMAINS, "notes.link"]),
+            json.dumps({"notes_link_v1": {"state": "ready"}}),
+            "dataset-1",
+        ),
+    )
+
+
+def _notes_link_envelope(
+    *,
+    client_envelope_id: str,
+    edge_id: str,
+    source_note_id: str,
+    target_note_id: str,
+    operation: str = "upsert",
+    revision: int = 1,
+    base: Any = None,
+    restore: bool = False,
+) -> SyncEnvelopeCreate:
+    source_note_id, target_note_id = sorted((source_note_id, target_note_id))
+    timestamp = f"2026-08-10T12:00:0{revision - 1}+00:00"
+    payload: dict[str, object] = {
+        "source_note_id": source_note_id,
+        "target_note_id": target_note_id,
+        "type": "manual",
+        "directed": False,
+        "weight": 1.0,
+        "label": None,
+        "properties": {},
+        "created_at": "2026-08-10T12:00:00+00:00",
+        "last_modified": timestamp,
+        "created_by": "device-1",
+    }
+    if operation == "tombstone":
+        payload.update({"deleted_at": timestamp, "reason": "manual-delete"})
+    return SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id=client_envelope_id,
+        domain="notes.link",
+        operation=operation,
+        object_id=edge_id,
+        device_id="device-1",
+        client_sequence=100 + revision,
+        base_server_cursor=base.server_cursor if base is not None else None,
+        base_object_revision=base.object_revision if base is not None else None,
+        base_object_hash=base.payload_hash if base is not None else None,
+        base_version=base.entity_version if base is not None else None,
+        object_revision=revision,
+        entity_version=revision,
+        payload=payload,
+        payload_hash=f"sha256:{client_envelope_id}",
+        created_at_client=timestamp,
+        routing_metadata={"restore_intent": True} if restore else {},
+        status="accepted",
+    )
+
+
 def _keyword_group(
     *,
     group_id: str,
@@ -355,6 +420,94 @@ def test_repair_rebuilds_note_projection_from_accepted_envelopes(
     assert result.failed_count == 0
     assert result.domain_results[0].domain == "notes.note"
     assert result.domain_results[0].applied_count == 1
+
+
+def test_notes_link_repair_preserves_tombstone_restore_and_exact_replay(
+    sync_store: SyncV2Store,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    source_note_id = "11111111-1111-4111-8111-111111111111"
+    target_note_id = "22222222-2222-4222-8222-222222222222"
+    edge_id = "33333333-3333-4333-8333-333333333333"
+    for note_id in (source_note_id, target_note_id):
+        chacha_db.note_store.add_note(note_id, "body", note_id=note_id)
+    service = _service(
+        sync_store,
+        materializers={"notes.link": NotesLinkMaterializer(chacha_db)},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_link(sync_store)
+    created = sync_store.insert_envelope(
+        _notes_link_envelope(
+            client_envelope_id="env-link-repair-create",
+            edge_id=edge_id,
+            source_note_id=source_note_id,
+            target_note_id=target_note_id,
+        )
+    )
+
+    created_result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+    )
+    tombstone = sync_store.insert_envelope(
+        _notes_link_envelope(
+            client_envelope_id="env-link-repair-delete",
+            edge_id=edge_id,
+            source_note_id=source_note_id,
+            target_note_id=target_note_id,
+            operation="tombstone",
+            revision=2,
+            base=created,
+        )
+    )
+    deleted_result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+        since_cursor=created.server_cursor or 0,
+    )
+    restored = sync_store.insert_envelope(
+        _notes_link_envelope(
+            client_envelope_id="env-link-repair-restore",
+            edge_id=edge_id,
+            source_note_id=source_note_id,
+            target_note_id=target_note_id,
+            revision=3,
+            base=tombstone,
+            restore=True,
+        )
+    )
+    restored_result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+        since_cursor=tombstone.server_cursor or 0,
+    )
+    graph_revision = chacha_db.execute_query(
+        "SELECT revision FROM note_graph_revisions WHERE singleton_id = 1"
+    ).fetchone()["revision"]
+
+    replayed = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+        failed_only=True,
+    )
+
+    link = NotesLinkStore(chacha_db).get(edge_id)
+    state = sync_store.get_object_state("dataset-1", "notes.link", edge_id)
+    assert created_result.applied_count == 1
+    assert deleted_result.applied_count == 1
+    assert restored_result.applied_count == 1
+    assert replayed.attempted_count == 0
+    assert replayed.repair_status["status"] == "healthy"
+    assert link is not None and link.deleted is False and link.version == 3
+    assert state is not None and state.latest_server_cursor == restored.server_cursor
+    assert chacha_db.execute_query(
+        "SELECT revision FROM note_graph_revisions WHERE singleton_id = 1"
+    ).fetchone()["revision"] == graph_revision
 
 
 def test_repair_rebuilds_chat_conversation_and_messages(

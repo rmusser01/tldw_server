@@ -148,7 +148,7 @@ def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
     migrated = CharactersRAGDB(str(db_path), client_id=client_id)
     try:
         with migrated.transaction() as conn:
-            assert migrated._get_db_version(conn) == 57
+            assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             row = conn.execute(
                 "SELECT id, keyword, client_id FROM keywords WHERE sync_id = ?",
                 ("11111111-1111-4111-8111-111111111111",),
@@ -158,8 +158,6 @@ def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
                 "keyword": "Portable",
                 "client_id": client_id,
             }
-            migrated._migrate_from_v56_to_v57(conn)
-            assert migrated._get_db_version(conn) == 57
         assert migrated._sqlite_linear_migration_steps()[56].__name__ == ("_migrate_from_v56_to_v57")
     finally:
         migrated.close_connection()

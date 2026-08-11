@@ -24,7 +24,10 @@ from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
     mutation_group_plan_hash,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
-from tldw_Server_API.app.core.Sync.v2.restore import order_restore_envelopes
+from tldw_Server_API.app.core.Sync.v2.restore import (
+    RestorePlanningError,
+    order_restore_envelopes,
+)
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
@@ -282,6 +285,18 @@ def _enable_ready_notes_organization(service: SyncV2Service) -> None:
     )
 
 
+def _enable_ready_notes_link(service: SyncV2Service) -> None:
+    service.store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ? "
+        "WHERE dataset_id = ?",
+        (
+            json.dumps([*M1_SYNC_DOMAINS, "notes.link"]),
+            json.dumps({"notes_link_v1": {"state": "ready"}}),
+            "dataset-1",
+        ),
+    )
+
+
 def _organization_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     payload: dict[str, Any] = {
         "dataset_id": "dataset-1",
@@ -337,6 +352,46 @@ def _keyword_link_envelope(
     )
 
 
+def _notes_link_envelope(
+    *,
+    client_envelope_id: str,
+    object_id: str,
+    source_note_id: str,
+    target_note_id: str,
+    operation: str = "upsert",
+    object_revision: int = 1,
+    **overrides: Any,
+) -> SyncEnvelopeCreate:
+    source_note_id, target_note_id = sorted((source_note_id, target_note_id))
+    created_at = "2026-08-10T12:00:00+00:00"
+    payload: dict[str, object] = {
+        "source_note_id": source_note_id,
+        "target_note_id": target_note_id,
+        "type": "manual",
+        "directed": False,
+        "weight": 1.0,
+        "label": None,
+        "properties": {},
+        "created_at": created_at,
+        "last_modified": created_at,
+        "created_by": "device-1",
+    }
+    if operation == "tombstone":
+        payload["deleted_at"] = created_at
+        payload["reason"] = "manual-delete"
+    return _organization_envelope(
+        client_envelope_id=client_envelope_id,
+        domain="notes.link",
+        operation=operation,
+        object_id=object_id,
+        object_revision=object_revision,
+        payload=payload,
+        payload_hash=f"sha256:{client_envelope_id}",
+        created_at_client=created_at,
+        **overrides,
+    )
+
+
 def _organization_tombstone(
     *,
     client_envelope_id: str,
@@ -369,6 +424,219 @@ def _ordered_restore_heads(
         selected_object_ids=set(),
     )
     return order_restore_envelopes(expanded)
+
+
+def test_notes_link_restore_preview_orders_live_group_after_both_note_providers(
+    sync_service: SyncV2Service,
+    client: TestClient,
+) -> None:
+    _enable_ready_notes_link(sync_service)
+    source_note_id = "11111111-1111-4111-8111-111111111111"
+    target_note_id = "22222222-2222-4222-8222-222222222222"
+    edge_id = "33333333-3333-4333-8333-333333333333"
+    deleted_edge_id = "44444444-4444-4444-8444-444444444444"
+    grouped = sync_service.store.insert_envelopes_atomic(
+        _organization_group(
+            "server-origin-notes-link-restore",
+            _note_envelope(
+                client_envelope_id="env-link-source-note",
+                object_id=source_note_id,
+                payload_hash="sha256:link-source-note",
+                apply_status="applied",
+            ),
+            _notes_link_envelope(
+                client_envelope_id="env-link-live",
+                object_id=edge_id,
+                source_note_id=source_note_id,
+                target_note_id=target_note_id,
+                apply_status="applied",
+            ),
+        )
+    )
+    target = sync_service.store.insert_envelope(
+        _note_envelope(
+            client_envelope_id="env-link-target-note",
+            object_id=target_note_id,
+            client_sequence=2,
+            payload_hash="sha256:link-target-note",
+            apply_status="applied",
+        )
+    )
+    sync_service.store.insert_envelope(
+        _notes_link_envelope(
+            client_envelope_id="env-link-deleted",
+            object_id=deleted_edge_id,
+            source_note_id="55555555-5555-4555-8555-555555555555",
+            target_note_id="66666666-6666-4666-8666-666666666666",
+            operation="tombstone",
+            object_revision=2,
+            apply_status="applied",
+        )
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", "notes.link"],
+        local_inventory=[],
+    )
+
+    actions = [
+        action
+        for action in preview.ordered_actions
+        if action.object_id in {source_note_id, target_note_id, edge_id}
+    ]
+    assert [action.server_cursor for action in actions] == [
+        target.server_cursor,
+        grouped[0].server_cursor,
+        grouped[1].server_cursor,
+    ]
+    assert actions[2].dataset_id == "dataset-1"
+    assert actions[2].domain == "notes.link"
+    assert actions[2].action == "apply"
+    assert (
+        actions[2].mutation_group_id,
+        actions[2].mutation_step,
+        actions[2].mutation_step_count,
+    ) == ("server-origin-notes-link-restore", 1, 2)
+    assert [item.object_id for item in preview.safe_applies if item.domain == "notes.link"] == [
+        edge_id
+    ]
+    assert [item.object_id for item in preview.tombstones if item.domain == "notes.link"] == [
+        deleted_edge_id
+    ]
+    assert next(
+        action for action in preview.ordered_actions if action.object_id == deleted_edge_id
+    ).action == "tombstone"
+
+    matching = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note", "notes.link"],
+        local_inventory=[
+            {
+                "dataset_id": "dataset-1",
+                "domain": "notes.link",
+                "object_id": edge_id,
+                "object_revision": grouped[1].object_revision,
+                "object_hash": grouped[1].payload_hash,
+                "deleted": False,
+            }
+        ],
+    )
+    assert next(
+        action for action in matching.ordered_actions if action.object_id == edge_id
+    ).action == "noop"
+
+    response = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "domains": ["notes.note", "notes.link"],
+            "local_inventory": [],
+        },
+    )
+    assert response.status_code == 200
+    public_action = next(
+        action for action in response.json()["ordered_actions"] if action["object_id"] == edge_id
+    )
+    assert public_action == {
+        "plan_index": public_action["plan_index"],
+        "action": "apply",
+        "dataset_id": "dataset-1",
+        "domain": "notes.link",
+        "object_id": edge_id,
+        "operation": "upsert",
+        "server_cursor": grouped[1].server_cursor,
+        "mutation_group_id": "server-origin-notes-link-restore",
+        "mutation_step": 1,
+        "mutation_step_count": 2,
+        "code": None,
+    }
+
+
+def test_notes_link_restore_requires_both_note_providers_but_tombstone_does_not() -> None:
+    create = _notes_link_envelope(
+        client_envelope_id="env-link-missing-provider",
+        object_id="33333333-3333-4333-8333-333333333333",
+        source_note_id="11111111-1111-4111-8111-111111111111",
+        target_note_id="22222222-2222-4222-8222-222222222222",
+    )
+    stored_fields = {
+        field_name: getattr(create, field_name)
+        for field_name in SyncEnvelopeCreate.__dataclass_fields__
+    }
+    stored_fields["server_cursor"] = 1
+    stored_fields["server_sequence"] = 1
+    live = SyncEnvelope(**stored_fields)
+    tombstone = replace(
+        live,
+        client_envelope_id="env-link-tombstone-no-provider",
+        operation="tombstone",
+        server_cursor=2,
+        server_sequence=2,
+    )
+
+    with pytest.raises(RestorePlanningError, match="Restore dependency is missing"):
+        order_restore_envelopes([live])
+    assert order_restore_envelopes([tombstone]) == [tombstone]
+
+
+def test_notes_link_restore_uses_later_restored_note_as_identity_provider() -> None:
+    source_note_id = "11111111-1111-4111-8111-111111111111"
+    target_note_id = "22222222-2222-4222-8222-222222222222"
+    source_tombstone_create = _note_envelope(
+        client_envelope_id="env-restore-source-tombstone",
+        object_id=source_note_id,
+        operation="tombstone",
+        object_revision=2,
+        payload={"deleted": True},
+        payload_hash="sha256:restore-source-tombstone",
+    )
+    link_create = _notes_link_envelope(
+        client_envelope_id="env-link-after-restored-endpoint",
+        object_id="33333333-3333-4333-8333-333333333333",
+        source_note_id=source_note_id,
+        target_note_id=target_note_id,
+    )
+    target_create = _note_envelope(
+        client_envelope_id="env-restore-target-live",
+        object_id=target_note_id,
+        client_sequence=2,
+        payload_hash="sha256:restore-target-live",
+    )
+    source_restore_create = _note_envelope(
+        client_envelope_id="env-restore-source-live",
+        object_id=source_note_id,
+        client_sequence=3,
+        object_revision=3,
+        base_server_cursor=1,
+        base_object_revision=2,
+        base_object_hash="sha256:restore-source-tombstone",
+        routing_metadata={"restore_intent": True},
+        payload_hash="sha256:restore-source-live",
+    )
+
+    def stored(create: SyncEnvelopeCreate, cursor: int) -> SyncEnvelope:
+        fields = {
+            field_name: getattr(create, field_name)
+            for field_name in SyncEnvelopeCreate.__dataclass_fields__
+        }
+        fields["server_cursor"] = cursor
+        fields["server_sequence"] = cursor
+        return SyncEnvelope(**fields)
+
+    source_tombstone = stored(source_tombstone_create, 1)
+    link = stored(link_create, 2)
+    target = stored(target_create, 3)
+    source_restore = stored(source_restore_create, 4)
+
+    ordered = order_restore_envelopes(
+        [source_tombstone, link, target, source_restore]
+    )
+
+    assert ordered.index(source_restore) < ordered.index(link)
+    assert ordered.index(target) < ordered.index(link)
 
 
 def test_restore_preview_empty_inventory_returns_safe_applies_ranges_counts_and_key_status(

@@ -20,6 +20,7 @@ from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegist
 from .blob_store import LocalSyncBlobStore
 from .domain_adapters.media import MediaMetadataAdapter
 from .domain_adapters.notes import NotesDomainAdapter
+from .domain_adapters.notes_link import NotesLinkDomainAdapter
 from .domain_adapters.notes_organization import NotesOrganizationDomainAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
@@ -28,6 +29,7 @@ from .materializers import (
     ChatConversationMaterializer,
     ChatMessageMaterializer,
     MediaMetadataMaterializer,
+    NotesLinkMaterializer,
     NotesMaterializer,
     NotesOrganizationMaterializer,
     SourceCacheMaterializer,
@@ -41,6 +43,7 @@ from .models import (
     WORKSPACE_SYNC_DOMAINS,
     SyncDomain,
 )
+from .notes_link_bootstrap import NotesLinkBootstrapper
 from .notes_organization_bootstrap import NotesOrganizationBootstrapper
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
@@ -66,6 +69,7 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [SourceCacheAdapter(domain=domain) for domain in SOURCE_CACHE_SYNC_DOMAINS]
         + [MediaMetadataAdapter(domain=domain) for domain in MEDIA_SYNC_DOMAINS]
         + [NotesOrganizationDomainAdapter(domain=domain) for domain in NOTES_ORGANIZATION_DOMAINS]
+        + [NotesLinkDomainAdapter()]
     )
 
 
@@ -85,6 +89,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         "chat.conversation": ChatConversationMaterializer(note_db),
         "chat.message": ChatMessageMaterializer(note_db),
         "notes.note": NotesMaterializer(note_db),
+        "notes.link": NotesLinkMaterializer(note_db),
         "source_cache.entry": SourceCacheMaterializer(),
         "media.item": MediaMetadataMaterializer(domain="media.item"),
         "media.keyword": MediaMetadataMaterializer(domain="media.keyword"),
@@ -99,6 +104,11 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         materializers=materializers,
         advertised_domains=settings.supported_domains,
     )
+    _validate_notes_link_components(
+        adapters=adapters,
+        materializers=materializers,
+        advertised_domains=settings.supported_domains,
+    )
     return SyncV2Service(
         store=store,
         adapters=adapters,
@@ -107,6 +117,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         settings=settings,
         workspace_access_checker=_workspace_access_checker,
         dataset_bootstrapper=NotesOrganizationBootstrapper(note_db),
+        notes_link_bootstrapper=NotesLinkBootstrapper(note_db),
     )
 
 
@@ -128,6 +139,26 @@ def _validate_notes_organization_components(
         materializer = materializers.get(domain)
         if not isinstance(materializer, NotesOrganizationMaterializer) or materializer.domain != domain:
             raise RuntimeError(f"Advertised Sync domain has no user-bound materializer: {domain}")
+
+
+def _validate_notes_link_components(
+    *,
+    adapters: SyncAdapterRegistry,
+    materializers: Mapping[SyncDomain, SyncMaterializer],
+    advertised_domains: list[SyncDomain],
+) -> None:
+    """Fail closed when advertised notes.link support is only partially wired."""
+
+    if "notes.link" not in advertised_domains:
+        return
+    if not adapters.has_domain("notes.link") or not isinstance(
+        adapters.get("notes.link"), NotesLinkDomainAdapter
+    ):
+        raise RuntimeError("Advertised Sync domain has no strict adapter: notes.link")
+    if not isinstance(materializers.get("notes.link"), NotesLinkMaterializer):
+        raise RuntimeError(
+            "Advertised Sync domain has no user-bound materializer: notes.link"
+        )
 
 
 def sync_v2_storage_exists_for_user(user_id: str) -> bool:

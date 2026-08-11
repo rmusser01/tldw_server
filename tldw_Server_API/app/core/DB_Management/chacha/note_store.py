@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     logger,
 )
+from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -69,6 +70,7 @@ class NoteStore:
             raise InputError("Note content cannot be None.")  # noqa: TRY003
 
         final_note_id = note_id or self._db._generate_uuid()
+        projection = parse_wikilinks(content, source_note_id=final_note_id)
         now = self._db._get_current_utc_timestamp_iso()
         client_id_to_use = self._db.client_id  # Notes use the instance's client_id directly
         normalized_conversation_id = self._db._normalize_nullable_text(conversation_id)
@@ -92,6 +94,12 @@ class NoteStore:
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> str:
                 transaction_conn.execute(query, params)
+                self._db.note_graph_projection_store.replace_projection(
+                    note_id=final_note_id,
+                    source_version=1,
+                    projection=projection,
+                    conn=transaction_conn,
+                )
                 logger.info(f"Added note '{title.strip()}' with ID: {final_note_id}.")
                 return final_note_id
 
@@ -147,6 +155,7 @@ class NoteStore:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
         now = projection_timestamp or self._db._get_current_utc_timestamp_iso()
+        projection = parse_wikilinks(content, source_note_id=normalized_note_id)
         normalized_conversation_id = self._db._normalize_nullable_text(conversation_id)
         normalized_message_id = self._db._normalize_nullable_text(message_id)
         query = """
@@ -205,6 +214,12 @@ class NoteStore:
                             projection_timestamp=now,
                             include_created_at=True,
                         ):
+                            self._db.note_graph_projection_store.replace_projection(
+                                note_id=normalized_note_id,
+                                source_version=object_revision,
+                                projection=projection,
+                                conn=transaction_conn,
+                            )
                             return False
                         raise ConflictError(
                             "Note projection changed after ingestion planning",
@@ -243,12 +258,24 @@ class NoteStore:
                             projection_timestamp=now,
                             include_created_at=False,
                         ):
+                            self._db.note_graph_projection_store.replace_projection(
+                                note_id=normalized_note_id,
+                                source_version=object_revision,
+                                projection=projection,
+                                conn=transaction_conn,
+                            )
                             return False
                         raise ConflictError(
                             "Note projection changed after ingestion planning",
                             entity="notes",
                             entity_id=normalized_note_id,
                         )
+                self._db.note_graph_projection_store.replace_projection(
+                    note_id=normalized_note_id,
+                    source_version=object_revision,
+                    projection=projection,
+                    conn=transaction_conn,
+                )
                 logger.info("Upserted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
 
@@ -354,6 +381,11 @@ class NoteStore:
                         entity_id=normalized_note_id,
                     )
                 self._db._invalidate_note_clipper_sidecars(normalized_note_id, conn=transaction_conn, deleted=True)
+                self._db.note_graph_projection_store.mark_lifecycle(
+                    note_id=normalized_note_id,
+                    source_version=object_revision,
+                    conn=transaction_conn,
+                )
                 logger.info("Soft-deleted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
 
@@ -951,10 +983,18 @@ class NoteStore:
                 f"SELECT n.id AS note_id, c.id AS conversation_id, c.source, c.external_ref "  # nosec B608
                 f"FROM notes n "
                 f"JOIN conversations c ON c.id = n.conversation_id "
-                f"WHERE n.id IN ({ph}) AND c.source IS NOT NULL "
+                f"WHERE n.id IN ({ph}) AND n.deleted = ? AND c.deleted = ? "
+                f"AND c.source IS NOT NULL "
                 f"ORDER BY n.id ASC, c.source ASC, c.external_ref ASC"
             )
-            cur = self._db.execute_query(query, tuple(batch))
+            params: list[object] = [*batch, self._deleted_value(False), self._deleted_value(False)]
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                query = query.replace(
+                    "AND c.source IS NOT NULL ",
+                    "AND n.client_id = ? AND c.client_id = ? AND c.source IS NOT NULL ",
+                )
+                params.extend((self._db.client_id, self._db.client_id))
+            cur = self._db.execute_query(query, tuple(params))
             for row in cur.fetchall():
                 r = dict(row) if hasattr(row, "keys") else {
                     "note_id": row[0], "conversation_id": row[1],
@@ -976,6 +1016,11 @@ class NoteStore:
     ) -> bool | None:
         if not update_data:
             raise InputError("No data provided for note update.")  # noqa: TRY003
+
+        current_note = self.get_note_by_id(note_id, include_deleted=True)
+        current_content = current_note.get("content", "") if current_note else ""
+        next_content = update_data.get("content", current_content)
+        projection = parse_wikilinks(str(next_content or ""), source_note_id=note_id)
 
         now = self._db._get_current_utc_timestamp_iso()
         fields_to_update_sql = []
@@ -1037,6 +1082,12 @@ class NoteStore:
                         msg = f"Update for note ID {note_id} (expected v{expected_version}) affected 0 rows."
                     raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
 
+                self._db.note_graph_projection_store.replace_projection(
+                    note_id=note_id,
+                    source_version=next_version_val,
+                    projection=projection,
+                    conn=transaction_conn,
+                )
                 logger.info(f"Updated note ID {note_id} from version {expected_version} to version {next_version_val}.")
                 return True
 
@@ -1108,6 +1159,11 @@ class NoteStore:
                     raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
 
                 self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=True)
+                self._db.note_graph_projection_store.mark_lifecycle(
+                    note_id=note_id,
+                    source_version=next_version_val,
+                    conn=conn,
+                )
                 logger.info(
                     f"Soft-deleted note ID {note_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
@@ -1145,6 +1201,11 @@ class NoteStore:
                 ).rowcount
                 if rc > 0:
                     self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=True)
+                    self._db.note_graph_projection_store.mark_lifecycle(
+                        note_id=note_id,
+                        source_version=cur_ver + 1,
+                        conn=conn,
+                    )
                 return rc > 0
         except BackendDatabaseError as e:
             raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003
@@ -1226,6 +1287,11 @@ class NoteStore:
                     raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
 
                 self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=False)
+                self._db.note_graph_projection_store.mark_lifecycle(
+                    note_id=note_id,
+                    source_version=next_version_val,
+                    conn=conn,
+                )
                 logger.info(
                     f"Restored note ID {note_id} (was version {expected_version}), new version {next_version_val}.")
                 return True

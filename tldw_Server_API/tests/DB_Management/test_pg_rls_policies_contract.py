@@ -86,6 +86,19 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "client_id = current_setting('app.current_user_id', true)" in sql
 
 
+def test_chacha_rls_scopes_graph_projection_state_and_allows_unresolved_targets():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+
+    assert "CREATE POLICY note_graph_note_state_tenant_isolation" in sql
+    policy = sql.split(
+        "CREATE POLICY note_wikilink_edges_tenant_isolation ON note_wikilink_edges",
+        1,
+    )[1].split(";", 1)[0]
+    assert "source_note.id = note_wikilink_edges.source_note_id" in policy
+    assert "source_note.client_id = current_setting('app.current_user_id', true)" in policy
+    assert "target_note.id = note_wikilink_edges.target_note_id" not in policy
+
+
 def test_chacha_rls_includes_web_clipper_owner_read_and_write_policies():
     sql = " ".join("\n".join(build_chacha_rls_sql()).split())
     owner = "client_id = current_setting('app.current_user_id', true)"
@@ -215,6 +228,25 @@ def test_chacha_notes_organization_link_rls_derives_owner_from_every_endpoint():
         assert "WITH CHECK (" in policy
         for check in checks:
             assert check in policy
+
+
+def test_chacha_notes_link_rls_checks_owner_and_both_note_endpoints() -> None:
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    policy = sql.split(
+        "CREATE POLICY note_edges_tenant_isolation ON note_edges", 1
+    )[1].split(";", 1)[0]
+    owner = "current_setting('app.current_user_id', true)"
+
+    assert "USING (" in policy
+    assert "WITH CHECK (" in policy
+    for clause in (
+        f"note_edges.user_id = {owner}",
+        "source_note.id = note_edges.from_note_id",
+        f"source_note.client_id = {owner}",
+        "target_note.id = note_edges.to_note_id",
+        f"target_note.client_id = {owner}",
+    ):
+        assert policy.count(clause) == 2
 
 
 def test_chacha_rls_includes_source_review_read_and_write_policies():

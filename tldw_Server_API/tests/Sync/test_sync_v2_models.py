@@ -43,12 +43,14 @@ NOTES_ORGANIZATION_DOMAINS = (
     "notes.folder",
     "notes.folder_link",
 )
+NOTES_LINK_DOMAINS = ["notes.link"]
 SUPPORTED_DOMAINS = (
     M1_DOMAINS
     + WORKSPACE_DOMAINS
     + SOURCE_CACHE_DOMAINS
     + MEDIA_DOMAINS
     + list(NOTES_ORGANIZATION_DOMAINS)
+    + NOTES_LINK_DOMAINS
 )
 
 
@@ -116,6 +118,7 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "notes.keyword_collection_link": ["upsert", "tombstone"],
         "notes.folder": ["upsert", "tombstone"],
         "notes.folder_link": ["upsert", "tombstone"],
+        "notes.link": ["upsert", "tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
@@ -154,6 +157,21 @@ def test_notes_organization_schema_is_server_trusted_v1(domain: str) -> None:
 
     capability_schema = SyncCapabilitiesResponse().domain_schemas[domain]
     assert capability_schema == schema
+
+
+def test_notes_link_schema_is_server_trusted_v1_and_separate_from_organization() -> None:
+    assert "notes.link" in core_sync_models.SyncDomain.__args__
+    assert "notes.link" not in core_sync_models.NOTES_ORGANIZATION_DOMAINS
+    assert core_sync_models.NOTES_LINK_DOMAINS == ("notes.link",)
+    assert core_sync_models.NOTES_LINK_SYNC_OPERATIONS == {
+        "notes.link": ["upsert", "tombstone"]
+    }
+
+    schema = core_sync_models.sync_v2_domain_schemas()["notes.link"]
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert set(schema) >= {"upsert", "tombstone"}
+    assert SyncCapabilitiesResponse().domain_schemas["notes.link"] == schema
 
 
 @pytest.mark.parametrize(

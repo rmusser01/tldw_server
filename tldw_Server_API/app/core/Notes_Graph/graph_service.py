@@ -20,12 +20,15 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     NoteGraphRequest,
     NoteGraphResponse,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store import (
+    NoteGraphProjectionStore,
+    ProjectionStatus,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     InputError,
 )
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
-from tldw_Server_API.app.core.Notes_Graph.wikilink_parser import extract_wikilinks
 
 # ---------------------------------------------------------------------------
 # Config constants (env-overridable, matching PRD §11)
@@ -70,6 +73,12 @@ _R2_MAX_DEGREE = 20
 _NOTE_CAP = 250
 _TAG_CAP = 75
 _SOURCE_CAP = 50
+_CURSOR_MAX_ENCODED_BYTES = 8 * 1024
+_CURSOR_MAX_DECODED_BYTES = 4 * 1024
+
+
+class GraphProjectionNotReadyError(InputError):
+    """Raised when a derived graph read would observe an incomplete projection."""
 
 
 # ---------------------------------------------------------------------------
@@ -96,21 +105,61 @@ def _metrics_observe(name: str, value: float, labels: dict[str, str] | None = No
 # Cursor helpers
 # ---------------------------------------------------------------------------
 
-def _encode_cursor(layer: int, pos: int, last_id: str, neighbor_pos: int = 0) -> str:
-    payload = json.dumps({
+def _encode_cursor(
+    layer: int,
+    pos: int,
+    last_id: str,
+    neighbor_pos: int = 0,
+    *,
+    dataset_hash: str | None = None,
+    graph_revision: int | None = None,
+    parser_version: int | None = None,
+    request_hash: str | None = None,
+) -> str:
+    payload_data: dict[str, object] = {
         "layer": layer,
         "pos": pos,
         "last_id": last_id,
         "neighbor_pos": neighbor_pos,
-    })
-    return base64.urlsafe_b64encode(payload.encode()).decode()
+    }
+    if dataset_hash is not None:
+        payload_data.update(
+            {
+                "v": 1,
+                "dataset": dataset_hash,
+                "revision": graph_revision,
+                "parser": parser_version,
+                "request": request_hash,
+            }
+        )
+    payload = json.dumps(payload_data, sort_keys=True, separators=(",", ":")).encode()
+    if len(payload) > _CURSOR_MAX_DECODED_BYTES:
+        raise InputError("Graph cursor payload is too large")
+    encoded = base64.urlsafe_b64encode(payload).decode()
+    if len(encoded.encode()) > _CURSOR_MAX_ENCODED_BYTES:
+        raise InputError("Graph cursor is too large")
+    return encoded
 
 
-def _decode_cursor(raw: str | None) -> dict | None:
+def _decode_cursor(
+    raw: str | None,
+    *,
+    expected_dataset_hash: str | None = None,
+    expected_graph_revision: int | None = None,
+    expected_parser_version: int | None = None,
+    expected_request_hash: str | None = None,
+) -> dict | None:
     if not raw:
         return None
+    if len(raw.encode()) > _CURSOR_MAX_ENCODED_BYTES:
+        raise InputError("Graph cursor is too large")
     try:
-        payload = json.loads(base64.urlsafe_b64decode(raw.encode()).decode())
+        decoded = base64.b64decode(raw.encode(), altchars=b"-_", validate=True)
+        if len(decoded) > _CURSOR_MAX_DECODED_BYTES:
+            raise InputError("Graph cursor payload is too large")
+        payload = json.loads(decoded.decode())
+    except InputError:
+        raise
     except Exception as exc:
         raise InputError("Invalid graph cursor") from exc
     if not isinstance(payload, dict):
@@ -128,6 +177,18 @@ def _decode_cursor(raw: str | None) -> dict | None:
         raise InputError("Invalid graph cursor")
     if not isinstance(payload["last_id"], str):
         raise InputError("Invalid graph cursor")
+    expected = {
+        "dataset": expected_dataset_hash,
+        "revision": expected_graph_revision,
+        "parser": expected_parser_version,
+        "request": expected_request_hash,
+    }
+    if any(value is not None for value in expected.values()):
+        if payload.get("v") != 1 or any(
+            payload.get(field) != value
+            for field, value in expected.items()
+        ):
+            raise InputError("Graph cursor is stale or mismatched")
     return payload
 
 
@@ -172,11 +233,13 @@ class NoteGraphService:
         self,
         *,
         user_id: str,
+        dataset_id: str | None = None,
         db: CharactersRAGDB,
         cache: GraphCache | None = None,
         allow_heavy_limits: bool = False,
     ) -> None:
         self._user_id = user_id
+        self._dataset_id = dataset_id or f"legacy:{user_id}"
         self._db = db
         self._cache = cache
         self._allow_heavy_limits = allow_heavy_limits
@@ -189,27 +252,57 @@ class NoteGraphService:
         """Build and return a bounded note graph."""
         t0 = time.monotonic()
 
+        wanted = set(req.edge_types) if req.edge_types else set(EdgeType)
+        projection_store = self._projection_store()
+        if projection_store is None:
+            graph_revision = 0
+            parser_version = 1
+        else:
+            projection_status = projection_store.get_projection_status()
+            graph_revision = projection_store.get_revision()
+            parser_version = projection_status.parser_version
+            if wanted - {EdgeType.manual} and (
+                projection_status.rebuild_state != "ready"
+                or projection_store.count_dirty() != 0
+            ):
+                raise GraphProjectionNotReadyError(
+                    "Derived Notes graph projection is rebuilding"
+                )
+
         # 1. Resolve effective limits before any graph expansion work.
         eff_max_nodes, eff_max_edges, eff_max_degree, radius_cap_applied = self._resolve_effective_limits(req)
+        normalized_query = {
+            "center": req.center_note_id,
+            "radius": req.radius,
+            "edge_types": [e.value for e in req.edge_types] if req.edge_types else None,
+            "tag": req.tag,
+            "source": req.source,
+            "time_range": req.time_range.model_dump(mode="json") if req.time_range else None,
+            "time_range_field": req.time_range_field,
+            "max_nodes": eff_max_nodes,
+            "max_edges": eff_max_edges,
+            "max_degree": eff_max_degree,
+            "allow_heavy": req.allow_heavy and self._allow_heavy_limits,
+        }
+        dataset_hash = hashlib.sha256(self._dataset_id.encode()).hexdigest()
+        request_hash = hashlib.sha256(
+            json.dumps(normalized_query, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        cursor_binding = {
+            "dataset_hash": dataset_hash,
+            "graph_revision": graph_revision,
+            "parser_version": parser_version,
+            "request_hash": request_hash,
+        }
 
         # 2. Check cache
         if self._cache is not None:
-            cache_key = GraphCache.make_cache_key(
-                self._user_id,
-                {
-                    "center": req.center_note_id,
-                    "radius": req.radius,
-                    "edge_types": [e.value for e in req.edge_types] if req.edge_types else None,
-                    "tag": req.tag,
-                    "source": req.source,
-                    "time_range": req.time_range.model_dump() if req.time_range else None,
-                    "time_range_field": req.time_range_field,
-                    "max_nodes": eff_max_nodes,
-                    "max_edges": eff_max_edges,
-                    "max_degree": eff_max_degree,
-                    "allow_heavy": req.allow_heavy and self._allow_heavy_limits,
-                    "cursor": req.cursor,
-                },
+            cache_key = GraphCache.make_revision_key(
+                user_id=self._user_id,
+                dataset_id=self._dataset_id,
+                graph_revision=graph_revision,
+                parser_version=parser_version,
+                query_params={**normalized_query, "cursor": req.cursor},
             )
             cached = self._cache.get(cache_key)
             if cached is not None:
@@ -224,11 +317,17 @@ class NoteGraphService:
 
         # 4. BFS expand — collects note IDs and manual edges
         note_ids, manual_edges, truncated, truncated_by, cursor_info = self._bfs_expand(
-            seed_ids, req.radius, eff_max_nodes, eff_max_degree, req,
+            seed_ids,
+            req.radius,
+            eff_max_nodes,
+            eff_max_degree,
+            req,
+            wanted,
+            cursor_binding,
         )
 
         # 5. Fetch note data
-        note_rows = self._db.get_notes_batch(note_ids, include_deleted=True)
+        note_rows = self._db.get_notes_batch(note_ids, include_deleted=False)
         note_map: dict[str, dict] = {r["id"]: r for r in note_rows}
         # Prune IDs that don't actually exist
         note_ids = [nid for nid in note_ids if nid in note_map]
@@ -242,9 +341,6 @@ class NoteGraphService:
             note_ids = self._apply_time_range(note_ids, note_map, req)
         note_ids = self._order_note_ids(note_ids, note_map)
         note_id_set = set(note_ids)
-
-        # 7. Determine which edge types to compute
-        wanted = set(req.edge_types) if req.edge_types else set(EdgeType)
 
         # 8. Compute derived edges
         edges: list[GraphEdge] = []
@@ -266,7 +362,11 @@ class NoteGraphService:
 
         # Wikilinks + backlinks
         if EdgeType.wikilink in wanted or EdgeType.backlink in wanted:
-            wl_edges, bl_edges = self._compute_wikilink_edges(note_ids, note_id_set, note_map, wanted)
+            wl_edges, bl_edges = self._compute_wikilink_edges(
+                note_ids,
+                note_id_set,
+                wanted,
+            )
             edges.extend(wl_edges)
             edges.extend(bl_edges)
 
@@ -345,6 +445,7 @@ class NoteGraphService:
                 cursor_info["pos"],
                 cursor_info["last_id"],
                 cursor_info.get("neighbor_pos", 0),
+                **cursor_binding,
             )
             has_more = True
 
@@ -388,6 +489,81 @@ class NoteGraphService:
             note_count, tag_count, source_count, len(edges), elapsed,
         )
         return response
+
+    def list_orphans(
+        self,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[GraphNode], bool, str | None]:
+        """Return one revision-bound page of live relationship-free notes."""
+
+        if not 1 <= limit <= 200:
+            raise InputError("Orphan page limit must be between 1 and 200")
+        projection_store = self._projection_store()
+        if projection_store is None:
+            raise GraphProjectionNotReadyError(
+                "Derived Notes graph projection is unavailable"
+            )
+        projection_status = projection_store.get_projection_status()
+        graph_revision = projection_store.get_revision()
+        if (
+            projection_status.rebuild_state != "ready"
+            or projection_store.count_dirty() != 0
+        ):
+            raise GraphProjectionNotReadyError(
+                "Derived Notes graph projection is rebuilding"
+            )
+        dataset_hash = hashlib.sha256(self._dataset_id.encode()).hexdigest()
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {"kind": "orphans", "limit": limit},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        decoded = _decode_cursor(
+            cursor,
+            expected_dataset_hash=dataset_hash,
+            expected_graph_revision=graph_revision,
+            expected_parser_version=projection_status.parser_version,
+            expected_request_hash=request_hash,
+        )
+        after_note_id = str(decoded["last_id"]) if decoded is not None else None
+        note_ids = projection_store.list_orphan_note_ids(
+            after_note_id=after_note_id,
+            limit=limit + 1,
+        )
+        has_more = len(note_ids) > limit
+        page_ids = list(note_ids[:limit])
+        rows = self._db.get_notes_batch(page_ids, include_deleted=False)
+        by_id = {str(row["id"]): row for row in rows}
+        notes = [
+            GraphNode(
+                id=note_id,
+                type="note",
+                label=str(by_id[note_id]["title"]),
+                created_at=by_id[note_id].get("created_at"),
+                deleted=False,
+                degree=0,
+                tag_count=None,
+                primary_source_id=None,
+            )
+            for note_id in page_ids
+            if note_id in by_id
+        ]
+        next_cursor = None
+        if has_more and page_ids:
+            next_cursor = _encode_cursor(
+                0,
+                0,
+                page_ids[-1],
+                dataset_hash=dataset_hash,
+                graph_revision=graph_revision,
+                parser_version=projection_status.parser_version,
+                request_hash=request_hash,
+            )
+        return notes, has_more, next_cursor
 
     # ------------------------------------------------------------------
     # Limit resolution
@@ -438,26 +614,26 @@ class NoteGraphService:
         if req.tag:
             return self._db.get_note_ids_by_tag_for_graph(
                 req.tag,
-                include_deleted=True,
+                include_deleted=False,
                 limit=max_nodes,
             )
 
         if req.source:
             return self._db.get_note_ids_by_source_for_graph(
                 req.source,
-                include_deleted=True,
+                include_deleted=False,
                 limit=max_nodes,
             )
 
         # Seedless: full graph if small enough
-        total = self._db.count_user_notes(include_deleted=True)
+        total = self._db.count_user_notes(include_deleted=False)
         if total == 0:
             return []
         if total <= max_nodes:
-            return self._db.get_all_note_ids_for_graph(include_deleted=True, limit=max_nodes)
+            return self._db.get_all_note_ids_for_graph(include_deleted=False, limit=max_nodes)
 
         if req.allow_heavy and self._allow_heavy_limits:
-            return self._db.get_all_note_ids_for_graph(include_deleted=True, limit=max_nodes)
+            return self._db.get_all_note_ids_for_graph(include_deleted=False, limit=max_nodes)
 
         raise InputError(  # noqa: TRY003
             f"Too many notes ({total}) for seedless graph. "
@@ -475,10 +651,13 @@ class NoteGraphService:
         max_nodes: int,
         max_degree: int,
         req: NoteGraphRequest,
+        wanted: set[EdgeType],
+        cursor_binding: dict[str, object],
     ) -> tuple[list[str], list[dict], bool, list[str], dict | None]:
         """Layer-by-layer BFS from seeds, collecting note IDs and manual edges."""
-        visited: set[str] = set()
-        visited_order: list[str] = []
+        seen: set[str] = set()
+        page_seen: set[str] = set()
+        page_order: list[str] = []
         all_edges: list[dict] = []
         edge_ids_seen: set[str] = set()
         truncated = False
@@ -486,26 +665,32 @@ class NoteGraphService:
         cursor_info: dict | None = None
 
         # Parse cursor for resume
-        cur = _decode_cursor(req.cursor)
-        if cur and radius > 1:
-            logger.warning("Cursor pagination only reliable for radius=1; ignoring cursor")
-            cur = None
+        cur = _decode_cursor(
+            req.cursor,
+            expected_dataset_hash=str(cursor_binding["dataset_hash"]),
+            expected_graph_revision=int(cursor_binding["graph_revision"]),
+            expected_parser_version=int(cursor_binding["parser_version"]),
+            expected_request_hash=str(cursor_binding["request_hash"]),
+        )
         start_layer = cur["layer"] if cur else 0
         start_pos = cur["pos"] if cur else 0
         start_neighbor_pos = cur["neighbor_pos"] if cur else 0
+        if cur and start_layer >= radius:
+            raise InputError("Graph cursor is stale or mismatched")
 
         frontier: deque[str] = deque()
 
         # Initial seeds
         for sid in seed_ids:
-            if len(visited) >= max_nodes:
+            if len(page_order) >= max_nodes:
                 truncated = True
                 if "max_nodes" not in truncated_by:
                     truncated_by.append("max_nodes")
                 break
-            if sid not in visited:
-                visited.add(sid)
-                visited_order.append(sid)
+            if sid not in seen:
+                seen.add(sid)
+                page_seen.add(sid)
+                page_order.append(sid)
                 frontier.append(sid)
 
         for layer in range(radius):
@@ -514,17 +699,26 @@ class NoteGraphService:
             next_frontier: deque[str] = deque()
             layer_nodes = list(frontier)
             frontier.clear()
+            if cur and layer == start_layer and (
+                start_pos >= len(layer_nodes)
+                or layer_nodes[start_pos] != cur["last_id"]
+            ):
+                raise InputError("Graph cursor is stale or mismatched")
 
-            # Fetch manual edges for all nodes in this layer
-            edges = self._db.get_manual_edges_for_notes(self._user_id, layer_nodes)
-            # Also compute wikilink targets from content
-            note_data = self._db.get_notes_batch(layer_nodes, include_deleted=True)
-            content_map = {r["id"]: r.get("content", "") for r in note_data}
+            edges = (
+                self._db.get_manual_edges_for_notes(self._user_id, layer_nodes)
+                if EdgeType.manual in wanted
+                else []
+            )
+            projection_store = self._projection_store()
+            projected_edges = (
+                projection_store.list_live_edges_for_notes(layer_nodes)
+                if projection_store is not None
+                and wanted.intersection({EdgeType.wikilink, EdgeType.backlink})
+                else ()
+            )
 
             for idx, nid in enumerate(layer_nodes):
-                if layer < start_layer or (layer == start_layer and idx < start_pos):
-                    continue
-
                 neighbors: list[str] = []
 
                 # Manual edge neighbors
@@ -541,16 +735,14 @@ class NoteGraphService:
                         edge_ids_seen.add(eid)
                         all_edges.append(e)
 
-                # Wikilink target neighbors
-                content = content_map.get(nid, "")
-                if content:
-                    wl_refs = extract_wikilinks(content)
-                    for ref in wl_refs:
-                        neighbors.append(ref.target_note_id)
+                for projected in projected_edges:
+                    if projected.source_note_id == nid:
+                        neighbors.append(projected.target_note_id)
+                    elif projected.target_note_id == nid:
+                        neighbors.append(projected.source_note_id)
 
                 # Sort neighbors: deterministic
                 neighbors = sorted(set(neighbors))
-                neighbor_start = start_neighbor_pos if layer == start_layer and idx == start_pos else 0
 
                 # Enforce max_degree per node
                 if len(neighbors) > max_degree:
@@ -559,10 +751,20 @@ class NoteGraphService:
                     if "max_degree" not in truncated_by:
                         truncated_by.append("max_degree")
 
-                for neighbor_idx, nb in enumerate(neighbors[neighbor_start:], start=neighbor_start):
-                    if nb in visited:
+                replay_neighbor_count = 0
+                if layer < start_layer or (layer == start_layer and idx < start_pos):
+                    replay_neighbor_count = len(neighbors)
+                elif layer == start_layer and idx == start_pos:
+                    replay_neighbor_count = start_neighbor_pos
+
+                if replay_neighbor_count > len(neighbors):
+                    raise InputError("Graph cursor is stale or mismatched")
+
+                for neighbor_idx, nb in enumerate(neighbors):
+                    replaying = neighbor_idx < replay_neighbor_count
+                    if nb in seen:
                         continue
-                    if len(visited) >= max_nodes:
+                    if not replaying and len(page_order) >= max_nodes:
                         truncated = True
                         if "max_nodes" not in truncated_by:
                             truncated_by.append("max_nodes")
@@ -574,8 +776,10 @@ class NoteGraphService:
                             "has_more": True,
                         }
                         break
-                    visited.add(nb)
-                    visited_order.append(nb)
+                    seen.add(nb)
+                    if not replaying and nb not in page_seen:
+                        page_seen.add(nb)
+                        page_order.append(nb)
                     next_frontier.append(nb)
 
                 if truncated and "max_nodes" in truncated_by:
@@ -583,7 +787,7 @@ class NoteGraphService:
 
             frontier = next_frontier
 
-        return visited_order, all_edges, truncated, truncated_by, cursor_info
+        return page_order, all_edges, truncated, truncated_by, cursor_info
 
     # ------------------------------------------------------------------
     # Derived edges
@@ -593,7 +797,6 @@ class NoteGraphService:
         self,
         note_ids: list[str],
         note_id_set: set[str],
-        note_map: dict[str, dict],
         wanted: set[EdgeType],
     ) -> tuple[list[GraphEdge], list[GraphEdge]]:
         """Compute wikilink and backlink edges within the graph."""
@@ -601,48 +804,52 @@ class NoteGraphService:
         bl_edges: list[GraphEdge] = []
         seen_wl: set[str] = set()
 
-        for nid in note_ids:
-            row = note_map.get(nid)
-            if not row:
+        projection_store = self._projection_store()
+        if projection_store is None:
+            return [], []
+        for projected in projection_store.list_live_edges_for_notes(note_ids):
+            nid = projected.source_note_id
+            target = projected.target_note_id
+            if nid not in note_id_set or target not in note_id_set:
                 continue
-            content = row.get("content", "")
-            if not content:
-                continue
-            refs = extract_wikilinks(content)
-            for ref in refs:
-                target = ref.target_note_id
-                if target not in note_id_set:
-                    continue
-                if target == nid:
-                    continue
 
-                if EdgeType.wikilink in wanted:
-                    eid = _wl_edge_id(nid, target)
-                    if eid not in seen_wl:
-                        seen_wl.add(eid)
-                        wl_edges.append(GraphEdge(
-                            id=eid,
-                            source=nid,
-                            target=target,
-                            type=EdgeType.wikilink,
-                            directed=True,
-                            weight=1.0,
-                        ))
+            if EdgeType.wikilink in wanted:
+                eid = _wl_edge_id(nid, target)
+                if eid not in seen_wl:
+                    seen_wl.add(eid)
+                    wl_edges.append(GraphEdge(
+                        id=eid,
+                        source=nid,
+                        target=target,
+                        type=EdgeType.wikilink,
+                        directed=True,
+                        weight=1.0,
+                    ))
 
-                if EdgeType.backlink in wanted:
-                    bl_eid = _bl_edge_id(target, nid)
-                    if bl_eid not in seen_wl:
-                        seen_wl.add(bl_eid)
-                        bl_edges.append(GraphEdge(
-                            id=bl_eid,
-                            source=target,
-                            target=nid,
-                            type=EdgeType.backlink,
-                            directed=True,
-                            weight=1.0,
-                        ))
+            if EdgeType.backlink in wanted:
+                bl_eid = _bl_edge_id(target, nid)
+                if bl_eid not in seen_wl:
+                    seen_wl.add(bl_eid)
+                    bl_edges.append(GraphEdge(
+                        id=bl_eid,
+                        source=target,
+                        target=nid,
+                        type=EdgeType.backlink,
+                        directed=True,
+                        weight=1.0,
+                    ))
 
         return wl_edges, bl_edges
+
+    def _projection_store(self) -> NoteGraphProjectionStore | object | None:
+        store = getattr(self._db, "note_graph_projection_store", None)
+        if isinstance(store, NoteGraphProjectionStore):
+            return store
+        try:
+            status = store.get_projection_status()
+        except (AttributeError, TypeError):
+            return None
+        return store if isinstance(status, ProjectionStatus) else None
 
     def _compute_tag_edges(
         self, note_ids: list[str],

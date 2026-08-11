@@ -295,7 +295,7 @@ class TestNoteStoreSyncHelpers:
 
         assert db.upsert_note_from_sync(**kwargs) is False
         assert db.get_note_by_id("sync-note-postgres-time") == after_product_commit
-        assert envelope.server_timestamp == "2026-08-09T01:00:00-07:00"
+        assert envelope.server_timestamp == "2026-08-09T08:00:00+00:00"
 
     @pytest.mark.parametrize(
         "stored_timestamp",
