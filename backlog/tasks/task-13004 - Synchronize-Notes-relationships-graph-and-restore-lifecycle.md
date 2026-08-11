@@ -1,10 +1,10 @@
 ---
 id: TASK-13004
 title: Synchronize Notes relationships graph and restore lifecycle
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-08 20:23'
-updated_date: '2026-08-11 03:44'
+updated_date: '2026-08-11 04:41'
 labels:
   - notes
   - sync-v2
@@ -123,6 +123,27 @@ cache/cursors, migration rollback, projection repair, and restore ordering found
 remaining task-scoped defect. No lesson file was added because no new reusable
 repository-wide incident remained after the existing design and tests captured the
 behavior.
+
+PR review follow-up hardened optimistic link writes with SQL CAS predicates, moved
+cursor encoding and projection persistence behind their owning service/store
+boundaries, centralized the public validation exception and payload limits, and
+made capability schemas advertise the canonical UUID, endpoint-order, and bounded
+property contracts. Schema review fixes added cascading link foreign keys,
+set-based PostgreSQL canonicalization, column-specific graph triggers, standalone
+RLS schema ordering, named result columns, and explicit DSR cleanup for manual and
+derived links. Graph reads now cap projection note queries at 1,000 and Sync restore
+discovery includes `notes.link`. The approved inactive-Sync compatibility contract
+still permits omitted `expected_version`; SQL CAS prevents lost updates there,
+while active-Sync mutations continue to require optimistic ancestry.
+
+Review verification recorded focused RED/GREEN coverage for cursor ownership,
+CAS races, capability limits, projection abstraction/bounds, restore discovery,
+RLS ordering, DSR erasure, trigger scope, and set-based migration behavior. The
+complete affected pre-rebase and post-rebase gates each finished with 433 passed
+and one optional live-PostgreSQL skip. The freshly fetched `origin/dev` was already
+the branch ancestor (zero commits behind), so the requested rebase was a no-op.
+Touched-file Ruff, Bandit, byte compilation, and `git diff --check` passed; the
+documented whole-file `ChaChaNotes_DB.py` Ruff baseline remains unchanged.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
