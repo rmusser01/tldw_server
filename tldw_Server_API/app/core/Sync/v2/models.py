@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .notes_link_contract import (
     NOTES_LINK_LABEL_MAX_CHARS,
@@ -160,6 +160,8 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
 }
+SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS = 100
+SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN = 8
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "server_trusted_v1",
@@ -270,6 +272,63 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "undirected_endpoint_order": "source_note_id <= target_note_id",
     }
     return {
+        "attachment.ref": {
+            "schema_version": 2,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": [
+                    "attachment_id",
+                    "parent_domain",
+                    "parent_object_id",
+                    "file_name",
+                    "original_file_name",
+                    "content_type",
+                    "size_bytes",
+                    "blob_hash",
+                    "created_at",
+                    "last_modified",
+                    "created_by",
+                ],
+                "properties": {
+                    "attachment_id": {
+                        "type": "string",
+                        "format": "uuid4",
+                        "canonical_lowercase": True,
+                    },
+                    "parent_domain": {"enum": ["notes.note"]},
+                    "parent_object_id": {
+                        "type": "string",
+                        "format": "uuid4",
+                        "canonical_lowercase": True,
+                    },
+                    "file_name": {"type": "string"},
+                    "original_file_name": {"type": "string"},
+                    "content_type": {"type": "string"},
+                    "size_bytes": {"type": "integer", "minimum": 1},
+                    "blob_hash": {
+                        "type": "string",
+                        "format": "sha256",
+                        "canonical_lowercase": True,
+                    },
+                    "created_at": {"type": "string", "format": "date-time"},
+                    "last_modified": {"type": "string", "format": "date-time"},
+                    "created_by": {"type": "string"},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone", "whole_object": True},
+            "restore": {
+                "operation": "upsert",
+                "routing_metadata": {"restore_intent": True},
+                "requires_current_base": True,
+            },
+            "derived_fields": [
+                "availability",
+                "resolved_blob_id",
+                "storage_status",
+                "retention_released_at",
+            ],
+        },
         "notes.note": {
             "schema_version": 1,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
@@ -368,6 +427,93 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
             },
         },
     }
+
+
+def sync_v2_server_supported_adapter_versions() -> dict[SyncDomain, list[int]]:
+    """Return bounded server-supported versions independently of writability."""
+
+    return {
+        domain: ([1, 2] if domain == "attachment.ref" else [1])
+        for domain in SYNC_V2_SUPPORTED_DOMAINS
+    }
+
+
+def sync_v2_dataset_writable_adapter_versions(
+    dataset_metadata: Mapping[str, object] | None = None,
+    *,
+    notes_attachment_sync_enabled: bool = False,
+) -> dict[SyncDomain, list[int]]:
+    """Return versions writable for a dataset under the attachment rollout gate."""
+
+    versions: dict[SyncDomain, list[int]] = {
+        domain: ([] if domain == "attachment.ref" else [1])
+        for domain in SYNC_V2_SUPPORTED_DOMAINS
+    }
+    metadata = dataset_metadata or {}
+    attachment_state = metadata.get("notes_attachment_v2")
+    if (
+        notes_attachment_sync_enabled
+        and isinstance(attachment_state, Mapping)
+        and attachment_state.get("state") == "ready"
+    ):
+        versions["attachment.ref"] = [2]
+    return versions
+
+
+def normalize_supported_adapter_versions(
+    value: object | None,
+    *,
+    requested_domains: Sequence[str],
+) -> dict[SyncDomain, list[int]]:
+    """Validate a bounded device version map; omission preserves version 1."""
+
+    requested = list(dict.fromkeys(requested_domains))
+    if value is None:
+        return {cast(SyncDomain, domain): [1] for domain in requested}
+    if not isinstance(value, Mapping):
+        raise ValueError("supported_adapter_versions must be an object")
+    if len(value) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
+        raise ValueError(
+            "supported_adapter_versions may contain at most "
+            f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
+        )
+
+    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    requested_set = set(requested)
+    normalized: dict[SyncDomain, list[int]] = {}
+    for raw_domain, raw_versions in value.items():
+        if not isinstance(raw_domain, str) or raw_domain not in known:
+            raise ValueError(
+                f"supported_adapter_versions contains unknown Sync domain: {raw_domain}"
+            )
+        if raw_domain not in requested_set:
+            raise ValueError(
+                "supported_adapter_versions domains must also be requested"
+            )
+        if not isinstance(raw_versions, Sequence) or isinstance(
+            raw_versions, (str, bytes, bytearray)
+        ):
+            raise ValueError(
+                "supported_adapter_versions values must be non-empty version lists"
+            )
+        versions = list(raw_versions)
+        if not versions:
+            raise ValueError(
+                "supported_adapter_versions values must be non-empty version lists"
+            )
+        if len(versions) > SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN:
+            raise ValueError(
+                "supported_adapter_versions may contain at most "
+                f"{SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN} versions per domain"
+            )
+        if any(isinstance(version, bool) or not isinstance(version, int) or version < 1 for version in versions):
+            raise ValueError(
+                "supported_adapter_versions must contain positive integers"
+            )
+        if len(set(versions)) != len(versions):
+            raise ValueError("supported_adapter_versions contains duplicate adapter versions")
+        normalized[cast(SyncDomain, raw_domain)] = sorted(versions)
+    return normalized
 
 
 def server_frontend_mutation_enabled_for_policy(policy: EncryptionPolicy | str) -> bool:

@@ -4,14 +4,25 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_LINK_DOMAINS,
     NOTES_LINK_SYNC_OPERATIONS,
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_ORGANIZATION_SYNC_OPERATIONS,
+    normalize_supported_adapter_versions,
+    sync_v2_dataset_writable_adapter_versions,
     sync_v2_domain_schemas,
+    sync_v2_server_supported_adapter_versions,
     validate_notes_note_upsert_payload,
 )
 
@@ -292,6 +303,12 @@ class SyncCapabilitiesResponse(BaseModel):
     domain_schemas: dict[SyncDomain, dict[str, Any]] = Field(
         default_factory=sync_v2_domain_schemas
     )
+    supported_adapter_versions: dict[SyncDomain, list[int]] = Field(
+        default_factory=sync_v2_server_supported_adapter_versions
+    )
+    writable_adapter_versions: dict[SyncDomain, list[int]] = Field(
+        default_factory=sync_v2_dataset_writable_adapter_versions
+    )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
     encryption_policies: list[EncryptionPolicy] = Field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
     blob_transfer: dict[str, Any] = Field(default_factory=_default_blob_transfer)
@@ -333,10 +350,27 @@ class SyncDeviceRegisterRequest(BaseModel):
     client_type: str = Field("chatbook", description="Client family, such as chatbook or webui.")
     client_version: str | None = None
     supported_domains: list[SyncDomain] = Field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+    supported_adapter_versions: dict[str, list[StrictInt]] | None = None
     capabilities: dict[str, Any] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("capabilities", "client_capabilities"),
     )
+
+    @model_validator(mode="after")
+    def _normalize_supported_adapter_versions(self) -> SyncDeviceRegisterRequest:
+        supplied = self.supported_adapter_versions
+        if supplied is None:
+            supplied = self.capabilities.get("supported_adapter_versions")
+        normalized = normalize_supported_adapter_versions(
+            supplied,
+            requested_domains=self.supported_domains,
+        )
+        self.supported_adapter_versions = normalized
+        self.capabilities = {
+            **self.capabilities,
+            "supported_adapter_versions": normalized,
+        }
+        return self
 
 
 class SyncDeviceRegisterResponse(BaseModel):
@@ -839,6 +873,23 @@ class SyncProfileBootstrapRequest(BaseModel):
     client_profile_id: str | None = None
     client_instance: dict[str, Any] = Field(default_factory=dict)
     requested_domains: list[SyncDomain] = Field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+    supported_adapter_versions: dict[str, list[StrictInt]] | None = None
+
+    @model_validator(mode="after")
+    def _normalize_supported_adapter_versions(self) -> SyncProfileBootstrapRequest:
+        supplied = self.supported_adapter_versions
+        if supplied is None:
+            supplied = self.client_instance.get("supported_adapter_versions")
+        normalized = normalize_supported_adapter_versions(
+            supplied,
+            requested_domains=self.requested_domains,
+        )
+        self.supported_adapter_versions = normalized
+        self.client_instance = {
+            **self.client_instance,
+            "supported_adapter_versions": normalized,
+        }
+        return self
 
 
 class SyncProfileBootstrapResponse(SyncProfileResponse):
@@ -1231,6 +1282,7 @@ class SyncV2Envelope(BaseModel):
     object_id: str = Field(..., min_length=1)
     parent_id: str | None = None
     schema_version: int = Field(1, ge=1)
+    adapter_version: int = Field(1, ge=1)
     payload: dict[str, Any] = Field(default_factory=dict)
     payload_hash: str = Field(..., min_length=1)
     object_revision: int | None = Field(None, ge=0)
@@ -1307,14 +1359,47 @@ class SyncV2Envelope(BaseModel):
             validate_notes_note_upsert_payload(self.payload)
 
         if self.domain == "attachment.ref":
-            missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(self.payload)
-            if missing:
-                raise ValueError(
-                    "attachment.ref envelopes require payload metadata fields: " + ", ".join(sorted(missing))
+            if self.adapter_version == 2:
+                from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+                    attachment_ref_v2_object_hash,
+                    parse_attachment_ref_v2_payload,
+                    validate_attachment_ref_v2_object_id,
+                    validate_attachment_ref_v2_routing_metadata,
                 )
-            attachment_id = self.payload.get("attachment_id")
-            if isinstance(attachment_id, str) and self.object_id != attachment_id.strip():
-                raise ValueError("attachment.ref object_id must match payload attachment_id")
+
+                if self.schema_version != 2:
+                    raise ValueError(
+                        "attachment.ref adapter version 2 requires schema version 2"
+                    )
+                attachment = parse_attachment_ref_v2_payload(self.payload)
+                validate_attachment_ref_v2_object_id(self.object_id)
+                validate_attachment_ref_v2_routing_metadata(
+                    self.operation,
+                    self.routing_metadata,
+                )
+                if self.object_id != str(attachment.attachment_id):
+                    raise ValueError(
+                        "attachment.ref object_id must match payload attachment_id"
+                    )
+                if self.payload_hash != attachment_ref_v2_object_hash(attachment):
+                    raise ValueError(
+                        "attachment.ref v2 payload_hash must match the canonical object hash"
+                    )
+            else:
+                missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(self.payload)
+                if missing:
+                    raise ValueError(
+                        "attachment.ref envelopes require payload metadata fields: "
+                        + ", ".join(sorted(missing))
+                    )
+                attachment_id = self.payload.get("attachment_id")
+                if (
+                    isinstance(attachment_id, str)
+                    and self.object_id != attachment_id.strip()
+                ):
+                    raise ValueError(
+                        "attachment.ref object_id must match payload attachment_id"
+                    )
         return self
 
     @property

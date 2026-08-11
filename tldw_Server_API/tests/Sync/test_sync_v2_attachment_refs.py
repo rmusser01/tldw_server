@@ -12,9 +12,14 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.api.v1.schemas.sync_v2_models import SyncV2Envelope
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2 import adapters as sync_adapters
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.materializers import AttachmentRefMaterializer
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    SyncDataset,
+    SyncEnvelopeCreate,
+)
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -34,12 +39,31 @@ def _test_user() -> User:
     return User(id="user-1", username="user-1")
 
 
+class _LegacyAttachmentRefAdapter:
+    """Frozen v1 writer used only to preserve legacy integration coverage."""
+
+    domain = "attachment.ref"
+    supported_adapter_versions = {1}
+
+    def evaluate_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        dataset: SyncDataset,
+        context: sync_adapters.SyncAdapterContext | None = None,
+    ):
+        del dataset
+        return sync_adapters._evaluate_attachment_ref_v1(envelope, context=context)
+
+
 @pytest.fixture()
 def sync_service(tmp_path: Path) -> SyncV2Service:
     default_sync_v2_registry.cache_clear()
+    registry = default_sync_v2_registry()
+    registry.register(_LegacyAttachmentRefAdapter())
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_attachment_refs.db")),
-        adapters=default_sync_v2_registry(),
+        adapters=registry,
         materializers={"attachment.ref": AttachmentRefMaterializer()},
         clock=lambda: "2026-05-23T18:12:00+00:00",
         id_factory=lambda prefix: f"{prefix}-generated",
@@ -137,6 +161,338 @@ def _push_one(service: SyncV2Service, envelope: SyncEnvelopeCreate):
         device_id="device-1",
         envelopes=[envelope],
     )
+
+
+ATTACHMENT_V2_ID = "a1111111-1111-4111-8111-111111111111"
+NOTE_V2_ID = "b2222222-2222-4222-8222-222222222222"
+ATTACHMENT_V2_TIMESTAMP = "2026-08-11T20:30:00+00:00"
+ATTACHMENT_V2_BLOB_HASH = "sha256:" + "a" * 64
+
+
+def _attachment_ref_v2_module():
+    from tldw_Server_API.app.core.Sync.v2 import attachment_refs_v2
+
+    return attachment_refs_v2
+
+
+def _attachment_v2_payload(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "attachment_id": ATTACHMENT_V2_ID,
+        "parent_domain": "notes.note",
+        "parent_object_id": NOTE_V2_ID,
+        "file_name": "diagram.png",
+        "original_file_name": "diagram.png",
+        "content_type": "image/png",
+        "size_bytes": 512,
+        "blob_hash": ATTACHMENT_V2_BLOB_HASH,
+        "created_at": ATTACHMENT_V2_TIMESTAMP,
+        "last_modified": ATTACHMENT_V2_TIMESTAMP,
+        "created_by": "device-1",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _attachment_v2_envelope(**overrides: Any) -> SyncEnvelopeCreate:
+    contract = _attachment_ref_v2_module()
+    payload = overrides.pop("payload", _attachment_v2_payload())
+    values: dict[str, Any] = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "attachment-v2-create",
+        "domain": "attachment.ref",
+        "operation": "upsert",
+        "object_id": ATTACHMENT_V2_ID,
+        "device_id": "device-1",
+        "client_sequence": 1,
+        "schema_version": 2,
+        "adapter_version": 2,
+        "object_revision": 1,
+        "payload": payload,
+        "payload_hash": contract.attachment_ref_v2_object_hash(payload),
+        "created_at_client": ATTACHMENT_V2_TIMESTAMP,
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "routing_metadata": {},
+    }
+    values.update(overrides)
+    return SyncEnvelopeCreate(**values)
+
+
+def _attachment_v2_dataset(
+    *,
+    state: str = "ready",
+    bootstrap_id: str | None = None,
+) -> SyncDataset:
+    metadata: dict[str, Any] = {"notes_attachment_v2": {"state": state}}
+    if bootstrap_id is not None:
+        metadata["notes_attachment_v2"]["bootstrap_id"] = bootstrap_id
+    return SyncDataset(
+        dataset_id="dataset-1",
+        owner_user_id="user-1",
+        scope_type="personal",
+        encryption_policy="server_trusted_v1",
+        domains=["notes.note", "attachment.ref"],
+        workspace_id=None,
+        metadata=metadata,
+        created_at=ATTACHMENT_V2_TIMESTAMP,
+        updated_at=ATTACHMENT_V2_TIMESTAMP,
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"attachment_id": ATTACHMENT_V2_ID.upper()}, "canonical lowercase UUIDv4"),
+        ({"attachment_id": "11111111-1111-1111-8111-111111111111"}, "UUIDv4"),
+        ({"parent_object_id": NOTE_V2_ID.upper()}, "canonical lowercase UUIDv4"),
+        ({"blob_hash": "sha256:" + "A" * 64}, "lowercase SHA-256"),
+        ({"blob_hash": "sha256:abc"}, "lowercase SHA-256"),
+        ({"size_bytes": 0}, "greater than or equal to 1"),
+        ({"size_bytes": -1}, "greater than or equal to 1"),
+        ({"size_bytes": True}, "valid integer"),
+        ({"availability": "available"}, "extra inputs are not permitted"),
+        ({"resolved_blob_id": "blob-1"}, "extra inputs are not permitted"),
+        ({"storage_status": "available"}, "extra inputs are not permitted"),
+        ({"retention_released_at": ATTACHMENT_V2_TIMESTAMP}, "extra inputs are not permitted"),
+        ({"restore_intent": True}, "extra inputs are not permitted"),
+    ],
+)
+def test_attachment_ref_v2_payload_is_exact_and_strict(
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    contract = _attachment_ref_v2_module()
+
+    with pytest.raises(contract.AttachmentRefV2ValidationError, match=message):
+        contract.parse_attachment_ref_v2_payload(_attachment_v2_payload(**overrides))
+
+
+def test_attachment_ref_v2_restore_intent_is_routing_metadata_only() -> None:
+    contract = _attachment_ref_v2_module()
+    parsed = contract.parse_attachment_ref_v2_payload(_attachment_v2_payload())
+
+    assert "restore_intent" not in parsed.model_dump(mode="json")
+    assert contract.validate_attachment_ref_v2_routing_metadata(
+        "upsert", {"restore_intent": True}
+    ) == {"restore_intent": True}
+
+
+@pytest.mark.parametrize("restore_intent", [False, 1, "true"])
+def test_attachment_ref_v2_restore_intent_requires_literal_true(
+    restore_intent: object,
+) -> None:
+    contract = _attachment_ref_v2_module()
+
+    with pytest.raises(
+        contract.AttachmentRefV2ValidationError,
+        match="boolean true",
+    ):
+        contract.validate_attachment_ref_v2_routing_metadata(
+            "upsert",
+            {"restore_intent": restore_intent},
+        )
+
+
+def test_attachment_ref_v2_canonical_object_hash_has_exact_vector() -> None:
+    contract = _attachment_ref_v2_module()
+
+    assert contract.attachment_ref_v2_object_hash(_attachment_v2_payload()) == (
+        "sha256:4baf97b7774cb9c4a4b27571ce5aa3454980dc4097ddeb174e650e62237dbb55"
+    )
+
+
+def test_attachment_ref_v2_provenance_acceptance_vectors() -> None:
+    contract = _attachment_ref_v2_module()
+    normalized_client_time = "2026-08-11T20:30:00+00:00"
+
+    client = contract.validate_attachment_ref_v2(
+        _attachment_v2_payload(),
+        envelope_created_at_client="2026-08-11T13:30:00-07:00",
+        authenticated_device_id="device-1",
+    )
+    server = contract.validate_attachment_ref_v2(
+        _attachment_v2_payload(created_by="server-origin"),
+        envelope_created_at_client=normalized_client_time,
+        authenticated_device_id="server-origin",
+        trusted_server_origin=True,
+    )
+
+    assert client.created_at == normalized_client_time
+    assert client.last_modified == normalized_client_time
+    assert client.created_by == "device-1"
+    assert server.created_at == normalized_client_time
+    assert server.last_modified == normalized_client_time
+    assert server.created_by == "server-origin"
+
+
+def test_attachment_ref_v2_legacy_provenance_requires_verified_bootstrap() -> None:
+    contract = _attachment_ref_v2_module()
+    legacy = _attachment_v2_payload(
+        created_at="2020-01-02T03:04:05+00:00",
+        created_by="legacy-device",
+    )
+
+    with pytest.raises(contract.AttachmentRefV2ValidationError, match="provenance"):
+        contract.validate_attachment_ref_v2(
+            legacy,
+            envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
+            authenticated_device_id="server-origin",
+            trusted_server_origin=True,
+            verified_bootstrap=False,
+        )
+
+    accepted = contract.validate_attachment_ref_v2(
+        legacy,
+        envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
+        authenticated_device_id="server-origin",
+        trusted_server_origin=True,
+        verified_bootstrap=True,
+    )
+    assert accepted.created_at == "2020-01-02T03:04:05+00:00"
+    assert accepted.created_by == "legacy-device"
+    assert accepted.last_modified == ATTACHMENT_V2_TIMESTAMP
+
+
+def test_attachment_ref_v2_updates_preserve_creation_fields_and_mutation_time() -> None:
+    contract = _attachment_ref_v2_module()
+    prior = contract.parse_attachment_ref_v2_payload(_attachment_v2_payload())
+    modified = "2026-08-11T20:31:00+00:00"
+
+    accepted = contract.validate_attachment_ref_v2(
+        _attachment_v2_payload(file_name="renamed.png", last_modified=modified),
+        envelope_created_at_client=modified,
+        authenticated_device_id="device-2",
+        prior_payload=prior,
+    )
+    assert accepted.created_at == prior.created_at
+    assert accepted.created_by == prior.created_by
+    assert accepted.original_file_name == prior.original_file_name
+    assert accepted.last_modified == modified
+
+    with pytest.raises(contract.AttachmentRefV2ValidationError, match="immutable"):
+        contract.validate_attachment_ref_v2(
+            _attachment_v2_payload(
+                created_by="device-2",
+                last_modified=modified,
+            ),
+            envelope_created_at_client=modified,
+            authenticated_device_id="device-2",
+            prior_payload=prior,
+        )
+
+
+def test_attachment_ref_v2_exact_replay_never_enriches_or_rewrites_payload() -> None:
+    contract = _attachment_ref_v2_module()
+    payload = _attachment_v2_payload()
+    before = dict(payload)
+
+    first = contract.validate_attachment_ref_v2(
+        payload,
+        envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
+        authenticated_device_id="device-1",
+    )
+    replay = contract.validate_attachment_ref_v2(
+        payload,
+        envelope_created_at_client=ATTACHMENT_V2_TIMESTAMP,
+        authenticated_device_id="device-1",
+        prior_payload=first,
+    )
+
+    assert payload == before
+    assert replay == first
+    assert replay.model_dump(mode="json") == before
+
+
+def test_attachment_ref_v2_adapter_rejects_version_one_writes() -> None:
+    from tldw_Server_API.app.core.Sync.v2.adapters import (
+        AdapterRejected,
+        AttachmentRefAdapter,
+    )
+
+    outcome = AttachmentRefAdapter(v2_writes_enabled=True).evaluate_envelope(
+        _attachment_ref(),
+        dataset=_attachment_v2_dataset(),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "attachment_ref_v1_immutable"
+
+
+def test_attachment_ref_v2_adapter_rejects_v1_v2_object_id_collision() -> None:
+    from tldw_Server_API.app.core.Sync.v2.adapters import (
+        AdapterConflict,
+        AttachmentRefAdapter,
+        SyncAdapterContext,
+    )
+
+    legacy = _attachment_ref(
+        object_id=ATTACHMENT_V2_ID,
+        payload=_attachment_payload(attachment_id=ATTACHMENT_V2_ID),
+    )
+    outcome = AttachmentRefAdapter(v2_writes_enabled=True).evaluate_envelope(
+        _attachment_v2_envelope(),
+        dataset=_attachment_v2_dataset(),
+        context=SyncAdapterContext(prior_envelopes=(legacy,)),
+    )
+
+    assert isinstance(outcome, AdapterConflict)
+    assert outcome.conflict_type == "attachment_ref_immutable_version_collision"
+
+
+@pytest.mark.parametrize(
+    ("state", "enabled"),
+    [("initializing", True), ("ready", False), ("failed", True)],
+)
+def test_attachment_ref_v2_writes_require_gate_and_ready_dataset(
+    state: str,
+    enabled: bool,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.adapters import (
+        AdapterRejected,
+        AttachmentRefAdapter,
+    )
+
+    outcome = AttachmentRefAdapter(v2_writes_enabled=enabled).evaluate_envelope(
+        _attachment_v2_envelope(),
+        dataset=_attachment_v2_dataset(state=state),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "attachment_ref_v2_not_writable"
+
+
+def test_attachment_ref_v2_verified_bootstrap_preserves_legacy_provenance() -> None:
+    from tldw_Server_API.app.core.Sync.v2.adapters import (
+        AdapterAccepted,
+        AttachmentRefAdapter,
+        SyncAdapterContext,
+    )
+
+    bootstrap_id = "bootstrap-1"
+    payload = _attachment_v2_payload(
+        created_at="2020-01-02T03:04:05+00:00",
+        created_by="legacy-device",
+    )
+    envelope = _attachment_v2_envelope(
+        device_id="server-origin",
+        payload=payload,
+        routing_metadata={
+            "bootstrap_capture": True,
+            "bootstrap_id": bootstrap_id,
+        },
+    )
+    outcome = AttachmentRefAdapter(v2_writes_enabled=True).evaluate_envelope(
+        envelope,
+        dataset=_attachment_v2_dataset(
+            state="initializing",
+            bootstrap_id=bootstrap_id,
+        ),
+        context=SyncAdapterContext(
+            trusted_server_origin=True,
+            attachment_ref_bootstrap_id=bootstrap_id,
+        ),
+    )
+
+    assert isinstance(outcome, AdapterAccepted)
 
 
 @pytest.mark.parametrize(

@@ -1515,3 +1515,132 @@ def test_capabilities_accept_m2_blob_transfer_and_quota_details():
     assert capabilities.blob_transfer["supported"] is True
     assert capabilities.blob_transfer["full_checksum"] == "sha256"
     assert capabilities.quota["max_chunk_bytes"] == 4194304
+
+
+def test_capabilities_advertise_supported_and_writable_adapter_versions_separately() -> None:
+    capabilities = SyncCapabilitiesResponse()
+
+    assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
+    assert capabilities.writable_adapter_versions["attachment.ref"] == []
+    assert capabilities.supported_adapter_versions["notes.note"] == [1]
+    assert capabilities.writable_adapter_versions["notes.note"] == [1]
+
+
+def test_device_adapter_version_omission_means_version_one() -> None:
+    request = api_sync_models.SyncDeviceRegisterRequest.model_validate(
+        {
+            "display_name": "Legacy device",
+            "supported_domains": ["notes.note", "attachment.ref"],
+        }
+    )
+
+    assert request.supported_adapter_versions == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+    assert request.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+
+
+def test_profile_bootstrap_adapter_version_omission_means_version_one() -> None:
+    request = api_sync_models.SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "requested_domains": ["notes.note", "attachment.ref"],
+        }
+    )
+
+    assert request.supported_adapter_versions == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+    assert request.client_instance["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+
+
+@pytest.mark.parametrize(
+    ("version_map", "message"),
+    [
+        (
+            {f"unknown-{index}": [1] for index in range(101)},
+            "at most 100 domains",
+        ),
+        ({"attachment.ref": list(range(1, 10))}, "at most 8 versions"),
+        ({"attachment.ref": [1, 1]}, "duplicate adapter versions"),
+        ({"attachment.ref": []}, "non-empty"),
+        ({"attachment.ref": [0]}, "positive integers"),
+        ({"attachment.ref": [-1]}, "positive integers"),
+        ({"attachment.ref": [True]}, "valid integer"),
+        ({"attachment.ref": ["2"]}, "valid integer"),
+        ({"unknown.domain": [1]}, "unknown Sync domain"),
+    ],
+)
+def test_device_adapter_version_map_is_bounded_and_strict(
+    version_map: dict[str, list[object]],
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        api_sync_models.SyncDeviceRegisterRequest.model_validate(
+            {
+                "display_name": "Versioned device",
+                "supported_domains": ["attachment.ref"],
+                "supported_adapter_versions": version_map,
+            }
+        )
+
+
+def test_device_adapter_version_map_accepts_eight_sorted_versions() -> None:
+    request = api_sync_models.SyncDeviceRegisterRequest.model_validate(
+        {
+            "display_name": "Versioned device",
+            "supported_domains": ["attachment.ref"],
+            "supported_adapter_versions": {
+                "attachment.ref": [8, 3, 1, 2, 4, 5, 6, 7],
+            },
+        }
+    )
+
+    assert request.supported_adapter_versions == {
+        "attachment.ref": [1, 2, 3, 4, 5, 6, 7, 8]
+    }
+
+
+def test_attachment_ref_v2_api_envelope_carries_adapter_version() -> None:
+    from tldw_Server_API.app.core.Sync.v2 import attachment_refs_v2
+
+    payload = {
+        "attachment_id": "a1111111-1111-4111-8111-111111111111",
+        "parent_domain": "notes.note",
+        "parent_object_id": "b2222222-2222-4222-8222-222222222222",
+        "file_name": "diagram.png",
+        "original_file_name": "diagram.png",
+        "content_type": "image/png",
+        "size_bytes": 512,
+        "blob_hash": "sha256:" + "a" * 64,
+        "created_at": "2026-08-11T20:30:00+00:00",
+        "last_modified": "2026-08-11T20:30:00+00:00",
+        "created_by": "device-1",
+    }
+    request = SyncV2Envelope.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "client_envelope_id": "attachment-v2-create",
+            "device_id": "device-1",
+            "domain": "attachment.ref",
+            "operation": "upsert",
+            "object_id": payload["attachment_id"],
+            "schema_version": 2,
+            "adapter_version": 2,
+            "object_revision": 1,
+            "payload": payload,
+            "payload_hash": attachment_refs_v2.attachment_ref_v2_object_hash(payload),
+            "created_at_client": "2026-08-11T20:30:00Z",
+        }
+    )
+
+    assert request.adapter_version == 2
+    assert _core_envelope_from_api(request).adapter_version == 2

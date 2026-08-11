@@ -914,6 +914,62 @@ def test_capabilities_can_advertise_m2_resumable_blob_transfer(
     }
 
 
+def test_default_attachment_ref_v2_rollout_gate_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
+
+    monkeypatch.delenv("SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC", raising=False)
+    default_sync_v2_registry.cache_clear()
+
+    adapter = default_sync_v2_registry().get("attachment.ref")
+    assert adapter.supported_adapter_versions == {1, 2}
+    assert adapter.v2_writes_enabled is False
+
+
+def test_attachment_ref_v2_rollout_gate_can_be_enabled_explicitly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
+
+    monkeypatch.setenv("SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC", "true")
+    default_sync_v2_registry.cache_clear()
+
+    adapter = default_sync_v2_registry().get("attachment.ref")
+    assert adapter.v2_writes_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("gate_value", "state", "expected"),
+    [
+        (None, "ready", []),
+        ("true", "initializing", []),
+        ("true", "failed", []),
+        ("true", "ready", [2]),
+    ],
+)
+def test_attachment_ref_adapter_version_capabilities_require_gate_and_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+    gate_value: str | None,
+    state: str,
+    expected: list[int],
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.factory import (
+        sync_v2_adapter_version_capabilities,
+    )
+
+    if gate_value is None:
+        monkeypatch.delenv("SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC", raising=False)
+    else:
+        monkeypatch.setenv("SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC", gate_value)
+
+    capabilities = sync_v2_adapter_version_capabilities(
+        {"notes_attachment_v2": {"state": state}}
+    )
+    assert capabilities["supported_adapter_versions"]["attachment.ref"] == [1, 2]
+    assert capabilities["writable_adapter_versions"]["attachment.ref"] == expected
+
+
 def test_device_registration_creates_and_refreshes_same_device(sync_service: SyncV2Service):
     first = sync_service.register_device(
         user_id="user-1",
