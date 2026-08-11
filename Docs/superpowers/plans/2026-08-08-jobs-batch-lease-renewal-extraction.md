@@ -4,7 +4,7 @@
 
 **Goal:** Extract `JobManager.batch_renew_leases` into typed, backend-owned SQLite and PostgreSQL operations while preserving its public integer result, input-order behavior, clock timing, no-op semantics, duration clamping, and whole-batch atomicity.
 
-**Architecture:** `JobManager` remains the compatibility facade: it resolves enforcement, opens the connection, normalizes and clamps every item into an immutable command, selects the backend operation, maps `applied_count` to `int`, and closes nonfatally. Each backend operation owns one transaction around the complete ordered tuple, samples the injected clock with the existing backend cadence, executes fixed bound SQL without no-op classification reads, and returns an immutable count result. Single and batch renewal share only a pure statement-and-parameter builder; their transaction and result handling remain separate.
+**Architecture:** `JobManager` remains the compatibility facade: it resolves enforcement, opens the connection, normalizes and clamps every item into an immutable command, selects the backend operation, maps `applied_count` to `int`, and closes nonfatally. Each backend operation owns one atomic scope around the complete ordered tuple, samples the injected clock with the existing backend cadence, executes fixed bound SQL without no-op classification reads, and returns an immutable count result. The normal facade path uses a native transaction; a direct SQLite call inside a caller-owned transaction uses a savepoint and leaves that transaction open. Single and batch renewal share only a pure statement-and-parameter builder; their transaction and result handling remain separate.
 
 **Tech Stack:** Python 3.14, frozen dataclasses, sqlite3, psycopg 3, pytest, Hypothesis, existing Jobs PostgreSQL fixtures, Ruff, compileall, Bandit.
 
@@ -17,6 +17,7 @@
 - Open the backend connection before item normalization to preserve connection-failure precedence.
 - Complete normalization of every item before dispatching any backend mutation.
 - Preserve input order, duplicate update-attempt counting, expected zero-row no-ops, non-shortening leases, and one atomic transaction for the complete batch.
+- Direct SQLite calls made inside an active caller transaction must isolate the batch with a savepoint, preserving both the outer transaction and unrelated caller-owned work.
 - Preserve PostgreSQL one-clock-sample-per-batch behavior, including one clock call for an empty batch.
 - Preserve SQLite one-clock-sample-per-item behavior, including zero clock calls for an empty batch.
 - Read and apply `JOBS_LEASE_MAX_SECONDS` once per item in the facade; backend operations do not read settings or reclamp durations.
@@ -193,13 +194,18 @@ Seed two processing jobs and call with a valid first item followed by `{"job_id"
 
 - [ ] **Step 5: Characterize database-triggered rollback**
 
-For SQLite, create a `BEFORE UPDATE ON jobs` trigger scoped to the second job that executes `RAISE(ABORT, 'forced batch renewal failure')`. For PostgreSQL, generate identifier-safe names with `uuid.uuid4().hex`, create a function that raises `forced batch renewal failure`, and create the scoped trigger with:
+For SQLite, assign the second job a unique constant worker identity and create a fixed `BEFORE UPDATE ON jobs` trigger scoped to that identity that executes `RAISE(ABORT, 'forced batch renewal failure')`. For PostgreSQL, generate unique names with `uuid.uuid4().hex`, create a function that raises `forced batch renewal failure`, and compose all dynamic identifiers and the scoped job literal with `psycopg.sql`:
 
 ```python
 cur.execute(
-    f'CREATE TRIGGER "{trigger_name}" BEFORE UPDATE ON jobs '
-    f'FOR EACH ROW WHEN (OLD.id = {int(second_job_id)}) '
-    f'EXECUTE FUNCTION "{function_name}"()'
+    psycopg_sql.SQL(
+        "CREATE TRIGGER {} BEFORE UPDATE ON jobs "
+        "FOR EACH ROW WHEN (OLD.id = {}) EXECUTE FUNCTION {}()"
+    ).format(
+        psycopg_sql.Identifier(trigger_name),
+        psycopg_sql.Literal(second_job_id),
+        psycopg_sql.Identifier(function_name),
+    )
 )
 ```
 
@@ -207,8 +213,16 @@ Call the public method with the first and second jobs in that order. Assert `sql
 
 ```python
 with cleanup_connection, manager._pg_cursor(cleanup_connection) as cur:
-    cur.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}" ON jobs')
-    cur.execute(f'DROP FUNCTION IF EXISTS "{function_name}"()')
+    cur.execute(
+        psycopg_sql.SQL("DROP TRIGGER IF EXISTS {} ON jobs").format(
+            psycopg_sql.Identifier(trigger_name)
+        )
+    )
+    cur.execute(
+        psycopg_sql.SQL("DROP FUNCTION IF EXISTS {}()").format(
+            psycopg_sql.Identifier(function_name)
+        )
+    )
 ```
 
 The generated names contain only a fixed ASCII prefix plus `uuid4().hex`; do not interpolate caller-controlled identifiers.
@@ -433,7 +447,7 @@ def test_sqlite_batch_renew_counts_attempts_and_commits_expected_noops(conn):
     assert conn.execute("SELECT leased_until FROM jobs WHERE id = ?", (long_id,)).fetchone()[0] == "2026-01-02 13:00:00"
 ```
 
-Add a `RecordingClock` assertion that calls equal item count, including no-op items; an empty command returns `(0, 0)` with zero calls. Add `FailOnSecondClock` that returns `NOW` once and then raises `RuntimeError("forced clock failure")`; query from a fresh connection and prove the first update rolled back.
+Add a `RecordingClock` assertion that calls equal item count, including no-op items; an empty command returns `(0, 0)` with zero calls. Add `FailOnSecondClock` that returns `NOW` once and then raises `RuntimeError("forced clock failure")`; query from a fresh connection and prove the first update rolled back. Add direct-call coverage proving success and failure leave a caller-owned transaction open, with failure rolling back only the batch savepoint while preserving unrelated caller-owned work.
 
 Add a trigger test scoped to the second job using `RAISE(ABORT, 'forced batch renewal failure')`. After the exception, query from a fresh connection and assert both leases are unchanged.
 
@@ -485,7 +499,7 @@ def renew_leases_batch(
     """Renew an ordered SQLite lease batch in one transaction."""
 
     applied_count = 0
-    with conn:
+    with _batch_renew_transaction(conn):
         for item in command.items:
             item_command = RenewLeaseCommand(
                 job_id=item.job_id,
@@ -503,7 +517,7 @@ def renew_leases_batch(
         )
 ```
 
-Import `Callable` and the three batch contracts. Export `renew_leases_batch` from `operations/sqlite/__init__.py`. Do not call `_classify_lifecycle_no_transition` in the batch path.
+Implement `_batch_renew_transaction` so a fresh connection uses the native connection context, while an already-active connection uses a fixed-name SQLite savepoint that is released on success and rolled back on failure. Import `Callable` and the three batch contracts. Export `renew_leases_batch` from `operations/sqlite/__init__.py`. Do not call `_classify_lifecycle_no_transition` in the batch path.
 
 - [ ] **Step 5: Verify SQLite green and single-renewal compatibility**
 

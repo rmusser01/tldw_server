@@ -71,15 +71,18 @@ path but do not read the lease maximum.
 ### Recommended: Dedicated backend batch operations
 
 Add one typed batch operation to each lifecycle backend. Each operation owns
-the complete transaction and iterates its immutable command items in order.
+the complete atomic scope and iterates its immutable command items in order.
+The normal `JobManager` path supplies a fresh connection, so that scope is a
+native transaction. A direct SQLite call inside a caller-owned transaction
+uses a savepoint and leaves the outer transaction open.
 Single and batch renewal may share only transaction-neutral SQL construction
 through a pure statement-and-parameter builder. Execution and result handling
 remain separate.
 
 Benefits:
 
-- transaction ownership is obvious and directly testable
-- no nested transaction or per-item commit ambiguity
+- transaction or savepoint ownership is obvious and directly testable
+- no caller-transaction commit or per-item commit ambiguity
 - backend differences remain explicit
 - the public facade becomes smaller without changing callers
 - the change remains independently reviewable and revertible
@@ -114,10 +117,12 @@ Backend lifecycle operations own:
 
 - backend-specific fixed SQL variants and bound parameters
 - backend-specific clock sampling
-- one transaction around the complete ordered item tuple
+- one atomic scope around the complete ordered item tuple
+- a native transaction on fresh connections and a savepoint for direct SQLite
+  calls made inside a caller-owned transaction
 - update execution and exact applied-attempt counting
-- rollback through the native connection context on unexpected errors
-- result construction before the transaction context exits
+- rollback through the native transaction or savepoint on unexpected errors
+- result construction before the atomic context exits
 
 Backend operation modules must not import or reference `JobManager`.
 
@@ -174,15 +179,18 @@ Duplicate job IDs therefore retain current counting semantics.
    seconds to `[1, current JOBS_LEASE_MAX_SECONDS]`. The environment value
    remains an operation-time per-item read; this task does not adopt
    `JobsSettings` snapshot behavior.
-6. The selected backend operation enters one transaction, opens its backend
-   cursor (thereby preserving PostgreSQL RLS setup), and processes every command
-   item in input order.
+6. The selected backend operation enters one atomic scope, opens its backend
+   cursor where applicable (thereby preserving PostgreSQL RLS setup), and
+   processes every command item in input order. Direct SQLite calls inside an
+   existing transaction use a savepoint without committing or rolling back the
+   caller's surrounding work.
 7. PostgreSQL samples the provided clock once before its loop. SQLite samples
    the provided clock before each item update.
 8. Matching updates increment `applied_count`; expected no-transitions add
    zero and processing continues.
-9. The operation constructs a valid result before leaving the transaction
-   context. Normal exit commits; unexpected exit rolls back.
+9. The operation constructs a valid result before leaving the atomic context.
+   Normal exit commits or releases its savepoint; unexpected exit rolls back
+   the owned transaction or only the batch savepoint.
 10. The facade returns `result.applied_count` and closes the connection through
     the established non-fatal cleanup path.
 
@@ -220,8 +228,9 @@ it must not issue extra classification queries for expected no-ops.
   completes normalization before dispatch, so malformed input cannot occur after
   a backend operation starts mutating rows.
 - Clock failures and unexpected SQLite/PostgreSQL errors propagate unchanged.
-- The backend transaction context rolls back every earlier update before an
-  unexpected exception reaches the facade.
+- The backend atomic context rolls back every earlier batch update before an
+  unexpected exception reaches the facade without closing a caller-owned
+  SQLite transaction.
 - No error is logged and suppressed in the backend operation.
 - Connection-close failures retain the existing non-fatal cleanup behavior.
 
@@ -292,8 +301,10 @@ modules additionally use `pg_jobs` as an infrastructure marker.
 
 ### Accidental per-item commits
 
-Mitigation: backend operations own one outer transaction, and durable
+Mitigation: backend operations own one atomic scope, and durable
 database-trigger tests verify rollback after an earlier successful update.
+Direct SQLite tests additionally prove a savepoint preserves the caller's
+transaction and unrelated uncommitted work.
 
 ### Single-job regression from helper reuse
 

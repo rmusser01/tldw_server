@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-from contextlib import nullcontext
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
@@ -239,6 +240,26 @@ def _renew_lease_statement(
     return sql, tuple(params)
 
 
+@contextmanager
+def _batch_renew_transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Own a transaction or isolate the batch inside the caller's transaction."""
+
+    if not conn.in_transaction:
+        with conn:
+            yield
+        return
+
+    conn.execute("SAVEPOINT jobs_batch_renew_leases")
+    try:
+        yield
+    except BaseException:
+        conn.execute("ROLLBACK TO SAVEPOINT jobs_batch_renew_leases")
+        conn.execute("RELEASE SAVEPOINT jobs_batch_renew_leases")
+        raise
+    else:
+        conn.execute("RELEASE SAVEPOINT jobs_batch_renew_leases")
+
+
 def renew_lease(
     conn: sqlite3.Connection,
     *,
@@ -281,7 +302,7 @@ def renew_leases_batch(
     """Renew an ordered SQLite lease batch in one transaction."""
 
     applied_count = 0
-    with conn:
+    with _batch_renew_transaction(conn):
         for item in command.items:
             item_command = RenewLeaseCommand(
                 job_id=item.job_id,

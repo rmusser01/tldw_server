@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
 )
 
 psycopg = pytest.importorskip("psycopg")
+psycopg_sql = pytest.importorskip("psycopg.sql")
 pytestmark = [pytest.mark.integration, pytest.mark.pg_jobs]
 
 NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
@@ -307,13 +308,20 @@ def test_postgres_batch_renew_rolls_back_when_later_update_trigger_fails(
     try:
         with setup_connection, manager._pg_cursor(setup_connection) as cur:
             cur.execute(
-                f'CREATE FUNCTION "{function_name}"() RETURNS trigger LANGUAGE plpgsql AS $$ '
-                "BEGIN RAISE EXCEPTION 'forced direct batch renewal failure'; END; $$"
+                psycopg_sql.SQL(
+                    "CREATE FUNCTION {}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                    "BEGIN RAISE EXCEPTION 'forced direct batch renewal failure'; END; $$"
+                ).format(psycopg_sql.Identifier(function_name))
             )
             cur.execute(
-                f'CREATE TRIGGER "{trigger_name}" BEFORE UPDATE ON jobs '
-                f'FOR EACH ROW WHEN (OLD.id = {int(second_job_id)}) '
-                f'EXECUTE FUNCTION "{function_name}"()'
+                psycopg_sql.SQL(
+                    "CREATE TRIGGER {} BEFORE UPDATE ON jobs "
+                    "FOR EACH ROW WHEN (OLD.id = {}) EXECUTE FUNCTION {}()"
+                ).format(
+                    psycopg_sql.Identifier(trigger_name),
+                    psycopg_sql.Literal(second_job_id),
+                    psycopg_sql.Identifier(function_name),
+                )
             )
     finally:
         setup_connection.close()
@@ -331,8 +339,16 @@ def test_postgres_batch_renew_rolls_back_when_later_update_trigger_fails(
         cleanup_connection = manager._connect()
         try:
             with cleanup_connection, manager._pg_cursor(cleanup_connection) as cur:
-                cur.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}" ON jobs')
-                cur.execute(f'DROP FUNCTION IF EXISTS "{function_name}"()')
+                cur.execute(
+                    psycopg_sql.SQL("DROP TRIGGER IF EXISTS {} ON jobs").format(
+                        psycopg_sql.Identifier(trigger_name)
+                    )
+                )
+                cur.execute(
+                    psycopg_sql.SQL("DROP FUNCTION IF EXISTS {}()").format(
+                        psycopg_sql.Identifier(function_name)
+                    )
+                )
         finally:
             cleanup_connection.close()
 

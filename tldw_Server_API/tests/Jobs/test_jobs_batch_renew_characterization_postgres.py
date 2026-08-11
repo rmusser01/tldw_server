@@ -9,6 +9,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg import sql as psycopg_sql
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
@@ -198,13 +199,20 @@ def test_batch_renew_rolls_back_every_update_on_database_failure_postgres(
     try:
         with connection, manager._pg_cursor(connection) as cursor:
             cursor.execute(
-                f'CREATE FUNCTION "{function_name}"() RETURNS trigger LANGUAGE plpgsql AS $$ '
-                "BEGIN RAISE EXCEPTION 'forced batch renewal failure'; END; $$"
+                psycopg_sql.SQL(
+                    "CREATE FUNCTION {}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                    "BEGIN RAISE EXCEPTION 'forced batch renewal failure'; END; $$"
+                ).format(psycopg_sql.Identifier(function_name))
             )
             cursor.execute(
-                f'CREATE TRIGGER "{trigger_name}" BEFORE UPDATE ON jobs '
-                f'FOR EACH ROW WHEN (OLD.id = {int(second_job_id)}) '
-                f'EXECUTE FUNCTION "{function_name}"()'
+                psycopg_sql.SQL(
+                    "CREATE TRIGGER {} BEFORE UPDATE ON jobs "
+                    "FOR EACH ROW WHEN (OLD.id = {}) EXECUTE FUNCTION {}()"
+                ).format(
+                    psycopg_sql.Identifier(trigger_name),
+                    psycopg_sql.Literal(second_job_id),
+                    psycopg_sql.Identifier(function_name),
+                )
             )
     finally:
         connection.close()
@@ -224,7 +232,15 @@ def test_batch_renew_rolls_back_every_update_on_database_failure_postgres(
         cleanup_connection = manager._connect()
         try:
             with cleanup_connection, manager._pg_cursor(cleanup_connection) as cursor:
-                cursor.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}" ON jobs')
-                cursor.execute(f'DROP FUNCTION IF EXISTS "{function_name}"()')
+                cursor.execute(
+                    psycopg_sql.SQL("DROP TRIGGER IF EXISTS {} ON jobs").format(
+                        psycopg_sql.Identifier(trigger_name)
+                    )
+                )
+                cursor.execute(
+                    psycopg_sql.SQL("DROP FUNCTION IF EXISTS {}()").format(
+                        psycopg_sql.Identifier(function_name)
+                    )
+                )
         finally:
             cleanup_connection.close()

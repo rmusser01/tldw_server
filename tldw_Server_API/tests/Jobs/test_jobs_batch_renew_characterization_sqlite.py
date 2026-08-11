@@ -186,14 +186,14 @@ def test_batch_renew_rolls_back_every_update_on_database_failure_sqlite(db_path:
     clock = RecordingClock(NOW)
     manager = _manager(db_path, clock)
     first_job_id = _insert_job(db_path)
-    second_job_id = _insert_job(db_path)
+    second_job_id = _insert_job(db_path, worker_id="worker-2")
     original_first_lease = _fetch_lease(db_path, first_job_id)
     original_second_lease = _fetch_lease(db_path, second_job_id)
     connection = sqlite3.connect(db_path)
     try:
         connection.execute(
             "CREATE TRIGGER force_batch_renew_failure BEFORE UPDATE ON jobs "
-            f"WHEN OLD.id = {second_job_id} "
+            "WHEN OLD.worker_id = 'worker-2' "
             "BEGIN SELECT RAISE(ABORT, 'forced batch renewal failure'); END"
         )
         connection.commit()
@@ -204,7 +204,7 @@ def test_batch_renew_rolls_back_every_update_on_database_failure_sqlite(db_path:
         manager.batch_renew_leases(
             [
                 {"job_id": first_job_id, "seconds": 30, "worker_id": WORKER_ID, "lease_id": LEASE_ID},
-                {"job_id": second_job_id, "seconds": 30, "worker_id": WORKER_ID, "lease_id": LEASE_ID},
+                {"job_id": second_job_id, "seconds": 30, "worker_id": "worker-2", "lease_id": LEASE_ID},
             ],
             enforce=True,
         )
