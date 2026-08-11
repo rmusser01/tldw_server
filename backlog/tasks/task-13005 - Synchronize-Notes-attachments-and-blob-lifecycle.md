@@ -1,9 +1,10 @@
 ---
 id: TASK-13005
 title: Synchronize Notes attachments and blob lifecycle
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-08 20:24'
+updated_date: '2026-08-11 15:26'
 labels:
   - notes
   - sync-v2
@@ -12,11 +13,10 @@ labels:
 dependencies:
   - TASK-13004
 references:
-  - >-
-    https://github.com/rmusser01/tldw_chatbook/blob/dev/backlog/decisions/046-synchronized-database-notes-parity.md
+  - Docs/ADR/038-canonical-notes-attachment-registry-and-blob-lifecycle.md
 documentation:
   - >-
-    https://github.com/rmusser01/tldw_chatbook/blob/dev/Docs/Parity/2026-08-08-notes-server-capability-matrix.md
+    Docs/superpowers/specs/2026-08-11-notes-attachment-sync-and-blob-lifecycle-design.md
 priority: high
 ---
 
@@ -35,6 +35,20 @@ Make Notes attachment metadata and binary content participate in the same offlin
 - [ ] #5 Concurrent attachment rename replace delete restore and note deletion yield idempotent results or reviewable conflicts with garbage collection evidence.
 - [ ] #6 Attachment APIs and sync paths enforce dataset ownership path safety content limits and secret-safe diagnostics.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Execute TASK-13005.1 using Docs/superpowers/plans/2026-08-11-notes-attachment-sync-contract-persistence-implementation-plan.md.
+2. Execute TASK-13005.2 after TASK-13005.1 using Docs/superpowers/plans/2026-08-11-notes-attachment-sync-mutation-lifecycle-implementation-plan.md.
+3. Execute TASK-13005.3 after TASK-13005.1 and TASK-13005.2 using Docs/superpowers/plans/2026-08-11-notes-attachment-sync-legacy-bootstrap-implementation-plan.md.
+4. Execute TASK-13005.4 after TASK-13005.1, TASK-13005.2, and TASK-13005.3 using Docs/superpowers/plans/2026-08-11-notes-attachment-sync-restore-operations-implementation-plan.md.
+5. Run the aggregate verification and complete the parent only after all four children are Done.
+
+ADR required: yes
+ADR path: Docs/ADR/038-canonical-notes-attachment-registry-and-blob-lifecycle.md
+Reason: durable schema, Sync versioning, tenancy, API, restore, and blob-deletion authority.
+<!-- SECTION:PLAN:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
