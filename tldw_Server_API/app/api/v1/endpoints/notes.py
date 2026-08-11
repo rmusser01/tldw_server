@@ -117,6 +117,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # Corrected
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    NOTE_ATTACHMENT_MAX_FILENAME_LEN as _NOTES_ATTACHMENT_MAX_FILENAME_LEN,
+    NoteAttachmentPolicyError,
+    sanitize_note_attachment_file_name,
+)
 from tldw_Server_API.app.core.Notes.organization_capture import (
     compound_note_id,
     compound_note_request_fingerprint,
@@ -196,40 +201,7 @@ router = APIRouter()
 
 _NOTES_ATTACHMENTS_DIRNAME = "notes_attachments"
 _NOTES_ATTACHMENT_META_SUFFIX = ".meta.json"
-_NOTES_ATTACHMENT_MAX_FILENAME_LEN = 180
 _NOTES_ATTACHMENT_DEFAULT_MAX_BYTES = 25 * 1024 * 1024
-_NOTES_ATTACHMENT_ALLOWED_EXTENSIONS = {
-    ".bmp",
-    ".csv",
-    ".doc",
-    ".docx",
-    ".gif",
-    ".gz",
-    ".jpeg",
-    ".jpg",
-    ".json",
-    ".md",
-    ".mp3",
-    ".mp4",
-    ".m4a",
-    ".mov",
-    ".ogg",
-    ".pdf",
-    ".png",
-    ".ppt",
-    ".pptx",
-    ".svg",
-    ".tar.gz",
-    ".txt",
-    ".wav",
-    ".webm",
-    ".webp",
-    ".xlsx",
-    ".xls",
-    ".yaml",
-    ".yml",
-    ".zip",
-}
 def get_notes_task_service() -> NotesTaskService:
     """Provide the stateless notes task service for note-save reconciliation."""
     return NotesTaskService()
@@ -559,35 +531,13 @@ def _get_note_attachments_dir(user_id: int | str, note_id: str, *, create: bool 
 
 
 def _sanitize_attachment_file_name(raw_name: str) -> str:
-    input_name = str(raw_name or "").strip()
-    if not input_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment filename is required")
-    basename = Path(input_name).name
-    if basename != input_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid attachment filename")
-
-    suffixes = [suffix.lower() for suffix in Path(basename).suffixes]
-    extension = ""
-    full_extension = "".join(suffixes)
-    if full_extension and full_extension in _NOTES_ATTACHMENT_ALLOWED_EXTENSIONS:
-        extension = full_extension
-    elif suffixes and suffixes[-1] in _NOTES_ATTACHMENT_ALLOWED_EXTENSIONS:
-        extension = suffixes[-1]
-    if not extension:
-        allowed = ", ".join(sorted(_NOTES_ATTACHMENT_ALLOWED_EXTENSIONS))
+    try:
+        return sanitize_note_attachment_file_name(raw_name)
+    except NoteAttachmentPolicyError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported attachment type. Allowed extensions: {allowed}",
-        )
-
-    stem = basename[:-len(extension)] if len(extension) < len(basename) else "attachment"
-    max_stem_len = max(1, _NOTES_ATTACHMENT_MAX_FILENAME_LEN - len(extension))
-    safe_stem = sanitize_filename(stem, max_total_length=max_stem_len).replace(" ", "_").strip("._")
-    if not safe_stem:
-        safe_stem = "attachment"
-    if len(safe_stem) > max_stem_len:
-        safe_stem = safe_stem[:max_stem_len]
-    return f"{safe_stem}{extension}"
+            detail=str(exc),
+        ) from exc
 
 
 def _resolve_unique_attachment_path(note_dir: Path, file_name: str) -> Path:

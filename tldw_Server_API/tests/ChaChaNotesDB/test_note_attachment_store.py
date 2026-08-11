@@ -13,6 +13,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+    attachment_ref_v2_object_hash,
+    parse_attachment_ref_v2_payload,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -169,6 +173,62 @@ def test_live_name_uniqueness_uses_unicode_normalization_and_casefold(
         file_name="RÉSUMÉ.pdf",
     )
     assert other_dataset.dataset_id == OTHER_DATASET
+
+
+def test_store_semantics_match_attachment_ref_v2_object_hash(
+    attachment_db: CharactersRAGDB,
+) -> None:
+    payload = {
+        "attachment_id": ATTACHMENT_A,
+        "parent_domain": "notes.note",
+        "parent_object_id": NOTE_ID,
+        "file_name": "Résumé Draft?.PDF",
+        "original_file_name": "Résumé Draft?.PDF",
+        "content_type": "application/pdf",
+        "size_bytes": 42,
+        "blob_hash": BLOB_A,
+        "created_at": CREATED_AT,
+        "last_modified": CREATED_AT,
+        "created_by": "device-a",
+    }
+    parsed = parse_attachment_ref_v2_payload("upsert", payload)
+    object_hash = attachment_ref_v2_object_hash("upsert", payload, object_revision=1)
+
+    stored = _store(attachment_db).create(
+        dataset_id=DATASET,
+        attachment_id=str(parsed.attachment_id),
+        note_id=str(parsed.parent_object_id),
+        file_name=parsed.file_name,
+        original_file_name=parsed.original_file_name,
+        content_type=parsed.content_type,
+        size_bytes=parsed.size_bytes,
+        blob_hash=parsed.blob_hash,
+        object_hash=object_hash,
+        created_at=parsed.created_at,
+        last_modified=parsed.last_modified,
+        created_by=parsed.created_by,
+        source_kind="sync",
+    )
+    stored_semantic_payload = {
+        "attachment_id": stored.attachment_id,
+        "parent_domain": "notes.note",
+        "parent_object_id": stored.note_id,
+        "file_name": stored.file_name,
+        "original_file_name": stored.original_file_name,
+        "content_type": stored.content_type,
+        "size_bytes": stored.size_bytes,
+        "blob_hash": stored.blob_hash,
+        "created_at": stored.created_at,
+        "last_modified": stored.last_modified,
+        "created_by": stored.created_by,
+    }
+
+    assert stored.file_name == "Résumé_Draft.pdf"
+    assert attachment_ref_v2_object_hash(
+        "upsert",
+        stored_semantic_payload,
+        object_revision=stored.version,
+    ) == stored.object_hash
 
 
 def test_compare_and_set_updates_mutable_fields_and_rejects_stale_base(
@@ -404,6 +464,8 @@ def test_detail_and_list_use_one_bounded_indexed_query_each(
         ("file_name", "x" * 181),
         ("original_file_name", "x" * 256),
         ("content_type", ""),
+        ("content_type", " Application/PDF "),
+        ("content_type", "application/pdf; charset=utf-8"),
         ("size_bytes", 0),
         ("blob_hash", "sha256:" + "A" * 64),
         ("object_hash", "sha256:" + "B" * 64),

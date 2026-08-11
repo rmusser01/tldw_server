@@ -20,6 +20,11 @@ from pydantic import (
     field_validator,
 )
 
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    sanitize_note_attachment_file_name,
+    validate_note_attachment_content_type,
+)
+
 from .models import normalize_sync_timestamp
 
 _LOWERCASE_SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}")
@@ -79,6 +84,16 @@ class AttachmentRefV2Payload(BaseModel):
                 "attachment.ref v2 blob_hash must be a canonical lowercase SHA-256 digest"
             )
         return value
+
+    @field_validator("file_name")
+    @classmethod
+    def _validate_file_name(cls, value: str) -> str:
+        return sanitize_note_attachment_file_name(value)
+
+    @field_validator("content_type")
+    @classmethod
+    def _validate_content_type(cls, value: str) -> str:
+        return validate_note_attachment_content_type(value)
 
     @field_validator("created_at", "last_modified")
     @classmethod
@@ -202,7 +217,7 @@ def validate_attachment_ref_v2_object_id(value: str) -> str:
                 "attachment_id": value,
                 "parent_domain": "notes.note",
                 "parent_object_id": value,
-                "file_name": "_",
+                "file_name": "attachment.txt",
                 "original_file_name": "_",
                 "content_type": "application/octet-stream",
                 "size_bytes": 1,

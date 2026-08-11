@@ -236,6 +236,39 @@ def test_sqlite_v58_to_v59_fails_closed_on_preexisting_registry_collision(
         ]
 
 
+def test_sqlite_v59_post_ddl_failure_rolls_back_registry_and_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "attachments-post-ddl-failure.sqlite"
+    _prepare_v58_database(db_path)
+    create_schema = CharactersRAGDB._create_note_attachment_schema_sqlite
+
+    def fail_after_ddl(self: CharactersRAGDB, conn: sqlite3.Connection) -> None:
+        create_schema(self, conn)
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'note_attachments'"
+        ).fetchone() is not None
+        raise SchemaError("injected post-DDL registry failure")
+
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_create_note_attachment_schema_sqlite",
+        fail_after_ddl,
+    )
+    with pytest.raises(CharactersRAGDBError, match="injected post-DDL registry failure"):
+        CharactersRAGDB(str(db_path), client_id=OWNER)
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'note_attachments'"
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0] == 58
+
+
 def test_sqlite_v59_initializer_serializes_on_one_schema_authority(tmp_path: Path) -> None:
     db_path = tmp_path / "attachments-concurrent.sqlite"
     _prepare_v58_database(db_path)
@@ -370,8 +403,11 @@ def test_postgres_v59_migration_uses_verified_lock_rls_and_version_order() -> No
     )
     joined = "\n".join(statements)
     assert "ON DELETE RESTRICT" in joined
-    assert "uq_note_attachments_live_name" in joined
-    assert "WHERE deleted = FALSE" in joined
+    assert (
+        "CREATE UNIQUE INDEX uq_note_attachments_live_name "
+        "ON note_attachments(client_id, dataset_id, note_id, normalized_file_name) "
+        "WHERE deleted = FALSE"
+    ) in statements
 
 
 def test_postgres_v59_rejects_unverified_owner_before_ddl_or_force_relaxation() -> None:

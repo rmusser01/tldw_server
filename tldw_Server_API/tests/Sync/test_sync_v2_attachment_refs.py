@@ -355,6 +355,64 @@ def test_attachment_ref_v2_payload_is_exact_and_strict(
         )
 
 
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        " Image/PNG ",
+        "Image/PNG",
+        "image/png; charset=utf-8",
+    ],
+)
+def test_attachment_ref_v2_rejects_noncanonical_content_type_before_hashing(
+    content_type: str,
+) -> None:
+    contract = _attachment_ref_v2_module()
+    payload = _attachment_v2_payload(content_type=content_type)
+
+    with pytest.raises(
+        contract.AttachmentRefV2ValidationError,
+        match="canonical normalized media type",
+    ):
+        contract.attachment_ref_v2_object_hash(
+            "upsert",
+            payload,
+            object_revision=1,
+        )
+
+
+def test_attachment_ref_v2_filename_uses_canonical_notes_policy() -> None:
+    contract = _attachment_ref_v2_module()
+
+    parsed = contract.parse_attachment_ref_v2_payload(
+        "upsert",
+        _attachment_v2_payload(file_name="Résumé Draft?.PDF"),
+    )
+    assert parsed.file_name == "Résumé_Draft.pdf"
+
+    with pytest.raises(
+        contract.AttachmentRefV2ValidationError,
+        match="Unsupported attachment type",
+    ):
+        contract.parse_attachment_ref_v2_payload(
+            "upsert",
+            _attachment_v2_payload(file_name="payload.exe"),
+        )
+
+
+def test_attachment_ref_v2_filename_rejects_control_characters_before_hashing() -> None:
+    contract = _attachment_ref_v2_module()
+
+    with pytest.raises(
+        contract.AttachmentRefV2ValidationError,
+        match="Invalid attachment filename",
+    ):
+        contract.attachment_ref_v2_object_hash(
+            "upsert",
+            _attachment_v2_payload(file_name="bad\x00.pdf"),
+            object_revision=1,
+        )
+
+
 def test_attachment_ref_v2_restore_intent_is_routing_metadata_only() -> None:
     contract = _attachment_ref_v2_module()
     parsed = contract.parse_attachment_ref_v2_payload(

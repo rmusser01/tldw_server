@@ -133,6 +133,19 @@ def test_postgres_note_attachments_are_two_owner_isolated_and_indexed(
             ).fetchall()
             plan = " ".join(str(next(iter(dict(row).values()))) for row in plan_rows)
         assert "idx_note_attachments_owner_dataset_note_page" in plan
+
+        with db_a.transaction() as conn:
+            conn.execute("SET LOCAL enable_seqscan = off")
+            name_plan_rows = conn.execute(
+                "EXPLAIN SELECT attachment_id FROM note_attachments "
+                "WHERE client_id = ? AND dataset_id = ? AND note_id = ? "
+                "AND normalized_file_name = ? AND deleted = FALSE",
+                (owner_a, dataset_id, note_a, "same-name.pdf"),
+            ).fetchall()
+            name_plan = " ".join(
+                str(next(iter(dict(row).values()))) for row in name_plan_rows
+            )
+        assert "uq_note_attachments_live_name" in name_plan
     finally:
         db_a.close_all_connections()
         db_b.close_all_connections()

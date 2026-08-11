@@ -20,6 +20,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    NoteAttachmentPolicyError,
+    sanitize_note_attachment_file_name,
+    validate_note_attachment_content_type,
+)
 from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
 
 if TYPE_CHECKING:
@@ -112,24 +117,20 @@ class NoteAttachmentStore:
 
     @classmethod
     def _normalized_filename(cls, value: object) -> tuple[str, str]:
-        file_name = cls._filename(value, "file_name", maximum=180)
+        try:
+            file_name = sanitize_note_attachment_file_name(value)
+        except NoteAttachmentPolicyError as exc:
+            raise InputError(str(exc)) from exc
         normalized = unicodedata.normalize("NFKC", file_name).casefold()
         cls._filename(normalized, "normalized_file_name", maximum=180)
         return file_name, normalized
 
     @staticmethod
     def _content_type(value: object) -> str:
-        if not isinstance(value, str):
-            raise InputError("content_type must be a normalized media type")
-        normalized = value.strip().lower()
-        if (
-            not normalized
-            or len(normalized) > 255
-            or "/" not in normalized
-            or any(ord(character) < 32 for character in normalized)
-        ):
-            raise InputError("content_type must be a normalized media type")
-        return normalized
+        try:
+            return validate_note_attachment_content_type(value)
+        except NoteAttachmentPolicyError as exc:
+            raise InputError(str(exc)) from exc
 
     @staticmethod
     def _positive_integer(value: object, field_name: str) -> int:
