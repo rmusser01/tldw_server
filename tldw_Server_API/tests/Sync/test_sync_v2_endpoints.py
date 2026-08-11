@@ -643,6 +643,34 @@ def test_profile_bootstrap_endpoint_idempotently_creates_dataset_and_device(
     assert len(sync_service.store.list_devices_for_user("user-1")) == 1
 
 
+@pytest.mark.parametrize(
+    "version_map",
+    [
+        {"attachment.ref": [True]},
+        {"attachment.ref": list(range(1, 10))},
+    ],
+)
+def test_profile_bootstrap_endpoint_rejects_malformed_adapter_maps(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    version_map: dict[str, list[object]],
+) -> None:
+    response = client.post(
+        "/api/v1/sync/profile/bootstrap",
+        json={
+            "client_family": "chatbook",
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["attachment.ref"],
+            "supported_adapter_versions": version_map,
+        },
+    )
+
+    assert response.status_code == 422
+    assert sync_service.store.list_devices_for_user("user-1") == []
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+
+
 def test_profile_bootstrap_rejects_reserved_server_origin_device_id(
     client: TestClient,
     sync_service: SyncV2Service,

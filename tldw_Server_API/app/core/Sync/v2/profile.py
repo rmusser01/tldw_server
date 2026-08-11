@@ -18,6 +18,7 @@ from .models import (
     SyncDomain,
     SyncEnvelope,
     client_private_server_frontend_limitation_warning,
+    normalize_supported_adapter_versions,
     server_frontend_mutation_blockers_for_policy,
     server_frontend_mutation_enabled_for_policy,
 )
@@ -173,6 +174,11 @@ class SyncV2ProfileManager:
             device_id=device_id,
             client_profile_id=client_profile_id,
         )
+        canonical_client_instance = dict(client_instance or {})
+        supported_adapter_versions = normalize_supported_adapter_versions(
+            canonical_client_instance.pop("supported_adapter_versions", None),
+            requested_domains=requested,
+        )
         self.store.upsert_device(
             SyncDeviceUpsert(
                 device_id=resolved_device_id,
@@ -184,8 +190,9 @@ class SyncV2ProfileManager:
                     "client_profile_id": client_profile_id,
                     "sync_mode": normalized_mode,
                     "client_family": client_family,
-                    "client_instance": dict(client_instance or {}),
+                    "client_instance": canonical_client_instance,
                     "requested_domains": requested,
+                    "supported_adapter_versions": supported_adapter_versions,
                 },
             )
         )
