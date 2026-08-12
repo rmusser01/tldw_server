@@ -30,7 +30,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_models_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_models_canonical.py
 - tldw_Server_API/tests/unit/test_moderation_models_imports.py
-updated_date: 2026-08-12 00:49
+updated_date: 2026-08-12 00:58
 ---
 
 ## Description
@@ -41,10 +41,10 @@ Transplant the reviewed shared-model extraction onto current dev: make models.py
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 models.py canonically owns exactly the three approved dataclasses and remains standard-library-only.
-- [ ] #2 moderation_service.py re-exports the exact canonical class objects with unchanged supported constructors, defaults, to_dict mapping, and runtime behavior.
-- [ ] #3 PolicyCompiler and PolicyEvaluator no longer load moderation_service.py for canonical runtime types while preserving policy_types descriptors and subclass dispatch.
-- [ ] #4 Focused and caller regression tests, compilation, Black/Ruff, Bandit, diff/scope checks, and independent review pass on current dev.
+- [x] #1 models.py canonically owns exactly the three approved dataclasses and remains standard-library-only.
+- [x] #2 moderation_service.py re-exports the exact canonical class objects with unchanged supported constructors, defaults, to_dict mapping, and runtime behavior.
+- [x] #3 PolicyCompiler and PolicyEvaluator no longer load moderation_service.py for canonical runtime types while preserving policy_types descriptors and subclass dispatch.
+- [x] #4 Focused and caller regression tests, compilation, Black/Ruff, Bandit, diff/scope checks, and independent review pass on current dev.
 - [ ] #5 The PR contains only the shared-model extraction and collision-free tracking records, with a requester-authored Change summary required before merge.
 <!-- AC:END -->
 
@@ -57,7 +57,24 @@ Follow Docs/superpowers/plans/2026-08-01-moderation-shared-models-extraction-imp
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Transplant: created codex/moderation-shared-models-dev directly from origin/dev@414e81a12aa71df97c4fad17df084aa7a78c474b and applied the nine reviewed post-predecessor commits without conflicts as one pending consolidated change. The original codex/moderation-shared-models-design@5d33b21ca4 remains untouched as a recovery reference. Reconciled predecessor references to merged TASK-12992 / PR #2770 and replaced colliding stale task IDs with TASK-13010 and TASK-13011. Current production scope is exactly models.py, moderation_service.py, policy_compiler.py, and policy_evaluator.py. Fresh current-dev verification and independent review remain pending; PR creation remains gated on the requester's own Change summary.
+Transplant:
+- Created codex/moderation-shared-models-dev directly from origin/dev@414e81a12aa71df97c4fad17df084aa7a78c474b and applied the nine reviewed post-predecessor commits without conflicts as consolidated current-dev commits.
+- Preserved codex/moderation-shared-models-design@5d33b21ca4 untouched as a recovery reference.
+- Reconciled the predecessor to merged TASK-12992 / PR #2770 and replaced colliding stale task IDs with TASK-13010 and TASK-13011.
+- Production scope is exactly models.py, moderation_service.py, policy_compiler.py, and policy_evaluator.py.
+
+Fresh current-dev verification on codex/moderation-shared-models-dev@f0639e91ed:
+- Compilation: py_compile passed for all four touched production files and all three new test files.
+- Formatting/lint: Black write/check left models.py, policy_evaluator.py, and the three new tests unchanged; Ruff passed all seven touched Python files. Fresh origin/dev baselines confirm moderation_service.py and policy_compiler.py both have pre-existing Black debt, so neither was whole-file formatted.
+- Regression tests: 303 Moderation unit tests passed; 97 moderation endpoint/Guardian tests passed; 16 chat moderation integration tests passed; 12 workflow moderation-adapter tests passed (45 deselected); and the targeted audio STT redaction test passed. Total selected tests: 429 passed.
+- Security: Bandit scanned app/core/Moderation (3,335 LOC) with 0 findings, 0 errors, 0 skipped tests, and 0 nosec suppressions.
+- Ancestry/scope: merge-base HEAD origin/dev equals 414e81a12aa71df97c4fad17df084aa7a78c474b; git diff --check passes; the branch contains only tracking seed 74373b7117 and extraction f0639e91ed. The 11-file diff contains exactly four approved production files, three focused tests, two approved documents, and two collision-free Backlog records.
+- Structural audit: models.py defines exactly ModerationPolicy, PatternRule, and ModerationEvaluationResult and imports only __future__, json, re, and dataclasses. Importing models/compiler/evaluator does not load moderation_service or config. Canonical model and test artifacts match reviewed recovery head 5d33b21ca4 exactly; only already-merged PR #2770 service/evaluator corrections differ from that old head.
+- Independent whole-branch review: APPROVE with no P0-P3 findings. The reviewer confirmed literal identity/default/to_dict preservation, exact facade aliases, deferred dependency removal, staticmethod/tuple/subclass/namespace contracts, clean scope, and approved pickle/monkeypatch boundaries. Reviewer independently passed 24 focused tests, isolated imports, and diff check.
+
+Known residual boundary: historical service-qualified pickle payload execution was deliberately not added as a test; existing names remain resolvable through exact service aliases, while new pickle bytes naturally identify models.py as approved.
+
+Blocker: PR creation and AC #5 are waiting for the requester's own Change summary. The agent will not draft, paraphrase, or infer that summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -69,9 +86,9 @@ Transplant: created codex/moderation-shared-models-dev directly from origin/dev@
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
