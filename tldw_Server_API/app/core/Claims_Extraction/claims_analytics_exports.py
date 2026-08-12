@@ -1452,22 +1452,6 @@ def _cleanup_retention_seconds(retention_hours: Any) -> float | None:
     return seconds if math.isfinite(seconds) and seconds > 0 else None
 
 
-def _cleanup_job_status(
-    job: Any,
-    *,
-    job_id: int,
-    owner_user_id: str,
-    batch_group: str,
-) -> str | None:
-    projection = _project_exact_export_job(
-        job,
-        owner_user_id=owner_user_id,
-        batch_group=batch_group,
-        job_id=job_id,
-    )
-    return projection[1] if projection is not None else None
-
-
 def _cleanup_rotation_anchor(*, owner_user_id: str, now: datetime) -> str:
     """Return a stable rotating anchor for bounded failed-artifact scans."""
     bucket = int(now.timestamp()) // CLEANUP_ROTATION_SECONDS
@@ -1604,16 +1588,8 @@ def cleanup_export_artifacts(
             if job is None:
                 selected.append(validated_export_id)
                 continue
-            projection = _project_exact_export_job(
-                job,
-                owner_user_id=owner,
-                batch_group=batch_group,
-            )
-            if projection is None:
-                continue
-            _job_id, job_status = projection
-            if is_terminal_job_status(job_status):
-                selected.append(validated_export_id)
+            # An existing Job can be retried by Jobs after this read. Preserve
+            # its artifact until active and archived history prove absence.
             continue
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
             continue
@@ -1632,14 +1608,6 @@ def cleanup_export_artifacts(
             job_id=job_id,
         )
         if direct_projection is not None:
-            job_status = _cleanup_job_status(
-                job,
-                job_id=job_id,
-                owner_user_id=owner,
-                batch_group=batch_group,
-            )
-            if is_terminal_job_status(job_status):
-                selected.append(export_id)
             continue
         try:
             exact_job = job_manager.find_job_by_batch_group(
@@ -1661,14 +1629,8 @@ def cleanup_export_artifacts(
             if age > retention_seconds + grace:
                 selected.append(export_id)
             continue
-        exact_status = _cleanup_job_status(
-            exact_job,
-            job_id=job_id,
-            owner_user_id=owner,
-            batch_group=batch_group,
-        )
-        if is_terminal_job_status(exact_status):
-            selected.append(export_id)
+        # Exact active or archived history remains retryable through Jobs.
+        # Cleanup only deletes after the row is pruned and absence is proven.
 
     if not selected:
         return 0

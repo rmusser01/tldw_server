@@ -560,7 +560,9 @@ def test_reconcile_preserves_attached_artifact_when_exact_job_is_active() -> Non
 
 
 @pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled", "quarantined"])
-def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> None:
+def test_cleanup_deletes_old_ready_but_preserves_failed_with_terminal_job(
+    terminal: str,
+) -> None:
     ready = _artifact(10, status="ready", updated_seconds_ago=3601)
     failed = _artifact(11, status="failed", job_id=81, updated_seconds_ago=3601)
     db = MaintenanceDB([ready, failed])
@@ -577,8 +579,8 @@ def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> No
     )
 
     cutoff = _timestamp(3600)
-    assert deleted == 2
-    assert db.rows == {}
+    assert deleted == 1
+    assert list(db.rows) == [failed["export_id"]]
     assert manager.batch_calls == [
         {
             "job_ids": [81],
@@ -590,7 +592,7 @@ def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> No
     assert db.delete_calls == [
         {
             "user_id": "7",
-            "export_ids": [ready["export_id"], failed["export_id"]],
+            "export_ids": [ready["export_id"]],
             "updated_before": cutoff,
         }
     ]
@@ -626,6 +628,29 @@ def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> No
     ]
 
 
+@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled", "quarantined"])
+def test_cleanup_preserves_failed_artifact_while_exact_terminal_job_exists(
+    terminal: str,
+) -> None:
+    failed = _artifact(12, status="failed", job_id=82, updated_seconds_ago=7200)
+    db = MaintenanceDB([failed])
+    manager = FakeJobManager(
+        jobs_by_id={82: {**_exact_job(failed["export_id"], 82), "status": terminal}}
+    )
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 0
+    )
+    assert failed["export_id"] in db.rows
+
+
 def test_cleanup_candidate_filters_prevent_active_rows_from_consuming_limit() -> None:
     irrelevant = [
         _artifact(
@@ -652,7 +677,7 @@ def test_cleanup_candidate_filters_prevent_active_rows_from_consuming_limit() ->
     assert all(row["export_id"] in db.rows for row in irrelevant)
 
 
-def test_cleanup_rotates_failed_page_past_older_uncertain_rows(
+def test_cleanup_rotates_failed_page_without_deleting_existing_terminal_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     anchor = f"{50:032x}"
@@ -692,8 +717,8 @@ def test_cleanup_rotates_failed_page_past_older_uncertain_rows(
         limit=4,
     )
 
-    assert deleted == 1
-    assert terminal["export_id"] not in db.rows
+    assert deleted == 0
+    assert terminal["export_id"] in db.rows
     assert all(row["export_id"] in db.rows for row in uncertain)
     assert manager.batch_calls[0]["job_ids"] == [300, 201]
     failed_calls = [call for call in db.list_calls if call["statuses"] == ("failed",)]
@@ -864,7 +889,7 @@ def test_cleanup_preserves_enqueue_failed_without_job_when_exact_job_exists(
 
 
 @pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled", "quarantined"])
-def test_cleanup_deletes_enqueue_failed_without_job_id_when_exact_job_is_terminal(
+def test_cleanup_preserves_enqueue_failed_without_job_id_when_exact_job_exists(
     monkeypatch: pytest.MonkeyPatch,
     terminal: str,
 ) -> None:
@@ -893,9 +918,9 @@ def test_cleanup_deletes_enqueue_failed_without_job_id_when_exact_job_is_termina
             now=NOW,
             retention_hours=1,
         )
-        == 1
+        == 0
     )
-    assert row["export_id"] not in db.rows
+    assert row["export_id"] in db.rows
 
 
 def test_cleanup_preserves_enqueue_failed_without_job_id_when_exact_job_is_active(
@@ -1076,7 +1101,7 @@ def test_cleanup_ignores_terminal_job_row_outside_requested_scope() -> None:
     assert failed["export_id"] in db.rows
 
 
-def test_cleanup_recovers_archived_terminal_job_after_active_wrong_batch_group_shadow() -> None:
+def test_cleanup_preserves_archived_terminal_job_after_active_wrong_batch_group_shadow() -> None:
     failed = _artifact(54, status="failed", job_id=114, updated_seconds_ago=7200)
     db = MaintenanceDB([failed])
     manager = FakeJobManager(
@@ -1097,9 +1122,9 @@ def test_cleanup_recovers_archived_terminal_job_after_active_wrong_batch_group_s
             now=NOW,
             retention_hours=1,
         )
-        == 1
+        == 0
     )
-    assert failed["export_id"] not in db.rows
+    assert failed["export_id"] in db.rows
     assert manager.group_calls == [
         {
             "batch_group": f"claims-analytics-export:{failed['export_id']}",
