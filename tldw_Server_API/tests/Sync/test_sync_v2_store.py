@@ -5,10 +5,12 @@ import inspect
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 from typing import Any, cast
 
 import pytest
@@ -22,7 +24,14 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.factory import (
+    DatabaseBackendFactory,
+)
 from tldw_Server_API.app.core.DB_Management.Sync_DB import (
+    SYNC_POSTGRES_SCHEMA,
+    SYNC_SQLITE_SCHEMA,
+    SYNC_VERSIONED_DEVICE_STATE_POSTGRES_SCHEMA,
+    SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA,
     SyncDatabase,
     _envelope_fingerprint_from_create,
     _envelope_fingerprint_from_row,
@@ -49,6 +58,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDatasetCreate,
     SyncDeviceAuthorizationCreate,
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceCursor,
     SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
@@ -403,6 +413,9 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
         "sync_object_state",
         "sync_materialization_locks",
         "sync_device_cursors",
+        "sync_device_adapter_cursors",
+        "sync_device_adapter_domain_acks",
+        "sync_device_blob_id_acks",
         "sync_conflicts",
         "sync_key_records",
         "sync_attachments",
@@ -415,6 +428,525 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
 
     for table_name in required_tables:
         assert sync_store.db.backend.table_exists(table_name)
+
+
+def test_adapter_cursor_and_version_ack_schema_has_fresh_backend_parity(
+    sync_store: SyncV2Store,
+) -> None:
+    for schema in (
+        SYNC_SQLITE_SCHEMA + SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA,
+        SYNC_POSTGRES_SCHEMA + SYNC_VERSIONED_DEVICE_STATE_POSTGRES_SCHEMA,
+    ):
+        assert "sync_device_adapter_cursors" in schema
+        assert "sync_device_adapter_domain_acks" in schema
+        assert "sync_device_blob_id_acks" in schema
+        assert "PRIMARY KEY(dataset_id, device_id, domain, adapter_version)" in schema
+        assert "PRIMARY KEY(dataset_id, device_id, blob_id)" in schema
+
+    cursor_columns = {
+        row["name"] for row in sync_store.db.execute(
+            "PRAGMA table_info(sync_device_adapter_cursors)"
+        ).rows
+    }
+    assert {"adapter_version", "last_pulled_sequence", "max_delivered_sequence"}.issubset(
+        cursor_columns
+    )
+
+
+def test_adapter_state_migration_records_completion_and_exact_sqlite_catalog(
+    sync_store: SyncV2Store,
+) -> None:
+    marker = sync_store.db.execute(
+        "SELECT completed_at FROM sync_schema_migrations WHERE migration_id = ?",
+        ("adapter_cursor_ack_blob_id_v1",),
+    ).rows
+    assert len(marker) == 1 and marker[0]["completed_at"]
+
+    expected_primary_keys = {
+        "sync_device_adapter_cursors": {
+            "dataset_id": 1,
+            "device_id": 2,
+            "domain": 3,
+            "adapter_version": 4,
+        },
+        "sync_device_adapter_domain_acks": {
+            "dataset_id": 1,
+            "device_id": 2,
+            "domain": 3,
+            "adapter_version": 4,
+        },
+        "sync_device_blob_id_acks": {
+            "dataset_id": 1,
+            "device_id": 2,
+            "blob_id": 3,
+        },
+    }
+    for table_name, expected_pk in expected_primary_keys.items():
+        info = sync_store.db.execute(f"PRAGMA table_info({table_name})").rows
+        assert {row["name"]: row["pk"] for row in info if row["pk"]} == expected_pk
+
+    indexes = {
+        row["name"]
+        for row in sync_store.db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'"
+        ).rows
+    }
+    assert {
+        "idx_sync_device_adapter_cursors_device",
+        "idx_sync_device_adapter_domain_acks_device",
+        "idx_sync_device_blob_id_acks_device",
+    }.issubset(indexes)
+
+
+def test_adapter_state_migration_seed_failure_rolls_back_ddl_and_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "atomic-adapter-migration.db"
+    db = SyncDatabase(sqlite_path=path)
+    for table_name in (
+        "sync_device_adapter_cursors",
+        "sync_device_adapter_domain_acks",
+        "sync_device_blob_id_acks",
+    ):
+        db.execute(f"DROP TABLE {table_name}")
+    db.execute(
+        "DELETE FROM sync_schema_migrations WHERE migration_id = ?",
+        ("adapter_cursor_ack_blob_id_v1",),
+    )
+    original_execute = db.execute
+
+    def fail_seed(statement, params=None, *, connection=None):
+        if "INSERT INTO sync_device_adapter_domain_acks" in statement:
+            raise SyncStoreError("injected atomic seed failure")
+        return original_execute(statement, params, connection=connection)
+
+    monkeypatch.setattr(db, "execute", fail_seed)
+    with pytest.raises(SyncStoreError, match="injected atomic seed failure"):
+        db.ensure_schema()
+    monkeypatch.setattr(db, "execute", original_execute)
+
+    committed_tables = {
+        row["name"]
+        for row in original_execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).rows
+    }
+    assert "sync_device_adapter_cursors" not in committed_tables
+    assert "sync_device_adapter_domain_acks" not in committed_tables
+    assert "sync_device_blob_id_acks" not in committed_tables
+    assert original_execute(
+        "SELECT COUNT(*) AS count FROM sync_schema_migrations WHERE migration_id = ?",
+        ("adapter_cursor_ack_blob_id_v1",),
+    ).rows[0]["count"] == 0
+
+
+def test_adapter_state_migration_serializes_concurrent_sqlite_initializers(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "concurrent-adapter-migration.db"
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        databases = list(executor.map(lambda _index: SyncDatabase(sqlite_path=path), range(2)))
+
+    assert databases[0].execute(
+        "SELECT COUNT(*) AS count FROM sync_schema_migrations WHERE migration_id = ? "
+        "AND completed_at IS NOT NULL",
+        ("adapter_cursor_ack_blob_id_v1",),
+    ).rows[0]["count"] == 1
+
+
+def test_adapter_state_migration_completed_authority_fails_closed_on_catalog_drift(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.db.execute(
+        "ALTER TABLE sync_schema_migrations ADD COLUMN unexpected_state TEXT"
+    )
+
+    with pytest.raises(SyncStoreError, match="catalog is incompatible"):
+        sync_store.db.ensure_schema()
+
+
+def test_adapter_state_migration_fails_closed_on_side_table_type_drift(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.db.execute("DROP TABLE sync_device_adapter_cursors")
+    sync_store.db.execute(
+        """
+        CREATE TABLE sync_device_adapter_cursors (
+            dataset_id TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            adapter_version TEXT NOT NULL,
+            last_pulled_sequence INTEGER NOT NULL DEFAULT 0,
+            max_delivered_sequence INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(dataset_id, device_id, domain, adapter_version)
+        )
+        """
+    )
+    sync_store.db.execute(
+        "CREATE INDEX idx_sync_device_adapter_cursors_device "
+        "ON sync_device_adapter_cursors(device_id, dataset_id)"
+    )
+
+    with pytest.raises(SyncStoreError, match="catalog is incompatible"):
+        sync_store.db.ensure_schema()
+
+
+def test_adapter_state_migration_fails_closed_when_side_checks_are_missing(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.db.execute("DROP TABLE sync_device_adapter_cursors")
+    sync_store.db.execute(
+        """
+        CREATE TABLE sync_device_adapter_cursors (
+            dataset_id TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            adapter_version INTEGER NOT NULL,
+            last_pulled_sequence INTEGER NOT NULL DEFAULT 0,
+            max_delivered_sequence INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(dataset_id, device_id, domain, adapter_version)
+        )
+        """
+    )
+    sync_store.db.execute(
+        "CREATE INDEX idx_sync_device_adapter_cursors_device "
+        "ON sync_device_adapter_cursors(device_id, dataset_id)"
+    )
+
+    with pytest.raises(SyncStoreError, match="catalog is incompatible"):
+        sync_store.db.ensure_schema()
+
+
+def test_adapter_state_migration_postgres_contract_locks_before_exact_catalog_check() -> None:
+    source = " ".join(
+        inspect.getsource(SyncDatabase._migrate_versioned_device_state).split()
+    )
+
+    assert "pg_advisory_xact_lock" in source
+    assert source.index("pg_advisory_xact_lock") < source.index(
+        "CREATE TABLE IF NOT EXISTS sync_schema_migrations"
+    )
+    assert "FOR UPDATE" in source
+    assert source.index("FOR UPDATE") < source.index("_verify_versioned_device_state_catalog")
+    assert source.index("_verify_versioned_device_state_catalog") < source.index(
+        "_reconcile_versioned_device_state"
+    )
+    assert source.index("_reconcile_versioned_device_state") < source.index(
+        "UPDATE sync_schema_migrations"
+    )
+
+
+def test_adapter_state_migration_serializes_concurrent_fresh_postgres_authority(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    setup = SyncDatabase(
+        backend=DatabaseBackendFactory.create_backend(pg_database_config)
+    )
+    with setup.backend.transaction() as connection:
+        for table_name in (
+            "sync_device_adapter_cursors",
+            "sync_device_adapter_domain_acks",
+            "sync_device_blob_id_acks",
+            "sync_schema_migrations",
+        ):
+            setup.execute(f"DROP TABLE {table_name}", connection=connection)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        databases = list(
+            executor.map(
+                lambda _index: SyncDatabase(
+                    backend=DatabaseBackendFactory.create_backend(pg_database_config)
+                ),
+                range(2),
+            )
+        )
+
+    assert databases[0].execute(
+        "SELECT COUNT(*) AS count FROM sync_schema_migrations "
+        "WHERE migration_id = ? AND completed_at IS NOT NULL",
+        ("adapter_cursor_ack_blob_id_v1",),
+    ).rows[0]["count"] == 1
+
+
+def test_v2_attachment_history_lookup_is_owner_scoped_indexed_and_bounded(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset(domains=["attachment.ref"]))
+    sync_store.insert_envelope(_attachment_v2_envelope())
+
+    assert sync_store.has_attachment_ref_v2_history(
+        "dataset-1",
+        "11111111-1111-4111-8111-111111111111",
+        owner_user_id="user-1",
+    )
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.has_attachment_ref_v2_history(
+            "dataset-1",
+            "11111111-1111-4111-8111-111111111111",
+            owner_user_id="other-user",
+        )
+
+    plan = sync_store.db.execute(
+        "EXPLAIN QUERY PLAN SELECT 1 FROM sync_envelopes "
+        "WHERE dataset_id = ? AND domain = 'attachment.ref' AND entity_id = ? "
+        "AND adapter_version = 2 AND status = 'accepted' LIMIT 1",
+        ("dataset-1", "11111111-1111-4111-8111-111111111111"),
+    ).rows
+    assert any("USING INDEX idx_sync_envelopes_dataset_domain" in row["detail"] for row in plan)
+
+
+def test_blob_binding_page_is_owner_scoped_bounded_and_index_backed(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset(domains=["attachment.ref"]))
+    sync_store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-page",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="legacy-provenance-not-authority",
+            payload_hash="sha256:" + "a" * 64,
+            content_type="application/pdf",
+            size_bytes=2048,
+            storage_backend="local_fs",
+            storage_key="blob-page.bin",
+        )
+    )
+    accepted = sync_store.insert_envelope(_attachment_v2_envelope())
+    binding = sync_store.get_attachment_revision_binding(
+        accepted.dataset_id,
+        accepted.object_id,
+        accepted.object_revision or 0,
+        owner_user_id="user-1",
+    )
+    assert binding is not None and binding.resolved_blob_id is not None
+
+    page = sync_store.list_attachment_revision_bindings_for_blob(
+        "dataset-1",
+        binding.resolved_blob_id,
+        owner_user_id="user-1",
+        after_establishing_server_cursor=0,
+        limit=10_000,
+    )
+    assert page == [binding]
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.list_attachment_revision_bindings_for_blob(
+            "dataset-1",
+            binding.resolved_blob_id,
+            owner_user_id="other-user",
+        )
+
+    plan = " ".join(
+        str(row["detail"])
+        for row in sync_store.db.execute(
+            "EXPLAIN QUERY PLAN SELECT attachment_id FROM "
+            "sync_attachment_revision_bindings WHERE dataset_id = ? "
+            "AND resolved_blob_id = ? AND retention_released_at IS NULL "
+            "AND establishing_server_cursor > ? "
+            "ORDER BY establishing_server_cursor, attachment_id, attachment_revision "
+            "LIMIT ?",
+            (
+                "dataset-1",
+                binding.resolved_blob_id,
+                0,
+                1_000,
+            ),
+        ).rows
+    )
+    assert "idx_sync_attachment_bindings_blob_retention" in plan
+    assert "USE TEMP B-TREE" not in plan.upper()
+    assert "idx_sync_attachment_bindings_blob_retention" in SYNC_POSTGRES_SCHEMA
+    assert "idx_sync_attachment_bindings_blob_retention" in inspect.getsource(
+        SyncDatabase._ensure_attachment_binding_tables
+    )
+
+
+def test_available_blob_page_is_keyset_bounded_and_index_backed(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset(domains=["attachment.ref"]))
+    for index in range(3):
+        sync_store.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id=f"blob-page-{index}",
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                attachment_id=f"legacy-provenance-{index}",
+                payload_hash="sha256:" + str(index) * 64,
+                content_type="application/octet-stream",
+                size_bytes=1,
+                storage_backend="local_fs",
+                storage_key=f"blob-page-{index}.bin",
+            )
+        )
+
+    first = sync_store.list_blob_objects_for_dataset_page(
+        "dataset-1",
+        limit=2,
+    )
+    second = sync_store.list_blob_objects_for_dataset_page(
+        "dataset-1",
+        after_updated_at=first[-1].updated_at,
+        after_blob_id=first[-1].blob_id,
+        limit=2,
+    )
+
+    assert len(first) == 2
+    assert len(second) == 1
+    assert {blob.blob_id for blob in [*first, *second]} == {
+        "blob-page-0",
+        "blob-page-1",
+        "blob-page-2",
+    }
+    plan = " ".join(
+        str(row["detail"])
+        for row in sync_store.db.execute(
+            "EXPLAIN QUERY PLAN SELECT blob_id FROM sync_blob_objects "
+            "WHERE dataset_id = ? AND status = ? "
+            "ORDER BY updated_at, blob_id LIMIT ?",
+            ("dataset-1", "available", 2),
+        ).rows
+    )
+    assert "idx_sync_blob_objects_retention" in plan
+    assert "USE TEMP B-TREE" not in plan.upper()
+    assert "idx_sync_blob_objects_retention" in SYNC_POSTGRES_SCHEMA
+
+
+def test_adapter_cursor_and_version_ack_upgrade_seeds_v1_and_reconciles_maxima(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sync-upgrade.db"
+    store = SyncV2Store(SyncDatabase(sqlite_path=path))
+    store.upsert_device(_device())
+    store.enroll_dataset(_dataset())
+    store.db.execute("DROP TABLE sync_device_adapter_cursors")
+    store.db.execute("DROP TABLE sync_device_adapter_domain_acks")
+    store.db.execute("DROP TABLE sync_device_blob_id_acks")
+    store.db.execute(
+        "DELETE FROM sync_schema_migrations WHERE migration_id = ?",
+        ("adapter_cursor_ack_blob_id_v1",),
+    )
+    now = utcnow_iso()
+    store.db.execute(
+        "INSERT INTO sync_device_cursors "
+        "(dataset_id, device_id, domain, last_pulled_sequence, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("dataset-1", "device-1", "notes.note", 7, now),
+    )
+    store.db.execute(
+        "INSERT INTO sync_device_domain_acks "
+        "(dataset_id, device_id, domain, through_server_sequence, applied_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("dataset-1", "device-1", "notes.note", 6, now, now),
+    )
+
+    store.db.ensure_schema()
+
+    cursor = store.get_device_cursor(
+        "dataset-1", "device-1", "notes.note", adapter_version=1
+    )
+    ack = store.get_device_domain_ack(
+        "dataset-1", "device-1", "notes.note", adapter_version=1
+    )
+    assert cursor is not None and cursor.last_pulled_sequence == 7
+    assert ack is not None and ack.through_server_sequence == 6
+    assert store.db.execute("SELECT COUNT(*) AS count FROM sync_device_blob_id_acks").rows[0][
+        "count"
+    ] == 0
+
+    store.db.execute(
+        "DELETE FROM sync_device_cursors WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    )
+    store.db.execute(
+        "DELETE FROM sync_device_domain_acks "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    )
+    store.db.ensure_schema()
+    assert store.db.execute(
+        "SELECT last_pulled_sequence FROM sync_device_cursors "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    ).rows[0]["last_pulled_sequence"] == 7
+    assert store.db.execute(
+        "SELECT through_server_sequence FROM sync_device_domain_acks "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    ).rows[0]["through_server_sequence"] == 6
+
+    store.db.execute(
+        "UPDATE sync_device_cursors SET last_pulled_sequence = 11 "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    )
+    store.db.execute(
+        "UPDATE sync_device_adapter_domain_acks SET through_server_sequence = 10 "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ? AND adapter_version = 1",
+        ("dataset-1", "device-1", "notes.note"),
+    )
+    store.db.ensure_schema()
+
+    legacy_cursor = store.db.execute(
+        "SELECT last_pulled_sequence FROM sync_device_cursors "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    ).rows[0]
+    version_cursor = store.db.execute(
+        "SELECT last_pulled_sequence FROM sync_device_adapter_cursors "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ? AND adapter_version = 1",
+        ("dataset-1", "device-1", "notes.note"),
+    ).rows[0]
+    legacy_ack = store.db.execute(
+        "SELECT through_server_sequence FROM sync_device_domain_acks "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    ).rows[0]
+    assert legacy_cursor["last_pulled_sequence"] == 11
+    assert version_cursor["last_pulled_sequence"] == 11
+    assert legacy_ack["through_server_sequence"] == 10
+
+    store.db.execute(
+        "UPDATE sync_device_domain_acks SET through_server_sequence = 11 "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    )
+    summary = store.list_device_acknowledgments("dataset-1", "device-1")
+    assert summary.domain_acks["notes.note"].through_server_sequence == 11
+    assert summary.version_acks[0].through_server_sequence == 11
+
+
+def test_adapter_cursor_and_version_ack_partial_seed_rolls_back(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.upsert_device(_device())
+    sync_store.enroll_dataset(_dataset())
+    sync_store.db.execute(
+        "INSERT INTO sync_device_cursors "
+        "(dataset_id, device_id, domain, last_pulled_sequence, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("dataset-1", "device-1", "notes.note", 4, utcnow_iso()),
+    )
+    sync_store.db.execute("DELETE FROM sync_device_adapter_cursors")
+    original_execute = sync_store.db.execute
+
+    def fail_second_seed(statement, params=None, *, connection=None):
+        if "INSERT INTO sync_device_adapter_domain_acks" in statement:
+            raise SyncStoreError("injected version ack seed failure")
+        return original_execute(statement, params, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "execute", fail_second_seed)
+    with pytest.raises(SyncStoreError, match="injected version ack seed failure"):
+        sync_store.db.ensure_schema()
+    monkeypatch.setattr(sync_store.db, "execute", original_execute)
+
+    assert original_execute(
+        "SELECT COUNT(*) AS count FROM sync_device_adapter_cursors"
+    ).rows[0]["count"] == 0
 
 
 def test_attachment_binding_schema_has_exact_constraints_and_indexes(
@@ -1097,7 +1629,13 @@ def test_attachment_binding_lookup_and_unresolved_page_are_bounded_and_indexed(
             ("dataset-1", 0, 1000),
         ).rows
     )
-    assert "idx_sync_attachment_bindings_unresolved" in plan
+    assert any(
+        index_name in plan
+        for index_name in (
+            "idx_sync_attachment_bindings_unresolved",
+            "idx_sync_attachment_bindings_blob_retention",
+        )
+    )
     assert "USE TEMP B-TREE" not in plan.upper()
     digest_plan = " ".join(
         str(row["detail"])
@@ -2058,6 +2596,15 @@ def test_device_lifecycle_status_authorization_and_acknowledgments(sync_store: S
     assert active.status == "active"
     assert active.authorized_at is not None
 
+    sync_store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            last_pulled_sequence=3,
+            max_delivered_sequence=3,
+        )
+    )
     domain_ack = sync_store.upsert_device_domain_ack(
         SyncDeviceDomainAckCreate(
             dataset_id="dataset-1",
@@ -3130,6 +3677,7 @@ def test_apply_status_lifecycle_and_replay_listing(sync_store: SyncV2Store):
 
 
 def test_device_cursor_upsert_and_fetch(sync_store: SyncV2Store):
+    sync_store.upsert_device(_device())
     sync_store.enroll_dataset(_dataset())
 
     cursor = sync_store.update_device_cursor(
@@ -3147,6 +3695,7 @@ def test_device_cursor_upsert_and_fetch(sync_store: SyncV2Store):
 
 
 def test_device_cursor_rejects_missing_dataset_and_unenrolled_domain(sync_store: SyncV2Store):
+    sync_store.upsert_device(_device())
     with pytest.raises(SyncDatasetNotFoundError):
         sync_store.update_device_cursor(
             SyncDeviceCursor(
@@ -3169,6 +3718,433 @@ def test_device_cursor_rejects_missing_dataset_and_unenrolled_domain(sync_store:
             )
         )
 
+
+def test_adapter_cursor_v1_dual_writes_but_v2_does_not_project_legacy(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.upsert_device(_device())
+    sync_store.enroll_dataset(_dataset())
+
+    v1 = sync_store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="attachment.ref",
+            adapter_version=1,
+            last_pulled_sequence=8,
+            max_delivered_sequence=7,
+        )
+    )
+    v2 = sync_store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="attachment.ref",
+            adapter_version=2,
+            last_pulled_sequence=3,
+            max_delivered_sequence=3,
+        )
+    )
+
+    legacy = sync_store.db.execute(
+        "SELECT last_pulled_sequence FROM sync_device_cursors "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "attachment.ref"),
+    ).rows[0]
+    assert v1.adapter_version == 1
+    assert v2.adapter_version == 2
+    assert legacy["last_pulled_sequence"] == 8
+    assert sync_store.get_device_cursor(
+        "dataset-1", "device-1", "attachment.ref", adapter_version=1
+    ) == v1
+    assert sync_store.get_device_cursor(
+        "dataset-1", "device-1", "attachment.ref", adapter_version=2
+    ) == v2
+
+
+def test_version_ack_is_monotonic_bounded_by_exact_delivered_watermark_and_dual_writes_v1(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.upsert_device(_device())
+    sync_store.enroll_dataset(_dataset())
+    for adapter_version, scanned, delivered in ((1, 9, 7), (2, 4, 4)):
+        sync_store.update_device_cursor(
+            SyncDeviceCursor(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="attachment.ref",
+                adapter_version=adapter_version,
+                last_pulled_sequence=scanned,
+                max_delivered_sequence=delivered,
+            )
+        )
+
+    v1 = sync_store.upsert_device_domain_ack(
+        SyncDeviceDomainAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="attachment.ref",
+            adapter_version=1,
+            through_server_sequence=7,
+            applied_at="2026-05-23T18:30:00+00:00",
+        )
+    )
+    v2 = sync_store.upsert_device_domain_ack(
+        SyncDeviceDomainAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="attachment.ref",
+            adapter_version=2,
+            through_server_sequence=4,
+            applied_at="2026-05-23T18:31:00+00:00",
+        )
+    )
+    stale_v2 = sync_store.upsert_device_domain_ack(
+        SyncDeviceDomainAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="attachment.ref",
+            adapter_version=2,
+            through_server_sequence=2,
+            applied_at="2026-05-23T18:29:00+00:00",
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="delivered watermark"):
+        sync_store.upsert_device_domain_ack(
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="attachment.ref",
+                adapter_version=1,
+                through_server_sequence=8,
+                applied_at="2026-05-23T18:32:00+00:00",
+            )
+        )
+    with pytest.raises(SyncStoreError, match="delivered watermark"):
+        sync_store.upsert_device_domain_ack(
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="attachment.ref",
+                adapter_version=2,
+                through_server_sequence=5,
+                applied_at="2026-05-23T18:32:00+00:00",
+            )
+        )
+
+    legacy = sync_store.db.execute(
+        "SELECT through_server_sequence FROM sync_device_domain_acks "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "attachment.ref"),
+    ).rows[0]
+    assert v1.through_server_sequence == 7
+    assert v2.through_server_sequence == 4
+    assert stale_v2.through_server_sequence == 4
+    assert stale_v2.applied_at == v2.applied_at
+    assert legacy["through_server_sequence"] == 7
+
+
+def test_adapter_cursor_and_version_ack_postgres_concurrent_writes_are_monotonic(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backends = [
+        DatabaseBackendFactory.create_backend(pg_database_config)
+        for _ in range(3)
+    ]
+    stores = [SyncV2Store(SyncDatabase(backend=backend)) for backend in backends]
+    setup, low, high = stores
+    setup.upsert_device(_device())
+    setup.enroll_dataset(_dataset())
+
+    def force_low_write_after_high_commit(
+        store: SyncV2Store,
+        *,
+        select_marker: str,
+        low_write,
+        high_write,
+    ) -> None:
+        low_selected = Event()
+        high_committed = Event()
+        original_execute = store.db.execute
+        paused = False
+
+        def delayed_execute(statement, params=None, *, connection=None):
+            nonlocal paused
+            result = original_execute(statement, params, connection=connection)
+            if select_marker in " ".join(statement.split()) and not paused:
+                paused = True
+                low_selected.set()
+                assert high_committed.wait(10)
+            return result
+
+        store.db.execute = delayed_execute  # type: ignore[method-assign]
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                low_future = executor.submit(low_write)
+
+                def commit_high():
+                    assert low_selected.wait(10)
+                    try:
+                        return high_write()
+                    finally:
+                        high_committed.set()
+
+                high_future = executor.submit(commit_high)
+                high_future.result(timeout=15)
+                low_future.result(timeout=15)
+        finally:
+            store.db.execute = original_execute  # type: ignore[method-assign]
+
+    force_low_write_after_high_commit(
+        low,
+        select_marker="SELECT * FROM sync_device_adapter_cursors",
+        low_write=lambda: low.update_device_cursor(
+            SyncDeviceCursor(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=2,
+                last_pulled_sequence=10,
+                max_delivered_sequence=10,
+            )
+        ),
+        high_write=lambda: high.update_device_cursor(
+            SyncDeviceCursor(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=2,
+                last_pulled_sequence=20,
+                max_delivered_sequence=20,
+            )
+        ),
+    )
+    cursor = setup.get_device_cursor(
+        "dataset-1", "device-1", "notes.note", adapter_version=2
+    )
+    assert cursor is not None and cursor.last_pulled_sequence == 20
+    assert cursor.max_delivered_sequence == 20
+
+    force_low_write_after_high_commit(
+        low,
+        select_marker="SELECT * FROM sync_device_adapter_domain_acks",
+        low_write=lambda: low.upsert_device_domain_ack(
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=2,
+                through_server_sequence=10,
+                applied_at="2026-05-23T18:29:00+00:00",
+            )
+        ),
+        high_write=lambda: high.upsert_device_domain_ack(
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=2,
+                through_server_sequence=20,
+                applied_at="2026-05-23T18:30:00+00:00",
+            )
+        ),
+    )
+    ack = setup.get_device_domain_ack(
+        "dataset-1", "device-1", "notes.note", adapter_version=2
+    )
+    assert ack is not None and ack.through_server_sequence == 20
+
+    force_low_write_after_high_commit(
+        low,
+        select_marker="SELECT * FROM sync_device_adapter_cursors",
+        low_write=lambda: low.update_device_cursor(
+            SyncDeviceCursor(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=1,
+                last_pulled_sequence=30,
+                max_delivered_sequence=30,
+            )
+        ),
+        high_write=lambda: high.update_device_cursor(
+            SyncDeviceCursor(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=1,
+                last_pulled_sequence=40,
+                max_delivered_sequence=40,
+            )
+        ),
+    )
+    cursor = setup.get_device_cursor(
+        "dataset-1", "device-1", "notes.note", adapter_version=1
+    )
+    legacy_cursor = setup.db.execute(
+        "SELECT last_pulled_sequence FROM sync_device_cursors "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    ).rows[0]
+    assert cursor is not None and cursor.last_pulled_sequence == 40
+    assert cursor.max_delivered_sequence == 40
+    assert legacy_cursor["last_pulled_sequence"] == 40
+
+    force_low_write_after_high_commit(
+        low,
+        select_marker="SELECT * FROM sync_device_adapter_domain_acks",
+        low_write=lambda: low.upsert_device_domain_ack(
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=1,
+                through_server_sequence=30,
+                applied_at="2026-05-23T18:31:00+00:00",
+            )
+        ),
+        high_write=lambda: high.upsert_device_domain_ack(
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=1,
+                through_server_sequence=40,
+                applied_at="2026-05-23T18:32:00+00:00",
+            )
+        ),
+    )
+    ack = setup.get_device_domain_ack(
+        "dataset-1", "device-1", "notes.note", adapter_version=1
+    )
+    legacy_ack = setup.db.execute(
+        "SELECT through_server_sequence FROM sync_device_domain_acks "
+        "WHERE dataset_id = ? AND device_id = ? AND domain = ?",
+        ("dataset-1", "device-1", "notes.note"),
+    ).rows[0]
+    assert ack is not None and ack.through_server_sequence == 40
+    assert legacy_ack["through_server_sequence"] == 40
+
+    for backend in backends:
+        backend.get_pool().close_all()
+
+
+def test_adapter_cursor_and_version_ack_upserts_apply_monotonic_max_in_database() -> None:
+    cursor_source = " ".join(inspect.getsource(SyncDatabase.update_device_cursor).split())
+    ack_source = " ".join(inspect.getsource(SyncDatabase.upsert_device_domain_ack).split())
+
+    assert (
+        "last_pulled_sequence = CASE WHEN excluded.last_pulled_sequence > "
+        "sync_device_adapter_cursors.last_pulled_sequence"
+    ) in cursor_source
+    assert (
+        "last_pulled_sequence = CASE WHEN excluded.last_pulled_sequence > "
+        "sync_device_cursors.last_pulled_sequence"
+    ) in cursor_source
+    assert (
+        "through_server_sequence = CASE WHEN excluded.through_server_sequence > "
+        "sync_device_adapter_domain_acks.through_server_sequence"
+    ) in ack_source
+    assert (
+        "through_server_sequence = CASE WHEN excluded.through_server_sequence > "
+        "sync_device_domain_acks.through_server_sequence"
+    ) in ack_source
+
+
+def test_blob_id_ack_requires_authorized_immutable_digest_and_preserves_replacement_evidence(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.upsert_device(_device())
+    sync_store.enroll_dataset(_dataset())
+    digest_one = "sha256:" + "a" * 64
+    digest_two = "sha256:" + "b" * 64
+    wrong_owner_digest = "sha256:" + "c" * 64
+    for blob_id, digest in (("blob-1", digest_one), ("blob-2", digest_two)):
+        sync_store.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id=blob_id,
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                attachment_id="legacy-provenance",
+                payload_hash=digest,
+                content_type="application/octet-stream",
+                size_bytes=1,
+                storage_backend="local_fs",
+                storage_key=f"blobs/{blob_id}",
+            )
+        )
+    now = utcnow_iso()
+    sync_store.db.execute(
+        "INSERT INTO sync_blob_objects "
+        "(blob_id, dataset_id, owner_user_id, attachment_id, payload_hash, content_type, "
+        "size_bytes, encryption_policy, storage_backend, storage_key, status, ref_count, "
+        "metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "blob-wrong-owner",
+            "dataset-1",
+            "user-2",
+            "legacy-provenance",
+            wrong_owner_digest,
+            "application/octet-stream",
+            1,
+            "server_trusted_v1",
+            "local_fs",
+            "blobs/blob-wrong-owner",
+            "available",
+            1,
+            "{}",
+            now,
+            now,
+        ),
+    )
+
+    first = sync_store.upsert_device_blob_id_ack(
+        SyncDeviceBlobIdAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            blob_id="blob-1",
+            payload_hash=digest_one,
+            verified_at="2026-05-23T18:31:00+00:00",
+        )
+    )
+    second = sync_store.upsert_device_blob_id_ack(
+        SyncDeviceBlobIdAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            blob_id="blob-2",
+            payload_hash=digest_two,
+            verified_at="2026-05-23T18:32:00+00:00",
+        )
+    )
+    with pytest.raises(SyncStoreError, match="digest"):
+        sync_store.upsert_device_blob_id_ack(
+            SyncDeviceBlobIdAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                blob_id="blob-1",
+                payload_hash=digest_two,
+                verified_at="2026-05-23T18:33:00+00:00",
+            )
+        )
+    with pytest.raises(SyncStoreError, match="not_authorized"):
+        sync_store.upsert_device_blob_id_ack(
+            SyncDeviceBlobIdAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                blob_id="blob-wrong-owner",
+                payload_hash=wrong_owner_digest,
+                verified_at="2026-05-23T18:33:00+00:00",
+            )
+        )
+
+    summary = sync_store.list_device_acknowledgments("dataset-1", "device-1")
+    assert first.blob_id == "blob-1"
+    assert second.blob_id == "blob-2"
+    assert [(ack.blob_id, ack.payload_hash) for ack in summary.blob_id_acks] == [
+        ("blob-1", digest_one),
+        ("blob-2", digest_two),
+    ]
 
 def test_conflict_insert_list_and_resolve_lifecycle(sync_store: SyncV2Store):
     sync_store.enroll_dataset(_dataset())

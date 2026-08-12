@@ -110,6 +110,7 @@ from tldw_Server_API.app.core.Sync.v2.factory import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceDomainAckCreate,
     SyncEnvelopeCreate,
 )
@@ -186,6 +187,50 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        pull_token_errors = {
+            "sync_pull_token_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "The Sync pull token is invalid.",
+            ),
+            "sync_pull_token_too_large": (
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "The Sync pull token exceeds the server size limit.",
+            ),
+            "sync_pull_restart_required": (
+                status.HTTP_409_CONFLICT,
+                "Sync negotiation changed; restart the pull from a stable cursor.",
+            ),
+        }
+        for error_code, (status_code, message) in pull_token_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
+        blob_id_ack_errors = {
+            "sync_blob_id_ack_adapter_v2_required": (
+                status.HTTP_400_BAD_REQUEST,
+                "Blob-ID acknowledgment requires negotiated attachment adapter v2.",
+            ),
+            "sync_blob_id_ack_not_authorized": (
+                status.HTTP_404_NOT_FOUND,
+                "Requested Sync blob was not found or is not accessible.",
+            ),
+            "sync_blob_id_ack_digest_mismatch": (
+                status.HTTP_400_BAD_REQUEST,
+                "Blob-ID acknowledgment digest does not match immutable blob metadata.",
+            ),
+            "sync_blob_id_ack_digest_immutable": (
+                status.HTTP_409_CONFLICT,
+                "Stored Blob-ID acknowledgment digest is immutable.",
+            ),
+        }
+        for error_code, (status_code, message) in blob_id_ack_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
         if "reserved device identifier" in lowered:
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -850,6 +895,7 @@ def acknowledge_sync_v2_device_state(
                     dataset_id=request.dataset_id,
                     device_id=request.device_id,
                     domain=ack.domain,
+                    adapter_version=ack.adapter_version,
                     through_server_sequence=ack.through_server_sequence,
                     applied_at=ack.applied_at,
                     idempotency_key=ack.idempotency_key,
@@ -866,6 +912,17 @@ def acknowledge_sync_v2_device_state(
                     idempotency_key=ack.idempotency_key,
                 )
                 for ack in request.blob_acks
+            ],
+            blob_id_acks=[
+                SyncDeviceBlobIdAckCreate(
+                    dataset_id=request.dataset_id,
+                    device_id=request.device_id,
+                    blob_id=ack.blob_id,
+                    payload_hash=ack.payload_hash,
+                    verified_at=ack.verified_at,
+                    idempotency_key=ack.idempotency_key,
+                )
+                for ack in request.blob_id_acks
             ],
         )
     except Exception as exc:

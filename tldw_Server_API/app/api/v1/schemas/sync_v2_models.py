@@ -478,6 +478,7 @@ class SyncDeviceDomainAckRequest(BaseModel):
     domain: SyncDomain
     through_server_sequence: int = Field(..., ge=0)
     applied_at: str
+    adapter_version: int = Field(1, ge=1)
     idempotency_key: str | None = None
 
 
@@ -495,6 +496,20 @@ class SyncDeviceBlobAckRequest(BaseModel):
         return _validate_sha256_hash(value)
 
 
+class SyncDeviceBlobIdAckRequest(BaseModel):
+    """Immutable blob-ID verification evidence for adapter-v2 flows."""
+
+    blob_id: str = Field(..., min_length=1)
+    payload_hash: str
+    verified_at: str
+    idempotency_key: str | None = None
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
 class SyncDeviceAcknowledgmentsRequest(BaseModel):
     """Batch of domain/blob acknowledgments for one dataset/device."""
 
@@ -502,6 +517,10 @@ class SyncDeviceAcknowledgmentsRequest(BaseModel):
     device_id: str = Field(..., min_length=1)
     domain_acks: list[SyncDeviceDomainAckRequest] = Field(default_factory=list)
     blob_acks: list[SyncDeviceBlobAckRequest] = Field(default_factory=list)
+    blob_id_acks: list[SyncDeviceBlobIdAckRequest] = Field(
+        default_factory=list,
+        max_length=800,
+    )
 
 
 class SyncDeviceDomainAckResponse(BaseModel):
@@ -513,6 +532,7 @@ class SyncDeviceDomainAckResponse(BaseModel):
     through_server_sequence: int = Field(..., ge=0)
     applied_at: str
     updated_at: str
+    adapter_version: int = Field(1, ge=1)
     idempotency_key: str | None = None
 
 
@@ -528,6 +548,18 @@ class SyncDeviceBlobAckResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class SyncDeviceBlobIdAckResponse(BaseModel):
+    """Stored immutable blob-ID verification evidence."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
 class SyncDeviceAcknowledgmentsResponse(BaseModel):
     """Stored acknowledgment summary for one dataset/device pair."""
 
@@ -535,6 +567,8 @@ class SyncDeviceAcknowledgmentsResponse(BaseModel):
     device_id: str
     domain_acks: dict[SyncDomain, SyncDeviceDomainAckResponse] = Field(default_factory=dict)
     blob_acks: list[SyncDeviceBlobAckResponse] = Field(default_factory=list)
+    version_acks: list[SyncDeviceDomainAckResponse] = Field(default_factory=list)
+    blob_id_acks: list[SyncDeviceBlobIdAckResponse] = Field(default_factory=list)
 
 
 class SyncBackgroundPolicyPatchRequest(BaseModel):

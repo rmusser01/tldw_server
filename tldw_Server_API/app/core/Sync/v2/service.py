@@ -2,9 +2,12 @@ from __future__ import annotations
 
 """Business service for Sync v2 protocol operations."""
 
+import base64
 import hashlib
+import hmac
 import inspect
 import json
+import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -48,6 +51,7 @@ from .models import (
     EncryptionPolicy,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncAttachmentRevisionBinding,
     SyncBackgroundDomainStatus,
     SyncBackgroundLease,
     SyncBackgroundLeaseCreate,
@@ -70,6 +74,7 @@ from .models import (
     SyncDeviceAuthorization,
     SyncDeviceAuthorizationCreate,
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceCursor,
     SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
@@ -121,6 +126,12 @@ from .security import (
 )
 from .store import SyncV2Store
 
+SYNC_PULL_TOKEN_MAX_ENCODED_BYTES = 32_768
+SYNC_PULL_TOKEN_MAX_DECODED_BYTES = 24_576
+SYNC_PULL_TOKEN_MAX_STREAMS = 800
+SYNC_PULL_TOKEN_VERSION = 1
+SYNC_RETENTION_BINDING_PAGE_SIZE = 1000
+
 SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
 SYNC_KEY_RECOVERY_MAX_WRAPPED_KEY_BYTES = 64 * 1024
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
@@ -155,6 +166,15 @@ def _key_recovery_metadata_string(
 
 def _sha256_bytes(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _decode_pull_token_segment(segment: str) -> bytes:
+    padding = "=" * (-len(segment) % 4)
+    return base64.b64decode(
+        (segment + padding).encode("ascii"),
+        altchars=b"-_",
+        validate=True,
+    )
 
 
 def _device_supports_adapter_version(
@@ -409,6 +429,8 @@ class SyncV2Settings:
     restore_manifest_scan_limit: int = 10_000
     restore_preview_candidate_limit: int = 50_000
     restore_preview_action_limit: int = 10_000
+    pull_token_signing_secret: str | None = None
+    pull_token_ttl_seconds: int = 3_600
 
 
 @dataclass(frozen=True, slots=True)
@@ -1133,20 +1155,19 @@ class SyncV2Service:
         device_id: str,
         domain_acks: Sequence[SyncDeviceDomainAckCreate] = (),
         blob_acks: Sequence[SyncDeviceBlobAckCreate] = (),
+        blob_id_acks: Sequence[SyncDeviceBlobIdAckCreate] = (),
     ) -> SyncDeviceAcknowledgmentSummary:
         """Record a device's durable application/verification acknowledgments."""
 
         self._require_registered_device(user_id, device_id)
         self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-        for acknowledgment in domain_acks:
-            if acknowledgment.dataset_id != dataset_id or acknowledgment.device_id != device_id:
-                raise SyncStoreError("Sync acknowledgment device or dataset does not match request")
-            self.store.upsert_device_domain_ack(acknowledgment)
-        for acknowledgment in blob_acks:
-            if acknowledgment.dataset_id != dataset_id or acknowledgment.device_id != device_id:
-                raise SyncStoreError("Sync acknowledgment device or dataset does not match request")
-            self.store.upsert_device_blob_ack(acknowledgment)
-        return self.store.list_device_acknowledgments(dataset_id, device_id)
+        return self.store.acknowledge_device_state_atomic(
+            dataset_id,
+            device_id,
+            domain_acks=domain_acks,
+            blob_acks=blob_acks,
+            blob_id_acks=blob_id_acks,
+        )
 
     def get_background_policy(
         self,
@@ -1454,11 +1475,14 @@ class SyncV2Service:
                 if candidate.candidate_type in {"envelope_compaction", "tombstone_prune"}
             ],
         )
-        blob_gc = self._apply_retention_blob_gc(
-            dataset_id=dataset_id,
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        blob_gc, revalidated_blob_blocked = self._apply_retention_blob_gc(
+            dataset=dataset,
             candidates=[
                 candidate for candidate in selected if candidate.candidate_type == "blob_gc"
             ],
+            minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+            offline_restore_window_seconds=offline_restore_window_seconds,
         )
         applied_count = sum(
             int(item["candidate_count"]) for item in domain_compactions
@@ -1470,8 +1494,16 @@ class SyncV2Service:
             evaluated_at=self.clock(),
             candidate_count=dry_run.candidate_count,
             applied_count=applied_count,
-            blocked_count=0,
-            skipped_count=dry_run.candidate_count - len(selected),
+            blocked_count=len(revalidated_blob_blocked),
+            skipped_count=(
+                dry_run.candidate_count - len(selected) + len(revalidated_blob_blocked)
+            ),
+            blockers=(
+                ["retention_revalidation_blocked"]
+                if revalidated_blob_blocked
+                else []
+            ),
+            blocker_counts=_retention_blocker_counts(revalidated_blob_blocked),
             domain_compactions=domain_compactions,
             blob_gc=blob_gc,
         )
@@ -1550,6 +1582,7 @@ class SyncV2Service:
             unacknowledged = self._retention_unacknowledged_devices(
                 dataset_id=dataset_id,
                 domain=envelope.domain,
+                adapter_version=envelope.adapter_version,
                 server_sequence=envelope.server_sequence,
                 active_devices=active_devices,
             )
@@ -1573,13 +1606,16 @@ class SyncV2Service:
                 )
             )
 
-        if "attachment.ref" in selected_domains:
+        remaining_budget = scan_limit - len(envelopes)
+        if "attachment.ref" in selected_domains and remaining_budget > 0:
             candidates.extend(
                 self._retention_blob_candidates(
                     dataset=dataset,
                     active_devices=active_devices,
                     audit_mode=audit_mode,
                     restore_window_blocked=restore_window_blocked,
+                    minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                    limit=remaining_budget,
                 )
             )
 
@@ -2013,6 +2049,16 @@ class SyncV2Service:
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
 
         selected_domains = self._selected_pull_domains(dataset, device, domains)
+        streams = self._pull_adapter_streams(device, selected_domains)
+        if any(adapter_version != 1 for _domain, adapter_version in streams):
+            return self._pull_versioned(
+                dataset=dataset,
+                device=device,
+                cursor=cursor,
+                streams=streams,
+                page_size=page_size,
+                include_own_changes=include_own_changes,
+            )
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
         raw_envelopes, visible = self._scan_pull_page(
@@ -2022,6 +2068,7 @@ class SyncV2Service:
             domains=selected_domains,
             page_limit=page_limit,
             include_own_changes=include_own_changes,
+            adapter_versions=[1],
         )
 
         page = visible[:page_limit]
@@ -2034,8 +2081,14 @@ class SyncV2Service:
                 (envelope.server_sequence for envelope in raw_envelopes),
                 default=since_sequence,
             )
-        if cursor is None and raw_envelopes:
-            self._update_cursors(dataset_id, device_id, selected_domains, next_sequence)
+        if raw_envelopes:
+            self._update_cursors(
+                dataset_id,
+                device_id,
+                selected_domains,
+                next_sequence if cursor is None else None,
+                delivered=page,
+            )
         return SyncPullResult(
             dataset_id=dataset_id,
             encryption_policy=dataset.encryption_policy,
@@ -4103,16 +4156,56 @@ class SyncV2Service:
     def _apply_retention_blob_gc(
         self,
         *,
-        dataset_id: str,
+        dataset: SyncDataset,
         candidates: Sequence[SyncRetentionCandidate],
-    ) -> list[dict[str, object]]:
+        minimum_tombstone_age_seconds: int,
+        offline_restore_window_seconds: int,
+    ) -> tuple[list[dict[str, object]], list[SyncRetentionCandidate]]:
         applied: list[dict[str, object]] = []
+        blocked: list[SyncRetentionCandidate] = []
         for candidate in candidates:
             if candidate.blob_id is None:
                 continue
-            blob = self.store.mark_blob_object_deleted(dataset_id, candidate.blob_id)
-            if blob is None or blob.status != "deleted":
-                continue
+            with self.store.retention_guard(
+                dataset.dataset_id,
+                candidate.blob_id,
+            ) as guarded:
+                current_dataset = guarded.get_dataset(
+                    dataset.dataset_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                blob = guarded.lock_blob_object_for_retention(
+                    dataset.dataset_id,
+                    candidate.blob_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                if current_dataset is None or blob is None:
+                    continue
+                active_devices = self._retention_active_devices(
+                    current_dataset,
+                    store=guarded,
+                )
+                revalidated = self._retention_blob_candidate(
+                    dataset=current_dataset,
+                    blob=blob,
+                    active_devices=active_devices,
+                    audit_mode=False,
+                    restore_window_blocked=self._retention_restore_window_active(
+                        active_devices,
+                        offline_restore_window_seconds,
+                    ),
+                    minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                    store=guarded,
+                )
+                if revalidated.blockers:
+                    blocked.append(revalidated)
+                    continue
+                blob = guarded.mark_blob_object_deleted(
+                    dataset.dataset_id,
+                    candidate.blob_id,
+                )
+                if blob is None or blob.status != "deleted":
+                    continue
             applied.append(
                 {
                     "attachment_id": blob.attachment_id,
@@ -4121,10 +4214,15 @@ class SyncV2Service:
                     "size_bytes": blob.size_bytes,
                 }
             )
-        return applied
+        return applied, blocked
 
-    def _retention_active_devices(self, dataset: SyncDataset) -> list[SyncDevice]:
-        devices = self.store.list_devices_for_user(dataset.owner_user_id)
+    def _retention_active_devices(
+        self,
+        dataset: SyncDataset,
+        *,
+        store: SyncV2Store | None = None,
+    ) -> list[SyncDevice]:
+        devices = (store or self.store).list_devices_for_user(dataset.owner_user_id)
         return sorted(
             [
                 device
@@ -4186,13 +4284,26 @@ class SyncV2Service:
         *,
         dataset_id: str,
         domain: SyncDomain,
+        adapter_version: int,
         server_sequence: int,
         active_devices: Sequence[SyncDevice],
+        store: SyncV2Store | None = None,
     ) -> list[str]:
+        active_store = store or self.store
         unacknowledged: list[str] = []
         for device in active_devices:
-            summary = self.store.list_device_acknowledgments(dataset_id, device.device_id)
-            ack = summary.domain_acks.get(domain)
+            if not _device_supports_adapter_version(
+                device,
+                domain,
+                adapter_version,
+            ):
+                continue
+            ack = active_store.get_device_domain_ack(
+                dataset_id,
+                device.device_id,
+                domain,
+                adapter_version=adapter_version,
+            )
             if ack is None or ack.through_server_sequence < server_sequence:
                 unacknowledged.append(device.device_id)
         return unacknowledged
@@ -4204,58 +4315,319 @@ class SyncV2Service:
         active_devices: Sequence[SyncDevice],
         audit_mode: bool,
         restore_window_blocked: bool,
+        minimum_tombstone_age_seconds: int,
+        limit: int,
+        store: SyncV2Store | None = None,
     ) -> list[SyncRetentionCandidate]:
+        active_store = store or self.store
         candidates: list[SyncRetentionCandidate] = []
-        for blob in self.store.list_blob_objects_for_dataset(dataset.dataset_id):
-            blockers: list[str] = []
-            if audit_mode:
-                blockers.append("retention_audit_mode")
-            if restore_window_blocked:
-                blockers.append("retention_restore_window_active")
-            if self._retention_workspace_ack_scope_blocked(dataset):
-                blockers.append("retention_workspace_ack_scope_unknown")
-            state = self.store.get_object_state(dataset.dataset_id, "attachment.ref", blob.attachment_id)
+        for blob in active_store.list_blob_objects_for_dataset_page(
+            dataset.dataset_id,
+            limit=limit,
+        ):
+            candidates.append(
+                self._retention_blob_candidate(
+                    dataset=dataset,
+                    blob=blob,
+                    active_devices=active_devices,
+                    audit_mode=audit_mode,
+                    restore_window_blocked=restore_window_blocked,
+                    minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                    store=active_store,
+                )
+            )
+        return candidates
+
+    def _retention_blob_candidate(
+        self,
+        *,
+        dataset: SyncDataset,
+        blob: SyncBlobObject,
+        active_devices: Sequence[SyncDevice],
+        audit_mode: bool,
+        restore_window_blocked: bool,
+        minimum_tombstone_age_seconds: int,
+        store: SyncV2Store | None = None,
+    ) -> SyncRetentionCandidate:
+        active_store = store or self.store
+        blockers: list[str] = []
+        if audit_mode:
+            blockers.append("retention_audit_mode")
+        if restore_window_blocked:
+            blockers.append("retention_restore_window_active")
+        if self._retention_workspace_ack_scope_blocked(dataset):
+            blockers.append("retention_workspace_ack_scope_unknown")
+        adapter_version, binding_cursor, binding_valid, binding_protected = (
+            self._retention_blob_adapter_version(
+                dataset=dataset,
+                blob=blob,
+                store=active_store,
+            )
+        )
+        if self._retention_blob_tombstone_window_active(
+            dataset=dataset,
+            blob=blob,
+            adapter_version=adapter_version,
+            window_seconds=minimum_tombstone_age_seconds,
+            store=active_store,
+        ):
+            blockers.append("retention_tombstone_window_active")
+        if adapter_version == 2:
+            if binding_protected:
+                blockers.append("retention_active_blob_reference")
+        else:
+            state = active_store.get_object_state(
+                dataset.dataset_id,
+                "attachment.ref",
+                blob.attachment_id,
+            )
             if (
                 (state is not None and not state.deleted)
                 or self._retention_attachment_ref_active(
                     dataset_id=dataset.dataset_id,
                     attachment_id=blob.attachment_id,
+                    store=active_store,
                 )
             ):
                 blockers.append("retention_active_blob_reference")
-            unacknowledged = self._retention_blob_unacknowledged_devices(
-                dataset_id=dataset.dataset_id,
-                attachment_id=blob.attachment_id,
-                payload_hash=blob.payload_hash,
-                active_devices=active_devices,
-            )
-            if unacknowledged:
-                blockers.append("retention_blob_unverified_by_device")
-            candidates.append(
-                SyncRetentionCandidate(
-                    candidate_type="blob_gc",
-                    dataset_id=dataset.dataset_id,
-                    domain="attachment.ref",
-                    object_id=blob.attachment_id,
-                    blob_id=blob.blob_id,
-                    attachment_id=blob.attachment_id,
-                    payload_hash=blob.payload_hash,
-                    size_bytes=blob.size_bytes,
-                    blockers=blockers,
-                    required_device_ids=[device.device_id for device in active_devices],
-                    unacknowledged_device_ids=unacknowledged,
-                    reason="server blob retained for attachment restore",
+        required_devices = (
+            [
+                device
+                for device in active_devices
+                if _device_supports_adapter_version(
+                    device,
+                    "attachment.ref",
+                    adapter_version,
                 )
+            ]
+            if adapter_version == 2
+            else list(active_devices)
+        )
+        if not binding_valid:
+            blockers.append("retention_blob_binding_invalid")
+        ref_unacknowledged = (
+            self._retention_unacknowledged_devices(
+                dataset_id=dataset.dataset_id,
+                domain="attachment.ref",
+                adapter_version=2,
+                server_sequence=binding_cursor,
+                active_devices=required_devices,
+                store=active_store,
             )
-        return candidates
+            if adapter_version == 2
+            and binding_valid
+            and binding_cursor is not None
+            else []
+        )
+        if ref_unacknowledged:
+            blockers.append("retention_blob_ref_unacknowledged")
+        blob_unacknowledged = self._retention_blob_unacknowledged_devices(
+            dataset_id=dataset.dataset_id,
+            attachment_id=blob.attachment_id,
+            blob_id=blob.blob_id,
+            payload_hash=blob.payload_hash,
+            adapter_version=adapter_version,
+            active_devices=required_devices,
+            store=active_store,
+        )
+        if blob_unacknowledged:
+            blockers.append("retention_blob_unverified_by_device")
+        return SyncRetentionCandidate(
+            candidate_type="blob_gc",
+            dataset_id=dataset.dataset_id,
+            domain="attachment.ref",
+            object_id=blob.attachment_id,
+            blob_id=blob.blob_id,
+            attachment_id=blob.attachment_id,
+            payload_hash=blob.payload_hash,
+            size_bytes=blob.size_bytes,
+            blockers=blockers,
+            required_device_ids=[device.device_id for device in required_devices],
+            unacknowledged_device_ids=sorted(
+                set(ref_unacknowledged) | set(blob_unacknowledged)
+            ),
+            reason="server blob retained for attachment restore",
+        )
+
+    def _retention_blob_adapter_version(
+        self,
+        *,
+        dataset: SyncDataset,
+        blob: SyncBlobObject,
+        store: SyncV2Store | None = None,
+    ) -> tuple[int, int | None, bool, bool]:
+        active_store = store or self.store
+        after_cursor = 0
+        binding_cursor: int | None = None
+        binding_valid = True
+        binding_protected = False
+        found_unreleased = False
+        while True:
+            bindings = active_store.list_attachment_revision_bindings_for_blob(
+                dataset.dataset_id,
+                blob.blob_id,
+                owner_user_id=dataset.owner_user_id,
+                after_establishing_server_cursor=after_cursor,
+                limit=SYNC_RETENTION_BINDING_PAGE_SIZE,
+            )
+            if not bindings:
+                break
+            found_unreleased = True
+            for binding in bindings:
+                binding_cursor = max(
+                    binding_cursor or 0,
+                    binding.establishing_server_cursor,
+                )
+                binding_valid = binding_valid and self._retention_blob_binding_valid(
+                    dataset=dataset,
+                    blob=blob,
+                    binding=binding,
+                    store=active_store,
+                )
+                binding_protected = (
+                    binding_protected
+                    or self._retention_v2_binding_protected(
+                        dataset_id=dataset.dataset_id,
+                        binding=binding,
+                        store=active_store,
+                    )
+                )
+            after_cursor = bindings[-1].establishing_server_cursor
+            if len(bindings) < SYNC_RETENTION_BINDING_PAGE_SIZE:
+                break
+        if found_unreleased:
+            return 2, binding_cursor, binding_valid, binding_protected
+
+        binding = active_store.get_attachment_revision_binding_for_blob(
+            dataset.dataset_id,
+            blob.blob_id,
+            owner_user_id=dataset.owner_user_id,
+        )
+        if binding is not None:
+            return (
+                2,
+                None,
+                self._retention_blob_binding_valid(
+                    dataset=dataset,
+                    blob=blob,
+                    binding=binding,
+                    store=active_store,
+                ),
+                False,
+            )
+
+        has_v2_history = active_store.has_attachment_ref_v2_history(
+            dataset.dataset_id,
+            blob.attachment_id,
+            owner_user_id=dataset.owner_user_id,
+        )
+        return (2, None, False, False) if has_v2_history else (1, None, True, False)
+
+    def _retention_blob_binding_valid(
+        self,
+        *,
+        dataset: SyncDataset,
+        blob: SyncBlobObject,
+        binding: SyncAttachmentRevisionBinding,
+        store: SyncV2Store | None = None,
+    ) -> bool:
+        envelope = (store or self.store).get_envelope_by_server_cursor(
+            binding.establishing_server_cursor
+        )
+        return (
+            envelope is not None
+            and envelope.dataset_id == dataset.dataset_id
+            and envelope.domain == "attachment.ref"
+            and envelope.adapter_version == 2
+            and envelope.object_id == binding.attachment_id
+            and envelope.object_revision == binding.attachment_revision
+            and binding.resolved_blob_id == blob.blob_id
+            and binding.blob_hash == blob.payload_hash
+            and binding.size_bytes == blob.size_bytes
+        )
+
+    def _retention_blob_tombstone_window_active(
+        self,
+        *,
+        dataset: SyncDataset,
+        blob: SyncBlobObject,
+        adapter_version: int,
+        window_seconds: int,
+        store: SyncV2Store | None = None,
+    ) -> bool:
+        if window_seconds <= 0:
+            return False
+        active_store = store or self.store
+        attachment_ids: set[str] = set()
+        if adapter_version == 2:
+            after_cursor = 0
+            while True:
+                bindings = active_store.list_attachment_revision_bindings_for_blob(
+                    dataset.dataset_id,
+                    blob.blob_id,
+                    owner_user_id=dataset.owner_user_id,
+                    after_establishing_server_cursor=after_cursor,
+                    limit=SYNC_RETENTION_BINDING_PAGE_SIZE,
+                )
+                if not bindings:
+                    break
+                attachment_ids.update(binding.attachment_id for binding in bindings)
+                after_cursor = bindings[-1].establishing_server_cursor
+                if len(bindings) < SYNC_RETENTION_BINDING_PAGE_SIZE:
+                    break
+        else:
+            attachment_ids.add(blob.attachment_id)
+        for attachment_id in attachment_ids:
+            head = active_store.get_current_head(
+                dataset.dataset_id,
+                "attachment.ref",
+                attachment_id,
+            )
+            if head is not None and self._retention_window_active(
+                head.server_timestamp,
+                window_seconds,
+            ):
+                return True
+        return False
+
+    def _retention_v2_binding_protected(
+        self,
+        *,
+        dataset_id: str,
+        binding: SyncAttachmentRevisionBinding,
+        store: SyncV2Store | None = None,
+    ) -> bool:
+        active_store = store or self.store
+        state = active_store.get_object_state(
+            dataset_id,
+            "attachment.ref",
+            binding.attachment_id,
+        )
+        head = active_store.get_current_head(
+            dataset_id,
+            "attachment.ref",
+            binding.attachment_id,
+        )
+        if head is None:
+            return True
+        if (
+            head.dataset_id != dataset_id
+            or head.domain != "attachment.ref"
+            or head.object_id != binding.attachment_id
+        ):
+            return True
+        return (state is not None and not state.deleted) or (
+            head.operation != "tombstone" and not head.deleted
+        )
 
     def _retention_attachment_ref_active(
         self,
         *,
         dataset_id: str,
         attachment_id: str,
+        store: SyncV2Store | None = None,
     ) -> bool:
-        envelopes = self.store.list_envelopes_for_entity(
+        envelopes = (store or self.store).list_envelopes_for_entity(
             dataset_id,
             "attachment.ref",
             entity_id=attachment_id,
@@ -4271,16 +4643,31 @@ class SyncV2Service:
         *,
         dataset_id: str,
         attachment_id: str,
+        blob_id: str,
         payload_hash: str,
+        adapter_version: int,
         active_devices: Sequence[SyncDevice],
+        store: SyncV2Store | None = None,
     ) -> list[str]:
+        active_store = store or self.store
         unacknowledged: list[str] = []
         for device in active_devices:
-            summary = self.store.list_device_acknowledgments(dataset_id, device.device_id)
-            if not any(
-                ack.attachment_id == attachment_id and ack.payload_hash == payload_hash
-                for ack in summary.blob_acks
-            ):
+            summary = active_store.list_device_acknowledgments(
+                dataset_id,
+                device.device_id,
+            )
+            acknowledged = (
+                any(
+                    ack.blob_id == blob_id and ack.payload_hash == payload_hash
+                    for ack in summary.blob_id_acks
+                )
+                if adapter_version == 2
+                else any(
+                    ack.attachment_id == attachment_id and ack.payload_hash == payload_hash
+                    for ack in summary.blob_acks
+                )
+            )
+            if not acknowledged:
                 unacknowledged.append(device.device_id)
         return unacknowledged
 
@@ -4562,6 +4949,303 @@ class SyncV2Service:
             cursors.append(stored.last_pulled_sequence if stored is not None else 0)
         return min(cursors, default=0)
 
+    def _pull_adapter_streams(
+        self,
+        device: SyncDevice,
+        domains: Sequence[SyncDomain],
+    ) -> list[tuple[SyncDomain, int]]:
+        version_set = self._pull_version_set(device)
+        streams = [
+            (domain, version)
+            for domain in domains
+            for version in version_set.get(domain, ())
+        ]
+        if domains and not streams:
+            raise SyncStoreError("sync_device_adapter_version_not_supported")
+        if len(streams) > SYNC_PULL_TOKEN_MAX_STREAMS:
+            raise SyncStoreError("sync_pull_token_too_large")
+        return streams
+
+    def _pull_version_set(self, device: SyncDevice) -> dict[SyncDomain, list[int]]:
+        requested = _device_requested_domains(device)
+        try:
+            advertised = normalize_supported_adapter_versions(
+                device.capabilities.get("supported_adapter_versions"),
+                requested_domains=requested,
+            )
+        except ValueError as exc:
+            raise SyncStoreError("Sync device adapter version capabilities are invalid") from exc
+        return {
+            domain: [
+                version
+                for version in versions
+                if self.adapters.has_domain(domain)
+                and self.adapters.supports_version(domain, version)
+            ]
+            for domain, versions in advertised.items()
+        }
+
+    def _pull_versioned(
+        self,
+        *,
+        dataset: SyncDataset,
+        device: SyncDevice,
+        cursor: str | int | None,
+        streams: Sequence[tuple[SyncDomain, int]],
+        page_size: int | None,
+        include_own_changes: bool,
+    ) -> SyncPullResult:
+        version_set = self._pull_version_set(device)
+        if cursor is None:
+            watermarks: dict[tuple[SyncDomain, int], int] = {}
+            for domain, adapter_version in streams:
+                stored = self.store.get_device_cursor(
+                    dataset.dataset_id,
+                    device.device_id,
+                    domain,
+                    adapter_version=adapter_version,
+                )
+                watermarks[(domain, adapter_version)] = (
+                    stored.last_pulled_sequence if stored is not None else 0
+                )
+        else:
+            if not isinstance(cursor, str):
+                raise SyncStoreError("sync_pull_token_invalid")
+            watermarks = self._decode_pull_token(
+                cursor,
+                dataset_id=dataset.dataset_id,
+                device_id=device.device_id,
+                version_set=version_set,
+                streams=streams,
+            )
+
+        page_limit = min(
+            page_size or self.settings.max_pull_page_size,
+            self.settings.max_pull_page_size,
+        )
+        raw_envelopes, visible = self._scan_versioned_pull_page(
+            dataset_id=dataset.dataset_id,
+            device_id=device.device_id,
+            watermarks=watermarks,
+            page_limit=page_limit,
+            include_own_changes=include_own_changes,
+        )
+        page = visible[:page_limit]
+        has_visible_lookahead = len(visible) > page_limit
+        has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
+        boundary = (
+            page[-1].server_sequence
+            if has_visible_lookahead and page
+            else max(
+                (envelope.server_sequence for envelope in raw_envelopes),
+                default=0,
+            )
+        )
+        next_watermarks = dict(watermarks)
+        for envelope in raw_envelopes:
+            if envelope.server_sequence > boundary:
+                continue
+            key = (envelope.domain, envelope.adapter_version)
+            next_watermarks[key] = max(
+                next_watermarks.get(key, 0),
+                envelope.server_sequence,
+            )
+        delivered = {
+            stream: max(
+                (
+                    envelope.server_sequence
+                    for envelope in page
+                    if (envelope.domain, envelope.adapter_version) == stream
+                ),
+                default=0,
+            )
+            for stream in streams
+        }
+        for domain, adapter_version in streams:
+            self.store.update_device_cursor(
+                SyncDeviceCursor(
+                    dataset_id=dataset.dataset_id,
+                    device_id=device.device_id,
+                    domain=domain,
+                    adapter_version=adapter_version,
+                    last_pulled_sequence=next_watermarks[(domain, adapter_version)],
+                    max_delivered_sequence=delivered[(domain, adapter_version)],
+                )
+            )
+        return SyncPullResult(
+            dataset_id=dataset.dataset_id,
+            encryption_policy=dataset.encryption_policy,
+            envelopes=page,
+            next_cursor=self._encode_pull_token(
+                dataset_id=dataset.dataset_id,
+                device_id=device.device_id,
+                version_set=version_set,
+                watermarks=next_watermarks,
+            ),
+            has_more=has_more,
+        )
+
+    def _scan_versioned_pull_page(
+        self,
+        *,
+        dataset_id: str,
+        device_id: str,
+        watermarks: Mapping[tuple[SyncDomain, int], int],
+        page_limit: int,
+        include_own_changes: bool,
+    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
+        candidates: dict[int, SyncEnvelope] = {}
+        for (domain, adapter_version), watermark in watermarks.items():
+            for envelope in self.store.list_envelopes_after(
+                dataset_id,
+                watermark,
+                limit=page_limit + 1,
+                domains=[domain],
+                adapter_versions=[adapter_version],
+                status="accepted",
+                exclude_device_id=None if include_own_changes else device_id,
+            ):
+                candidates[envelope.server_sequence] = envelope
+        raw = sorted(candidates.values(), key=lambda item: item.server_sequence)[
+            : page_limit + 1
+        ]
+        blocker = self.store.get_unresolved_materialization_conflict(dataset_id)
+        blocker_cursor = (
+            blocker.server_sequence
+            if blocker is not None
+            and blocker.conflict_type
+            != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+            else None
+        )
+        visible = [
+            envelope
+            for envelope in raw
+            if envelope.apply_status not in {"conflict", "superseded"}
+            and (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
+        ]
+        return raw, visible
+
+    def _pull_token_secret(self) -> bytes:
+        secret = (
+            self.settings.pull_token_signing_secret
+            or os.getenv("SYNC_V2_PULL_TOKEN_SIGNING_SECRET")
+            or ""
+        ).strip()
+        if not secret:
+            raise SyncStoreError("sync_pull_token_signing_unavailable")
+        return secret.encode("utf-8")
+
+    def _encode_pull_token(
+        self,
+        *,
+        dataset_id: str,
+        device_id: str,
+        version_set: Mapping[SyncDomain, Sequence[int]],
+        watermarks: Mapping[tuple[SyncDomain, int], int],
+    ) -> str:
+        now = _parse_sync_timestamp(self.clock()) or datetime.now(timezone.utc)
+        payload = {
+            "v": SYNC_PULL_TOKEN_VERSION,
+            "dataset_id": dataset_id,
+            "device_id": device_id,
+            "iat": int(now.timestamp()),
+            "exp": int(now.timestamp()) + self.settings.pull_token_ttl_seconds,
+            "vs": [
+                [domain, list(versions)]
+                for domain, versions in sorted(version_set.items())
+            ],
+            "wm": [
+                [domain, adapter_version, sequence]
+                for (domain, adapter_version), sequence in sorted(watermarks.items())
+            ],
+        }
+        raw = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+        if len(raw) > SYNC_PULL_TOKEN_MAX_DECODED_BYTES:
+            raise SyncStoreError("sync_pull_token_too_large")
+        payload_segment = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        signature = hmac.digest(self._pull_token_secret(), raw, "sha256")
+        signature_segment = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+        token = f"{payload_segment}.{signature_segment}"
+        if len(token) > SYNC_PULL_TOKEN_MAX_ENCODED_BYTES:
+            raise SyncStoreError("sync_pull_token_too_large")
+        return token
+
+    def _decode_pull_token(
+        self,
+        token: str,
+        *,
+        dataset_id: str,
+        device_id: str,
+        version_set: Mapping[SyncDomain, Sequence[int]],
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> dict[tuple[SyncDomain, int], int]:
+        try:
+            encoded = token.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise SyncStoreError("sync_pull_token_invalid") from exc
+        if len(encoded) > SYNC_PULL_TOKEN_MAX_ENCODED_BYTES:
+            raise SyncStoreError("sync_pull_token_too_large")
+        try:
+            payload_segment, signature_segment = token.split(".")
+            raw = _decode_pull_token_segment(payload_segment)
+            signature = _decode_pull_token_segment(signature_segment)
+        except (ValueError, TypeError) as exc:
+            raise SyncStoreError("sync_pull_token_invalid") from exc
+        if len(raw) > SYNC_PULL_TOKEN_MAX_DECODED_BYTES:
+            raise SyncStoreError("sync_pull_token_too_large")
+        expected_signature = hmac.digest(self._pull_token_secret(), raw, "sha256")
+        if not hmac.compare_digest(signature, expected_signature):
+            raise SyncStoreError("sync_pull_token_invalid")
+        try:
+            payload = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SyncStoreError("sync_pull_token_invalid") from exc
+        expected_version_set = [
+            [domain, list(versions)]
+            for domain, versions in sorted(version_set.items())
+        ]
+        if not isinstance(payload, dict) or payload.get("v") != SYNC_PULL_TOKEN_VERSION:
+            raise SyncStoreError("sync_pull_token_invalid")
+        if payload.get("dataset_id") != dataset_id or payload.get("device_id") != device_id:
+            raise SyncStoreError("sync_pull_token_invalid")
+        if payload.get("vs") != expected_version_set:
+            raise SyncStoreError("sync_pull_restart_required")
+        now = _parse_sync_timestamp(self.clock()) or datetime.now(timezone.utc)
+        exp = payload.get("exp")
+        if isinstance(exp, bool) or not isinstance(exp, int) or exp < int(now.timestamp()):
+            raise SyncStoreError("sync_pull_token_invalid")
+        raw_watermarks = payload.get("wm")
+        if not isinstance(raw_watermarks, list):
+            raise SyncStoreError("sync_pull_token_invalid")
+        if len(raw_watermarks) > SYNC_PULL_TOKEN_MAX_STREAMS:
+            raise SyncStoreError("sync_pull_token_too_large")
+        expected_streams = set(streams)
+        watermarks: dict[tuple[SyncDomain, int], int] = {}
+        for item in raw_watermarks:
+            if not isinstance(item, list) or len(item) != 3:
+                raise SyncStoreError("sync_pull_token_invalid")
+            domain, adapter_version, sequence = item
+            if (
+                not isinstance(domain, str)
+                or isinstance(adapter_version, bool)
+                or not isinstance(adapter_version, int)
+                or isinstance(sequence, bool)
+                or not isinstance(sequence, int)
+                or sequence < 0
+                or (domain, adapter_version) not in expected_streams
+                or (domain, adapter_version) in watermarks
+            ):
+                raise SyncStoreError("sync_pull_token_invalid")
+            watermarks[(domain, adapter_version)] = sequence
+        if set(watermarks) != expected_streams:
+            raise SyncStoreError("sync_pull_restart_required")
+        return watermarks
+
     def _parse_cursor(self, cursor: str | int | None) -> int:
         if cursor is None:
             return 0
@@ -4626,15 +5310,31 @@ class SyncV2Service:
         dataset_id: str,
         device_id: str,
         domains: Sequence[SyncDomain],
-        sequence: int,
+        sequence: int | None,
+        *,
+        delivered: Sequence[SyncEnvelope],
     ) -> None:
         for domain in domains:
+            delivered_sequence = max(
+                (
+                    envelope.server_sequence
+                    for envelope in delivered
+                    if envelope.domain == domain and envelope.adapter_version == 1
+                ),
+                default=0,
+            )
+            if sequence is None and delivered_sequence == 0:
+                continue
             self.store.update_device_cursor(
                 SyncDeviceCursor(
                     dataset_id=dataset_id,
                     device_id=device_id,
                     domain=domain,
-                    last_pulled_sequence=sequence,
+                    adapter_version=1,
+                    last_pulled_sequence=(
+                        delivered_sequence if sequence is None else sequence
+                    ),
+                    max_delivered_sequence=delivered_sequence,
                 )
             )
 
@@ -4647,12 +5347,14 @@ class SyncV2Service:
         domains: Sequence[SyncDomain],
         page_limit: int,
         include_own_changes: bool,
+        adapter_versions: Sequence[int] | None = None,
     ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
         raw = self.store.list_envelopes_after(
             dataset_id,
             since_sequence,
             limit=page_limit + 1,
             domains=domains,
+            adapter_versions=adapter_versions,
             status="accepted",
             exclude_device_id=None if include_own_changes else device_id,
         )

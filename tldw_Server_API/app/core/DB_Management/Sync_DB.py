@@ -64,6 +64,8 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceAuthorizationCreate,
     SyncDeviceBlobAck,
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAck,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceCursor,
     SyncDeviceDomainAck,
     SyncDeviceDomainAckCreate,
@@ -500,6 +502,8 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_owner
     ON sync_blob_objects(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_attachment
     ON sync_blob_objects(dataset_id, attachment_id);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_retention
+    ON sync_blob_objects(dataset_id, status, updated_at, blob_id);
 
 CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings (
     dataset_id TEXT NOT NULL,
@@ -542,6 +546,12 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
     ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
+    ON sync_attachment_revision_bindings(
+        dataset_id, resolved_blob_id, establishing_server_cursor,
+        attachment_id, attachment_revision
+    )
+    WHERE retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
     ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
@@ -603,6 +613,61 @@ CREATE TABLE IF NOT EXISTS sync_blob_chunks (
 CREATE INDEX IF NOT EXISTS idx_sync_blob_chunks_dataset
     ON sync_blob_chunks(dataset_id, upload_id);
 """
+
+SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID = "adapter_cursor_ack_blob_id_v1"
+# Stable, process-independent signed 64-bit key reserved for this Sync migration.
+SYNC_VERSIONED_DEVICE_STATE_MIGRATION_LOCK_KEY = 5_465_866_052_944_881_777
+
+SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sync_device_adapter_cursors (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    adapter_version INTEGER NOT NULL CHECK (adapter_version > 0),
+    last_pulled_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_pulled_sequence >= 0),
+    max_delivered_sequence INTEGER NOT NULL DEFAULT 0 CHECK (max_delivered_sequence >= 0),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(dataset_id, device_id, domain, adapter_version),
+    CHECK (max_delivered_sequence <= last_pulled_sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_adapter_cursors_device
+    ON sync_device_adapter_cursors(device_id, dataset_id);
+CREATE TABLE IF NOT EXISTS sync_device_adapter_domain_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    adapter_version INTEGER NOT NULL CHECK (adapter_version > 0),
+    through_server_sequence INTEGER NOT NULL DEFAULT 0 CHECK (through_server_sequence >= 0),
+    applied_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, domain, adapter_version)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_adapter_domain_acks_device
+    ON sync_device_adapter_domain_acks(device_id, dataset_id);
+CREATE TABLE IF NOT EXISTS sync_device_blob_id_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    blob_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, blob_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_blob_id_acks_device
+    ON sync_device_blob_id_acks(device_id, dataset_id);
+"""
+
+SYNC_VERSIONED_DEVICE_STATE_POSTGRES_SCHEMA = (
+    SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA
+    .replace("last_pulled_sequence INTEGER", "last_pulled_sequence BIGINT")
+    .replace("max_delivered_sequence INTEGER", "max_delivered_sequence BIGINT")
+    .replace("through_server_sequence INTEGER", "through_server_sequence BIGINT")
+    .replace("updated_at TEXT", "updated_at TIMESTAMPTZ")
+    .replace("applied_at TEXT", "applied_at TIMESTAMPTZ")
+    .replace("verified_at TEXT", "verified_at TIMESTAMPTZ")
+)
 
 SYNC_POSTGRES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_devices (
@@ -937,6 +1002,8 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_owner
     ON sync_blob_objects(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_attachment
     ON sync_blob_objects(dataset_id, attachment_id);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_retention
+    ON sync_blob_objects(dataset_id, status, updated_at, blob_id);
 
 CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings (
     dataset_id TEXT NOT NULL,
@@ -964,6 +1031,12 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
     ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
+    ON sync_attachment_revision_bindings(
+        dataset_id, resolved_blob_id, establishing_server_cursor,
+        attachment_id, attachment_revision
+    )
+    WHERE retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
     ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
@@ -1216,6 +1289,7 @@ def _device_domain_ack_from_row(row: dict[str, Any]) -> SyncDeviceDomainAck:
         through_server_sequence=int(row["through_server_sequence"]),
         applied_at=_timestamp_to_string(row.get("applied_at")) or "",
         updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+        adapter_version=int(row.get("adapter_version") or 1),
         idempotency_key=row.get("idempotency_key"),
     )
 
@@ -1225,6 +1299,18 @@ def _device_blob_ack_from_row(row: dict[str, Any]) -> SyncDeviceBlobAck:
         dataset_id=row["dataset_id"],
         device_id=row["device_id"],
         attachment_id=row["attachment_id"],
+        payload_hash=row["payload_hash"],
+        verified_at=_timestamp_to_string(row.get("verified_at")) or "",
+        updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+        idempotency_key=row.get("idempotency_key"),
+    )
+
+
+def _device_blob_id_ack_from_row(row: dict[str, Any]) -> SyncDeviceBlobIdAck:
+    return SyncDeviceBlobIdAck(
+        dataset_id=row["dataset_id"],
+        device_id=row["device_id"],
+        blob_id=row["blob_id"],
         payload_hash=row["payload_hash"],
         verified_at=_timestamp_to_string(row.get("verified_at")) or "",
         updated_at=_timestamp_to_string(row.get("updated_at")) or "",
@@ -1387,6 +1473,8 @@ def _cursor_from_row(row: dict[str, Any]) -> SyncDeviceCursor:
         device_id=row["device_id"],
         domain=row["domain"],
         last_pulled_sequence=int(row["last_pulled_sequence"]),
+        adapter_version=int(row.get("adapter_version") or 1),
+        max_delivered_sequence=int(row.get("max_delivered_sequence") or 0),
         updated_at=row["updated_at"],
     )
 
@@ -2018,6 +2106,12 @@ class SyncDatabase:
             else SYNC_SQLITE_SCHEMA
         )
         with self.backend.transaction() as conn:
+            if self.backend_type == BackendType.POSTGRESQL:
+                self.execute(
+                    "SELECT pg_advisory_xact_lock(?)",
+                    (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_LOCK_KEY,),
+                    connection=conn,
+                )
             current_heads_existed = self.backend.table_exists(
                 "sync_current_heads", connection=conn
             )
@@ -2042,6 +2136,8 @@ class SyncDatabase:
             self._ensure_key_record_user_id_column(connection=conn)
             self._ensure_key_record_rotation_columns(connection=conn)
             self._ensure_key_record_user_id_index(connection=conn)
+        with self.backend.transaction() as conn:
+            self._migrate_versioned_device_state(connection=conn)
 
     def execute(
         self,
@@ -3192,8 +3288,13 @@ class SyncDatabase:
         dataset_id: str,
         *,
         owner_user_id: str | None = None,
+        connection: Any | None = None,
     ) -> SyncDataset | None:
-        row = self._get_dataset_row(dataset_id, owner_user_id=owner_user_id)
+        row = self._get_dataset_row(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            connection=connection,
+        )
         if row is None:
             return None
         return _dataset_from_row(row)
@@ -3224,6 +3325,7 @@ class SyncDatabase:
         user_id: str,
         *,
         include_revoked: bool = False,
+        connection: Any | None = None,
     ) -> list[SyncDevice]:
         """List Sync v2 devices registered by a user."""
 
@@ -3235,7 +3337,7 @@ class SyncDatabase:
         if not include_revoked:
             sql += " AND status <> 'revoked' AND revoked_at IS NULL"
         sql += " ORDER BY last_seen_at DESC, device_id ASC"
-        result = self.execute(sql, tuple(params))
+        result = self.execute(sql, tuple(params), connection=connection)
         return [_device_from_row(row) for row in result.rows]
 
     def create_device_authorization(
@@ -3451,11 +3553,13 @@ class SyncDatabase:
     def upsert_device_domain_ack(
         self,
         acknowledgment: SyncDeviceDomainAckCreate,
+        *,
+        connection: Any | None = None,
     ) -> SyncDeviceDomainAck:
         """Record the highest accepted sequence a device has applied for a domain."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(
                 acknowledgment.dataset_id,
                 acknowledgment.domain,
@@ -3466,21 +3570,134 @@ class SyncDatabase:
                 acknowledgment.device_id,
                 connection=conn,
             )
-            existing = _first(
+            cursor = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_domain_acks
+                    SELECT * FROM sync_device_adapter_cursors
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
                     (
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
+                        acknowledgment.adapter_version,
                     ),
                     connection=conn,
                 )
             )
-            if existing is None:
+            delivered = int((cursor or {}).get("max_delivered_sequence") or 0)
+            if acknowledgment.adapter_version == 1:
+                legacy_cursor = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_cursors
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (
+                            acknowledgment.dataset_id,
+                            acknowledgment.device_id,
+                            acknowledgment.domain,
+                        ),
+                        connection=conn,
+                    )
+                )
+                legacy_delivered = int(
+                    (legacy_cursor or {}).get("last_pulled_sequence") or 0
+                )
+                if cursor is None or legacy_delivered > int(
+                    cursor.get("last_pulled_sequence") or 0
+                ):
+                    delivered = max(delivered, legacy_delivered)
+            if acknowledgment.through_server_sequence > delivered:
+                raise SyncStoreError(
+                    "Sync domain acknowledgment exceeds the delivered watermark"
+                )
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_adapter_domain_acks
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.domain,
+                        acknowledgment.adapter_version,
+                    ),
+                    connection=conn,
+                )
+            )
+            sequence = max(
+                acknowledgment.through_server_sequence,
+                int((existing or {}).get("through_server_sequence") or 0),
+            )
+            applied_at = acknowledgment.applied_at
+            idempotency_key = acknowledgment.idempotency_key
+            if existing is not None and acknowledgment.through_server_sequence < int(
+                existing["through_server_sequence"]
+            ):
+                applied_at = existing["applied_at"]
+                idempotency_key = existing.get("idempotency_key")
+            self.execute(
+                """
+                INSERT INTO sync_device_adapter_domain_acks (
+                    dataset_id, device_id, domain, adapter_version,
+                    through_server_sequence, applied_at, updated_at, idempotency_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+                DO UPDATE SET through_server_sequence = CASE
+                                  WHEN excluded.through_server_sequence >
+                                       sync_device_adapter_domain_acks.through_server_sequence
+                                  THEN excluded.through_server_sequence
+                                  ELSE sync_device_adapter_domain_acks.through_server_sequence END,
+                              applied_at = CASE
+                                  WHEN excluded.through_server_sequence >=
+                                       sync_device_adapter_domain_acks.through_server_sequence
+                                  THEN excluded.applied_at
+                                  ELSE sync_device_adapter_domain_acks.applied_at END,
+                              updated_at = excluded.updated_at,
+                              idempotency_key = CASE
+                                  WHEN excluded.through_server_sequence >=
+                                       sync_device_adapter_domain_acks.through_server_sequence
+                                  THEN excluded.idempotency_key
+                                  ELSE sync_device_adapter_domain_acks.idempotency_key END
+                """,
+                (
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                    acknowledgment.domain,
+                    acknowledgment.adapter_version,
+                    sequence,
+                    applied_at,
+                    now,
+                    idempotency_key,
+                ),
+                connection=conn,
+            )
+            if acknowledgment.adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_domain_acks
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (
+                            acknowledgment.dataset_id,
+                            acknowledgment.device_id,
+                            acknowledgment.domain,
+                        ),
+                        connection=conn,
+                    )
+                )
+                legacy_sequence = int(
+                    (legacy or {}).get("through_server_sequence") or 0
+                )
+                if legacy is not None and legacy_sequence > sequence:
+                    sequence = legacy_sequence
+                    applied_at = legacy["applied_at"]
+                    idempotency_key = legacy.get("idempotency_key")
                 self.execute(
                     """
                     INSERT INTO sync_device_domain_acks (
@@ -3488,35 +3705,49 @@ class SyncDatabase:
                         applied_at, updated_at, idempotency_key
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (dataset_id, device_id, domain)
+                    DO UPDATE SET through_server_sequence = CASE
+                                      WHEN excluded.through_server_sequence >
+                                           sync_device_domain_acks.through_server_sequence
+                                      THEN excluded.through_server_sequence
+                                      ELSE sync_device_domain_acks.through_server_sequence END,
+                                  applied_at = CASE
+                                      WHEN excluded.through_server_sequence >=
+                                           sync_device_domain_acks.through_server_sequence
+                                      THEN excluded.applied_at
+                                      ELSE sync_device_domain_acks.applied_at END,
+                                  updated_at = excluded.updated_at,
+                                  idempotency_key = CASE
+                                      WHEN excluded.through_server_sequence >=
+                                           sync_device_domain_acks.through_server_sequence
+                                      THEN excluded.idempotency_key
+                                      ELSE sync_device_domain_acks.idempotency_key END
                     """,
                     (
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
-                        acknowledgment.through_server_sequence,
-                        acknowledgment.applied_at,
+                        sequence,
+                        applied_at,
                         now,
-                        acknowledgment.idempotency_key,
+                        idempotency_key,
                     ),
                     connection=conn,
                 )
-            elif acknowledgment.through_server_sequence >= int(
-                existing["through_server_sequence"]
-            ):
                 self.execute(
                     """
-                    UPDATE sync_device_domain_acks
-                       SET through_server_sequence = ?,
-                           applied_at = ?,
-                           updated_at = ?,
-                           idempotency_key = ?
+                    UPDATE sync_device_adapter_domain_acks
+                       SET through_server_sequence = CASE
+                               WHEN through_server_sequence < ?
+                               THEN (? + 0) ELSE through_server_sequence END,
+                           updated_at = ?
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = 1
                     """,
                     (
-                        acknowledgment.through_server_sequence,
-                        acknowledgment.applied_at,
+                        sequence,
+                        sequence,
                         now,
-                        acknowledgment.idempotency_key,
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
@@ -3526,27 +3757,73 @@ class SyncDatabase:
             row = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_domain_acks
+                    SELECT * FROM sync_device_adapter_domain_acks
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
                     (
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
+                        acknowledgment.adapter_version,
                     ),
                     connection=conn,
                 )
             )
         return _device_domain_ack_from_row(row)
 
+    def get_device_domain_ack(
+        self,
+        dataset_id: str,
+        device_id: str,
+        domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
+        connection: Any | None = None,
+    ) -> SyncDeviceDomainAck | None:
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset_domain(dataset_id, domain, connection=conn)
+            self._require_device_for_dataset(dataset_id, device_id, connection=conn)
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_adapter_domain_acks
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
+                    """,
+                    (dataset_id, device_id, domain, adapter_version),
+                    connection=conn,
+                )
+            )
+            if adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_domain_acks
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (dataset_id, device_id, domain),
+                        connection=conn,
+                    )
+                )
+                if legacy is not None and (
+                    row is None
+                    or int(legacy["through_server_sequence"])
+                    > int(row["through_server_sequence"])
+                ):
+                    row = {**legacy, "adapter_version": 1}
+        return None if row is None else _device_domain_ack_from_row(row)
+
     def upsert_device_blob_ack(
         self,
         acknowledgment: SyncDeviceBlobAckCreate,
+        *,
+        connection: Any | None = None,
     ) -> SyncDeviceBlobAck:
         """Record a device-level blob verification acknowledgment."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_device_for_dataset(
                 acknowledgment.dataset_id,
                 acknowledgment.device_id,
@@ -3593,16 +3870,118 @@ class SyncDatabase:
             )
         return _device_blob_ack_from_row(row)
 
+    def upsert_device_blob_id_ack(
+        self,
+        acknowledgment: SyncDeviceBlobIdAckCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncDeviceBlobIdAck:
+        """Record immutable, authorized v2 blob-ID verification evidence."""
+
+        now = utcnow_iso()
+        with self.backend.transaction(connection) as conn:
+            self._require_device_for_dataset(
+                acknowledgment.dataset_id,
+                acknowledgment.device_id,
+                connection=conn,
+            )
+            blob = _first(
+                self.execute(
+                    """
+                    SELECT blob.blob_id, blob.payload_hash
+                      FROM sync_blob_objects AS blob
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = blob.dataset_id
+                     WHERE blob.dataset_id = ? AND blob.blob_id = ?
+                       AND blob.status = 'available'
+                       AND (
+                            dataset.scope_type = 'workspace'
+                            OR blob.owner_user_id = dataset.owner_user_id
+                       )
+                    """,
+                    (acknowledgment.dataset_id, acknowledgment.blob_id),
+                    connection=conn,
+                )
+            )
+            if blob is None:
+                raise SyncStoreError("sync_blob_id_ack_not_authorized")
+            if blob["payload_hash"] != acknowledgment.payload_hash:
+                raise SyncStoreError("sync_blob_id_ack_digest_mismatch")
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_blob_id_acks
+                     WHERE dataset_id = ? AND device_id = ? AND blob_id = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.blob_id,
+                    ),
+                    connection=conn,
+                )
+            )
+            if existing is not None and existing["payload_hash"] != acknowledgment.payload_hash:
+                raise SyncStoreError("sync_blob_id_ack_digest_immutable")
+            self.execute(
+                """
+                INSERT INTO sync_device_blob_id_acks (
+                    dataset_id, device_id, blob_id, payload_hash,
+                    verified_at, updated_at, idempotency_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id, blob_id)
+                DO UPDATE SET verified_at = excluded.verified_at,
+                              updated_at = excluded.updated_at,
+                              idempotency_key = excluded.idempotency_key
+                """,
+                (
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                    acknowledgment.blob_id,
+                    acknowledgment.payload_hash,
+                    acknowledgment.verified_at,
+                    now,
+                    acknowledgment.idempotency_key,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_blob_id_acks
+                     WHERE dataset_id = ? AND device_id = ? AND blob_id = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.blob_id,
+                    ),
+                    connection=conn,
+                )
+            )
+        return _device_blob_id_ack_from_row(row)
+
     def list_device_acknowledgments(
         self,
         dataset_id: str,
         device_id: str,
+        *,
+        connection: Any | None = None,
     ) -> SyncDeviceAcknowledgmentSummary:
         """Return all domain and blob acknowledgments for one device in a dataset."""
 
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_device_for_dataset(dataset_id, device_id, connection=conn)
-            domain_rows = self.execute(
+            version_rows = self.execute(
+                """
+                SELECT * FROM sync_device_adapter_domain_acks
+                 WHERE dataset_id = ? AND device_id = ?
+                 ORDER BY domain ASC, adapter_version ASC
+                """,
+                (dataset_id, device_id),
+                connection=conn,
+            ).rows
+            legacy_rows = self.execute(
                 """
                 SELECT * FROM sync_device_domain_acks
                  WHERE dataset_id = ? AND device_id = ?
@@ -3620,16 +3999,134 @@ class SyncDatabase:
                 (dataset_id, device_id),
                 connection=conn,
             ).rows
+            blob_id_rows = self.execute(
+                """
+                SELECT * FROM sync_device_blob_id_acks
+                 WHERE dataset_id = ? AND device_id = ?
+                 ORDER BY updated_at ASC, blob_id ASC
+                """,
+                (dataset_id, device_id),
+                connection=conn,
+            ).rows
+        version_ack_by_key = {
+            (ack.domain, ack.adapter_version): ack
+            for ack in (_device_domain_ack_from_row(row) for row in version_rows)
+        }
+        for row in legacy_rows:
+            legacy_ack = _device_domain_ack_from_row(row)
+            key = (legacy_ack.domain, 1)
+            current = version_ack_by_key.get(key)
+            if (
+                current is None
+                or legacy_ack.through_server_sequence
+                > current.through_server_sequence
+            ):
+                version_ack_by_key[key] = legacy_ack
+        version_acks = [
+            version_ack_by_key[key] for key in sorted(version_ack_by_key)
+        ]
         domain_acks = {
-            row["domain"]: _device_domain_ack_from_row(row)
-            for row in domain_rows
+            ack.domain: ack for ack in version_acks if ack.adapter_version == 1
         }
         return SyncDeviceAcknowledgmentSummary(
             dataset_id=dataset_id,
             device_id=device_id,
             domain_acks=domain_acks,
             blob_acks=[_device_blob_ack_from_row(row) for row in blob_rows],
+            version_acks=version_acks,
+            blob_id_acks=[_device_blob_id_ack_from_row(row) for row in blob_id_rows],
         )
+
+    def acknowledge_device_state_atomic(
+        self,
+        dataset_id: str,
+        device_id: str,
+        *,
+        domain_acks: Sequence[SyncDeviceDomainAckCreate] = (),
+        blob_acks: Sequence[SyncDeviceBlobAckCreate] = (),
+        blob_id_acks: Sequence[SyncDeviceBlobIdAckCreate] = (),
+    ) -> SyncDeviceAcknowledgmentSummary:
+        """Validate and persist one acknowledgment request as a single unit."""
+
+        with self.backend.transaction() as conn:
+            device_row = self._require_device_for_dataset(
+                dataset_id,
+                device_id,
+                connection=conn,
+            )
+            if (
+                device_row.get("revoked_at") is not None
+                or str(device_row.get("status") or "active") != "active"
+            ):
+                raise SyncStoreError("Sync device was not found or is not accessible")
+            for acknowledgment in domain_acks:
+                self._require_ack_request_identity(
+                    dataset_id,
+                    device_id,
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                )
+                self.upsert_device_domain_ack(acknowledgment, connection=conn)
+            for acknowledgment in blob_acks:
+                self._require_ack_request_identity(
+                    dataset_id,
+                    device_id,
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                )
+                self.upsert_device_blob_ack(acknowledgment, connection=conn)
+            for acknowledgment in blob_id_acks:
+                self._require_ack_request_identity(
+                    dataset_id,
+                    device_id,
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                )
+                capabilities = decode_json(
+                    device_row.get("capabilities_json"),
+                    default={},
+                )
+                version_map = (
+                    capabilities.get("supported_adapter_versions")
+                    if isinstance(capabilities, Mapping)
+                    else None
+                )
+                versions = (
+                    version_map.get("attachment.ref")
+                    if isinstance(version_map, Mapping)
+                    else None
+                )
+                if not isinstance(versions, Sequence) or isinstance(
+                    versions,
+                    (str, bytes, bytearray),
+                ) or not any(
+                    isinstance(version, int)
+                    and not isinstance(version, bool)
+                    and version == 2
+                    for version in versions
+                ):
+                    raise SyncStoreError("sync_blob_id_ack_adapter_v2_required")
+                self.upsert_device_blob_id_ack(acknowledgment, connection=conn)
+            return self.list_device_acknowledgments(
+                dataset_id,
+                device_id,
+                connection=conn,
+            )
+
+    @staticmethod
+    def _require_ack_request_identity(
+        dataset_id: str,
+        device_id: str,
+        acknowledgment_dataset_id: str,
+        acknowledgment_device_id: str,
+    ) -> None:
+        if (
+            acknowledgment_dataset_id != dataset_id
+            or acknowledgment_device_id != device_id
+        ):
+            raise SyncStoreError(
+                "Sync acknowledgment device or dataset does not match request"
+            )
 
     def get_background_policy(
         self,
@@ -5097,6 +5594,7 @@ class SyncDatabase:
         *,
         limit: int = 100,
         domains: Sequence[SyncDomain] | None = None,
+        adapter_versions: Sequence[int] | None = None,
         status: str | Sequence[str] | None = None,
         exclude_device_id: str | None = None,
         connection: Any | None = None,
@@ -5112,6 +5610,13 @@ class SyncDatabase:
             if not domains:
                 return []
             sql += _domain_filter_sql(domains, params)
+        if adapter_versions is not None:
+            versions = sorted(set(adapter_versions))
+            if not versions:
+                return []
+            placeholders = ", ".join("?" for _ in versions)
+            sql += f" AND adapter_version IN ({placeholders})"
+            params.extend(versions)
         if status is not None:
             statuses = [status] if isinstance(status, str) else list(status)
             if not statuses:
@@ -5208,6 +5713,7 @@ class SyncDatabase:
         entity_id: str | None = None,
         stable_key: str | None = None,
         limit: int = 100,
+        connection: Any | None = None,
     ) -> list[SyncEnvelope]:
         """List accepted envelopes for one entity identity or stable key."""
 
@@ -5248,7 +5754,7 @@ class SyncDatabase:
             """
             params.append(stable_key)
         params.append(limit)
-        result = self.execute(sql, tuple(params))
+        result = self.execute(sql, tuple(params), connection=connection)
         return [_envelope_from_row(row) for row in result.rows]
 
     def get_envelope_for_entity_at_or_before(
@@ -5709,56 +6215,145 @@ class SyncDatabase:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
             self._require_dataset_domain(cursor.dataset_id, cursor.domain, connection=conn)
+            self._require_device_for_dataset(
+                cursor.dataset_id, cursor.device_id, connection=conn
+            )
             existing = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_cursors
+                    SELECT * FROM sync_device_adapter_cursors
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
-                    """,
-                    (cursor.dataset_id, cursor.device_id, cursor.domain),
-                    connection=conn,
-                )
-            )
-            if existing:
-                self.execute(
-                    """
-                    UPDATE sync_device_cursors
-                       SET last_pulled_sequence = ?, updated_at = ?
-                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
                     (
-                        cursor.last_pulled_sequence,
-                        now,
                         cursor.dataset_id,
                         cursor.device_id,
                         cursor.domain,
+                        cursor.adapter_version,
                     ),
                     connection=conn,
                 )
-            else:
+            )
+            last_pulled = max(
+                cursor.last_pulled_sequence,
+                int((existing or {}).get("last_pulled_sequence") or 0),
+            )
+            max_delivered = max(
+                cursor.max_delivered_sequence,
+                int((existing or {}).get("max_delivered_sequence") or 0),
+            )
+            self.execute(
+                """
+                INSERT INTO sync_device_adapter_cursors (
+                    dataset_id, device_id, domain, adapter_version,
+                    last_pulled_sequence, max_delivered_sequence, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+                DO UPDATE SET last_pulled_sequence = CASE
+                                  WHEN excluded.last_pulled_sequence >
+                                       sync_device_adapter_cursors.last_pulled_sequence
+                                  THEN excluded.last_pulled_sequence
+                                  ELSE sync_device_adapter_cursors.last_pulled_sequence END,
+                              max_delivered_sequence = CASE
+                                  WHEN excluded.max_delivered_sequence >
+                                       sync_device_adapter_cursors.max_delivered_sequence
+                                  THEN excluded.max_delivered_sequence
+                                  ELSE sync_device_adapter_cursors.max_delivered_sequence END,
+                              updated_at = excluded.updated_at
+                """,
+                (
+                    cursor.dataset_id,
+                    cursor.device_id,
+                    cursor.domain,
+                    cursor.adapter_version,
+                    last_pulled,
+                    max_delivered,
+                    now,
+                ),
+                connection=conn,
+            )
+            if cursor.adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_cursors
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (cursor.dataset_id, cursor.device_id, cursor.domain),
+                        connection=conn,
+                    )
+                )
+                legacy_last_pulled = int(
+                    (legacy or {}).get("last_pulled_sequence") or 0
+                )
+                if legacy_last_pulled > int(
+                    (existing or {}).get("last_pulled_sequence") or 0
+                ):
+                    max_delivered = max(max_delivered, legacy_last_pulled)
+                last_pulled = max(
+                    last_pulled,
+                    legacy_last_pulled,
+                )
                 self.execute(
                     """
                     INSERT INTO sync_device_cursors (
                         dataset_id, device_id, domain, last_pulled_sequence, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (dataset_id, device_id, domain)
+                    DO UPDATE SET last_pulled_sequence = CASE
+                                      WHEN excluded.last_pulled_sequence >
+                                           sync_device_cursors.last_pulled_sequence
+                                      THEN excluded.last_pulled_sequence
+                                      ELSE sync_device_cursors.last_pulled_sequence END,
+                                  updated_at = excluded.updated_at
                     """,
                     (
                         cursor.dataset_id,
                         cursor.device_id,
                         cursor.domain,
-                        cursor.last_pulled_sequence,
+                        last_pulled,
                         now,
+                    ),
+                    connection=conn,
+                )
+                self.execute(
+                    """
+                    UPDATE sync_device_adapter_cursors
+                       SET last_pulled_sequence = CASE
+                               WHEN last_pulled_sequence < ?
+                               THEN (? + 0) ELSE last_pulled_sequence END,
+                           max_delivered_sequence = CASE
+                               WHEN max_delivered_sequence > ?
+                               THEN max_delivered_sequence ELSE (? + 0) END,
+                           updated_at = ?
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = 1
+                    """,
+                    (
+                        last_pulled,
+                        last_pulled,
+                        max_delivered,
+                        max_delivered,
+                        now,
+                        cursor.dataset_id,
+                        cursor.device_id,
+                        cursor.domain,
                     ),
                     connection=conn,
                 )
             row = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_cursors
+                    SELECT * FROM sync_device_adapter_cursors
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
-                    (cursor.dataset_id, cursor.device_id, cursor.domain),
+                    (
+                        cursor.dataset_id,
+                        cursor.device_id,
+                        cursor.domain,
+                        cursor.adapter_version,
+                    ),
                     connection=conn,
                 )
             )
@@ -5769,16 +6364,44 @@ class SyncDatabase:
         dataset_id: str,
         device_id: str,
         domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
     ) -> SyncDeviceCursor | None:
-        row = _first(
-            self.execute(
-                """
-                SELECT * FROM sync_device_cursors
-                 WHERE dataset_id = ? AND device_id = ? AND domain = ?
-                """,
-                (dataset_id, device_id, domain),
+        with self.backend.transaction() as conn:
+            self._require_dataset_domain(dataset_id, domain, connection=conn)
+            self._require_device_for_dataset(dataset_id, device_id, connection=conn)
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_adapter_cursors
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
+                    """,
+                    (dataset_id, device_id, domain, adapter_version),
+                    connection=conn,
+                )
             )
-        )
+            if adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_cursors
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (dataset_id, device_id, domain),
+                        connection=conn,
+                    )
+                )
+                if legacy is not None and (
+                    row is None
+                    or int(legacy["last_pulled_sequence"])
+                    > int(row["last_pulled_sequence"])
+                ):
+                    row = {
+                        **legacy,
+                        "adapter_version": 1,
+                        "max_delivered_sequence": legacy["last_pulled_sequence"],
+                    }
         if row is None:
             return None
         return _cursor_from_row(row)
@@ -6800,6 +7423,108 @@ class SyncDatabase:
             )
         return None if row is None else _attachment_revision_binding_from_row(row)
 
+    def get_attachment_revision_binding_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> SyncAttachmentRevisionBinding | None:
+        """Return the immutable revision binding that resolved to one blob ID."""
+
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT * FROM sync_attachment_revision_bindings
+                 WHERE dataset_id = ? AND resolved_blob_id = ?
+                 ORDER BY establishing_server_cursor DESC
+                 LIMIT 1
+                """,
+                (dataset_id, blob_id),
+                connection=conn,
+            ).rows
+        return None if not rows else _attachment_revision_binding_from_row(rows[0])
+
+    def list_attachment_revision_bindings_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """Return one bounded keyset page of unreleased bindings for a blob."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync attachment binding page limit must be positive")
+        page_limit = min(limit, 1000)
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT * FROM sync_attachment_revision_bindings
+                 WHERE dataset_id = ? AND resolved_blob_id = ?
+                   AND retention_released_at IS NULL
+                   AND establishing_server_cursor > ?
+                 ORDER BY establishing_server_cursor, attachment_id,
+                          attachment_revision
+                 LIMIT ?
+                """,
+                (
+                    dataset_id,
+                    blob_id,
+                    after_establishing_server_cursor,
+                    page_limit,
+                ),
+                connection=conn,
+            ).rows
+        return [_attachment_revision_binding_from_row(row) for row in rows]
+
+    def has_attachment_ref_v2_history(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> bool:
+        """Return whether an attachment identity has accepted adapter-v2 history."""
+
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT 1 FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND domain = 'attachment.ref'
+                       AND entity_id = ?
+                       AND adapter_version = 2
+                       AND status = 'accepted'
+                     LIMIT 1
+                    """,
+                    (dataset_id, attachment_id),
+                    connection=conn,
+                )
+            )
+        return row is not None
+
     def list_unresolved_attachment_revision_bindings(
         self,
         dataset_id: str,
@@ -7640,48 +8365,58 @@ class SyncDatabase:
         blob_id: str | None = None,
         payload_hash: str | None = None,
         owner_user_id: str | None = None,
+        connection: Any | None = None,
+        for_update: bool = False,
     ) -> SyncBlobObject | None:
         """Return an available blob object scoped by dataset and optional identity filters."""
 
-        self._require_dataset(dataset_id)
-        row = _first(
-            self.execute(
-                """
-                SELECT *
-                  FROM sync_blob_objects
-                 WHERE dataset_id = ?
-                   AND status = 'available'
-                   AND (? IS NULL OR owner_user_id = ?)
-                   AND (? IS NULL OR blob_id = ?)
-                   AND (? IS NULL OR payload_hash = ?)
-                   AND (
-                        ? IS NULL
-                        OR attachment_id = ?
-                        OR payload_hash IN (
-                            SELECT payload_hash
-                              FROM sync_attachments
-                             WHERE dataset_id = ?
-                               AND attachment_id = ?
-                        )
-                   )
-                 ORDER BY updated_at DESC, blob_id ASC
-                 LIMIT 1
-                """,
-                (
-                    dataset_id,
-                    owner_user_id,
-                    owner_user_id,
-                    blob_id,
-                    blob_id,
-                    payload_hash,
-                    payload_hash,
-                    attachment_id,
-                    attachment_id,
-                    dataset_id,
-                    attachment_id,
-                ),
-            )
+        suffix = (
+            " FOR UPDATE"
+            if for_update and self.backend_type == BackendType.POSTGRESQL
+            else ""
         )
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            row = _first(
+                self.execute(
+                    """
+                    SELECT *
+                      FROM sync_blob_objects
+                     WHERE dataset_id = ?
+                       AND status = 'available'
+                       AND (? IS NULL OR owner_user_id = ?)
+                       AND (? IS NULL OR blob_id = ?)
+                       AND (? IS NULL OR payload_hash = ?)
+                       AND (
+                            ? IS NULL
+                            OR attachment_id = ?
+                            OR payload_hash IN (
+                                SELECT payload_hash
+                                  FROM sync_attachments
+                                 WHERE dataset_id = ?
+                                   AND attachment_id = ?
+                            )
+                       )
+                     ORDER BY updated_at DESC, blob_id ASC
+                     LIMIT 1
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                    (
+                        dataset_id,
+                        owner_user_id,
+                        owner_user_id,
+                        blob_id,
+                        blob_id,
+                        payload_hash,
+                        payload_hash,
+                        attachment_id,
+                        attachment_id,
+                        dataset_id,
+                        attachment_id,
+                    ),
+                    connection=conn,
+                )
+            )
         if row is None:
             return None
         return _blob_object_from_row(row)
@@ -7707,15 +8442,59 @@ class SyncDatabase:
         ).rows
         return [_blob_object_from_row(row) for row in rows]
 
+    def list_blob_objects_for_dataset_page(
+        self,
+        dataset_id: str,
+        *,
+        status: str = "available",
+        after_updated_at: str | None = None,
+        after_blob_id: str | None = None,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncBlobObject]:
+        """Return one capped keyset page of blob metadata."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync blob page limit must be positive")
+        if (after_updated_at is None) != (after_blob_id is None):
+            raise SyncStoreError("Sync blob page cursor is incomplete")
+        page_limit = min(limit, 1000)
+        params: list[Any] = [dataset_id, status]
+        if after_updated_at is not None and after_blob_id is not None:
+            query = """
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND status = ?
+                   AND (updated_at, blob_id) > (?, ?)
+                 ORDER BY updated_at, blob_id LIMIT ?
+            """
+            params.extend((after_updated_at, after_blob_id))
+        else:
+            query = """
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND status = ?
+                 ORDER BY updated_at, blob_id LIMIT ?
+            """
+        params.append(page_limit)
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            rows = self.execute(
+                query,
+                tuple(params),
+                connection=conn,
+            ).rows
+        return [_blob_object_from_row(row) for row in rows]
+
     def mark_blob_object_deleted(
         self,
         dataset_id: str,
         blob_id: str,
+        *,
+        connection: Any | None = None,
     ) -> SyncBlobObject | None:
         """Soft-delete available blob metadata without removing blob bytes."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self.execute(
                 """
                 UPDATE sync_blob_objects
@@ -8148,6 +8927,597 @@ class SyncDatabase:
             connection=connection,
         )
 
+    def _migrate_versioned_device_state(self, *, connection: Any) -> None:
+        """Serialize, verify, and complete the additive adapter-state migration."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.execute(
+                "SELECT pg_advisory_xact_lock(?)",
+                (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_LOCK_KEY,),
+                connection=connection,
+            )
+        completed_type = (
+            "TIMESTAMPTZ" if self.backend_type == BackendType.POSTGRESQL else "TEXT"
+        )
+        self.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS sync_schema_migrations (
+                migration_id TEXT PRIMARY KEY NOT NULL,
+                completed_at {completed_type}
+            )
+            """,  # nosec B608 - backend-selected fixed timestamp type.
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_schema_migrations (migration_id, completed_at)
+            VALUES (?, NULL)
+            ON CONFLICT (migration_id) DO NOTHING
+            """,
+            (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID,),
+            connection=connection,
+        )
+        lock_suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        marker = _first(
+            self.execute(
+                "SELECT completed_at FROM sync_schema_migrations WHERE migration_id = ?"
+                + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID,),
+                connection=connection,
+            )
+        )
+        if marker is None:
+            raise SyncStoreError("Sync adapter-state migration authority is unavailable")
+
+        if marker.get("completed_at") is None:
+            schema = (
+                SYNC_VERSIONED_DEVICE_STATE_POSTGRES_SCHEMA
+                if self.backend_type == BackendType.POSTGRESQL
+                else SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA
+            )
+            for statement in schema.split(";"):
+                if statement.strip():
+                    self.execute(statement, connection=connection)
+
+        self._verify_versioned_device_state_catalog(connection=connection)
+        self._reconcile_versioned_device_state(connection=connection)
+        if marker.get("completed_at") is None:
+            self.execute(
+                """
+                UPDATE sync_schema_migrations
+                   SET completed_at = ?
+                 WHERE migration_id = ? AND completed_at IS NULL
+                """,
+                (utcnow_iso(), SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID),
+                connection=connection,
+            )
+
+    def _verify_versioned_device_state_catalog(self, *, connection: Any) -> None:
+        """Fail closed when the three additive side tables differ from the contract."""
+
+        authority_info = self.backend.get_table_info(
+            "sync_schema_migrations",
+            connection=connection,
+        )
+        if [str(column.get("name")) for column in authority_info] != [
+            "migration_id",
+            "completed_at",
+        ] or [str(column.get("type") or "").lower() for column in authority_info] != [
+            "text",
+            (
+                "timestamp with time zone"
+                if self.backend_type == BackendType.POSTGRESQL
+                else "text"
+            ),
+        ] or [bool(column.get("nullable")) for column in authority_info] != [False, True]:
+            raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+        if self.backend_type == BackendType.POSTGRESQL:
+            authority_pk = _first(
+                self.execute(
+                    """
+                    SELECT string_agg(attribute.attname, ',' ORDER BY keys.ordinality)
+                               AS primary_key_columns
+                      FROM pg_constraint AS constraint_row
+                      JOIN pg_class AS table_row
+                        ON table_row.oid = constraint_row.conrelid
+                      JOIN pg_namespace AS namespace
+                        ON namespace.oid = table_row.relnamespace
+                      JOIN unnest(constraint_row.conkey) WITH ORDINALITY
+                           AS keys(attnum, ordinality) ON TRUE
+                      JOIN pg_attribute AS attribute
+                        ON attribute.attrelid = table_row.oid
+                       AND attribute.attnum = keys.attnum
+                     WHERE namespace.nspname = current_schema()
+                       AND table_row.relname = 'sync_schema_migrations'
+                       AND constraint_row.contype = 'p'
+                    """,
+                    connection=connection,
+                )
+            ) or {}
+            authority_primary_key = str(
+                authority_pk.get("primary_key_columns") or ""
+            ).split(",")
+        else:
+            authority_primary_key = [
+                str(row["name"])
+                for row in self.execute(
+                    "PRAGMA table_info(sync_schema_migrations)",
+                    connection=connection,
+                ).rows
+                if int(row["pk"])
+            ]
+        if authority_primary_key != ["migration_id"]:
+            raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+        expected_columns = {
+            "sync_device_adapter_cursors": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+                "last_pulled_sequence",
+                "max_delivered_sequence",
+                "updated_at",
+            ],
+            "sync_device_adapter_domain_acks": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+                "through_server_sequence",
+                "applied_at",
+                "updated_at",
+                "idempotency_key",
+            ],
+            "sync_device_blob_id_acks": [
+                "dataset_id",
+                "device_id",
+                "blob_id",
+                "payload_hash",
+                "verified_at",
+                "updated_at",
+                "idempotency_key",
+            ],
+        }
+        expected_primary_keys = {
+            "sync_device_adapter_cursors": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+            ],
+            "sync_device_adapter_domain_acks": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+            ],
+            "sync_device_blob_id_acks": ["dataset_id", "device_id", "blob_id"],
+        }
+        expected_indexes = {
+            "sync_device_adapter_cursors": "idx_sync_device_adapter_cursors_device",
+            "sync_device_adapter_domain_acks": (
+                "idx_sync_device_adapter_domain_acks_device"
+            ),
+            "sync_device_blob_id_acks": "idx_sync_device_blob_id_acks_device",
+        }
+        expected_sqlite_table_sql: dict[str, str] = {}
+        if self.backend_type != BackendType.POSTGRESQL:
+            for statement in SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA.split(";"):
+                compact_statement = self._compact_catalog_sql(statement)
+                for table_name in expected_columns:
+                    if f"createtableifnotexists{table_name}(" in compact_statement:
+                        expected_sqlite_table_sql[table_name] = compact_statement.replace(
+                            "createtableifnotexists",
+                            "createtable",
+                            1,
+                        )
+        expected_postgres_checks = {
+            "sync_device_adapter_cursors": {
+                "checkadapter_version>0",
+                "checklast_pulled_sequence>=0",
+                "checkmax_delivered_sequence>=0",
+                "checkmax_delivered_sequence<=last_pulled_sequence",
+            },
+            "sync_device_adapter_domain_acks": {
+                "checkadapter_version>0",
+                "checkthrough_server_sequence>=0",
+            },
+            "sync_device_blob_id_acks": set(),
+        }
+        timestamp_type = (
+            "timestamp with time zone"
+            if self.backend_type == BackendType.POSTGRESQL
+            else "text"
+        )
+        sequence_type = (
+            "bigint" if self.backend_type == BackendType.POSTGRESQL else "integer"
+        )
+        expected_types = {
+            "sync_device_adapter_cursors": [
+                "text",
+                "text",
+                "text",
+                "integer",
+                sequence_type,
+                sequence_type,
+                timestamp_type,
+            ],
+            "sync_device_adapter_domain_acks": [
+                "text",
+                "text",
+                "text",
+                "integer",
+                sequence_type,
+                timestamp_type,
+                timestamp_type,
+                "text",
+            ],
+            "sync_device_blob_id_acks": [
+                "text",
+                "text",
+                "text",
+                "text",
+                timestamp_type,
+                timestamp_type,
+                "text",
+            ],
+        }
+        for table_name, columns in expected_columns.items():
+            info = self.backend.get_table_info(table_name, connection=connection)
+            if (
+                [str(column.get("name")) for column in info] != columns
+                or [str(column.get("type") or "").lower() for column in info]
+                != expected_types[table_name]
+                or [bool(column.get("nullable")) for column in info]
+                != [False] * (len(columns) - 1) + [table_name != "sync_device_adapter_cursors"]
+            ):
+                raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+            if self.backend_type == BackendType.POSTGRESQL:
+                pk_row = _first(
+                    self.execute(
+                        """
+                        SELECT string_agg(attribute.attname, ',' ORDER BY keys.ordinality)
+                                   AS primary_key_columns
+                          FROM pg_constraint AS constraint_row
+                          JOIN pg_class AS table_row
+                            ON table_row.oid = constraint_row.conrelid
+                          JOIN pg_namespace AS namespace
+                            ON namespace.oid = table_row.relnamespace
+                          JOIN unnest(constraint_row.conkey) WITH ORDINALITY
+                               AS keys(attnum, ordinality) ON TRUE
+                          JOIN pg_attribute AS attribute
+                            ON attribute.attrelid = table_row.oid
+                           AND attribute.attnum = keys.attnum
+                         WHERE namespace.nspname = current_schema()
+                           AND table_row.relname = ?
+                           AND constraint_row.contype = 'p'
+                        """,
+                        (table_name,),
+                        connection=connection,
+                    )
+                ) or {}
+                primary_key = str(pk_row.get("primary_key_columns") or "").split(",")
+                check_rows = self.execute(
+                    """
+                    SELECT pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+                               AS definition
+                      FROM pg_catalog.pg_constraint AS constraint_row
+                      JOIN pg_catalog.pg_class AS table_row
+                        ON table_row.oid = constraint_row.conrelid
+                      JOIN pg_catalog.pg_namespace AS namespace
+                        ON namespace.oid = table_row.relnamespace
+                     WHERE namespace.nspname = current_schema()
+                       AND table_row.relname = ?
+                       AND constraint_row.contype = 'c'
+                    """,
+                    (table_name,),
+                    connection=connection,
+                ).rows
+                checks_valid = {
+                    self._compact_postgres_catalog_sql(row["definition"])
+                    for row in check_rows
+                } == expected_postgres_checks[table_name]
+                index_rows = self.execute(
+                    """
+                    SELECT indexname, indexdef FROM pg_indexes
+                     WHERE schemaname = current_schema() AND tablename = ?
+                    """,
+                    (table_name,),
+                    connection=connection,
+                ).rows
+                index = next(
+                    (
+                        row
+                        for row in index_rows
+                        if row.get("indexname") == expected_indexes[table_name]
+                    ),
+                    None,
+                )
+                index_columns_valid = index is not None and "(device_id, dataset_id)" in str(
+                    index.get("indexdef")
+                )
+            else:
+                raw_info = self.execute(
+                    f"PRAGMA table_info({table_name})",  # nosec B608 - fixed catalog names.
+                    connection=connection,
+                ).rows
+                primary_key = [
+                    str(row["name"])
+                    for row in sorted(raw_info, key=lambda row: int(row["pk"]))
+                    if int(row["pk"])
+                ]
+                table_row = _first(
+                    self.execute(
+                        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                        (table_name,),
+                        connection=connection,
+                    )
+                )
+                checks_valid = self._compact_catalog_sql(
+                    None if table_row is None else table_row.get("sql")
+                ) == expected_sqlite_table_sql.get(table_name)
+                index_rows = self.execute(
+                    f"PRAGMA index_list({table_name})",  # nosec B608 - fixed catalog names.
+                    connection=connection,
+                ).rows
+                index = next(
+                    (
+                        row
+                        for row in index_rows
+                        if row.get("name") == expected_indexes[table_name]
+                    ),
+                    None,
+                )
+                index_columns = (
+                    []
+                    if index is None
+                    else [
+                        row["name"]
+                        for row in self.execute(
+                            f"PRAGMA index_info({expected_indexes[table_name]})",  # nosec B608
+                            connection=connection,
+                        ).rows
+                    ]
+                )
+                index_columns_valid = index_columns == ["device_id", "dataset_id"]
+            if (
+                primary_key != expected_primary_keys[table_name]
+                or not checks_valid
+                or not index_columns_valid
+            ):
+                raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+
+    def _reconcile_versioned_device_state(self, *, connection: Any) -> None:
+        """Seed and reconcile rollback-compatible adapter-v1 cursor/ack state."""
+
+        self.execute(
+            """
+            INSERT INTO sync_device_adapter_cursors (
+                dataset_id, device_id, domain, adapter_version,
+                last_pulled_sequence, max_delivered_sequence, updated_at
+            )
+            SELECT dataset_id, device_id, domain, 1,
+                   last_pulled_sequence, last_pulled_sequence, updated_at
+              FROM sync_device_cursors
+             WHERE 1 = 1
+            ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+            DO UPDATE SET
+                last_pulled_sequence = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_adapter_cursors.last_pulled_sequence
+                    THEN excluded.last_pulled_sequence
+                    ELSE sync_device_adapter_cursors.last_pulled_sequence END,
+                max_delivered_sequence = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_adapter_cursors.last_pulled_sequence
+                    THEN excluded.max_delivered_sequence
+                    ELSE sync_device_adapter_cursors.max_delivered_sequence END,
+                updated_at = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_adapter_cursors.last_pulled_sequence
+                    THEN excluded.updated_at
+                    ELSE sync_device_adapter_cursors.updated_at END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_device_cursors (
+                dataset_id, device_id, domain, last_pulled_sequence, updated_at
+            )
+            SELECT dataset_id, device_id, domain, last_pulled_sequence, updated_at
+              FROM sync_device_adapter_cursors
+             WHERE adapter_version = 1
+            ON CONFLICT (dataset_id, device_id, domain)
+            DO UPDATE SET
+                last_pulled_sequence = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_cursors.last_pulled_sequence
+                    THEN excluded.last_pulled_sequence
+                    ELSE sync_device_cursors.last_pulled_sequence END,
+                updated_at = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_cursors.last_pulled_sequence
+                    THEN excluded.updated_at ELSE sync_device_cursors.updated_at END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            UPDATE sync_device_cursors
+               SET last_pulled_sequence = (
+                       SELECT versioned.last_pulled_sequence
+                         FROM sync_device_adapter_cursors AS versioned
+                        WHERE versioned.dataset_id = sync_device_cursors.dataset_id
+                          AND versioned.device_id = sync_device_cursors.device_id
+                          AND versioned.domain = sync_device_cursors.domain
+                          AND versioned.adapter_version = 1
+                   ),
+                   updated_at = (
+                       SELECT versioned.updated_at
+                         FROM sync_device_adapter_cursors AS versioned
+                        WHERE versioned.dataset_id = sync_device_cursors.dataset_id
+                          AND versioned.device_id = sync_device_cursors.device_id
+                          AND versioned.domain = sync_device_cursors.domain
+                          AND versioned.adapter_version = 1
+                   )
+             WHERE EXISTS (
+                       SELECT 1 FROM sync_device_adapter_cursors AS versioned
+                        WHERE versioned.dataset_id = sync_device_cursors.dataset_id
+                          AND versioned.device_id = sync_device_cursors.device_id
+                          AND versioned.domain = sync_device_cursors.domain
+                          AND versioned.adapter_version = 1
+                          AND versioned.last_pulled_sequence > sync_device_cursors.last_pulled_sequence
+                   )
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_device_adapter_domain_acks (
+                dataset_id, device_id, domain, adapter_version,
+                through_server_sequence, applied_at, updated_at, idempotency_key
+            )
+            SELECT dataset_id, device_id, domain, 1, through_server_sequence,
+                   applied_at, updated_at, idempotency_key
+              FROM sync_device_domain_acks
+             WHERE 1 = 1
+            ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+            DO UPDATE SET
+                through_server_sequence = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.through_server_sequence
+                    ELSE sync_device_adapter_domain_acks.through_server_sequence END,
+                applied_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.applied_at
+                    ELSE sync_device_adapter_domain_acks.applied_at END,
+                updated_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.updated_at
+                    ELSE sync_device_adapter_domain_acks.updated_at END,
+                idempotency_key = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.idempotency_key
+                    ELSE sync_device_adapter_domain_acks.idempotency_key END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_device_domain_acks (
+                dataset_id, device_id, domain, through_server_sequence,
+                applied_at, updated_at, idempotency_key
+            )
+            SELECT dataset_id, device_id, domain, through_server_sequence,
+                   applied_at, updated_at, idempotency_key
+              FROM sync_device_adapter_domain_acks
+             WHERE adapter_version = 1
+            ON CONFLICT (dataset_id, device_id, domain)
+            DO UPDATE SET
+                through_server_sequence = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.through_server_sequence
+                    ELSE sync_device_domain_acks.through_server_sequence END,
+                applied_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.applied_at ELSE sync_device_domain_acks.applied_at END,
+                updated_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.updated_at ELSE sync_device_domain_acks.updated_at END,
+                idempotency_key = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.idempotency_key
+                    ELSE sync_device_domain_acks.idempotency_key END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            UPDATE sync_device_domain_acks
+               SET through_server_sequence = (
+                       SELECT versioned.through_server_sequence
+                         FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                   ),
+                   applied_at = (
+                       SELECT versioned.applied_at
+                         FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                   ),
+                   updated_at = (
+                       SELECT versioned.updated_at
+                         FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                   )
+             WHERE EXISTS (
+                       SELECT 1 FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                          AND versioned.through_server_sequence
+                              > sync_device_domain_acks.through_server_sequence
+                   )
+            """,
+            connection=connection,
+        )
+        mismatch = _first(
+            self.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM sync_device_cursors) AS legacy_cursor_count,
+                    (SELECT COUNT(*) FROM sync_device_adapter_cursors
+                      WHERE adapter_version = 1) AS version_cursor_count,
+                    (SELECT COUNT(*) FROM sync_device_domain_acks) AS legacy_ack_count,
+                    (SELECT COUNT(*) FROM sync_device_adapter_domain_acks
+                      WHERE adapter_version = 1) AS version_ack_count,
+                    (SELECT COUNT(*) FROM sync_device_cursors AS legacy
+                      JOIN sync_device_adapter_cursors AS versioned
+                        ON versioned.dataset_id = legacy.dataset_id
+                       AND versioned.device_id = legacy.device_id
+                       AND versioned.domain = legacy.domain
+                       AND versioned.adapter_version = 1
+                     WHERE legacy.last_pulled_sequence <> versioned.last_pulled_sequence)
+                        AS cursor_mismatches,
+                    (SELECT COUNT(*) FROM sync_device_domain_acks AS legacy
+                      JOIN sync_device_adapter_domain_acks AS versioned
+                        ON versioned.dataset_id = legacy.dataset_id
+                       AND versioned.device_id = legacy.device_id
+                       AND versioned.domain = legacy.domain
+                       AND versioned.adapter_version = 1
+                     WHERE legacy.through_server_sequence <> versioned.through_server_sequence)
+                        AS ack_mismatches
+                """,
+                connection=connection,
+            )
+        ) or {}
+        if (
+            int(mismatch.get("legacy_cursor_count") or 0)
+            != int(mismatch.get("version_cursor_count") or 0)
+            or int(mismatch.get("legacy_ack_count") or 0)
+            != int(mismatch.get("version_ack_count") or 0)
+            or int(mismatch.get("cursor_mismatches") or 0)
+            or int(mismatch.get("ack_mismatches") or 0)
+        ):
+            raise SyncStoreError("Sync adapter cursor/ack migration verification failed")
     def _ensure_device_lifecycle_tables(self, *, connection: Any) -> None:
         if self.backend_type == BackendType.POSTGRESQL:
             schema = """
@@ -8687,6 +10057,14 @@ class SyncDatabase:
                 ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id)
             """,
             """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
+                ON sync_attachment_revision_bindings(
+                    dataset_id, resolved_blob_id, establishing_server_cursor,
+                    attachment_id, attachment_revision
+                )
+                WHERE retention_released_at IS NULL
+            """,
+            """
             CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
                 ON sync_attachment_revision_bindings(
                     dataset_id, blob_hash, size_bytes, establishing_server_cursor,
@@ -8756,6 +10134,7 @@ class SyncDatabase:
         expected_indexes = {
             "idx_sync_attachment_bindings_unresolved": "createindexidx_sync_attachment_bindings_unresolvedonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
             "idx_sync_attachment_bindings_blob": "createindexidx_sync_attachment_bindings_blobonsync_attachment_revision_bindings(dataset_id,resolved_blob_id)",
+            "idx_sync_attachment_bindings_blob_retention": "createindexidx_sync_attachment_bindings_blob_retentiononsync_attachment_revision_bindings(dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision)whereretention_released_atisnull",
             "idx_sync_attachment_bindings_pending_digest": "createindexidx_sync_attachment_bindings_pending_digestonsync_attachment_revision_bindings(dataset_id,blob_hash,size_bytes,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
             "uq_sync_dataset_storage_namespace_id": "createuniqueindexuq_sync_dataset_storage_namespace_idonsync_dataset_storage_namespaces(storage_namespace_id)",
             "idx_sync_dataset_storage_namespaces_owner": "createindexidx_sync_dataset_storage_namespaces_owneronsync_dataset_storage_namespaces(owner_user_id,dataset_id)",
@@ -8788,6 +10167,7 @@ class SyncDatabase:
                AND name IN (
                     'idx_sync_attachment_bindings_unresolved',
                     'idx_sync_attachment_bindings_blob',
+                    'idx_sync_attachment_bindings_blob_retention',
                     'idx_sync_attachment_bindings_pending_digest',
                     'uq_sync_dataset_storage_namespace_id',
                     'idx_sync_dataset_storage_namespaces_owner'
@@ -8856,6 +10236,7 @@ class SyncDatabase:
               JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
              WHERE namespace.nspname = current_schema()
                AND relation.relname IN ('sync_attachment_revision_bindings', 'sync_dataset_storage_namespaces')
+               AND constraint_record.contype IN ('p', 'c')
              ORDER BY relation.relname, constraint_record.contype, constraint_record.conname
             """,
             connection=connection,
@@ -8915,6 +10296,7 @@ class SyncDatabase:
                AND index_relation.relname IN (
                     'idx_sync_attachment_bindings_unresolved',
                     'idx_sync_attachment_bindings_blob',
+                    'idx_sync_attachment_bindings_blob_retention',
                     'idx_sync_attachment_bindings_pending_digest',
                     'uq_sync_dataset_storage_namespace_id',
                     'idx_sync_dataset_storage_namespaces_owner'
@@ -8935,6 +10317,12 @@ class SyncDatabase:
                 False,
                 "dataset_id,resolved_blob_id",
                 "",
+            ),
+            "idx_sync_attachment_bindings_blob_retention": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision",
+                "retention_released_atisnull",
             ),
             "idx_sync_attachment_bindings_pending_digest": (
                 "sync_attachment_revision_bindings",

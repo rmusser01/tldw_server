@@ -46,7 +46,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
     SyncDataset,
     SyncDatasetCreate,
+    SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceCursor,
+    SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelope,
@@ -7032,6 +7035,371 @@ def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     assert second_pull.next_cursor == "1"
 
 
+def test_adapter_cursor_version_upgrade_replays_v2_without_rewinding_v1(
+    sync_store: SyncV2Store,
+) -> None:
+    registry = SyncAdapterRegistry(
+        [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            max_pull_page_size=10,
+            pull_token_signing_secret="test-only-pull-secret",
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1]},
+        },
+    )
+    service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-1", domains=["notes.note"]
+    )
+    v1 = sync_store.insert_envelope(
+        _envelope(client_envelope_id="v1-history", adapter_version=1)
+    )
+    v2 = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="v2-history",
+            entity_id="note-v2",
+            stable_key="note:v2",
+            payload_hash="sha256:v2-history",
+            adapter_version=2,
+            schema_version=2,
+        )
+    )
+    sync_store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            adapter_version=1,
+            last_pulled_sequence=v1.server_sequence,
+            max_delivered_sequence=v1.server_sequence,
+        )
+    )
+    service.update_device(
+        user_id="user-1",
+        device_id="device-1",
+        capabilities={
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        },
+    )
+
+    pulled = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        include_own_changes=True,
+    )
+
+    assert [item.client_envelope_id for item in pulled.envelopes] == ["v2-history"]
+    assert pulled.next_cursor is not None and not pulled.next_cursor.isdigit()
+    stored_v1 = sync_store.get_device_cursor(
+        "dataset-1", "device-1", "notes.note", adapter_version=1
+    )
+    stored_v2 = sync_store.get_device_cursor(
+        "dataset-1", "device-1", "notes.note", adapter_version=2
+    )
+    assert stored_v1 is not None and stored_v1.max_delivered_sequence == v1.server_sequence
+    assert stored_v2 is not None and stored_v2.max_delivered_sequence == v2.server_sequence
+
+
+def test_pull_token_rejects_tampering_oversize_and_negotiated_version_set_change(
+    sync_store: SyncV2Store,
+) -> None:
+    registry = SyncAdapterRegistry(
+        [
+            StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2}),
+            StaticSyncAdapter(domain="chat.conversation", supported_adapter_versions={1}),
+        ]
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            max_pull_page_size=1,
+            pull_token_signing_secret="test-only-pull-secret",
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        },
+    )
+    service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-1", domains=["notes.note"]
+    )
+    sync_store.insert_envelope(_envelope(client_envelope_id="token-v1"))
+    sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="token-v2",
+            entity_id="note-v2",
+            stable_key="note:v2",
+            payload_hash="sha256:token-v2",
+            adapter_version=2,
+            schema_version=2,
+        )
+    )
+    first = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        page_size=1,
+        include_own_changes=True,
+    )
+    assert first.next_cursor is not None
+
+    with pytest.raises(SyncStoreError, match="sync_pull_token_invalid"):
+        service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            cursor=first.next_cursor[:-1] + ("A" if first.next_cursor[-1] != "A" else "B"),
+            include_own_changes=True,
+        )
+    with pytest.raises(SyncStoreError, match="sync_pull_token_too_large"):
+        service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            cursor="x" * 32_769,
+            include_own_changes=True,
+        )
+
+    second = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor=first.next_cursor,
+        page_size=1,
+        include_own_changes=True,
+    )
+    delivered_v2 = next(
+        envelope for envelope in second.envelopes if envelope.adapter_version == 2
+    )
+    service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain_acks=[
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=2,
+                through_server_sequence=delivered_v2.server_sequence,
+                applied_at=_clock(),
+            )
+        ],
+    )
+
+    service.update_device(
+        user_id="user-1",
+        device_id="device-1",
+        capabilities={
+            "requested_domains": ["chat.conversation"],
+            "supported_adapter_versions": {"chat.conversation": [1]},
+        },
+    )
+    with pytest.raises(SyncStoreError, match="sync_pull_restart_required"):
+        service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            cursor=first.next_cursor,
+            include_own_changes=True,
+        )
+
+
+def test_version_ack_accepts_only_exact_adapter_stream_delivered_by_pull(
+    sync_store: SyncV2Store,
+) -> None:
+    registry = SyncAdapterRegistry(
+        [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            pull_token_signing_secret="test-only-pull-secret",
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        },
+    )
+    service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-1", domains=["notes.note"]
+    )
+    delivered = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="ack-v2",
+            adapter_version=2,
+            schema_version=2,
+        )
+    )
+    service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        include_own_changes=True,
+    )
+
+    summary = service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain_acks=[
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="notes.note",
+                adapter_version=2,
+                through_server_sequence=delivered.server_sequence,
+                applied_at=_clock(),
+            )
+        ],
+    )
+    with pytest.raises(SyncStoreError, match="delivered watermark"):
+        service.acknowledge_device_state(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain_acks=[
+                SyncDeviceDomainAckCreate(
+                    dataset_id="dataset-1",
+                    device_id="device-1",
+                    domain="notes.note",
+                    adapter_version=1,
+                    through_server_sequence=delivered.server_sequence,
+                    applied_at=_clock(),
+                )
+            ],
+        )
+
+    service.register_device(
+        user_id="user-1",
+        display_name="Legacy client",
+        client_type="chatbook",
+        device_id="legacy-device",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1]},
+        },
+    )
+    unacknowledged = service._retention_unacknowledged_devices(
+        dataset_id="dataset-1",
+        domain="notes.note",
+        adapter_version=2,
+        server_sequence=delivered.server_sequence,
+        active_devices=sync_store.list_devices_for_user("user-1"),
+    )
+
+    assert summary.version_acks[0].adapter_version == 2
+    assert unacknowledged == []
+
+
+@pytest.mark.parametrize("later_failure", ["domain", "blob", "blob_id"])
+def test_mixed_ack_batch_rolls_back_every_earlier_ack_type(
+    sync_service: SyncV2Service,
+    later_failure: str,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    delivered = sync_service.store.insert_envelope(_envelope())
+    sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        include_own_changes=True,
+    )
+    valid_domain = SyncDeviceDomainAckCreate(
+        dataset_id="dataset-1",
+        device_id="device-2",
+        domain="notes.note",
+        through_server_sequence=delivered.server_sequence,
+        applied_at=_clock(),
+    )
+    valid_blob = SyncDeviceBlobAckCreate(
+        dataset_id="dataset-1",
+        device_id="device-2",
+        attachment_id="attachment-1",
+        payload_hash="sha256:" + "a" * 64,
+        verified_at=_clock(),
+    )
+    domain_acks = [valid_domain]
+    blob_acks: list[SyncDeviceBlobAckCreate] = []
+    blob_id_acks: list[SyncDeviceBlobIdAckCreate] = []
+    if later_failure == "domain":
+        domain_acks.append(
+            replace(
+                valid_domain,
+                through_server_sequence=delivered.server_sequence + 1,
+            )
+        )
+    elif later_failure == "blob":
+        blob_acks.extend(
+            [valid_blob, replace(valid_blob, dataset_id="other-dataset")]
+        )
+    else:
+        blob_acks.append(valid_blob)
+        blob_id_acks.append(
+            SyncDeviceBlobIdAckCreate(
+                dataset_id="dataset-1",
+                device_id="device-2",
+                blob_id="missing-blob",
+                payload_hash="sha256:" + "b" * 64,
+                verified_at=_clock(),
+            )
+        )
+
+    with pytest.raises(SyncStoreError):
+        sync_service.acknowledge_device_state(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            domain_acks=domain_acks,
+            blob_acks=blob_acks,
+            blob_id_acks=blob_id_acks,
+        )
+
+    summary = sync_service.store.list_device_acknowledgments(
+        "dataset-1",
+        "device-2",
+    )
+    assert summary.version_acks == []
+    assert summary.blob_acks == []
+    assert summary.blob_id_acks == []
+
+
 def test_implicit_pull_isolates_legacy_device_and_rejects_explicit_unsupported_domain(
     sync_store: SyncV2Store,
 ) -> None:
@@ -7152,6 +7520,66 @@ def test_pull_does_not_persist_empty_explicit_high_cursor(sync_service: SyncV2Se
 
     assert poisoned.envelopes == []
     assert [envelope.client_envelope_id for envelope in later.envelopes] == ["env-1"]
+
+
+def test_v1_explicit_cursor_pages_record_only_delivered_watermarks(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    for sequence in range(1, 4):
+        sync_service.store.insert_envelope(
+            _envelope(
+                client_envelope_id=f"explicit-page-{sequence}",
+                entity_id=f"note-{sequence}",
+                stable_key=f"note:{sequence}",
+                payload_hash=f"sha256:explicit-page-{sequence}",
+                client_sequence=sequence,
+            )
+        )
+
+    cursor: str | int = 0
+    delivered: list[int] = []
+    for _page_number in range(3):
+        page = sync_service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            cursor=cursor,
+            page_size=1,
+            include_own_changes=True,
+        )
+        assert len(page.envelopes) == 1
+        sequence = page.envelopes[0].server_sequence
+        delivered.append(sequence)
+        sync_service.acknowledge_device_state(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            domain_acks=[
+                SyncDeviceDomainAckCreate(
+                    dataset_id="dataset-1",
+                    device_id="device-2",
+                    domain="notes.note",
+                    through_server_sequence=sequence,
+                    applied_at=_clock(),
+                )
+            ],
+        )
+        cursor = page.next_cursor or cursor
+
+    stored = sync_service.store.get_device_cursor(
+        "dataset-1",
+        "device-2",
+        "notes.note",
+    )
+    assert delivered == sorted(delivered)
+    assert stored is not None
+    assert stored.last_pulled_sequence == delivered[-1]
+    assert stored.max_delivered_sequence == delivered[-1]
 
 
 def test_pull_does_not_persist_visible_empty_explicit_cursor_over_echoes(
@@ -7505,6 +7933,7 @@ def test_pull_uses_server_side_filters_past_echo_filled_raw_window(
         {
             "limit": 2,
             "domains": ["notes.note"],
+            "adapter_versions": [1],
             "status": "accepted",
             "exclude_device_id": "device-1",
         }

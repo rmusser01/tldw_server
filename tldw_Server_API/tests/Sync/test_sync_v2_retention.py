@@ -11,11 +11,14 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2 import service as service_module
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncBlobObjectCreate,
+    SyncDatasetCreate,
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncEnvelopeCreate,
@@ -157,8 +160,174 @@ def _attachment_ref_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+_ATTACHMENT_A = "a1111111-1111-4111-8111-111111111111"
+_ATTACHMENT_B = "a2222222-2222-4222-8222-222222222222"
+_ATTACHMENT_C = "a3333333-3333-4333-8333-333333333333"
+
+
+def _v2_attachment_payload(
+    blob_hash: str,
+    *,
+    attachment_id: str = _ATTACHMENT_A,
+) -> dict[str, Any]:
+    return {
+        "attachment_id": attachment_id,
+        "parent_domain": "notes.note",
+        "parent_object_id": "b2222222-2222-4222-8222-222222222222",
+        "file_name": "paper.bin",
+        "original_file_name": "paper.bin",
+        "content_type": "application/octet-stream",
+        "size_bytes": 1,
+        "blob_hash": blob_hash,
+        "created_at": _clock(),
+        "last_modified": _clock(),
+        "created_by": "device-v2",
+    }
+
+
+def _v2_attachment_envelope(
+    blob_hash: str,
+    *,
+    attachment_id: str = _ATTACHMENT_A,
+    **overrides: Any,
+) -> SyncEnvelopeCreate:
+    payload = overrides.pop(
+        "payload",
+        _v2_attachment_payload(blob_hash, attachment_id=attachment_id),
+    )
+    values: dict[str, Any] = {
+        "dataset_id": "dataset-v2",
+        "client_envelope_id": "v2-attachment-1",
+        "domain": "attachment.ref",
+        "operation": "upsert",
+        "object_id": attachment_id,
+        "device_id": "device-v2",
+        "client_sequence": 1,
+        "schema_version": 2,
+        "adapter_version": 2,
+        "object_revision": 1,
+        "payload": payload,
+        "payload_hash": "sha256:" + "c" * 64,
+        "created_at_client": _clock(),
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+    }
+    values.update(overrides)
+    return SyncEnvelopeCreate(**values)
+
+
+def _v2_retention_service(tmp_path: Path) -> SyncV2Service:
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "v2-retention.db")),
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="attachment.ref", supported_adapter_versions={1, 2})]
+        ),
+        clock=_clock,
+        settings=SyncV2Settings(
+            server_trusted_encryption=_ready_encryption(),
+            pull_token_signing_secret="retention-test-secret",
+        ),
+    )
+    for device_id, versions in (
+        ("device-v2", [2]),
+        ("device-v1", [1]),
+    ):
+        service.register_device(
+            user_id="user-1",
+            device_id=device_id,
+            display_name=device_id,
+            client_type="chatbook",
+            capabilities={
+                "requested_domains": ["attachment.ref"],
+                "supported_adapter_versions": {"attachment.ref": versions},
+            },
+        )
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-v2",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["attachment.ref"],
+            metadata={"notes_attachment_v2": {"state": "ready"}},
+        )
+    )
+    return service
+
+
+def _store_v2_blob(
+    service: SyncV2Service,
+    *,
+    blob_id: str,
+    blob_hash: str,
+) -> None:
+    service.store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id=blob_id,
+            dataset_id="dataset-v2",
+            owner_user_id="user-1",
+            attachment_id="a1111111-1111-4111-8111-111111111111",
+            payload_hash=blob_hash,
+            content_type="application/octet-stream",
+            size_bytes=1,
+            storage_backend="local_fs",
+            storage_key=f"{blob_id}.bin",
+        )
+    )
+
+
+def _tombstone_v2_attachment(
+    service: SyncV2Service,
+    *,
+    blob_hash: str,
+    head,
+    revision: int,
+    attachment_id: str = _ATTACHMENT_A,
+    client_sequence: int | None = None,
+):
+    current = service.store.get_current_head(
+        "dataset-v2",
+        "attachment.ref",
+        attachment_id,
+    )
+    assert current is not None and current.server_sequence == head.server_sequence
+    payload = _v2_attachment_payload(blob_hash, attachment_id=attachment_id)
+    payload["deleted_at"] = _clock()
+    return service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[
+            _v2_attachment_envelope(
+                blob_hash,
+                attachment_id=attachment_id,
+                client_envelope_id=f"v2-tombstone-{attachment_id}-{revision}",
+                operation="tombstone",
+                client_sequence=client_sequence or revision,
+                object_revision=revision,
+                payload=payload,
+                base_server_cursor=current.server_sequence,
+                base_object_revision=current.object_revision,
+                base_object_hash=current.payload_hash,
+            )
+        ],
+    ).accepted[0]
+
+
 def _ack_all_domains(service: SyncV2Service, through_sequence: int) -> None:
     for device_id in ("device-1", "device-2"):
+        pulled = service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id=device_id,
+            include_own_changes=True,
+        )
+        delivered_by_domain: dict[str, int] = {}
+        for envelope in pulled.envelopes:
+            if envelope.server_sequence <= through_sequence:
+                delivered_by_domain[envelope.domain] = max(
+                    envelope.server_sequence,
+                    delivered_by_domain.get(envelope.domain, 0),
+                )
         service.acknowledge_device_state(
             user_id="user-1",
             dataset_id="dataset-1",
@@ -167,19 +336,510 @@ def _ack_all_domains(service: SyncV2Service, through_sequence: int) -> None:
                 SyncDeviceDomainAckCreate(
                     dataset_id="dataset-1",
                     device_id=device_id,
-                    domain="notes.note",
-                    through_server_sequence=through_sequence,
+                    domain=domain,
+                    through_server_sequence=sequence,
                     applied_at=_clock(),
-                ),
-                SyncDeviceDomainAckCreate(
-                    dataset_id="dataset-1",
-                    device_id=device_id,
-                    domain="attachment.ref",
-                    through_server_sequence=through_sequence,
-                    applied_at=_clock(),
-                ),
+                )
+                for domain, sequence in sorted(delivered_by_domain.items())
             ],
         )
+
+
+def _ack_v2_attachment_ref_through(
+    service: SyncV2Service,
+    through_sequence: int,
+) -> None:
+    pulled = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        include_own_changes=True,
+    )
+    assert any(
+        envelope.adapter_version == 2
+        and envelope.server_sequence >= through_sequence
+        for envelope in pulled.envelopes
+    )
+    service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        domain_acks=[
+            SyncDeviceDomainAckCreate(
+                dataset_id="dataset-v2",
+                device_id="device-v2",
+                domain="attachment.ref",
+                adapter_version=2,
+                through_server_sequence=through_sequence,
+                applied_at=_clock(),
+            )
+        ],
+    )
+
+
+def _ack_v2_blob(service: SyncV2Service, *, blob_id: str, blob_hash: str) -> None:
+    service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        blob_id_acks=[
+            SyncDeviceBlobIdAckCreate(
+                dataset_id="dataset-v2",
+                device_id="device-v2",
+                blob_id=blob_id,
+                payload_hash=blob_hash,
+                verified_at=_clock(),
+            )
+        ],
+    )
+
+
+def _push_shared_v2_refs(
+    service: SyncV2Service,
+    *,
+    blob_id: str,
+    blob_hash: str,
+    attachment_ids: tuple[str, ...] = (_ATTACHMENT_A, _ATTACHMENT_B),
+):
+    _store_v2_blob(service, blob_id=blob_id, blob_hash=blob_hash)
+    return [
+        service.push(
+            user_id="user-1",
+            dataset_id="dataset-v2",
+            device_id="device-v2",
+            envelopes=[
+                _v2_attachment_envelope(
+                    blob_hash,
+                    attachment_id=attachment_id,
+                    client_envelope_id=f"shared-{index}",
+                    client_sequence=index,
+                )
+            ],
+        ).accepted[0]
+        for index, attachment_id in enumerate(attachment_ids, start=1)
+    ]
+
+
+def _shared_blob_candidate(service: SyncV2Service, blob_id: str):
+    dry_run = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+        minimum_tombstone_age_seconds=0,
+    )
+    return next(item for item in dry_run.candidates if item.blob_id == blob_id)
+
+
+def test_v2_shared_blob_live_sibling_binding_blocks_gc(tmp_path: Path) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    first, second = _push_shared_v2_refs(
+        service,
+        blob_id="blob-shared",
+        blob_hash=digest,
+    )
+    tombstone = _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=first,
+        revision=2,
+        attachment_id=_ATTACHMENT_A,
+        client_sequence=101,
+    )
+    _ack_v2_attachment_ref_through(service, tombstone.server_sequence)
+    _ack_v2_blob(service, blob_id="blob-shared", blob_hash=digest)
+
+    candidate = _shared_blob_candidate(service, "blob-shared")
+
+    assert second.entity_id == _ATTACHMENT_B
+    assert "retention_active_blob_reference" in candidate.blockers
+
+
+def test_v2_shared_blob_all_eligible_bindings_allow_exact_evidence(
+    tmp_path: Path,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    first, second = _push_shared_v2_refs(
+        service,
+        blob_id="blob-shared",
+        blob_hash=digest,
+    )
+    first_tombstone = _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=first,
+        revision=2,
+        attachment_id=_ATTACHMENT_A,
+        client_sequence=101,
+    )
+    second_tombstone = _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=second,
+        revision=2,
+        attachment_id=_ATTACHMENT_B,
+        client_sequence=102,
+    )
+    _ack_v2_attachment_ref_through(
+        service,
+        max(first_tombstone.server_sequence, second_tombstone.server_sequence),
+    )
+    _ack_v2_blob(service, blob_id="blob-shared", blob_hash=digest)
+
+    candidate = _shared_blob_candidate(service, "blob-shared")
+
+    assert candidate.blockers == []
+    assert candidate.unacknowledged_device_ids == []
+
+
+def test_v2_shared_blob_binding_pagination_still_finds_live_ref(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    first, second, third = _push_shared_v2_refs(
+        service,
+        blob_id="blob-shared",
+        blob_hash=digest,
+        attachment_ids=(_ATTACHMENT_A, _ATTACHMENT_B, _ATTACHMENT_C),
+    )
+    for client_sequence, attachment_id, head in (
+        (101, _ATTACHMENT_A, first),
+        (102, _ATTACHMENT_B, second),
+    ):
+        _tombstone_v2_attachment(
+            service,
+            blob_hash=digest,
+            head=head,
+            revision=2,
+            attachment_id=attachment_id,
+            client_sequence=client_sequence,
+        )
+    monkeypatch.setattr(service_module, "SYNC_RETENTION_BINDING_PAGE_SIZE", 1)
+    _ack_v2_blob(service, blob_id="blob-shared", blob_hash=digest)
+
+    candidate = _shared_blob_candidate(service, "blob-shared")
+
+    assert third.entity_id == _ATTACHMENT_C
+    assert "retention_active_blob_reference" in candidate.blockers
+
+
+def test_v2_shared_blob_released_live_binding_stops_blocking(tmp_path: Path) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    first, second = _push_shared_v2_refs(
+        service,
+        blob_id="blob-shared",
+        blob_hash=digest,
+    )
+    tombstone = _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=first,
+        revision=2,
+        attachment_id=_ATTACHMENT_A,
+        client_sequence=101,
+    )
+    service.store.release_attachment_revision_binding(
+        "dataset-v2",
+        _ATTACHMENT_B,
+        1,
+        released_at=_clock(),
+        owner_user_id="user-1",
+    )
+    _ack_v2_attachment_ref_through(service, tombstone.server_sequence)
+    _ack_v2_blob(service, blob_id="blob-shared", blob_hash=digest)
+
+    candidate = _shared_blob_candidate(service, "blob-shared")
+
+    assert second.entity_id == _ATTACHMENT_B
+    assert "retention_active_blob_reference" not in candidate.blockers
+    assert candidate.blockers == []
+
+
+def test_retention_apply_revalidates_stale_blob_candidate_under_fence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    first = _push_shared_v2_refs(
+        service,
+        blob_id="blob-stale",
+        blob_hash=digest,
+        attachment_ids=(_ATTACHMENT_A,),
+    )[0]
+    tombstone = _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=first,
+        revision=2,
+        attachment_id=_ATTACHMENT_A,
+        client_sequence=2,
+    )
+    _ack_v2_attachment_ref_through(service, tombstone.server_sequence)
+    _ack_v2_blob(service, blob_id="blob-stale", blob_hash=digest)
+    original_dry_run = service.retention_dry_run
+    injected = False
+
+    def stale_dry_run(**kwargs):
+        nonlocal injected
+        result = original_dry_run(**kwargs)
+        if not injected:
+            injected = True
+            pushed = service.push(
+                user_id="user-1",
+                dataset_id="dataset-v2",
+                device_id="device-v2",
+                envelopes=[
+                    _v2_attachment_envelope(
+                        digest,
+                        attachment_id=_ATTACHMENT_B,
+                        client_envelope_id="stale-live-binding",
+                        client_sequence=3,
+                    )
+                ],
+            )
+            assert pushed.accepted
+        return result
+
+    monkeypatch.setattr(service, "retention_dry_run", stale_dry_run)
+
+    applied = service.retention_compact(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        confirm=True,
+        apply_envelope_compaction=False,
+        apply_tombstone_prune=False,
+        apply_blob_gc=True,
+    )
+
+    assert applied.mutation_performed is False
+    assert applied.applied_count == 0
+    blob = service.store.get_blob_object(
+        "dataset-v2",
+        blob_id="blob-stale",
+        owner_user_id="user-1",
+    )
+    assert blob is not None and blob.status == "available"
+
+
+def test_v2_blob_retention_uses_blob_id_ack_and_exact_version_devices(
+    tmp_path: Path,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    _store_v2_blob(service, blob_id="blob-v2", blob_hash=digest)
+    upsert = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[_v2_attachment_envelope(digest)],
+    ).accepted[0]
+    tombstone = _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=upsert,
+        revision=2,
+    )
+    service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        blob_acks=[
+            SyncDeviceBlobAckCreate(
+                dataset_id="dataset-v2",
+                device_id="device-v2",
+                attachment_id="a1111111-1111-4111-8111-111111111111",
+                payload_hash=digest,
+                verified_at=_clock(),
+            )
+        ],
+    )
+
+    legacy_only = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+        minimum_tombstone_age_seconds=0,
+    )
+    candidate = next(item for item in legacy_only.candidates if item.blob_id == "blob-v2")
+    assert candidate.required_device_ids == ["device-v2"]
+    assert candidate.unacknowledged_device_ids == ["device-v2"]
+    assert "retention_blob_unverified_by_device" in candidate.blockers
+
+    service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        blob_id_acks=[
+            SyncDeviceBlobIdAckCreate(
+                dataset_id="dataset-v2",
+                device_id="device-v2",
+                blob_id="blob-v2",
+                payload_hash=digest,
+                verified_at=_clock(),
+            )
+        ],
+    )
+    blob_only = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+        minimum_tombstone_age_seconds=0,
+    )
+    candidate = next(item for item in blob_only.candidates if item.blob_id == "blob-v2")
+    assert candidate.unacknowledged_device_ids == ["device-v2"]
+    assert "retention_blob_ref_unacknowledged" in candidate.blockers
+    assert "retention_blob_unverified_by_device" not in candidate.blockers
+
+    _ack_v2_attachment_ref_through(service, tombstone.server_sequence)
+    acknowledged = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+        minimum_tombstone_age_seconds=0,
+    )
+    candidate = next(item for item in acknowledged.candidates if item.blob_id == "blob-v2")
+    assert candidate.unacknowledged_device_ids == []
+    assert "retention_blob_ref_unacknowledged" not in candidate.blockers
+    assert "retention_blob_unverified_by_device" not in candidate.blockers
+
+
+def test_v2_blob_retention_keeps_replacement_evidence_separate(tmp_path: Path) -> None:
+    service = _v2_retention_service(tmp_path)
+    old_digest = "sha256:" + "a" * 64
+    new_digest = "sha256:" + "b" * 64
+    _store_v2_blob(service, blob_id="blob-old", blob_hash=old_digest)
+    _store_v2_blob(service, blob_id="blob-new", blob_hash=new_digest)
+    service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[_v2_attachment_envelope(old_digest)],
+    ).accepted[0]
+    first_head = service.store.get_current_head(
+        "dataset-v2",
+        "attachment.ref",
+        "a1111111-1111-4111-8111-111111111111",
+    )
+    assert first_head is not None
+    second = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[
+            _v2_attachment_envelope(
+                new_digest,
+                client_envelope_id="v2-attachment-2",
+                client_sequence=2,
+                object_revision=2,
+                payload_hash="sha256:" + "d" * 64,
+                base_server_cursor=first_head.server_sequence,
+                base_object_revision=first_head.object_revision,
+                base_object_hash=first_head.payload_hash,
+            )
+        ],
+    ).accepted[0]
+    _tombstone_v2_attachment(
+        service,
+        blob_hash=new_digest,
+        head=second,
+        revision=3,
+    )
+    _ack_v2_attachment_ref_through(service, second.server_sequence)
+    service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        blob_id_acks=[
+            SyncDeviceBlobIdAckCreate(
+                dataset_id="dataset-v2",
+                device_id="device-v2",
+                blob_id="blob-old",
+                payload_hash=old_digest,
+                verified_at=_clock(),
+            )
+        ],
+    )
+
+    dry_run = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+        minimum_tombstone_age_seconds=0,
+    )
+    by_blob = {
+        item.blob_id: item
+        for item in dry_run.candidates
+        if item.candidate_type == "blob_gc"
+    }
+    assert by_blob["blob-old"].unacknowledged_device_ids == []
+    assert by_blob["blob-new"].unacknowledged_device_ids == ["device-v2"]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "mismatch"])
+def test_v2_blob_retention_fails_closed_on_invalid_binding(
+    tmp_path: Path,
+    mutation: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    _store_v2_blob(service, blob_id="blob-v2", blob_hash=digest)
+    upsert = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[_v2_attachment_envelope(digest)],
+    ).accepted[0]
+    _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=upsert,
+        revision=2,
+    )
+    if mutation == "missing":
+        service.store.db.execute(
+            "DELETE FROM sync_attachment_revision_bindings WHERE dataset_id = ?",
+            ("dataset-v2",),
+        )
+        monkeypatch.setattr(
+            service.store,
+            "list_envelopes_for_entity",
+            lambda *args, **kwargs: [],
+        )
+    else:
+        service.store.db.execute(
+            "UPDATE sync_attachment_revision_bindings SET blob_hash = ? "
+            "WHERE dataset_id = ?",
+            ("sha256:" + "f" * 64, "dataset-v2"),
+        )
+    service.acknowledge_device_state(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        blob_id_acks=[
+            SyncDeviceBlobIdAckCreate(
+                dataset_id="dataset-v2",
+                device_id="device-v2",
+                blob_id="blob-v2",
+                payload_hash=digest,
+                verified_at=_clock(),
+            )
+        ],
+    )
+
+    dry_run = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+        minimum_tombstone_age_seconds=0,
+    )
+    candidate = next(item for item in dry_run.candidates if item.blob_id == "blob-v2")
+    assert "retention_blob_binding_invalid" in candidate.blockers
 
 
 def test_retention_dry_run_blocks_compaction_until_active_devices_ack(
@@ -232,6 +892,57 @@ def test_retention_dry_run_blocks_compaction_until_active_devices_ack(
     assert candidate.required_device_ids == ["device-1", "device-2"]
     assert len(sync_service.store.list_envelopes_after("dataset-1", 0, limit=10)) == envelope_count_before
     assert sync_service.store.get_object_state("dataset-1", "notes.note", "note-1") == object_state_before
+
+
+def test_retention_limit_uses_one_bounded_blob_page_budget(
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(3):
+        sync_service.store.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id=f"blob-budget-{index}",
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                attachment_id=f"attachment-budget-{index}",
+                payload_hash="sha256:" + str(index) * 64,
+                content_type="application/octet-stream",
+                size_bytes=1,
+                storage_backend="local_fs",
+                storage_key=f"blob-budget-{index}.bin",
+            )
+        )
+    original = sync_service.store.list_blob_objects_for_dataset
+    page_limits: list[int] = []
+
+    def bounded_page(dataset_id: str, *, limit: int, **_kwargs):
+        page_limits.append(limit)
+        return original(dataset_id)[:limit]
+
+    def unbounded_list(*_args, **_kwargs):
+        raise AssertionError("retention must not use the unbounded blob listing")
+
+    monkeypatch.setattr(
+        sync_service.store,
+        "list_blob_objects_for_dataset_page",
+        bounded_page,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sync_service.store,
+        "list_blob_objects_for_dataset",
+        unbounded_list,
+    )
+
+    result = sync_service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        audit_mode=False,
+        limit=1,
+    )
+
+    assert len(result.candidates) == 1
+    assert page_limits == [1]
 
 
 def test_retention_dry_run_reports_eligible_candidate_after_all_devices_ack(
@@ -674,8 +1385,15 @@ def test_retention_compact_soft_deletes_eligible_blob_metadata(
         user_id="user-1",
         dataset_id="dataset-1",
         device_id="device-1",
-        envelopes=[_attachment_ref_envelope()],
+        envelopes=[_attachment_ref_envelope(object_revision=1)],
     ).accepted[0]
+    head = sync_service.store.get_current_head(
+        "dataset-1",
+        "attachment.ref",
+        "attachment-1",
+    )
+    assert head is not None and head.server_sequence == upsert.server_sequence
+    assert head.object_revision is not None
     tombstone = sync_service.push(
         user_id="user-1",
         dataset_id="dataset-1",
@@ -685,9 +1403,9 @@ def test_retention_compact_soft_deletes_eligible_blob_metadata(
                 client_envelope_id="attachment-env-tombstone",
                 operation="tombstone",
                 client_sequence=51,
-                base_server_cursor=upsert.server_sequence,
-                base_object_revision=upsert.object_revision or 1,
-                base_object_hash=_sha256(b"paper payload"),
+                base_server_cursor=head.server_sequence,
+                base_object_revision=head.object_revision,
+                base_object_hash=head.payload_hash,
                 object_revision=2,
             )
         ],

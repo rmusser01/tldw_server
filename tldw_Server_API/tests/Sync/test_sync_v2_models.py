@@ -1734,3 +1734,91 @@ def test_attachment_ref_v2_capability_schema_advertises_strict_tombstones() -> N
                 assert advertised["properties"][field_name]["min_length"] == field_schema[
                     "minLength"
                 ]
+
+
+def test_version_ack_api_defaults_adapter_version_to_one() -> None:
+    request = api_sync_models.SyncDeviceDomainAckRequest.model_validate(
+        {
+            "domain": "notes.note",
+            "through_server_sequence": 7,
+            "applied_at": "2026-08-11T20:30:00Z",
+        }
+    )
+    response = api_sync_models.SyncDeviceDomainAckResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "notes.note",
+            "through_server_sequence": 7,
+            "applied_at": "2026-08-11T20:30:00Z",
+            "updated_at": "2026-08-11T20:30:00Z",
+        }
+    )
+
+    assert request.adapter_version == 1
+    assert response.adapter_version == 1
+
+
+def test_blob_id_ack_api_is_separate_from_legacy_attachment_ack() -> None:
+    digest = "sha256:" + "a" * 64
+    v2 = api_sync_models.SyncDeviceBlobIdAckRequest.model_validate(
+        {
+            "blob_id": "blob-immutable-1",
+            "payload_hash": digest,
+            "verified_at": "2026-08-11T20:30:00Z",
+        }
+    )
+
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncDeviceBlobAckRequest.model_validate(
+            {
+                "blob_id": "blob-immutable-1",
+                "payload_hash": digest,
+                "verified_at": "2026-08-11T20:30:00Z",
+            }
+        )
+
+    assert v2.blob_id == "blob-immutable-1"
+
+
+def test_blob_id_ack_batch_is_bounded_and_omitted_by_default() -> None:
+    digest = "sha256:" + "a" * 64
+    base = {
+        "dataset_id": "dataset-1",
+        "device_id": "device-1",
+    }
+
+    omitted = api_sync_models.SyncDeviceAcknowledgmentsRequest.model_validate(base)
+    assert omitted.blob_id_acks == []
+
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncDeviceAcknowledgmentsRequest.model_validate(
+            {
+                **base,
+                "blob_id_acks": [
+                    {
+                        "blob_id": f"blob-{index}",
+                        "payload_hash": digest,
+                        "verified_at": "2026-08-11T20:30:00Z",
+                    }
+                    for index in range(801)
+                ],
+            }
+        )
+
+
+def test_blob_id_ack_endpoint_keeps_legacy_and_v2_inputs_distinct() -> None:
+    from pathlib import Path
+
+    endpoint_source = Path(
+        "tldw_Server_API/app/api/v1/endpoints/sync.py"
+    ).read_text(encoding="utf-8")
+    acknowledgment_block = endpoint_source.split(
+        "def acknowledge_sync_v2_device_state", 1
+    )[1].split("@router.", 1)[0]
+
+    assert "SyncDeviceBlobAckCreate" in acknowledgment_block
+    assert "attachment_id=ack.attachment_id" in acknowledgment_block
+    assert "SyncDeviceBlobIdAckCreate" in acknowledgment_block
+    assert "blob_id=ack.blob_id" in acknowledgment_block
+    assert "blob_id=ack.attachment_id" not in acknowledgment_block

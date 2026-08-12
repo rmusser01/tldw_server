@@ -27,7 +27,9 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
+    SyncBlobObjectCreate,
     SyncDatasetCreate,
+    SyncDeviceCursor,
     SyncDeviceUpsert,
     SyncEnvelope,
     SyncEnvelopeCreate,
@@ -443,6 +445,15 @@ def test_device_lifecycle_endpoints_authorize_acknowledge_and_revoke(
         },
     )
     resumed = client.post("/api/v1/sync/devices/device-2/resume")
+    sync_service.store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-2",
+            domain="notes.note",
+            last_pulled_sequence=5,
+            max_delivered_sequence=5,
+        )
+    )
     acknowledged = client.post(
         "/api/v1/sync/device-acknowledgments",
         json={
@@ -513,6 +524,196 @@ def test_device_lifecycle_endpoints_authorize_acknowledge_and_revoke(
         device["device_id"]: device["status"]
         for device in auditable.json()
     } == {"device-1": "active", "device-2": "revoked"}
+
+
+def test_device_acknowledgment_endpoint_forwards_exact_adapter_version(
+    tmp_path: Path,
+) -> None:
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "version-ack.db")),
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]
+        ),
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        },
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    service.store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            adapter_version=2,
+            last_pulled_sequence=5,
+            max_delivered_sequence=5,
+        )
+    )
+
+    response = _client_for_service(service).post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain_acks": [
+                {
+                    "domain": "notes.note",
+                    "adapter_version": 2,
+                    "through_server_sequence": 5,
+                    "applied_at": "2026-05-23T18:30:00+00:00",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["version_acks"]) == 1
+    assert response.json()["version_acks"][0]["adapter_version"] == 2
+    assert response.json()["domain_acks"] == {}
+
+
+def _blob_id_ack_service(tmp_path: Path, *, supports_v2: bool = True) -> SyncV2Service:
+    versions = {1, 2} if supports_v2 else {1}
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "blob-id-ack.db")),
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="attachment.ref", supported_adapter_versions=versions)]
+        ),
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        capabilities={
+            "requested_domains": ["attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": sorted(versions)},
+        },
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["attachment.ref"],
+    )
+    service.store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-1",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="attachment-provenance",
+            payload_hash="sha256:" + "a" * 64,
+            content_type="application/octet-stream",
+            size_bytes=1,
+            storage_backend="local_fs",
+            storage_key="blob-1.bin",
+        )
+    )
+    return service
+
+
+def test_device_acknowledgment_endpoint_persists_reachable_blob_id_evidence(
+    tmp_path: Path,
+) -> None:
+    response = _client_for_service(_blob_id_ack_service(tmp_path)).post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "blob_id_acks": [
+                {
+                    "blob_id": "blob-1",
+                    "payload_hash": "sha256:" + "a" * 64,
+                    "verified_at": "2026-08-11T20:30:00Z",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["blob_acks"] == []
+    assert response.json()["blob_id_acks"][0]["blob_id"] == "blob-1"
+
+
+@pytest.mark.parametrize(
+    ("supports_v2", "blob_id", "digest", "status_code", "error_code"),
+    [
+        (False, "blob-1", "sha256:" + "a" * 64, 400, "sync_blob_id_ack_adapter_v2_required"),
+        (True, "missing", "sha256:" + "a" * 64, 404, "sync_blob_id_ack_not_authorized"),
+        (True, "blob-1", "sha256:" + "b" * 64, 400, "sync_blob_id_ack_digest_mismatch"),
+    ],
+)
+def test_device_acknowledgment_endpoint_sanitizes_blob_id_ack_errors(
+    tmp_path: Path,
+    supports_v2: bool,
+    blob_id: str,
+    digest: str,
+    status_code: int,
+    error_code: str,
+) -> None:
+    response = _client_for_service(
+        _blob_id_ack_service(tmp_path, supports_v2=supports_v2)
+    ).post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "blob_id_acks": [
+                {
+                    "blob_id": blob_id,
+                    "payload_hash": digest,
+                    "verified_at": "2026-08-11T20:30:00Z",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["detail"]["error_code"] == error_code
+    assert blob_id not in response.json()["detail"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_status"),
+    [
+        ("sync_pull_token_invalid", 400),
+        ("sync_pull_token_too_large", 413),
+        ("sync_pull_restart_required", 409),
+    ],
+)
+def test_pull_endpoint_maps_versioned_token_errors(
+    error_code: str,
+    expected_status: int,
+) -> None:
+    class FailingPullService:
+        def pull(self, **_kwargs):
+            raise SyncStoreError(error_code)
+
+    response = _client_for_service(FailingPullService()).get(  # type: ignore[arg-type]
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "cursor": "opaque-token",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"]["error_code"] == error_code
 
 
 def test_background_sync_policy_lease_and_status_endpoints(

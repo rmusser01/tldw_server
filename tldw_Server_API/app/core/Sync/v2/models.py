@@ -818,7 +818,12 @@ class SyncDeviceDomainAckCreate:
     domain: SyncDomain
     through_server_sequence: int
     applied_at: str
+    adapter_version: int = 1
     idempotency_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.adapter_version < 1:
+            raise ValueError("Sync adapter version must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -831,6 +836,7 @@ class SyncDeviceDomainAck:
     through_server_sequence: int
     applied_at: str
     updated_at: str
+    adapter_version: int = 1
     idempotency_key: str | None = None
 
 
@@ -860,6 +866,31 @@ class SyncDeviceBlobAck:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncDeviceBlobIdAckCreate:
+    """Immutable blob-ID verification evidence accepted from a v2 device."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceBlobIdAck:
+    """Stored immutable blob-ID verification evidence."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncDeviceAcknowledgmentSummary:
     """Aggregated device acknowledgments for one dataset/device."""
 
@@ -867,6 +898,8 @@ class SyncDeviceAcknowledgmentSummary:
     device_id: str
     domain_acks: dict[SyncDomain, SyncDeviceDomainAck] = field(default_factory=dict)
     blob_acks: list[SyncDeviceBlobAck] = field(default_factory=list)
+    version_acks: list[SyncDeviceDomainAck] = field(default_factory=list)
+    blob_id_acks: list[SyncDeviceBlobIdAck] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1214,7 +1247,17 @@ class SyncDeviceCursor:
     device_id: str
     domain: SyncDomain
     last_pulled_sequence: int
+    adapter_version: int = 1
+    max_delivered_sequence: int = 0
     updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.adapter_version < 1:
+            raise ValueError("Sync adapter version must be positive")
+        if self.last_pulled_sequence < 0 or self.max_delivered_sequence < 0:
+            raise ValueError("Sync cursor sequences must be non-negative")
+        if self.max_delivered_sequence > self.last_pulled_sequence:
+            raise ValueError("Sync delivered watermark cannot exceed scan cursor")
 
 
 @dataclass(frozen=True, slots=True)
