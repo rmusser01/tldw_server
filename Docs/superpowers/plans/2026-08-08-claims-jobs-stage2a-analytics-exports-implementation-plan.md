@@ -610,13 +610,15 @@ provider/model filters in parameterized database predicates, increment a total
 match counter from constant-size metadata rows, and retain only matches in
 `[offset, offset + limit)`. Continue JSON's bounded scan to calculate the stable
 `pagination.total`; stop CSV once its selected window is complete because CSV
-does not expose a total. Never retain unrelated pages. Load payload text only
-for selected owner-scoped rows through a query that caps raw source before JSON
-parsing at six times the builder's decreasing remaining-byte budget plus a fixed
-64 KiB formatting allowance, then canonicalizes with compact separators,
-`ensure_ascii=False`, and strict finite numbers before applying the exact UTF-8
-limit. Provider/model filters match JSON strings only on both database backends.
-Render JSON with compact deterministic separators and UTF-8 preservation:
+does not expose a total. Never retain unrelated pages. Metadata pages omit
+variable-width `event_type`, `severity`, and payload text. Load them together
+only for selected owner-scoped rows through a query that caps their combined raw
+source before JSON parsing at six times the builder's decreasing remaining-byte
+budget plus a fixed 64 KiB formatting allowance, then canonicalizes payload JSON
+with compact separators, `ensure_ascii=False`, and strict finite numbers before
+applying the exact UTF-8 limit. Provider/model filters match JSON strings only
+on both database backends. Render JSON with compact deterministic separators and
+UTF-8 preservation:
 
 ```python
 payload_text = json.dumps(
@@ -1779,3 +1781,9 @@ existing stable terminal codes; the focused run passed 9 tests and the affected
 matrix passed 197 tests with 4 official PostgreSQL skips before the one expected
 query-shape assertion was updated. The complete cleanup suite then passed 52
 tests.
+
+Specification re-review correction: metadata pages still returned unrestricted
+`event_type` and `severity` text, and product documentation omitted the raw
+preparse cap and full failed-artifact grace rule. RED was 2 focused failures.
+GREEN keeps metadata pages fixed-width, hydrates all selected variable text in
+one owner-scoped remaining-budget query, and aligns product/design guidance.

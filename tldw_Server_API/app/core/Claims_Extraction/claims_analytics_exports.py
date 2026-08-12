@@ -380,9 +380,10 @@ def _decode_event(
     event_id = row.get("id")
     if isinstance(event_id, bool) or not isinstance(event_id, int) or event_id <= 0:
         raise _serialization_error()
-    event_type = row.get("event_type")
-    if not isinstance(event_type, str) or not event_type:
-        raise _serialization_error()
+    if "event_type" in row:
+        event_type = row.get("event_type")
+        if not isinstance(event_type, str) or not event_type:
+            raise _serialization_error()
     if "user_id" not in row or str(row.get("user_id")) != owner_user_id:
         raise _serialization_error()
     if "created_at" not in row:
@@ -426,6 +427,64 @@ def _load_event_payload(
         return json.loads(raw_payload) if raw_payload else {}
     except (TypeError, ValueError, UnicodeError):
         return {}
+
+
+def _load_event_export_data(
+    db: Any,
+    *,
+    owner_user_id: str,
+    row: Mapping[str, Any],
+    max_bytes: int,
+) -> dict[str, Any]:
+    loader = getattr(db, "get_claims_monitoring_event_export_data_bounded", None)
+    if not callable(loader):
+        event_type = row.get("event_type")
+        severity = row.get("severity")
+        if not isinstance(event_type, str) or not event_type:
+            raise _serialization_error()
+        if severity is not None and not isinstance(severity, str):
+            raise _serialization_error()
+        return {
+            "event_type": event_type,
+            "severity": severity,
+            "payload": _load_event_payload(
+                db,
+                owner_user_id=owner_user_id,
+                row=row,
+                max_bytes=max_bytes,
+            ),
+        }
+
+    loaded = loader(
+        user_id=owner_user_id,
+        event_id=row["id"],
+        max_bytes=max_bytes,
+    )
+    if not isinstance(loaded, Mapping):
+        raise _serialization_error()
+    actual_size = loaded.get("export_data_size_bytes")
+    if isinstance(actual_size, bool) or not isinstance(actual_size, int) or actual_size < 0:
+        raise _serialization_error()
+    if actual_size > max_bytes:
+        raise _too_large_error()
+    event_type = loaded.get("event_type")
+    severity = loaded.get("severity")
+    raw_payload = loaded.get("payload_json")
+    if not isinstance(event_type, str) or not event_type:
+        raise _serialization_error()
+    if severity is not None and not isinstance(severity, str):
+        raise _serialization_error()
+    if not isinstance(raw_payload, str):
+        raise _serialization_error()
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except (TypeError, ValueError, UnicodeError):
+        payload = {}
+    return {
+        "event_type": event_type,
+        "severity": severity,
+        "payload": payload,
+    }
 
 
 def _scan_events(
@@ -478,12 +537,20 @@ def _scan_events(
                 payload_budget = remaining_bytes()
                 if payload_budget <= 0:
                     raise _too_large_error()
-                event["payload"] = _load_event_payload(
+                selected_data = _load_event_export_data(
                     db,
                     owner_user_id=owner_user_id,
                     row=raw_row,
                     max_bytes=payload_budget,
                 )
+                event = {
+                    "id": event["id"],
+                    "user_id": event["user_id"],
+                    "event_type": selected_data["event_type"],
+                    "severity": selected_data["severity"],
+                    "created_at": event["created_at"],
+                    "payload": selected_data["payload"],
+                }
                 emit(event)
                 selected_count += 1
             total += 1

@@ -371,12 +371,17 @@ integer value overrides that default, while invalid or non-positive values use 1
 Process environment values take precedence over config-loaded settings. API
 producer and WorkerSDK processes must use the same byte limit so synchronous and
 asynchronous rendering enforce one contract.
-Monitoring-event scans return filter metadata and normalized payload byte sizes
-without returning payload text. Claims then loads only selected, owner-scoped
-payloads whose normalized form fits the budget
-and appends each JSON event or CSV row to a byte-counted builder. An individually
-oversized payload and the first cumulative serialized overflow therefore fail
-before an oversized result or database page is retained in application memory.
+Monitoring-event scans return only bounded ordering and ownership metadata;
+variable-width `event_type`, `severity`, and payload text are loaded only for
+selected, owner-scoped rows. Before parsing JSON, the selected-row query limits
+their combined raw UTF-8 source to six times the builder's remaining budget plus
+a fixed 64 KiB formatting allowance. It then canonicalizes the payload with
+compact separators, decoded Unicode, and finite JSON numbers and applies the
+exact remaining-byte limit to the selected data. Claims appends each JSON event
+or CSV row to a byte-counted builder. An individually oversized selected row,
+an excessive raw source, and the first cumulative serialized overflow therefore
+fail before an oversized result or database page is retained in application
+memory.
 At artifact acceptance, Claims also records an internal owner-scoped monitoring
 event-ID high-water. Rendering and retries apply that high-water with the
 timestamp cutoff so events added later with equal or backdated timestamps are
@@ -442,13 +447,14 @@ Cleanup:
 - Retention accepts any finite positive hour value, including fractional values;
   invalid, non-finite, or non-positive values fall back to the default.
 - Once retention eligibility is reached, lifecycle-aware cleanup may delete aged
-  ready artifacts, aged failed artifacts whose Jobs state is terminal, and
-  reconciled failed artifacts with no Job. A failed artifact that still retains
-  `job_id` becomes deletion-eligible only after retention plus orphan grace when
-  a successful owner-scoped lookup of active and archived Jobs returns no row,
-  proving that the Job was pruned or is missing. Queued, processing, retrying,
-  and uncertain non-ready artifacts are preserved. A Jobs lookup failure or
-  owner/domain/type mismatch remains uncertainty and preserves the artifact.
+  ready artifacts and aged failed artifacts whose exact Jobs state is terminal.
+  Every failed artifact without `job_id` requires retention plus orphan grace
+  and a successful exact owner-scoped lookup proving that no active or archived
+  Job exists. A failed artifact that retains `job_id` uses the same combined
+  threshold and absence proof when that exact Job was pruned or is missing.
+  Queued, processing, retrying, and uncertain non-ready artifacts are preserved.
+  A Jobs lookup failure or owner/domain/type mismatch remains uncertainty and
+  preserves the artifact.
 - This is request-time maintenance, not a scheduled Claims cleanup job,
   scheduler, daemon, lease loop, or retry engine. Clients should download before
   expiry.

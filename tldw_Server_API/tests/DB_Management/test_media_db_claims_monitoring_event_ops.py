@@ -590,12 +590,7 @@ def test_list_claims_monitoring_events_page_uses_paired_keyset_without_gaps(
         assert [int(row["id"]) for row in rows] == wanted_ids
         assert [int(row["id"]) for row in rows] == sorted(int(row["id"]) for row in rows)
         assert all(row["user_id"] == "1" for row in rows)
-        assert all(row["event_type"] == "unsupported_ratio" for row in rows)
-        assert all(row["severity"] == "warning" for row in rows)
-        assert all(
-            set(row) == {"id", "user_id", "event_type", "severity", "created_at"}
-            for row in rows
-        )
+        assert all(set(row) == {"id", "user_id", "created_at"} for row in rows)
     finally:
         db.close_connection()
 
@@ -617,7 +612,7 @@ def test_claims_monitoring_event_payload_scan_and_fetch_are_byte_bounded_and_own
         metadata = db.list_claims_monitoring_events_page(user_id="1", limit=1)
 
         assert len(metadata) == 1
-        assert set(metadata[0]) == {"id", "user_id", "event_type", "severity", "created_at"}
+        assert set(metadata[0]) == {"id", "user_id", "created_at"}
         assert db.get_claims_monitoring_event_payload_bounded(
             user_id="2",
             event_id=int(event["id"]),
@@ -644,6 +639,61 @@ def test_claims_monitoring_event_payload_scan_and_fetch_are_byte_bounded_and_own
             provider="missing",
             limit=1,
         ) == []
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_export_page_omits_unbounded_text_metadata(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-fixed-export-page.db")
+    try:
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="e" * 70_000,
+            severity="s" * 70_000,
+            payload_json="{}",
+        )
+
+        rows = db.list_claims_monitoring_events_page(user_id="1", limit=1)
+
+        assert len(rows) == 1
+        assert set(rows[0]) == {"id", "user_id", "created_at"}
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_export_data_bounds_metadata_with_payload(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-export-data-bound.db")
+    event_type = "e" * 70_000
+    severity = "warning"
+    payload = "{}"
+    source_size = len((event_type + severity + payload).encode("utf-8"))
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type=event_type,
+            severity=severity,
+            payload_json=payload,
+        )
+
+        assert db.get_claims_monitoring_event_export_data_bounded(
+            user_id="2",
+            event_id=int(event["id"]),
+            max_bytes=16,
+        ) == {}
+        assert db.get_claims_monitoring_event_export_data_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=16,
+        ) == {
+            "event_type": None,
+            "severity": None,
+            "payload_json": None,
+            "export_data_size_bytes": source_size,
+        }
     finally:
         db.close_connection()
 

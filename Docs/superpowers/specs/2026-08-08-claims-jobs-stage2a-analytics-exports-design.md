@@ -422,20 +422,22 @@ Invalid or non-positive settings fall back to that default. The limit is
 measured against UTF-8 serialized bytes before persistence.
 
 The keyset scan applies provider/model filters in parameterized database
-predicates and returns only constant-size event metadata, not payload-derived
-values or payload text. Provider/model predicates match JSON string values
-only; non-string JSON scalars and containers do not match string filters on
-either backend. Claims applies pagination, then loads each selected owner-scoped
-payload through a database query that returns normalized text only when it fits
-the builder's decreasing remaining-byte budget. Before invoking a JSON parser,
-the query returns raw source only when it is no larger than six times that
-budget plus a fixed 64 KiB formatting allowance. Six covers the worst-case
-`\\u0061`-to-`a` contraction; the fixed allowance permits ordinary whitespace
-without allowing unbounded raw normalization. Claims then parses and
-reserializes with compact separators, `ensure_ascii=False`, and strict finite
-numbers. The canonical UTF-8 byte count determines whether the payload fits, so
-escaped Unicode and already-decoded Unicode have identical limits. Claims
-appends one serialized JSON event or CSV row at a time.
+predicates and returns only bounded ordering and ownership metadata, not
+variable-width `event_type`, `severity`, payload-derived values, or payload
+text. Provider/model predicates match JSON string values only; non-string JSON
+scalars and containers do not match string filters on either backend. Claims
+applies pagination, then loads each selected owner-scoped row through a database
+query bounded by the builder's decreasing remaining-byte budget. Before
+invoking a JSON parser, the query returns the combined raw `event_type`,
+`severity`, and payload source only when it is no larger than six times that
+budget plus a fixed 64 KiB formatting allowance. Six covers escaped-value
+contraction and expansion within a constant factor; the fixed allowance permits
+ordinary whitespace without allowing unbounded raw normalization. Claims then
+parses and reserializes payload JSON with compact separators,
+`ensure_ascii=False`, and strict finite numbers. The canonical UTF-8 byte count
+determines whether the selected data fits, so escaped Unicode and already-decoded
+Unicode have identical payload limits. Claims appends one serialized JSON event
+or CSV row at a time.
 This prevents a database page, selected-event list, or final serializer from
 materializing unbounded payload content. Producer and worker processes must use
 the same byte-limit setting.

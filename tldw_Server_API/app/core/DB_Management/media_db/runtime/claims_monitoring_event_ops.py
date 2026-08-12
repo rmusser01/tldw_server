@@ -16,6 +16,19 @@ _PAYLOAD_SOURCE_EXPANSION_FACTOR = 6
 _PAYLOAD_SOURCE_OVERHEAD_BYTES = 65_536
 
 
+def _text_size_sql(column: str, *, postgresql: bool) -> str:
+    if postgresql:
+        return f"octet_length(COALESCE({column}, ''))"
+    return f"length(CAST(COALESCE({column}, '') AS BLOB))"
+
+
+def _bounded_source_budget(max_bytes: int) -> int:
+    return (
+        max_bytes * _PAYLOAD_SOURCE_EXPANSION_FACTOR
+        + _PAYLOAD_SOURCE_OVERHEAD_BYTES
+    )
+
+
 def _lock_postgres_event_owner(
     self,
     *,
@@ -114,16 +127,13 @@ def get_claims_monitoring_event_payload_bounded(
         raise ValueError("event_id must be a positive integer")
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValueError("max_bytes must be a positive integer")
-    if self.backend_type == BackendType.POSTGRESQL:
-        raw_size_sql = "octet_length(COALESCE(payload_json, ''))"
-    else:
-        raw_size_sql = "length(CAST(COALESCE(payload_json, '') AS BLOB))"
+    raw_size_sql = _text_size_sql(
+        "payload_json",
+        postgresql=self.backend_type == BackendType.POSTGRESQL,
+    )
     # Six covers escaped Unicode contraction; the fixed allowance permits
     # ordinary formatting whitespace without allowing unbounded raw parsing.
-    source_budget = (
-        max_bytes * _PAYLOAD_SOURCE_EXPANSION_FACTOR
-        + _PAYLOAD_SOURCE_OVERHEAD_BYTES
-    )
+    source_budget = _bounded_source_budget(max_bytes)
     row = self.execute_query(
         (
             "SELECT CASE WHEN "  # nosec B608
@@ -165,6 +175,89 @@ def get_claims_monitoring_event_payload_bounded(
     return {
         "payload_json": canonical_payload if canonical_size <= max_bytes else None,
         "payload_size_bytes": canonical_size,
+    }
+
+
+def get_claims_monitoring_event_export_data_bounded(
+    self,
+    *,
+    user_id: str,
+    event_id: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    """Load selected export text only within a constant-factor source bound."""
+    if type(event_id) is not int or event_id <= 0:
+        raise ValueError("event_id must be a positive integer")
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValueError("max_bytes must be a positive integer")
+
+    postgresql = self.backend_type == BackendType.POSTGRESQL
+    event_type_size_sql = _text_size_sql("event_type", postgresql=postgresql)
+    severity_size_sql = _text_size_sql("severity", postgresql=postgresql)
+    payload_size_sql = _text_size_sql("payload_json", postgresql=postgresql)
+    source_size_sql = (
+        f"({event_type_size_sql} + {severity_size_sql} + {payload_size_sql})"
+    )
+    source_budget = _bounded_source_budget(max_bytes)
+    row = self.execute_query(
+        (
+            "SELECT CASE WHEN "  # nosec B608
+            + source_size_sql
+            + " <= ? THEN event_type ELSE NULL END AS event_type, CASE WHEN "
+            + source_size_sql
+            + " <= ? THEN severity ELSE NULL END AS severity, CASE WHEN "
+            + source_size_sql
+            + " <= ? THEN COALESCE(payload_json, '') ELSE NULL END AS payload_source, "
+            + source_size_sql
+            + " AS export_source_size_bytes FROM claims_monitoring_events "
+            "WHERE id = ? AND user_id = ? LIMIT 1"
+        ),
+        (source_budget, source_budget, source_budget, event_id, str(user_id)),
+    ).fetchone()
+    if not row:
+        return {}
+
+    loaded = dict(row)
+    source_size = loaded.get("export_source_size_bytes")
+    if isinstance(source_size, bool) or not isinstance(source_size, int) or source_size < 0:
+        raise ValueError("export source size is invalid")
+    event_type = loaded.get("event_type")
+    severity = loaded.get("severity")
+    raw_payload = loaded.get("payload_source")
+    if source_size > source_budget:
+        return {
+            "event_type": None,
+            "severity": None,
+            "payload_json": None,
+            "export_data_size_bytes": source_size,
+        }
+    if not isinstance(event_type, str):
+        raise ValueError("event type is invalid")
+    if severity is not None and not isinstance(severity, str):
+        raise ValueError("severity is invalid")
+    if not isinstance(raw_payload, str):
+        raise ValueError("payload source is invalid")
+
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except (TypeError, ValueError, UnicodeError):
+        payload = {}
+    canonical_payload = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    canonical_size = len(event_type.encode("utf-8"))
+    if severity is not None:
+        canonical_size += len(severity.encode("utf-8"))
+    canonical_size += len(canonical_payload.encode("utf-8"))
+    fits = canonical_size <= max_bytes
+    return {
+        "event_type": event_type if fits else None,
+        "severity": severity if fits else None,
+        "payload_json": canonical_payload if fits else None,
+        "export_data_size_bytes": canonical_size,
     }
 
 
@@ -311,7 +404,7 @@ def list_claims_monitoring_events_page(
         params.extend([after_created_at, after_created_at, int(after_id)])
 
     query = (
-        "SELECT id, user_id, event_type, severity, created_at "  # nosec B608
+        "SELECT id, user_id, created_at "  # nosec B608
         "FROM claims_monitoring_events WHERE "
         + " AND ".join(conditions)
         + " ORDER BY created_at ASC, id ASC LIMIT ?"

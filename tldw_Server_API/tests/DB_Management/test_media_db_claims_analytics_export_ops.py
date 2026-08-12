@@ -1283,7 +1283,7 @@ def test_claims_monitoring_event_postgres_pages_are_bounded_with_equal_timestamp
         assert [row["id"] for row in third_page] == event_ids[4:]
         assert len({row["id"] for row in first_page + second_page + third_page}) == 5
         assert all(
-            set(row) == {"id", "user_id", "event_type", "severity", "created_at"}
+            set(row) == {"id", "user_id", "created_at"}
             for row in first_page + second_page + third_page
         )
         assert db.get_claims_monitoring_event_payload_bounded(
