@@ -517,6 +517,21 @@ def ensure_postgres_claims_extensions(
             f"ON {ident('claims_analytics_exports')} ({ident('job_id')})",
             connection=conn,
         )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS "
+            f"{ident('idx_claims_analytics_exports_user_status_export_id')} "
+            f"ON {ident('claims_analytics_exports')} "
+            f"({ident('user_id')}, {ident('status')}, {ident('export_id')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS "
+            f"{ident('idx_claims_analytics_exports_user_status_updated_export_id')} "
+            f"ON {ident('claims_analytics_exports')} "
+            f"({ident('user_id')}, {ident('status')}, "
+            f"{ident('updated_at')}, {ident('export_id')})",
+            connection=conn,
+        )
 
         backend.execute(
             (

@@ -174,6 +174,17 @@ def test_ensure_postgres_claims_extensions_executes_representative_claims_ddls_a
         'ON "claims_analytics_exports" ("job_id")' in query
         for query in queries
     )
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_analytics_exports_user_status_export_id" '
+        'ON "claims_analytics_exports" ("user_id", "status", "export_id")' in query
+        for query in queries
+    )
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_analytics_exports_user_status_updated_export_id" '
+        'ON "claims_analytics_exports" '
+        '("user_id", "status", "updated_at", "export_id")' in query
+        for query in queries
+    )
     assert not any(
         'ALTER COLUMN "job_id" TYPE' in query
         or 'ALTER COLUMN "snapshot_at" TYPE' in query

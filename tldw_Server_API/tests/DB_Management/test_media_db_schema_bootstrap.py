@@ -2970,6 +2970,8 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
         assert columns["snapshot_event_id"] == {"type": "INTEGER", "notnull": 0}
         assert "job_status" not in columns
         assert "idx_claims_analytics_exports_job_id" in indexes
+        assert "idx_claims_analytics_exports_user_status_export_id" in indexes
+        assert "idx_claims_analytics_exports_user_status_updated_export_id" in indexes
         assert monitoring_index_columns == ["user_id", "created_at", "id"]
 
         with sqlite3.connect(db_path) as conn:
@@ -3062,8 +3064,19 @@ def test_current_v24_sqlite_bootstrap_repairs_export_snapshot_column_and_event_i
                     "PRAGMA table_info(claims_analytics_exports)"
                 ).fetchall()
             }
+            export_indexes = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA index_list(claims_analytics_exports)"
+                ).fetchall()
+            }
         assert created["snapshot_event_id"] == 0
         assert "snapshot_event_id" in export_columns
+        assert "idx_claims_analytics_exports_user_status_export_id" in export_indexes
+        assert (
+            "idx_claims_analytics_exports_user_status_updated_export_id"
+            in export_indexes
+        )
         assert event_index_columns == ["user_id", "created_at", "id"]
         assert high_water_index_columns == ["user_id", "id"]
     finally:
@@ -3120,6 +3133,14 @@ def test_postgres_migration_v24_defers_monitoring_event_indexes_to_extension() -
     )
 
     assert any("idx_claims_analytics_exports_job_id" in query for query in statements)
+    assert any(
+        "idx_claims_analytics_exports_user_status_export_id" in query
+        for query in statements
+    )
+    assert any(
+        "idx_claims_analytics_exports_user_status_updated_export_id" in query
+        for query in statements
+    )
     assert all("claims_monitoring_events" not in query for query in statements)
 
 
@@ -3274,6 +3295,8 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_event_id"] == {"type": "INTEGER", "notnull": 0}
         assert "idx_claims_analytics_exports_job_id" in indexes
+        assert "idx_claims_analytics_exports_user_status_export_id" in indexes
+        assert "idx_claims_analytics_exports_user_status_updated_export_id" in indexes
         assert monitoring_index_columns == ["user_id", "created_at", "id"]
         assert migration_row == {
             "version": 24,

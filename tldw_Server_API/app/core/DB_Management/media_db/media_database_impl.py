@@ -1181,6 +1181,10 @@ class MediaDatabase:
     );
     CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user ON claims_analytics_exports(user_id);
     CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_job_id ON claims_analytics_exports(job_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_export_id
+        ON claims_analytics_exports(user_id, status, export_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_updated_export_id
+        ON claims_analytics_exports(user_id, status, updated_at, export_id);
 
     CREATE TABLE IF NOT EXISTS claims_notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

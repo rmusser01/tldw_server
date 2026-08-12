@@ -12,6 +12,10 @@ ALTER TABLE claims_analytics_exports ADD COLUMN snapshot_event_id INTEGER;
 
 CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_job_id
     ON claims_analytics_exports(job_id);
+CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_export_id
+    ON claims_analytics_exports(user_id, status, export_id);
+CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_updated_export_id
+    ON claims_analytics_exports(user_id, status, updated_at, export_id);
 
 UPDATE schema_version SET version = 24;
 

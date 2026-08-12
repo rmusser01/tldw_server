@@ -75,9 +75,20 @@ def ensure_sqlite_claims_extensions(db: Any, conn: sqlite3.Connection) -> None:
                 "ALTER TABLE claims_analytics_exports "
                 "ADD COLUMN snapshot_event_id INTEGER;"
             )
+        if exports_columns:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS "
+                "idx_claims_analytics_exports_user_status_export_id "
+                "ON claims_analytics_exports(user_id, status, export_id);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS "
+                "idx_claims_analytics_exports_user_status_updated_export_id "
+                "ON claims_analytics_exports(user_id, status, updated_at, export_id);"
+            )
     except sqlite3.Error as exc:
         logger.warning(
-            f"Could not ensure snapshot_event_id for claims_analytics_exports: {exc}"
+            f"Could not ensure claims_analytics_exports extensions: {exc}"
         )
 
     try:

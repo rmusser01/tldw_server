@@ -759,6 +759,37 @@ def test_claims_analytics_export_maintenance_list_is_owner_scoped_and_determinis
         db.close_connection()
 
 
+def test_claims_analytics_export_maintenance_queries_use_composite_indexes(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-analytics-maintenance-indexes.db")
+    try:
+        rotation_plan = db.get_connection().execute(
+            "EXPLAIN QUERY PLAN SELECT export_id FROM claims_analytics_exports "
+            "WHERE user_id = ? AND status = ? AND export_id > ? "
+            "ORDER BY export_id ASC LIMIT ?",
+            ("1", "failed", "0", 10),
+        ).fetchall()
+        age_plan = db.get_connection().execute(
+            "EXPLAIN QUERY PLAN SELECT export_id FROM claims_analytics_exports "
+            "WHERE user_id = ? AND status = ? AND updated_at < ? "
+            "ORDER BY updated_at ASC, export_id ASC LIMIT ?",
+            ("1", "ready", "2026-08-08T12:00:00.000Z", 10),
+        ).fetchall()
+
+        assert any(
+            "idx_claims_analytics_exports_user_status_export_id" in str(row["detail"])
+            for row in rotation_plan
+        )
+        assert any(
+            "idx_claims_analytics_exports_user_status_updated_export_id"
+            in str(row["detail"])
+            for row in age_plan
+        )
+    finally:
+        db.close_connection()
+
+
 def test_maintenance_list_filters_reconciliation_candidates_before_limit(
     tmp_path: Path,
 ) -> None:
