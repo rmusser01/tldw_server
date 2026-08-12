@@ -31,6 +31,20 @@ pytestmark = pytest.mark.integration
 
 def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() -> None:
     compact_schema = " ".join(SYNC_POSTGRES_SCHEMA.split())
+    read_owner_guard = getattr(
+        SyncDatabase,
+        "_require_attachment_binding_dataset_owner",
+        None,
+    )
+    mutation_owner_guard = getattr(
+        SyncDatabase,
+        "_require_attachment_binding_dataset_owner_for_update",
+        None,
+    )
+    assert read_owner_guard is not None
+    assert mutation_owner_guard is not None
+    read_owner_source = " ".join(inspect.getsource(read_owner_guard).split())
+    mutation_owner_source = " ".join(inspect.getsource(mutation_owner_guard).split())
     ensure_source = inspect.getsource(SyncDatabase._ensure_attachment_binding_tables)
     lookup_source = inspect.getsource(SyncDatabase.get_attachment_revision_binding)
     unresolved_source = inspect.getsource(
@@ -80,6 +94,10 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     ) in compact_schema
     assert "sync_attachment_revision_bindings" in ensure_source
     assert "sync_dataset_storage_namespaces" in ensure_source
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in read_owner_source
+    assert "FOR UPDATE" not in read_owner_source
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in mutation_owner_source
+    assert "FOR UPDATE" in mutation_owner_source
     assert "dataset_id = ? AND attachment_id = ? AND attachment_revision = ?" in " ".join(
         lookup_source.split()
     )

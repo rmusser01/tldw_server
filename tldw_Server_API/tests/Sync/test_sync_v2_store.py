@@ -601,6 +601,7 @@ def test_attachment_binding_identity_is_immutable_and_pending_resolution_is_exac
 
 def test_public_attachment_binding_methods_deny_wrong_dataset_owner(
     sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sync_store.enroll_dataset(_dataset())
     binding_create = _attachment_binding()
@@ -615,6 +616,14 @@ def test_public_attachment_binding_methods_deny_wrong_dataset_owner(
         binding_create,
         owner_user_id="user-1",
     )
+    statements: list[tuple[str, tuple[Any, ...]]] = []
+    original_execute = sync_store.db.execute
+
+    def record_execute(statement, params=None, *, connection=None):
+        statements.append((" ".join(statement.split()), tuple(params or ())))
+        return original_execute(statement, params, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "execute", record_execute)
     with pytest.raises(SyncDatasetNotFoundError):
         sync_store.get_attachment_revision_binding(
             binding.dataset_id,
@@ -622,11 +631,23 @@ def test_public_attachment_binding_methods_deny_wrong_dataset_owner(
             binding.attachment_revision,
             owner_user_id="user-2",
         )
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in statements[0][0]
+    assert statements[0][1] == (binding.dataset_id, "user-2")
+    assert "FOR UPDATE" not in statements[0][0]
+    assert all(
+        "FROM sync_attachment_revision_bindings" not in statement
+        for statement, _params in statements
+    )
+    statements.clear()
     with pytest.raises(SyncDatasetNotFoundError):
         sync_store.list_unresolved_attachment_revision_bindings(
             binding.dataset_id,
             owner_user_id="user-2",
         )
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in statements[0][0]
+    assert statements[0][1] == (binding.dataset_id, "user-2")
+    assert "FOR UPDATE" not in statements[0][0]
+    statements.clear()
     with pytest.raises(SyncDatasetNotFoundError):
         sync_store.resolve_attachment_revision_binding(
             binding.dataset_id,
@@ -635,6 +656,9 @@ def test_public_attachment_binding_methods_deny_wrong_dataset_owner(
             blob_id="blob-not-authorized",
             owner_user_id="user-2",
         )
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in statements[0][0]
+    assert statements[0][1] == (binding.dataset_id, "user-2")
+    statements.clear()
     with pytest.raises(SyncDatasetNotFoundError):
         sync_store.release_attachment_revision_binding(
             binding.dataset_id,
@@ -643,6 +667,8 @@ def test_public_attachment_binding_methods_deny_wrong_dataset_owner(
             released_at="2026-08-11T21:00:00+00:00",
             owner_user_id="user-2",
         )
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in statements[0][0]
+    assert statements[0][1] == (binding.dataset_id, "user-2")
 
 
 def test_attachment_binding_retention_release_is_monotonic_and_idempotent(

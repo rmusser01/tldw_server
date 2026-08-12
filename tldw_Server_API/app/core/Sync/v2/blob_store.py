@@ -8,6 +8,7 @@ import secrets
 import shutil
 import stat
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,8 +17,9 @@ from typing import BinaryIO
 from loguru import logger
 
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import (
-    FileLock,
     LockAcquisitionError,
+    _acquire_platform_file_lock,
+    _release_platform_file_lock,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
@@ -177,49 +179,57 @@ class LocalSyncBlobStore:
         target_key = self.namespace_storage_key(storage_namespace_id, payload_hash)
         digest = _hash_digest(payload_hash)
         namespace = _storage_namespace_id(storage_namespace_id)
-        lock_path = self.resolve_storage_key(
-            f"_locks/legacy-relocation/{namespace}.{digest}.lock"
-        )
         try:
-            with FileLock(lock_path, timeout=10):
-                try:
-                    with _open_contained_regular_file(
-                        self.root,
-                        canonical_legacy_key,
-                        error_message=(
-                            "Sync legacy blob relocation source failed verification"
-                        ),
-                    ) as source_handle:
-                        try:
-                            _verify_open_blob(
-                                source_handle,
-                                payload_hash=payload_hash,
-                                expected_size=expected_size,
-                            )
-                        except SyncBlobStoreError as exc:
-                            raise SyncBlobStoreError(
-                                "Sync legacy blob relocation source failed verification"
-                            ) from exc
-                        source_handle.seek(0)
-                        with _open_directory_chain(
+            with _open_directory_chain(
+                self.root,
+                ("_locks", "legacy-relocation"),
+                create=True,
+            ) as lock_directory:
+                with _lock_file_at(
+                    lock_directory,
+                    f"{namespace}.{digest}.lock",
+                    timeout=10,
+                ):
+                    try:
+                        with _open_contained_regular_file(
                             self.root,
-                            ("blobs", "v2", namespace),
-                            create=True,
-                        ) as target_directory:
-                            _relocate_open_blob(
-                                source_handle,
-                                target_directory=target_directory,
-                                target_name=f"{digest}.blob",
-                                digest=digest,
-                                namespace=namespace,
-                                payload_hash=payload_hash,
-                                expected_size=expected_size,
-                            )
-                except SyncBlobStoreError:
-                    raise
-                except OSError as exc:
-                    raise SyncBlobStoreError("Sync legacy blob relocation failed") from exc
-                return target_key
+                            canonical_legacy_key,
+                            error_message=(
+                                "Sync legacy blob relocation source failed verification"
+                            ),
+                        ) as source_handle:
+                            try:
+                                _verify_open_blob(
+                                    source_handle,
+                                    payload_hash=payload_hash,
+                                    expected_size=expected_size,
+                                )
+                            except SyncBlobStoreError as exc:
+                                raise SyncBlobStoreError(
+                                    "Sync legacy blob relocation source failed verification"
+                                ) from exc
+                            source_handle.seek(0)
+                            with _open_directory_chain(
+                                self.root,
+                                ("blobs", "v2", namespace),
+                                create=True,
+                            ) as target_directory:
+                                _relocate_open_blob(
+                                    source_handle,
+                                    target_directory=target_directory,
+                                    target_name=f"{digest}.blob",
+                                    digest=digest,
+                                    namespace=namespace,
+                                    payload_hash=payload_hash,
+                                    expected_size=expected_size,
+                                )
+                    except SyncBlobStoreError:
+                        raise
+                    except OSError as exc:
+                        raise SyncBlobStoreError(
+                            "Sync legacy blob relocation failed"
+                        ) from exc
+                    return target_key
         except LockAcquisitionError as exc:
             raise SyncBlobStoreError("Sync legacy blob relocation lock is unavailable") from exc
 
@@ -386,6 +396,104 @@ def _open_directory_chain(
         yield current
     finally:
         os.close(current)
+
+
+def _open_lock_file_at(directory: int, name: str) -> int:
+    """Open a stable regular lock file relative to an anchored directory."""
+
+    lock_name = _safe_segment(name, field_name="lock file name")
+    flags = (
+        os.O_RDWR
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    for _attempt in range(16):
+        try:
+            expected = os.stat(lock_name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            try:
+                descriptor = os.open(
+                    lock_name,
+                    flags | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                    dir_fd=directory,
+                )
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file could not be created safely"
+                ) from exc
+            try:
+                expected = os.fstat(descriptor)
+            except OSError as exc:
+                os.close(descriptor)
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file could not be inspected safely"
+                ) from exc
+        except OSError as exc:
+            raise SyncBlobStoreError(
+                "Sync legacy blob relocation lock file could not be inspected safely"
+            ) from exc
+        else:
+            try:
+                descriptor = os.open(lock_name, flags, dir_fd=directory)
+            except OSError as exc:
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file could not be opened safely"
+                ) from exc
+
+        try:
+            opened = os.fstat(descriptor)
+            named = os.stat(lock_name, dir_fd=directory, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(expected.st_mode)
+                or not stat.S_ISREG(opened.st_mode)
+                or not stat.S_ISREG(named.st_mode)
+                or opened.st_dev != expected.st_dev
+                or opened.st_ino != expected.st_ino
+                or named.st_dev != opened.st_dev
+                or named.st_ino != opened.st_ino
+            ):
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file identity changed"
+                )
+            return descriptor
+        except Exception:
+            os.close(descriptor)
+            raise
+    raise SyncBlobStoreError(
+        "Sync legacy blob relocation lock file could not be created safely"
+    )
+
+
+@contextmanager
+def _lock_file_at(directory: int, name: str, *, timeout: float) -> Iterator[None]:
+    """Lock a no-follow file descriptor without reopening its pathname."""
+
+    descriptor = _open_lock_file_at(directory, name)
+    deadline = time.monotonic() + timeout
+    acquired = False
+    try:
+        while True:
+            try:
+                _acquire_platform_file_lock(descriptor)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise LockAcquisitionError(
+                        f"Failed to acquire sync relocation lock within {timeout}s"
+                    ) from None
+                time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+        yield
+    finally:
+        if acquired:
+            try:
+                _release_platform_file_lock(descriptor)
+            except OSError:
+                pass
+        os.close(descriptor)
 
 
 @contextmanager

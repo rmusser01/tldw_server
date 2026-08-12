@@ -2704,15 +2704,47 @@ class SyncDatabase:
             raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
         return row
 
-    def _require_dataset_owner_for_update(
+    def _require_attachment_binding_dataset_owner(
         self,
         dataset_id: str,
         owner_user_id: str,
         *,
         connection: Any,
     ) -> dict[str, Any]:
-        row = self._get_dataset_row_for_update(dataset_id, connection=connection)
-        if row is None or str(row.get("owner_user_id")) != str(owner_user_id):
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_datasets
+                 WHERE dataset_id = ? AND owner_user_id = ?
+                """,
+                (dataset_id, owner_user_id),
+                connection=connection,
+            )
+        )
+        if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return row
+
+    def _require_attachment_binding_dataset_owner_for_update(
+        self,
+        dataset_id: str,
+        owner_user_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_datasets
+                 WHERE dataset_id = ? AND owner_user_id = ?
+                """
+                + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (dataset_id, owner_user_id),
+                connection=connection,
+            )
+        )
+        if row is None:
             raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
         return row
 
@@ -6742,7 +6774,7 @@ class SyncDatabase:
         """Create or exactly replay one immutable attachment revision binding."""
 
         with self.backend.transaction() as conn:
-            self._require_dataset_owner_for_update(
+            self._require_attachment_binding_dataset_owner_for_update(
                 binding.dataset_id,
                 owner_user_id,
                 connection=conn,
@@ -6763,7 +6795,7 @@ class SyncDatabase:
         """Return one dataset-scoped immutable attachment revision binding."""
 
         with self.backend.transaction() as conn:
-            self._require_dataset_owner_for_update(
+            self._require_attachment_binding_dataset_owner(
                 dataset_id,
                 owner_user_id,
                 connection=conn,
@@ -6795,7 +6827,7 @@ class SyncDatabase:
             raise SyncStoreError("Sync attachment binding page limit must be positive")
         page_limit = min(limit, 1000)
         with self.backend.transaction() as conn:
-            self._require_dataset_owner_for_update(
+            self._require_attachment_binding_dataset_owner(
                 dataset_id,
                 owner_user_id,
                 connection=conn,
@@ -6859,7 +6891,7 @@ class SyncDatabase:
 
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
-            self._require_dataset_owner_for_update(
+            self._require_attachment_binding_dataset_owner_for_update(
                 dataset_id,
                 owner_user_id,
                 connection=conn,
@@ -6938,7 +6970,7 @@ class SyncDatabase:
             raise SyncStoreError("Sync attachment binding release timestamp is required")
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
-            self._require_dataset_owner_for_update(
+            self._require_attachment_binding_dataset_owner_for_update(
                 dataset_id,
                 owner_user_id,
                 connection=conn,
