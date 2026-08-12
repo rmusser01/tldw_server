@@ -764,6 +764,60 @@ def test_blob_binding_page_is_owner_scoped_bounded_and_index_backed(
     )
 
 
+def test_blob_binding_page_uses_compound_keyset_for_shared_cursor(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset(domains=["attachment.ref"]))
+    sync_store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-shared-cursor",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="legacy-provenance-not-authority",
+            payload_hash="sha256:" + "a" * 64,
+            content_type="application/pdf",
+            size_bytes=2048,
+            storage_backend="local_fs",
+            storage_key="blob-shared-cursor.bin",
+        )
+    )
+    bindings = [
+        _insert_attachment_binding_for_schema_test(
+            sync_store,
+            _attachment_binding(
+                attachment_id=attachment_id,
+                establishing_server_cursor=7,
+                availability_at_acceptance="available",
+                resolved_blob_id="blob-shared-cursor",
+            ),
+        )
+        for attachment_id in (
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222",
+            "33333333-3333-4333-8333-333333333333",
+        )
+    ]
+
+    first = sync_store.list_attachment_revision_bindings_for_blob(
+        "dataset-1",
+        "blob-shared-cursor",
+        owner_user_id="user-1",
+        limit=2,
+    )
+    second = sync_store.list_attachment_revision_bindings_for_blob(
+        "dataset-1",
+        "blob-shared-cursor",
+        owner_user_id="user-1",
+        after_establishing_server_cursor=first[-1].establishing_server_cursor,
+        after_attachment_id=first[-1].attachment_id,
+        after_attachment_revision=first[-1].attachment_revision,
+        limit=2,
+    )
+
+    assert first == bindings[:2]
+    assert second == bindings[2:]
+
+
 def test_available_blob_page_is_keyset_bounded_and_index_backed(
     sync_store: SyncV2Store,
 ) -> None:

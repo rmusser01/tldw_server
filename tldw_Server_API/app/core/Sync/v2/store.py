@@ -914,6 +914,8 @@ class SyncV2Store:
         *,
         owner_user_id: str,
         after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
         limit: int = 1000,
     ) -> list[SyncAttachmentRevisionBinding]:
         return self.db.list_attachment_revision_bindings_for_blob(
@@ -921,6 +923,8 @@ class SyncV2Store:
             blob_id,
             owner_user_id=owner_user_id,
             after_establishing_server_cursor=after_establishing_server_cursor,
+            after_attachment_id=after_attachment_id,
+            after_attachment_revision=after_attachment_revision,
             limit=limit,
             connection=self._connection,
         )

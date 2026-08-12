@@ -7458,6 +7458,8 @@ class SyncDatabase:
         *,
         owner_user_id: str,
         after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
         limit: int = 1000,
         connection: Any | None = None,
     ) -> list[SyncAttachmentRevisionBinding]:
@@ -7477,7 +7479,8 @@ class SyncDatabase:
                 SELECT * FROM sync_attachment_revision_bindings
                  WHERE dataset_id = ? AND resolved_blob_id = ?
                    AND retention_released_at IS NULL
-                   AND establishing_server_cursor > ?
+                   AND (establishing_server_cursor, attachment_id,
+                        attachment_revision) > (?, ?, ?)
                  ORDER BY establishing_server_cursor, attachment_id,
                           attachment_revision
                  LIMIT ?
@@ -7486,6 +7489,8 @@ class SyncDatabase:
                     dataset_id,
                     blob_id,
                     after_establishing_server_cursor,
+                    after_attachment_id,
+                    after_attachment_revision,
                     page_limit,
                 ),
                 connection=conn,

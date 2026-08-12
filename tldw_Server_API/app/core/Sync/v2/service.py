@@ -4485,6 +4485,8 @@ class SyncV2Service:
     ) -> tuple[int, int | None, bool, bool]:
         active_store = store or self.store
         after_cursor = 0
+        after_attachment_id = ""
+        after_attachment_revision = 0
         binding_cursor: int | None = None
         binding_valid = True
         binding_protected = False
@@ -4495,6 +4497,8 @@ class SyncV2Service:
                 blob.blob_id,
                 owner_user_id=dataset.owner_user_id,
                 after_establishing_server_cursor=after_cursor,
+                after_attachment_id=after_attachment_id,
+                after_attachment_revision=after_attachment_revision,
                 limit=SYNC_RETENTION_BINDING_PAGE_SIZE,
             )
             if not bindings:
@@ -4519,7 +4523,10 @@ class SyncV2Service:
                         store=active_store,
                     )
                 )
-            after_cursor = bindings[-1].establishing_server_cursor
+            last_binding = bindings[-1]
+            after_cursor = last_binding.establishing_server_cursor
+            after_attachment_id = last_binding.attachment_id
+            after_attachment_revision = last_binding.attachment_revision
             if len(bindings) < SYNC_RETENTION_BINDING_PAGE_SIZE:
                 break
         if found_unreleased:
@@ -4588,18 +4595,25 @@ class SyncV2Service:
         attachment_ids: set[str] = set()
         if adapter_version == 2:
             after_cursor = 0
+            after_attachment_id = ""
+            after_attachment_revision = 0
             while True:
                 bindings = active_store.list_attachment_revision_bindings_for_blob(
                     dataset.dataset_id,
                     blob.blob_id,
                     owner_user_id=dataset.owner_user_id,
                     after_establishing_server_cursor=after_cursor,
+                    after_attachment_id=after_attachment_id,
+                    after_attachment_revision=after_attachment_revision,
                     limit=SYNC_RETENTION_BINDING_PAGE_SIZE,
                 )
                 if not bindings:
                     break
                 attachment_ids.update(binding.attachment_id for binding in bindings)
-                after_cursor = bindings[-1].establishing_server_cursor
+                last_binding = bindings[-1]
+                after_cursor = last_binding.establishing_server_cursor
+                after_attachment_id = last_binding.attachment_id
+                after_attachment_revision = last_binding.attachment_revision
                 if len(bindings) < SYNC_RETENTION_BINDING_PAGE_SIZE:
                     break
         else:
@@ -5050,7 +5064,7 @@ class SyncV2Service:
             page_size or self.settings.max_pull_page_size,
             self.settings.max_pull_page_size,
         )
-        raw_envelopes, visible = self._scan_versioned_pull_page(
+        raw_envelopes, visible, blocker_cursor = self._scan_versioned_pull_page(
             dataset_id=dataset.dataset_id,
             device_id=device.device_id,
             watermarks=watermarks,
@@ -5060,11 +5074,16 @@ class SyncV2Service:
         page = visible[:page_limit]
         has_visible_lookahead = len(visible) > page_limit
         has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
+        safe_raw_envelopes = [
+            envelope
+            for envelope in raw_envelopes
+            if blocker_cursor is None or envelope.server_sequence < blocker_cursor
+        ]
         boundary = (
             page[-1].server_sequence
             if has_visible_lookahead and page
             else max(
-                (envelope.server_sequence for envelope in raw_envelopes),
+                (envelope.server_sequence for envelope in safe_raw_envelopes),
                 default=0,
             )
         )
@@ -5120,7 +5139,7 @@ class SyncV2Service:
         watermarks: Mapping[tuple[SyncDomain, int], int],
         page_limit: int,
         include_own_changes: bool,
-    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
+    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope], int | None]:
         candidates: dict[int, SyncEnvelope] = {}
         for (domain, adapter_version), watermark in watermarks.items():
             for envelope in self.store.list_envelopes_after(
@@ -5150,7 +5169,7 @@ class SyncV2Service:
             if envelope.apply_status not in {"conflict", "superseded"}
             and (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
         ]
-        return raw, visible
+        return raw, visible, blocker_cursor
 
     def _pull_token_secret(self) -> bytes:
         secret = (
