@@ -76,11 +76,22 @@ def _event(
     return row
 
 
+def _metadata_row(row: dict[str, Any]) -> dict[str, Any]:
+    raw_payload = row.get("payload_json")
+    payload_size_bytes = len(raw_payload.encode("utf-8")) if isinstance(raw_payload, str) else 0
+    return {
+        key: value
+        for key, value in row.items()
+        if key not in {"payload_json", "delivered_at"}
+    } | {"payload_size_bytes": payload_size_bytes}
+
+
 class FakeMonitoringDB:
     def __init__(self, rows: list[dict[str, Any]], *, expected_owner: str = "7") -> None:
         self.rows = list(rows)
         self.expected_owner = expected_owner
         self.calls: list[dict[str, Any]] = []
+        self.payload_calls: list[dict[str, Any]] = []
 
     def list_claims_monitoring_events_page(
         self,
@@ -130,7 +141,33 @@ class FakeMonitoringDB:
         if after_created_at is not None and after_id is not None:
             cursor = (_parse_time(str(after_created_at)), int(after_id))
             rows = [row for row in rows if (_parse_time(str(row["created_at"])), int(row["id"])) > cursor]
-        return [dict(row) for row in rows[:limit]]
+        return [_metadata_row(row) for row in rows[:limit]]
+
+    def get_claims_monitoring_event_payload_bounded(
+        self,
+        *,
+        user_id: str,
+        event_id: int,
+        max_bytes: int,
+    ) -> dict[str, Any]:
+        assert user_id == self.expected_owner
+        self.payload_calls.append(
+            {
+                "user_id": user_id,
+                "event_id": event_id,
+                "max_bytes": max_bytes,
+            }
+        )
+        for row in self.rows:
+            if str(row.get("user_id")) != user_id or row.get("id") != event_id:
+                continue
+            raw_payload = row.get("payload_json")
+            payload_size_bytes = len(raw_payload.encode("utf-8")) if isinstance(raw_payload, str) else 0
+            return {
+                "payload_json": raw_payload if payload_size_bytes <= max_bytes else None,
+                "payload_size_bytes": payload_size_bytes,
+            }
+        return {}
 
 
 class ScriptedPageDB:
@@ -143,6 +180,14 @@ class ScriptedPageDB:
         self.pages = pages
         self.expected_owner = expected_owner
         self.calls: list[dict[str, Any]] = []
+        self.payload_calls: list[dict[str, Any]] = []
+        self.rows_by_id = {
+            row["id"]: row
+            for page in pages
+            if isinstance(page, list)
+            for row in page
+            if isinstance(row, dict) and "id" in row
+        }
 
     def list_claims_monitoring_events_page(
         self,
@@ -177,7 +222,32 @@ class ScriptedPageDB:
         scripted = self.pages[page_index] if page_index < len(self.pages) else []
         if isinstance(scripted, BaseException):
             raise scripted
-        return scripted
+        return [_metadata_row(row) for row in scripted]
+
+    def get_claims_monitoring_event_payload_bounded(
+        self,
+        *,
+        user_id: str,
+        event_id: int,
+        max_bytes: int,
+    ) -> dict[str, Any]:
+        assert user_id == self.expected_owner
+        self.payload_calls.append(
+            {
+                "user_id": user_id,
+                "event_id": event_id,
+                "max_bytes": max_bytes,
+            }
+        )
+        row = self.rows_by_id.get(event_id)
+        if row is None or str(row.get("user_id")) != user_id:
+            return {}
+        raw_payload = row.get("payload_json")
+        payload_size_bytes = len(raw_payload.encode("utf-8")) if isinstance(raw_payload, str) else 0
+        return {
+            "payload_json": raw_payload if payload_size_bytes <= max_bytes else None,
+            "payload_size_bytes": payload_size_bytes,
+        }
 
 
 class ArtifactDB(FakeMonitoringDB):
@@ -971,9 +1041,10 @@ def test_render_csv_preserves_unicode_delimiters_quotes_newlines_and_formula_saf
     assert result["size_bytes"] == len(payload_csv.encode("utf-8"))
 
 
-def test_render_enforces_exact_utf8_byte_boundary_and_one_byte_over() -> None:
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_render_enforces_exact_utf8_byte_boundary_and_one_byte_over(format: str) -> None:
     db = FakeMonitoringDB([_event(1, payload={"text": "東京"})])
-    normalized = _normalized()
+    normalized = _normalized(format=format)
     baseline = _render(db, normalized)
     exact_size = baseline["size_bytes"]
 
@@ -987,6 +1058,35 @@ def test_render_enforces_exact_utf8_byte_boundary_and_one_byte_over() -> None:
     assert exc_info.value.code == "claims_export_too_large"
     assert exc_info.value.retryable is False
     assert exc_info.value.http_status == 413
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_render_rejects_one_oversized_event_before_loading_payload(format: str) -> None:
+    db = FakeMonitoringDB([_event(1, payload={"text": "東京" * 256})])
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        _render(db, _normalized(format=format), max_bytes=256)
+
+    assert exc_info.value.code == "claims_export_too_large"
+    assert exc_info.value.http_status == 413
+    assert db.payload_calls == []
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_render_rejects_cumulative_rows_at_first_exact_budget_overflow(format: str) -> None:
+    rows = [_event(event_id, payload={"text": "東京" * 8}) for event_id in range(1, 4)]
+    normalized = _normalized(format=format, pagination={"limit": 3, "offset": 0})
+    one_row = _render(
+        FakeMonitoringDB(rows[:1]),
+        _normalized(format=format, pagination={"limit": 1, "offset": 0}),
+    )
+    db = FakeMonitoringDB(rows)
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        _render(db, normalized, max_bytes=one_row["size_bytes"])
+
+    assert exc_info.value.code == "claims_export_too_large"
+    assert [call["event_id"] for call in db.payload_calls] == [1, 2]
 
 
 def test_render_wraps_serialization_failures_without_raw_public_text() -> None:

@@ -578,9 +578,10 @@ def test_cleanup_requires_successful_absence_and_grace_for_pruned_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
-    elapsed = _artifact(30, status="failed", job_id=101, updated_seconds_ago=601)
-    exact_grace = _artifact(31, status="failed", job_id=102, updated_seconds_ago=300)
-    db = MaintenanceDB([elapsed, exact_grace])
+    after_sum = _artifact(30, status="failed", job_id=101, updated_seconds_ago=601)
+    exact_sum = _artifact(31, status="failed", job_id=102, updated_seconds_ago=600)
+    between_max_and_sum = _artifact(32, status="failed", job_id=103, updated_seconds_ago=450)
+    db = MaintenanceDB([after_sum, exact_sum, between_max_and_sum])
 
     deleted = cleanup_export_artifacts(
         db,
@@ -591,8 +592,9 @@ def test_cleanup_requires_successful_absence_and_grace_for_pruned_job(
     )
 
     assert deleted == 1
-    assert elapsed["export_id"] not in db.rows
-    assert exact_grace["export_id"] in db.rows
+    assert after_sum["export_id"] not in db.rows
+    assert exact_sum["export_id"] in db.rows
+    assert between_max_and_sum["export_id"] in db.rows
 
 
 def test_cleanup_reconciled_failed_without_job_waits_retention_plus_grace(

@@ -368,6 +368,14 @@ Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
 JSON or CSV output is bounded by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; the default
 configured limit is 10 MiB (10,485,760 UTF-8 bytes). Any configured positive
 integer value overrides that default, while invalid or non-positive values use 10 MiB.
+Process environment values take precedence over config-loaded settings. API
+producer and WorkerSDK processes must use the same byte limit so synchronous and
+asynchronous rendering enforce one contract.
+Monitoring-event scans return metadata and payload byte sizes without returning
+payload text. Claims then loads only owner-scoped payloads that fit the budget
+and appends each JSON event or CSV row to a byte-counted builder. An individually
+oversized payload and the first cumulative serialized overflow therefore fail
+before an oversized result or database page is retained in application memory.
 At artifact acceptance, Claims also records an internal owner-scoped monitoring
 event-ID high-water. Rendering and retries apply that high-water with the
 timestamp cutoff so events added later with equal or backdated timestamps are
@@ -430,6 +438,8 @@ Cleanup:
   during existing Claims create/list activity. They use
   `CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS` (default 24) and
   `CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC` (default 300).
+- Retention accepts any finite positive hour value, including fractional values;
+  invalid, non-finite, or non-positive values fall back to the default.
 - Once retention eligibility is reached, lifecycle-aware cleanup may delete aged
   ready artifacts, aged failed artifacts whose Jobs state is terminal, and
   reconciled failed artifacts with no Job. A failed artifact that still retains

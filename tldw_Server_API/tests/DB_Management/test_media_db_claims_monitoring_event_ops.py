@@ -592,6 +592,52 @@ def test_list_claims_monitoring_events_page_uses_paired_keyset_without_gaps(
         assert all(row["user_id"] == "1" for row in rows)
         assert all(row["event_type"] == "unsupported_ratio" for row in rows)
         assert all(row["severity"] == "warning" for row in rows)
+        assert all("payload_json" not in row for row in rows)
+        assert [row["payload_size_bytes"] for row in rows] == [11, 11, 11, 11]
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_payload_scan_and_fetch_are_byte_bounded_and_owner_scoped(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-payload-bound.db")
+    payload = '{"text":"東京"}'
+    payload_size = len(payload.encode("utf-8"))
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            payload_json=payload,
+        )
+
+        metadata = db.list_claims_monitoring_events_page(user_id="1", limit=1)
+
+        assert len(metadata) == 1
+        assert "payload_json" not in metadata[0]
+        assert metadata[0]["payload_size_bytes"] == payload_size
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="2",
+            event_id=int(event["id"]),
+            max_bytes=payload_size,
+        ) == {}
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=payload_size - 1,
+        ) == {
+            "payload_json": None,
+            "payload_size_bytes": payload_size,
+        }
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=payload_size,
+        ) == {
+            "payload_json": payload,
+            "payload_size_bytes": payload_size,
+        }
     finally:
         db.close_connection()
 

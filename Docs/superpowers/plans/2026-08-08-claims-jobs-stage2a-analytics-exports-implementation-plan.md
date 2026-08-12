@@ -1598,11 +1598,43 @@ or public API/Jobs contracts.
 
 ### Stage 3: Focused verification and commit
 
-- [ ] Run Claims export, monitoring-event DB, SQLite schema/migration, PostgreSQL
+- [x] Run Claims export, monitoring-event DB, SQLite schema/migration, PostgreSQL
   structure/migration, API, and worker suites. Accept only skips emitted by the
   official PostgreSQL fixture.
-- [ ] Run Ruff, compileall, Bandit on production touched scope, and
+- [x] Run Ruff, compileall, Bandit on production touched scope, and
   `git diff --check`; inspect SQL placeholders, transaction boundaries, and
   API/Jobs privacy.
-- [ ] Stage only follow-up files and commit separately with
+- [x] Stage only follow-up files and commit separately with
   `fix: harden Claims export snapshot fence`.
+
+## Task 12 Bounded Rendering Follow-up (2026-08-11)
+
+**Goal:** Enforce the serialized byte limit before payload pages or complete
+outputs accumulate, and apply orphan grace after retention for pruned Jobs.
+
+### Stage 1: Regression tests (RED)
+
+- [x] Add JSON/CSV exact-boundary, single-oversized-event, and cumulative-row
+  overflow tests.
+- [x] Add SQLite/PostgreSQL metadata-page and owner-scoped bounded-payload tests.
+- [x] Add failed-artifact cleanup cases between `max(retention, grace)` and
+  `retention + grace`, at the exact sum, and after the sum.
+
+### Stage 2: Minimal implementation (GREEN)
+
+- [x] Return payload byte sizes rather than payload text from keyset pages and
+  load one owner-scoped payload only when the database proves it fits.
+- [x] Incrementally serialize byte-counted JSON event and CSV row chunks without
+  retaining decoded event lists or materializing an unchecked final payload.
+- [x] Require retention plus orphan grace when an attached Job is proven absent.
+- [x] Document environment precedence, fractional retention, producer/worker
+  byte-limit parity, and the bounded rendering mechanism.
+
+### Stage 3: Verification and review
+
+- [x] Run rendering, cleanup, monitoring-event, API, worker, and database suites:
+  330 passed with four official PostgreSQL fixture skips across the two runs.
+- [x] Run Ruff and `git diff --check` on the exact touched scope.
+- [x] Run compileall and Bandit on production touched scope; Bandit reported
+  zero findings across 3,724 lines of production code.
+- [ ] Complete fresh specification and quality reviews and commit the batch.

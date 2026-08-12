@@ -100,6 +100,37 @@ def get_claims_monitoring_event(self, event_id: int) -> dict[str, Any]:
     return dict(row) if row else {}
 
 
+def get_claims_monitoring_event_payload_bounded(
+    self,
+    *,
+    user_id: str,
+    event_id: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    """Return one owner-scoped payload only when it fits the caller's byte budget."""
+    if type(event_id) is not int or event_id <= 0:
+        raise ValueError("event_id must be a positive integer")
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValueError("max_bytes must be a positive integer")
+    size_sql = (
+        "COALESCE(octet_length(payload_json), 0)"
+        if self.backend_type == BackendType.POSTGRESQL
+        else "COALESCE(length(CAST(payload_json AS BLOB)), 0)"
+    )
+    row = self.execute_query(
+        (
+            "SELECT CASE WHEN "  # nosec B608 - expression is selected by backend type.
+            + size_sql
+            + " <= ? THEN payload_json ELSE NULL END AS payload_json, "
+            + size_sql
+            + " AS payload_size_bytes FROM claims_monitoring_events "
+            "WHERE id = ? AND user_id = ? LIMIT 1"
+        ),
+        (max_bytes, event_id, str(user_id)),
+    ).fetchone()
+    return dict(row) if row else {}
+
+
 def get_claims_monitoring_event_high_water(self, *, user_id: str) -> int:
     """Return the owner's greatest persisted monitoring-event ID, or zero."""
     if self.backend_type == BackendType.POSTGRESQL:
@@ -214,8 +245,15 @@ def list_claims_monitoring_events_page(
         conditions.append("(created_at > ? OR (created_at = ? AND id > ?))")
         params.extend([after_created_at, after_created_at, int(after_id)])
 
+    payload_size_sql = (
+        "COALESCE(octet_length(payload_json), 0)"
+        if self.backend_type == BackendType.POSTGRESQL
+        else "COALESCE(length(CAST(payload_json AS BLOB)), 0)"
+    )
     query = (
-        "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "  # nosec B608
+        "SELECT id, user_id, event_type, severity, created_at, "  # nosec B608
+        + payload_size_sql
+        + " AS payload_size_bytes "
         "FROM claims_monitoring_events WHERE "
         + " AND ".join(conditions)
         + " ORDER BY created_at ASC, id ASC LIMIT ?"

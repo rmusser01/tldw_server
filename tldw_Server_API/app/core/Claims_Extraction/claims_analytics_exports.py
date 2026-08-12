@@ -9,7 +9,7 @@ import json
 import math
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -93,6 +93,14 @@ def _serialization_error() -> ClaimsAnalyticsExportError:
     return ClaimsAnalyticsExportError(
         "Claims analytics export could not be serialized.",
         code="claims_export_serialization_failed",
+    )
+
+
+def _too_large_error() -> ClaimsAnalyticsExportError:
+    return ClaimsAnalyticsExportError(
+        "Claims analytics export exceeds the configured size limit.",
+        code="claims_export_too_large",
+        http_status=413,
     )
 
 
@@ -370,12 +378,6 @@ def _decode_event(
 
     event = {column: row.get(column) for column in _EVENT_COLUMNS if column in row}
     event["created_at"] = canonical_created_at
-    raw_payload = row.get("payload_json")
-    try:
-        payload = json.loads(raw_payload) if raw_payload else {}
-    except (TypeError, ValueError, UnicodeError):
-        payload = {}
-    event["payload"] = payload
     return event, order_key, raw_created_at
 
 
@@ -390,6 +392,41 @@ def _payload_matches(event: Mapping[str, Any], *, provider: str | None, model: s
     return model is None or str(payload.get("model")) == model
 
 
+def _load_event_payload(
+    db: Any,
+    *,
+    owner_user_id: str,
+    row: Mapping[str, Any],
+    max_bytes: int,
+) -> Any:
+    payload_size = row.get("payload_size_bytes")
+    if isinstance(payload_size, bool) or not isinstance(payload_size, int) or payload_size < 0:
+        raise _serialization_error()
+    if payload_size > max_bytes:
+        raise _too_large_error()
+    loaded = db.get_claims_monitoring_event_payload_bounded(
+        user_id=owner_user_id,
+        event_id=row["id"],
+        max_bytes=max_bytes,
+    )
+    if not isinstance(loaded, Mapping):
+        raise _serialization_error()
+    actual_size = loaded.get("payload_size_bytes")
+    if isinstance(actual_size, bool) or not isinstance(actual_size, int) or actual_size < 0:
+        raise _serialization_error()
+    if actual_size > max_bytes:
+        raise _too_large_error()
+    raw_payload = loaded.get("payload_json")
+    if raw_payload is not None and not isinstance(raw_payload, str):
+        raise _serialization_error()
+    if isinstance(raw_payload, str) and len(raw_payload.encode("utf-8")) != actual_size:
+        raise _serialization_error()
+    try:
+        return json.loads(raw_payload) if raw_payload else {}
+    except (TypeError, ValueError, UnicodeError):
+        return {}
+
+
 def _scan_events(
     db: Any,
     *,
@@ -397,14 +434,19 @@ def _scan_events(
     filters: dict[str, Any],
     pagination: dict[str, int],
     snapshot_event_id: int | None,
-) -> tuple[list[dict[str, Any]], int]:
-    selected: list[dict[str, Any]] = []
+    max_bytes: int,
+    emit: Callable[[dict[str, Any]], None],
+) -> tuple[int, int]:
+    selected_count = 0
     total = 0
     offset = pagination["offset"]
     upper_bound = offset + pagination["limit"]
     after_created_at: Any = None
     after_id: int | None = None
     previous_key: tuple[datetime, int] | None = None
+    provider = filters.get("provider")
+    model = filters.get("model")
+    payload_filtering = provider is not None or model is not None
 
     while True:
         page = db.list_claims_monitoring_events_page(
@@ -432,14 +474,25 @@ def _scan_events(
                 previous_key=previous_key,
             )
             page_last_id = previous_key[1]
-            if not _payload_matches(
-                event,
-                provider=filters.get("provider"),
-                model=filters.get("model"),
-            ):
-                continue
+            if payload_filtering:
+                event["payload"] = _load_event_payload(
+                    db,
+                    owner_user_id=owner_user_id,
+                    row=raw_row,
+                    max_bytes=max_bytes,
+                )
+                if not _payload_matches(event, provider=provider, model=model):
+                    continue
             if offset <= total < upper_bound:
-                selected.append(event)
+                if not payload_filtering:
+                    event["payload"] = _load_event_payload(
+                        db,
+                        owner_user_id=owner_user_id,
+                        row=raw_row,
+                        max_bytes=max_bytes,
+                    )
+                emit(event)
+                selected_count += 1
             total += 1
 
         if len(page) < EXPORT_SCAN_PAGE_SIZE:
@@ -447,42 +500,49 @@ def _scan_events(
         after_created_at = page_last_created_at
         after_id = page_last_id
 
-    return selected, total
+    return selected_count, total
 
 
-def _render_json(
-    events: list[dict[str, Any]],
-    *,
-    filters: dict[str, Any],
-    pagination: dict[str, int],
-) -> str:
-    return json.dumps(
-        {"events": events, "filters": filters, "pagination": pagination},
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
+class _BoundedTextBuilder:
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max_bytes
+        self.size_bytes = 0
+        self._chunks: list[str] = []
+
+    def append(self, value: str) -> None:
+        try:
+            size = len(value.encode("utf-8"))
+        except UnicodeError as exc:
+            raise _serialization_error() from exc
+        if self.size_bytes + size > self.max_bytes:
+            raise _too_large_error()
+        self._chunks.append(value)
+        self.size_bytes += size
+
+    def finish(self) -> str:
+        return "".join(self._chunks)
 
 
-def _render_csv(events: list[dict[str, Any]]) -> str:
-    output = io.StringIO(newline="")
-    writer = csv.writer(output, lineterminator="\r\n")
-    writer.writerow([spreadsheet_safe(value) for value in CSV_COLUMNS])
-    for event in events:
-        payload_json = json.dumps(
-            event.get("payload", {}),
+def _csv_row(values: tuple[Any, ...]) -> str:
+    try:
+        output = io.StringIO(newline="")
+        writer = csv.writer(output, lineterminator="\r\n")
+        writer.writerow([spreadsheet_safe(value) for value in values])
+        return output.getvalue()
+    except Exception as exc:  # noqa: BLE001 - cell details must not become public text.
+        raise _serialization_error() from exc
+
+
+def _json_text(value: Any, *, sort_keys: bool = False) -> str:
+    try:
+        return json.dumps(
+            value,
             ensure_ascii=False,
             separators=(",", ":"),
-            sort_keys=True,
+            sort_keys=sort_keys,
         )
-        cells = (
-            event.get("id"),
-            event.get("event_type"),
-            event.get("severity"),
-            event.get("created_at"),
-            payload_json,
-        )
-        writer.writerow([spreadsheet_safe(value) for value in cells])
-    return output.getvalue()
+    except Exception as exc:  # noqa: BLE001 - object details must not become public text.
+        raise _serialization_error() from exc
 
 
 def render_export(
@@ -520,45 +580,68 @@ def render_export(
         now=snapshot,
     )
 
-    events, total = _scan_events(
-        db,
-        owner_user_id=owner,
-        filters=normalized["filters"],
-        pagination=normalized["pagination"],
-        snapshot_event_id=snapshot_event_id,
-    )
-    pagination_meta = {
-        "limit": normalized["pagination"]["limit"],
-        "offset": normalized["pagination"]["offset"],
-        "total": total,
-    }
     try:
+        builder = _BoundedTextBuilder(max_bytes)
         if normalized["format"] == "csv":
-            payload_text = _render_csv(events)
+            builder.append(_csv_row(CSV_COLUMNS))
+
+            def emit(event: dict[str, Any]) -> None:
+                payload_json = _json_text(event.get("payload", {}), sort_keys=True)
+                builder.append(
+                    _csv_row(
+                        (
+                            event.get("id"),
+                            event.get("event_type"),
+                            event.get("severity"),
+                            event.get("created_at"),
+                            payload_json,
+                        )
+                    )
+                )
         else:
-            payload_text = _render_json(
-                events,
-                filters=normalized["filters"],
-                pagination=pagination_meta,
+            builder.append('{"events":[')
+            first_event = True
+
+            def emit(event: dict[str, Any]) -> None:
+                nonlocal first_event
+                event_json = _json_text(event)
+                builder.append(("" if first_event else ",") + event_json)
+                first_event = False
+
+        event_count, total = _scan_events(
+            db,
+            owner_user_id=owner,
+            filters=normalized["filters"],
+            pagination=normalized["pagination"],
+            snapshot_event_id=snapshot_event_id,
+            max_bytes=max_bytes,
+            emit=emit,
+        )
+        if normalized["format"] == "json":
+            pagination_meta = {
+                "limit": normalized["pagination"]["limit"],
+                "offset": normalized["pagination"]["offset"],
+                "total": total,
+            }
+            builder.append(
+                '],"filters":'
+                + _json_text(normalized["filters"])
+                + ',"pagination":'
+                + _json_text(pagination_meta)
+                + "}"
             )
-        size_bytes = len(payload_text.encode("utf-8"))
+        payload_text = builder.finish()
+        size_bytes = builder.size_bytes
     except ClaimsAnalyticsExportError:
         raise
-    except Exception as exc:  # noqa: BLE001 - serialization details must never become public text.
+    except (TypeError, ValueError, OverflowError, UnicodeError, csv.Error) as exc:
         raise _serialization_error() from exc
-
-    if size_bytes > max_bytes:
-        raise ClaimsAnalyticsExportError(
-            "Claims analytics export exceeds the configured size limit.",
-            code="claims_export_too_large",
-            http_status=413,
-        )
 
     return {
         "payload_json": payload_text if normalized["format"] == "json" else None,
         "payload_csv": payload_text if normalized["format"] == "csv" else None,
         "format": normalized["format"],
-        "event_count": len(events),
+        "event_count": event_count,
         "size_bytes": size_bytes,
     }
 
@@ -1310,7 +1393,7 @@ def cleanup_export_artifacts(
             )
             if job_status in _TERMINAL_JOB_STATUSES:
                 selected.append(export_id)
-        elif age > grace:
+        elif age > retention_seconds + grace:
             selected.append(export_id)
 
     if not selected:

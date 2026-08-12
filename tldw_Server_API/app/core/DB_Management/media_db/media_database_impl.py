@@ -115,6 +115,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_c
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     get_claims_monitoring_event,
     get_claims_monitoring_event_high_water,
+    get_claims_monitoring_event_payload_bounded,
     get_latest_claims_monitoring_event_delivery,
     has_successful_claims_monitoring_event_delivery,
     insert_claims_monitoring_event,
@@ -2109,6 +2110,9 @@ MediaDatabase.upsert_claims_monitoring_health = upsert_claims_monitoring_health
 MediaDatabase.insert_claims_monitoring_event = insert_claims_monitoring_event
 MediaDatabase.get_claims_monitoring_event = get_claims_monitoring_event
 MediaDatabase.get_claims_monitoring_event_high_water = get_claims_monitoring_event_high_water
+MediaDatabase.get_claims_monitoring_event_payload_bounded = (
+    get_claims_monitoring_event_payload_bounded
+)
 MediaDatabase.list_claims_monitoring_events = list_claims_monitoring_events
 MediaDatabase.list_claims_monitoring_events_page = list_claims_monitoring_events_page
 MediaDatabase.list_undelivered_claims_monitoring_events = (

@@ -408,6 +408,14 @@ The existing row limit remains capped at 10,000. Stage 2A also adds
 Invalid or non-positive settings fall back to that default. The limit is
 measured against UTF-8 serialized bytes before persistence.
 
+The keyset scan returns event metadata plus payload byte sizes, not payload
+text. Claims loads each selected owner-scoped payload through a database query
+that returns the text only when it fits the configured limit, then appends one
+serialized JSON event or CSV row at a time to a byte-counted builder. This
+prevents a database page, selected-event list, or final serializer from
+materializing unbounded payload content. Producer and worker processes must use
+the same byte-limit setting.
+
 Exceeding the byte limit is non-retryable and records
 `claims_export_too_large`. An asynchronous request remains accepted and exposes
 the failed artifact through its normal status APIs. A synchronous request
