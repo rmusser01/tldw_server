@@ -363,6 +363,14 @@ Response schema:
   "next_offset": null
 }
 ```
+Persisted filter and pagination snapshots are validated before response
+projection. Historical or malformed snapshots that exceed current limits or
+otherwise fail their public shapes are returned as `filters: null` or
+`pagination: null` so the export row remains listable. SQLite and PostgreSQL
+list and exact-artifact projections independently enforce an 8 KiB serialized
+cap for each request snapshot before the API or worker decodes it.
+Maintenance projections omit both filter and pagination snapshots because
+reconciliation and cleanup use only artifact lifecycle fields.
 
 Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
 JSON or CSV output is bounded by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; the default

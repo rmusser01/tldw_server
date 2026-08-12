@@ -7,6 +7,24 @@ from tldw_Server_API.app.core.Claims_Extraction import claims_job_contracts as c
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS", 19),
+        ("CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS", 128),
+        ("CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS", 64),
+        ("CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS", 128),
+        ("CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS", 256),
+        ("CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS", 64),
+    ],
+)
+def test_analytics_export_limits_remain_available_from_job_contracts(
+    name: str,
+    expected: int,
+) -> None:
+    assert getattr(contracts, name) == expected
+
+
 def test_rebuild_payload_validation_accepts_id_only_payload() -> None:
     payload = contracts.validate_rebuild_media_payload(
         {"version": 1, "owner_user_id": "1", "media_id": 42}

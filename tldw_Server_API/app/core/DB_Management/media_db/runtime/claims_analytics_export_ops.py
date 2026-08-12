@@ -6,6 +6,11 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.claims_analytics_export_contract import (
+    CLAIMS_ANALYTICS_EXPORT_FILTERS_JSON_MAX_BYTES,
+    CLAIMS_ANALYTICS_EXPORT_PAGINATION_JSON_MAX_BYTES,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -24,6 +29,20 @@ ALLOWED_EXPORT_TRANSITIONS = {
 _SUPPORTED_EXPORT_FORMATS = {"json", "csv"}
 _SUPPORTED_EXPORT_STATUSES = {"queued", "processing", "ready", "failed"}
 _EXPORT_DELETE_CHUNK_SIZE = 400
+
+
+def _text_size_sql(column: str, *, postgresql: bool) -> str:
+    if postgresql:
+        return f"octet_length(COALESCE({column}, ''))"
+    return f"length(CAST(COALESCE({column}, '') AS BLOB))"
+
+
+def _bounded_text_projection(column: str, *, postgresql: bool) -> str:
+    size_sql = _text_size_sql(column, postgresql=postgresql)
+    return (
+        f"CASE WHEN {column} IS NULL OR {size_sql} <= ? "
+        f"THEN {column} ELSE NULL END AS {column}"
+    )
 
 
 def _canonicalize_claims_analytics_export_row(row: Any) -> dict[str, Any]:
@@ -155,13 +174,28 @@ def get_claims_analytics_export(
     *,
     user_id: str,
 ) -> dict[str, Any]:
+    postgresql = self.backend_type == BackendType.POSTGRESQL
+    bounded_filters_projection = _bounded_text_projection(
+        "filters_json",
+        postgresql=postgresql,
+    )
+    bounded_pagination_projection = _bounded_text_projection(
+        "pagination_json",
+        postgresql=postgresql,
+    )
     row = self.execute_query(
         (
-            "SELECT export_id, user_id, format, status, payload_json, payload_csv, filters_json, "
-            "pagination_json, error_message, job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at "
+            "SELECT export_id, user_id, format, status, payload_json, payload_csv, "
+            f"{bounded_filters_projection}, {bounded_pagination_projection}, "  # nosec B608
+            "error_message, job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at "
             "FROM claims_analytics_exports WHERE export_id = ? AND user_id = ? LIMIT 1"
         ),
-        (str(export_id), str(user_id)),
+        (
+            CLAIMS_ANALYTICS_EXPORT_FILTERS_JSON_MAX_BYTES,
+            CLAIMS_ANALYTICS_EXPORT_PAGINATION_JSON_MAX_BYTES,
+            str(export_id),
+            str(user_id),
+        ),
     ).fetchone()
     return _canonicalize_claims_analytics_export_row(row) if row else {}
 
@@ -301,14 +335,30 @@ def list_claims_analytics_exports(
     if format:
         conditions.append("format = ?")
         params.append(str(format))
+    postgresql = self.backend_type == BackendType.POSTGRESQL
+    bounded_filters_projection = _bounded_text_projection(
+        "filters_json",
+        postgresql=postgresql,
+    )
+    bounded_pagination_projection = _bounded_text_projection(
+        "pagination_json",
+        postgresql=postgresql,
+    )
     query = (
-        "SELECT export_id, user_id, format, status, filters_json, pagination_json, error_message, "  # nosec B608
+        "SELECT export_id, user_id, format, status, "
+        f"{bounded_filters_projection}, {bounded_pagination_projection}, error_message, "  # nosec B608
         "job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at "
         "FROM claims_analytics_exports WHERE "
         + " AND ".join(conditions)
         + " ORDER BY created_at DESC, export_id DESC LIMIT ? OFFSET ?"
     )
-    params.extend([limit, offset])
+    params = [
+        CLAIMS_ANALYTICS_EXPORT_FILTERS_JSON_MAX_BYTES,
+        CLAIMS_ANALYTICS_EXPORT_PAGINATION_JSON_MAX_BYTES,
+        *params,
+        limit,
+        offset,
+    ]
     rows = self.execute_query(query, tuple(params)).fetchall()
     return [_canonicalize_claims_analytics_export_row(row) for row in rows]
 
@@ -362,7 +412,7 @@ def list_claims_analytics_exports_for_maintenance(
         else "updated_at ASC, export_id ASC"
     )
     query = (
-        "SELECT export_id, user_id, format, status, filters_json, pagination_json, "  # nosec B608
+        "SELECT export_id, user_id, format, status, "  # nosec B608
         "error_message, job_id, error_code, snapshot_at, snapshot_event_id, created_at, updated_at "
         "FROM claims_analytics_exports WHERE "
         + " AND ".join(conditions)

@@ -163,6 +163,14 @@ The existing synchronous path and the worker call the same rendering function.
 Lifecycle metadata is not part of the rendered content, so equivalent requests
 produce equivalent normalized JSON or CSV output.
 
+### Shared Request Contract
+
+`app/core/claims_analytics_export_contract.py` owns the request-string ceilings
+and canonical signed-64-bit owner validation shared by API schemas and Claims
+domain code. It is dependency-neutral so importing the Claims API schema does
+not execute the eager `Claims_Extraction` package initializer or create a schema
+import cycle.
+
 ### Existing Claims Jobs Modules
 
 `claims_job_contracts.py` adds:
@@ -520,6 +528,18 @@ stores.
 
 Create and list responses add nullable `job_id`, `job_status`, `error_code`, and
 `snapshot_at`. Raw Jobs errors are not exposed.
+
+Persisted filter and pagination snapshots are validated against their current
+public response shapes before projection. A historical or malformed snapshot
+that cannot satisfy its response contract is returned as `filters=null` or
+`pagination=null`; it does not make the owner-scoped export row or the whole
+list endpoint unavailable. List and exact-artifact queries independently apply
+an 8 KiB serialized ceiling to each snapshot in SQLite or PostgreSQL, and the
+service repeats that check before JSON decoding, so oversized historical values
+are never materialized by the API or decoded by a worker.
+Reconciliation and cleanup projections omit `filters_json` and
+`pagination_json` entirely because maintenance does not consume request
+snapshots.
 
 ### Download
 

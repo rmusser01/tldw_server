@@ -8,7 +8,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     validate_offset_pagination_aliases,
 )
-from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+from tldw_Server_API.app.core.claims_analytics_export_contract import (
     CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS,
     CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS,
     CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS,

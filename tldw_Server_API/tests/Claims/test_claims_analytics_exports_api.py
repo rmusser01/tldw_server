@@ -1,4 +1,8 @@
+import json
+import subprocess
+import sys
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,6 +13,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.endpoints import claims as claims_endpoint
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimsAnalyticsExportFilters,
+    ClaimsAnalyticsExportListResponse,
     ClaimsAnalyticsExportRequest,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN
@@ -75,6 +80,26 @@ def test_service_owner_validation_rejects_huge_integer_with_stable_error() -> No
     assert exc_info.value.detail["code"] == "claims_owner_scope_violation"
 
 
+def test_claims_export_filter_schema_imports_in_fresh_interpreter() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from tldw_Server_API.app.api.v1.schemas.claims_schemas "
+                "import ClaimsAnalyticsExportFilters"
+            ),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     ("field_name", "maximum_length"),
     [
@@ -95,6 +120,29 @@ def test_export_filter_schema_rejects_oversized_strings(
         ClaimsAnalyticsExportFilters(
             **{field_name: "x" * (maximum_length + 1)}
         )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "maximum_length"),
+    [
+        ("workspace_id", 19),
+        ("event_type", 128),
+        ("severity", 64),
+        ("provider", 128),
+        ("model", 256),
+        ("start_time", 64),
+        ("end_time", 64),
+    ],
+)
+def test_export_filter_schema_accepts_strings_at_character_limit(
+    field_name: str,
+    maximum_length: int,
+) -> None:
+    filters = ClaimsAnalyticsExportFilters(
+        **{field_name: "x" * maximum_length}
+    )
+
+    assert getattr(filters, field_name) == "x" * maximum_length
 
 
 class _ExportReadDb:
@@ -1078,6 +1126,80 @@ def test_list_is_owner_scoped_and_batches_nullable_job_status_hydration(
         ("reconcile", db, "1", 100),
         ("cleanup", db, "1", 100),
     ]
+
+
+def test_list_replaces_oversized_persisted_filters_with_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _stored_row("1")
+    row["filters_json"] = json.dumps({"provider": "x" * 129})
+    db = _ExportReadDb([row])
+    _patch_export_read_maintenance(monkeypatch, _JobsReader({}))
+
+    result = claims_service.list_claims_analytics_exports(
+        limit=100,
+        offset=0,
+        status_filter=None,
+        format_filter=None,
+        workspace_id=None,
+        principal=_principal(platform_admin=False),
+        current_user=_user(1),
+        db=db,
+    )
+
+    response = ClaimsAnalyticsExportListResponse.model_validate(result)
+
+    assert response.exports[0].filters is None
+
+
+def test_persisted_filter_parser_rejects_oversized_json_before_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oversized = '{"provider":"' + ("x" * 9000) + '"}'
+    monkeypatch.setattr(
+        claims_service.json,
+        "loads",
+        lambda _value: pytest.fail("oversized persisted filters must not be decoded"),
+    )
+
+    assert claims_service._parse_persisted_claims_export_filters(oversized) is None
+
+
+def test_list_replaces_oversized_persisted_pagination_with_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _stored_row("1")
+    row["pagination_json"] = json.dumps({"offset": "x" * 9000})
+    db = _ExportReadDb([row])
+    _patch_export_read_maintenance(monkeypatch, _JobsReader({}))
+
+    result = claims_service.list_claims_analytics_exports(
+        limit=100,
+        offset=0,
+        status_filter=None,
+        format_filter=None,
+        workspace_id=None,
+        principal=_principal(platform_admin=False),
+        current_user=_user(1),
+        db=db,
+    )
+
+    response = ClaimsAnalyticsExportListResponse.model_validate(result)
+
+    assert response.exports[0].pagination is None
+
+
+def test_persisted_pagination_parser_rejects_oversized_json_before_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oversized = '{"offset":"' + ("x" * 9000) + '"}'
+    monkeypatch.setattr(
+        claims_service.json,
+        "loads",
+        lambda _value: pytest.fail("oversized persisted pagination must not be decoded"),
+    )
+
+    assert claims_service._parse_persisted_claims_export_pagination(oversized) is None
 
 
 def test_list_jobs_outage_returns_artifacts_with_null_job_status(

@@ -24,6 +24,14 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.claims_analytics_export_contract import (
+    CLAIMS_ANALYTICS_EXPORT_FILTERS_JSON_MAX_BYTES,
+    CLAIMS_ANALYTICS_EXPORT_PAGINATION_JSON_MAX_BYTES,
+    CLAIMS_MAX_OWNER_USER_ID,
+    is_routable_claims_owner_id_text,
+    is_valid_persisted_claims_analytics_export_filters,
+    is_valid_persisted_claims_analytics_export_pagination,
+)
 from tldw_Server_API.app.core.Claims_Extraction import claims_analytics_exports, claims_jobs
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim_span
 from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
@@ -38,10 +46,6 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_clustering import rebuild_claim_clusters_embeddings
 from tldw_Server_API.app.core.Claims_Extraction.claims_embeddings import claim_embedding_id
-from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
-    CLAIMS_MAX_OWNER_USER_ID,
-    is_routable_claims_owner_id_text,
-)
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
     dispatch_claim_review_notifications,
     record_watchlist_cluster_notifications,
@@ -3849,14 +3853,40 @@ def export_claims_analytics(
         )
 
 
-def _parse_persisted_claims_export_json(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, str) or not value:
+def _parse_persisted_claims_export_json(
+    value: Any,
+    *,
+    max_bytes: int,
+) -> dict[str, Any] | None:
+    if not isinstance(value, str) or not value or len(value) > max_bytes:
         return None
     try:
+        if len(value.encode("utf-8")) > max_bytes:
+            return None
         parsed = json.loads(value)
     except _CLAIMS_NONCRITICAL_EXCEPTIONS:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _parse_persisted_claims_export_filters(value: Any) -> dict[str, Any] | None:
+    parsed = _parse_persisted_claims_export_json(
+        value,
+        max_bytes=CLAIMS_ANALYTICS_EXPORT_FILTERS_JSON_MAX_BYTES,
+    )
+    if not is_valid_persisted_claims_analytics_export_filters(parsed):
+        return None
+    return parsed
+
+
+def _parse_persisted_claims_export_pagination(value: Any) -> dict[str, Any] | None:
+    parsed = _parse_persisted_claims_export_json(
+        value,
+        max_bytes=CLAIMS_ANALYTICS_EXPORT_PAGINATION_JSON_MAX_BYTES,
+    )
+    if not is_valid_persisted_claims_analytics_export_pagination(parsed):
+        return None
+    return parsed
 
 
 def list_claims_analytics_exports(
@@ -3929,8 +3959,10 @@ def list_claims_analytics_exports(
                     "download_url": download_url,
                     "created_at": row.get("created_at"),
                     "updated_at": row.get("updated_at"),
-                    "filters": _parse_persisted_claims_export_json(row.get("filters_json")),
-                    "pagination": _parse_persisted_claims_export_json(row.get("pagination_json")),
+                    "filters": _parse_persisted_claims_export_filters(row.get("filters_json")),
+                    "pagination": _parse_persisted_claims_export_pagination(
+                        row.get("pagination_json")
+                    ),
                     "error_message": row.get("error_message"),
                     "job_id": job_id,
                     "job_status": job_status,

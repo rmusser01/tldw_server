@@ -1,10 +1,10 @@
 ---
 id: TASK-12993
 title: Implement Claims Jobs Stage 2A analytics exports
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-08-08 21:36
-updated_date: 2026-08-12 05:00
+updated_date: 2026-08-12 05:54
 labels:
 - claims
 - jobs
@@ -19,6 +19,57 @@ documentation:
 - Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
 - Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
 priority: high
+modified_files:
+- Docs/Product/Claims_Module/Claims_Monitoring_Implementation.md
+- Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
+- Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
+- backlog/tasks/task-12989 - Design-Claims-Jobs-Stage-2A-analytics-exports.md
+- backlog/tasks/task-12990 - Plan-Claims-Jobs-Stage-2A-analytics-exports-implementation.md
+- backlog/tasks/task-12993 - Implement-Claims-Jobs-Stage-2A-analytics-exports.md
+- tldw_Server_API/Config_Files/.env.example
+- tldw_Server_API/app/api/v1/endpoints/claims.py
+- tldw_Server_API/app/api/v1/schemas/claims_schemas.py
+- tldw_Server_API/app/core/claims_analytics_export_contract.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_analytics_exports.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_job_contracts.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_job_handlers.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_jobs.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_service.py
+- tldw_Server_API/app/core/DB_Management/db_migration.py
+- tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/claims_analytics_export_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/claims_monitoring_event_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/schema/migration_bodies/__init__.py
+- tldw_Server_API/app/core/DB_Management/media_db/schema/migration_bodies/postgres_claims_analytics_export_jobs.py
+- tldw_Server_API/app/core/DB_Management/media_db/schema/migrations.py
+- tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_claims_collection_structures.py
+- tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_claims_json_helpers.py
+- tldw_Server_API/app/core/DB_Management/media_db/schema/sqlite_claims_extensions.py
+- tldw_Server_API/app/core/DB_Management/migrations/024_claims_analytics_export_jobs.sql
+- tldw_Server_API/app/core/Jobs/manager.py
+- tldw_Server_API/app/core/Jobs/migrations.py
+- tldw_Server_API/app/core/Jobs/models.py
+- tldw_Server_API/app/core/Jobs/pg_migrations.py
+- tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+- tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
+- tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+- tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
+- tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
+- tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
+- tldw_Server_API/tests/Claims/test_claims_jobs_contracts.py
+- tldw_Server_API/tests/Claims/test_claims_jobs_enqueue.py
+- tldw_Server_API/tests/Claims/test_claims_jobs_handlers.py
+- tldw_Server_API/tests/DB_Management/test_db_migration_loader.py
+- tldw_Server_API/tests/DB_Management/test_media_db_claims_analytics_export_ops.py
+- tldw_Server_API/tests/DB_Management/test_media_db_claims_monitoring_event_ops.py
+- tldw_Server_API/tests/DB_Management/test_media_db_postgres_claims_collection_structures.py
+- tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py
+- tldw_Server_API/tests/DB_Management/test_media_postgres_migrations.py
+- tldw_Server_API/tests/Jobs/test_jobs_batch_read_postgres.py
+- tldw_Server_API/tests/Jobs/test_jobs_batch_read_sqlite.py
+- tldw_Server_API/tests/Jobs/test_jobs_manager.py
+- tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py
+- tldw_Server_API/tests/Services/test_openapi_contracts.py
 ---
 
 ## Description
@@ -29,16 +80,16 @@ Execute the approved Stage 2A implementation plan to move Claims analytics expor
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Jobs-enabled analytics export requests return HTTP 202 with a durable Claims Job and queued owner-scoped artifact; Jobs-disabled requests retain synchronous HTTP 200 behavior.
-- [ ] #2 Claims owns normalized export requests, deterministic bounded rendering, artifacts, reconciliation, retention, and downloads while Jobs exclusively owns execution lifecycle, retries, leases, cancellation, quarantine, status, and admin controls.
-- [ ] #3 Jobs payloads are strict versioned ID-only contracts and Jobs results contain only non-sensitive export metadata.
-- [ ] #4 SQLite and PostgreSQL schemas, migrations, owner-scoped operations, active/archive Jobs reads, and cross-owner denials are implemented and tested.
-- [ ] #5 Worker retries use the persisted snapshot, can recover failed artifacts, cannot overwrite ready artifacts, and repair missing Job associations.
-- [ ] #6 JSON and CSV output enforce row and byte bounds, stable ordering, CSV formula protection, safe filenames, and correct content types.
-- [ ] #7 List and download behavior exposes separate artifact and read-only Job statuses, returns 409 for non-ready artifacts, and keeps missing/wrong-owner responses indistinguishable.
-- [ ] #8 Reconciliation and retention are conservative when Jobs is unavailable; failed artifacts are deleted only after retention plus grace and proven exact active/archive Jobs absence.
-- [ ] #9 Focused, regression, PostgreSQL, property, lint, compile, and Bandit verification gates pass with only fixture-reported environment skips.
-- [ ] #10 No review-metrics aggregation, cluster rebuild, scheduler, Claims queue-control API, or request-level idempotency work enters Stage 2A.
+- [x] #1 Jobs-enabled analytics export requests return HTTP 202 with a durable Claims Job and queued owner-scoped artifact; Jobs-disabled requests retain synchronous HTTP 200 behavior.
+- [x] #2 Claims owns normalized export requests, deterministic bounded rendering, artifacts, reconciliation, retention, and downloads while Jobs exclusively owns execution lifecycle, retries, leases, cancellation, quarantine, status, and admin controls.
+- [x] #3 Jobs payloads are strict versioned ID-only contracts and Jobs results contain only non-sensitive export metadata.
+- [x] #4 SQLite and PostgreSQL schemas, migrations, owner-scoped operations, active/archive Jobs reads, and cross-owner denials are implemented and tested.
+- [x] #5 Worker retries use the persisted snapshot, can recover failed artifacts, cannot overwrite ready artifacts, and repair missing Job associations.
+- [x] #6 JSON and CSV output enforce row and byte bounds, stable ordering, CSV formula protection, safe filenames, and correct content types.
+- [x] #7 List and download behavior exposes separate artifact and read-only Job statuses, returns 409 for non-ready artifacts, and keeps missing/wrong-owner responses indistinguishable.
+- [x] #8 Reconciliation and retention are conservative when Jobs is unavailable; failed artifacts are deleted only after retention plus grace and proven exact active/archive Jobs absence.
+- [x] #9 Focused, regression, PostgreSQL, property, lint, compile, and Bandit verification gates pass with only fixture-reported environment skips.
+- [x] #10 No review-metrics aggregation, cluster rebuild, scheduler, Claims queue-control API, or request-level idempotency work enters Stage 2A.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -58,7 +109,7 @@ Task 4 complete at aecf18e29d: canonical request normalization, fixed snapshot s
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Claims analytics exports on the shared Jobs control plane behind opt-in producer flags while preserving the synchronous HTTP 200 fallback. Claims owns request normalization, bounded deterministic rendering, owner-scoped artifacts, read-only Jobs projection, conservative reconciliation/retention, and downloads; Jobs remains the sole owner of queue admission, leases, retries, cancellation, quarantine, status, and administrative controls. The design uses strict ID-only Job payloads and conservative dual-store repair because Claims and Jobs cannot share one transaction. Resource ceilings, snapshot fencing, ready-state monotonicity, owner routing, SQLite/PostgreSQL parity, and legacy-row compatibility are covered by focused, integration, property, migration, and security tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -67,12 +118,12 @@ Task 4 complete at aecf18e29d: canonical request normalization, fixed snapshot s
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -95,4 +146,7 @@ Final quality review validated four additional gaps and all are now fixed with f
 Fresh specification review validated one remaining bound violation and two documentation mismatches. TDD RED reproduced unrestricted event_type/severity metadata and the missing bounded selected-row loader (2 failures). GREEN removes variable-width fields from metadata pages, hydrates selected event_type/severity/payload together through an owner-scoped constant-factor raw-source and exact canonical-byte bound, and aligns product/design documentation for the preparse cap and retention-plus-grace absence rule. Affected verification: 261 passed, 4 official PostgreSQL-unreachable skips; focused final checks 6 passed.
 2026-08-11 final quality-audit correction: validated and fixed four additional findings. Failed artifacts are preserved while any exact active or archived Job exists and are deleted only after retention plus grace and proven exact absence (cleanup suite 56 passed). Provider/model scans now bound raw source before JSON evaluation and fail closed on a fixed oversized marker (affected renderer/DB suites 263 passed, 4 official PostgreSQL-unavailable skips). Fresh, migration, and current-v24 schema paths install composite maintenance indexes, with query-plan coverage (73 passed, 3 official PostgreSQL-unavailable skips). Claims owner validation is centralized to canonical signed-64-bit positive IDs and preserves layer-specific errors (377 affected tests passed). Commits: 8eb7f90310, 2e787f309f, 816dba5cb9, fd53f3eea8. Final whole-feature verification and fresh re-reviews remain pending.
 2026-08-11 final resource-bound correction: fresh quality re-review validated unbounded export filter/timestamp strings and huge integer owner conversions that could escape stable Claims errors. RED reproduced 16 failures. GREEN centralizes schema/core character limits (workspace 19, event type 128, severity 64, provider 128, model 256, timestamps 64) and range-checks integer owners before conversion in contracts, handlers, and API routing. Focused regressions passed 16/16; all four affected suites passed 393 tests; Ruff, compileall, Bandit (zero findings), and diff checks passed. Final cumulative verification and re-review remain pending.
+2026-08-11 final import/projection correction in progress: fresh review validated a clean-process schema import cycle, response-validation failure for oversized historical filter snapshots, and missing exact-ceiling regression coverage. RED reproduced the import failure and persisted-row validation failure. GREEN moved shared owner/input limits to a dependency-neutral core contract, maps incompatible persisted filters to null, and added exact-boundary tests. Focused verification currently passes 9 API regressions and 6 core boundary cases; final cumulative verification and re-review remain pending.
+Final 2026-08-11 import/projection closeout: moved shared owner and request-size limits to a dependency-neutral core module to eliminate the fresh-process schema import cycle while retaining compatibility aliases in the Claims Jobs contract. Historical malformed or oversized filters now project as null, list SQL bounds filter snapshots before materialization, and maintenance scans omit unused filters_json/pagination_json entirely. The final P2 regression failed before the projection correction and passed afterward; the database-plus-cleanup suites passed 122 tests with 3 official PostgreSQL skips. The complete Stage 2A matrix collected 687 tests: 676 passed and 9 official PostgreSQL tests skipped; the only two failures were known order-dependent shared OpenAPI tests, and each passed in a fresh process. Earlier final gates remained green: Stage 1/lifecycle 52 passed with 31 PostgreSQL skips; schema/migration 111 passed with 22 PostgreSQL skips. Ruff and compileall passed all 42 changed Python files. Bandit scanned 23,569 changed production lines with 0 findings and 0 errors. git diff --check passed. Boundary audit confirmed Claims contains no queue controls and analytics Job payloads remain exactly version, owner_user_id, and export_id. Fresh specification review reported no findings; final independent quality re-review reported no P0-P3 findings. PostgreSQL integration skips are fixture-declared because PostgreSQL is unavailable in this environment.
+Superseding final self-review evidence: the ordinary list and exact-artifact paths also needed to bound pagination_json. RED reproduced 7 failures, including a list response-validation failure and worker decode before the size guard. GREEN independently caps filters_json and pagination_json at 8 KiB in SQLite/PostgreSQL list and exact-get projections, validates historical pagination metadata, maps incompatible list pagination to null, and checks worker request JSON before json.loads. Focused regression: 7 passed. Full export core/API/cleanup/worker/database matrix: 402 passed, 3 official PostgreSQL skips. Final Stage 2A matrix collected 691 tests: 680 passed, 9 official PostgreSQL skips, and only the same 2 shared-state OpenAPI failures; both passed together 2/2 in a fresh process. Final Ruff and compileall passed all 42 changed Python files. Bandit scanned 23,640 changed production lines with 0 findings and 0 errors; git diff --check passed. The final independent quality review reported no P0-P3 findings and explicitly confirmed UTF-8 byte semantics, SQLite/PostgreSQL placeholder ordering, historical compatibility, maintenance projection minimization, and exact-boundary behavior.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

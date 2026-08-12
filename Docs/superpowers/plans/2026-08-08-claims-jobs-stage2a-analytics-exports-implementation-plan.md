@@ -1764,11 +1764,11 @@ terminal-Job reconciliation, and PostgreSQL v24 migration-ordering findings.
 
 ### Stage 3: Final verification and independent review
 
-- [ ] Run the complete Stage 2A, Stage 1/lifecycle, migration/schema, Ruff,
+- [x] Run the complete Stage 2A, Stage 1/lifecycle, migration/schema, Ruff,
   compileall, Bandit, boundary, and diff gates.
-- [ ] Complete fresh specification and quality reviews and address every
+- [x] Complete fresh specification and quality reviews and address every
   validated finding.
-- [ ] Update TASK-12993 with final evidence and commit the aligned records.
+- [x] Update TASK-12993 with final evidence and commit the aligned records.
 
 Quality review correction: a fresh audit found and validated four additional
 issues. A full page of unchanged active artifacts could starve later terminal
@@ -1817,3 +1817,50 @@ and very large Python integer owners could raise the interpreter's digit-limit
 cases. GREEN centralizes schema/core string limits, range-checks integer owners
 before conversion in contracts, handlers, and API routing, and passes the four
 affected suites with 393 tests.
+
+## Task 12 Import And Persisted-Projection Correction (2026-08-11)
+
+**Goal:** Keep the shared analytics-export input contract import-safe and keep
+legacy export rows listable when their persisted filters no longer satisfy the
+current response schema.
+
+### Stage 1: Verified regressions (RED)
+
+- [x] Reproduce the clean-interpreter Claims schema import cycle.
+- [x] Prove an oversized persisted filter snapshot fails list-response
+  validation.
+- [x] Add exact-limit acceptance coverage for every request filter.
+
+### Stage 2: Minimal corrections (GREEN)
+
+- [x] Move shared owner and request-length contracts to a dependency-neutral
+  top-level core module while retaining Jobs payload validation in Jobs-facing
+  Claims contracts.
+- [x] Validate persisted filter snapshots before response projection and map
+  incompatible historical values to `filters=null`.
+- [x] Align the design and product documentation with import ownership and
+  compatibility behavior.
+
+### Stage 3: Final verification and review
+
+- [x] Run the complete Stage 2A, lifecycle, schema/migration, static-analysis,
+  security, boundary, and diff gates.
+- [x] Obtain fresh specification and quality re-reviews and address every
+  validated finding.
+- [x] Update TASK-12993 with final evidence and commit the correction.
+
+Quality re-review correction: request-time reconciliation and cleanup selected
+unbounded persisted filter and pagination JSON even though neither maintenance
+path consumed those fields. RED reproduced the exposure with a real SQLite row.
+GREEN removes both snapshots from the maintenance projection; the focused
+regression passed and the complete database-plus-cleanup run passed 122 tests
+with 3 PostgreSQL-dependent skips.
+
+Final self-review correction: ordinary list and exact-artifact reads still
+selected unbounded pagination snapshots, allowing historical data to trigger
+response validation failure or worker-side decoding before a size check. RED
+was 7 failed. GREEN applies the same independent 8 KiB SQLite/PostgreSQL
+projection and pre-decode ceiling to both request snapshots, validates legacy
+pagination shape, and maps incompatible list metadata to `pagination=null`.
+The focused run passed 7 tests and the full export core/API/cleanup/worker/DB
+matrix passed 402 tests with 3 PostgreSQL-dependent skips.

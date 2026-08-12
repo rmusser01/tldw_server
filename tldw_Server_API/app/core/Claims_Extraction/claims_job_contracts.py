@@ -6,6 +6,34 @@ import json
 import re
 from typing import Any
 
+from tldw_Server_API.app.core import (
+    claims_analytics_export_contract as _analytics_export_contract,
+)
+from tldw_Server_API.app.core.claims_analytics_export_contract import (
+    CLAIMS_MAX_OWNER_USER_ID,
+    is_routable_claims_owner_id_text,
+)
+
+# Compatibility aliases for callers that imported these limits from this module.
+CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS
+)
+
 CLAIMS_JOBS_DOMAIN = "claims"
 CLAIMS_JOBS_DEFAULT_QUEUE = "default"
 
@@ -16,14 +44,6 @@ CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE = "claims_generate_analytics_export"
 
 CLAIMS_JOB_PAYLOAD_VERSION = 1
 CLAIMS_ALERT_JOB_CHANNELS = {"slack", "webhook"}
-CLAIMS_MAX_OWNER_USER_ID = 9_223_372_036_854_775_807
-_CLAIMS_MAX_OWNER_USER_ID_TEXT = str(CLAIMS_MAX_OWNER_USER_ID)
-CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS = len(_CLAIMS_MAX_OWNER_USER_ID_TEXT)
-CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS = 128
-CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS = 64
-CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS = 128
-CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS = 256
-CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS = 64
 SENSITIVE_PAYLOAD_KEYS = {
     "db_path",
     "path",
@@ -83,24 +103,6 @@ class ClaimsJobError(RuntimeError):
         self.failure_code = str(failure_code)
         if backoff_seconds is not None:
             self.backoff_seconds = int(backoff_seconds)
-
-
-def is_routable_claims_owner_id_text(value: Any) -> bool:
-    """Return whether value is a canonical positive signed-BIGINT owner id."""
-    if (
-        not isinstance(value, str)
-        or not value
-        or value != value.strip()
-        or not value.isascii()
-        or not value.isdigit()
-        or value == "0"
-        or (len(value) > 1 and value.startswith("0"))
-    ):
-        return False
-    maximum = _CLAIMS_MAX_OWNER_USER_ID_TEXT
-    return len(value) < len(maximum) or (
-        len(value) == len(maximum) and value <= maximum
-    )
 
 
 def _normalize_dict(value: Any) -> dict[str, Any]:

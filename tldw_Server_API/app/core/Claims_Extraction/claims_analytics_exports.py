@@ -16,10 +16,11 @@ from uuid import uuid4
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+from tldw_Server_API.app.core.claims_analytics_export_contract import (
     CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS,
     CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS,
     CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_REQUEST_JSON_MAX_BYTES,
     CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS,
     CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
     is_routable_claims_owner_id_text,
@@ -988,9 +989,14 @@ def create_ready_artifact(
 
 
 def _decode_persisted_object(value: Any) -> dict[str, Any]:
-    if not isinstance(value, str):
+    if (
+        not isinstance(value, str)
+        or len(value) > CLAIMS_ANALYTICS_EXPORT_REQUEST_JSON_MAX_BYTES
+    ):
         raise _invalid_artifact_error()
     try:
+        if len(value.encode("utf-8")) > CLAIMS_ANALYTICS_EXPORT_REQUEST_JSON_MAX_BYTES:
+            raise _invalid_artifact_error()
         decoded = json.loads(value)
     except (TypeError, ValueError, UnicodeError) as exc:
         raise _invalid_artifact_error() from exc

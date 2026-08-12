@@ -12,10 +12,13 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import 
     process_export_artifact,
     render_export,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
     MediaDatabase,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import (
+    claims_analytics_export_ops,
 )
 
 pytestmark = pytest.mark.unit
@@ -288,6 +291,119 @@ def test_claims_analytics_export_list_projects_job_fields_without_payloads(tmp_p
         assert rows[0]["snapshot_event_id"] == 19
         assert "payload_json" not in rows[0]
         assert "payload_csv" not in rows[0]
+    finally:
+        db.close_connection()
+
+
+def test_claims_analytics_export_list_omits_oversized_request_json(tmp_path: Path) -> None:
+    db = _make_db(tmp_path, "claims-analytics-list-bounded-request.db")
+    try:
+        _seed_export(db, export_id="exp-oversized-request")
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET filters_json = ?, pagination_json = ? "
+            "WHERE export_id = ?",
+            (
+                '{"provider":"' + ("x" * 9000) + '"}',
+                '{"offset":"' + ("x" * 9000) + '"}',
+                "exp-oversized-request",
+            ),
+            commit=True,
+        )
+
+        rows = db.list_claims_analytics_exports("1")
+
+        assert rows[0]["filters_json"] is None
+        assert rows[0]["pagination_json"] is None
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.parametrize(
+    ("backend_type", "expected_size_expression"),
+    [
+        (BackendType.SQLITE, "length(CAST(COALESCE(filters_json, '') AS BLOB))"),
+        (BackendType.POSTGRESQL, "octet_length(COALESCE(filters_json, ''))"),
+    ],
+)
+def test_claims_analytics_export_list_bounds_request_json_in_database_projection(
+    backend_type: BackendType,
+    expected_size_expression: str,
+) -> None:
+    captured: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Cursor:
+        def fetchall(self) -> list[dict[str, object]]:
+            return []
+
+    class _Db:
+        def __init__(self) -> None:
+            self.backend_type = backend_type
+
+        def execute_query(
+            self,
+            query: str,
+            params: tuple[object, ...],
+        ) -> _Cursor:
+            captured.append((query, params))
+            return _Cursor()
+
+    rows = claims_analytics_export_ops.list_claims_analytics_exports(
+        _Db(),
+        "1",
+    )
+
+    assert rows == []
+    assert expected_size_expression in captured[0][0]
+    assert "ELSE NULL END AS filters_json" in captured[0][0]
+    assert expected_size_expression.replace("filters_json", "pagination_json") in captured[0][0]
+    assert "ELSE NULL END AS pagination_json" in captured[0][0]
+
+
+def test_claims_analytics_export_get_omits_oversized_request_json(tmp_path: Path) -> None:
+    db = _make_db(tmp_path, "claims-analytics-get-bounded-request.db")
+    try:
+        _seed_export(db, export_id="exp-get-oversized-request")
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET filters_json = ?, pagination_json = ? "
+            "WHERE export_id = ?",
+            (
+                '{"provider":"' + ("x" * 9000) + '"}',
+                '{"offset":"' + ("x" * 9000) + '"}',
+                "exp-get-oversized-request",
+            ),
+            commit=True,
+        )
+
+        row = db.get_claims_analytics_export("exp-get-oversized-request", user_id="1")
+
+        assert row["filters_json"] is None
+        assert row["pagination_json"] is None
+    finally:
+        db.close_connection()
+
+
+def test_claims_analytics_export_maintenance_omits_oversized_request_json(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-analytics-maintenance-bounded-request.db")
+    try:
+        _seed_export(db, export_id="exp-maintenance-oversized-request")
+        db.execute_query(
+            "UPDATE claims_analytics_exports SET filters_json = ?, pagination_json = ? "
+            "WHERE export_id = ?",
+            (
+                '{"provider":"' + ("x" * 9000) + '"}',
+                '{"offset":"' + ("x" * 9000) + '"}',
+                "exp-maintenance-oversized-request",
+            ),
+            commit=True,
+        )
+
+        rows = db.list_claims_analytics_exports_for_maintenance(user_id="1")
+
+        assert len(rows) == 1
+        assert "filters_json" not in rows[0]
+        assert "pagination_json" not in rows[0]
     finally:
         db.close_connection()
 

@@ -623,6 +623,30 @@ def test_normalize_rejects_oversized_scalar_filters(
     assert excinfo.value.code == "claims_export_invalid_payload"
 
 
+@pytest.mark.parametrize(
+    ("filter_name", "maximum_length"),
+    [
+        ("event_type", 128),
+        ("severity", 64),
+        ("provider", 128),
+        ("model", 256),
+    ],
+)
+def test_normalize_accepts_scalar_filters_at_character_limit(
+    filter_name: str,
+    maximum_length: int,
+) -> None:
+    value = "x" * maximum_length
+
+    normalized = normalize_export_request(
+        {"filters": {filter_name: value}},
+        owner_user_id="7",
+        now=FIXED_NOW,
+    )
+
+    assert normalized["filters"][filter_name] == value
+
+
 @pytest.mark.parametrize("filter_name", ["start_time", "end_time"])
 def test_normalize_rejects_oversized_timestamp_filters(filter_name: str) -> None:
     oversized_valid_timestamp = "2026-08-08T11:00:00." + ("1" * 64) + "Z"
@@ -635,6 +659,22 @@ def test_normalize_rejects_oversized_timestamp_filters(filter_name: str) -> None
         )
 
     assert excinfo.value.code == "claims_export_invalid_payload"
+
+
+@pytest.mark.parametrize("filter_name", ["start_time", "end_time"])
+def test_normalize_accepts_timestamp_filters_at_character_limit(
+    filter_name: str,
+) -> None:
+    prefix = "2026-08-08T11:00:00."
+    timestamp = prefix + ("1" * (64 - len(prefix) - 1)) + "Z"
+
+    normalized = normalize_export_request(
+        {"filters": {filter_name: timestamp}},
+        owner_user_id="7",
+        now=FIXED_NOW,
+    )
+
+    assert normalized["filters"][filter_name] == "2026-08-08T11:00:00.111Z"
 
 
 def test_normalize_accepts_naive_and_offset_timestamps_as_utc_milliseconds() -> None:
@@ -1654,6 +1694,22 @@ def test_process_rejects_malformed_or_noncanonical_persisted_request(
     assert stored["status"] == "failed"
     assert stored["error_code"] == "claims_export_invalid_artifact"
     assert "not-json" not in (stored["error_message"] or "")
+
+
+def test_persisted_request_decoder_rejects_oversized_json_before_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oversized = '{"provider":"' + ("x" * 9000) + '"}'
+    monkeypatch.setattr(
+        exports.json,
+        "loads",
+        lambda _value: pytest.fail("oversized persisted request JSON must not be decoded"),
+    )
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        exports._decode_persisted_object(oversized)
+
+    assert exc_info.value.code == "claims_export_invalid_artifact"
 
 
 def test_process_missing_or_wrong_owner_artifact_uses_same_safe_code() -> None:
