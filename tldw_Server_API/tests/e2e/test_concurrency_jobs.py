@@ -41,11 +41,11 @@ def test_chatbooks_async_cancel(api_client):
     payload = {
         "name": "E2E Cancel Chatbook",
         "description": "Cancel flow",
-        "content_selections": {"conversation": []},
+        "content_selections": {},
         "async_mode": True,
     }
     r = api_client.client.post("/api/v1/chatbooks/export", json=payload)
-    r.raise_for_status()
+    assert r.status_code == 200, r.text
     d = r.json()
     job_id = d.get("job_id")
     assert job_id
