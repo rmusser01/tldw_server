@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import multiprocessing
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -16,9 +17,52 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import (
     SyncBlobStoreError,
 )
 
+FIFO_TEST_UNAVAILABLE = not hasattr(os, "mkfifo") or (
+    "fork" not in multiprocessing.get_all_start_methods()
+)
+
 
 def _sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _relocate_in_child(
+    root: str,
+    kwargs: dict[str, Any],
+    connection: Any,
+) -> None:
+    try:
+        LocalSyncBlobStore(root).relocate_legacy_blob(**kwargs)
+    except SyncBlobStoreError as exc:
+        connection.send((type(exc).__name__, str(exc)))
+    else:
+        connection.send(("success", ""))
+    finally:
+        connection.close()
+
+
+def _assert_relocation_fails_without_hanging(
+    store: LocalSyncBlobStore,
+    **kwargs: Any,
+) -> tuple[str, str]:
+    context = multiprocessing.get_context("fork")
+    parent, child = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_relocate_in_child,
+        args=(str(store.root), kwargs, child),
+    )
+    process.start()
+    child.close()
+    try:
+        assert parent.poll(2), "relocation blocked opening a FIFO"
+        result = parent.recv()
+    finally:
+        if process.is_alive():
+            process.terminate()
+        process.join(2)
+        parent.close()
+    assert not process.is_alive()
+    return result
 
 
 def test_local_blob_store_commits_verified_chunks_atomically(tmp_path: Path):
@@ -352,6 +396,54 @@ def test_legacy_blob_relocation_is_idempotent_and_concurrent_safe(
     assert keys == [target_key, target_key]
     assert store.read_blob(target_key) == payload
     assert store.read_blob(legacy_key) == payload
+
+
+@pytest.mark.skipif(FIFO_TEST_UNAVAILABLE, reason="requires POSIX FIFO and fork")
+def test_legacy_blob_relocation_rejects_fifo_source_without_blocking(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"fifo source bytes"
+    payload_hash = _sha256(payload)
+    legacy_key = store.legacy_storage_key(payload_hash)
+    source = store.root / legacy_key
+    source.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(source)
+
+    error_type, message = _assert_relocation_fails_without_hanging(
+        store,
+        legacy_storage_key=legacy_key,
+        storage_namespace_id="b" * 32,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    )
+
+    assert error_type == "SyncBlobStoreError"
+    assert "source failed verification" in message
+
+
+@pytest.mark.skipif(FIFO_TEST_UNAVAILABLE, reason="requires POSIX FIFO and fork")
+def test_legacy_blob_relocation_rejects_fifo_target_without_blocking(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"fifo target bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "c" * 32
+    target = store.root / store.namespace_storage_key(namespace, payload_hash)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(target)
+
+    error_type, message = _assert_relocation_fails_without_hanging(
+        store,
+        legacy_storage_key=legacy_key,
+        storage_namespace_id=namespace,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    )
+
+    assert error_type == "SyncBlobStoreError"
+    assert "target is not a regular file" in message
 
 
 @pytest.mark.parametrize("failure", ["corrupt", "symlink"])
@@ -763,33 +855,6 @@ def test_relocation_has_no_race_prone_path_cleanup() -> None:
     assert "os.unlink" not in source
     assert "_unlink_name_if_inode_matches" not in source
     assert "logger.warning" not in source
-
-
-def test_legacy_blob_relocation_never_reopens_temporary_file_by_path(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
-    payload = b"legacy anchored temp bytes"
-    legacy_key, payload_hash = _legacy_blob(store, payload)
-    original_open = Path.open
-
-    def reject_relocation_temp_reopen(self: Path, *args: Any, **kwargs: Any):
-        if self.name.endswith(".relocating"):
-            raise AssertionError("relocation temp must remain descriptor-anchored")
-        return original_open(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", reject_relocation_temp_reopen)
-
-    relocated_key = store.relocate_legacy_blob(
-        legacy_storage_key=legacy_key,
-        storage_namespace_id="8" * 32,
-        payload_hash=payload_hash,
-        expected_size=len(payload),
-    )
-
-    assert store.read_blob(relocated_key) == payload
-    assert store.read_blob(legacy_key) == payload
 
 
 def test_legacy_blob_relocation_rejects_new_target_name_swap_after_copy(

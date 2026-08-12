@@ -548,6 +548,7 @@ def _open_contained_regular_file(
     with _open_directory_chain(root, segments[:-1], create=False) as directory:
         flags = (
             os.O_RDONLY
+            | os.O_NONBLOCK
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_CLOEXEC", 0)
         )
@@ -613,6 +614,7 @@ def _verify_open_blob(
 def _open_target_at(directory: int, name: str) -> BinaryIO:
     flags = (
         os.O_RDONLY
+        | os.O_NONBLOCK
         | getattr(os, "O_NOFOLLOW", 0)
         | getattr(os, "O_CLOEXEC", 0)
     )
