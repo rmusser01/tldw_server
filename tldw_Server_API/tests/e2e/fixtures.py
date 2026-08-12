@@ -1239,6 +1239,7 @@ class TestDataTracker:
         self.media_ids.append(media_id)
 
     def add_note(self, note_id: str | int):
+        """Track a note ID for end-of-session cleanup."""
         self.note_ids.append(note_id)
 
     def add_prompt(self, prompt_id: int):
