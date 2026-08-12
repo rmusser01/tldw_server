@@ -17,6 +17,7 @@ from uuid import uuid4
 from loguru import logger
 
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.Jobs.models import is_terminal_job_status
 
 DEFAULT_EXPORT_MAX_BYTES = 10_485_760
 DEFAULT_EXPORT_ORPHAN_GRACE_SEC = 300
@@ -45,7 +46,6 @@ _EXPORT_TRANSITIONS = {
     ("failed", "processing"),
     ("ready", "ready"),
 }
-_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 _EXPORT_JOB_TYPE = "claims_generate_analytics_export"
 _EXPORT_BATCH_GROUP_PREFIX = "claims-analytics-export:"
 
@@ -133,6 +133,23 @@ def _enqueue_failed_error() -> ClaimsAnalyticsExportError:
         "Claims analytics export could not be queued.",
         code="claims_export_enqueue_failed",
         http_status=503,
+    )
+
+
+def _terminal_job_artifact_error(job_status: str) -> ClaimsAnalyticsExportError:
+    if job_status == "cancelled":
+        return ClaimsAnalyticsExportError(
+            "Claims analytics export Job was cancelled.",
+            code="claims_export_job_cancelled",
+        )
+    if job_status == "quarantined":
+        return ClaimsAnalyticsExportError(
+            "Claims analytics export Job was quarantined.",
+            code="claims_export_job_quarantined",
+        )
+    return ClaimsAnalyticsExportError(
+        "Claims analytics export failed.",
+        code="claims_export_failed",
     )
 
 
@@ -1182,27 +1199,45 @@ def reconcile_export_artifacts(
     now: datetime | None = None,
     limit: int = 100,
 ) -> dict[str, int]:
-    """Repair missing Job links and fail only Jobs-proven queued orphans."""
+    """Repair missing links and reconcile artifacts against exact read-only Jobs state."""
     owner = _canonical_owner_id(owner_user_id)
     current_time = _normalize_now(now)
-    rows = db.list_claims_analytics_exports_for_maintenance(
+    bounded_limit = _maintenance_limit(limit)
+    missing_rows = db.list_claims_analytics_exports_for_maintenance(
         user_id=owner,
-        limit=_maintenance_limit(limit),
+        limit=bounded_limit,
         statuses=("queued",),
         job_id_missing=True,
     )
-    candidates = [
-        row for row in rows if isinstance(row, Mapping) and row.get("status") == "queued" and row.get("job_id") is None
+    attached_rows = db.list_claims_analytics_exports_for_maintenance(
+        user_id=owner,
+        limit=bounded_limit,
+        statuses=("queued", "processing"),
+        job_id_missing=False,
+    )
+    missing_candidates = [
+        row
+        for row in missing_rows
+        if isinstance(row, Mapping)
+        and row.get("status") == "queued"
+        and row.get("job_id") is None
+    ]
+    attached_candidates = [
+        row
+        for row in attached_rows
+        if isinstance(row, Mapping)
+        and row.get("status") in {"queued", "processing"}
+        and row.get("job_id") is not None
     ]
     counters = {
-        "examined": len(candidates),
+        "examined": len(missing_candidates) + len(attached_candidates),
         "repaired": 0,
         "failed": 0,
         "unchanged": 0,
     }
     grace = orphan_grace_seconds()
     enqueue_error = _enqueue_failed_error()
-    for row in candidates:
+    for row in missing_candidates:
         export_id = row.get("export_id")
         try:
             validated_export_id = validate_export_id(export_id)
@@ -1247,6 +1282,38 @@ def reconcile_export_artifacts(
             to_status="failed",
             error_code=enqueue_error.code,
             error_message=enqueue_error.public_message,
+        ):
+            counters["failed"] += 1
+        else:
+            counters["unchanged"] += 1
+
+    job_statuses = hydrate_job_statuses(
+        attached_candidates,
+        owner_user_id=owner,
+        job_manager=job_manager,
+    )
+    for row in attached_candidates:
+        try:
+            export_id = validate_export_id(row.get("export_id"))
+        except ClaimsAnalyticsExportError:
+            counters["unchanged"] += 1
+            continue
+        artifact_status = row.get("status")
+        if artifact_status not in {"queued", "processing"}:
+            counters["unchanged"] += 1
+            continue
+        job_status = job_statuses.get(export_id)
+        if not is_terminal_job_status(job_status):
+            counters["unchanged"] += 1
+            continue
+        error = _terminal_job_artifact_error(job_status)
+        if db.transition_claims_analytics_export_status(
+            export_id=export_id,
+            user_id=owner,
+            from_statuses=(artifact_status,),
+            to_status="failed",
+            error_code=error.code,
+            error_message=error.public_message,
         ):
             counters["failed"] += 1
         else:
@@ -1390,7 +1457,7 @@ def cleanup_export_artifacts(
             continue
         job_id = row.get("job_id")
         if job_id is None:
-            if row.get("error_code") != "claims_export_enqueue_failed" or age <= retention_seconds + grace:
+            if age <= retention_seconds + grace:
                 continue
             try:
                 validated_export_id = validate_export_id(export_id)
@@ -1424,7 +1491,7 @@ def cleanup_export_artifacts(
             if projection is None:
                 continue
             _job_id, job_status = projection
-            if job_status in _TERMINAL_JOB_STATUSES:
+            if is_terminal_job_status(job_status):
                 selected.append(validated_export_id)
             continue
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
@@ -1450,7 +1517,7 @@ def cleanup_export_artifacts(
                 owner_user_id=owner,
                 batch_group=batch_group,
             )
-            if job_status in _TERMINAL_JOB_STATUSES:
+            if is_terminal_job_status(job_status):
                 selected.append(export_id)
             continue
         try:
@@ -1479,7 +1546,7 @@ def cleanup_export_artifacts(
             owner_user_id=owner,
             batch_group=batch_group,
         )
-        if exact_status in _TERMINAL_JOB_STATUSES:
+        if is_terminal_job_status(exact_status):
             selected.append(export_id)
 
     if not selected:

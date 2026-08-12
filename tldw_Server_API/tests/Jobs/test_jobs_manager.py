@@ -58,6 +58,17 @@ def _capture_sqlite_archive_query_plan(
     return rows, plan
 
 
+def test_jobs_models_owns_terminal_status_classification():
+    from tldw_Server_API.app.core.Jobs import models
+
+    assert frozenset({"completed", "failed", "cancelled", "quarantined"}) == (
+        models.TERMINAL_JOB_STATUSES
+    )
+    assert all(models.is_terminal_job_status(status) for status in models.TERMINAL_JOB_STATUSES)
+    assert models.is_terminal_job_status("processing") is False
+    assert models.is_terminal_job_status(None) is False
+
+
 def test_create_and_acquire_and_complete(jobs_db):
 
 

@@ -310,7 +310,16 @@ def test_reconcile_repairs_exact_active_and_archived_jobs_before_grace(
             "updated_before": None,
             "export_id_after": None,
             "export_id_at_or_before": None,
-        }
+        },
+        {
+            "user_id": "7",
+            "limit": 100,
+            "statuses": ("queued", "processing"),
+            "job_id_missing": False,
+            "updated_before": None,
+            "export_id_after": None,
+            "export_id_at_or_before": None,
+        },
     ]
     assert {db.rows[active["export_id"]]["job_id"], db.rows[archived["export_id"]]["job_id"]} == {41, 42}
     assert all(
@@ -443,9 +452,79 @@ def test_reconcile_candidate_filters_prevent_attached_rows_from_consuming_limit(
         limit=2,
     )
 
-    assert result == {"examined": 1, "repaired": 0, "failed": 1, "unchanged": 0}
+    assert result == {"examined": 3, "repaired": 0, "failed": 1, "unchanged": 2}
     assert db.rows[orphan["export_id"]]["status"] == "failed"
     assert all(db.rows[row["export_id"]]["status"] == "queued" for row in irrelevant)
+
+
+@pytest.mark.parametrize(
+    ("artifact_status", "job_status", "expected_code"),
+    [
+        ("queued", "cancelled", "claims_export_job_cancelled"),
+        ("processing", "quarantined", "claims_export_job_quarantined"),
+        ("queued", "failed", "claims_export_failed"),
+        ("processing", "completed", "claims_export_failed"),
+    ],
+)
+def test_reconcile_marks_attached_artifact_failed_when_exact_job_is_terminal(
+    artifact_status: str,
+    job_status: str,
+    expected_code: str,
+) -> None:
+    row = _artifact(8, status=artifact_status, job_id=58)
+    db = MaintenanceDB([row])
+    manager = FakeJobManager(
+        jobs_by_id={
+            58: {
+                **_exact_job(row["export_id"], 58),
+                "status": job_status,
+            }
+        }
+    )
+
+    result = reconcile_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=manager,
+        now=NOW,
+    )
+
+    assert result == {
+        "examined": 1,
+        "repaired": 0,
+        "failed": 1,
+        "unchanged": 0,
+    }
+    assert db.rows[row["export_id"]]["status"] == "failed"
+    assert db.rows[row["export_id"]]["error_code"] == expected_code
+
+
+def test_reconcile_preserves_attached_artifact_when_exact_job_is_active() -> None:
+    row = _artifact(9, status="queued", job_id=59)
+    db = MaintenanceDB([row])
+    manager = FakeJobManager(
+        jobs_by_id={
+            59: {
+                **_exact_job(row["export_id"], 59),
+                "status": "processing",
+            }
+        }
+    )
+
+    result = reconcile_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=manager,
+        now=NOW,
+    )
+
+    assert result == {
+        "examined": 1,
+        "repaired": 0,
+        "failed": 0,
+        "unchanged": 1,
+    }
+    assert db.rows[row["export_id"]]["status"] == "queued"
 
 
 @pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled", "quarantined"])
@@ -688,6 +767,39 @@ def test_cleanup_reconciled_failed_without_job_waits_retention_plus_grace(
     ]
 
 
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "claims_export_too_large",
+        "claims_export_serialization_failed",
+        "claims_export_storage_unavailable",
+    ],
+)
+def test_cleanup_failed_without_job_uses_exact_lookup_regardless_of_error_code(
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    row = _artifact(
+        42,
+        status="failed",
+        updated_seconds_ago=3901,
+        error_code=error_code,
+    )
+    db = MaintenanceDB([row])
+    manager = FakeJobManager()
+
+    assert cleanup_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=manager,
+        now=NOW,
+        retention_hours=1,
+    ) == 1
+    assert row["export_id"] not in db.rows
+    assert len(manager.group_calls) == 1
+
+
 @pytest.mark.parametrize("archived", [False, True])
 def test_cleanup_preserves_enqueue_failed_without_job_when_exact_job_exists(
     monkeypatch: pytest.MonkeyPatch,
@@ -849,7 +961,7 @@ def test_cleanup_preserves_enqueue_failed_without_job_during_jobs_outage(
     "error_code",
     [None, "claims_export_serialization_failed", "claims_export_storage_unavailable"],
 )
-def test_cleanup_preserves_unrelated_failed_without_job_after_retention_and_grace(
+def test_cleanup_deletes_failed_without_job_after_retention_grace_and_exact_absence(
     monkeypatch: pytest.MonkeyPatch,
     error_code: str | None,
 ) -> None:
@@ -861,7 +973,7 @@ def test_cleanup_preserves_unrelated_failed_without_job_after_retention_and_grac
         error_code=error_code,
     )
     db = MaintenanceDB([unrelated])
-    manager = FakeJobManager(batch_error=RuntimeError("Jobs should not be called"))
+    manager = FakeJobManager(batch_error=RuntimeError("batch lookup should not be called"))
 
     deleted = cleanup_export_artifacts(
         db,
@@ -871,11 +983,11 @@ def test_cleanup_preserves_unrelated_failed_without_job_after_retention_and_grac
         retention_hours=1,
     )
 
-    assert deleted == 0
-    assert unrelated["export_id"] in db.rows
+    assert deleted == 1
+    assert unrelated["export_id"] not in db.rows
     assert manager.batch_calls == []
-    assert manager.group_calls == []
-    assert db.delete_calls == []
+    assert len(manager.group_calls) == 1
+    assert len(db.delete_calls) == 1
 
 
 def test_cleanup_jobs_outage_deletes_ready_but_preserves_uncertain_failed() -> None:
