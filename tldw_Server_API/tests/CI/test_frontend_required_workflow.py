@@ -45,4 +45,5 @@ def test_frontend_coverage_report_cannot_starve_required_gates() -> None:
     )
 
     assert coverage_step["continue-on-error"] is True
-    assert coverage_step["timeout-minutes"] == 15
+    assert coverage_step["timeout-minutes"] == 17
+    assert "timeout --kill-after=30s 15m bun run test:coverage" in coverage_step["run"]

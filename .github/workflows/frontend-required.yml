@@ -200,11 +200,12 @@ jobs:
       - name: Frontend coverage summary (report-only)
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 17
         working-directory: apps/tldw-frontend
         run: |
           set -o pipefail
-          bun run test:coverage 2>&1 | tail -30
+          # Coreutils timeout owns the process group; GitHub's step timeout can leave Vitest workers alive.
+          timeout --kill-after=30s 15m bun run test:coverage 2>&1 | tail -30 || true
           echo "NOTE: report-only; thresholds land after a baseline is observed in CI (audit F4)."
 
       - name: Run family guardrails parity tests
