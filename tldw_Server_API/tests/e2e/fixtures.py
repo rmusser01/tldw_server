@@ -671,7 +671,7 @@ class APIClient:
 
         return self._handle_rate_limit(_update)
 
-    def delete_note(self, note_id: int) -> Dict[str, Any]:
+    def delete_note(self, note_id: str | int) -> Dict[str, Any]:
         """Delete a note."""
         response = self.client.delete(f"{API_PREFIX}/notes/{note_id}")
         response.raise_for_status()
@@ -1218,7 +1218,7 @@ class TestDataTracker:
 
     def __init__(self):
         self.media_ids: List[int] = []
-        self.note_ids: List[int] = []
+        self.note_ids: List[str | int] = []
         self.prompt_ids: List[int] = []
         self.character_ids: List[int] = []
         self.chat_ids: List[str] = []
@@ -1238,7 +1238,7 @@ class TestDataTracker:
     def add_media(self, media_id: int):
         self.media_ids.append(media_id)
 
-    def add_note(self, note_id: int):
+    def add_note(self, note_id: str | int):
         self.note_ids.append(note_id)
 
     def add_prompt(self, prompt_id: int):
