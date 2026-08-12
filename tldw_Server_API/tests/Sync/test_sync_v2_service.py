@@ -7114,6 +7114,7 @@ def test_adapter_cursor_version_upgrade_replays_v2_without_rewinding_v1(
     assert stored_v2 is not None and stored_v2.max_delivered_sequence == v2.server_sequence
 
 
+@pytest.mark.unit
 def test_versioned_pull_does_not_advance_past_unresolved_conflict(
     sync_store: SyncV2Store,
     monkeypatch: pytest.MonkeyPatch,

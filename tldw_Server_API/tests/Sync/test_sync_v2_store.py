@@ -764,6 +764,7 @@ def test_blob_binding_page_is_owner_scoped_bounded_and_index_backed(
     )
 
 
+@pytest.mark.unit
 def test_blob_binding_page_uses_compound_keyset_for_shared_cursor(
     sync_store: SyncV2Store,
 ) -> None:
