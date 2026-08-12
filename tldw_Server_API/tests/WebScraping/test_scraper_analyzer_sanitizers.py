@@ -1,5 +1,10 @@
+"""Tests that scraper and pre-scrape analyzer failures remain sanitized."""
+
+from __future__ import annotations
+
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -12,7 +17,9 @@ pytestmark = pytest.mark.unit
 _LEAKY_ERROR = "backend exploded at /tmp/secret-token with api_key=abc123"
 
 
-def _install_extraction_dependencies(monkeypatch, **overrides):
+def _install_extraction_dependencies(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
+    """Install extraction dependencies with selected test overrides."""
+
     dependencies = replace(pipeline.build_default_dependencies(), **overrides)
     monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
 

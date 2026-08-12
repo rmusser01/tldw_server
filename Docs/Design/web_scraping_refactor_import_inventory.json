@@ -285,7 +285,7 @@
       {
         "import_kind": "from",
         "imported_name": "DEFAULT_EXTRACTION_STRATEGY_ORDER",
-        "line": 5,
+        "line": 10,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/tests/WebScraping/test_extraction_pipeline_router.py",
         "target_name": "Article_Extractor_Lib"
@@ -293,7 +293,7 @@
       {
         "import_kind": "from",
         "imported_name": "extract_article_with_pipeline",
-        "line": 5,
+        "line": 10,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/tests/WebScraping/test_extraction_pipeline_router.py",
         "target_name": "Article_Extractor_Lib"
@@ -341,7 +341,7 @@
       {
         "import_kind": "from",
         "imported_name": "extract_article_with_pipeline",
-        "line": 3,
+        "line": 10,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/tests/WebScraping/test_llm_extraction.py",
         "target_name": "Article_Extractor_Lib"
@@ -349,7 +349,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 3,
+        "line": 10,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_llm_throttling.py",
         "target_name": "Article_Extractor_Lib"
@@ -429,7 +429,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 6,
+        "line": 11,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_scraper_analyzer_sanitizers.py",
         "target_name": "Article_Extractor_Lib"
@@ -629,7 +629,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 17,
+        "line": 19,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_extraction_failures.py",
         "target_name": "Article_Extractor_Lib"
@@ -2001,7 +2001,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScraperRouter",
-        "line": 11,
+        "line": 16,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/tests/WebScraping/test_extraction_pipeline_router.py",
         "target_name": "scraper_router"

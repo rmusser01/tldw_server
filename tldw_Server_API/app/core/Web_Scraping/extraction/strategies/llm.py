@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Optional
 
@@ -83,12 +84,14 @@ def _throttle_settings(settings: dict[str, Any]) -> tuple[Optional[int], float, 
 
 
 @contextmanager
-def _llm_throttle(provider: str, settings: dict[str, Any], dependencies: ExtractionDependencies):
+def _llm_throttle(
+    provider: str,
+    settings: dict[str, Any],
+    dependencies: ExtractionDependencies,
+) -> Iterator[None]:
     max_concurrency, delay_ms, jitter_ms = _throttle_settings(settings)
     semaphore = throttles.get_llm_semaphore(provider, max_concurrency) if max_concurrency else None
-    if semaphore is not None:
-        semaphore.acquire()
-    try:
+    if semaphore is None:
         throttles.apply_llm_delay(
             provider,
             delay_ms,
@@ -97,9 +100,16 @@ def _llm_throttle(provider: str, settings: dict[str, Any], dependencies: Extract
             sleep=dependencies.sleep,
         )
         yield
-    finally:
-        if semaphore is not None:
-            semaphore.release()
+        return
+    with throttles.cancellable_semaphore(semaphore, dependencies.cancellation_checkpoint):
+        throttles.apply_llm_delay(
+            provider,
+            delay_ms,
+            jitter_ms,
+            wall_time=dependencies.wall_time,
+            sleep=dependencies.sleep,
+        )
+        yield
 
 
 def _retry_settings() -> tuple[int, float, float]:

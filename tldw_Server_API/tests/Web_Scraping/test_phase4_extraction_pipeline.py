@@ -248,7 +248,7 @@ def test_disabling_llm_filters_only_llm_from_explicit_order(monkeypatch: pytest.
     ]
 
 
-def test_default_regex_matches_survive_later_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_regex_result_survives_later_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_default_strategies(monkeypatch)
     regex_result = _result(
         success=True, content="email", regex_matches=[{"label": "email", "value": "demo@example.com"}]
@@ -258,9 +258,10 @@ def test_default_regex_matches_survive_later_failure(monkeypatch: pytest.MonkeyP
 
     result = pipeline.extract_article_with_pipeline(HTML, URL)
 
-    assert result["extraction_successful"] is False
+    assert result["extraction_successful"] is True
+    assert result["content"] == "email"
     assert result["regex_matches"] == regex_result["regex_matches"]
-    assert result["extraction_strategy"] is None
+    assert result["extraction_strategy"] == "regex"
 
 
 def test_jsonld_summary_carries_forward_without_mutating_strategy_result(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -640,9 +641,9 @@ def test_pipeline_cancellation_after_semaphore_wait_releases_permit_without_disp
     release_count = 0
 
     class SignalingSemaphore:
-        def acquire(self) -> bool:
+        def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
             waiting.set()
-            return semaphore.acquire()
+            return semaphore.acquire(blocking=blocking, timeout=timeout)
 
         def release(self) -> None:
             nonlocal release_count

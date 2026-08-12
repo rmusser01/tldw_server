@@ -39,7 +39,10 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.llm import (
     schema_rules_to_field_specs,
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.trafilatura import extract_with_trafilatura
-from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import get_strategy_semaphore
+from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
+    cancellable_semaphore,
+    get_strategy_semaphore,
+)
 
 DEFAULT_EXTRACTION_STRATEGY_ORDER = [
     "jsonld",
@@ -231,12 +234,8 @@ def _strategy_throttle(strategy: str, dependencies: ExtractionDependencies) -> I
     if semaphore is None:
         yield
         return
-    semaphore.acquire()
-    try:
-        dependencies.cancellation_checkpoint()
+    with cancellable_semaphore(semaphore, dependencies.cancellation_checkpoint):
         yield
-    finally:
-        semaphore.release()
 
 
 def _coerce_positive_int(value: Any) -> Optional[int]:
@@ -568,6 +567,8 @@ def _extract_article_with_pipeline_with_dependencies(
         trace.append(_trace_entry(dependencies, strategy, "failed", "no_content"))
         _record_strategy_metrics(dependencies, strategy, "failed", dependencies.perf_counter() - start, result)
 
+    if regex_result is not None and regex_result.get("extraction_successful"):
+        return finalize(regex_result, strategy="regex")
     if last_result is None:
         last_result = {
             "title": "N/A",

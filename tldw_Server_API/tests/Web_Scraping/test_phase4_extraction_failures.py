@@ -1,3 +1,5 @@
+"""Failure, cancellation, and sanitization tests for canonical extraction."""
+
 import ast
 import asyncio
 import dataclasses
@@ -27,6 +29,22 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import schema a
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WEB_SCRAPING_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping"
 SECRET = "https://user:api-key@example.com/private/path?token=secret#payload"
+
+
+class _UnavailableSemaphore:
+    """Test double that records timed acquisition attempts without granting a slot."""
+
+    def __init__(self) -> None:
+        self.acquire_attempts = 0
+        self.release_calls = 0
+
+    def acquire(self, blocking: bool = True, timeout: Optional[float] = None) -> bool:
+        del blocking, timeout
+        self.acquire_attempts += 1
+        return False
+
+    def release(self) -> None:
+        self.release_calls += 1
 
 
 def _dependencies(**changes: Any) -> ExtractionDependencies:
@@ -348,6 +366,85 @@ def test_cancellation_during_throttle_wait_prevents_provider_dispatch(monkeypatc
         )
 
     assert provider_calls == 0
+
+
+def test_strategy_throttle_polls_cancellation_while_semaphore_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    semaphore = _UnavailableSemaphore()
+    entered = False
+
+    def checkpoint() -> None:
+        if semaphore.acquire_attempts >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(pipeline, "get_strategy_semaphore", lambda *_args: semaphore)
+    dependencies = _dependencies(cancellation_checkpoint=checkpoint)
+
+    with pytest.raises(asyncio.CancelledError):
+        with pipeline._strategy_throttle("regex", dependencies):
+            entered = True
+
+    assert entered is False
+    assert semaphore.acquire_attempts == 2
+    assert semaphore.release_calls == 0
+
+
+def test_llm_throttle_polls_cancellation_while_semaphore_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    semaphore = _UnavailableSemaphore()
+    entered = False
+
+    def checkpoint() -> None:
+        if semaphore.acquire_attempts >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(throttles, "get_llm_semaphore", lambda *_args: semaphore)
+    dependencies = _dependencies(cancellation_checkpoint=checkpoint)
+
+    with pytest.raises(asyncio.CancelledError):
+        with llm_strategy._llm_throttle("openai", {"max_concurrency": 1}, dependencies):
+            entered = True
+
+    assert entered is False
+    assert semaphore.acquire_attempts == 2
+    assert semaphore.release_calls == 0
+
+
+def test_llm_concurrency_normalizes_provider_identity() -> None:
+    throttles.clear_throttle_state()
+    try:
+        mixed_case = throttles.get_llm_semaphore(" OpenAI ", 1)
+        canonical = throttles.get_llm_semaphore("openai", 1)
+
+        assert mixed_case is canonical
+    finally:
+        throttles.clear_throttle_state()
+
+
+def test_llm_delay_normalizes_provider_identity() -> None:
+    sleeps: list[float] = []
+    throttles.clear_throttle_state()
+    try:
+        throttles.apply_llm_delay(
+            "",
+            100.0,
+            0.0,
+            wall_time=lambda: 1000.0,
+            sleep=sleeps.append,
+        )
+        throttles.apply_llm_delay(
+            " DEFAULT ",
+            100.0,
+            0.0,
+            wall_time=lambda: 1000.0,
+            sleep=sleeps.append,
+        )
+
+        assert sleeps == [0.1]
+    finally:
+        throttles.clear_throttle_state()
 
 
 def test_cancellation_during_retry_backoff_prevents_later_provider_dispatch(

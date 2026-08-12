@@ -1,4 +1,9 @@
+"""Tests for extraction strategy routing and pipeline overrides."""
+
+from __future__ import annotations
+
 import dataclasses
+from typing import Any, Callable
 
 import pytest
 
@@ -11,7 +16,9 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
 
-def _install_llm_provider(monkeypatch, provider):
+def _install_llm_provider(monkeypatch: pytest.MonkeyPatch, provider: Callable[..., Any]) -> None:
+    """Install a deterministic LLM provider for a pipeline routing test."""
+
     dependencies = dataclasses.replace(
         build_default_dependencies(),
         perform_chat_api_call=provider,
