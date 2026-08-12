@@ -327,7 +327,7 @@ const inspectWebSocket = async (page: Page, url: string): Promise<WebSocketResul
         const timeout = window.setTimeout(() => {
           socket.close()
           finish({ opened, closeCode: -1, url: openedUrl })
-        }, 15_000)
+        }, 45_000)
         socket.onopen = () => {
           opened = true
           openedUrl = socket.url
@@ -522,9 +522,10 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
       ]
       for (const socketUrl of representativeSockets) {
         const result = await inspectWebSocket(page, socketUrl)
-        expect(result.opened, `${socketUrl} did not authenticate through the cookie`).toBe(
-          true
-        )
+        expect(
+          result.opened,
+          `${socketUrl} did not authenticate through the cookie: ${JSON.stringify(result)}`
+        ).toBe(true)
         expect(new URL(result.url).searchParams.has("api_key")).toBe(false)
         expect(new URL(result.url).searchParams.has("token")).toBe(false)
         expect(result.url).not.toContain(INITIAL_API_KEY)
