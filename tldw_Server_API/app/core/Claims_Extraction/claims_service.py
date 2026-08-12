@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
 from tldw_Server_API.app.core.Claims_Extraction.claims_clustering import rebuild_claim_clusters_embeddings
 from tldw_Server_API.app.core.Claims_Extraction.claims_embeddings import claim_embedding_id
 from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+    CLAIMS_MAX_OWNER_USER_ID,
     is_routable_claims_owner_id_text,
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
@@ -3437,6 +3438,8 @@ def _canonical_claims_export_owner_id(value: Any) -> str:
     if isinstance(value, bool):
         raise _claims_export_owner_error()
     if isinstance(value, int):
+        if not 1 <= value <= CLAIMS_MAX_OWNER_USER_ID:
+            raise _claims_export_owner_error()
         owner = str(value)
     elif isinstance(value, str):
         owner = value

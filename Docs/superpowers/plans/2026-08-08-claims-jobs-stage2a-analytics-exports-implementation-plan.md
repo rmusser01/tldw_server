@@ -1809,3 +1809,11 @@ routable signed-64-bit range. Each correction followed RED/GREEN TDD:
 - Contracts, handlers, rendering, and API routing now accept owner IDs only in
   the canonical range 1 through 9,223,372,036,854,775,807; affected suites
   passed 377 tests.
+
+Fresh quality re-review then validated two final resource-bound gaps. Analytics
+filter and timestamp strings could be persisted without character ceilings,
+and very large Python integer owners could raise the interpreter's digit-limit
+`ValueError` before stable Claims error translation. RED reproduced all 16
+cases. GREEN centralizes schema/core string limits, range-checks integer owners
+before conversion in contracts, handlers, and API routing, and passes the four
+affected suites with 393 tests.

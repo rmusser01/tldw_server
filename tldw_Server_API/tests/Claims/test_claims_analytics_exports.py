@@ -600,6 +600,43 @@ def test_normalize_enforces_routable_owner_range() -> None:
     assert exc_info.value.code == "claims_owner_scope_violation"
 
 
+@pytest.mark.parametrize(
+    ("filter_name", "maximum_length"),
+    [
+        ("event_type", 128),
+        ("severity", 64),
+        ("provider", 128),
+        ("model", 256),
+    ],
+)
+def test_normalize_rejects_oversized_scalar_filters(
+    filter_name: str,
+    maximum_length: int,
+) -> None:
+    with pytest.raises(ClaimsAnalyticsExportError) as excinfo:
+        normalize_export_request(
+            {"filters": {filter_name: "x" * (maximum_length + 1)}},
+            owner_user_id="7",
+            now=FIXED_NOW,
+        )
+
+    assert excinfo.value.code == "claims_export_invalid_payload"
+
+
+@pytest.mark.parametrize("filter_name", ["start_time", "end_time"])
+def test_normalize_rejects_oversized_timestamp_filters(filter_name: str) -> None:
+    oversized_valid_timestamp = "2026-08-08T11:00:00." + ("1" * 64) + "Z"
+
+    with pytest.raises(ClaimsAnalyticsExportError) as excinfo:
+        normalize_export_request(
+            {"filters": {filter_name: oversized_valid_timestamp}},
+            owner_user_id="7",
+            now=FIXED_NOW,
+        )
+
+    assert excinfo.value.code == "claims_export_invalid_payload"
+
+
 def test_normalize_accepts_naive_and_offset_timestamps_as_utc_milliseconds() -> None:
     naive = _normalized(filters={"start_time": "2026-08-01T01:02:03.456789"})
     offset = _normalized(filters={"start_time": "2026-08-01T01:02:03.456789-07:00"})

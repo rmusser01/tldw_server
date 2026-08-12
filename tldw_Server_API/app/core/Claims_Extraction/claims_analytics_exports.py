@@ -17,6 +17,11 @@ from uuid import uuid4
 from loguru import logger
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+    CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
     is_routable_claims_owner_id_text,
 )
 from tldw_Server_API.app.core.config import settings
@@ -33,6 +38,12 @@ EXPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 CSV_COLUMNS = ("id", "event_type", "severity", "created_at", "payload_json")
 
 _SCALAR_FILTERS = ("event_type", "severity", "provider", "model")
+_SCALAR_FILTER_MAX_CHARS = {
+    "event_type": CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS,
+    "severity": CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS,
+    "provider": CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS,
+    "model": CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS,
+}
 _EVENT_COLUMNS = ("id", "user_id", "event_type", "severity", "created_at")
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 _NORMALIZED_REQUEST_KEYS = {
@@ -168,7 +179,11 @@ def _canonical_owner_id(value: Any) -> str:
 
 
 def _parse_iso8601(value: Any) -> datetime:
-    if not isinstance(value, str) or not value:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS
+    ):
         raise _invalid_payload_error()
     candidate = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
@@ -281,6 +296,8 @@ def normalize_export_request(
         if value is None:
             continue
         if not isinstance(value, str):
+            raise _invalid_payload_error()
+        if len(value) > _SCALAR_FILTER_MAX_CHARS[key]:
             raise _invalid_payload_error()
         normalized_filters[key] = value
 

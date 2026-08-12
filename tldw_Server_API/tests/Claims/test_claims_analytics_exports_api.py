@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException, Response
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.endpoints import claims as claims_endpoint
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
@@ -64,6 +65,36 @@ def test_service_owner_validation_enforces_routable_integer_range() -> None:
         "code": "claims_owner_scope_violation",
         "message": "Invalid Claims analytics export owner.",
     }
+
+
+def test_service_owner_validation_rejects_huge_integer_with_stable_error() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service._canonical_claims_export_owner_id(10**5000)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == "claims_owner_scope_violation"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "maximum_length"),
+    [
+        ("workspace_id", 19),
+        ("event_type", 128),
+        ("severity", 64),
+        ("provider", 128),
+        ("model", 256),
+        ("start_time", 64),
+        ("end_time", 64),
+    ],
+)
+def test_export_filter_schema_rejects_oversized_strings(
+    field_name: str,
+    maximum_length: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        ClaimsAnalyticsExportFilters(
+            **{field_name: "x" * (maximum_length + 1)}
+        )
 
 
 class _ExportReadDb:

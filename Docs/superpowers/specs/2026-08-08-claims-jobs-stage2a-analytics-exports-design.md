@@ -281,15 +281,18 @@ Before creating an artifact, Claims:
 
 1. Validates the format as `json` or `csv`.
 2. Resolves the authorized target owner.
-3. Parses filter timestamps as supported ISO-8601 values and normalizes them to
+3. Enforces request-string ceilings before persistence: 19 characters for the
+   signed-64-bit `workspace_id`, 128 for `event_type`, 64 for `severity`, 128
+   for `provider`, 256 for `model`, and 64 for each timestamp.
+4. Parses filter timestamps as supported ISO-8601 values and normalizes them to
    UTC.
-4. Captures `snapshot_at` in UTC.
-5. Uses the earlier of the caller's `end_time` and `snapshot_at` as the effective
+5. Captures `snapshot_at` in UTC.
+6. Uses the earlier of the caller's `end_time` and `snapshot_at` as the effective
    upper bound.
-6. Rejects a start time later than the effective end time.
-7. Clamps pagination to the existing limit of 1 through 10,000 and a
+7. Rejects a start time later than the effective end time.
+8. Clamps pagination to the existing limit of 1 through 10,000 and a
    non-negative offset.
-8. Removes `workspace_id` from persisted filters because the export row and Job
+9. Removes `workspace_id` from persisted filters because the export row and Job
    owner are the only ownership sources.
 
 The event query orders by creation timestamp and a stable ID tie-breaker before
@@ -662,8 +665,8 @@ bounded maintenance pages.
 
 - Payload validation rejects unknown and sensitive keys.
 - Job owner, payload owner, export owner, and requested owner must agree.
-- Owner IDs are canonical positive signed-64-bit integers before database
-  routing.
+- Owner IDs are range-checked as canonical positive signed-64-bit integers
+  before string conversion or database routing.
 - Cross-user access requires platform-admin Claims permission.
 - Export lookup includes owner scope at the database query, avoiding existence
   disclosure followed by an authorization check.

@@ -4,7 +4,7 @@ title: Implement Claims Jobs Stage 2A analytics exports
 status: In Progress
 assignee: []
 created_date: 2026-08-08 21:36
-updated_date: 2026-08-12 04:39
+updated_date: 2026-08-12 05:00
 labels:
 - claims
 - jobs
@@ -36,7 +36,7 @@ Execute the approved Stage 2A implementation plan to move Claims analytics expor
 - [ ] #5 Worker retries use the persisted snapshot, can recover failed artifacts, cannot overwrite ready artifacts, and repair missing Job associations.
 - [ ] #6 JSON and CSV output enforce row and byte bounds, stable ordering, CSV formula protection, safe filenames, and correct content types.
 - [ ] #7 List and download behavior exposes separate artifact and read-only Job statuses, returns 409 for non-ready artifacts, and keeps missing/wrong-owner responses indistinguishable.
-- [ ] #8 Reconciliation and retention are conservative when Jobs is unavailable and delete only eligible terminal artifacts after grace and retention.
+- [ ] #8 Reconciliation and retention are conservative when Jobs is unavailable; failed artifacts are deleted only after retention plus grace and proven exact active/archive Jobs absence.
 - [ ] #9 Focused, regression, PostgreSQL, property, lint, compile, and Bandit verification gates pass with only fixture-reported environment skips.
 - [ ] #10 No review-metrics aggregation, cluster rebuild, scheduler, Claims queue-control API, or request-level idempotency work enters Stage 2A.
 <!-- AC:END -->
@@ -94,4 +94,5 @@ Task 12 final whole-feature review found seven validated defects that must be fi
 Final quality review validated four additional gaps and all are now fixed with focused regressions: reconciliation uses independently rotating bounded pages so old active artifacts cannot permanently hide later terminal Jobs; monitoring payload reads cap raw source bytes before JSON parsing; rendering rejects non-finite JSON numbers; and persisted cancelled/quarantined export error codes remain public when Jobs history is unavailable. Focused tests, Ruff, compileall, and diff validation pass; full post-review verification remains pending.
 Fresh specification review validated one remaining bound violation and two documentation mismatches. TDD RED reproduced unrestricted event_type/severity metadata and the missing bounded selected-row loader (2 failures). GREEN removes variable-width fields from metadata pages, hydrates selected event_type/severity/payload together through an owner-scoped constant-factor raw-source and exact canonical-byte bound, and aligns product/design documentation for the preparse cap and retention-plus-grace absence rule. Affected verification: 261 passed, 4 official PostgreSQL-unreachable skips; focused final checks 6 passed.
 2026-08-11 final quality-audit correction: validated and fixed four additional findings. Failed artifacts are preserved while any exact active or archived Job exists and are deleted only after retention plus grace and proven exact absence (cleanup suite 56 passed). Provider/model scans now bound raw source before JSON evaluation and fail closed on a fixed oversized marker (affected renderer/DB suites 263 passed, 4 official PostgreSQL-unavailable skips). Fresh, migration, and current-v24 schema paths install composite maintenance indexes, with query-plan coverage (73 passed, 3 official PostgreSQL-unavailable skips). Claims owner validation is centralized to canonical signed-64-bit positive IDs and preserves layer-specific errors (377 affected tests passed). Commits: 8eb7f90310, 2e787f309f, 816dba5cb9, fd53f3eea8. Final whole-feature verification and fresh re-reviews remain pending.
+2026-08-11 final resource-bound correction: fresh quality re-review validated unbounded export filter/timestamp strings and huge integer owner conversions that could escape stable Claims errors. RED reproduced 16 failures. GREEN centralizes schema/core character limits (workspace 19, event type 128, severity 64, provider 128, model 256, timestamps 64) and range-checks integer owners before conversion in contracts, handlers, and API routing. Focused regressions passed 16/16; all four affected suites passed 393 tests; Ruff, compileall, Bandit (zero findings), and diff checks passed. Final cumulative verification and re-review remain pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

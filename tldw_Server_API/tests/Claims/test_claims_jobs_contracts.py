@@ -194,6 +194,15 @@ def test_analytics_export_payload_enforces_routable_owner_range() -> None:
     assert excinfo.value.failure_code == "claims_missing_owner"  # nosec B101
 
 
+def test_payload_owner_validation_rejects_huge_integer_with_stable_error() -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_rebuild_media_payload(
+            {"version": 1, "owner_user_id": 10**5000, "media_id": 42}
+        )
+
+    assert excinfo.value.failure_code == "claims_missing_owner"  # nosec B101
+
+
 @pytest.mark.parametrize(
     "export_id",
     [

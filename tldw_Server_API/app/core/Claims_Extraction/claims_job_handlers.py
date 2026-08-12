@@ -33,6 +33,7 @@ from .claims_job_contracts import (
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
     CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
+    CLAIMS_MAX_OWNER_USER_ID,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
     ClaimsJobError,
     is_routable_claims_owner_id_text,
@@ -128,6 +129,8 @@ def _canonical_owner_user_id(value: Any) -> str:
     if isinstance(value, bool):
         raise _owner_scope_error("claims job owner must be a canonical positive integer")
     if isinstance(value, int):
+        if not 1 <= value <= CLAIMS_MAX_OWNER_USER_ID:
+            raise _owner_scope_error("claims job owner must be a canonical positive integer")
         text = str(value)
     elif isinstance(value, str):
         text = value

@@ -18,6 +18,12 @@ CLAIMS_JOB_PAYLOAD_VERSION = 1
 CLAIMS_ALERT_JOB_CHANNELS = {"slack", "webhook"}
 CLAIMS_MAX_OWNER_USER_ID = 9_223_372_036_854_775_807
 _CLAIMS_MAX_OWNER_USER_ID_TEXT = str(CLAIMS_MAX_OWNER_USER_ID)
+CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS = len(_CLAIMS_MAX_OWNER_USER_ID_TEXT)
+CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS = 128
+CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS = 64
+CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS = 128
+CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS = 256
+CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS = 64
 SENSITIVE_PAYLOAD_KEYS = {
     "db_path",
     "path",
@@ -151,7 +157,7 @@ def _owner_user_id(value: Any) -> str:
             failure_code="claims_missing_owner",
         )
     if isinstance(value, int):
-        owner = str(value)
+        owner = str(value) if 1 <= value <= CLAIMS_MAX_OWNER_USER_ID else ""
     else:
         owner = value
     if not is_routable_claims_owner_id_text(owner):

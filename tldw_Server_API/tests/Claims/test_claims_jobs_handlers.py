@@ -153,6 +153,13 @@ def test_handler_owner_validation_enforces_routable_integer_range() -> None:
     assert excinfo.value.failure_code == "claims_owner_scope_violation"
 
 
+def test_handler_owner_validation_rejects_huge_integer_with_stable_error() -> None:
+    with pytest.raises(ClaimsJobError) as excinfo:
+        claims_job_handlers._canonical_owner_user_id(10**5000)
+
+    assert excinfo.value.failure_code == "claims_owner_scope_violation"
+
+
 async def test_review_notification_delivery_failure_is_retryable(monkeypatch) -> None:
     monkeypatch.setattr(
         claims_job_handlers,

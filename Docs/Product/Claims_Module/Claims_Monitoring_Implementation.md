@@ -267,13 +267,13 @@ Request schema:
 {
   "format": "csv|json",               // required
   "filters": {
-    "workspace_id": "string|null",    // optional admin cross-owner target; non-admins may omit or provide their own ID; 403 for another workspace
-    "event_type": "string|null",
-    "severity": "string|null",
-    "provider": "string|null",
-    "model": "string|null",
-    "start_time": "string|null",      // ISO 8601
-    "end_time": "string|null"         // ISO 8601
+    "workspace_id": "string|null",    // optional signed-64-bit owner ID, max 19 characters; admin required for another owner
+    "event_type": "string|null",      // max 128 characters
+    "severity": "string|null",        // max 64 characters
+    "provider": "string|null",        // max 128 characters
+    "model": "string|null",           // max 256 characters
+    "start_time": "string|null",      // ISO 8601, max 64 characters
+    "end_time": "string|null"         // ISO 8601, max 64 characters
   },
   "pagination": {
     "limit": 1000,                    // optional, max 10000
