@@ -36,12 +36,21 @@ def test_bulk_media_ingest(api_client, data_tracker):
 
 
 @pytest.mark.critical
-def test_chatbooks_async_cancel(api_client):
-    # Start an async export (minimal content selections)
+def test_chatbooks_async_cancel(api_client, data_tracker):
+    note = api_client.create_note(
+        title="E2E Cancel Chatbook Note",
+        content="Deterministic content for the async cancellation test.",
+    )
+    note_id = str(note.get("id") or note.get("note_id") or "")
+    assert note_id, f"No note id returned: {note}"
+    if note_id.isdigit():
+        data_tracker.add_note(int(note_id))
+
+    # Start a bounded async export containing only the note created above.
     payload = {
         "name": "E2E Cancel Chatbook",
         "description": "Cancel flow",
-        "content_selections": {},
+        "content_selections": {"note": [note_id]},
         "async_mode": True,
     }
     r = api_client.client.post("/api/v1/chatbooks/export", json=payload)
