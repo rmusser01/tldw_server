@@ -2141,6 +2141,18 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
             if query == "PRAGMA table_info(claims_analytics_exports)":
                 return FakeCursor(rows=[(0, "export_id"), (1, "snapshot_at")])
             if query == (
+                "CREATE INDEX IF NOT EXISTS "
+                "idx_claims_analytics_exports_user_status_export_id "
+                "ON claims_analytics_exports(user_id, status, export_id);"
+            ):
+                return None
+            if query == (
+                "CREATE INDEX IF NOT EXISTS "
+                "idx_claims_analytics_exports_user_status_updated_export_id "
+                "ON claims_analytics_exports(user_id, status, updated_at, export_id);"
+            ):
+                return None
+            if query == (
                 "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered "
                 "ON claims_monitoring_events(delivered_at);"
             ):
@@ -2169,6 +2181,8 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
         "SELECT name FROM sqlite_master WHERE type='table' AND name='Claims'",
         "PRAGMA table_info(Claims)",
         "PRAGMA table_info(claims_analytics_exports)",
+        "CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_export_id ON claims_analytics_exports(user_id, status, export_id);",
+        "CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_updated_export_id ON claims_analytics_exports(user_id, status, updated_at, export_id);",
         "PRAGMA table_info(claims_monitoring_events)",
         "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered ON claims_monitoring_events(delivered_at);",
         "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id ON claims_monitoring_events(user_id, created_at, id);",
