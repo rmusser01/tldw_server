@@ -200,6 +200,7 @@ jobs:
       - name: Frontend coverage summary (report-only)
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         continue-on-error: true
+        timeout-minutes: 15
         working-directory: apps/tldw-frontend
         run: |
           set -o pipefail
