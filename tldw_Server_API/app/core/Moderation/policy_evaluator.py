@@ -9,8 +9,18 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from tldw_Server_API.app.core.Moderation.models import (
+    ModerationEvaluationResult as _ModerationEvaluationResult,
+)
+from tldw_Server_API.app.core.Moderation.models import (
+    ModerationPolicy as _ModerationPolicy,
+)
+from tldw_Server_API.app.core.Moderation.models import (
+    PatternRule as _PatternRule,
+)
+
 if TYPE_CHECKING:
-    from tldw_Server_API.app.core.Moderation.moderation_service import (
+    from tldw_Server_API.app.core.Moderation.models import (
         ModerationEvaluationResult,
         ModerationPolicy,
         PatternRule,
@@ -53,15 +63,9 @@ class PolicyEvaluator:
         type[PatternRule],
         type[ModerationEvaluationResult],
     ]:
-        """Load service-owned dataclasses lazily to avoid import cycles."""
+        """Return canonical policy dataclasses without loading the service."""
 
-        from tldw_Server_API.app.core.Moderation.moderation_service import (
-            ModerationEvaluationResult,
-            ModerationPolicy,
-            PatternRule,
-        )
-
-        return ModerationPolicy, PatternRule, ModerationEvaluationResult
+        return _ModerationPolicy, _PatternRule, _ModerationEvaluationResult
 
     @classmethod
     def effective_rule_categories(cls, rule: PatternRule) -> set[str]:

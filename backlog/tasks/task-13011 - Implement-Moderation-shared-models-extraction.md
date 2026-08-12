@@ -22,6 +22,7 @@ modified_files:
 - Docs/superpowers/specs/2026-08-01-moderation-shared-models-extraction-design.md
 - Docs/superpowers/plans/2026-08-01-moderation-shared-models-extraction-implementation-plan.md
 - backlog/tasks/task-13010 - Design-Moderation-shared-models-extraction.md
+- backlog/tasks/task-13011 - Implement-Moderation-shared-models-extraction.md
 - tldw_Server_API/app/core/Moderation/models.py
 - tldw_Server_API/app/core/Moderation/moderation_service.py
 - tldw_Server_API/app/core/Moderation/policy_compiler.py
@@ -29,6 +30,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_models_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_models_canonical.py
 - tldw_Server_API/tests/unit/test_moderation_models_imports.py
+updated_date: 2026-08-12 00:49
 ---
 
 ## Description
@@ -55,7 +57,7 @@ Follow Docs/superpowers/plans/2026-08-01-moderation-shared-models-extraction-imp
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Transplant: created codex/moderation-shared-models-dev directly from origin/dev@414e81a12aa71df97c4fad17df084aa7a78c474b and applied the nine reviewed post-predecessor commits without conflicts as one pending consolidated change. The original codex/moderation-shared-models-design@5d33b21ca4 remains untouched as a recovery reference. Reconciled predecessor references to merged TASK-12992 / PR #2770 and replaced colliding stale task IDs with TASK-13010 and TASK-13011. Current production scope is exactly models.py, moderation_service.py, policy_compiler.py, and policy_evaluator.py. Fresh current-dev verification and independent review remain pending; PR creation remains gated on the requester's own Change summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

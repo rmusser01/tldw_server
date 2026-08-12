@@ -7,8 +7,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tldw_Server_API.app.core.Moderation.models import (
+    ModerationPolicy as _ModerationPolicy,
+)
+from tldw_Server_API.app.core.Moderation.models import (
+    PatternRule as _PatternRule,
+)
+
 if TYPE_CHECKING:
-    from tldw_Server_API.app.core.Moderation.moderation_service import (
+    from tldw_Server_API.app.core.Moderation.models import (
         ModerationPolicy,
         PatternRule,
     )
@@ -92,14 +99,9 @@ class PolicyCompiler:
 
     @staticmethod
     def policy_types() -> tuple[type[ModerationPolicy], type[PatternRule]]:
-        """Load policy dataclasses lazily to avoid import cycles."""
+        """Return the canonical policy dataclasses without loading the service."""
 
-        from tldw_Server_API.app.core.Moderation.moderation_service import (
-            ModerationPolicy,
-            PatternRule,
-        )
-
-        return ModerationPolicy, PatternRule
+        return _ModerationPolicy, _PatternRule
 
     def compile_global(self, data: PolicyCompilationInput) -> PolicyCompilationResult:
         """Compile the global moderation policy from config and blocklist input."""
