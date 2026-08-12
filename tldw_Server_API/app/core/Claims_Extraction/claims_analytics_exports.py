@@ -24,6 +24,8 @@ DEFAULT_EXPORT_ORPHAN_GRACE_SEC = 300
 DEFAULT_EXPORT_RETENTION_HOURS = 24
 CLEANUP_ROTATION_SECONDS = 300
 EXPORT_SCAN_PAGE_SIZE = 1000
+EXPORT_SOURCE_EXPANSION_FACTOR = 6
+EXPORT_SOURCE_OVERHEAD_BYTES = 65_536
 EXPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 CSV_COLUMNS = ("id", "event_type", "severity", "created_at", "payload_json")
 
@@ -102,6 +104,10 @@ def _too_large_error() -> ClaimsAnalyticsExportError:
         code="claims_export_too_large",
         http_status=413,
     )
+
+
+def _filter_source_budget(max_bytes: int) -> int:
+    return max_bytes * EXPORT_SOURCE_EXPANSION_FACTOR + EXPORT_SOURCE_OVERHEAD_BYTES
 
 
 def _missing_artifact_error() -> ClaimsAnalyticsExportError:
@@ -377,6 +383,11 @@ def _decode_event(
 ) -> tuple[dict[str, Any], tuple[datetime, int], Any]:
     if not isinstance(row, Mapping):
         raise _serialization_error()
+    filter_payload_oversized = row.get("filter_payload_oversized", 0)
+    if filter_payload_oversized not in (0, 1, False, True):
+        raise _serialization_error()
+    if bool(filter_payload_oversized):
+        raise _too_large_error()
     event_id = row.get("id")
     if isinstance(event_id, bool) or not isinstance(event_id, int) or event_id <= 0:
         raise _serialization_error()
@@ -497,6 +508,7 @@ def _scan_events(
     scan_to_end: bool,
     remaining_bytes: Callable[[], int],
     emit: Callable[[dict[str, Any]], None],
+    max_filter_source_bytes: int,
 ) -> tuple[int, int]:
     selected_count = 0
     total = 0
@@ -517,6 +529,7 @@ def _scan_events(
             after_created_at=after_created_at,
             after_id=after_id,
             max_event_id=snapshot_event_id,
+            max_filter_source_bytes=max_filter_source_bytes,
             limit=EXPORT_SCAN_PAGE_SIZE,
         )
         if not isinstance(page, list) or len(page) > EXPORT_SCAN_PAGE_SIZE:
@@ -684,6 +697,7 @@ def render_export(
             scan_to_end=normalized["format"] == "json",
             remaining_bytes=lambda: builder.remaining_bytes,
             emit=emit,
+            max_filter_source_bytes=_filter_source_budget(max_bytes),
         )
         if normalized["format"] == "json":
             pagination_meta = {

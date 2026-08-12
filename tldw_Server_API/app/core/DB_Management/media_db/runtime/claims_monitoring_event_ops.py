@@ -29,6 +29,9 @@ def _bounded_source_budget(max_bytes: int) -> int:
     )
 
 
+_DEFAULT_FILTER_SOURCE_BYTES = _bounded_source_budget(10_485_760)
+
+
 def _lock_postgres_event_owner(
     self,
     *,
@@ -344,6 +347,7 @@ def list_claims_monitoring_events_page(
     after_created_at: Any = None,
     after_id: int | None = None,
     max_event_id: int | None = None,
+    max_filter_source_bytes: int = _DEFAULT_FILTER_SOURCE_BYTES,
     limit: int = 1000,
 ) -> list[dict[str, Any]]:
     if (after_created_at is None) != (after_id is None):
@@ -356,6 +360,9 @@ def list_claims_monitoring_events_page(
 
     conditions: list[str] = ["user_id = ?"]
     params: list[Any] = [str(user_id)]
+    select_params: list[Any] = []
+    payload_filter_conditions: list[str] = []
+    payload_filter_params: list[Any] = []
     if event_type is not None:
         conditions.append("event_type = ?")
         params.append(str(event_type))
@@ -364,30 +371,56 @@ def list_claims_monitoring_events_page(
         params.append(str(severity))
     if provider is not None:
         if self.backend_type == BackendType.POSTGRESQL:
-            conditions.append(
+            payload_filter_conditions.append(
                 "CASE WHEN json_typeof(tldw_claims_safe_json(payload_json) -> 'provider') = 'string' "
                 "THEN tldw_claims_safe_json(payload_json) ->> 'provider' END = ?"
             )
         else:
-            conditions.append(
+            payload_filter_conditions.append(
                 "CASE WHEN json_valid(payload_json) THEN "
                 "CASE WHEN json_type(payload_json, '$.provider') = 'text' "
                 "THEN json_extract(payload_json, '$.provider') END END = ?"
             )
-        params.append(str(provider))
+        payload_filter_params.append(str(provider))
     if model is not None:
         if self.backend_type == BackendType.POSTGRESQL:
-            conditions.append(
+            payload_filter_conditions.append(
                 "CASE WHEN json_typeof(tldw_claims_safe_json(payload_json) -> 'model') = 'string' "
                 "THEN tldw_claims_safe_json(payload_json) ->> 'model' END = ?"
             )
         else:
-            conditions.append(
+            payload_filter_conditions.append(
                 "CASE WHEN json_valid(payload_json) THEN "
                 "CASE WHEN json_type(payload_json, '$.model') = 'text' "
                 "THEN json_extract(payload_json, '$.model') END END = ?"
             )
-        params.append(str(model))
+        payload_filter_params.append(str(model))
+    select_columns = "id, user_id, created_at"
+    if payload_filter_conditions:
+        if (
+            isinstance(max_filter_source_bytes, bool)
+            or not isinstance(max_filter_source_bytes, int)
+            or max_filter_source_bytes <= 0
+        ):
+            raise ValueError("max_filter_source_bytes must be a positive integer")
+        raw_size_sql = _text_size_sql(
+            "payload_json",
+            postgresql=self.backend_type == BackendType.POSTGRESQL,
+        )
+        select_columns += (
+            ", CASE WHEN "
+            + raw_size_sql
+            + " > ? THEN 1 ELSE 0 END AS filter_payload_oversized"
+        )
+        select_params.append(max_filter_source_bytes)
+        conditions.append(
+            "CASE WHEN "
+            + raw_size_sql
+            + " > ? THEN 1 ELSE CASE WHEN "
+            + " AND ".join(payload_filter_conditions)
+            + " THEN 1 ELSE 0 END END = 1"
+        )
+        params.extend([max_filter_source_bytes, *payload_filter_params])
     if start_time:
         conditions.append("created_at >= ?")
         params.append(str(start_time))
@@ -404,13 +437,15 @@ def list_claims_monitoring_events_page(
         params.extend([after_created_at, after_created_at, int(after_id)])
 
     query = (
-        "SELECT id, user_id, created_at "  # nosec B608
+        "SELECT "  # nosec B608
+        + select_columns
+        + " "
         "FROM claims_monitoring_events WHERE "
         + " AND ".join(conditions)
         + " ORDER BY created_at ASC, id ASC LIMIT ?"
     )
     params.append(limit)
-    rows = self.execute_query(query, tuple(params)).fetchall()
+    rows = self.execute_query(query, tuple(select_params + params)).fetchall()
     return [dict(row) for row in rows]
 
 

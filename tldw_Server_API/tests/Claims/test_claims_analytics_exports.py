@@ -125,6 +125,7 @@ class FakeMonitoringDB:
         after_created_at: Any = None,
         after_id: int | None = None,
         max_event_id: int | None = None,
+        max_filter_source_bytes: int = DEFAULT_EXPORT_MAX_BYTES * 6 + 65_536,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         assert user_id == self.expected_owner
@@ -142,6 +143,7 @@ class FakeMonitoringDB:
                 "after_created_at": after_created_at,
                 "after_id": after_id,
                 "max_event_id": max_event_id,
+                "max_filter_source_bytes": max_filter_source_bytes,
                 "limit": limit,
             }
         )
@@ -151,7 +153,14 @@ class FakeMonitoringDB:
             rows = [row for row in rows if row.get("event_type") == event_type]
         if severity is not None:
             rows = [row for row in rows if row.get("severity") == severity]
-        rows = [row for row in rows if _row_payload_matches(row, provider=provider, model=model)]
+        if provider is not None or model is not None:
+            rows = [
+                row
+                for row in rows
+                if len(str(row.get("payload_json") or "").encode("utf-8"))
+                > max_filter_source_bytes
+                or _row_payload_matches(row, provider=provider, model=model)
+            ]
         if start_time is not None:
             start = _parse_time(start_time)
             rows = [row for row in rows if _parse_time(str(row["created_at"])) >= start]
@@ -165,7 +174,19 @@ class FakeMonitoringDB:
         if after_created_at is not None and after_id is not None:
             cursor = (_parse_time(str(after_created_at)), int(after_id))
             rows = [row for row in rows if (_parse_time(str(row["created_at"])), int(row["id"])) > cursor]
-        return [_metadata_row(row) for row in rows[:limit]]
+        return [
+            {
+                **_metadata_row(row),
+                **(
+                    {"filter_payload_oversized": 1}
+                    if (provider is not None or model is not None)
+                    and len(str(row.get("payload_json") or "").encode("utf-8"))
+                    > max_filter_source_bytes
+                    else {}
+                ),
+            }
+            for row in rows[:limit]
+        ]
 
     def get_claims_monitoring_event_payload_bounded(
         self,
@@ -231,6 +252,7 @@ class ScriptedPageDB:
         after_created_at: Any = None,
         after_id: int | None = None,
         max_event_id: int | None = None,
+        max_filter_source_bytes: int = DEFAULT_EXPORT_MAX_BYTES * 6 + 65_536,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         assert user_id == self.expected_owner
@@ -248,6 +270,7 @@ class ScriptedPageDB:
                 "after_created_at": after_created_at,
                 "after_id": after_id,
                 "max_event_id": max_event_id,
+                "max_filter_source_bytes": max_filter_source_bytes,
                 "limit": limit,
             }
         )
@@ -949,6 +972,24 @@ def test_render_applies_provider_and_model_in_database_scan_and_counts_all_match
     assert db.calls[0]["model"] == "model-a"
     assert db.calls[0]["event_type"] is None
     assert db.calls[0]["severity"] is None
+
+
+def test_render_rejects_oversized_payload_needed_for_provider_filter() -> None:
+    row = _event(
+        1,
+        payload={"provider": "local"},
+        filter_payload_oversized=1,
+    )
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        _render(
+            ScriptedPageDB([[row]]),
+            _normalized(filters={"provider": "local"}),
+            max_bytes=1024,
+        )
+
+    assert exc_info.value.code == "claims_export_too_large"
+    assert exc_info.value.http_status == 413
 
 
 def test_render_passes_database_filters_and_snapshot_cutoff_on_every_page() -> None:

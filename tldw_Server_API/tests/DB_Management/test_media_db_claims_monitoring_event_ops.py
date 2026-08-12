@@ -663,6 +663,71 @@ def test_claims_monitoring_event_export_page_omits_unbounded_text_metadata(
         db.close_connection()
 
 
+def test_claims_monitoring_event_filter_flags_payload_above_source_budget(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-filter-source-bound.db")
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            payload_json=" " * 80_000 + '{"provider":"local"}',
+        )
+
+        rows = db.list_claims_monitoring_events_page(
+            user_id="1",
+            provider="local",
+            max_filter_source_bytes=1024,
+            limit=1,
+        )
+
+        assert rows == [
+            {
+                "id": event["id"],
+                "user_id": "1",
+                "created_at": event["created_at"],
+                "filter_payload_oversized": 1,
+            }
+        ]
+    finally:
+        db.close_connection()
+
+
+def test_postgres_claims_monitoring_event_filter_checks_size_before_json_parse() -> None:
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Cursor:
+        def fetchall(self) -> list[dict[str, object]]:
+            return []
+
+    class _FakePostgresDB:
+        backend_type = BackendType.POSTGRESQL
+
+        def execute_query(
+            self,
+            sql: str,
+            params: tuple[object, ...],
+        ) -> _Cursor:
+            calls.append((sql, params))
+            return _Cursor()
+
+    assert claims_monitoring_event_ops.list_claims_monitoring_events_page(
+        _FakePostgresDB(),
+        user_id="1",
+        provider="local",
+        model="model-a",
+        max_filter_source_bytes=4096,
+        limit=10,
+    ) == []
+
+    sql, params = calls[0]
+    assert (
+        "CASE WHEN octet_length(COALESCE(payload_json, '')) > ? THEN 1 "
+        "ELSE CASE WHEN CASE WHEN json_typeof"
+    ) in sql
+    assert params == (4096, "1", 4096, "local", "model-a", 10)
+
+
 def test_claims_monitoring_event_export_data_bounds_metadata_with_payload(
     tmp_path: Path,
 ) -> None:
