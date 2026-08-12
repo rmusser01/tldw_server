@@ -41,6 +41,8 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
+pytestmark = pytest.mark.unit
+
 
 def _clock() -> str:
     return "2026-05-23T18:12:00+00:00"
@@ -693,6 +695,7 @@ def test_device_acknowledgment_endpoint_sanitizes_blob_id_ack_errors(
         ("sync_pull_token_invalid", 400),
         ("sync_pull_token_too_large", 413),
         ("sync_pull_restart_required", 409),
+        ("sync_device_adapter_version_not_supported", 400),
     ],
 )
 def test_pull_endpoint_maps_versioned_token_errors(

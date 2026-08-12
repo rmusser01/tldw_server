@@ -6,6 +6,7 @@ import re
 import unicodedata
 from pathlib import Path
 
+from tldw_Server_API.app.core.exceptions import NoteAttachmentPolicyError
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 
 NOTE_ATTACHMENT_MAX_FILENAME_LEN = 180
@@ -44,10 +45,6 @@ NOTE_ATTACHMENT_ALLOWED_EXTENSIONS = frozenset(
     }
 )
 _MEDIA_TYPE_RE = re.compile(r"[a-z0-9!#$%&'*+.^_`|~-]+/[a-z0-9!#$%&'*+.^_`|~-]+\Z")
-
-
-class NoteAttachmentPolicyError(ValueError):
-    """Raised when attachment metadata is outside the canonical Notes policy."""
 
 
 def canonicalize_note_attachment_file_name(raw_name: object) -> tuple[str, str]:
@@ -154,7 +151,6 @@ def validate_note_attachment_content_type(value: object) -> str:
 __all__ = [
     "NOTE_ATTACHMENT_ALLOWED_EXTENSIONS",
     "NOTE_ATTACHMENT_MAX_FILENAME_LEN",
-    "NoteAttachmentPolicyError",
     "canonicalize_note_attachment_file_name",
     "sanitize_note_attachment_file_name",
     "validate_note_attachment_content_type",

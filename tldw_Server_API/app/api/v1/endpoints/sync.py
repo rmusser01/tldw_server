@@ -187,7 +187,7 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
-        pull_token_errors = {
+        pull_errors = {
             "sync_pull_token_invalid": (
                 status.HTTP_400_BAD_REQUEST,
                 "The Sync pull token is invalid.",
@@ -200,8 +200,12 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 status.HTTP_409_CONFLICT,
                 "Sync negotiation changed; restart the pull from a stable cursor.",
             ),
+            "sync_device_adapter_version_not_supported": (
+                status.HTTP_400_BAD_REQUEST,
+                "The device and server have no mutually supported adapter version.",
+            ),
         }
-        for error_code, (status_code, message) in pull_token_errors.items():
+        for error_code, (status_code, message) in pull_errors.items():
             if error_code in lowered:
                 return HTTPException(
                     status_code=status_code,
@@ -582,7 +586,7 @@ def get_sync_v2_capabilities(
     dataset_id: str | None = Query(None),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> SyncCapabilitiesResponse:
     user_id = _sync_user_id(user)
     try:
         capabilities = service.capabilities(

@@ -55,6 +55,10 @@ class NotesLinkValidationError(ValueError):
     error_code = "notes_link_payload_invalid"
 
 
+class NoteAttachmentPolicyError(ValueError):
+    """Raised when attachment metadata is outside the canonical Notes policy."""
+
+
 class PromptImprovementDispatchError(RuntimeError):
     """Sanitized infrastructure failure for endpoint error mapping."""
 

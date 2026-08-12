@@ -19,8 +19,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.exceptions import NoteAttachmentPolicyError
 from tldw_Server_API.app.core.Notes.attachment_policy import (
-    NoteAttachmentPolicyError,
     canonicalize_note_attachment_file_name,
     validate_note_attachment_content_type,
     validate_note_attachment_original_file_name,

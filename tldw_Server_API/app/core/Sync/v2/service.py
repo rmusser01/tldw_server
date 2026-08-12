@@ -169,6 +169,8 @@ def _sha256_bytes(payload: bytes) -> str:
 
 
 def _decode_pull_token_segment(segment: str) -> bytes:
+    """Decode one unpadded URL-safe base64 pull-token segment."""
+
     padding = "=" * (-len(segment) % 4)
     return base64.b64decode(
         (segment + padding).encode("ascii"),

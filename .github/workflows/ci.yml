@@ -982,6 +982,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
