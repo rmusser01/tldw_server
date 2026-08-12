@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -21,8 +24,29 @@ class ExtractionDependencies:
     cancellation_checkpoint: Callable[[], None]
 
 
+_CANCELLATION_CHECKPOINT_OVERRIDE: ContextVar[Callable[[], None] | None] = ContextVar(
+    "web_scraping_extraction_cancellation_checkpoint",
+    default=None,
+)
+
+
+@contextmanager
+def cancellation_checkpoint_scope(checkpoint: Callable[[], None]) -> Iterator[None]:
+    """Install a checkpoint that propagates into worker-thread context."""
+
+    token = _CANCELLATION_CHECKPOINT_OVERRIDE.set(checkpoint)
+    try:
+        yield
+    finally:
+        _CANCELLATION_CHECKPOINT_OVERRIDE.reset(token)
+
+
 def _cancellation_checkpoint() -> None:
-    """Provide a no-op cooperative cancellation seam until strategies move."""
+    """Run the active cooperative checkpoint for this execution context."""
+
+    checkpoint = _CANCELLATION_CHECKPOINT_OVERRIDE.get()
+    if checkpoint is not None:
+        checkpoint()
 
 
 def build_default_dependencies() -> ExtractionDependencies:

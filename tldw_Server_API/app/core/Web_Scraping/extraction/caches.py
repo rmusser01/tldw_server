@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from ..selectors import clear_selector_caches, get_selector_cache_stats
 from .metrics import emit_callback_counter
-from .throttles import clear_throttle_state, get_throttle_stats
+from .throttles import get_throttle_stats
 
 _CLUSTER_EMBED_CACHE_MAX = 512
 _SCHEMA_RESULT_CACHE_MAX = 128
@@ -42,7 +42,7 @@ def _schema_cache_get(key: str) -> dict[str, Any] | None:
         if value is None:
             return None
         _SCHEMA_RESULT_CACHE.move_to_end(key)
-        return deepcopy(value)
+    return deepcopy(value)
 
 
 def _is_schema_result_cacheable(value: dict[str, Any]) -> bool:
@@ -58,8 +58,9 @@ def _is_schema_result_cacheable(value: dict[str, Any]) -> bool:
 def _schema_cache_put(key: str, value: dict[str, Any]) -> None:
     if not _is_schema_result_cacheable(value):
         return
+    stored = deepcopy(value)
     with _SCHEMA_CACHE_LOCK:
-        _SCHEMA_RESULT_CACHE[key] = deepcopy(value)
+        _SCHEMA_RESULT_CACHE[key] = stored
         _SCHEMA_RESULT_CACHE.move_to_end(key)
         while len(_SCHEMA_RESULT_CACHE) > _SCHEMA_RESULT_CACHE_MAX:
             _SCHEMA_RESULT_CACHE.popitem(last=False)
@@ -70,23 +71,19 @@ def _cluster_cache_get(
     *,
     increment_counter: Callable[..., None] | None = None,
 ) -> list[float] | None:
+    result: list[float] | None
     with _CLUSTER_CACHE_LOCK:
         value = _CLUSTER_EMBED_CACHE.get(key)
         if value is None:
-            if increment_counter is not None:
-                emit_callback_counter(
-                    increment_counter,
-                    "extraction_cluster_cache_total",
-                    labels={"cache": "embedding", "result": "miss"},
-                )
-            return None
-        _CLUSTER_EMBED_CACHE.move_to_end(key)
-        result = list(value)
+            result = None
+        else:
+            _CLUSTER_EMBED_CACHE.move_to_end(key)
+            result = list(value)
     if increment_counter is not None:
         emit_callback_counter(
             increment_counter,
             "extraction_cluster_cache_total",
-            labels={"cache": "embedding", "result": "hit"},
+            labels={"cache": "embedding", "result": "hit" if result is not None else "miss"},
         )
     return result
 
@@ -117,11 +114,12 @@ def get_extraction_cache_stats() -> dict[str, int]:
 
 
 def clear_extraction_caches() -> None:
+    """Clear extraction data caches without replacing live throttle objects."""
+
     with _CLUSTER_CACHE_LOCK:
         _CLUSTER_EMBED_CACHE.clear()
     with _SCHEMA_CACHE_LOCK:
         _SCHEMA_RESULT_CACHE.clear()
-    clear_throttle_state()
     try:
         clear_selector_caches()
     except _SELECTOR_CACHE_NONCRITICAL_EXCEPTIONS:

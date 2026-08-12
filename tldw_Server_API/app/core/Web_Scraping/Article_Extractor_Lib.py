@@ -77,6 +77,7 @@ from tldw_Server_API.app.core.Web_Scraping.extraction import (  # noqa: F401
 from tldw_Server_API.app.core.Web_Scraping.extraction import (
     get_extraction_cache_stats as _get_extraction_cache_stats,
 )
+from tldw_Server_API.app.core.Web_Scraping.extraction_async import run_extraction_in_thread
 from tldw_Server_API.app.core.Web_Scraping.filters import (
     ContentTypeFilter,
     FilterChain,
@@ -107,7 +108,6 @@ from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
 )
 
 _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -623,7 +623,8 @@ async def scrape_article(
                 if _js_required(text, _resp_get(resp, "headers", {}), url=url):
                     increment_counter("scrape_playwright_fallback_total", labels={"reason": "js_required"})
                     raise RuntimeError("js_required_detected")
-                article_data = extract_article_with_pipeline(
+                article_data = await run_extraction_in_thread(
+                    extract_article_with_pipeline,
                     text,
                     url,
                     strategy_order=strategy_order,
@@ -754,7 +755,8 @@ async def scrape_article(
         return ""
 
     html = await fetch_html(url)
-    article_data = extract_article_with_pipeline(
+    article_data = await run_extraction_in_thread(
+        extract_article_with_pipeline,
         html,
         url,
         strategy_order=strategy_order,
@@ -1830,7 +1832,8 @@ async def scrape_article_async(
         title = await page.title()
         content = await page.content()
 
-        article_data = extract_article_with_pipeline(
+        article_data = await run_extraction_in_thread(
+            extract_article_with_pipeline,
             content,
             url,
             allow_llm_extraction=allow_llm_extraction,

@@ -599,9 +599,12 @@ async def test_probe_guard_logs_only_approved_low_cardinality_context_labels(
     ],
 )
 def test_probe_log_host_is_canonical_or_unknown(url: str, expected: str) -> None:
-    from tldw_Server_API.app.core.Web_Scraping.observability import sanitized_host
+    from tldw_Server_API.app.core.Web_Scraping import observability
 
-    label = sanitized_host(url)
+    probe_module = _probe_implementation_module()
+    assert probe_module.sanitized_host is observability.sanitized_host
+
+    label = probe_module.sanitized_host(url)
 
     assert label == expected
     if expected == "unknown":

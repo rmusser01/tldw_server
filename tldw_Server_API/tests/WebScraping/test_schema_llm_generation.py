@@ -56,3 +56,26 @@ def test_generate_schema_rules_from_llm_parses_schema(monkeypatch):
     assert schema.get("baseSelector") == "//article"
     assert schema.get("fields", [])[0].get("name") == "title"
     assert result.get("schema_validation", {}).get("errors") == []
+
+
+def test_generate_schema_rules_uses_unknown_for_missing_response_model(monkeypatch):
+    def _fake_call(**_kwargs):
+        return {
+            "choices": [{"message": {"content": '{"schema": {"fields": []}}'}}],
+            "usage": {},
+        }
+
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=_fake_call,
+    )
+    monkeypatch.setattr(schema_strategy, "build_default_dependencies", lambda: dependencies)
+
+    result = ael.generate_schema_rules_from_llm(
+        "<html><body>Body</body></html>",
+        "https://example.com",
+        llm_settings={"provider": "openai"},
+    )
+
+    assert result["success"] is True
+    assert result["llm_model"] == "unknown"

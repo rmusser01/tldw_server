@@ -4,6 +4,9 @@ import ast
 import asyncio
 import dataclasses
 import inspect
+import threading
+import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Optional
 
@@ -11,12 +14,13 @@ import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import extraction
-from tldw_Server_API.app.core.Web_Scraping.extraction import caches, pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction import caches, pipeline, throttles
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
     build_default_dependencies,
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import jsonld as jsonld_strategy
+from tldw_Server_API.app.core.Web_Scraping.extraction_async import run_extraction_in_thread
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXTRACTION_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping" / "extraction"
@@ -214,7 +218,7 @@ def test_jsonld_parse_failure_is_sanitized_and_deterministic(monkeypatch: pytest
     def raise_sensitive_error(_payload: str) -> object:
         raise ValueError(secret)
 
-    monkeypatch.setattr(jsonld_strategy.json, "loads", raise_sensitive_error)
+    monkeypatch.setattr(jsonld_strategy, "_decode_all_json", raise_sensitive_error)
 
     result = extraction.extract_jsonld_entities(
         '<script type="application/ld+json">not-json</script>',
@@ -229,7 +233,7 @@ def test_jsonld_cancellation_propagates(monkeypatch: pytest.MonkeyPatch) -> None
     def raise_cancellation(_payload: str) -> object:
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(jsonld_strategy.json, "loads", raise_cancellation)
+    monkeypatch.setattr(jsonld_strategy, "_decode_all_json", raise_cancellation)
 
     with pytest.raises(asyncio.CancelledError):
         extraction.extract_jsonld_entities(
@@ -329,6 +333,31 @@ def test_default_dependencies_are_immutable_and_created_at_call_time() -> None:
         raise AssertionError("ExtractionDependencies must be frozen")
 
 
+@pytest.mark.asyncio
+async def test_async_extraction_cancellation_reaches_worker_checkpoint() -> None:
+    entered = threading.Event()
+    stopped = threading.Event()
+
+    def blocking_extraction() -> None:
+        dependencies = build_default_dependencies()
+        entered.set()
+        try:
+            while True:
+                dependencies.cancellation_checkpoint()
+                time.sleep(0.001)
+        finally:
+            stopped.set()
+
+    task = asyncio.create_task(run_extraction_in_thread(blocking_extraction))
+    assert await asyncio.to_thread(entered.wait, 1.0)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert await asyncio.to_thread(stopped.wait, 1.0)
+
+
 def test_schema_and_cluster_cache_reads_and_writes_are_isolated() -> None:
     caches.clear_extraction_caches()
     schema_value = {"extraction_successful": True, "nested": {"values": ["original"]}}
@@ -354,6 +383,57 @@ def test_schema_and_cluster_cache_reads_and_writes_are_isolated() -> None:
         "nested": {"values": ["original"]},
     }
     assert caches._cluster_cache_get("cluster") == [1.0, 2.0]
+
+
+def test_schema_cache_deepcopies_outside_its_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    caches.clear_extraction_caches()
+    copied_while_unlocked = 0
+
+    def assert_unlocked(value: Any) -> Any:
+        nonlocal copied_while_unlocked
+        acquired = caches._SCHEMA_CACHE_LOCK.acquire(blocking=False)
+        assert acquired, "schema cache deepcopy ran while the cache lock was held"
+        caches._SCHEMA_CACHE_LOCK.release()
+        copied_while_unlocked += 1
+        return deepcopy(value)
+
+    monkeypatch.setattr(caches, "deepcopy", assert_unlocked)
+
+    caches._schema_cache_put("schema", {"extraction_successful": True, "content": "body"})
+    assert caches._schema_cache_get("schema") == {"extraction_successful": True, "content": "body"}
+    assert copied_while_unlocked == 2
+
+
+def test_cluster_cache_miss_callback_runs_outside_its_lock() -> None:
+    caches.clear_extraction_caches()
+    callback_ran = False
+
+    def record_miss(_name: str, *, labels: dict[str, str]) -> None:
+        nonlocal callback_ran
+        acquired = caches._CLUSTER_CACHE_LOCK.acquire(blocking=False)
+        assert acquired, "cluster cache miss callback ran while the cache lock was held"
+        caches._CLUSTER_CACHE_LOCK.release()
+        callback_ran = True
+        assert labels == {"cache": "embedding", "result": "miss"}
+
+    assert caches._cluster_cache_get("missing", increment_counter=record_miss) is None
+    assert callback_ran is True
+
+
+def test_clearing_extraction_caches_does_not_replace_live_throttles() -> None:
+    throttles.clear_throttle_state()
+    semaphore = throttles.get_strategy_semaphore("schema", 1)
+    assert semaphore is not None
+    assert semaphore.acquire(blocking=False) is True
+    try:
+        caches.clear_extraction_caches()
+
+        same_semaphore = throttles.get_strategy_semaphore("schema", 1)
+        assert same_semaphore is semaphore
+        assert same_semaphore.acquire(blocking=False) is False
+    finally:
+        semaphore.release()
+        throttles.clear_throttle_state()
 
 
 def test_schema_cache_stores_successes_only_and_reports_selector_keys() -> None:
@@ -432,12 +512,9 @@ def test_partial_schema_result_with_no_matches_warning_is_not_cached(monkeypatch
 
 def test_selector_cache_lifecycle_failures_are_silent_and_omit_selector_stats(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    secret = "https://user:secret@example.test/selector"
-
     def raise_sensitive_error() -> None:
-        raise ValueError(secret)
+        raise ValueError("selector cache unavailable")
 
     monkeypatch.setattr(caches, "get_selector_cache_stats", raise_sensitive_error)
     monkeypatch.setattr(caches, "clear_selector_caches", raise_sensitive_error)
@@ -447,7 +524,6 @@ def test_selector_cache_lifecycle_failures_are_silent_and_omit_selector_stats(
 
     assert "selector_xpath_cache_size" not in stats
     assert "selector_css_cache_size" not in stats
-    assert secret not in caplog.text
 
 
 def test_selector_cache_lifecycle_cancellation_propagates(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,6 +9,8 @@ from numbers import Real
 from types import MappingProxyType
 from typing import Any
 
+from loguru import logger
+
 LLM_PROVIDER_LABEL_VALUES = frozenset(
     {
         "openai",
@@ -82,10 +84,28 @@ _METRICS_REQUIRING_VALUE = frozenset(
 
 
 @contextmanager
-def _isolated_metric_emission() -> Iterator[None]:
+def _isolated_metric_emission(
+    name: str,
+    labels: Mapping[str, str] | None,
+) -> Iterator[None]:
     try:
         yield
-    except Exception:  # noqa: BLE001 - observability must not replace extraction behavior
+    except Exception as exc:  # noqa: BLE001 - observability must not replace extraction behavior
+        expected_labels = METRIC_LABEL_CONTRACT.get(name) if isinstance(name, str) else None
+        safe_name = name if expected_labels is not None else "unknown"
+        safe_label_keys = (
+            sorted(set(labels) & set(expected_labels))
+            if isinstance(labels, Mapping) and expected_labels is not None
+            else []
+        )
+        try:
+            logger.bind(
+                metric=safe_name,
+                label_keys=safe_label_keys,
+                exception_class=type(exc).__name__,
+            ).debug("Extraction metric emission failed")
+        except Exception:  # noqa: BLE001 - diagnostics cannot replace extraction behavior
+            return
         return
 
 
@@ -121,7 +141,7 @@ def emit_counter(
     value: Real | None = None,
 ) -> None:
     """Validate and best-effort forward a counter through the injected sink."""
-    with _isolated_metric_emission():
+    with _isolated_metric_emission(name, labels):
         validate_metric(name, labels=labels, value=value)
         if value is None:
             dependencies.increment_counter(name, labels=dict(labels))
@@ -137,7 +157,7 @@ def emit_histogram(
     labels: Mapping[str, str],
 ) -> None:
     """Validate and best-effort forward a histogram through the injected sink."""
-    with _isolated_metric_emission():
+    with _isolated_metric_emission(name, labels):
         validate_metric(name, labels=labels, value=value)
         dependencies.observe_histogram(name, value, labels=dict(labels))
 
@@ -150,7 +170,7 @@ def emit_log_counter(
     value: Real | None = None,
 ) -> None:
     """Validate and best-effort forward the legacy log-backed counter."""
-    with _isolated_metric_emission():
+    with _isolated_metric_emission(name, labels):
         validate_metric(name, labels=labels, value=value)
         if value is None:
             dependencies.log_counter(name, labels=dict(labels))
@@ -165,7 +185,7 @@ def emit_callback_counter(
     labels: Mapping[str, str],
 ) -> None:
     """Validate and best-effort invoke a caller-owned counter callback."""
-    with _isolated_metric_emission():
+    with _isolated_metric_emission(name, labels):
         validate_metric(name, labels=labels)
         counter(name, labels=dict(labels))
 
@@ -177,7 +197,7 @@ def emit_global_counter(
     value: Real | None = None,
 ) -> None:
     """Validate and best-effort emit through the legacy global counter sink."""
-    with _isolated_metric_emission():
+    with _isolated_metric_emission(name, labels):
         validate_metric(name, labels=labels, value=value)
         from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 

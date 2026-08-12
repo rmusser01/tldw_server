@@ -77,7 +77,6 @@ def test_regex_pii_mask_flag_accepts_y(monkeypatch):
     assert email["value"] == "d***o@example.com"
 
 
-def test_clear_caches_flag_accepts_y_end_only(monkeypatch):
+def test_clear_caches_flag_does_not_restore_per_request_global_resets(monkeypatch):
     monkeypatch.setenv("EXTRACTOR_CLEAR_CACHES", "y")
-    assert pipeline._should_clear_caches("start") is False
-    assert pipeline._should_clear_caches("end") is True
+    assert not hasattr(pipeline, "_should_clear_caches")

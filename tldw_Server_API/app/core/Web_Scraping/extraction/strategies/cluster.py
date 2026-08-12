@@ -8,18 +8,18 @@ from typing import Any, Callable, Optional
 
 from bs4 import BeautifulSoup
 
+from ...cluster_settings import (
+    CLUSTER_LINKAGES,
+    CLUSTER_MAX_BLOCKS,
+    has_valid_hierarchical_linkage,
+    normalize_cluster_settings,
+)
 from ..caches import _cluster_cache_get, _cluster_cache_put
 from ..dependencies import ExtractionDependencies, build_default_dependencies
 from ..metrics import emit_counter
 
-_CLUSTER_EMBED_DIM = 128
-_CLUSTER_PREFILTER_THRESHOLD = 0.2
-_CLUSTER_SIM_THRESHOLD = 0.4
-_CLUSTER_MIN_BLOCK_CHARS = 40
-_CLUSTER_MIN_WORDS = 8
-_CLUSTER_MAX_BLOCKS = 60
-_CLUSTER_LINKAGE = "average"
-_CLUSTER_TAG_TOP_K = 3
+_CLUSTER_LINKAGES = CLUSTER_LINKAGES
+_CLUSTER_MAX_BLOCKS = CLUSTER_MAX_BLOCKS
 _DEFAULT_CLUSTER_TAG_KEYWORDS: dict[str, list[str]] = {
     "marketing": ["subscribe", "newsletter", "promotion", "marketing"],
     "commerce": ["price", "pricing", "cost", "$"],
@@ -116,10 +116,11 @@ def _cluster_embedding(
     *,
     increment_counter: Callable[..., None] | None = None,
 ) -> list[float]:
-    key = hashlib.sha1(
+    text_hash = hashlib.sha1(
         text.encode("utf-8", errors="ignore"),
         usedforsecurity=False,
     ).hexdigest()
+    key = f"{dims}:{text_hash}"
     cached = _cluster_cache_get(key, increment_counter=increment_counter)
     if cached is not None:
         return list(cached)
@@ -198,21 +199,26 @@ def _cluster_assignments_hierarchical(
             distance = max(0.0, 1.0 - similarity)
             distances[index][other_index] = distance
             distances[other_index][index] = distance
+    if linkage not in _CLUSTER_LINKAGES:
+        return None
     try:
-        clusterer = AgglomerativeClustering(
-            n_clusters=None,
-            metric="precomputed",
-            linkage=linkage,
-            distance_threshold=distance_threshold,
-        )
-    except TypeError:
-        clusterer = AgglomerativeClustering(
-            n_clusters=None,
-            affinity="precomputed",
-            linkage=linkage,
-            distance_threshold=distance_threshold,
-        )
-    labels = clusterer.fit_predict(distances)
+        try:
+            clusterer = AgglomerativeClustering(
+                n_clusters=None,
+                metric="precomputed",
+                linkage=linkage,
+                distance_threshold=distance_threshold,
+            )
+        except TypeError:
+            clusterer = AgglomerativeClustering(
+                n_clusters=None,
+                affinity="precomputed",
+                linkage=linkage,
+                distance_threshold=distance_threshold,
+            )
+        labels = clusterer.fit_predict(distances)
+    except _METRIC_NONCRITICAL_EXCEPTIONS:
+        return None
     return [int(label) for label in labels]
 
 
@@ -317,36 +323,29 @@ def _extract_cluster_entities_with_dependencies(
         result["cluster_error"] = "cluster_empty_html"
         return result
 
-    settings = dict(cluster_settings or {})
+    raw_settings = dict(cluster_settings or {})
     env_similarity = _env_float("SIM_THRESHOLD")
     env_min_words = _env_int("WORD_COUNT_THRESHOLD")
     env_linkage = os.getenv("CLUSTER_LINKAGE", "").strip().lower()
-    min_block_chars = int(settings.get("min_block_chars", _CLUSTER_MIN_BLOCK_CHARS))
-    min_word_count = int(
-        settings.get("min_word_count")
-        or settings.get("min_words")
-        or settings.get("word_count_threshold")
-        or (env_min_words if env_min_words is not None else _CLUSTER_MIN_WORDS)
+    valid_hierarchical_linkage = has_valid_hierarchical_linkage(
+        raw_settings,
+        env_linkage=env_linkage,
     )
-    max_blocks = int(settings.get("max_blocks", _CLUSTER_MAX_BLOCKS))
-    prefilter_threshold = float(settings.get("prefilter_threshold", _CLUSTER_PREFILTER_THRESHOLD))
-    cluster_threshold = float(
-        settings.get("cluster_threshold")
-        or settings.get("similarity_threshold")
-        or (env_similarity if env_similarity is not None else _CLUSTER_SIM_THRESHOLD)
+    settings = normalize_cluster_settings(
+        raw_settings,
+        env_similarity=env_similarity,
+        env_min_words=env_min_words,
+        env_linkage=env_linkage,
     )
-    embed_dims = int(settings.get("embed_dims", _CLUSTER_EMBED_DIM))
-    method = str(settings.get("method") or settings.get("cluster_method") or "greedy").strip().lower()
-    linkage = (
-        str(
-            settings.get("linkage")
-            or settings.get("cluster_linkage")
-            or (env_linkage if env_linkage else _CLUSTER_LINKAGE)
-        )
-        .strip()
-        .lower()
-    )
-    tag_top_k = int(settings.get("tag_top_k", _CLUSTER_TAG_TOP_K))
+    min_block_chars = settings["min_block_chars"]
+    min_word_count = settings["min_word_count"]
+    max_blocks = settings["max_blocks"]
+    prefilter_threshold = settings["prefilter_threshold"]
+    cluster_threshold = settings["cluster_threshold"]
+    embed_dims = settings["embed_dims"]
+    method = settings["method"]
+    linkage = settings["linkage"]
+    tag_top_k = settings["tag_top_k"]
     tag_keywords = settings.get("tag_keywords") or _DEFAULT_CLUSTER_TAG_KEYWORDS
     if not isinstance(tag_keywords, dict):
         tag_keywords = _DEFAULT_CLUSTER_TAG_KEYWORDS
@@ -388,10 +387,14 @@ def _extract_cluster_entities_with_dependencies(
     clusters: list[dict[str, Any]] = []
     cluster_method = method
     if method == "hierarchical":
-        assignments = _cluster_assignments_hierarchical(
-            [item[2] for item in kept],
-            similarity_threshold=cluster_threshold,
-            linkage=linkage,
+        assignments = (
+            _cluster_assignments_hierarchical(
+                [item[2] for item in kept],
+                similarity_threshold=cluster_threshold,
+                linkage=linkage,
+            )
+            if valid_hierarchical_linkage
+            else None
         )
         dependencies.cancellation_checkpoint()
         if assignments and len(assignments) == len(kept):
@@ -431,7 +434,7 @@ def _extract_cluster_entities_with_dependencies(
     result["cluster_total_blocks"] = len(blocks)
     result["cluster_cluster_count"] = len(clusters)
     result["cluster_method"] = cluster_method
-    if method == "hierarchical":
+    if method == "hierarchical" and valid_hierarchical_linkage:
         result["cluster_linkage"] = linkage
     result["cluster_similarity_threshold"] = cluster_threshold
     result["cluster_word_threshold"] = min_word_count

@@ -762,7 +762,7 @@ def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label()
 
     actual = deepcopy(expected)
     actual["metrics"][1]["labels"]["strategy"] = "unknown"
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=r"\$\.metrics\[1\]\.labels\.strategy"):
         assert_predecessor_behavior(
             actual,
             expected,
@@ -773,7 +773,7 @@ def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label()
     actual = deepcopy(expected)
     actual["metrics"][0]["name"] = "extraction_retry_total"
     actual["metrics"][0]["labels"]["strategy"] = "unknown"
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=r"\$\.metrics\[0\]\.name"):
         assert_predecessor_behavior(
             actual,
             expected,
@@ -784,7 +784,7 @@ def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label()
     actual = deepcopy(expected)
     actual["metrics"][0]["labels"]["status"] = "failed"
     actual["metrics"][0]["labels"]["strategy"] = "unknown"
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=r"\$\.metrics\[0\]\.labels\.status"):
         assert_predecessor_behavior(
             actual,
             expected,
@@ -795,7 +795,7 @@ def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label()
     actual = deepcopy(expected)
     actual["metrics"][0]["labels"]["strategy"] = "unknown"
     actual["result"]["extraction_trace"][0]["strategy"] = "unknown"
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=r"\$\.result\.extraction_trace\[0\]\.strategy"):
         assert_predecessor_behavior(
             actual,
             expected,

@@ -2,35 +2,30 @@
 
 from __future__ import annotations
 
-import dataclasses
-from typing import Any, Callable
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline, throttles
-from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
 
 
-def _install_dependencies(
+@pytest.fixture(autouse=True)
+def _isolate_throttle_state() -> Iterator[None]:
+    """Keep process-global throttle state isolated between tests."""
+
+    throttles.clear_throttle_state()
+    try:
+        yield
+    finally:
+        throttles.clear_throttle_state()
+
+
+def test_llm_throttling_applies_delay(
     monkeypatch: pytest.MonkeyPatch,
-    provider: Callable[..., Any],
-    *,
-    sleep: Callable[[float], None],
-    wall_time: Callable[[], float],
+    install_extraction_dependencies,
 ) -> None:
-    """Install deterministic LLM dependencies for a pipeline test."""
-
-    dependencies = dataclasses.replace(
-        build_default_dependencies(),
-        perform_chat_api_call=provider,
-        sleep=sleep,
-        wall_time=wall_time,
-    )
-    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
-
-
-def test_llm_throttling_applies_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_DELAY_MS", "50")
     monkeypatch.setenv("LLM_MAX_CONCURRENCY", "1")
 
@@ -43,9 +38,7 @@ def test_llm_throttling_applies_delay(monkeypatch: pytest.MonkeyPatch) -> None:
             "model": "gpt-test",
         }
 
-    throttles.clear_throttle_state()
-    _install_dependencies(
-        monkeypatch,
+    install_extraction_dependencies(
         _fake_call,
         sleep=sleeps.append,
         wall_time=lambda: 1000.0,
@@ -65,10 +58,13 @@ def test_llm_throttling_applies_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert result["extraction_successful"] is True
-    assert any(value >= 0.05 for value in sleeps)
+    assert any(value == pytest.approx(0.05) for value in sleeps)
 
 
-def test_llm_throttling_uses_env_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_llm_throttling_uses_env_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+    install_extraction_dependencies,
+) -> None:
     monkeypatch.setenv("LLM_MAX_CONCURRENCY", "3")
     monkeypatch.setenv("LLM_DELAY_MS", "0")
 
@@ -97,9 +93,7 @@ def test_llm_throttling_uses_env_concurrency(monkeypatch: pytest.MonkeyPatch) ->
             "model": "gpt-test",
         }
 
-    throttles.clear_throttle_state()
-    _install_dependencies(
-        monkeypatch,
+    install_extraction_dependencies(
         _fake_call,
         sleep=lambda _value: None,
         wall_time=lambda: 1000.0,
@@ -122,3 +116,38 @@ def test_llm_throttling_uses_env_concurrency(monkeypatch: pytest.MonkeyPatch) ->
     assert calls["max"] == 3
     assert calls["acquire"] >= 1
     assert calls["release"] >= 1
+
+
+def test_llm_delay_reserves_sequential_provider_slots() -> None:
+    sleeps: list[float] = []
+
+    throttles.apply_llm_delay(
+        "openai",
+        50.0,
+        0.0,
+        wall_time=lambda: 1000.0,
+        sleep=sleeps.append,
+    )
+    throttles.apply_llm_delay(
+        "openai",
+        50.0,
+        0.0,
+        wall_time=lambda: 1000.0,
+        sleep=sleeps.append,
+    )
+    throttles.apply_llm_delay(
+        "openai",
+        50.0,
+        0.0,
+        wall_time=lambda: 1000.0,
+        sleep=sleeps.append,
+    )
+    throttles.apply_llm_delay(
+        "anthropic",
+        50.0,
+        0.0,
+        wall_time=lambda: 1000.0,
+        sleep=sleeps.append,
+    )
+
+    assert sleeps == pytest.approx([0.05, 0.1])

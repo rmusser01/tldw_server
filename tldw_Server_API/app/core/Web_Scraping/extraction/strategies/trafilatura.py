@@ -4,8 +4,8 @@ import re
 from typing import Any
 
 import trafilatura
+from loguru import logger
 
-from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 from tldw_Server_API.app.core.Web_Scraping.extraction.metrics import emit_global_counter as log_counter
 
@@ -48,7 +48,7 @@ def _strip_boilerplate_sections(text: str) -> str:
 
 def extract_with_trafilatura(html: str, url: str) -> dict[str, Any]:
     """Extract article metadata and body from raw HTML for the direct pipeline."""
-    logging.info("Extracting article data from HTML")
+    logger.info("Extracting article data from HTML")
     downloaded = trafilatura.extract(
         html,
         include_comments=False,
@@ -67,7 +67,7 @@ def extract_with_trafilatura(html: str, url: str) -> dict[str, Any]:
         "extraction_successful": False,
     }
     if downloaded:
-        logging.info("Content extracted successfully")
+        logger.info("Content extracted successfully")
         log_counter("article_extracted", labels={"success": "true"})
         result["content"] = ContentMetadataHandler.format_content_with_metadata(
             url=url,
@@ -81,7 +81,7 @@ def extract_with_trafilatura(html: str, url: str) -> dict[str, Any]:
         result["extraction_successful"] = True
     else:
         log_counter("article_extracted", labels={"success": "false"})
-        logging.warning("Content extraction failed")
+        logger.warning("Content extraction failed")
 
     if metadata:
         result.update(
@@ -92,5 +92,5 @@ def extract_with_trafilatura(html: str, url: str) -> dict[str, Any]:
             }
         )
     else:
-        logging.warning("Metadata extraction failed")
+        logger.warning("Metadata extraction failed")
     return result

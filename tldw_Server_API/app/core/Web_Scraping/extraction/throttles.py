@@ -5,10 +5,63 @@ from __future__ import annotations
 import random
 from collections.abc import Iterator
 from contextlib import contextmanager
-from threading import BoundedSemaphore, Lock
-from typing import Callable
+from threading import BoundedSemaphore, Condition, Lock
+from time import monotonic
+from typing import Callable, Protocol
 
-_LLM_PROVIDER_LIMITS: dict[str, tuple[int, BoundedSemaphore]] = {}
+
+class _Semaphore(Protocol):
+    def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool: ...
+
+    def release(self) -> None: ...
+
+
+class _ProviderConcurrencyLimiter:
+    """Stable provider limiter whose process-wide ceiling can only tighten."""
+
+    def __init__(self, max_concurrency: int) -> None:
+        if max_concurrency <= 0:
+            raise ValueError("max_concurrency must be positive")
+        self._condition = Condition()
+        self._limit = max_concurrency
+        self._active = 0
+
+    def tighten(self, max_concurrency: int) -> None:
+        if max_concurrency <= 0:
+            raise ValueError("max_concurrency must be positive")
+        with self._condition:
+            self._limit = min(self._limit, max_concurrency)
+            self._condition.notify_all()
+
+    def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
+        with self._condition:
+            if not blocking:
+                if self._active >= self._limit:
+                    return False
+                self._active += 1
+                return True
+
+            deadline = None if timeout is None else monotonic() + max(0.0, timeout)
+            while self._active >= self._limit:
+                if deadline is None:
+                    self._condition.wait()
+                    continue
+                remaining = deadline - monotonic()
+                if remaining <= 0.0:
+                    return False
+                self._condition.wait(remaining)
+            self._active += 1
+            return True
+
+    def release(self) -> None:
+        with self._condition:
+            if self._active <= 0:
+                raise ValueError("Semaphore released too many times")
+            self._active -= 1
+            self._condition.notify()
+
+
+_LLM_PROVIDER_LIMITS: dict[str, _ProviderConcurrencyLimiter] = {}
 _LLM_PROVIDER_LAST_CALL: dict[str, float] = {}
 _STRATEGY_LIMITS: dict[str, tuple[int, BoundedSemaphore]] = {}
 _LLM_PROVIDER_LIMITS_LOCK = Lock()
@@ -23,7 +76,7 @@ def _llm_provider_key(provider: str | None) -> str:
 
 @contextmanager
 def cancellable_semaphore(
-    semaphore: BoundedSemaphore,
+    semaphore: _Semaphore,
     cancellation_checkpoint: Callable[[], None],
 ) -> Iterator[None]:
     """Acquire a semaphore while periodically checking for cancellation."""
@@ -51,15 +104,16 @@ def get_strategy_semaphore(strategy: str, max_workers: int | None) -> BoundedSem
         return _STRATEGY_LIMITS[strategy][1]
 
 
-def get_llm_semaphore(provider: str | None, max_concurrency: int) -> BoundedSemaphore:
+def get_llm_semaphore(provider: str | None, max_concurrency: int) -> _ProviderConcurrencyLimiter:
     key = _llm_provider_key(provider)
     with _LLM_PROVIDER_LIMITS_LOCK:
         existing = _LLM_PROVIDER_LIMITS.get(key)
-        if existing and existing[0] == max_concurrency:
-            return existing[1]
-        semaphore = BoundedSemaphore(max_concurrency)
-        _LLM_PROVIDER_LIMITS[key] = (max_concurrency, semaphore)
-        return semaphore
+        if existing is None:
+            existing = _ProviderConcurrencyLimiter(max_concurrency)
+            _LLM_PROVIDER_LIMITS[key] = existing
+        else:
+            existing.tighten(max_concurrency)
+        return existing
 
 
 def apply_llm_delay(
@@ -74,15 +128,18 @@ def apply_llm_delay(
         return
     provider_key = _llm_provider_key(provider)
     now = wall_time()
+    wait_seconds = 0.0
     with _LLM_PROVIDER_LAST_CALL_LOCK:
         last_call = _LLM_PROVIDER_LAST_CALL.get(provider_key)
-    if last_call is not None:
-        remaining = (delay_ms / 1000.0) - (now - last_call)
-        if remaining > 0.0:
+        if last_call is None:
+            reserved_call = now
+        else:
             jitter = random.uniform(0.0, jitter_ms / 1000.0) if jitter_ms > 0.0 else 0.0  # nosec B311
-            sleep(remaining + jitter)
-    with _LLM_PROVIDER_LAST_CALL_LOCK:
-        _LLM_PROVIDER_LAST_CALL[provider_key] = wall_time()
+            reserved_call = max(now, last_call + (delay_ms / 1000.0) + jitter)
+            wait_seconds = max(0.0, reserved_call - now)
+        _LLM_PROVIDER_LAST_CALL[provider_key] = reserved_call
+    if wait_seconds > 0.0:
+        sleep(wait_seconds)
 
 
 def get_throttle_stats() -> dict[str, int]:

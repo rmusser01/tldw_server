@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Metrics import metrics_logger
 from tldw_Server_API.app.core.Web_Scraping.extraction import metrics
@@ -92,6 +93,29 @@ def test_metric_emit_helpers_ignore_validation_errors(monkeypatch, emitter: str)
 
     assert sinks.calls == 0
     assert calls == 0
+
+
+def test_metric_validation_failure_logs_only_bounded_diagnostics() -> None:
+    secret = "https://user:secret@example.com/private?token=value"
+    records: list[Any] = []
+    handler_id = logger.add(
+        records.append,
+        level="DEBUG",
+        filter=lambda record: record["message"] == "Extraction metric emission failed",
+    )
+    try:
+        metrics.emit_counter(_MetricSinks(RuntimeError("unused")), secret, labels={"secret": secret})
+    finally:
+        logger.remove(handler_id)
+
+    assert len(records) == 1
+    record = records[0].record
+    assert {key: record["extra"][key] for key in ("exception_class", "label_keys", "metric")} == {
+        "exception_class": "ValueError",
+        "label_keys": [],
+        "metric": "unknown",
+    }
+    assert secret not in str(record)
 
 
 @pytest.mark.parametrize(

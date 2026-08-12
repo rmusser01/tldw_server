@@ -4,9 +4,10 @@ import re
 from typing import Any, Optional
 
 from ...safe_regex import SafeRegexLimits, search_untrusted
-from ..dependencies import build_default_dependencies
+from ..dependencies import ExtractionDependencies, build_default_dependencies
 from .llm import (
     _NONCRITICAL_EXCEPTIONS,
+    _response_model,
     call_llm_provider,
     extract_llm_response_text,
     extract_usage_from_response,
@@ -61,10 +62,15 @@ def _prepare_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _record_response(
-    result: dict[str, Any], response: Any, *, provider: str, settings: dict[str, Any], dependencies: Any
+    result: dict[str, Any],
+    response: Any,
+    *,
+    provider: str,
+    settings: dict[str, Any],
+    dependencies: ExtractionDependencies,
 ) -> None:
     usage = extract_usage_from_response(response)
-    model = str(response.get("model") if isinstance(response, dict) else settings.get("model") or "unknown")
+    model = _response_model(response, settings)
     record_llm_usage_metrics(usage, provider=provider, model=model, dependencies=dependencies)
     result.update({"llm_usage": usage, "llm_provider": provider, "llm_model": model})
 

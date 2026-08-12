@@ -2,27 +2,12 @@
 
 from __future__ import annotations
 
-import dataclasses
-from typing import Any, Callable
-
-import pytest
+from typing import Any
 
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import extract_article_with_pipeline
-from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
-from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
 
 
-def _install_provider(monkeypatch: pytest.MonkeyPatch, provider: Callable[..., Any]) -> None:
-    """Install a deterministic provider dependency for an extraction test."""
-
-    dependencies = dataclasses.replace(
-        build_default_dependencies(),
-        perform_chat_api_call=provider,
-    )
-    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
-
-
-def test_llm_extraction_parses_code_fenced_json(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_llm_extraction_parses_code_fenced_json(install_extraction_dependencies) -> None:
     def _fake_call(**_kwargs: Any) -> dict[str, Any]:
         return {
             "choices": [
@@ -36,7 +21,7 @@ def test_llm_extraction_parses_code_fenced_json(monkeypatch: pytest.MonkeyPatch)
             "model": "gpt-test",
         }
 
-    _install_provider(monkeypatch, _fake_call)
+    install_extraction_dependencies(_fake_call)
 
     result = extract_article_with_pipeline(
         "<html><body><p>Body</p></body></html>",
@@ -51,7 +36,7 @@ def test_llm_extraction_parses_code_fenced_json(monkeypatch: pytest.MonkeyPatch)
     assert result.get("llm_usage", {}).get("prompt_tokens") == 3
 
 
-def test_llm_extraction_strict_json_rejects_extras(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_llm_extraction_strict_json_rejects_extras(install_extraction_dependencies) -> None:
     def _fake_call(**_kwargs: Any) -> dict[str, Any]:
         return {
             "choices": [
@@ -65,7 +50,7 @@ def test_llm_extraction_strict_json_rejects_extras(monkeypatch: pytest.MonkeyPat
             "model": "gpt-test",
         }
 
-    _install_provider(monkeypatch, _fake_call)
+    install_extraction_dependencies(_fake_call)
 
     result = extract_article_with_pipeline(
         "<html><body><p>Body</p></body></html>",

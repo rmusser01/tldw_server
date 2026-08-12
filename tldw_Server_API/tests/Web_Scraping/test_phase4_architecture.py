@@ -8,6 +8,7 @@ import json
 import math
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -221,7 +222,8 @@ def _metric_boundary_bypasses(paths: list[Path]) -> list[str]:
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 if isinstance(value, ast.Attribute) and value.attr in _RAW_METRIC_SINK_NAMES:
                     callable_aliases.update(target.id for target in targets if isinstance(target, ast.Name))
-            elif isinstance(node, ast.Call):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Attribute) and node.func.attr in _RAW_METRIC_SINK_NAMES:
                     violations.append(f"{path.name}: direct {node.func.attr} call")
                 elif isinstance(node.func, ast.Name) and node.func.id in raw_aliases | callable_aliases:
@@ -478,7 +480,12 @@ def test_phase4b_crawl_bound_article_helper_keeps_its_async_surface_and_canonica
         "return": dict[str, Any],
     }
     assert "extract_article_with_pipeline" in _imported_names(ARTICLE_PATH, extraction_module)
-    assert "extract_article_with_pipeline" in _called_names(helper)
+    assert "run_extraction_in_thread" in _imported_names(
+        ARTICLE_PATH,
+        "tldw_Server_API.app.core.Web_Scraping.extraction_async",
+    )
+    assert any(isinstance(node, ast.Name) and node.id == "extract_article_with_pipeline" for node in ast.walk(helper))
+    assert "run_extraction_in_thread" in _called_names(helper)
 
 
 def test_phase4b_crawl_bound_article_helper_forwards_to_canonical_extraction_and_closes_page(
@@ -512,8 +519,11 @@ def test_phase4b_crawl_bound_article_helper_forwards_to_canonical_extraction_and
             return self.page
 
     calls: list[tuple[str, str, dict[str, bool]]] = []
+    event_loop_thread = threading.get_ident()
+    extraction_threads: list[int] = []
 
     def extract(html: str, url: str, **kwargs: bool) -> dict[str, Any]:
+        extraction_threads.append(threading.get_ident())
         calls.append((html, url, kwargs))
         return {"title": "N/A", "content": "Body", "extraction_successful": True}
 
@@ -526,6 +536,7 @@ def test_phase4b_crawl_bound_article_helper_forwards_to_canonical_extraction_and
     )
 
     assert calls == [("<article>Body</article>", "https://example.com/article", {"allow_llm_extraction": False})]
+    assert extraction_threads and extraction_threads[0] != event_loop_thread
     assert result == {"title": "Browser title", "content": "markdown:Body", "extraction_successful": True}
     assert context.page.closed is True
 
@@ -641,6 +652,16 @@ increment_counter("future_metric", labels={"url": "https://example.com"})
 def emit(dependencies):
     sink = dependencies.increment_counter
     sink("article_extracted", labels={"success": "true"})
+""",
+        "late_alias.py": """
+sink = None
+
+def emit():
+    sink("article_extracted", labels={"success": "true"})
+
+def configure(dependencies):
+    global sink
+    sink = dependencies.increment_counter
 """,
         "wrapper.py": """
 def emit(dependencies):

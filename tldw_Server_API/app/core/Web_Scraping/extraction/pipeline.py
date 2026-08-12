@@ -1,6 +1,7 @@
 """Canonical orchestration for article extraction strategies."""
 
 import hashlib
+import inspect
 import json
 import os
 import random
@@ -12,7 +13,6 @@ from typing import Any, Callable, Optional
 from tldw_Server_API.app.core.Web_Scraping.extraction.caches import (
     _schema_cache_get,
     _schema_cache_put,
-    clear_extraction_caches,
 )
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     ExtractionDependencies,
@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.metrics import (
     emit_histogram,
     emit_log_counter,
 )
+from tldw_Server_API.app.core.Web_Scraping.extraction.retry import cap_retry_delay
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
     extract_jsonld_entities,
     extract_regex_entities,
@@ -213,20 +214,6 @@ def _extractor_max_workers() -> Optional[int]:
     return value if value and value > 0 else None
 
 
-def _should_clear_caches(stage: str) -> bool:
-    raw = os.getenv("EXTRACTOR_CLEAR_CACHES", "")
-    if not raw:
-        return False
-    value = raw.strip().lower()
-    if value in {"1", "true", "yes", "y", "on"}:
-        return stage == "end"
-    if value in {"both", "all"}:
-        return True
-    if value in {"start", "before", "entry"}:
-        return stage == "start"
-    return value in {"end", "after", "exit"} and stage == "end"
-
-
 @contextmanager
 def _strategy_throttle(strategy: str, dependencies: ExtractionDependencies) -> Iterator[None]:
     dependencies.cancellation_checkpoint()
@@ -280,6 +267,7 @@ def _run_with_retries(
             delay_s = (base_delay_ms / 1000.0) * (2**attempts)
             if jitter_ms:
                 delay_s += random.uniform(0.0, jitter_ms / 1000.0)  # nosec B311
+            delay_s = cap_retry_delay(delay_s)
             attempts += 1
             try:
                 emit_counter(
@@ -323,6 +311,26 @@ def _schema_rule_keys(schema_rules: Optional[dict[str, Any]]) -> list[str]:
     return sorted(set(keys))
 
 
+def _invoke_handler(
+    handler: Callable[[str, str], dict[str, Any]],
+    html: str,
+    url: str,
+    *,
+    allow_llm_extraction: bool,
+) -> dict[str, Any]:
+    """Forward the LLM policy when supported without breaking legacy handlers."""
+
+    try:
+        inspect.signature(handler).bind(
+            html,
+            url,
+            allow_llm_extraction=allow_llm_extraction,
+        )
+    except (TypeError, ValueError):
+        return handler(html, url)
+    return handler(html, url, allow_llm_extraction=allow_llm_extraction)
+
+
 def _extract_article_with_pipeline_with_dependencies(
     html: str,
     url: str,
@@ -344,8 +352,6 @@ def _extract_article_with_pipeline_with_dependencies(
     order, unknown, default_regex_enrichment = _normalize_strategy_order(strategy_order)
     if not allow_llm_extraction:
         order = [strategy for strategy in order if strategy != "llm"]
-    if _should_clear_caches("start"):
-        clear_extraction_caches()
 
     def finalize(result: dict[str, Any], *, strategy: Optional[str]) -> dict[str, Any]:
         final_result = _copy_result(result)
@@ -358,8 +364,6 @@ def _extract_article_with_pipeline_with_dependencies(
             final_result["summary"] = jsonld_summary
         final_result = enrich_with_regex_matches(final_result, regex_result)
         final_result = _attach_trace(final_result, trace, strategy, order)
-        if _should_clear_caches("end"):
-            clear_extraction_caches()
         return final_result
 
     for strategy in unknown:
@@ -468,7 +472,14 @@ def _extract_article_with_pipeline_with_dependencies(
                 continue
             with _strategy_throttle(strategy, dependencies):
                 result, exc, _attempts = _run_with_retries(
-                    lambda: handler(html, url), strategy=strategy, dependencies=dependencies
+                    lambda: _invoke_handler(
+                        handler,
+                        html,
+                        url,
+                        allow_llm_extraction=allow_llm_extraction,
+                    ),
+                    strategy=strategy,
+                    dependencies=dependencies,
                 )
             if exc or result is None:
                 trace.append(_trace_entry(dependencies, strategy, "failed", "handler_error"))

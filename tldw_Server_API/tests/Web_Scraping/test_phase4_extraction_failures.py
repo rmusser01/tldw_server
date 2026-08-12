@@ -4,6 +4,7 @@ import ast
 import asyncio
 import dataclasses
 import inspect
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -29,6 +30,17 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import schema a
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WEB_SCRAPING_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "core" / "Web_Scraping"
 SECRET = "https://user:api-key@example.com/private/path?token=secret#payload"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_throttle_state() -> Iterator[None]:
+    """Keep process-global throttle state isolated between tests."""
+
+    throttles.clear_throttle_state()
+    try:
+        yield
+    finally:
+        throttles.clear_throttle_state()
 
 
 class _UnavailableSemaphore:
@@ -423,6 +435,24 @@ def test_llm_concurrency_normalizes_provider_identity() -> None:
         throttles.clear_throttle_state()
 
 
+def test_llm_concurrency_tightens_without_replacing_live_provider_limiter() -> None:
+    throttles.clear_throttle_state()
+    limiter = throttles.get_llm_semaphore("openai", 2)
+    assert limiter.acquire(blocking=False) is True
+    assert limiter.acquire(blocking=False) is True
+    try:
+        tightened = throttles.get_llm_semaphore("OPENAI", 1)
+
+        assert tightened is limiter
+        limiter.release()
+        assert tightened.acquire(blocking=False) is False
+        limiter.release()
+        assert tightened.acquire(blocking=False) is True
+        tightened.release()
+    finally:
+        throttles.clear_throttle_state()
+
+
 def test_llm_delay_normalizes_provider_identity() -> None:
     sleeps: list[float] = []
     throttles.clear_throttle_state()
@@ -442,7 +472,7 @@ def test_llm_delay_normalizes_provider_identity() -> None:
             sleep=sleeps.append,
         )
 
-        assert sleeps == [0.1]
+        assert sleeps == pytest.approx([0.1])
     finally:
         throttles.clear_throttle_state()
 
@@ -518,6 +548,84 @@ def test_provider_retry_uses_backoff_and_then_succeeds(monkeypatch: pytest.Monke
     assert result["content"] == "Recovered"
     assert provider_calls == 2
     assert sleeps == [0.025]
+
+
+def test_pipeline_retry_delay_caps_base_plus_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    def operation() -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary failure")
+        return {"extraction_successful": True}
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "1")
+    monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "100")
+    monkeypatch.setenv("EXTRACTOR_RETRY_JITTER_MS", "1000")
+    monkeypatch.setenv("EXTRACTOR_RETRY_MAX_DELAY_MS", "25")
+    monkeypatch.setattr(pipeline.random, "uniform", lambda _start, _end: 1.0)
+
+    result, error, retries = pipeline._run_with_retries(
+        operation,
+        strategy="schema",
+        dependencies=_dependencies(sleep=sleeps.append),
+    )
+
+    assert result == {"extraction_successful": True}
+    assert error is None
+    assert retries == 1
+    assert sleeps == [0.025]
+
+
+def test_llm_retry_delay_caps_base_plus_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary failure")
+        return _response('{"content": "Recovered"}')
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "1")
+    monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "100")
+    monkeypatch.setenv("EXTRACTOR_RETRY_JITTER_MS", "1000")
+    monkeypatch.setenv("EXTRACTOR_RETRY_MAX_DELAY_MS", "25")
+    monkeypatch.setattr(llm_strategy.random, "uniform", lambda _start, _end: 1.0)
+    dependencies = _dependencies(perform_chat_api_call=provider, sleep=sleeps.append)
+
+    response, failed = llm_strategy.call_llm_provider(
+        provider="openai",
+        settings={},
+        messages=[],
+        app_config=None,
+        dependencies=dependencies,
+        stage="llm_extraction",
+        url="https://example.com",
+    )
+
+    assert response == _response('{"content": "Recovered"}')
+    assert failed is False
+    assert sleeps == [0.025]
+
+
+@pytest.mark.parametrize(
+    ("response", "settings", "expected"),
+    [
+        ({}, {"model": "configured-model"}, "configured-model"),
+        ({}, {}, "unknown"),
+        ({"model": "response-model"}, {"model": "configured-model"}, "response-model"),
+    ],
+)
+def test_response_model_fallback_is_shared(
+    response: dict[str, Any],
+    settings: dict[str, Any],
+    expected: str,
+) -> None:
+    assert llm_strategy._response_model(response, settings) == expected
 
 
 class _ArbitraryProviderSDKError(Exception):
@@ -709,11 +817,12 @@ def test_provider_failure_is_sanitized_in_results_and_structured_logs(
     records: list[Any] = []
     handler_id = logger.add(records.append, level="WARNING")
     try:
-        result = getattr(extraction, function_name)(
-            "<p>Body</p>",
-            "https://user:password@example.com/private?api_key=secret",
-            llm_settings={"provider": "openai", "api_key": "top-secret"},
-        )
+        with logger.contextualize(request_id="request-123"):
+            result = getattr(extraction, function_name)(
+                "<p>Body</p>",
+                "https://user:password@example.com/private?api_key=secret",
+                llm_settings={"provider": "openai", "api_key": "top-secret"},
+            )
     finally:
         logger.remove(handler_id)
 
@@ -730,6 +839,7 @@ def test_provider_failure_is_sanitized_in_results_and_structured_logs(
         "stage": stage,
         "host": "example.com",
     }
+    assert provider_record["extra"]["request_id"] == "request-123"
     assert provider_record["message"] == "LLM provider call failed"
     assert SECRET not in str(provider_record)
     assert "top-secret" not in str(provider_record)

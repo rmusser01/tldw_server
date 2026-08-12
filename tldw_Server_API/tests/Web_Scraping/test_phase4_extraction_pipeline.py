@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import dataclasses
 import hashlib
 import inspect
+import textwrap
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -14,6 +16,7 @@ from typing import Any
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from loguru import logger
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping
@@ -543,8 +546,8 @@ def test_pipeline_llm_reuses_injected_clocks_sleeps_and_metric_sinks(
     assert result["content"] == "injected"
     assert provider_calls == 2
     assert perf_calls == 2
-    assert wall_time_calls == 4
-    assert sleeps == [0.01]
+    assert wall_time_calls == 2
+    assert sleeps == pytest.approx([0.01])
     assert set(counter_names) == {
         "llm_tokens_used_total",
         "llm_tokens_used_total_by_operation",
@@ -758,10 +761,14 @@ def test_direct_trafilatura_executes_metadata_and_sanitized_observability_contra
         "log_counter",
         lambda name, labels: metric_events.append((name, dict(labels))),
     )
-    monkeypatch.setattr(direct_trafilatura.logging, "info", lambda message: log_messages.append(str(message)))
-    monkeypatch.setattr(direct_trafilatura.logging, "warning", lambda message: log_messages.append(str(message)))
-
-    result = direct_trafilatura.extract_with_trafilatura(sensitive_html, sensitive_url)
+    handler_id = logger.add(
+        lambda message: log_messages.append(message.record["message"]),
+        filter=lambda record: record["name"] == direct_trafilatura.__name__,
+    )
+    try:
+        result = direct_trafilatura.extract_with_trafilatura(sensitive_html, sensitive_url)
+    finally:
+        logger.remove(handler_id)
     metadata, body = ContentMetadataHandler.extract_metadata(result["content"])
 
     assert extract_calls == [
@@ -803,6 +810,22 @@ def test_direct_trafilatura_executes_metadata_and_sanitized_observability_contra
 
 def test_direct_trafilatura_is_separate_from_enhanced_json_path() -> None:
     enhanced_source = inspect.getsource(enhanced_web_scraping.EnhancedWebScraper._extract_trafilatura_json)
+    tree = ast.parse(textwrap.dedent(enhanced_source))
+    extract_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "trafilatura"
+        and node.func.attr == "extract"
+    ]
+    assert len(extract_calls) == 1
+    keywords = {
+        keyword.arg: keyword.value.value
+        for keyword in extract_calls[0].keywords
+        if keyword.arg is not None and isinstance(keyword.value, ast.Constant)
+    }
 
-    assert "output_format='json'" in enhanced_source
-    assert "include_tables=True" in enhanced_source
+    assert keywords["output_format"] == "json"
+    assert keywords["include_tables"] is True

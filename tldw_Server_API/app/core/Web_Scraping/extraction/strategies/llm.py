@@ -15,6 +15,7 @@ from ...observability import bounded_code, bounded_stage, sanitized_host
 from .. import throttles
 from ..dependencies import ExtractionDependencies, build_default_dependencies
 from ..metrics import LLM_PROVIDER_LABEL_VALUES, emit_counter
+from ..retry import cap_retry_delay
 
 _NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -136,7 +137,14 @@ def _log_provider_failure(exc: Exception, *, stage: str, url: str) -> None:
         "stage": bounded_stage(stage),
         "host": sanitized_host(url),
     }
-    logger.bind(**fields).patch(lambda record: record.update(extra=fields)).warning("LLM provider call failed")
+    logger.bind(**fields).warning("LLM provider call failed")
+
+
+def _response_model(response: Any, settings: dict[str, Any]) -> str:
+    """Resolve the response model with a configured and then stable fallback."""
+
+    response_model = response.get("model") if isinstance(response, dict) else getattr(response, "model", None)
+    return str(response_model or settings.get("model") or "unknown")
 
 
 def call_llm_provider(
@@ -185,6 +193,7 @@ def call_llm_provider(
             delay_s = (base_delay_ms / 1000.0) * (2 ** (attempt - 1))
             if jitter_ms:
                 delay_s += random.uniform(0.0, jitter_ms / 1000.0)  # nosec B311
+            delay_s = cap_retry_delay(delay_s)
             if delay_s > 0.0:
                 dependencies.sleep(delay_s)
 
@@ -498,7 +507,7 @@ def _extract_llm_entities_with_dependencies(
         if failed:
             continue
         usage = extract_usage_from_response(response)
-        model = str(response.get("model") if isinstance(response, dict) else settings.get("model") or "unknown")
+        model = _response_model(response, settings)
         record_llm_usage_metrics(usage, provider=provider, model=model, dependencies=dependencies)
         for key in usage_total:
             usage_total[key] += usage.get(key, 0)

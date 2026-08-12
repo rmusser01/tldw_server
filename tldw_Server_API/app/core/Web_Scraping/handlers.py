@@ -3,15 +3,24 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any, Callable
 
-HandlerFunc = Callable[[str, str], dict[str, Any]]
+HandlerFunc = Callable[..., dict[str, Any]]
 
 
-def handle_generic_html(html: str, url: str) -> dict[str, Any]:
+def handle_generic_html(
+    html: str,
+    url: str,
+    *,
+    allow_llm_extraction: bool = True,
+) -> dict[str, Any]:
     """Default handler: extract article metadata and convert content to Markdown."""
     from tldw_Server_API.app.core.Web_Scraping.content import convert_html_to_markdown
     from tldw_Server_API.app.core.Web_Scraping.extraction import extract_article_data_from_html
 
-    data = extract_article_data_from_html(html, url)
+    data = extract_article_data_from_html(
+        html,
+        url,
+        allow_llm_extraction=allow_llm_extraction,
+    )
     if data.get("extraction_successful") and data.get("content"):
         data["content"] = convert_html_to_markdown(data["content"])
     return data
