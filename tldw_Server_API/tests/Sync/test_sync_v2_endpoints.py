@@ -330,6 +330,7 @@ def test_capabilities_endpoint_reports_selected_dataset_writable_versions(
     assert response.json()["writable_adapter_versions"]["attachment.ref"] == expected
 
 
+@pytest.mark.unit
 def test_capabilities_endpoint_hides_unauthorized_selected_dataset(
     tmp_path: Path,
 ) -> None:
