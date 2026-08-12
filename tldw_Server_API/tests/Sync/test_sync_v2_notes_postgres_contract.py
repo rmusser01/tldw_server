@@ -4,7 +4,11 @@ import inspect
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
+    DatabaseConfig,
+    QueryResult,
+)
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import (
@@ -13,7 +17,10 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import (
 )
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
-from tldw_Server_API.app.core.Sync.v2.errors import SyncDatasetNotFoundError
+from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncDatasetNotFoundError,
+    SyncStoreError,
+)
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncAttachmentRevisionBindingCreate,
@@ -31,6 +38,13 @@ pytestmark = pytest.mark.integration
 
 def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() -> None:
     compact_schema = " ".join(SYNC_POSTGRES_SCHEMA.split())
+    catalog_verifier = getattr(
+        SyncDatabase,
+        "_verify_attachment_binding_tables_postgres",
+        None,
+    )
+    assert catalog_verifier is not None
+    catalog_source = inspect.getsource(catalog_verifier)
     read_owner_guard = getattr(
         SyncDatabase,
         "_require_attachment_binding_dataset_owner",
@@ -95,6 +109,11 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     ) in compact_schema
     assert "sync_attachment_revision_bindings" in ensure_source
     assert "sync_dataset_storage_namespaces" in ensure_source
+    assert "pg_attribute" in catalog_source
+    assert "pg_constraint" in catalog_source
+    assert "pg_get_constraintdef" in catalog_source
+    assert "pg_index" in catalog_source
+    assert "pg_get_indexdef" in catalog_source
     assert "WHERE dataset_id = ? AND owner_user_id = ?" in read_owner_source
     assert "FOR UPDATE" not in read_owner_source
     assert "WHERE dataset_id = ? AND owner_user_id = ?" in mutation_owner_source
@@ -109,7 +128,7 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     assert "resolved_blob_id IS NULL" in unresolved_source
     assert "retention_released_at IS NULL" in unresolved_source
     assert "FOR UPDATE" in resolve_source
-    assert "WHERE dataset_id = ? AND blob_id = ?" in " ".join(
+    assert "WHERE blob.dataset_id = ? AND blob.blob_id = ?" in " ".join(
         blob_lookup_source.split()
     )
     assert "attachment_id = ?" not in blob_lookup_source
@@ -122,8 +141,161 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     assert "owner_user_id" in lookup_source
     assert "owner_user_id" in unresolved_source
     assert "FOR UPDATE" in acceptance_source
+    assert "blob.owner_user_id = dataset.owner_user_id" in acceptance_source
+    exact_blob_source = inspect.getsource(
+        SyncDatabase._require_exact_available_blob_for_binding
+    )
+    completion_source = inspect.getsource(SyncDatabase.complete_blob_upload)
+    repair_source = inspect.getsource(SyncDatabase._resolve_pending_bindings_for_blob)
+    assert "blob.owner_user_id = dataset.owner_user_id" in exact_blob_source
+    assert "blob.owner_user_id = dataset.owner_user_id" in completion_source
+    assert repair_source.count("LIMIT 1000") == 2
+    assert "UPDATE sync_attachment_revision_bindings" in repair_source
+    assert "EXISTS (" not in repair_source.split(
+        "UPDATE sync_attachment_revision_bindings", 1
+    )[1].split("SELECT", 1)[0]
     assert "_get_dataset_row_for_update" in completion_source
     assert "_resolve_pending_bindings_for_blob" in completion_source
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [None, "constraint_or_true", "predicate_and_false"],
+)
+def test_postgres_attachment_authority_catalog_is_exact(
+    drift: str | None,
+) -> None:
+    database = object.__new__(SyncDatabase)
+    columns = [
+        {
+            "table_name": table,
+            "column_name": name,
+            "data_type": data_type,
+            "is_not_null": not_null,
+        }
+        for table, specs in {
+            "sync_attachment_revision_bindings": [
+                ("dataset_id", "text", True),
+                ("attachment_id", "text", True),
+                ("attachment_revision", "bigint", True),
+                ("blob_hash", "text", True),
+                ("size_bytes", "bigint", True),
+                ("establishing_server_cursor", "bigint", True),
+                ("availability_at_acceptance", "text", True),
+                ("resolved_blob_id", "text", False),
+                ("retention_released_at", "timestamp with time zone", False),
+                ("created_at", "timestamp with time zone", True),
+            ],
+            "sync_dataset_storage_namespaces": [
+                ("dataset_id", "text", True),
+                ("owner_user_id", "text", True),
+                ("storage_namespace_id", "text", True),
+                ("created_at", "timestamp with time zone", True),
+            ],
+        }.items()
+        for name, data_type, not_null in specs
+    ]
+    constraints = [
+        {"table_name": table, "kind": kind, "definition": definition}
+        for table, definitions in {
+            "sync_attachment_revision_bindings": [
+                ("p", "PRIMARY KEY (dataset_id, attachment_id, attachment_revision)"),
+                ("c", "CHECK (length(dataset_id) > 0)"),
+                (
+                    "c",
+                    "CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text)",
+                ),
+                ("c", "CHECK (attachment_revision > 0)"),
+                ("c", "CHECK (blob_hash ~ '^sha256:[0-9a-f]{64}$'::text)"),
+                ("c", "CHECK (size_bytes > 0)"),
+                ("c", "CHECK (establishing_server_cursor > 0)"),
+                (
+                    "c",
+                    "CHECK (availability_at_acceptance = ANY (ARRAY['available'::text, 'metadata_only'::text]))",
+                ),
+                (
+                    "c",
+                    "CHECK (resolved_blob_id IS NULL OR length(resolved_blob_id) > 0)",
+                ),
+            ],
+            "sync_dataset_storage_namespaces": [
+                ("p", "PRIMARY KEY (dataset_id)"),
+                ("c", "CHECK (length(dataset_id) > 0)"),
+                ("c", "CHECK (length(owner_user_id) > 0)"),
+                (
+                    "c",
+                    "CHECK (storage_namespace_id ~ '^[0-9a-f]{32}$'::text)",
+                ),
+            ],
+        }.items()
+        for kind, definition in definitions
+    ]
+    index_specs = {
+        "idx_sync_attachment_bindings_unresolved": (
+            "sync_attachment_revision_bindings",
+            False,
+            "dataset_id, establishing_server_cursor, attachment_id, attachment_revision",
+            "resolved_blob_id IS NULL AND retention_released_at IS NULL",
+        ),
+        "idx_sync_attachment_bindings_blob": (
+            "sync_attachment_revision_bindings",
+            False,
+            "dataset_id, resolved_blob_id",
+            "",
+        ),
+        "idx_sync_attachment_bindings_pending_digest": (
+            "sync_attachment_revision_bindings",
+            False,
+            "dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision",
+            "resolved_blob_id IS NULL AND retention_released_at IS NULL",
+        ),
+        "uq_sync_dataset_storage_namespace_id": (
+            "sync_dataset_storage_namespaces",
+            True,
+            "storage_namespace_id",
+            "",
+        ),
+        "idx_sync_dataset_storage_namespaces_owner": (
+            "sync_dataset_storage_namespaces",
+            False,
+            "owner_user_id, dataset_id",
+            "",
+        ),
+    }
+    indexes = [
+        {
+            "index_name": name,
+            "table_name": table,
+            "is_unique": unique,
+            "is_valid": True,
+            "is_ready": True,
+            "definition": (
+                f"CREATE {'UNIQUE ' if unique else ''}INDEX {name} ON public.{table} "
+                f"USING btree ({index_columns})"
+                + (f" WHERE ({predicate})" if predicate else "")
+            ),
+            "predicate": predicate or None,
+        }
+        for name, (table, unique, index_columns, predicate) in index_specs.items()
+    ]
+    if drift == "constraint_or_true":
+        constraints[1]["definition"] += " OR true"
+    elif drift == "predicate_and_false":
+        indexes[0]["definition"] += " AND false"
+        indexes[0]["predicate"] += " AND false"
+
+    results = iter((columns, constraints, indexes))
+
+    def fake_execute(*_args, **_kwargs):
+        rows = next(results)
+        return QueryResult(rows=rows, rowcount=len(rows))
+
+    database.execute = fake_execute
+    if drift is None:
+        database._verify_attachment_binding_tables_postgres(connection=object())
+        return
+    with pytest.raises(SyncStoreError, match="catalog"):
+        database._verify_attachment_binding_tables_postgres(connection=object())
 
 
 def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_indexes(
@@ -142,8 +314,9 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
                 domains=["notes.note", "attachment.ref"],
             )
         )
-        store.create_attachment_revision_binding(
-            SyncAttachmentRevisionBindingCreate(
+        with backend.transaction() as conn:
+            db._create_attachment_revision_binding(
+                SyncAttachmentRevisionBindingCreate(
                 dataset_id="dataset-binding-pg",
                 attachment_id="11111111-1111-4111-8111-111111111111",
                 attachment_revision=1,
@@ -151,9 +324,9 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
                 size_bytes=1,
                 establishing_server_cursor=1,
                 availability_at_acceptance="metadata_only",
-            ),
-            owner_user_id="owner-binding-pg",
-        )
+                ),
+                connection=conn,
+            )
         with pytest.raises(SyncDatasetNotFoundError):
             store.get_attachment_revision_binding(
                 "dataset-binding-pg",
@@ -164,19 +337,6 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
         with pytest.raises(SyncDatasetNotFoundError):
             store.list_unresolved_attachment_revision_bindings(
                 "dataset-binding-pg",
-                owner_user_id="other-owner-pg",
-            )
-        with pytest.raises(SyncDatasetNotFoundError):
-            store.create_attachment_revision_binding(
-                SyncAttachmentRevisionBindingCreate(
-                    dataset_id="dataset-binding-pg",
-                    attachment_id="22222222-2222-4222-8222-222222222222",
-                    attachment_revision=1,
-                    blob_hash="sha256:" + "b" * 64,
-                    size_bytes=1,
-                    establishing_server_cursor=2,
-                    availability_at_acceptance="metadata_only",
-                ),
                 owner_user_id="other-owner-pg",
             )
         with pytest.raises(SyncDatasetNotFoundError):

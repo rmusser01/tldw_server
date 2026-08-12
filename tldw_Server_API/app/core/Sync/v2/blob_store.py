@@ -153,11 +153,18 @@ class LocalSyncBlobStore:
             raise SyncBlobStoreError("expected_size must be positive")
         _hash_digest(payload_hash)
         try:
-            path = self.resolve_storage_key(storage_key)
-            if not path.is_file() or path.stat().st_size != expected_size:
-                raise SyncBlobStoreError("Sync blob size does not match expected bytes")
-            if _sha256_file(path) != payload_hash:
-                raise SyncBlobStoreError("Sync blob digest does not match expected bytes")
+            _require_secure_relocation_capabilities()
+            with _open_contained_regular_file(
+                self.root,
+                storage_key,
+                error_message="Sync blob verification failed",
+                recheck_name=True,
+            ) as handle:
+                _verify_open_blob(
+                    handle,
+                    payload_hash=payload_hash,
+                    expected_size=expected_size,
+                )
         except SyncBlobStoreError:
             raise
         except OSError as exc:
@@ -180,6 +187,7 @@ class LocalSyncBlobStore:
         digest = _hash_digest(payload_hash)
         namespace = _storage_namespace_id(storage_namespace_id)
         try:
+            _require_secure_relocation_capabilities()
             with _open_directory_chain(
                 self.root,
                 ("_locks", "legacy-relocation"),
@@ -230,6 +238,10 @@ class LocalSyncBlobStore:
                             "Sync legacy blob relocation failed"
                         ) from exc
                     return target_key
+        except NotImplementedError as exc:
+            raise SyncBlobStoreError(
+                "Sync legacy blob relocation has an unsupported platform"
+            ) from exc
         except LockAcquisitionError as exc:
             raise SyncBlobStoreError("Sync legacy blob relocation lock is unavailable") from exc
 
@@ -328,6 +340,30 @@ def _open_regular_file_no_follow(path: Path, *, error_message: str) -> BinaryIO:
     except Exception:
         os.close(descriptor)
         raise
+
+
+def _require_secure_relocation_capabilities() -> None:
+    """Reject platforms lacking the descriptor-relative primitives we rely on."""
+
+    supported_dir_fd = {
+        getattr(function, "__name__", "")
+        for function in getattr(os, "supports_dir_fd", set())
+    }
+    supported_follow = {
+        getattr(function, "__name__", "")
+        for function in getattr(os, "supports_follow_symlinks", set())
+    }
+    if (
+        not getattr(os, "O_DIRECTORY", 0)
+        or not getattr(os, "O_NOFOLLOW", 0)
+        or not {"open", "stat", "mkdir", "unlink", "link"}.issubset(
+            supported_dir_fd
+        )
+        or "link" not in supported_follow
+    ):
+        raise SyncBlobStoreError(
+            "Sync legacy blob relocation has an unsupported platform"
+        )
 
 
 @contextmanager
@@ -502,6 +538,7 @@ def _open_contained_regular_file(
     storage_key: str,
     *,
     error_message: str,
+    recheck_name: bool = False,
 ) -> Iterator[BinaryIO]:
     """Open one contained regular file without following any path symlink."""
 
@@ -522,11 +559,27 @@ def _open_contained_regular_file(
         except OSError as exc:
             raise SyncBlobStoreError(error_message) from exc
         try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
                 raise SyncBlobStoreError(error_message)
             with os.fdopen(descriptor, "rb") as handle:
                 descriptor = -1
                 yield handle
+                if recheck_name:
+                    try:
+                        named = os.stat(
+                            segments[-1],
+                            dir_fd=directory,
+                            follow_symlinks=False,
+                        )
+                    except OSError as exc:
+                        raise SyncBlobStoreError(
+                            "Sync blob path identity changed"
+                        ) from exc
+                    if not stat.S_ISREG(named.st_mode) or not _same_inode(
+                        opened, named
+                    ):
+                        raise SyncBlobStoreError("Sync blob path identity changed")
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
@@ -576,6 +629,62 @@ def _open_target_at(directory: int, name: str) -> BinaryIO:
         raise
 
 
+def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino
+
+
+def _verify_named_open_blob(
+    handle: BinaryIO,
+    *,
+    directory: int,
+    name: str,
+    payload_hash: str,
+    expected_size: int,
+    expected_inode: os.stat_result | None = None,
+) -> os.stat_result:
+    """Verify bytes and then prove the directory name still names this inode."""
+
+    opened = os.fstat(handle.fileno())
+    if expected_inode is not None and not _same_inode(opened, expected_inode):
+        raise SyncBlobStoreError("Sync relocated blob target inode changed")
+    _verify_open_blob(
+        handle,
+        payload_hash=payload_hash,
+        expected_size=expected_size,
+    )
+    try:
+        named = os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except OSError as exc:
+        raise SyncBlobStoreError("Sync relocated blob target identity changed") from exc
+    if not stat.S_ISREG(named.st_mode) or not _same_inode(opened, named):
+        raise SyncBlobStoreError("Sync relocated blob target identity changed")
+    return opened
+
+
+def _unlink_name_if_inode_matches(
+    directory: int,
+    name: str,
+    expected_inode: os.stat_result,
+) -> bool:
+    """Unlink only the exact entry created by this relocation attempt."""
+
+    try:
+        named = os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if not stat.S_ISREG(named.st_mode) or not _same_inode(named, expected_inode):
+        return False
+    try:
+        os.unlink(name, dir_fd=directory)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _relocate_open_blob(
     source: BinaryIO,
     *,
@@ -600,8 +709,10 @@ def _relocate_open_blob(
         raise SyncBlobStoreError("Sync relocated blob target could not be opened safely") from exc
     if existing is not None:
         with existing:
-            _verify_open_blob(
+            _verify_named_open_blob(
                 existing,
+                directory=target_directory,
+                name=target_name,
                 payload_hash=payload_hash,
                 expected_size=expected_size,
             )
@@ -620,6 +731,7 @@ def _relocate_open_blob(
     except OSError as exc:
         raise SyncBlobStoreError("Sync relocation temporary file could not be created") from exc
 
+    expected = os.fstat(descriptor)
     published = False
     try:
         with os.fdopen(descriptor, "r+b", closefd=False) as temp:
@@ -634,7 +746,6 @@ def _relocate_open_blob(
                 expected_size=expected_size,
             )
 
-        expected = os.fstat(descriptor)
         named = os.stat(temp_name, dir_fd=target_directory, follow_symlinks=False)
         if (
             named.st_dev != expected.st_dev
@@ -653,31 +764,29 @@ def _relocate_open_blob(
             published = True
         except FileExistsError:
             with _open_target_at(target_directory, target_name) as existing:
-                _verify_open_blob(
+                _verify_named_open_blob(
                     existing,
+                    directory=target_directory,
+                    name=target_name,
                     payload_hash=payload_hash,
                     expected_size=expected_size,
                 )
             return
         try:
             with _open_target_at(target_directory, target_name) as target:
-                target_stat = os.fstat(target.fileno())
-                if (
-                    target_stat.st_dev != expected.st_dev
-                    or target_stat.st_ino != expected.st_ino
-                ):
-                    raise SyncBlobStoreError("Sync relocated blob target inode changed")
-                _verify_open_blob(
+                _verify_named_open_blob(
                     target,
+                    directory=target_directory,
+                    name=target_name,
                     payload_hash=payload_hash,
                     expected_size=expected_size,
+                    expected_inode=expected,
                 )
         except Exception:
-            if published:
-                try:
-                    os.unlink(target_name, dir_fd=target_directory)
-                except OSError:
-                    pass
+            if published and not _unlink_name_if_inode_matches(
+                target_directory, target_name, expected
+            ):
+                logger.warning("Relocation target cleanup skipped after identity change")
             raise
     except SyncBlobStoreError:
         raise
@@ -685,12 +794,8 @@ def _relocate_open_blob(
         raise SyncBlobStoreError("Sync legacy blob relocation failed") from exc
     finally:
         os.close(descriptor)
-        try:
-            os.unlink(temp_name, dir_fd=target_directory)
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            logger.warning("Failed to remove relocation temp entry {}: {}", temp_name, exc)
+        if not _unlink_name_if_inode_matches(target_directory, temp_name, expected):
+            logger.warning("Relocation temporary cleanup skipped after identity change")
 
 
 def _hash_digest(value: str) -> str:

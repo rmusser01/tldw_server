@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +10,7 @@ from typing import Any
 
 import pytest
 
+import tldw_Server_API.app.core.Sync.v2.blob_store as blob_store_module
 from tldw_Server_API.app.core.Sync.v2.blob_store import (
     LocalSyncBlobStore,
     SyncBlobStoreError,
@@ -428,6 +430,214 @@ def test_legacy_blob_relocation_rejects_target_symlink_swap_during_reverificatio
     assert outside.read_bytes() == payload
 
 
+def test_legacy_blob_relocation_rejects_post_verify_target_name_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy post-verify target race"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "d" * 32
+    target = store.root / store.namespace_storage_key(namespace, payload_hash)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    displaced = tmp_path / "displaced-target.blob"
+    original_verify = blob_store_module._verify_open_blob
+    calls = 0
+
+    def swap_name_after_verify(handle: Any, **kwargs: Any) -> None:
+        nonlocal calls
+        calls += 1
+        original_verify(handle, **kwargs)
+        if calls == 2:
+            target.rename(displaced)
+            target.write_bytes(payload)
+
+    monkeypatch.setattr(blob_store_module, "_verify_open_blob", swap_name_after_verify)
+
+    with pytest.raises(SyncBlobStoreError, match="identity"):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert calls == 2
+    assert target.read_bytes() == payload
+    assert displaced.read_bytes() == payload
+
+
+def test_relocation_cleanup_never_unlinks_swapped_target_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy cleanup target race"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "e" * 32
+    target = store.root / store.namespace_storage_key(namespace, payload_hash)
+    displaced = tmp_path / "published-target.blob"
+    replacement = b"attacker target must remain"
+    original_verify = blob_store_module._verify_open_blob
+    calls = 0
+
+    def fail_after_target_swap(handle: Any, **kwargs: Any) -> None:
+        nonlocal calls
+        calls += 1
+        original_verify(handle, **kwargs)
+        if calls == 3:
+            target.rename(displaced)
+            target.write_bytes(replacement)
+            raise SyncBlobStoreError("injected post-publish failure")
+
+    monkeypatch.setattr(blob_store_module, "_verify_open_blob", fail_after_target_swap)
+
+    with pytest.raises(SyncBlobStoreError, match="injected"):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert target.read_bytes() == replacement
+    assert displaced.read_bytes() == payload
+
+
+def test_relocation_cleanup_never_unlinks_swapped_temp_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy cleanup temp race"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "f" * 32
+    replacement = b"attacker temp must remain"
+    target_directory = store.root / "blobs" / "v2" / namespace
+    original_stat = os.stat
+    swapped_path: Path | None = None
+
+    def swap_temp_before_identity_check(
+        path: Any,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ):
+        nonlocal swapped_path
+        name = os.fspath(path)
+        if name.endswith(".relocating") and dir_fd is not None and swapped_path is None:
+            swapped_path = target_directory / name
+            os.unlink(name, dir_fd=dir_fd)
+            descriptor = os.open(
+                name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=dir_fd,
+            )
+            with os.fdopen(descriptor, "wb") as replacement_file:
+                replacement_file.write(replacement)
+        return original_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(os, "stat", swap_temp_before_identity_check)
+
+    with pytest.raises(SyncBlobStoreError, match="temporary inode changed"):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert swapped_path is not None
+    assert swapped_path.read_bytes() == replacement
+
+
+def test_legacy_relocation_fails_closed_when_secure_dirfd_capabilities_are_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy unsupported platform"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    monkeypatch.setattr(os, "supports_dir_fd", set())
+
+    with pytest.raises(SyncBlobStoreError, match="unsupported platform"):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id="1" * 32,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+
+def test_legacy_relocation_wraps_runtime_unsupported_dir_relative_link(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy runtime unsupported link"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+
+    def unsupported_link(*_args: Any, **_kwargs: Any) -> None:
+        raise NotImplementedError("dir-relative link unavailable")
+
+    monkeypatch.setattr(os, "link", unsupported_link)
+    with pytest.raises(SyncBlobStoreError, match="unsupported platform"):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id="3" * 32,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+
+def test_verify_blob_uses_descriptor_anchored_path() -> None:
+    source = inspect.getsource(LocalSyncBlobStore.verify_blob)
+    assert "_open_contained_regular_file" in source
+    assert ".is_file()" not in source
+    assert ".stat()" not in source
+
+
+def test_verify_blob_rejects_post_verify_name_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"anchored replay name race"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    key = store.relocate_legacy_blob(
+        legacy_storage_key=legacy_key,
+        storage_namespace_id="4" * 32,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    )
+    target = store.root / key
+    displaced = tmp_path / "replay-displaced.blob"
+    original_verify = blob_store_module._verify_open_blob
+
+    def swap_after_verify(handle: Any, **kwargs: Any) -> None:
+        original_verify(handle, **kwargs)
+        target.rename(displaced)
+        target.write_bytes(payload)
+
+    monkeypatch.setattr(blob_store_module, "_verify_open_blob", swap_after_verify)
+    with pytest.raises(SyncBlobStoreError, match="identity"):
+        store.verify_blob(key, payload_hash=payload_hash, expected_size=len(payload))
+
+    assert target.read_bytes() == payload
+    assert displaced.read_bytes() == payload
+
+
+def test_relocation_cleanup_warning_never_contains_temp_identity() -> None:
+    source = inspect.getsource(blob_store_module._relocate_open_blob)
+    warning_lines = [line for line in source.splitlines() if "logger.warning" in line]
+    assert warning_lines
+    assert all("temp_name" not in line for line in warning_lines)
+    assert all("digest" not in line for line in warning_lines)
+    assert all("namespace" not in line for line in warning_lines)
+
+
 def test_legacy_blob_relocation_never_reopens_temporary_file_by_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -507,7 +717,8 @@ def test_legacy_blob_relocation_rejects_temporary_inode_swap_before_publish(
         )
 
     assert attacked is True
-    assert os.path.lexists(target) is False
+    assert target.is_symlink()
+    assert target.resolve() == outside
     assert outside.read_bytes() == payload
     assert store.read_blob(legacy_key) == payload
 

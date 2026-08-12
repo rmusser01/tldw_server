@@ -16,7 +16,6 @@ from .models import (
     SyncAttachment,
     SyncAttachmentCreate,
     SyncAttachmentRevisionBinding,
-    SyncAttachmentRevisionBindingCreate,
     SyncBackgroundDomainStatus,
     SyncBackgroundLease,
     SyncBackgroundLeaseCreate,
@@ -795,17 +794,6 @@ class SyncV2Store:
         """Store or deduplicate an encrypted attachment through the DB layer."""
 
         return self.db.store_attachment(attachment)
-
-    def create_attachment_revision_binding(
-        self,
-        binding: SyncAttachmentRevisionBindingCreate,
-        *,
-        owner_user_id: str,
-    ) -> SyncAttachmentRevisionBinding:
-        return self.db.create_attachment_revision_binding(
-            binding,
-            owner_user_id=owner_user_id,
-        )
 
     def get_attachment_revision_binding(
         self,

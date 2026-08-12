@@ -547,7 +547,7 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
-    dataset_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
     storage_namespace_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -6651,13 +6651,19 @@ class SyncDatabase:
         blob_row = _first(
             self.execute(
                 """
-                SELECT blob_id
-                  FROM sync_blob_objects
-                 WHERE dataset_id = ?
-                   AND payload_hash = ?
-                   AND size_bytes = ?
-                   AND status = 'available'
-                 ORDER BY blob_id ASC
+                SELECT blob.blob_id
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ?
+                   AND blob.payload_hash = ?
+                   AND blob.size_bytes = ?
+                   AND blob.status = 'available'
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = dataset.owner_user_id
+                   )
+                 ORDER BY blob.blob_id ASC
                  LIMIT 1
                 """
                 + suffix,  # nosec B608 - backend-controlled row lock suffix.
@@ -6765,25 +6771,6 @@ class SyncDatabase:
             raise SyncStoreError("Sync attachment binding cannot be rebound")
         return _attachment_revision_binding_from_row(row)
 
-    def create_attachment_revision_binding(
-        self,
-        binding: SyncAttachmentRevisionBindingCreate,
-        *,
-        owner_user_id: str,
-    ) -> SyncAttachmentRevisionBinding:
-        """Create or exactly replay one immutable attachment revision binding."""
-
-        with self.backend.transaction() as conn:
-            self._require_dataset_owner_for_update(
-                binding.dataset_id,
-                owner_user_id,
-                connection=conn,
-            )
-            return self._create_attachment_revision_binding(
-                binding,
-                connection=conn,
-            )
-
     def get_attachment_revision_binding(
         self,
         dataset_id: str,
@@ -6859,8 +6846,15 @@ class SyncDatabase:
         row = _first(
             self.execute(
                 """
-                SELECT * FROM sync_blob_objects
-                 WHERE dataset_id = ? AND blob_id = ?
+                SELECT blob.*
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ? AND blob.blob_id = ?
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = dataset.owner_user_id
+                   )
                 """
                 + suffix,  # nosec B608 - backend-controlled row lock suffix.
                 (binding.dataset_id, blob_id),
@@ -7075,15 +7069,38 @@ class SyncDatabase:
     ) -> None:
         if blob_row.get("status") != "available":
             return
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        authoritative_blob = _first(
+            self.execute(
+                """
+                SELECT blob.*
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ? AND blob.blob_id = ?
+                   AND blob.status = 'available'
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = dataset.owner_user_id
+                   )
+                """
+                + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (blob_row["dataset_id"], blob_row["blob_id"]),
+                connection=connection,
+            )
+        )
+        if authoritative_blob is None:
+            raise SyncStoreError("Sync blob is unavailable under dataset owner authority")
+        blob_row = authoritative_blob
         match_params = (
             blob_row["dataset_id"],
             blob_row["payload_hash"],
             int(blob_row["size_bytes"]),
         )
-        self.execute(
+        current_rows = self.execute(
             """
-            UPDATE sync_attachment_revision_bindings
-               SET resolved_blob_id = ?
+            SELECT dataset_id, attachment_id, attachment_revision
+              FROM sync_attachment_revision_bindings
              WHERE dataset_id = ? AND blob_hash = ? AND size_bytes = ?
                AND resolved_blob_id IS NULL AND retention_released_at IS NULL
                AND EXISTS (
@@ -7096,11 +7113,13 @@ class SyncDatabase:
                        AND head.latest_server_cursor =
                                sync_attachment_revision_bindings.establishing_server_cursor
                )
+             ORDER BY establishing_server_cursor, attachment_id, attachment_revision
+             LIMIT 1000
             """,
-            (blob_row["blob_id"], *match_params),
+            match_params,
             connection=connection,
-        )
-        rows = self.execute(
+        ).rows
+        historical_rows = self.execute(
             """
             SELECT dataset_id, attachment_id, attachment_revision
               FROM sync_attachment_revision_bindings
@@ -7122,7 +7141,7 @@ class SyncDatabase:
             match_params,
             connection=connection,
         ).rows
-        for row in rows:
+        for row in (*current_rows, *historical_rows):
             self.execute(
                 """
                 UPDATE sync_attachment_revision_bindings
@@ -7577,8 +7596,15 @@ class SyncDatabase:
             row = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_blob_objects
-                     WHERE dataset_id = ? AND payload_hash = ?
+                    SELECT blob.*
+                      FROM sync_blob_objects AS blob
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = blob.dataset_id
+                     WHERE blob.dataset_id = ? AND blob.payload_hash = ?
+                       AND (
+                            dataset.scope_type = 'workspace'
+                            OR blob.owner_user_id = dataset.owner_user_id
+                       )
                     """
                     + suffix,  # nosec B608 - backend-controlled row lock suffix.
                     (blob.dataset_id, blob.payload_hash),
@@ -7586,7 +7612,9 @@ class SyncDatabase:
                 )
             )
             if row is None:
-                raise SyncStoreError("Sync blob object insert did not produce a retrievable record")
+                raise SyncStoreError(
+                    "Sync blob is unavailable under dataset owner authority"
+                )
             if _blob_object_fingerprint_from_row(row) != _blob_object_fingerprint_from_create(blob):
                 raise SyncIdempotencyConflictError(
                     "Sync blob payload hash was reused with different metadata"
@@ -8588,7 +8616,7 @@ class SyncDatabase:
                 CHECK (resolved_blob_id IS NULL OR length(resolved_blob_id) > 0)
             );
             CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
-                dataset_id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL PRIMARY KEY,
                 owner_user_id TEXT NOT NULL,
                 storage_namespace_id TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
@@ -8634,7 +8662,7 @@ class SyncDatabase:
                 CHECK (resolved_blob_id IS NULL OR length(resolved_blob_id) > 0)
             );
             CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
-                dataset_id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL PRIMARY KEY,
                 owner_user_id TEXT NOT NULL,
                 storage_namespace_id TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -8677,6 +8705,286 @@ class SyncDatabase:
             """,
         ):
             self.execute(statement, connection=connection)
+        if self.backend_type == BackendType.POSTGRESQL:
+            self._verify_attachment_binding_tables_postgres(connection=connection)
+        else:
+            self._verify_attachment_binding_tables_sqlite(
+                connection=connection,
+                canonical_schema=schema,
+            )
+
+    @staticmethod
+    def _compact_catalog_sql(value: Any) -> str:
+        return "".join(str(value or "").lower().replace('"', "").split())
+
+    def _verify_attachment_binding_tables_sqlite(
+        self,
+        *,
+        connection: Any,
+        canonical_schema: str,
+    ) -> None:
+        expected_columns = {
+            "sync_attachment_revision_bindings": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("attachment_id", "TEXT", 1, 2),
+                ("attachment_revision", "INTEGER", 1, 3),
+                ("blob_hash", "TEXT", 1, 0),
+                ("size_bytes", "INTEGER", 1, 0),
+                ("establishing_server_cursor", "INTEGER", 1, 0),
+                ("availability_at_acceptance", "TEXT", 1, 0),
+                ("resolved_blob_id", "TEXT", 0, 0),
+                ("retention_released_at", "TEXT", 0, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+            "sync_dataset_storage_namespaces": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("owner_user_id", "TEXT", 1, 0),
+                ("storage_namespace_id", "TEXT", 1, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+        }
+        expected_table_sql = {}
+        for statement in canonical_schema.split(";"):
+            compact_statement = self._compact_catalog_sql(statement)
+            for table_name in expected_columns:
+                if f"createtableifnotexists{table_name}(" in compact_statement:
+                    expected_table_sql[table_name] = compact_statement.replace(
+                        "createtableifnotexists",
+                        "createtable",
+                        1,
+                    )
+        expected_indexes = {
+            "idx_sync_attachment_bindings_unresolved": "createindexidx_sync_attachment_bindings_unresolvedonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
+            "idx_sync_attachment_bindings_blob": "createindexidx_sync_attachment_bindings_blobonsync_attachment_revision_bindings(dataset_id,resolved_blob_id)",
+            "idx_sync_attachment_bindings_pending_digest": "createindexidx_sync_attachment_bindings_pending_digestonsync_attachment_revision_bindings(dataset_id,blob_hash,size_bytes,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
+            "uq_sync_dataset_storage_namespace_id": "createuniqueindexuq_sync_dataset_storage_namespace_idonsync_dataset_storage_namespaces(storage_namespace_id)",
+            "idx_sync_dataset_storage_namespaces_owner": "createindexidx_sync_dataset_storage_namespaces_owneronsync_dataset_storage_namespaces(owner_user_id,dataset_id)",
+        }
+        for table_name, expected in expected_columns.items():
+            rows = self.execute(
+                f"PRAGMA table_info({table_name})",  # nosec B608 - fixed catalog names.
+                connection=connection,
+            ).rows
+            actual = [
+                (row["name"], row["type"], int(row["notnull"]), int(row["pk"]))
+                for row in rows
+            ]
+            table_row = _first(
+                self.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                    (table_name,),
+                    connection=connection,
+                )
+            )
+            compact = self._compact_catalog_sql(
+                None if table_row is None else table_row.get("sql")
+            )
+            if actual != expected or compact != expected_table_sql.get(table_name):
+                raise SyncStoreError("Sync attachment authority catalog is malformed")
+        rows = self.execute(
+            """
+            SELECT name, sql FROM sqlite_master
+             WHERE type = 'index'
+               AND name IN (
+                    'idx_sync_attachment_bindings_unresolved',
+                    'idx_sync_attachment_bindings_blob',
+                    'idx_sync_attachment_bindings_pending_digest',
+                    'uq_sync_dataset_storage_namespace_id',
+                    'idx_sync_dataset_storage_namespaces_owner'
+               )
+             ORDER BY name
+            """,
+            connection=connection,
+        ).rows
+        actual_indexes = {
+            row["name"]: self._compact_catalog_sql(row["sql"])
+            for row in rows
+        }
+        if actual_indexes != expected_indexes:
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+
+    def _verify_attachment_binding_tables_postgres(self, *, connection: Any) -> None:
+        expected_columns = {
+            "sync_attachment_revision_bindings": [
+                ("dataset_id", "text", True),
+                ("attachment_id", "text", True),
+                ("attachment_revision", "bigint", True),
+                ("blob_hash", "text", True),
+                ("size_bytes", "bigint", True),
+                ("establishing_server_cursor", "bigint", True),
+                ("availability_at_acceptance", "text", True),
+                ("resolved_blob_id", "text", False),
+                ("retention_released_at", "timestamp with time zone", False),
+                ("created_at", "timestamp with time zone", True),
+            ],
+            "sync_dataset_storage_namespaces": [
+                ("dataset_id", "text", True),
+                ("owner_user_id", "text", True),
+                ("storage_namespace_id", "text", True),
+                ("created_at", "timestamp with time zone", True),
+            ],
+        }
+        rows = self.execute(
+            """
+            SELECT relation.relname AS table_name,
+                   attribute.attname AS column_name,
+                   pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS data_type,
+                   attribute.attnotnull AS is_not_null
+              FROM pg_catalog.pg_class AS relation
+              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+              JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid = relation.oid
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN ('sync_attachment_revision_bindings', 'sync_dataset_storage_namespaces')
+               AND relation.relkind = 'r' AND attribute.attnum > 0 AND NOT attribute.attisdropped
+             ORDER BY relation.relname, attribute.attnum
+            """,
+            connection=connection,
+        ).rows
+        actual_columns = {name: [] for name in expected_columns}
+        for row in rows:
+            actual_columns[row["table_name"]].append(
+                (row["column_name"], row["data_type"], bool(row["is_not_null"]))
+            )
+        if actual_columns != expected_columns:
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+        constraints = self.execute(
+            """
+            SELECT relation.relname AS table_name, constraint_record.contype AS kind,
+                   pg_catalog.pg_get_constraintdef(constraint_record.oid, true) AS definition
+              FROM pg_catalog.pg_constraint AS constraint_record
+              JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint_record.conrelid
+              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN ('sync_attachment_revision_bindings', 'sync_dataset_storage_namespaces')
+             ORDER BY relation.relname, constraint_record.contype, constraint_record.conname
+            """,
+            connection=connection,
+        ).rows
+        expected_constraints = {
+            "sync_attachment_revision_bindings": {
+                ("p", "primarykeydataset_id,attachment_id,attachment_revision"),
+                ("c", "checklengthdataset_id>0"),
+                (
+                    "c",
+                    "checkattachment_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'",
+                ),
+                ("c", "checkattachment_revision>0"),
+                ("c", "checkblob_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checksize_bytes>0"),
+                ("c", "checkestablishing_server_cursor>0"),
+                (
+                    "c",
+                    "checkavailability_at_acceptance=anyarray['available','metadata_only']",
+                ),
+                ("c", "checkresolved_blob_idisnullorlengthresolved_blob_id>0"),
+            },
+            "sync_dataset_storage_namespaces": {
+                ("p", "primarykeydataset_id"),
+                ("c", "checklengthdataset_id>0"),
+                ("c", "checklengthowner_user_id>0"),
+                ("c", "checkstorage_namespace_id~'^[0-9a-f]{32}$'"),
+            },
+        }
+        actual_constraints = {
+            table_name: {
+                (
+                    str(row["kind"]),
+                    self._compact_postgres_catalog_sql(row["definition"]),
+                )
+                for row in constraints
+                if row["table_name"] == table_name
+            }
+            for table_name in expected_constraints
+        }
+        if actual_constraints != expected_constraints:
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+        indexes = self.execute(
+            """
+            SELECT index_relation.relname AS index_name,
+                   table_relation.relname AS table_name,
+                   index_record.indisunique AS is_unique,
+                   index_record.indisvalid AS is_valid,
+                   index_record.indisready AS is_ready,
+                   pg_catalog.pg_get_indexdef(index_record.indexrelid) AS definition,
+                   pg_catalog.pg_get_expr(index_record.indpred, index_record.indrelid) AS predicate
+              FROM pg_catalog.pg_index AS index_record
+              JOIN pg_catalog.pg_class AS index_relation ON index_relation.oid = index_record.indexrelid
+              JOIN pg_catalog.pg_class AS table_relation ON table_relation.oid = index_record.indrelid
+              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = table_relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND index_relation.relname IN (
+                    'idx_sync_attachment_bindings_unresolved',
+                    'idx_sync_attachment_bindings_blob',
+                    'idx_sync_attachment_bindings_pending_digest',
+                    'uq_sync_dataset_storage_namespace_id',
+                    'idx_sync_dataset_storage_namespaces_owner'
+               )
+             ORDER BY index_relation.relname
+            """,
+            connection=connection,
+        ).rows
+        expected_indexes = {
+            "idx_sync_attachment_bindings_unresolved": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,establishing_server_cursor,attachment_id,attachment_revision",
+                "resolved_blob_idisnullandretention_released_atisnull",
+            ),
+            "idx_sync_attachment_bindings_blob": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,resolved_blob_id",
+                "",
+            ),
+            "idx_sync_attachment_bindings_pending_digest": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,blob_hash,size_bytes,establishing_server_cursor,attachment_id,attachment_revision",
+                "resolved_blob_idisnullandretention_released_atisnull",
+            ),
+            "uq_sync_dataset_storage_namespace_id": (
+                "sync_dataset_storage_namespaces",
+                True,
+                "storage_namespace_id",
+                "",
+            ),
+            "idx_sync_dataset_storage_namespaces_owner": (
+                "sync_dataset_storage_namespaces",
+                False,
+                "owner_user_id,dataset_id",
+                "",
+            ),
+        }
+        if {row["index_name"] for row in indexes} != set(expected_indexes):
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+        for row in indexes:
+            table_name, unique, columns, predicate = expected_indexes[
+                row["index_name"]
+            ]
+            actual_predicate = self._compact_postgres_catalog_sql(
+                row.get("predicate")
+            )
+            definition = self._compact_postgres_catalog_sql(row["definition"])
+            try:
+                definition_tail = definition.split("usingbtree", 1)[1]
+            except IndexError:
+                definition_tail = ""
+            expected_tail = columns + (f"where{predicate}" if predicate else "")
+            if (
+                row["table_name"] != table_name
+                or bool(row["is_unique"]) != unique
+                or not row["is_valid"] or not row["is_ready"]
+                or definition_tail != expected_tail
+                or actual_predicate != predicate
+            ):
+                raise SyncStoreError("Sync attachment authority catalog is malformed")
+
+    @classmethod
+    def _compact_postgres_catalog_sql(cls, value: Any) -> str:
+        compact = cls._compact_catalog_sql(value)
+        for cast in ("::text", "::bigint"):
+            compact = compact.replace(cast, "")
+        return compact.replace("(", "").replace(")", "")
 
     def _ensure_envelope_m1_indexes(self, *, connection: Any) -> None:
         statements = [
