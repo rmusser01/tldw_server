@@ -112,16 +112,26 @@ def get_claims_monitoring_event_payload_bounded(
         raise ValueError("event_id must be a positive integer")
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValueError("max_bytes must be a positive integer")
-    size_sql = (
-        "COALESCE(octet_length(payload_json), 0)"
-        if self.backend_type == BackendType.POSTGRESQL
-        else "COALESCE(length(CAST(payload_json AS BLOB)), 0)"
-    )
+    if self.backend_type == BackendType.POSTGRESQL:
+        normalized_sql = (
+            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
+            "WHEN payload_json IS JSON THEN json_serialize(payload_json::jsonb RETURNING text) "
+            "ELSE '{}' END"
+        )
+        size_sql = f"octet_length({normalized_sql})"
+    else:
+        normalized_sql = (
+            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
+            "WHEN json_valid(payload_json) THEN json(payload_json) ELSE '{}' END"
+        )
+        size_sql = f"length(CAST(({normalized_sql}) AS BLOB))"
     row = self.execute_query(
         (
             "SELECT CASE WHEN "  # nosec B608 - expression is selected by backend type.
             + size_sql
-            + " <= ? THEN payload_json ELSE NULL END AS payload_json, "
+            + " <= ? THEN "
+            + normalized_sql
+            + " ELSE NULL END AS payload_json, "
             + size_sql
             + " AS payload_size_bytes FROM claims_monitoring_events "
             "WHERE id = ? AND user_id = ? LIMIT 1"
@@ -245,15 +255,43 @@ def list_claims_monitoring_events_page(
         conditions.append("(created_at > ? OR (created_at = ? AND id > ?))")
         params.extend([after_created_at, after_created_at, int(after_id)])
 
-    payload_size_sql = (
-        "COALESCE(octet_length(payload_json), 0)"
-        if self.backend_type == BackendType.POSTGRESQL
-        else "COALESCE(length(CAST(payload_json AS BLOB)), 0)"
-    )
+    if self.backend_type == BackendType.POSTGRESQL:
+        normalized_payload_sql = (
+            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
+            "WHEN payload_json IS JSON THEN json_serialize(payload_json::jsonb RETURNING text) "
+            "ELSE '{}' END"
+        )
+        payload_size_sql = f"octet_length({normalized_payload_sql})"
+        payload_provider_sql = (
+            "CASE WHEN payload_json IS JSON OBJECT THEN payload_json::jsonb ->> 'provider' END"
+        )
+        payload_model_sql = (
+            "CASE WHEN payload_json IS JSON OBJECT THEN payload_json::jsonb ->> 'model' END"
+        )
+    else:
+        normalized_payload_sql = (
+            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
+            "WHEN json_valid(payload_json) THEN json(payload_json) ELSE '{}' END"
+        )
+        payload_size_sql = f"length(CAST(({normalized_payload_sql}) AS BLOB))"
+        payload_provider_sql = (
+            "CASE WHEN json_valid(payload_json) THEN "
+            "CASE WHEN json_type(payload_json) = 'object' "
+            "THEN CAST(json_extract(payload_json, '$.provider') AS TEXT) END END"
+        )
+        payload_model_sql = (
+            "CASE WHEN json_valid(payload_json) THEN "
+            "CASE WHEN json_type(payload_json) = 'object' "
+            "THEN CAST(json_extract(payload_json, '$.model') AS TEXT) END END"
+        )
     query = (
         "SELECT id, user_id, event_type, severity, created_at, "  # nosec B608
         + payload_size_sql
-        + " AS payload_size_bytes "
+        + " AS payload_size_bytes, "
+        + payload_provider_sql
+        + " AS payload_provider, "
+        + payload_model_sql
+        + " AS payload_model "
         "FROM claims_monitoring_events WHERE "
         + " AND ".join(conditions)
         + " ORDER BY created_at ASC, id ASC LIMIT ?"

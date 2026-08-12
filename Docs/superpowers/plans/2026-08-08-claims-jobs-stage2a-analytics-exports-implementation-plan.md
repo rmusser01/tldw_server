@@ -1638,3 +1638,10 @@ outputs accumulate, and apply orphan grace after retention for pruned Jobs.
 - [x] Run compileall and Bandit on production touched scope; Bandit reported
   zero findings across 3,724 lines of production code.
 - [ ] Complete fresh specification and quality reviews and commit the batch.
+
+Review correction: both reviewers validated that raw payload size was being
+applied before provider/model filtering and pagination. RED: six JSON/CSV cases
+for oversized nonmatching rows, oversized off-page rows, and whitespace-heavy
+selected JSON. GREEN: provider/model metadata and normalized payload sizes are
+projected without payload text; only selected rows use the owner-scoped bounded
+payload read (7 focused rendering tests passed).

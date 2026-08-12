@@ -381,15 +381,12 @@ def _decode_event(
     return event, order_key, raw_created_at
 
 
-def _payload_matches(event: Mapping[str, Any], *, provider: str | None, model: str | None) -> bool:
+def _payload_matches(row: Mapping[str, Any], *, provider: str | None, model: str | None) -> bool:
     if provider is None and model is None:
         return True
-    payload = event.get("payload")
-    if not isinstance(payload, Mapping):
+    if provider is not None and row.get("payload_provider") != provider:
         return False
-    if provider is not None and str(payload.get("provider")) != provider:
-        return False
-    return model is None or str(payload.get("model")) == model
+    return model is None or row.get("payload_model") == model
 
 
 def _load_event_payload(
@@ -474,23 +471,19 @@ def _scan_events(
                 previous_key=previous_key,
             )
             page_last_id = previous_key[1]
-            if payload_filtering:
+            if payload_filtering and not _payload_matches(
+                raw_row,
+                provider=provider,
+                model=model,
+            ):
+                continue
+            if offset <= total < upper_bound:
                 event["payload"] = _load_event_payload(
                     db,
                     owner_user_id=owner_user_id,
                     row=raw_row,
                     max_bytes=max_bytes,
                 )
-                if not _payload_matches(event, provider=provider, model=model):
-                    continue
-            if offset <= total < upper_bound:
-                if not payload_filtering:
-                    event["payload"] = _load_event_payload(
-                        db,
-                        owner_user_id=owner_user_id,
-                        row=raw_row,
-                        max_bytes=max_bytes,
-                    )
                 emit(event)
                 selected_count += 1
             total += 1

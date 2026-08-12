@@ -371,8 +371,9 @@ integer value overrides that default, while invalid or non-positive values use 1
 Process environment values take precedence over config-loaded settings. API
 producer and WorkerSDK processes must use the same byte limit so synchronous and
 asynchronous rendering enforce one contract.
-Monitoring-event scans return metadata and payload byte sizes without returning
-payload text. Claims then loads only owner-scoped payloads that fit the budget
+Monitoring-event scans return filter metadata and normalized payload byte sizes
+without returning payload text. Claims then loads only selected, owner-scoped
+payloads whose normalized form fits the budget
 and appends each JSON event or CSV row to a byte-counted builder. An individually
 oversized payload and the first cumulative serialized overflow therefore fail
 before an oversized result or database page is retained in application memory.

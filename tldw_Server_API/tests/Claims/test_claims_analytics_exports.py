@@ -78,12 +78,21 @@ def _event(
 
 def _metadata_row(row: dict[str, Any]) -> dict[str, Any]:
     raw_payload = row.get("payload_json")
-    payload_size_bytes = len(raw_payload.encode("utf-8")) if isinstance(raw_payload, str) else 0
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except (TypeError, ValueError, UnicodeError):
+        payload = {}
+    normalized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    payload_size_bytes = len(normalized.encode("utf-8"))
     return {
         key: value
         for key, value in row.items()
         if key not in {"payload_json", "delivered_at"}
-    } | {"payload_size_bytes": payload_size_bytes}
+    } | {
+        "payload_size_bytes": payload_size_bytes,
+        "payload_provider": str(payload.get("provider")) if isinstance(payload, dict) and "provider" in payload else None,
+        "payload_model": str(payload.get("model")) if isinstance(payload, dict) and "model" in payload else None,
+    }
 
 
 class FakeMonitoringDB:
@@ -162,9 +171,14 @@ class FakeMonitoringDB:
             if str(row.get("user_id")) != user_id or row.get("id") != event_id:
                 continue
             raw_payload = row.get("payload_json")
-            payload_size_bytes = len(raw_payload.encode("utf-8")) if isinstance(raw_payload, str) else 0
+            try:
+                payload = json.loads(raw_payload) if raw_payload else {}
+            except (TypeError, ValueError, UnicodeError):
+                payload = {}
+            normalized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            payload_size_bytes = len(normalized.encode("utf-8"))
             return {
-                "payload_json": raw_payload if payload_size_bytes <= max_bytes else None,
+                "payload_json": normalized if payload_size_bytes <= max_bytes else None,
                 "payload_size_bytes": payload_size_bytes,
             }
         return {}
@@ -243,9 +257,14 @@ class ScriptedPageDB:
         if row is None or str(row.get("user_id")) != user_id:
             return {}
         raw_payload = row.get("payload_json")
-        payload_size_bytes = len(raw_payload.encode("utf-8")) if isinstance(raw_payload, str) else 0
+        try:
+            payload = json.loads(raw_payload) if raw_payload else {}
+        except (TypeError, ValueError, UnicodeError):
+            payload = {}
+        normalized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        payload_size_bytes = len(normalized.encode("utf-8"))
         return {
-            "payload_json": raw_payload if payload_size_bytes <= max_bytes else None,
+            "payload_json": normalized if payload_size_bytes <= max_bytes else None,
             "payload_size_bytes": payload_size_bytes,
         }
 
@@ -1087,6 +1106,57 @@ def test_render_rejects_cumulative_rows_at_first_exact_budget_overflow(format: s
 
     assert exc_info.value.code == "claims_export_too_large"
     assert [call["event_id"] for call in db.payload_calls] == [1, 2]
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_render_ignores_oversized_payload_excluded_by_provider_filter(format: str) -> None:
+    rows = [
+        _event(1, payload={"provider": "remote", "text": "x" * 10_000}),
+        _event(2, payload={"provider": "local", "text": "ok"}),
+    ]
+    db = FakeMonitoringDB(rows)
+
+    result = _render(
+        db,
+        _normalized(format=format, filters={"provider": "local"}),
+        max_bytes=1024,
+    )
+
+    assert result["event_count"] == 1
+    assert [call["event_id"] for call in db.payload_calls] == [2]
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_render_ignores_oversized_matching_payload_outside_page(format: str) -> None:
+    rows = [
+        _event(1, payload={"provider": "local", "text": "ok"}),
+        _event(2, payload={"provider": "local", "text": "x" * 10_000}),
+    ]
+    db = FakeMonitoringDB(rows)
+
+    result = _render(
+        db,
+        _normalized(
+            format=format,
+            filters={"provider": "local"},
+            pagination={"limit": 1, "offset": 0},
+        ),
+        max_bytes=1024,
+    )
+
+    assert result["event_count"] == 1
+    assert [call["event_id"] for call in db.payload_calls] == [1]
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_render_accepts_whitespace_heavy_payload_when_compact_output_fits(format: str) -> None:
+    raw_payload = '{"text":' + (" " * 4096) + '"ok"}'
+    db = FakeMonitoringDB([_event(1, payload_json=raw_payload)])
+
+    result = _render(db, _normalized(format=format), max_bytes=1024)
+
+    assert result["event_count"] == 1
+    assert result["size_bytes"] <= 1024
 
 
 def test_render_wraps_serialization_failures_without_raw_public_text() -> None:
