@@ -585,6 +585,21 @@ def test_normalize_rejects_noncanonical_owner_ids(owner_user_id: Any) -> None:
     assert exc_info.value.retryable is False
 
 
+def test_normalize_enforces_routable_owner_range() -> None:
+    maximum = "9223372036854775807"
+
+    assert normalize_export_request(
+        {}, owner_user_id=maximum, now=FIXED_NOW
+    )["owner_user_id"] == maximum
+
+    with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+        normalize_export_request(
+            {}, owner_user_id="9223372036854775808", now=FIXED_NOW
+        )
+
+    assert exc_info.value.code == "claims_owner_scope_violation"
+
+
 def test_normalize_accepts_naive_and_offset_timestamps_as_utc_milliseconds() -> None:
     naive = _normalized(filters={"start_time": "2026-08-01T01:02:03.456789"})
     offset = _normalized(filters={"start_time": "2026-08-01T01:02:03.456789-07:00"})

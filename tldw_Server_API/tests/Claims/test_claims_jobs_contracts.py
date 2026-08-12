@@ -174,6 +174,26 @@ def test_analytics_export_payload_accepts_exact_id_only_contract() -> None:
     }
 
 
+def test_analytics_export_payload_enforces_routable_owner_range() -> None:
+    maximum = "9223372036854775807"
+    export_id = "0123456789abcdef0123456789abcdef"
+
+    assert contracts.validate_analytics_export_payload(
+        {"version": 1, "owner_user_id": maximum, "export_id": export_id}
+    )["owner_user_id"] == maximum
+
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_analytics_export_payload(
+            {
+                "version": 1,
+                "owner_user_id": "9223372036854775808",
+                "export_id": export_id,
+            }
+        )
+
+    assert excinfo.value.failure_code == "claims_missing_owner"  # nosec B101
+
+
 @pytest.mark.parametrize(
     "export_id",
     [

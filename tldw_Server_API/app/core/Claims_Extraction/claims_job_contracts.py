@@ -16,6 +16,8 @@ CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE = "claims_generate_analytics_export"
 
 CLAIMS_JOB_PAYLOAD_VERSION = 1
 CLAIMS_ALERT_JOB_CHANNELS = {"slack", "webhook"}
+CLAIMS_MAX_OWNER_USER_ID = 9_223_372_036_854_775_807
+_CLAIMS_MAX_OWNER_USER_ID_TEXT = str(CLAIMS_MAX_OWNER_USER_ID)
 SENSITIVE_PAYLOAD_KEYS = {
     "db_path",
     "path",
@@ -77,6 +79,24 @@ class ClaimsJobError(RuntimeError):
             self.backoff_seconds = int(backoff_seconds)
 
 
+def is_routable_claims_owner_id_text(value: Any) -> bool:
+    """Return whether value is a canonical positive signed-BIGINT owner id."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or not value.isascii()
+        or not value.isdigit()
+        or value == "0"
+        or (len(value) > 1 and value.startswith("0"))
+    ):
+        return False
+    maximum = _CLAIMS_MAX_OWNER_USER_ID_TEXT
+    return len(value) < len(maximum) or (
+        len(value) == len(maximum) and value <= maximum
+    )
+
+
 def _normalize_dict(value: Any) -> dict[str, Any]:
     """Coerce a JSON object or mapping payload into a mutable dictionary."""
     if isinstance(value, dict):
@@ -134,14 +154,7 @@ def _owner_user_id(value: Any) -> str:
         owner = str(value)
     else:
         owner = value
-    if (
-        not owner
-        or owner != owner.strip()
-        or not owner.isascii()
-        or not owner.isdigit()
-        or owner == "0"
-        or (len(owner) > 1 and owner.startswith("0"))
-    ):
+    if not is_routable_claims_owner_id_text(owner):
         raise ClaimsJobError(
             "claims job payload owner_user_id must be a canonical positive integer",
             retryable=False,

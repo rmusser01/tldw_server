@@ -38,6 +38,9 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_clustering import rebuild_claim_clusters_embeddings
 from tldw_Server_API.app.core.Claims_Extraction.claims_embeddings import claim_embedding_id
+from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+    is_routable_claims_owner_id_text,
+)
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
     dispatch_claim_review_notifications,
     record_watchlist_cluster_notifications,
@@ -3434,20 +3437,14 @@ def _canonical_claims_export_owner_id(value: Any) -> str:
     if isinstance(value, bool):
         raise _claims_export_owner_error()
     if isinstance(value, int):
-        if value <= 0:
-            raise _claims_export_owner_error()
-        return str(value)
-    if not isinstance(value, str):
+        owner = str(value)
+    elif isinstance(value, str):
+        owner = value
+    else:
         raise _claims_export_owner_error()
-    if (
-        not value
-        or not value.isascii()
-        or not value.isdigit()
-        or value == "0"
-        or (len(value) > 1 and value.startswith("0"))
-    ):
+    if not is_routable_claims_owner_id_text(owner):
         raise _claims_export_owner_error()
-    return value
+    return owner
 
 
 def _claims_export_target_owner(

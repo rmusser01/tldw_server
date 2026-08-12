@@ -141,6 +141,18 @@ async def test_handler_rejects_noncanonical_owner(monkeypatch: pytest.MonkeyPatc
     assert excinfo.value.failure_code == "claims_owner_scope_violation"
 
 
+def test_handler_owner_validation_enforces_routable_integer_range() -> None:
+    maximum = "9223372036854775807"
+
+    assert claims_job_handlers._canonical_owner_user_id(maximum) == maximum
+    assert claims_job_handlers._canonical_owner_user_id(int(maximum)) == maximum
+
+    with pytest.raises(ClaimsJobError) as excinfo:
+        claims_job_handlers._canonical_owner_user_id("9223372036854775808")
+
+    assert excinfo.value.failure_code == "claims_owner_scope_violation"
+
+
 async def test_review_notification_delivery_failure_is_retryable(monkeypatch) -> None:
     monkeypatch.setattr(
         claims_job_handlers,

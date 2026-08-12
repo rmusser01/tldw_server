@@ -50,6 +50,22 @@ class _FakeDb:
         return True
 
 
+def test_service_owner_validation_enforces_routable_integer_range() -> None:
+    maximum = "9223372036854775807"
+
+    assert claims_service._canonical_claims_export_owner_id(maximum) == maximum
+    assert claims_service._canonical_claims_export_owner_id(int(maximum)) == maximum
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service._canonical_claims_export_owner_id("9223372036854775808")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "claims_owner_scope_violation",
+        "message": "Invalid Claims analytics export owner.",
+    }
+
+
 class _ExportReadDb:
     def __init__(
         self,

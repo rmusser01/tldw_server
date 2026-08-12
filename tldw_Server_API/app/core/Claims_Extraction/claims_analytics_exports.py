@@ -16,6 +16,9 @@ from uuid import uuid4
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+    is_routable_claims_owner_id_text,
+)
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Jobs.models import is_terminal_job_status
 
@@ -29,7 +32,6 @@ EXPORT_SOURCE_OVERHEAD_BYTES = 65_536
 EXPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 CSV_COLUMNS = ("id", "event_type", "severity", "created_at", "payload_json")
 
-_OWNER_ID_RE = re.compile(r"^[1-9][0-9]*$")
 _SCALAR_FILTERS = ("event_type", "severity", "provider", "model")
 _EVENT_COLUMNS = ("id", "user_id", "event_type", "severity", "created_at")
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -160,7 +162,7 @@ def _terminal_job_artifact_error(job_status: str) -> ClaimsAnalyticsExportError:
 
 
 def _canonical_owner_id(value: Any) -> str:
-    if not isinstance(value, str) or _OWNER_ID_RE.fullmatch(value) is None:
+    if not is_routable_claims_owner_id_text(value):
         raise _owner_error()
     return value
 
