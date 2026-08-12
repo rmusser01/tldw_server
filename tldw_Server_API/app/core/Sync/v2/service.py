@@ -4981,6 +4981,8 @@ class SyncV2Service:
         cursor: str | int | None,
         domains: Sequence[SyncDomain] | None,
     ) -> int:
+        """Resolve a legacy cursor from the request or stored domain watermarks."""
+
         if cursor is not None:
             return self._parse_cursor(cursor)
         cursor_domains = list(domains or self.settings.supported_domains)
@@ -4995,6 +4997,8 @@ class SyncV2Service:
         device: SyncDevice,
         domains: Sequence[SyncDomain],
     ) -> list[tuple[SyncDomain, int]]:
+        """Return mutually supported domain-version streams for a device pull."""
+
         version_set = self._pull_version_set(device)
         streams = [
             (domain, version)
@@ -5008,6 +5012,8 @@ class SyncV2Service:
         return streams
 
     def _pull_version_set(self, device: SyncDevice) -> dict[SyncDomain, list[int]]:
+        """Intersect a device's advertised adapter versions with server support."""
+
         requested = _device_requested_domains(device)
         try:
             advertised = normalize_supported_adapter_versions(
@@ -5036,6 +5042,8 @@ class SyncV2Service:
         page_size: int | None,
         include_own_changes: bool,
     ) -> SyncPullResult:
+        """Pull a token-paginated page without advancing past hidden conflicts."""
+
         version_set = self._pull_version_set(device)
         if cursor is None:
             watermarks: dict[tuple[SyncDomain, int], int] = {}
@@ -5140,6 +5148,8 @@ class SyncV2Service:
         page_limit: int,
         include_own_changes: bool,
     ) -> tuple[list[SyncEnvelope], list[SyncEnvelope], int | None]:
+        """Return raw and visible versioned candidates plus any blocking cursor."""
+
         candidates: dict[int, SyncEnvelope] = {}
         for (domain, adapter_version), watermark in watermarks.items():
             for envelope in self.store.list_envelopes_after(

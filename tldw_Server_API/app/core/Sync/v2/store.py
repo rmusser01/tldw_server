@@ -900,6 +900,8 @@ class SyncV2Store:
         *,
         owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding | None:
+        """Return the latest revision binding resolved to a blob for its owner."""
+
         return self.db.get_attachment_revision_binding_for_blob(
             dataset_id,
             blob_id,
@@ -918,6 +920,8 @@ class SyncV2Store:
         after_attachment_revision: int = 0,
         limit: int = 1000,
     ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded compound-keyset page of unreleased blob bindings."""
+
         return self.db.list_attachment_revision_bindings_for_blob(
             dataset_id,
             blob_id,
@@ -936,6 +940,8 @@ class SyncV2Store:
         *,
         owner_user_id: str,
     ) -> bool:
+        """Return whether an owned attachment has accepted adapter-v2 history."""
+
         return self.db.has_attachment_ref_v2_history(
             dataset_id,
             attachment_id,
@@ -951,6 +957,8 @@ class SyncV2Store:
         after_establishing_server_cursor: int = 0,
         limit: int = 1000,
     ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded cursor page of unresolved attachment bindings."""
+
         return self.db.list_unresolved_attachment_revision_bindings(
             dataset_id,
             owner_user_id=owner_user_id,
