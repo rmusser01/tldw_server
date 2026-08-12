@@ -94,6 +94,32 @@ describe("ServerReadinessGate", () => {
     )
   })
 
+  it("uses the bootstrapped server URL while the connection store hydrates", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "healthy" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate configuredServerUrl="http://127.0.0.1:19042">
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("App ready")).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:19042/api/v1/health",
+      expect.objectContaining({ method: "GET" })
+    )
+  })
+
   it("normalizes the saved server URL to its origin before probing health", async () => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
     vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")

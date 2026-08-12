@@ -66,6 +66,7 @@ type ConfiguredAuthState = {
   hasConfig: boolean
   authMode?: "single-user" | "multi-user"
   isAuthenticated: boolean
+  serverUrl?: string | null
 }
 
 const getErrorStatus = (error: unknown): number | null => {
@@ -145,6 +146,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         isAuthenticated: false
       }
     }
+    const serverUrl =
+      typeof config.serverUrl === "string" ? config.serverUrl : null
 
     if (config.authMode === "multi-user") {
       const hostedMode = isHostedTldwDeployment()
@@ -155,7 +158,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         return {
           hasConfig: true,
           authMode: "multi-user",
-          isAuthenticated: false
+          isAuthenticated: false,
+          serverUrl
         }
       }
 
@@ -165,14 +169,16 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         return {
           hasConfig: true,
           authMode: "multi-user",
-          isAuthenticated: true
+          isAuthenticated: true,
+          serverUrl
         }
       } catch (error) {
         if (!isAuthValidationFailure(error)) {
           return {
             hasConfig: true,
             authMode: "multi-user",
-            isAuthenticated: true
+            isAuthenticated: true,
+            serverUrl
           }
         }
         try {
@@ -183,7 +189,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         return {
           hasConfig: true,
           authMode: "multi-user",
-          isAuthenticated: false
+          isAuthenticated: false,
+          serverUrl
         }
       }
     }
@@ -191,6 +198,7 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
     return {
       hasConfig: true,
       authMode: "single-user",
+      serverUrl,
       isAuthenticated:
         hasActiveCookieSessionAuth(config) ||
         (typeof config.apiKey === "string" && config.apiKey.trim().length > 0)
@@ -220,6 +228,8 @@ export default function App({ Component, pageProps }: AppProps) {
   const shouldBypassGates =
     isPublicAuthRoute || isSettingsRoute || isSetupRoute || isDebugRoute
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
+  const [configuredServerUrl, setConfiguredServerUrl] =
+    React.useState<string | null>(null)
   const [authResolved, setAuthResolved] = React.useState(false)
   const didWarmRoutePrefetch = React.useRef(false)
 
@@ -244,6 +254,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
       if (!cancelled) {
         setIsAuthenticated(authed)
+        setConfiguredServerUrl(configuredAuth.serverUrl ?? null)
         setAuthResolved(true)
         if (
           !authed &&
@@ -429,7 +440,8 @@ export default function App({ Component, pageProps }: AppProps) {
           <ErrorBoundary>
             <ServerReadinessGate
               bypass={shouldBypassGates}
-              allowDegraded={shouldAllowDegradedReadiness}>
+              allowDegraded={shouldAllowDegradedReadiness}
+              configuredServerUrl={configuredServerUrl}>
               {gatedContent}
             </ServerReadinessGate>
           </ErrorBoundary>

@@ -333,8 +333,15 @@ export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   allowDegraded?: boolean
   bypass?: boolean
-}> = ({ children, allowDegraded = false, bypass = false }) => {
-  const configuredServerUrl = useConnectionStore((s) => s.state.serverUrl)
+  configuredServerUrl?: string | null
+}> = ({
+  children,
+  allowDegraded = false,
+  bypass = false,
+  configuredServerUrl = null
+}) => {
+  const storedServerUrl = useConnectionStore((s) => s.state.serverUrl)
+  const effectiveServerUrl = storedServerUrl || configuredServerUrl
   const offlineBypassEnabled = shouldBypassReadinessForOffline()
   const [gate, setGate] = React.useState<GateState>(() =>
     offlineBypassEnabled ? "ready" : "checking"
@@ -349,12 +356,12 @@ export const ServerReadinessGate: React.FC<{
     () => {
       if (bypass || offlineBypassEnabled) return HEALTH_PATH
       return resolveReadinessHealthUrl({
-        configuredServerUrl,
+        configuredServerUrl: effectiveServerUrl,
         env: _env,
         pageOrigin
       })
     },
-    [bypass, configuredServerUrl, offlineBypassEnabled, pageOrigin]
+    [bypass, effectiveServerUrl, offlineBypassEnabled, pageOrigin]
   )
 
   const retryNow = React.useCallback(() => {
