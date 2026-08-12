@@ -373,7 +373,12 @@ producer and WorkerSDK processes must use the same byte limit so synchronous and
 asynchronous rendering enforce one contract.
 Monitoring-event scans return only bounded ordering and ownership metadata;
 variable-width `event_type`, `severity`, and payload text are loaded only for
-selected, owner-scoped rows. Before parsing JSON, the selected-row query limits
+selected, owner-scoped rows. When a provider or model filter is present, the
+database checks raw payload bytes before evaluating JSON. Payload source above
+six times the configured export limit plus 64 KiB is not parsed; the scan
+returns a fixed-size marker and rendering fails with `claims_export_too_large`
+rather than silently excluding a possible match. Before parsing selected-row
+JSON, the selected-row query limits
 their combined raw UTF-8 source to six times the builder's remaining budget plus
 a fixed 64 KiB formatting allowance. It then canonicalizes the payload with
 compact separators, decoded Unicode, and finite JSON numbers and applies the
@@ -410,7 +415,9 @@ Export lookup, list, and download are owner-scoped at the database query. A
 platform-admin caller authorized to target another user receives generated
 cross-user URLs with that target's `workspace_id` query parameter so per-user
 SQLite routing resolves the correct database. Non-admin callers cannot set
-another owner, and missing and wrong-owner exports both return HTTP 404.
+another owner, and missing and wrong-owner exports both return HTTP 404. Owner
+IDs must be canonical positive signed-64-bit integers in the range 1 through
+9,223,372,036,854,775,807 before database routing.
 
 ### Export Status Lifecycle
 - **queued**: export request accepted and queued for async processing.
@@ -436,7 +443,14 @@ State transitions:
 
 Client guidance:
 - Poll `GET /api/v1/claims/analytics/export/{export_id}` with exponential backoff
-  (e.g., 2s, 5s, 10s, 30s) until `status` is `ready` or `failed`.
+  (e.g., 2s, 5s, 10s, 30s). Continue only while the HTTP 409 detail reports
+  artifact `status` as `queued` or `processing` and `job_status` is null or
+  non-terminal. Stop on HTTP 200, artifact `status=failed`, or terminal
+  `job_status` `completed`, `failed`, `cancelled`, or `quarantined`; cancelled
+  and quarantined downloads use stable `claims_export_job_cancelled` and
+  `claims_export_job_quarantined` codes. Listing `GET
+  /api/v1/claims/analytics/exports` also runs bounded reconciliation before it
+  returns artifact and Jobs status projections.
 - No webhook callback is provided; `export_id` is the tracking identifier.
 
 Cleanup:
@@ -447,14 +461,16 @@ Cleanup:
 - Retention accepts any finite positive hour value, including fractional values;
   invalid, non-finite, or non-positive values fall back to the default.
 - Once retention eligibility is reached, lifecycle-aware cleanup may delete aged
-  ready artifacts and aged failed artifacts whose exact Jobs state is terminal.
-  Every failed artifact without `job_id` requires retention plus orphan grace
-  and a successful exact owner-scoped lookup proving that no active or archived
-  Job exists. A failed artifact that retains `job_id` uses the same combined
-  threshold and absence proof when that exact Job was pruned or is missing.
-  Queued, processing, retrying, and uncertain non-ready artifacts are preserved.
-  A Jobs lookup failure or owner/domain/type mismatch remains uncertainty and
-  preserves the artifact.
+  ready artifacts. Every failed artifact, with or without `job_id`, requires
+  retention plus orphan grace and a successful exact owner-scoped,
+  archived-aware lookup proving that no Job exists. Any exact active or archived
+  Jobs row preserves the failed artifact regardless of its observed status,
+  because Jobs may retry terminal work. Queued, processing, retrying, and
+  uncertain non-ready artifacts are also preserved. A Jobs lookup failure or
+  owner/domain/type mismatch remains uncertainty and preserves the artifact.
+- Maintenance scans use `(user_id, status, export_id)` and
+  `(user_id, status, updated_at, export_id)` indexes on SQLite and PostgreSQL for
+  rotating and age-ordered bounded pages.
 - This is request-time maintenance, not a scheduled Claims cleanup job,
   scheduler, daemon, lease loop, or retry engine. Clients should download before
   expiry.

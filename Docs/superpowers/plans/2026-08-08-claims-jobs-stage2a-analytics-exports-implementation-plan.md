@@ -1787,3 +1787,25 @@ Specification re-review correction: metadata pages still returned unrestricted
 preparse cap and full failed-artifact grace rule. RED was 2 focused failures.
 GREEN keeps metadata pages fixed-width, hydrates all selected variable text in
 one owner-scoped remaining-budget query, and aligns product/design guidance.
+
+Final quality-audit correction: four additional findings were independently
+validated. Cleanup could delete a failed artifact after observing a terminal Job
+that Jobs could subsequently retry; provider/model predicates could parse an
+unrestricted raw payload; maintenance scans lacked indexes matching their
+filters and ordering; and owner validation accepted digit strings beyond the
+routable signed-64-bit range. Each correction followed RED/GREEN TDD:
+
+- Cleanup now preserves failed artifacts while any exact active or archived Job
+  exists and deletes only after retention plus grace and proven exact absence;
+  the full cleanup suite passed 56 tests.
+- Provider/model scans measure raw payload bytes before JSON evaluation, return
+  only a fixed oversized marker, and fail closed with
+  `claims_export_too_large`; renderer/database coverage passed 263 tests with 4
+  official PostgreSQL-unavailable skips.
+- Fresh, migration, and current-v24 repair paths now install
+  `(user_id, status, export_id)` and
+  `(user_id, status, updated_at, export_id)` indexes; query-plan and schema
+  coverage passed 73 tests with 3 official PostgreSQL-unavailable skips.
+- Contracts, handlers, rendering, and API routing now accept owner IDs only in
+  the canonical range 1 through 9,223,372,036,854,775,807; affected suites
+  passed 377 tests.

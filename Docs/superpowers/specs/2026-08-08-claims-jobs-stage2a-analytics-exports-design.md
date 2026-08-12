@@ -304,8 +304,9 @@ HTTP behavior remains synchronous, but validation is now explicit and shared.
 When both producer flags are enabled:
 
 1. The endpoint authorizes Claims administration access.
-2. It resolves a canonical positive integer owner ID. A cross-user
-   `workspace_id` requires platform-admin Claims permission.
+2. It resolves a canonical positive signed-64-bit integer owner ID in the range
+   1 through 9,223,372,036,854,775,807. A cross-user `workspace_id` requires
+   platform-admin Claims permission.
 3. It opens the target owner's Media DB. PostgreSQL uses the shared backend;
    SQLite uses that owner's database path.
 4. It performs bounded, best-effort terminal cleanup and orphan reconciliation.
@@ -422,9 +423,15 @@ Invalid or non-positive settings fall back to that default. The limit is
 measured against UTF-8 serialized bytes before persistence.
 
 The keyset scan applies provider/model filters in parameterized database
-predicates and returns only bounded ordering and ownership metadata, not
-variable-width `event_type`, `severity`, payload-derived values, or payload
-text. Provider/model predicates match JSON string values only; non-string JSON
+predicates and returns only bounded ordering and ownership metadata, plus a
+fixed-size oversized-source marker when a payload cannot safely be evaluated.
+It does not return variable-width `event_type`, `severity`, payload-derived
+strings, or payload text. Before provider/model JSON evaluation, the database
+measures raw payload bytes. A payload larger than six times the configured
+export byte limit plus a fixed 64 KiB allowance is not parsed; its metadata row
+is returned with the oversized marker and rendering fails closed with
+`claims_export_too_large` rather than silently excluding a possible match.
+Provider/model predicates match JSON string values only; non-string JSON
 scalars and containers do not match string filters on either backend. Claims
 applies pagination, then loads each selected owner-scoped row through a database
 query bounded by the builder's decreasing remaining-byte budget. Before
@@ -610,8 +617,9 @@ Jobs decides whether the Job is queued for retry, failed, or quarantined. Claims
 does not inspect retry counters or implement backoff.
 
 On any failed attempt, Claims may record `status="failed"` and a safe code. A
-later Jobs retry may transition that artifact back to processing. Cleanup must
-therefore consult terminal Jobs state before removing a failed artifact.
+later Jobs retry may transition that artifact back to processing, including
+after a terminal Jobs observation. Cleanup therefore preserves a failed
+artifact while any exact active or archived Jobs row exists.
 
 Raw exception strings, filters, and export content are not persisted in error
 fields or returned to API callers. Logs contain identifiers, operation names,
@@ -628,13 +636,14 @@ Existing request-time retention cleanup remains bounded and becomes
 lifecycle-aware:
 
 - Ready artifacts older than retention may be deleted.
-- Failed artifacts with a terminal Jobs status may be deleted after retention.
-- Any failed artifact without an attached Job ID may be deleted only after
-  retention plus orphan grace and a successful exact Jobs lookup confirms that
-  no active or archived row remains. This applies to synchronous rendering and
-  storage failures as well as enqueue/reconciliation failures.
-- Failed artifacts whose attached Jobs row has been pruned use the same exact
-  archived-aware absence proof and retention-plus-grace threshold.
+- Every failed artifact may be deleted only after retention plus orphan grace
+  and a successful exact archived-aware Jobs lookup confirms that no active or
+  archived row remains. This applies with or without an attached Job ID and to
+  synchronous rendering, storage, enqueue, and reconciliation failures.
+- A matching Jobs row preserves the failed artifact regardless of whether its
+  observed status is active or terminal, because Jobs may retry terminal work.
+  Cleanup becomes eligible only after Jobs history is pruned and exact absence
+  is proven.
 - An attached numeric Job row must match owner, domain, type, and exact export
   batch group. A missing or reused numeric row uses the exact archived-aware
   batch-group lookup before cleanup decides whether the artifact is terminal,
@@ -644,13 +653,17 @@ lifecycle-aware:
 - If Jobs status cannot be read, cleanup skips uncertain non-ready artifacts.
 
 Retention is measured from the terminal artifact update time, not merely initial
-creation time.
+creation time. SQLite and PostgreSQL provide
+`(user_id, status, export_id)` and
+`(user_id, status, updated_at, export_id)` indexes for rotating and age-ordered
+bounded maintenance pages.
 
 ## Security And Privacy
 
 - Payload validation rejects unknown and sensitive keys.
 - Job owner, payload owner, export owner, and requested owner must agree.
-- Owner IDs are canonical positive integers before database routing.
+- Owner IDs are canonical positive signed-64-bit integers before database
+  routing.
 - Cross-user access requires platform-admin Claims permission.
 - Export lookup includes owner scope at the database query, avoiding existence
   disclosure followed by an authorization check.
@@ -763,9 +776,9 @@ supported rollback sequence.
   leaves rows unchanged while Jobs is unavailable, fails only proven orphans,
   and converts attached non-ready artifacts only when their exact Job is
   terminal.
-- Cleanup preserves queued, processing, and retrying work and removes only
-  eligible terminal artifacts or failed artifacts whose exact Job absence is
-  proven after retention plus grace.
+- Cleanup preserves queued, processing, and retrying work, plus every failed
+  artifact with exact active or archived Jobs history. It removes failed
+  artifacts only when exact Job absence is proven after retention plus grace.
 - Cancelled, quarantined, missing, and pruned Job projections are represented
   safely.
 
