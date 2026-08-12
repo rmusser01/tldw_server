@@ -311,9 +311,13 @@ type WebSocketResult = {
   url: string
 }
 
-const inspectWebSocket = async (page: Page, url: string): Promise<WebSocketResult> =>
+const inspectWebSocket = async (
+  page: Page,
+  url: string,
+  timeoutMs = 15_000
+): Promise<WebSocketResult> =>
   page.evaluate(
-    ({ target }) =>
+    ({ target, timeoutMilliseconds }) =>
       new Promise<WebSocketResult>((resolve) => {
         const socket = new WebSocket(target)
         let settled = false
@@ -324,23 +328,39 @@ const inspectWebSocket = async (page: Page, url: string): Promise<WebSocketResul
           settled = true
           resolve(result)
         }
-        const timeout = window.setTimeout(() => {
+        const timeoutHandle = window.setTimeout(() => {
           socket.close()
           finish({ opened, closeCode: -1, url: openedUrl })
-        }, 45_000)
+        }, timeoutMilliseconds)
         socket.onopen = () => {
           opened = true
           openedUrl = socket.url
           socket.close(1000)
         }
         socket.onclose = (event) => {
-          window.clearTimeout(timeout)
+          window.clearTimeout(timeoutHandle)
           finish({ opened, closeCode: event.code, url: openedUrl })
         }
         socket.onerror = () => undefined
       }),
-    { target: url }
+    { target: url, timeoutMilliseconds: timeoutMs }
   )
+
+const inspectAuthenticatedWebSocket = async (
+  page: Page,
+  url: string
+): Promise<WebSocketResult & { attempts: number }> => {
+  let result: WebSocketResult = { opened: false, closeCode: -1, url }
+  // Next's dev proxy can drop a cold upgrade with 1006. Retry only transport
+  // failures; policy/auth close codes remain immediate failures.
+  for (let attempts = 1; attempts <= 3; attempts += 1) {
+    result = await inspectWebSocket(page, url)
+    if (result.opened || ![-1, 1006].includes(result.closeCode)) {
+      return { ...result, attempts }
+    }
+  }
+  return { ...result, attempts: 3 }
+}
 
 const startHostileOrigin = async (): Promise<Server> => {
   const server = createServer((_request, response) => {
@@ -521,7 +541,7 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
         `${wsBase}/api/v1/prompt-studio/ws`,
       ]
       for (const socketUrl of representativeSockets) {
-        const result = await inspectWebSocket(page, socketUrl)
+        const result = await inspectAuthenticatedWebSocket(page, socketUrl)
         expect(
           result.opened,
           `${socketUrl} did not authenticate through the cookie: ${JSON.stringify(result)}`
