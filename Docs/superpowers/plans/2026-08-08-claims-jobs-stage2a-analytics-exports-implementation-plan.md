@@ -1703,7 +1703,7 @@ lifecycle state.
   approved. Quality review found one terminal cleanup gap for enqueue-failed
   artifacts without an attached ID; focused RED was 4 failed/1 passed and GREEN
   was 5 passed, the full cleanup suite passed 43 tests, and re-review approved.
-- [ ] Commit separately.
+- [x] Commit separately as `e1b03907c0`.
 
 Initial TDD evidence: enqueue regressions failed 5 tests before the fix;
 hydration/cleanup regressions failed 7 tests with one incidental pass. GREEN
@@ -1711,3 +1711,7 @@ focused runs passed 5 enqueue tests and 8 identity/cleanup tests. The full API
 and cleanup suites passed 100 tests, and the broader Claims producer, handler,
 worker, and Jobs batch-read matrix passed 396 tests with six official
 PostgreSQL-unreachable fixture skips.
+
+After the quality-review correction, the final API/cleanup run passed 105
+tests. Ruff, compileall, Bandit (zero findings), and `git diff --check` passed
+on the final production and test scope.
