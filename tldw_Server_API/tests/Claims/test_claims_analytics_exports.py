@@ -1204,6 +1204,33 @@ def test_render_accepts_whitespace_heavy_payload_when_compact_output_fits(format
     assert result["size_bytes"] <= 1024
 
 
+def test_render_csv_stops_scanning_after_selected_page() -> None:
+    rows = [_event(event_id, payload={"text": "ok"}) for event_id in range(1, 1002)]
+    db = FakeMonitoringDB(rows)
+
+    result = _render(
+        db,
+        _normalized(format="csv", pagination={"limit": 1, "offset": 0}),
+    )
+
+    assert result["event_count"] == 1
+    assert len(db.calls) == 1
+    assert [call["event_id"] for call in db.payload_calls] == [1]
+
+
+def test_render_json_still_scans_all_pages_for_total() -> None:
+    rows = [_event(event_id, payload={"text": "ok"}) for event_id in range(1, 1002)]
+    db = FakeMonitoringDB(rows)
+
+    result = _render(
+        db,
+        _normalized(format="json", pagination={"limit": 1, "offset": 0}),
+    )
+
+    assert json.loads(result["payload_json"])["pagination"]["total"] == 1001
+    assert len(db.calls) == 2
+
+
 def test_render_wraps_serialization_failures_without_raw_public_text() -> None:
     secret = object()
     db = FakeMonitoringDB([_event(1, severity=secret)])  # type: ignore[arg-type]

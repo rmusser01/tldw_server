@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import (
+    ClaimsAnalyticsExportError,
     process_export_artifact,
+    render_export,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
@@ -1318,5 +1320,56 @@ def test_claims_monitoring_event_postgres_pages_are_bounded_with_equal_timestamp
             limit=10,
         )
         assert [row["id"] for row in filtered] == event_ids
+
+        escaped_payload = '{"text":"\\u6771\\u4eac"}'
+        canonical_payload = '{"text":"東京"}'
+        canonical_size = len(canonical_payload.encode("utf-8"))
+        escaped_event = db.insert_claims_monitoring_event(
+            user_id="owner-1",
+            event_type="escaped-unicode",
+            payload_json=escaped_payload,
+        )
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="owner-1",
+            event_id=int(escaped_event["id"]),
+            max_bytes=canonical_size,
+        ) == {
+            "payload_json": canonical_payload,
+            "payload_size_bytes": canonical_size,
+        }
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_sqlite_render_accepts_escaped_unicode_at_exact_artifact_boundary(
+    tmp_path: Path,
+    format: str,
+) -> None:
+    db = _make_db(tmp_path, f"claims-analytics-escaped-unicode-{format}.db")
+    try:
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="escaped-unicode",
+            severity="info",
+            payload_json='{"text":"' + ("\\u6771\\u4eac" * 32) + '"}',
+        )
+        render_kwargs = {
+            "owner_user_id": "1",
+            "format": format,
+            "filters": {},
+            "pagination": {"limit": 1, "offset": 0},
+            "snapshot_at": "2099-01-01T00:00:00.000Z",
+            "snapshot_event_id": db.get_claims_monitoring_event_high_water(user_id="1"),
+        }
+        baseline = render_export(db, max_bytes=100_000, **render_kwargs)
+        exact_size = baseline["size_bytes"]
+
+        exact = render_export(db, max_bytes=exact_size, **render_kwargs)
+        assert exact["size_bytes"] == exact_size
+
+        with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+            render_export(db, max_bytes=exact_size - 1, **render_kwargs)
+        assert exc_info.value.code == "claims_export_too_large"
     finally:
         db.close_connection()

@@ -648,6 +648,70 @@ def test_claims_monitoring_event_payload_scan_and_fetch_are_byte_bounded_and_own
         db.close_connection()
 
 
+def test_claims_monitoring_event_payload_bound_uses_canonical_unicode_bytes(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-escaped-unicode.db")
+    escaped_payload = '{"text":"\\u6771\\u4eac"}'
+    canonical_payload = '{"text":"東京"}'
+    canonical_size = len(canonical_payload.encode("utf-8"))
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unicode",
+            payload_json=escaped_payload,
+        )
+
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=canonical_size - 1,
+        ) == {
+            "payload_json": None,
+            "payload_size_bytes": canonical_size,
+        }
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=canonical_size,
+        ) == {
+            "payload_json": canonical_payload,
+            "payload_size_bytes": canonical_size,
+        }
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.parametrize("filter_name", ["event_type", "severity", "provider", "model"])
+def test_claims_monitoring_event_page_applies_empty_scalar_filters(
+    tmp_path: Path,
+    filter_name: str,
+) -> None:
+    db = _make_db(tmp_path, f"claims-monitoring-event-empty-{filter_name}.db")
+    try:
+        empty = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="",
+            severity="",
+            payload_json='{"provider":"","model":""}',
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="nonempty",
+            severity="nonempty",
+            payload_json='{"provider":"nonempty","model":"nonempty"}',
+        )
+
+        rows = db.list_claims_monitoring_events_page(
+            user_id="1",
+            **{filter_name: ""},
+        )
+
+        assert [row["id"] for row in rows] == [empty["id"]]
+    finally:
+        db.close_connection()
+
+
 def test_claims_monitoring_event_page_filters_only_string_provider_and_model_values(
     tmp_path: Path,
 ) -> None:

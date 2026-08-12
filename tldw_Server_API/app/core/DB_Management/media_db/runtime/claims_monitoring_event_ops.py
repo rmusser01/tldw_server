@@ -123,6 +123,9 @@ def get_claims_monitoring_event_payload_bounded(
             "WHEN json_valid(payload_json) THEN json(payload_json) ELSE '{}' END"
         )
         size_sql = f"length(CAST(({normalized_sql}) AS BLOB))"
+    # A compact JSON source can be at most six times larger than its canonical
+    # ensure_ascii=False form (for example, ``\u0061`` versus ``a``).
+    source_budget = max_bytes * 6
     row = self.execute_query(
         (
             "SELECT CASE WHEN "  # nosec B608
@@ -134,9 +137,31 @@ def get_claims_monitoring_event_payload_bounded(
             + " AS payload_size_bytes FROM claims_monitoring_events "
             "WHERE id = ? AND user_id = ? LIMIT 1"
         ),
-        (max_bytes, event_id, str(user_id)),
+        (source_budget, event_id, str(user_id)),
     ).fetchone()
-    return dict(row) if row else {}
+    if not row:
+        return {}
+
+    loaded = dict(row)
+    raw_payload = loaded.get("payload_json")
+    source_size = loaded.get("payload_size_bytes")
+    if raw_payload is None:
+        return {
+            "payload_json": None,
+            "payload_size_bytes": int(source_size),
+        }
+
+    payload = json.loads(raw_payload)
+    canonical_payload = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    canonical_size = len(canonical_payload.encode("utf-8"))
+    return {
+        "payload_json": canonical_payload if canonical_size <= max_bytes else None,
+        "payload_size_bytes": canonical_size,
+    }
 
 
 def get_claims_monitoring_event_high_water(self, *, user_id: str) -> int:
@@ -234,10 +259,10 @@ def list_claims_monitoring_events_page(
 
     conditions: list[str] = ["user_id = ?"]
     params: list[Any] = [str(user_id)]
-    if event_type:
+    if event_type is not None:
         conditions.append("event_type = ?")
         params.append(str(event_type))
-    if severity:
+    if severity is not None:
         conditions.append("severity = ?")
         params.append(str(severity))
     if provider is not None:

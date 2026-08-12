@@ -418,6 +418,7 @@ def _scan_events(
     filters: dict[str, Any],
     pagination: dict[str, int],
     snapshot_event_id: int | None,
+    scan_to_end: bool,
     remaining_bytes: Callable[[], int],
     emit: Callable[[dict[str, Any]], None],
 ) -> tuple[int, int]:
@@ -469,6 +470,8 @@ def _scan_events(
                 emit(event)
                 selected_count += 1
             total += 1
+            if not scan_to_end and total >= upper_bound:
+                return selected_count, total
 
         if len(page) < EXPORT_SCAN_PAGE_SIZE:
             break
@@ -593,6 +596,7 @@ def render_export(
             filters=normalized["filters"],
             pagination=normalized["pagination"],
             snapshot_event_id=snapshot_event_id,
+            scan_to_end=normalized["format"] == "json",
             remaining_bytes=lambda: builder.remaining_bytes,
             emit=emit,
         )
