@@ -187,22 +187,22 @@ def _exact_job(export_id: str, job_id: int, *, archived: bool = False) -> dict[s
 
 def test_hydrate_job_statuses_batches_unique_valid_ids_once_without_payload_access() -> None:
     rows = [
-        {"job_id": 4},
-        {"job_id": 4},
-        {"job_id": 7},
+        {"export_id": f"{4:032x}", "job_id": 4},
+        {"export_id": f"{5:032x}", "job_id": 4},
+        {"export_id": f"{7:032x}", "job_id": 7},
         {"job_id": None},
         {"job_id": True},
         {"job_id": 0},
     ]
     manager = FakeJobManager(
         jobs_by_id={
-            4: {"id": 4, "status": "processing", "result": object()},
+            4: {**_exact_job(f"{4:032x}", 4), "status": "processing", "result": object()},
         }
     )
 
     statuses = hydrate_job_statuses(rows, owner_user_id="7", job_manager=manager)
 
-    assert statuses == {4: "processing", 7: None}
+    assert statuses == {f"{4:032x}": "processing", f"{5:032x}": None, f"{7:032x}": None}
     assert manager.batch_calls == [
         {
             "job_ids": [4, 7],
@@ -212,9 +212,9 @@ def test_hydrate_job_statuses_batches_unique_valid_ids_once_without_payload_acce
         }
     ]
     assert rows == [
-        {"job_id": 4},
-        {"job_id": 4},
-        {"job_id": 7},
+        {"export_id": f"{4:032x}", "job_id": 4},
+        {"export_id": f"{5:032x}", "job_id": 4},
+        {"export_id": f"{7:032x}", "job_id": 7},
         {"job_id": None},
         {"job_id": True},
         {"job_id": 0},
@@ -222,16 +222,60 @@ def test_hydrate_job_statuses_batches_unique_valid_ids_once_without_payload_acce
 
 
 def test_hydrate_job_statuses_jobs_exception_returns_nulls_without_mutation() -> None:
-    rows = [{"job_id": 9, "status": "ready"}, {"job_id": 10, "status": "failed"}]
+    rows = [
+        {"export_id": f"{9:032x}", "job_id": 9, "status": "ready"},
+        {"export_id": f"{10:032x}", "job_id": 10, "status": "failed"},
+    ]
     before = [dict(row) for row in rows]
     manager = FakeJobManager(batch_error=RuntimeError("jobs unavailable with secret"))
 
     assert hydrate_job_statuses(rows, owner_user_id="7", job_manager=manager) == {
-        9: None,
-        10: None,
+        f"{9:032x}": None,
+        f"{10:032x}": None,
     }
     assert rows == before
     assert len(manager.batch_calls) == 1
+
+
+def test_hydrate_job_statuses_recovers_archived_exact_job_after_wrong_batch_group_shadow() -> None:
+    export_id = f"{12:032x}"
+    row = {"export_id": export_id, "job_id": 71}
+    manager = FakeJobManager(
+        jobs_by_id={71: {**_exact_job(f"{13:032x}", 71), "status": "processing"}},
+        groups={f"claims-analytics-export:{export_id}": {**_exact_job(export_id, 71, archived=True), "status": "completed"}},
+    )
+
+    assert hydrate_job_statuses([row], owner_user_id="7", job_manager=manager) == {export_id: "completed"}
+    assert len(manager.batch_calls) == 1
+    assert manager.group_calls == [
+        {
+            "batch_group": f"claims-analytics-export:{export_id}",
+            "domain": "claims",
+            "owner_user_id": "7",
+            "job_type": "claims_generate_analytics_export",
+            "include_archived": True,
+        }
+    ]
+
+
+def test_hydrate_job_statuses_keeps_duplicate_numeric_job_id_row_specific() -> None:
+    first_export_id = f"{14:032x}"
+    second_export_id = f"{15:032x}"
+    manager = FakeJobManager(
+        jobs_by_id={72: {**_exact_job(first_export_id, 72), "status": "completed"}},
+        groups={f"claims-analytics-export:{second_export_id}": {**_exact_job(second_export_id, 72, archived=True), "status": "failed"}},
+    )
+
+    assert hydrate_job_statuses(
+        [
+            {"export_id": first_export_id, "job_id": 72},
+            {"export_id": second_export_id, "job_id": 72},
+        ],
+        owner_user_id="7",
+        job_manager=manager,
+    ) == {first_export_id: "completed", second_export_id: "failed"}
+    assert len(manager.batch_calls) == 1
+    assert len(manager.group_calls) == 1
 
 
 def test_reconcile_repairs_exact_active_and_archived_jobs_before_grace(
@@ -409,7 +453,9 @@ def test_cleanup_deletes_old_ready_and_terminal_failed_rows(terminal: str) -> No
     ready = _artifact(10, status="ready", updated_seconds_ago=3601)
     failed = _artifact(11, status="failed", job_id=81, updated_seconds_ago=3601)
     db = MaintenanceDB([ready, failed])
-    manager = FakeJobManager(jobs_by_id={81: {"id": 81, "status": terminal}})
+    manager = FakeJobManager(
+        jobs_by_id={81: {**_exact_job(failed["export_id"], 81), "status": terminal}}
+    )
 
     deleted = cleanup_export_artifacts(
         db,
@@ -518,8 +564,11 @@ def test_cleanup_rotates_failed_page_past_older_uncertain_rows(
     db = MaintenanceDB([*uncertain, terminal])
     manager = FakeJobManager(
         jobs_by_id={
-            **{row["job_id"]: {"status": "processing"} for row in uncertain},
-            300: {"status": "completed"},
+            **{
+                row["job_id"]: {**_exact_job(row["export_id"], row["job_id"]), "status": "processing"}
+                for row in uncertain
+            },
+            300: {**_exact_job(terminal["export_id"], 300), "status": "completed"},
         }
     )
 
@@ -553,9 +602,9 @@ def test_cleanup_preserves_cutoff_active_and_status_uncertainty() -> None:
     db = MaintenanceDB(rows)
     manager = FakeJobManager(
         jobs_by_id={
-            91: {"id": 91, "status": "queued"},
-            92: {"id": 92, "status": "processing"},
-            93: {"id": 93, "status": "retrying"},
+            91: {**_exact_job(rows[3]["export_id"], 91), "status": "queued"},
+            92: {**_exact_job(rows[4]["export_id"], 92), "status": "processing"},
+            93: {**_exact_job(rows[5]["export_id"], 93), "status": "retrying"},
         }
     )
 
@@ -668,6 +717,74 @@ def test_cleanup_preserves_enqueue_failed_without_job_when_exact_job_exists(
     assert len(manager.group_calls) == 1
     assert manager.group_calls[0]["include_archived"] is True
     assert db.delete_calls == []
+
+
+@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled", "quarantined"])
+def test_cleanup_deletes_enqueue_failed_without_job_id_when_exact_job_is_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal: str,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    row = _artifact(
+        46,
+        status="failed",
+        updated_seconds_ago=3901,
+        error_code="claims_export_enqueue_failed",
+    )
+    db = MaintenanceDB([row])
+    manager = FakeJobManager(
+        groups={
+            f"claims-analytics-export:{row['export_id']}": {
+                **_exact_job(row["export_id"], 146, archived=True),
+                "status": terminal,
+            }
+        }
+    )
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 1
+    )
+    assert row["export_id"] not in db.rows
+
+
+def test_cleanup_preserves_enqueue_failed_without_job_id_when_exact_job_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    row = _artifact(
+        47,
+        status="failed",
+        updated_seconds_ago=3901,
+        error_code="claims_export_enqueue_failed",
+    )
+    db = MaintenanceDB([row])
+    manager = FakeJobManager(
+        groups={
+            f"claims-analytics-export:{row['export_id']}": {
+                **_exact_job(row["export_id"], 147),
+                "status": "processing",
+            }
+        }
+    )
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 0
+    )
+    assert row["export_id"] in db.rows
 
 
 def test_cleanup_preserves_enqueue_failed_without_job_on_malformed_lookup(
@@ -793,7 +910,127 @@ def test_cleanup_ignores_terminal_job_row_outside_requested_scope() -> None:
                 "owner_user_id": "8",
                 "job_type": "claims_generate_analytics_export",
             }
+        },
+        groups={
+            f"claims-analytics-export:{failed['export_id']}": {
+                **_exact_job(failed["export_id"], 112),
+                "owner_user_id": "8",
+            }
+        },
+    )
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 0
+    )
+    assert failed["export_id"] in db.rows
+
+
+def test_cleanup_recovers_archived_terminal_job_after_active_wrong_batch_group_shadow() -> None:
+    failed = _artifact(54, status="failed", job_id=114, updated_seconds_ago=7200)
+    db = MaintenanceDB([failed])
+    manager = FakeJobManager(
+        jobs_by_id={114: {**_exact_job(f"{55:032x}", 114), "status": "processing"}},
+        groups={
+            f"claims-analytics-export:{failed['export_id']}": {
+                **_exact_job(failed["export_id"], 114, archived=True),
+                "status": "completed",
+            }
+        },
+    )
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 1
+    )
+    assert failed["export_id"] not in db.rows
+    assert manager.group_calls == [
+        {
+            "batch_group": f"claims-analytics-export:{failed['export_id']}",
+            "domain": "claims",
+            "owner_user_id": "7",
+            "job_type": "claims_generate_analytics_export",
+            "include_archived": True,
         }
+    ]
+    assert len(manager.batch_calls) == 1
+    assert len(manager.group_calls) == 1
+
+
+def test_cleanup_preserves_artifact_when_exact_fallback_job_is_active() -> None:
+    failed = _artifact(56, status="failed", job_id=115, updated_seconds_ago=7200)
+    db = MaintenanceDB([failed])
+    manager = FakeJobManager(
+        jobs_by_id={115: {**_exact_job(f"{57:032x}", 115), "status": "completed"}},
+        groups={
+            f"claims-analytics-export:{failed['export_id']}": {
+                **_exact_job(failed["export_id"], 115),
+                "status": "processing",
+            }
+        },
+    )
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 0
+    )
+    assert failed["export_id"] in db.rows
+
+
+def test_cleanup_deletes_exact_none_fallback_only_after_retention_plus_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(exports.settings, "CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC", 300)
+    failed = _artifact(58, status="failed", job_id=116, updated_seconds_ago=3901)
+    db = MaintenanceDB([failed])
+    manager = FakeJobManager(jobs_by_id={116: {**_exact_job(f"{59:032x}", 116), "status": "completed"}})
+
+    assert (
+        cleanup_export_artifacts(
+            db,
+            owner_user_id="7",
+            job_manager=manager,
+            now=NOW,
+            retention_hours=1,
+        )
+        == 1
+    )
+    assert failed["export_id"] not in db.rows
+    assert manager.group_calls == [
+        {
+            "batch_group": f"claims-analytics-export:{failed['export_id']}",
+            "domain": "claims",
+            "owner_user_id": "7",
+            "job_type": "claims_generate_analytics_export",
+            "include_archived": True,
+        }
+    ]
+
+
+def test_cleanup_preserves_artifact_when_exact_fallback_lookup_is_uncertain() -> None:
+    failed = _artifact(60, status="failed", job_id=117, updated_seconds_ago=7200)
+    db = MaintenanceDB([failed])
+    manager = FakeJobManager(
+        jobs_by_id={117: {**_exact_job(f"{61:032x}", 117), "status": "completed"}},
+        groups={f"claims-analytics-export:{failed['export_id']}": RuntimeError("Jobs lookup unavailable")},
     )
 
     assert (
@@ -825,7 +1062,10 @@ def test_cleanup_rejects_type_only_terminal_job_row_shape() -> None:
         cleanup_export_artifacts(
             db,
             owner_user_id="7",
-            job_manager=FakeJobManager(jobs_by_id={113: type_only}),
+            job_manager=FakeJobManager(
+                jobs_by_id={113: type_only},
+                groups={f"claims-analytics-export:{failed['export_id']}": type_only},
+            ),
             now=NOW,
             retention_hours=1,
         )

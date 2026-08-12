@@ -1042,13 +1042,25 @@ def hydrate_job_statuses(
     *,
     owner_user_id: str,
     job_manager: Any,
-) -> dict[int, str | None]:
+) -> dict[str, str | None]:
     """Project scoped Jobs statuses without mutating artifact rows."""
     owner = _canonical_owner_id(owner_user_id)
-    job_ids = _valid_artifact_job_ids(rows)
-    if not job_ids:
+    artifacts: list[tuple[str, int, str]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            export_id = validate_export_id(row.get("export_id"))
+        except ClaimsAnalyticsExportError:
+            continue
+        job_id = row.get("job_id")
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+            continue
+        artifacts.append((export_id, job_id, f"{_EXPORT_BATCH_GROUP_PREFIX}{export_id}"))
+    if not artifacts:
         return {}
-    statuses = dict.fromkeys(job_ids)
+    statuses = {export_id: None for export_id, _job_id, _batch_group in artifacts}
+    job_ids = list(dict.fromkeys(job_id for _export_id, job_id, _batch_group in artifacts))
     try:
         jobs = job_manager.get_jobs_by_ids(
             job_ids,
@@ -1060,10 +1072,43 @@ def hydrate_job_statuses(
         return statuses
     if not isinstance(jobs, Mapping):
         return statuses
-    for job_id in job_ids:
+    for export_id, job_id, batch_group in artifacts:
         job = jobs.get(job_id)
-        status = job.get("status") if isinstance(job, Mapping) else None
-        statuses[job_id] = status if isinstance(status, str) else None
+        projection = _project_exact_export_job(
+            job,
+            owner_user_id=owner,
+            batch_group=batch_group,
+            job_id=job_id,
+        )
+        if projection is not None:
+            _validated_job_id, job_status = projection
+            statuses[export_id] = job_status
+            continue
+        try:
+            exact_job = job_manager.find_job_by_batch_group(
+                batch_group=batch_group,
+                domain="claims",
+                owner_user_id=owner,
+                job_type=_EXPORT_JOB_TYPE,
+                include_archived=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - uncertainty must keep the projection null.
+            logger.warning(
+                "Claims export Jobs projection unavailable: operation={} export_id={} error_type={}",
+                "find_job_by_batch_group",
+                export_id,
+                type(exc).__name__,
+            )
+            continue
+        projection = _project_exact_export_job(
+            exact_job,
+            owner_user_id=owner,
+            batch_group=batch_group,
+            job_id=job_id,
+        )
+        if projection is not None:
+            _validated_job_id, job_status = projection
+            statuses[export_id] = job_status
     return statuses
 
 
@@ -1103,6 +1148,26 @@ def _job_matches_reconciliation(
     ):
         return None
     return job_id
+
+
+def _project_exact_export_job(
+    job: Any,
+    *,
+    owner_user_id: str,
+    batch_group: str,
+    job_id: int | None = None,
+) -> tuple[int, str | None] | None:
+    """Return the read-only projection only for the artifact's exact Job identity."""
+    matched_job_id = _job_matches_reconciliation(
+        job,
+        owner_user_id=owner_user_id,
+        batch_group=batch_group,
+    )
+    if matched_job_id is None or (job_id is not None and matched_job_id != job_id):
+        return None
+    raw_status = job.get("status")
+    status = raw_status if isinstance(raw_status, str) and raw_status.strip() else None
+    return matched_job_id, status
 
 
 def reconcile_export_artifacts(
@@ -1200,18 +1265,15 @@ def _cleanup_job_status(
     *,
     job_id: int,
     owner_user_id: str,
+    batch_group: str,
 ) -> str | None:
-    if not isinstance(job, Mapping):
-        return None
-    if (
-        job.get("id") != job_id
-        or job.get("domain") != "claims"
-        or job.get("owner_user_id") != owner_user_id
-        or job.get("job_type") != _EXPORT_JOB_TYPE
-    ):
-        return None
-    status = job.get("status")
-    return status if isinstance(status, str) else None
+    projection = _project_exact_export_job(
+        job,
+        owner_user_id=owner_user_id,
+        batch_group=batch_group,
+        job_id=job_id,
+    )
+    return projection[1] if projection is not None else None
 
 
 def _cleanup_rotation_anchor(*, owner_user_id: str, now: datetime) -> str:
@@ -1349,30 +1411,71 @@ def cleanup_export_artifacts(
                 continue
             if job is None:
                 selected.append(validated_export_id)
-            elif (
-                _job_matches_reconciliation(
-                    job,
-                    owner_user_id=owner,
-                    batch_group=batch_group,
-                )
-                is None
-            ):
                 continue
+            projection = _project_exact_export_job(
+                job,
+                owner_user_id=owner,
+                batch_group=batch_group,
+            )
+            if projection is None:
+                continue
+            _job_id, job_status = projection
+            if job_status in _TERMINAL_JOB_STATUSES:
+                selected.append(validated_export_id)
             continue
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
             continue
         if not jobs_lookup_succeeded:
             continue
+        try:
+            validated_export_id = validate_export_id(export_id)
+        except ClaimsAnalyticsExportError:
+            continue
+        batch_group = f"{_EXPORT_BATCH_GROUP_PREFIX}{validated_export_id}"
         job = jobs.get(job_id)
-        if isinstance(job, Mapping):
+        direct_projection = _project_exact_export_job(
+            job,
+            owner_user_id=owner,
+            batch_group=batch_group,
+            job_id=job_id,
+        )
+        if direct_projection is not None:
             job_status = _cleanup_job_status(
                 job,
                 job_id=job_id,
                 owner_user_id=owner,
+                batch_group=batch_group,
             )
             if job_status in _TERMINAL_JOB_STATUSES:
                 selected.append(export_id)
-        elif age > retention_seconds + grace:
+            continue
+        try:
+            exact_job = job_manager.find_job_by_batch_group(
+                batch_group=batch_group,
+                domain="claims",
+                owner_user_id=owner,
+                job_type=_EXPORT_JOB_TYPE,
+                include_archived=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - uncertainty must preserve the artifact.
+            logger.warning(
+                "Claims export cleanup Jobs lookup unavailable: operation={} export_id={} error_type={}",
+                "find_job_by_batch_group",
+                validated_export_id,
+                type(exc).__name__,
+            )
+            continue
+        if exact_job is None:
+            if age > retention_seconds + grace:
+                selected.append(export_id)
+            continue
+        exact_status = _cleanup_job_status(
+            exact_job,
+            job_id=job_id,
+            owner_user_id=owner,
+            batch_group=batch_group,
+        )
+        if exact_status in _TERMINAL_JOB_STATUSES:
             selected.append(export_id)
 
     if not selected:

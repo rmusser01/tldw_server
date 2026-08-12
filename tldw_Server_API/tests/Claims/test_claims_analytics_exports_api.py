@@ -128,6 +128,18 @@ class _JobsReader:
         return {job_id: self.jobs[job_id] for job_id in job_ids if job_id in self.jobs}
 
 
+class _EnqueueLookupManager:
+    def __init__(self, result: dict[str, Any] | None | BaseException) -> None:
+        self.result = result
+        self.calls: list[dict[str, Any]] = []
+
+    def find_job_by_batch_group(self, **kwargs: Any) -> dict[str, Any] | None:
+        self.calls.append(kwargs)
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
 def _principal(*, platform_admin: bool = True) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -197,11 +209,29 @@ def _stored_row(
     }
 
 
+def _export_job(
+    export_id: str,
+    job_id: int,
+    status: str,
+    *,
+    owner_user_id: str = "1",
+) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "status": status,
+        "batch_group": f"claims-analytics-export:{export_id}",
+        "domain": "claims",
+        "owner_user_id": owner_user_id,
+        "job_type": "claims_generate_analytics_export",
+    }
+
+
 def _patch_common(
     monkeypatch: pytest.MonkeyPatch,
     *,
     enabled: bool,
     expected_owner: str = "1",
+    job_manager: Any | None = None,
 ) -> list[dict[str, Any]]:
     normalized_calls: list[dict[str, Any]] = []
 
@@ -215,7 +245,7 @@ def _patch_common(
     monkeypatch.setattr(claims_analytics_exports, "normalize_export_request", _normalize)
     monkeypatch.setattr(claims_analytics_exports, "reconcile_export_artifacts", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(claims_analytics_exports, "cleanup_export_artifacts", lambda *_args, **_kwargs: 0)
-    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: object(), raising=False)
+    monkeypatch.setattr(claims_service, "jobs_manager_from_env", lambda: job_manager or object(), raising=False)
     return normalized_calls
 
 
@@ -425,20 +455,71 @@ def test_async_create_returns_accepted_job_without_inline_render(monkeypatch: py
     assert db.attach_calls == [{"export_id": _EXPORT_ID, "user_id": "1", "job_id": 81}]
 
 
-def test_enqueue_failure_marks_artifact_failed_and_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enqueue_exception_after_durable_admission_returns_accepted_and_attaches_exact_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     db = _FakeDb()
-    _patch_common(monkeypatch, enabled=True)
+    durable_job = {
+        "id": 81,
+        "status": "queued",
+        "batch_group": f"claims-analytics-export:{_EXPORT_ID}",
+        "domain": "claims",
+        "owner_user_id": "1",
+        "job_type": "claims_generate_analytics_export",
+    }
+    manager = _EnqueueLookupManager(durable_job)
+    _patch_common(monkeypatch, enabled=True, job_manager=manager)
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "create_queued_artifact",
+        lambda *_args, **_kwargs: _row("1", status="queued"),
+    )
+
+    def _fail_enqueue(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("admission response interrupted")
+
+    monkeypatch.setattr(claims_jobs, "enqueue_claims_analytics_export", _fail_enqueue)
+
+    body, response_status = claims_service.export_claims_analytics(
+        payload={"format": "json"},
+        principal=_principal(),
+        current_user=_user(),
+        db=db,
+    )
+
+    assert response_status == 202
+    assert body["job_id"] == 81
+    assert body["job_status"] == "queued"
+    assert db.attach_calls == [{"export_id": _EXPORT_ID, "user_id": "1", "job_id": 81}]
+    assert db.transition_calls == []
+    assert manager.calls == [
+        {
+            "batch_group": f"claims-analytics-export:{_EXPORT_ID}",
+            "domain": "claims",
+            "owner_user_id": "1",
+            "job_type": "claims_generate_analytics_export",
+            "include_archived": True,
+        }
+    ]
+
+
+def test_enqueue_exception_with_proven_absence_compensates_and_hides_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _FakeDb()
+    manager = _EnqueueLookupManager(None)
+    _patch_common(monkeypatch, enabled=True, job_manager=manager)
     monkeypatch.setattr(
         claims_analytics_exports,
         "create_queued_artifact",
         lambda *_args, **_kwargs: _row("1", status="queued"),
     )
     secret = "postgresql://owner:password@private-db/claims"
-
-    def _fail_enqueue(**_kwargs: Any) -> dict[str, Any]:
-        raise RuntimeError(secret)
-
-    monkeypatch.setattr(claims_jobs, "enqueue_claims_analytics_export", _fail_enqueue)
+    monkeypatch.setattr(
+        claims_jobs,
+        "enqueue_claims_analytics_export",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError(secret)),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         claims_service.export_claims_analytics(
@@ -454,16 +535,45 @@ def test_enqueue_failure_marks_artifact_failed_and_returns_503(monkeypatch: pyte
         "message": "Claims analytics export could not be queued.",
     }
     assert secret not in repr(exc_info.value.detail)
-    assert db.transition_calls == [
-        {
-            "export_id": _EXPORT_ID,
-            "user_id": "1",
-            "from_statuses": ("queued",),
-            "to_status": "failed",
-            "error_code": "claims_export_enqueue_failed",
-            "error_message": "Claims analytics export could not be queued.",
-        }
-    ]
+    assert len(db.transition_calls) == 1
+    assert manager.calls[0]["batch_group"] == f"claims-analytics-export:{_EXPORT_ID}"
+
+
+@pytest.mark.parametrize(
+    "lookup_result",
+    [RuntimeError("Jobs lookup unavailable"), {"id": True}, ["not-a-job"]],
+)
+def test_enqueue_exception_with_uncertain_lookup_preserves_queued_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    lookup_result: dict[str, Any] | list[str] | RuntimeError,
+) -> None:
+    db = _FakeDb()
+    manager = _EnqueueLookupManager(lookup_result)
+    _patch_common(monkeypatch, enabled=True, job_manager=manager)
+    monkeypatch.setattr(
+        claims_analytics_exports,
+        "create_queued_artifact",
+        lambda *_args, **_kwargs: _row("1", status="queued"),
+    )
+    monkeypatch.setattr(
+        claims_jobs,
+        "enqueue_claims_analytics_export",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("transport interrupted")),
+    )
+
+    body, response_status = claims_service.export_claims_analytics(
+        payload={"format": "json"},
+        principal=_principal(),
+        current_user=_user(),
+        db=db,
+    )
+
+    assert response_status == 202
+    assert body["status"] == "queued"
+    assert body["job_id"] is None
+    assert body["job_status"] is None
+    assert db.attach_calls == []
+    assert db.transition_calls == []
 
 
 @pytest.mark.parametrize("job_id", [None, 0, -1, True, "81"])
@@ -874,9 +984,9 @@ def test_list_is_owner_scoped_and_batches_nullable_job_status_hydration(
     db = _ExportReadDb([first, second, unlinked, other_owner])
     manager = _JobsReader(
         {
-            81: {"id": 81, "status": "completed"},
-            82: {"id": 82, "status": "retrying"},
-            83: {"id": 83, "status": "completed"},
+            81: _export_job(first["export_id"], 81, "completed"),
+            82: _export_job(second["export_id"], 82, "retrying"),
+            83: _export_job(other_owner["export_id"], 83, "completed", owner_user_id="2"),
         }
     )
     maintenance_calls = _patch_export_read_maintenance(monkeypatch, manager)
@@ -953,8 +1063,8 @@ def test_list_status_filter_remains_artifact_only(monkeypatch: pytest.MonkeyPatc
     db = _ExportReadDb([ready, processing])
     manager = _JobsReader(
         {
-            81: {"id": 81, "status": "processing"},
-            82: {"id": 82, "status": "completed"},
+            81: _export_job(ready["export_id"], 81, "processing"),
+            82: _export_job(processing["export_id"], 82, "completed"),
         }
     )
     _patch_export_read_maintenance(monkeypatch, manager)
@@ -1025,7 +1135,7 @@ def test_platform_admin_cross_owner_list_scopes_shared_postgres_database(
         [_stored_row("2", export_id="b" * 32, job_id=81)],
         backend_type=BackendType.POSTGRESQL,
     )
-    manager = _JobsReader({81: {"id": 81, "status": "completed"}})
+    manager = _JobsReader({81: _export_job("b" * 32, 81, "completed", owner_user_id="2")})
     _patch_export_read_maintenance(monkeypatch, manager)
     monkeypatch.setattr(
         claims_service,
@@ -1157,7 +1267,7 @@ def test_pending_download_returns_stable_not_ready_conflict(
     monkeypatch.setattr(
         claims_service,
         "jobs_manager_from_env",
-        lambda: _JobsReader({81: {"id": 81, "status": job_status}}),
+        lambda: _JobsReader({81: _export_job(_EXPORT_ID, 81, job_status)}),
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -1187,7 +1297,7 @@ def test_terminal_job_projection_returns_stable_conflict_code(
     monkeypatch.setattr(
         claims_service,
         "jobs_manager_from_env",
-        lambda: _JobsReader({81: {"id": 81, "status": job_status}}),
+        lambda: _JobsReader({81: _export_job(_EXPORT_ID, 81, job_status)}),
     )
 
     with pytest.raises(HTTPException) as exc_info:

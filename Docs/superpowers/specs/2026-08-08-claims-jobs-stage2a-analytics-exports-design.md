@@ -201,6 +201,14 @@ The operation:
 - Preserves Jobs payload/result decryption behavior.
 - Does not add a public API endpoint or administrative behavior.
 
+Claims treats the numeric Job ID as a lookup hint, not complete identity. Every
+artifact status projection also validates the canonical owner, Claims domain,
+analytics-export job type, and exact export batch group. If an unrelated active
+row reuses an archived Job's numeric ID, Claims performs the existing exact
+batch-group lookup (including archived rows) before projecting status. Status
+results are keyed by export identity so two artifacts cannot overwrite each
+other merely because they share a numeric ID.
+
 This avoids one Jobs connection/query per export while keeping lifecycle reads
 inside Jobs.
 
@@ -312,9 +320,14 @@ The endpoint returns 202 after Jobs accepts the work even if attaching `job_id`
 fails. Returning 503 at that point would encourage clients to create duplicate
 exports. The worker and reconciliation path repair the missing association.
 
-If Job creation fails, Claims best-effort marks the artifact failed with
-`claims_export_enqueue_failed` and returns 503. It does not generate the export
-inline while asynchronous mode is enabled.
+An exception from Job creation is ambiguous because Jobs may have committed the
+row before the caller observed the failure. Claims performs one exact read-only
+batch-group lookup. An exact matching Job means the request remains accepted
+and returns 202; a successful lookup that proves no matching Job exists permits
+enqueue compensation and a 503. If Jobs lookup is unavailable or returns an
+uncertain row, Claims preserves the queued artifact and returns 202 with null
+Job projection for bounded reconciliation to repair. Claims never retries the
+enqueue or generates the export inline while asynchronous mode is enabled.
 
 ## Synchronous Fallback Flow
 
@@ -515,7 +528,9 @@ stores. Stage 2A uses these safeguards:
 - Server-generated `export_id` is created before either write.
 - Jobs idempotency is scoped to owner and export ID.
 - Jobs `batch_group` stores the export identity for repair lookup.
-- A caught enqueue failure marks the artifact failed.
+- A caught enqueue exception marks the artifact failed only when an exact
+  scoped Jobs lookup successfully proves that no matching active or archived
+  row exists.
 - A caught attach failure still returns the accepted Job ID.
 - The worker repairs `job_id` before rendering.
 - Bounded reconciliation repairs queued artifacts by matching domain, owner,
@@ -588,6 +603,10 @@ lifecycle-aware:
 - Failed artifacts whose Jobs row has been pruned may be deleted only after a
   successful Jobs lookup confirms that no active or archived row remains and
   the orphan grace period has elapsed.
+- An attached numeric Job row must match owner, domain, type, and exact export
+  batch group. A missing or reused numeric row uses the exact archived-aware
+  batch-group lookup before cleanup decides whether the artifact is terminal,
+  active, absent, or uncertain.
 - Queued, processing, retrying, or unreconciled artifacts are not deleted solely
   because they are old.
 - If Jobs status cannot be read, cleanup skips uncertain non-ready artifacts.
@@ -603,7 +622,8 @@ creation time.
 - Cross-user access requires platform-admin Claims permission.
 - Export lookup includes owner scope at the database query, avoiding existence
   disclosure followed by an authorization check.
-- Jobs status hydration includes both Claims domain and owner filters.
+- Jobs status hydration includes Claims domain and owner filters, then validates
+  exact type and batch-group identity for each artifact.
 - SQL remains parameterized; the Jobs batch read chunks parameter lists safely.
 - Jobs results contain no export body or monitoring-event payload.
 - CSV protects spreadsheet consumers from formula injection.

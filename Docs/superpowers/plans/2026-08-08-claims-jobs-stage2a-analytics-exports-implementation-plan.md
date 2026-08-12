@@ -1668,3 +1668,46 @@ decreasing remaining-byte budget instead of the original export limit. SQLite
 and PostgreSQL provider/model predicates now share an explicit string-only JSON
 contract so booleans, numbers, nulls, arrays, and objects cannot produce
 backend-specific matches. RED: three focused tests; GREEN: three focused tests.
+
+## Task 12 Jobs Acceptance And Identity Follow-up (2026-08-11)
+
+**Goal:** Preserve durable Jobs admission across ambiguous enqueue exceptions
+and prevent reused numeric Job IDs from projecting or authorizing unrelated
+lifecycle state.
+
+### Stage 1: Regression tests (RED)
+
+- [x] Cover enqueue exception outcomes for exact durable admission, proven
+  absence, Jobs lookup outage, and malformed/mismatched lookup results.
+- [x] Cover row-specific hydration when an unrelated active Job shadows the
+  exact archived export Job under the same numeric ID.
+- [x] Cover cleanup fallback for exact terminal, exact active, proven absent,
+  and uncertain Jobs states after retention plus orphan grace.
+
+### Stage 2: Minimal implementation (GREEN)
+
+- [x] On enqueue exceptions, perform one exact owner/domain/type/batch read;
+  compensate and return 503 only when that read proves absence. Preserve 202
+  for exact durable admission or uncertain Jobs state and never retry enqueue.
+- [x] Validate exact export Job identity after the bounded numeric-ID batch
+  read, use one archived-aware exact fallback per mismatch, and key hydrated
+  status by export identity.
+- [x] Apply the same exact identity and conservative fallback contract to
+  failed-artifact cleanup without adding Claims lifecycle controls.
+
+### Stage 3: Verification and review
+
+- [x] Run focused API, hydration, reconciliation, cleanup, Jobs regression,
+  Ruff, compileall, Bandit, and diff checks.
+- [x] Complete fresh specification and quality reviews. Specification review
+  approved. Quality review found one terminal cleanup gap for enqueue-failed
+  artifacts without an attached ID; focused RED was 4 failed/1 passed and GREEN
+  was 5 passed, the full cleanup suite passed 43 tests, and re-review approved.
+- [ ] Commit separately.
+
+Initial TDD evidence: enqueue regressions failed 5 tests before the fix;
+hydration/cleanup regressions failed 7 tests with one incidental pass. GREEN
+focused runs passed 5 enqueue tests and 8 identity/cleanup tests. The full API
+and cleanup suites passed 100 tests, and the broader Claims producer, handler,
+worker, and Jobs batch-read matrix passed 396 tests with six official
+PostgreSQL-unreachable fixture skips.

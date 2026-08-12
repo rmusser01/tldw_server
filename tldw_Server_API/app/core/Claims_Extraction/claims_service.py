@@ -3597,6 +3597,55 @@ def _mark_claims_export_enqueue_failed(
         )
 
 
+def _recover_claims_export_enqueue_admission(
+    *,
+    job_manager: Any | None,
+    owner_user_id: str,
+    export_id: str,
+) -> tuple[str, int | None, str | None]:
+    """Classify an interrupted enqueue without changing the Jobs lifecycle."""
+    manager = job_manager
+    if manager is None:
+        try:
+            manager = jobs_manager_from_env()
+        except Exception as exc:  # noqa: BLE001 - no manager means admission is uncertain.
+            logger.warning(
+                "Claims export enqueue recovery unavailable: operation={} export_id={} error_type={}",
+                "jobs_manager_from_env",
+                export_id,
+                type(exc).__name__,
+            )
+            return "uncertain", None, None
+    batch_group = f"claims-analytics-export:{export_id}"
+    try:
+        job = manager.find_job_by_batch_group(
+            batch_group=batch_group,
+            domain="claims",
+            owner_user_id=owner_user_id,
+            job_type="claims_generate_analytics_export",
+            include_archived=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - lookup failure cannot prove absence.
+        logger.warning(
+            "Claims export enqueue recovery unavailable: operation={} export_id={} error_type={}",
+            "find_job_by_batch_group",
+            export_id,
+            type(exc).__name__,
+        )
+        return "uncertain", None, None
+    if job is None:
+        return "absent", None, None
+    projection = claims_analytics_exports._project_exact_export_job(
+        job,
+        owner_user_id=owner_user_id,
+        batch_group=batch_group,
+    )
+    if projection is None:
+        return "uncertain", None, None
+    recovered_job_id, recovered_status = projection
+    return "found", recovered_job_id, recovered_status
+
+
 def export_claims_analytics(
     *,
     payload: dict[str, Any],
@@ -3676,27 +3725,72 @@ def export_claims_analytics(
             if job_manager is not None:
                 enqueue_kwargs["job_manager"] = job_manager
             accepted = claims_jobs.enqueue_claims_analytics_export(**enqueue_kwargs)
-        except Exception as exc:  # noqa: BLE001 - cross-store enqueue failures need compensation.
-            _mark_claims_export_enqueue_failed(
-                db=target_db,
+        except Exception as exc:  # noqa: BLE001 - admission may already be durable.
+            recovery, recovered_job_id, recovered_job_status = _recover_claims_export_enqueue_admission(
+                job_manager=job_manager,
                 owner_user_id=owner_user_id,
                 export_id=export_id,
-                original_error=exc,
             )
+            if recovery == "found":
+                try:
+                    target_db.attach_claims_analytics_export_job(
+                        export_id=export_id,
+                        user_id=owner_user_id,
+                        job_id=recovered_job_id,
+                    )
+                except Exception as attach_exc:  # noqa: BLE001 - reconciliation repairs an accepted Job.
+                    logger.warning(
+                        "Claims export Job attachment deferred: operation={} export_id={} job_id={} error_type={}",
+                        "attach_claims_analytics_export_job",
+                        export_id,
+                        recovered_job_id,
+                        type(attach_exc).__name__,
+                    )
+                return (
+                    _claims_export_response(
+                        row=row,
+                        normalized=normalized,
+                        workspace_id=workspace_id,
+                        accepted_job_id=recovered_job_id,
+                        job_status=recovered_job_status,
+                    ),
+                    status.HTTP_202_ACCEPTED,
+                )
+            if recovery == "absent":
+                _mark_claims_export_enqueue_failed(
+                    db=target_db,
+                    owner_user_id=owner_user_id,
+                    export_id=export_id,
+                    original_error=exc,
+                )
+                logger.warning(
+                    "Claims export enqueue failed: operation={} export_id={} error_code={} error_type={}",
+                    "enqueue_claims_analytics_export",
+                    export_id,
+                    "claims_export_enqueue_failed",
+                    type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "code": "claims_export_enqueue_failed",
+                        "message": "Claims analytics export could not be queued.",
+                    },
+                ) from exc
             logger.warning(
-                "Claims export enqueue failed: operation={} export_id={} error_code={} error_type={}",
+                "Claims export enqueue admission uncertain: operation={} export_id={} error_type={}",
                 "enqueue_claims_analytics_export",
                 export_id,
-                "claims_export_enqueue_failed",
                 type(exc).__name__,
             )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "claims_export_enqueue_failed",
-                    "message": "Claims analytics export could not be queued.",
-                },
-            ) from exc
+            return (
+                _claims_export_response(
+                    row=row,
+                    normalized=normalized,
+                    workspace_id=workspace_id,
+                ),
+                status.HTTP_202_ACCEPTED,
+            )
 
         job_id: int | None = None
         job_status: str | None = None
@@ -3824,11 +3918,7 @@ def list_claims_analytics_exports(
             except claims_analytics_exports.ClaimsAnalyticsExportError:
                 download_url = None
             job_id = row.get("job_id")
-            job_status = (
-                job_statuses.get(job_id)
-                if isinstance(job_id, int) and not isinstance(job_id, bool) and job_id > 0
-                else None
-            )
+            job_status = job_statuses.get(export_id) if isinstance(export_id, str) else None
             exports.append(
                 {
                     "export_id": export_id,
@@ -3887,7 +3977,8 @@ def _claims_export_download_job_status(
         owner_user_id=owner_user_id,
         job_manager=job_manager,
     )
-    return statuses.get(job_id)
+    export_id = row.get("export_id")
+    return statuses.get(export_id) if isinstance(export_id, str) else None
 
 
 def _claims_export_download_conflict_code(
