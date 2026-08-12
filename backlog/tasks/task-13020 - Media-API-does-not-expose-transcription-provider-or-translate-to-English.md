@@ -59,9 +59,8 @@ instead.
 Note for whoever picks this up: the endpoint's silent-discard behaviour is what
 made this invisible for so long. An undeclared form field produces no error and
 a `200`, so a client asking for an unsupported option gets a successful-looking
-job that ignored the request. Worth considering whether unknown form fields
-should be rejected, or at least reported in the response, independently of this
-task.
+job that ignored the request. That is tracked separately as **TASK-13021** —
+it is a property of the media form endpoints as a family, not of this gap.
 
 ## Acceptance Criteria
 
