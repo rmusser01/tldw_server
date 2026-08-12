@@ -127,6 +127,8 @@ _CLAIMS_EXPORT_PUBLIC_ERROR_CODES = frozenset(
         "claims_export_failed",
         "claims_export_invalid_artifact",
         "claims_export_invalid_payload",
+        "claims_export_job_cancelled",
+        "claims_export_job_quarantined",
         "claims_export_serialization_failed",
         "claims_export_storage_unavailable",
         "claims_export_too_large",

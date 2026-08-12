@@ -1315,6 +1315,8 @@ def test_terminal_job_projection_returns_stable_conflict_code(
     ("stored_code", "expected_code"),
     [
         ("claims_export_too_large", "claims_export_too_large"),
+        ("claims_export_job_cancelled", "claims_export_job_cancelled"),
+        ("claims_export_job_quarantined", "claims_export_job_quarantined"),
         (None, "claims_export_failed"),
         ("postgresql://owner:secret@private-db", "claims_export_failed"),
     ],

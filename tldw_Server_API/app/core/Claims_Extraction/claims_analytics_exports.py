@@ -536,6 +536,7 @@ def _json_text(value: Any, *, sort_keys: bool = False) -> str:
     try:
         return json.dumps(
             value,
+            allow_nan=False,
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=sort_keys,
@@ -1191,6 +1192,53 @@ def _project_exact_export_job(
     return matched_job_id, status
 
 
+def _reconciliation_rotation_anchor(
+    *,
+    owner_user_id: str,
+    candidate_class: str,
+    now: datetime,
+) -> str:
+    bucket = int(now.timestamp()) // CLEANUP_ROTATION_SECONDS
+    seed = f"{owner_user_id}:{candidate_class}:{bucket}".encode("ascii")
+    return hashlib.sha256(seed).hexdigest()[:32]
+
+
+def _rotating_reconciliation_rows(
+    db: Any,
+    *,
+    owner_user_id: str,
+    statuses: tuple[str, ...],
+    job_id_missing: bool,
+    candidate_class: str,
+    now: datetime,
+    limit: int,
+) -> list[dict[str, Any]]:
+    anchor = _reconciliation_rotation_anchor(
+        owner_user_id=owner_user_id,
+        candidate_class=candidate_class,
+        now=now,
+    )
+    rows = db.list_claims_analytics_exports_for_maintenance(
+        user_id=owner_user_id,
+        limit=limit,
+        statuses=statuses,
+        job_id_missing=job_id_missing,
+        export_id_after=anchor,
+    )
+    remaining = limit - len(rows)
+    if remaining > 0:
+        rows.extend(
+            db.list_claims_analytics_exports_for_maintenance(
+                user_id=owner_user_id,
+                limit=remaining,
+                statuses=statuses,
+                job_id_missing=job_id_missing,
+                export_id_at_or_before=anchor,
+            )
+        )
+    return rows
+
+
 def reconcile_export_artifacts(
     db: Any,
     *,
@@ -1203,17 +1251,23 @@ def reconcile_export_artifacts(
     owner = _canonical_owner_id(owner_user_id)
     current_time = _normalize_now(now)
     bounded_limit = _maintenance_limit(limit)
-    missing_rows = db.list_claims_analytics_exports_for_maintenance(
-        user_id=owner,
-        limit=bounded_limit,
+    missing_rows = _rotating_reconciliation_rows(
+        db,
+        owner_user_id=owner,
         statuses=("queued",),
         job_id_missing=True,
-    )
-    attached_rows = db.list_claims_analytics_exports_for_maintenance(
-        user_id=owner,
+        candidate_class="missing",
+        now=current_time,
         limit=bounded_limit,
+    )
+    attached_rows = _rotating_reconciliation_rows(
+        db,
+        owner_user_id=owner,
         statuses=("queued", "processing"),
         job_id_missing=False,
+        candidate_class="attached",
+        now=current_time,
+        limit=bounded_limit,
     )
     missing_candidates = [
         row

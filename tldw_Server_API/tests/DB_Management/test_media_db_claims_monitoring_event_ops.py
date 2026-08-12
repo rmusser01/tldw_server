@@ -682,6 +682,30 @@ def test_claims_monitoring_event_payload_bound_uses_canonical_unicode_bytes(
         db.close_connection()
 
 
+def test_claims_monitoring_event_payload_bound_rejects_oversized_raw_source_before_normalizing(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-raw-source-bound.db")
+    raw_payload = (" " * 70_000) + "{}"
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="oversized-raw-source",
+            payload_json=raw_payload,
+        )
+
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=16,
+        ) == {
+            "payload_json": None,
+            "payload_size_bytes": len(raw_payload.encode("utf-8")),
+        }
+    finally:
+        db.close_connection()
+
+
 @pytest.mark.parametrize("filter_name", ["event_type", "severity", "provider", "model"])
 def test_claims_monitoring_event_page_applies_empty_scalar_filters(
     tmp_path: Path,

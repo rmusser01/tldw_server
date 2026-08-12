@@ -608,12 +608,15 @@ def render_export(
 Scan `list_claims_monitoring_events_page()` in pages of 1000. Apply
 provider/model filters in parameterized database predicates, increment a total
 match counter from constant-size metadata rows, and retain only matches in
-`[offset, offset + limit)`. Continue the bounded scan to calculate the stable
-`pagination.total`; never retain unrelated pages. Load payload text only for
-selected owner-scoped rows through a query bounded by the builder's decreasing
-remaining-byte budget. Provider/model filters match JSON strings only on both
-database backends. Render JSON with compact deterministic separators and UTF-8
-preservation:
+`[offset, offset + limit)`. Continue JSON's bounded scan to calculate the stable
+`pagination.total`; stop CSV once its selected window is complete because CSV
+does not expose a total. Never retain unrelated pages. Load payload text only
+for selected owner-scoped rows through a query that caps raw source before JSON
+parsing at six times the builder's decreasing remaining-byte budget plus a fixed
+64 KiB formatting allowance, then canonicalizes with compact separators,
+`ensure_ascii=False`, and strict finite numbers before applying the exact UTF-8
+limit. Provider/model filters match JSON strings only on both database backends.
+Render JSON with compact deterministic separators and UTF-8 preservation:
 
 ```python
 payload_text = json.dumps(
@@ -760,6 +763,18 @@ Expose these exact functions:
 - `cleanup_export_artifacts(db: Any, *, owner_user_id: str, job_manager: JobManager, now: datetime | None = None, retention_hours: float = 24, limit: int = 100) -> int`
 
 Hydration catches Jobs availability errors and returns null projections without mutating artifact state. Reconciliation uses exact `claims-analytics-export:{export_id}` batch groups and `include_archived=True`. It only marks a proven orphan after grace and a successful no-match result. Cleanup accepts terminal Jobs statuses `completed`, `failed`, `cancelled`, and `quarantined`; it skips non-ready uncertainty.
+
+Use independent bounded reconciliation pages for queued artifacts missing a Job
+ID and queued/processing artifacts with an attached Job ID. The latter uses
+read-only exact Jobs projection and marks the artifact failed only when Jobs'
+shared terminal-status classifier confirms a terminal Job. Failed artifacts
+without a Job ID, regardless of error code, require retention plus grace and an
+exact archived-aware Jobs absence proof before cleanup.
+
+Rotate each reconciliation page by export ID on a bounded maintenance interval
+so unchanged active rows cannot starve later candidates. Strict serialization
+must reject non-finite JSON values. Persisted cancelled/quarantined Claims codes
+remain in the public safe-code allowlist even when Jobs projection is absent.
 
 - [ ] **Step 7: Run lifecycle tests and commit**
 
@@ -1715,3 +1730,52 @@ PostgreSQL-unreachable fixture skips.
 After the quality-review correction, the final API/cleanup run passed 105
 tests. Ruff, compileall, Bandit (zero findings), and `git diff --check` passed
 on the final production and test scope.
+
+## Task 12 Final Review Corrections (2026-08-11)
+
+**Goal:** Close the independently validated canonical-Unicode sizing, blank
+scalar-filter parity, CSV over-scan, synchronous-failure retention, attached
+terminal-Job reconciliation, and PostgreSQL v24 migration-ordering findings.
+
+### Stage 1: Verified regressions (RED)
+
+- [x] Add escaped-Unicode exact-boundary tests against real SQLite rendering and
+  the official PostgreSQL fixture.
+- [x] Add blank scalar-filter parity and JSON-versus-CSV scan-count tests.
+- [x] Add failed artifacts without Jobs for non-enqueue error codes, attached
+  active/terminal Job reconciliation, and Jobs-owned terminal classification.
+- [x] Add a partial-v23 PostgreSQL migration test where the monitoring-event
+  extension table is absent.
+
+### Stage 2: Minimal corrections (GREEN)
+
+- [x] Canonicalize bounded payload JSON before exact UTF-8 sizing while keeping
+  source reads within a six-times constant-factor cap.
+- [x] Apply present empty scalar filters and stop CSV after its selected window;
+  retain JSON's exact-total scan.
+- [x] Reconcile attached artifacts through exact read-only Jobs projections and
+  move the terminal-status contract into Jobs without adding Claims controls.
+- [x] Apply retention plus grace and exact absence checks to all failed artifacts
+  without Job IDs.
+- [x] Defer PostgreSQL monitoring-event index creation to the extension repair
+  path that owns creation of the optional table.
+
+### Stage 3: Final verification and independent review
+
+- [ ] Run the complete Stage 2A, Stage 1/lifecycle, migration/schema, Ruff,
+  compileall, Bandit, boundary, and diff gates.
+- [ ] Complete fresh specification and quality reviews and address every
+  validated finding.
+- [ ] Update TASK-12993 with final evidence and commit the aligned records.
+
+Quality review correction: a fresh audit found and validated four additional
+issues. A full page of unchanged active artifacts could starve later terminal
+artifacts; a valid large exponent could round to infinity and emit invalid JSON;
+the database normalized unbounded raw JSON before applying its compact-byte
+cap; and persisted cancelled/quarantined codes were omitted from the safe
+download allowlist. RED was 6 failed/3 passed. GREEN uses rotating independently
+bounded reconciliation pages, a raw pre-parse cap, `allow_nan=False`, and the
+existing stable terminal codes; the focused run passed 9 tests and the affected
+matrix passed 197 tests with 4 official PostgreSQL skips before the one expected
+query-shape assertion was updated. The complete cleanup suite then passed 52
+tests.

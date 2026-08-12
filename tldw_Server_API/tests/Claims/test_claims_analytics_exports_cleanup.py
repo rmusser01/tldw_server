@@ -301,26 +301,10 @@ def test_reconcile_repairs_exact_active_and_archived_jobs_before_grace(
     )
 
     assert result == {"examined": 2, "repaired": 2, "failed": 0, "unchanged": 0}
-    assert db.list_calls == [
-        {
-            "user_id": "7",
-            "limit": 100,
-            "statuses": ("queued",),
-            "job_id_missing": True,
-            "updated_before": None,
-            "export_id_after": None,
-            "export_id_at_or_before": None,
-        },
-        {
-            "user_id": "7",
-            "limit": 100,
-            "statuses": ("queued", "processing"),
-            "job_id_missing": False,
-            "updated_before": None,
-            "export_id_after": None,
-            "export_id_at_or_before": None,
-        },
-    ]
+    assert len(db.list_calls) == 4
+    assert [call["job_id_missing"] for call in db.list_calls] == [True, True, False, False]
+    assert all(1 <= call["limit"] <= 100 for call in db.list_calls)
+    assert all(call["user_id"] == "7" for call in db.list_calls)
     assert {db.rows[active["export_id"]]["job_id"], db.rows[archived["export_id"]]["job_id"]} == {41, 42}
     assert all(
         call
@@ -455,6 +439,54 @@ def test_reconcile_candidate_filters_prevent_attached_rows_from_consuming_limit(
     assert result == {"examined": 3, "repaired": 0, "failed": 1, "unchanged": 2}
     assert db.rows[orphan["export_id"]]["status"] == "failed"
     assert all(db.rows[row["export_id"]]["status"] == "queued" for row in irrelevant)
+
+
+def test_reconcile_rotates_past_full_active_page_to_terminal_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = [
+        _artifact(index, status="queued", job_id=1000 + index)
+        for index in range(1, 101)
+    ]
+    terminal = _artifact(101, status="queued", job_id=1101)
+    db = MaintenanceDB([*active, terminal])
+    manager = FakeJobManager(
+        jobs_by_id={
+            **{
+                row["job_id"]: {
+                    **_exact_job(row["export_id"], row["job_id"]),
+                    "status": "processing",
+                }
+                for row in active
+            },
+            1101: {
+                **_exact_job(terminal["export_id"], 1101),
+                "status": "cancelled",
+            },
+        }
+    )
+    monkeypatch.setattr(
+        exports,
+        "_reconciliation_rotation_anchor",
+        lambda **_: f"{100:032x}",
+        raising=False,
+    )
+
+    result = reconcile_export_artifacts(
+        db,
+        owner_user_id="7",
+        job_manager=manager,
+        now=NOW,
+        limit=100,
+    )
+
+    assert result == {
+        "examined": 100,
+        "repaired": 0,
+        "failed": 1,
+        "unchanged": 99,
+    }
+    assert db.rows[terminal["export_id"]]["status"] == "failed"
 
 
 @pytest.mark.parametrize(

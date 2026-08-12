@@ -427,10 +427,23 @@ values or payload text. Provider/model predicates match JSON string values
 only; non-string JSON scalars and containers do not match string filters on
 either backend. Claims applies pagination, then loads each selected owner-scoped
 payload through a database query that returns normalized text only when it fits
-the builder's decreasing remaining-byte budget, and appends one serialized JSON
-event or CSV row at a time. This prevents a database page, selected-event list,
-or final serializer from materializing unbounded payload content. Producer and
-worker processes must use the same byte-limit setting.
+the builder's decreasing remaining-byte budget. Before invoking a JSON parser,
+the query returns raw source only when it is no larger than six times that
+budget plus a fixed 64 KiB formatting allowance. Six covers the worst-case
+`\\u0061`-to-`a` contraction; the fixed allowance permits ordinary whitespace
+without allowing unbounded raw normalization. Claims then parses and
+reserializes with compact separators, `ensure_ascii=False`, and strict finite
+numbers. The canonical UTF-8 byte count determines whether the payload fits, so
+escaped Unicode and already-decoded Unicode have identical limits. Claims
+appends one serialized JSON event or CSV row at a time.
+This prevents a database page, selected-event list, or final serializer from
+materializing unbounded payload content. Producer and worker processes must use
+the same byte-limit setting.
+
+JSON scans all bounded metadata pages because its response includes an exact
+`pagination.total`. CSV has no total field and stops as soon as the selected
+`[offset, offset + limit)` window has been emitted; it does not scan unrelated
+matching rows after that point.
 
 Exceeding the byte limit is non-retryable and records
 `claims_export_too_large`. An asynchronous request remains accepted and exposes
@@ -535,6 +548,12 @@ stores. Stage 2A uses these safeguards:
 - The worker repairs `job_id` before rendering.
 - Bounded reconciliation repairs queued artifacts by matching domain, owner,
   type, and exact batch group.
+- A separately bounded page of queued or processing artifacts with attached Job
+  IDs is reconciled through exact, archived-aware, read-only Jobs projections.
+  Exact terminal Jobs move non-ready artifacts to failed with safe Claims codes;
+  active, malformed, missing, or unavailable projections remain unchanged.
+- Jobs owns the canonical terminal-status set and classifier. Claims consumes
+  that read-only contract but never updates Jobs lifecycle state.
 
 `CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC` defines a conservative grace period
 and defaults to 300 seconds. Invalid or negative settings fall back to the
@@ -549,8 +568,12 @@ An export missing `job_id` becomes failed only when all conditions hold:
 If Jobs is unavailable, reconciliation leaves the artifact unchanged. It never
 converts uncertainty into a failed result.
 
-Reconciliation runs only as bounded best-effort maintenance during existing
-create/list activity. It is not a daemon, scheduler, queue, or retry engine.
+Missing-link and attached-Job candidates use independent bounded, rotating
+export-ID pages so one class cannot consume the other's maintenance limit and a
+full page of unchanged active artifacts cannot permanently hide later terminal
+artifacts. Reconciliation runs only as bounded best-effort maintenance during
+existing create/list activity. It is not a daemon, scheduler, queue, or retry
+engine.
 
 ## Failure Model
 
@@ -592,6 +615,11 @@ Raw exception strings, filters, and export content are not persisted in error
 fields or returned to API callers. Logs contain identifiers, operation names,
 exception types, and stable codes only.
 
+Safe persisted `claims_export_job_cancelled` and
+`claims_export_job_quarantined` codes remain public when a later Jobs projection
+is unavailable or pruned; unrecognized stored values still collapse to
+`claims_export_failed`.
+
 ## Retention And Cleanup
 
 Existing request-time retention cleanup remains bounded and becomes
@@ -599,10 +627,12 @@ lifecycle-aware:
 
 - Ready artifacts older than retention may be deleted.
 - Failed artifacts with a terminal Jobs status may be deleted after retention.
-- Reconciled failed artifacts with no Job may be deleted after retention.
-- Failed artifacts whose Jobs row has been pruned may be deleted only after a
-  successful Jobs lookup confirms that no active or archived row remains and
-  the orphan grace period has elapsed.
+- Any failed artifact without an attached Job ID may be deleted only after
+  retention plus orphan grace and a successful exact Jobs lookup confirms that
+  no active or archived row remains. This applies to synchronous rendering and
+  storage failures as well as enqueue/reconciliation failures.
+- Failed artifacts whose attached Jobs row has been pruned use the same exact
+  archived-aware absence proof and retention-plus-grace threshold.
 - An attached numeric Job row must match owner, domain, type, and exact export
   batch group. A missing or reused numeric row uses the exact archived-aware
   batch-group lookup before cleanup decides whether the artifact is terminal,
@@ -728,10 +758,12 @@ supported rollback sequence.
 - A retry can move failed to processing but cannot overwrite ready.
 - Worker startup repair attaches a missing Job ID.
 - Reconciliation finds exact batch-group matches, respects the grace period,
-  leaves rows unchanged while Jobs is unavailable, and fails only proven
-  orphans.
+  leaves rows unchanged while Jobs is unavailable, fails only proven orphans,
+  and converts attached non-ready artifacts only when their exact Job is
+  terminal.
 - Cleanup preserves queued, processing, and retrying work and removes only
-  eligible terminal artifacts.
+  eligible terminal artifacts or failed artifacts whose exact Job absence is
+  proven after retention plus grace.
 - Cancelled, quarantined, missing, and pruned Job projections are represented
   safely.
 

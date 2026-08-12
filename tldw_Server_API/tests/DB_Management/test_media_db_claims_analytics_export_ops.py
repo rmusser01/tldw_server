@@ -1373,3 +1373,32 @@ def test_sqlite_render_accepts_escaped_unicode_at_exact_artifact_boundary(
         assert exc_info.value.code == "claims_export_too_large"
     finally:
         db.close_connection()
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_sqlite_render_rejects_non_finite_numbers_in_monitoring_payload(
+    tmp_path: Path,
+    format: str,
+) -> None:
+    db = _make_db(tmp_path, f"claims-analytics-non-finite-{format}.db")
+    try:
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="large-exponent",
+            payload_json='{"value":1e999}',
+        )
+
+        with pytest.raises(ClaimsAnalyticsExportError) as exc_info:
+            render_export(
+                db,
+                owner_user_id="1",
+                format=format,
+                filters={},
+                pagination={"limit": 1, "offset": 0},
+                snapshot_at="2099-01-01T00:00:00.000Z",
+                snapshot_event_id=db.get_claims_monitoring_event_high_water(user_id="1"),
+                max_bytes=100_000,
+            )
+        assert exc_info.value.code == "claims_export_serialization_failed"
+    finally:
+        db.close_connection()

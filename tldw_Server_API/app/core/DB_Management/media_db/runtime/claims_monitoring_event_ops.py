@@ -12,6 +12,8 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 _EVENT_ADVISORY_LOCK_PREFIX = "claims_monitoring_events:"
+_PAYLOAD_SOURCE_EXPANSION_FACTOR = 6
+_PAYLOAD_SOURCE_OVERHEAD_BYTES = 65_536
 
 
 def _lock_postgres_event_owner(
@@ -113,28 +115,22 @@ def get_claims_monitoring_event_payload_bounded(
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValueError("max_bytes must be a positive integer")
     if self.backend_type == BackendType.POSTGRESQL:
-        normalized_sql = (
-            "tldw_claims_compact_json(tldw_claims_safe_json(payload_json))"
-        )
-        size_sql = f"octet_length({normalized_sql})"
+        raw_size_sql = "octet_length(COALESCE(payload_json, ''))"
     else:
-        normalized_sql = (
-            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
-            "WHEN json_valid(payload_json) THEN json(payload_json) ELSE '{}' END"
-        )
-        size_sql = f"length(CAST(({normalized_sql}) AS BLOB))"
-    # A compact JSON source can be at most six times larger than its canonical
-    # ensure_ascii=False form (for example, ``\u0061`` versus ``a``).
-    source_budget = max_bytes * 6
+        raw_size_sql = "length(CAST(COALESCE(payload_json, '') AS BLOB))"
+    # Six covers escaped Unicode contraction; the fixed allowance permits
+    # ordinary formatting whitespace without allowing unbounded raw parsing.
+    source_budget = (
+        max_bytes * _PAYLOAD_SOURCE_EXPANSION_FACTOR
+        + _PAYLOAD_SOURCE_OVERHEAD_BYTES
+    )
     row = self.execute_query(
         (
             "SELECT CASE WHEN "  # nosec B608
-            + size_sql
-            + " <= ? THEN "
-            + normalized_sql
-            + " ELSE NULL END AS payload_json, "
-            + size_sql
-            + " AS payload_size_bytes FROM claims_monitoring_events "
+            + raw_size_sql
+            + " <= ? THEN COALESCE(payload_json, '') ELSE NULL END AS payload_source, "
+            + raw_size_sql
+            + " AS payload_source_size_bytes FROM claims_monitoring_events "
             "WHERE id = ? AND user_id = ? LIMIT 1"
         ),
         (source_budget, event_id, str(user_id)),
@@ -143,17 +139,25 @@ def get_claims_monitoring_event_payload_bounded(
         return {}
 
     loaded = dict(row)
-    raw_payload = loaded.get("payload_json")
-    source_size = loaded.get("payload_size_bytes")
+    raw_payload = loaded.get("payload_source")
+    source_size = loaded.get("payload_source_size_bytes")
+    if isinstance(source_size, bool) or not isinstance(source_size, int) or source_size < 0:
+        raise ValueError("payload source size is invalid")
     if raw_payload is None:
         return {
             "payload_json": None,
-            "payload_size_bytes": int(source_size),
+            "payload_size_bytes": source_size,
         }
+    if not isinstance(raw_payload, str):
+        raise ValueError("payload source is invalid")
 
-    payload = json.loads(raw_payload)
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except (TypeError, ValueError, UnicodeError):
+        payload = {}
     canonical_payload = json.dumps(
         payload,
+        allow_nan=False,
         ensure_ascii=False,
         separators=(",", ":"),
     )
