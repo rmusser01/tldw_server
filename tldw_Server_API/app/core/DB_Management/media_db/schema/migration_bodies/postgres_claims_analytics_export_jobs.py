@@ -62,16 +62,6 @@ def run_postgres_migrate_to_v24(
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_analytics_exports_job_id')} "
             f"ON {table} ({ident('job_id')})"
         ),
-        (
-            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user_created_id')} "
-            f"ON {ident('claims_monitoring_events')} "
-            f"({ident('user_id')}, {ident('created_at')}, {ident('id')})"
-        ),
-        (
-            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user_id')} "
-            f"ON {ident('claims_monitoring_events')} "
-            f"({ident('user_id')}, {ident('id')})"
-        ),
     ]
 
     for statement in statements:

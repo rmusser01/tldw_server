@@ -896,3 +896,64 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
             ]
     finally:
         db.close_connection()
+
+
+@pytest.mark.integration
+def test_media_postgres_migration_v24_repairs_missing_monitoring_event_extension(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="pg-migration-v24-missing-claims-events",
+        backend=backend,
+    )
+
+    try:
+        with backend.transaction() as conn:
+            backend.execute(
+                "DROP TABLE IF EXISTS claims_monitoring_events CASCADE",
+                connection=conn,
+            )
+            backend.execute(
+                "DROP INDEX IF EXISTS idx_claims_analytics_exports_job_id",
+                connection=conn,
+            )
+            for column_name in (
+                "job_id",
+                "error_code",
+                "snapshot_at",
+                "snapshot_event_id",
+            ):
+                backend.execute(
+                    f'ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS "{column_name}"',
+                    connection=conn,
+                )
+            backend.execute(
+                "UPDATE schema_version SET version = %s",
+                (23,),
+                connection=conn,
+            )
+
+        db._initialize_schema()
+
+        with backend.transaction() as conn:
+            version = backend.execute(
+                "SELECT version FROM schema_version LIMIT 1",
+                connection=conn,
+            ).scalar
+
+            assert int(version) == 24
+            assert backend.table_exists("claims_monitoring_events", connection=conn)
+            assert _index_exists(
+                backend,
+                conn,
+                "idx_claims_monitoring_events_user_created_id",
+            )
+            assert _index_exists(
+                backend,
+                conn,
+                "idx_claims_monitoring_events_user_id",
+            )
+    finally:
+        db.close_connection()

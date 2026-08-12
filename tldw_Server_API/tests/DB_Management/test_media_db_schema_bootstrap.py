@@ -3091,6 +3091,38 @@ def test_sqlite_migration_024_defers_monitoring_event_indexes_to_extension() -> 
     assert "claims_monitoring_events" not in migration_path.read_text(encoding="utf-8")
 
 
+@pytest.mark.unit
+def test_postgres_migration_v24_defers_monitoring_event_indexes_to_extension() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_analytics_export_jobs import (
+        run_postgres_migrate_to_v24,
+    )
+
+    statements: list[str] = []
+
+    class Backend:
+        @staticmethod
+        def escape_identifier(name: str) -> str:
+            return f'"{name}"'
+
+        @staticmethod
+        def execute(
+            query: str,
+            params=None,
+            *,
+            connection,
+        ) -> None:
+            del params, connection
+            statements.append(query)
+
+    run_postgres_migrate_to_v24(
+        SimpleNamespace(backend=Backend()),
+        object(),
+    )
+
+    assert any("idx_claims_analytics_exports_job_id" in query for query in statements)
+    assert all("claims_monitoring_events" not in query for query in statements)
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("present_column_definitions", "job_index_present"),
