@@ -2725,7 +2725,7 @@ class SyncDatabase:
             raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
         return row
 
-    def _require_attachment_binding_dataset_owner_for_update(
+    def _require_dataset_owner_for_update(
         self,
         dataset_id: str,
         owner_user_id: str,
@@ -6774,7 +6774,7 @@ class SyncDatabase:
         """Create or exactly replay one immutable attachment revision binding."""
 
         with self.backend.transaction() as conn:
-            self._require_attachment_binding_dataset_owner_for_update(
+            self._require_dataset_owner_for_update(
                 binding.dataset_id,
                 owner_user_id,
                 connection=conn,
@@ -6891,7 +6891,7 @@ class SyncDatabase:
 
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
-            self._require_attachment_binding_dataset_owner_for_update(
+            self._require_dataset_owner_for_update(
                 dataset_id,
                 owner_user_id,
                 connection=conn,
@@ -6970,7 +6970,7 @@ class SyncDatabase:
             raise SyncStoreError("Sync attachment binding release timestamp is required")
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
-            self._require_attachment_binding_dataset_owner_for_update(
+            self._require_dataset_owner_for_update(
                 dataset_id,
                 owner_user_id,
                 connection=conn,
@@ -7026,9 +7026,11 @@ class SyncDatabase:
 
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
-            dataset = self._get_dataset_row_for_update(dataset_id, connection=conn)
-            if dataset is None or str(dataset.get("owner_user_id")) != owner_user_id:
-                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
             row = _first(
                 self.execute(
                     """
@@ -7153,9 +7155,11 @@ class SyncDatabase:
 
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
-            dataset = self._get_dataset_row_for_update(dataset_id, connection=conn)
-            if dataset is None or str(dataset.get("owner_user_id")) != owner_user_id:
-                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
             namespace_row = _first(
                 self.execute(
                     """

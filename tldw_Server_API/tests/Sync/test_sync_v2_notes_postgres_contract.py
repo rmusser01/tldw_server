@@ -38,7 +38,7 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     )
     mutation_owner_guard = getattr(
         SyncDatabase,
-        "_require_attachment_binding_dataset_owner_for_update",
+        "_require_dataset_owner_for_update",
         None,
     )
     assert read_owner_guard is not None
@@ -55,6 +55,7 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
         SyncDatabase._require_exact_available_blob_for_binding
     )
     namespace_source = inspect.getsource(SyncDatabase.get_or_create_storage_namespace)
+    relocation_source = inspect.getsource(SyncDatabase.relocate_legacy_blob)
     acceptance_source = inspect.getsource(
         SyncDatabase._create_attachment_binding_for_envelope
     )
@@ -114,6 +115,10 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     assert "attachment_id = ?" not in blob_lookup_source
     assert "owner_user_id" in namespace_source
     assert "FOR UPDATE" in namespace_source
+    assert "_require_dataset_owner_for_update" in namespace_source
+    assert "_get_dataset_row_for_update" not in namespace_source
+    assert "_require_dataset_owner_for_update" in relocation_source
+    assert "_get_dataset_row_for_update" not in relocation_source
     assert "owner_user_id" in lookup_source
     assert "owner_user_id" in unresolved_source
     assert "FOR UPDATE" in acceptance_source

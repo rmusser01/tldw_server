@@ -702,6 +702,7 @@ def test_attachment_binding_retention_release_is_monotonic_and_idempotent(
 
 def test_storage_namespace_is_server_issued_owner_scoped_and_stable(
     sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sync_store.enroll_dataset(_dataset())
     first = sync_store.get_or_create_storage_namespace(
@@ -718,11 +719,56 @@ def test_storage_namespace_is_server_issued_owner_scoped_and_stable(
     assert first.storage_namespace_id.isascii()
     assert first.storage_namespace_id == first.storage_namespace_id.lower()
     assert all(character in "0123456789abcdef" for character in first.storage_namespace_id)
+    statements: list[tuple[str, tuple[Any, ...]]] = []
+    original_execute = sync_store.db.execute
+
+    def record_execute(statement, params=None, *, connection=None):
+        statements.append((" ".join(statement.split()), tuple(params or ())))
+        return original_execute(statement, params, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "execute", record_execute)
     with pytest.raises(SyncDatasetNotFoundError):
         sync_store.get_or_create_storage_namespace(
             "dataset-1",
             owner_user_id="user-2",
         )
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in statements[0][0]
+    assert statements[0][1] == ("dataset-1", "user-2")
+    assert all(
+        "sync_dataset_storage_namespaces" not in statement
+        for statement, _params in statements
+    )
+
+
+def test_legacy_blob_relocation_denies_wrong_owner_before_namespace_or_blob_query(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    statements: list[tuple[str, tuple[Any, ...]]] = []
+    original_execute = sync_store.db.execute
+
+    def record_execute(statement, params=None, *, connection=None):
+        statements.append((" ".join(statement.split()), tuple(params or ())))
+        return original_execute(statement, params, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "execute", record_execute)
+
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.relocate_legacy_blob(
+            object(),
+            dataset_id="dataset-1",
+            owner_user_id="user-2",
+            blob_id="blob-not-authorized",
+        )
+
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in statements[0][0]
+    assert statements[0][1] == ("dataset-1", "user-2")
+    assert all(
+        "sync_dataset_storage_namespaces" not in statement
+        and "sync_blob_objects" not in statement
+        for statement, _params in statements
+    )
 
 
 def test_legacy_blob_relocation_cas_updates_storage_and_resolves_matching_binding(
