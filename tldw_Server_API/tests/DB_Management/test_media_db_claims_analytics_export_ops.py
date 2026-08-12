@@ -1240,7 +1240,7 @@ def test_claims_monitoring_event_postgres_pages_are_bounded_with_equal_timestamp
         backend=backend,
     )
     try:
-        payload = '{"text":"東京"}'
+        payload = '{"provider":"true","model":"7","text":"東京"}'
         payload_size = len(payload.encode("utf-8"))
         event_ids = [
             int(
@@ -1280,8 +1280,10 @@ def test_claims_monitoring_event_postgres_pages_are_bounded_with_equal_timestamp
         assert [row["id"] for row in second_page] == event_ids[2:4]
         assert [row["id"] for row in third_page] == event_ids[4:]
         assert len({row["id"] for row in first_page + second_page + third_page}) == 5
-        assert all("payload_json" not in row for row in first_page + second_page + third_page)
-        assert all(row["payload_size_bytes"] == payload_size for row in first_page)
+        assert all(
+            set(row) == {"id", "user_id", "event_type", "severity", "created_at"}
+            for row in first_page + second_page + third_page
+        )
         assert db.get_claims_monitoring_event_payload_bounded(
             user_id="owner-2",
             event_id=event_ids[0],
@@ -1303,5 +1305,18 @@ def test_claims_monitoring_event_postgres_pages_are_bounded_with_equal_timestamp
             "payload_json": payload,
             "payload_size_bytes": payload_size,
         }
+        db.insert_claims_monitoring_event(
+            user_id="owner-1",
+            event_type="unsupported_ratio",
+            severity="high",
+            payload_json='{"provider":true,"model":7}',
+        )
+        filtered = db.list_claims_monitoring_events_page(
+            user_id="owner-1",
+            provider="true",
+            model="7",
+            limit=10,
+        )
+        assert [row["id"] for row in filtered] == event_ids
     finally:
         db.close_connection()

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_json_helpers import (
+    POSTGRES_CLAIMS_JSON_HELPER_DDL,
+)
+
 
 class _ClaimsAnalyticsExportJobsBackend(Protocol):
     """Backend surface required by the v24 migration helper."""
@@ -37,6 +41,7 @@ def run_postgres_migrate_to_v24(
     table = ident("claims_analytics_exports")
 
     statements = [
+        *POSTGRES_CLAIMS_JSON_HELPER_DDL,
         (
             f"ALTER TABLE {table} "
             f"ADD COLUMN IF NOT EXISTS {ident('job_id')} BIGINT"

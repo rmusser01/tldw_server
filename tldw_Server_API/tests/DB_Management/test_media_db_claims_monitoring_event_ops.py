@@ -592,8 +592,10 @@ def test_list_claims_monitoring_events_page_uses_paired_keyset_without_gaps(
         assert all(row["user_id"] == "1" for row in rows)
         assert all(row["event_type"] == "unsupported_ratio" for row in rows)
         assert all(row["severity"] == "warning" for row in rows)
-        assert all("payload_json" not in row for row in rows)
-        assert [row["payload_size_bytes"] for row in rows] == [11, 11, 11, 11]
+        assert all(
+            set(row) == {"id", "user_id", "event_type", "severity", "created_at"}
+            for row in rows
+        )
     finally:
         db.close_connection()
 
@@ -615,8 +617,7 @@ def test_claims_monitoring_event_payload_scan_and_fetch_are_byte_bounded_and_own
         metadata = db.list_claims_monitoring_events_page(user_id="1", limit=1)
 
         assert len(metadata) == 1
-        assert "payload_json" not in metadata[0]
-        assert metadata[0]["payload_size_bytes"] == payload_size
+        assert set(metadata[0]) == {"id", "user_id", "event_type", "severity", "created_at"}
         assert db.get_claims_monitoring_event_payload_bounded(
             user_id="2",
             event_id=int(event["id"]),
@@ -638,6 +639,40 @@ def test_claims_monitoring_event_payload_scan_and_fetch_are_byte_bounded_and_own
             "payload_json": payload,
             "payload_size_bytes": payload_size,
         }
+        assert db.list_claims_monitoring_events_page(
+            user_id="1",
+            provider="missing",
+            limit=1,
+        ) == []
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_page_filters_only_string_provider_and_model_values(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-string-filters.db")
+    try:
+        non_string = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            payload_json='{"provider":true,"model":7}',
+        )
+        wanted = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            payload_json='{"provider":"1","model":"7"}',
+        )
+
+        rows = db.list_claims_monitoring_events_page(
+            user_id="1",
+            provider="1",
+            model="7",
+            limit=10,
+        )
+
+        assert [row["id"] for row in rows] == [wanted["id"]]
+        assert non_string["id"] != wanted["id"]
     finally:
         db.close_connection()
 

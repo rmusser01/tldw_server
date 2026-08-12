@@ -8,6 +8,9 @@ from typing import Any, Protocol
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_json_helpers import (
+    POSTGRES_CLAIMS_JSON_HELPER_DDL,
+)
 
 try:
     from loguru import logger
@@ -414,6 +417,8 @@ def ensure_postgres_claims_extensions(
             f"ADD COLUMN IF NOT EXISTS {ident('delivered_at')} TIMESTAMPTZ",
             connection=conn,
         )
+        for statement in POSTGRES_CLAIMS_JSON_HELPER_DDL:
+            backend.execute(statement, connection=conn)
         backend.execute(
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user')} "
             f"ON {ident('claims_monitoring_events')} ({ident('user_id')})",

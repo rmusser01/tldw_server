@@ -77,22 +77,32 @@ def _event(
 
 
 def _metadata_row(row: dict[str, Any]) -> dict[str, Any]:
-    raw_payload = row.get("payload_json")
-    try:
-        payload = json.loads(raw_payload) if raw_payload else {}
-    except (TypeError, ValueError, UnicodeError):
-        payload = {}
-    normalized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    payload_size_bytes = len(normalized.encode("utf-8"))
     return {
         key: value
         for key, value in row.items()
         if key not in {"payload_json", "delivered_at"}
-    } | {
-        "payload_size_bytes": payload_size_bytes,
-        "payload_provider": str(payload.get("provider")) if isinstance(payload, dict) and "provider" in payload else None,
-        "payload_model": str(payload.get("model")) if isinstance(payload, dict) and "model" in payload else None,
     }
+
+
+def _row_payload_matches(
+    row: dict[str, Any],
+    *,
+    provider: str | None,
+    model: str | None,
+) -> bool:
+    try:
+        payload = json.loads(row.get("payload_json") or "{}")
+    except (TypeError, ValueError, UnicodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        return provider is None and model is None
+    payload_provider = payload.get("provider")
+    payload_model = payload.get("model")
+    if provider is not None and (
+        not isinstance(payload_provider, str) or payload_provider != provider
+    ):
+        return False
+    return model is None or (isinstance(payload_model, str) and payload_model == model)
 
 
 class FakeMonitoringDB:
@@ -108,6 +118,8 @@ class FakeMonitoringDB:
         user_id: str,
         event_type: str | None = None,
         severity: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
         start_time: str | None = None,
         end_time: str | None = None,
         after_created_at: Any = None,
@@ -123,6 +135,8 @@ class FakeMonitoringDB:
                 "user_id": user_id,
                 "event_type": event_type,
                 "severity": severity,
+                "provider": provider,
+                "model": model,
                 "start_time": start_time,
                 "end_time": end_time,
                 "after_created_at": after_created_at,
@@ -137,6 +151,7 @@ class FakeMonitoringDB:
             rows = [row for row in rows if row.get("event_type") == event_type]
         if severity is not None:
             rows = [row for row in rows if row.get("severity") == severity]
+        rows = [row for row in rows if _row_payload_matches(row, provider=provider, model=model)]
         if start_time is not None:
             start = _parse_time(start_time)
             rows = [row for row in rows if _parse_time(str(row["created_at"])) >= start]
@@ -209,6 +224,8 @@ class ScriptedPageDB:
         user_id: str,
         event_type: str | None = None,
         severity: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
         start_time: str | None = None,
         end_time: str | None = None,
         after_created_at: Any = None,
@@ -224,6 +241,8 @@ class ScriptedPageDB:
                 "user_id": user_id,
                 "event_type": event_type,
                 "severity": severity,
+                "provider": provider,
+                "model": model,
                 "start_time": start_time,
                 "end_time": end_time,
                 "after_created_at": after_created_at,
@@ -236,7 +255,11 @@ class ScriptedPageDB:
         scripted = self.pages[page_index] if page_index < len(self.pages) else []
         if isinstance(scripted, BaseException):
             raise scripted
-        return [_metadata_row(row) for row in scripted]
+        return [
+            _metadata_row(row)
+            for row in scripted
+            if _row_payload_matches(row, provider=provider, model=model)
+        ]
 
     def get_claims_monitoring_event_payload_bounded(
         self,
@@ -897,7 +920,7 @@ def test_render_does_not_wrap_raw_database_exceptions() -> None:
     assert exc_info.value is database_error
 
 
-def test_render_applies_provider_and_model_after_payload_decode_and_counts_all_matches() -> None:
+def test_render_applies_provider_and_model_in_database_scan_and_counts_all_matches() -> None:
     rows = [
         _event(
             event_id,
@@ -921,8 +944,11 @@ def test_render_applies_provider_and_model_after_payload_decode_and_counts_all_m
     assert payload["pagination"] == {"limit": 3, "offset": 2, "total": 301}
     assert all("payload_json" not in event for event in payload["events"])
     assert all(event["payload"] == {"provider": "local", "model": "model-a"} for event in payload["events"])
-    assert len(db.calls) == 2
-    assert all(call["event_type"] is None and call["severity"] is None for call in db.calls)
+    assert len(db.calls) == 1
+    assert db.calls[0]["provider"] == "local"
+    assert db.calls[0]["model"] == "model-a"
+    assert db.calls[0]["event_type"] is None
+    assert db.calls[0]["severity"] is None
 
 
 def test_render_passes_database_filters_and_snapshot_cutoff_on_every_page() -> None:
@@ -1088,7 +1114,7 @@ def test_render_rejects_one_oversized_event_before_loading_payload(format: str) 
 
     assert exc_info.value.code == "claims_export_too_large"
     assert exc_info.value.http_status == 413
-    assert db.payload_calls == []
+    assert [call["event_id"] for call in db.payload_calls] == [1]
 
 
 @pytest.mark.parametrize("format", ["json", "csv"])
@@ -1105,7 +1131,26 @@ def test_render_rejects_cumulative_rows_at_first_exact_budget_overflow(format: s
         _render(db, normalized, max_bytes=one_row["size_bytes"])
 
     assert exc_info.value.code == "claims_export_too_large"
-    assert [call["event_id"] for call in db.payload_calls] == [1, 2]
+    expected_calls = [1] if format == "csv" else [1, 2]
+    assert [call["event_id"] for call in db.payload_calls] == expected_calls
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_render_passes_each_selected_payload_the_decreasing_remaining_budget(format: str) -> None:
+    db = FakeMonitoringDB(
+        [_event(1, payload={"text": "first"}), _event(2, payload={"text": "second"})]
+    )
+
+    _render(
+        db,
+        _normalized(format=format, pagination={"limit": 2, "offset": 0}),
+        max_bytes=4096,
+    )
+
+    budgets = [call["max_bytes"] for call in db.payload_calls]
+    assert len(budgets) == 2
+    assert budgets[0] < 4096
+    assert budgets[1] < budgets[0]
 
 
 @pytest.mark.parametrize("format", ["json", "csv"])

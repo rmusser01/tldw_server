@@ -871,6 +871,15 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
             assert _index_exists(
                 backend, conn, "idx_claims_monitoring_events_user_id"
             )
+            helper_functions = backend.execute(
+                "SELECT proname FROM pg_proc WHERE proname IN (%s, %s)",
+                ("tldw_claims_safe_json", "tldw_claims_compact_json"),
+                connection=conn,
+            ).fetchall()
+            assert {row["proname"] for row in helper_functions} == {
+                "tldw_claims_safe_json",
+                "tldw_claims_compact_json",
+            }
             assert [dict(row) for row in export_rows] == [
                 {
                     "export_id": "export-existing",

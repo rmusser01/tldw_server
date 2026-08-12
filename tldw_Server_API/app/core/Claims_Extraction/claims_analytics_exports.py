@@ -381,14 +381,6 @@ def _decode_event(
     return event, order_key, raw_created_at
 
 
-def _payload_matches(row: Mapping[str, Any], *, provider: str | None, model: str | None) -> bool:
-    if provider is None and model is None:
-        return True
-    if provider is not None and row.get("payload_provider") != provider:
-        return False
-    return model is None or row.get("payload_model") == model
-
-
 def _load_event_payload(
     db: Any,
     *,
@@ -396,11 +388,6 @@ def _load_event_payload(
     row: Mapping[str, Any],
     max_bytes: int,
 ) -> Any:
-    payload_size = row.get("payload_size_bytes")
-    if isinstance(payload_size, bool) or not isinstance(payload_size, int) or payload_size < 0:
-        raise _serialization_error()
-    if payload_size > max_bytes:
-        raise _too_large_error()
     loaded = db.get_claims_monitoring_event_payload_bounded(
         user_id=owner_user_id,
         event_id=row["id"],
@@ -431,7 +418,7 @@ def _scan_events(
     filters: dict[str, Any],
     pagination: dict[str, int],
     snapshot_event_id: int | None,
-    max_bytes: int,
+    remaining_bytes: Callable[[], int],
     emit: Callable[[dict[str, Any]], None],
 ) -> tuple[int, int]:
     selected_count = 0
@@ -441,15 +428,13 @@ def _scan_events(
     after_created_at: Any = None
     after_id: int | None = None
     previous_key: tuple[datetime, int] | None = None
-    provider = filters.get("provider")
-    model = filters.get("model")
-    payload_filtering = provider is not None or model is not None
-
     while True:
         page = db.list_claims_monitoring_events_page(
             user_id=owner_user_id,
             event_type=filters.get("event_type"),
             severity=filters.get("severity"),
+            provider=filters.get("provider"),
+            model=filters.get("model"),
             start_time=filters.get("start_time"),
             end_time=filters["end_time"],
             after_created_at=after_created_at,
@@ -471,18 +456,15 @@ def _scan_events(
                 previous_key=previous_key,
             )
             page_last_id = previous_key[1]
-            if payload_filtering and not _payload_matches(
-                raw_row,
-                provider=provider,
-                model=model,
-            ):
-                continue
             if offset <= total < upper_bound:
+                payload_budget = remaining_bytes()
+                if payload_budget <= 0:
+                    raise _too_large_error()
                 event["payload"] = _load_event_payload(
                     db,
                     owner_user_id=owner_user_id,
                     row=raw_row,
-                    max_bytes=max_bytes,
+                    max_bytes=payload_budget,
                 )
                 emit(event)
                 selected_count += 1
@@ -501,6 +483,10 @@ class _BoundedTextBuilder:
         self.max_bytes = max_bytes
         self.size_bytes = 0
         self._chunks: list[str] = []
+
+    @property
+    def remaining_bytes(self) -> int:
+        return self.max_bytes - self.size_bytes
 
     def append(self, value: str) -> None:
         try:
@@ -607,7 +593,7 @@ def render_export(
             filters=normalized["filters"],
             pagination=normalized["pagination"],
             snapshot_event_id=snapshot_event_id,
-            max_bytes=max_bytes,
+            remaining_bytes=lambda: builder.remaining_bytes,
             emit=emit,
         )
         if normalized["format"] == "json":

@@ -605,7 +605,15 @@ def render_export(
 ) -> dict[str, Any]:
 ```
 
-Scan `list_claims_monitoring_events_page()` in pages of 1000. Apply provider/model filters after decoding `payload_json`, increment a total match counter, and retain only matches in `[offset, offset + limit)`. Continue the bounded scan to calculate the stable `pagination.total`; never retain unrelated pages. Render JSON with compact deterministic separators and UTF-8 preservation:
+Scan `list_claims_monitoring_events_page()` in pages of 1000. Apply
+provider/model filters in parameterized database predicates, increment a total
+match counter from constant-size metadata rows, and retain only matches in
+`[offset, offset + limit)`. Continue the bounded scan to calculate the stable
+`pagination.total`; never retain unrelated pages. Load payload text only for
+selected owner-scoped rows through a query bounded by the builder's decreasing
+remaining-byte budget. Provider/model filters match JSON strings only on both
+database backends. Render JSON with compact deterministic separators and UTF-8
+preservation:
 
 ```python
 payload_text = json.dumps(
@@ -1622,8 +1630,10 @@ outputs accumulate, and apply orphan grace after retention for pruned Jobs.
 
 ### Stage 2: Minimal implementation (GREEN)
 
-- [x] Return payload byte sizes rather than payload text from keyset pages and
-  load one owner-scoped payload only when the database proves it fits.
+- [x] Apply payload-derived filters in parameterized database predicates,
+  return only constant-size event metadata from keyset pages, and load one
+  owner-scoped payload only when the database proves it fits the builder's
+  current remaining-byte budget.
 - [x] Incrementally serialize byte-counted JSON event and CSV row chunks without
   retaining decoded event lists or materializing an unchecked final payload.
 - [x] Require retention plus orphan grace when an attached Job is proven absent.
@@ -1633,15 +1643,28 @@ outputs accumulate, and apply orphan grace after retention for pruned Jobs.
 ### Stage 3: Verification and review
 
 - [x] Run rendering, cleanup, monitoring-event, API, worker, and database suites:
-  330 passed with four official PostgreSQL fixture skips across the two runs.
+  final bounded rendering/cleanup/database run passed 284 tests with 13
+  official PostgreSQL-unreachable fixture skips; API/worker integration passed
+  60 tests.
 - [x] Run Ruff and `git diff --check` on the exact touched scope.
 - [x] Run compileall and Bandit on production touched scope; Bandit reported
   zero findings across 3,724 lines of production code.
-- [ ] Complete fresh specification and quality reviews and commit the batch.
+- [x] Complete fresh specification and quality reviews. Specification re-review
+  approved the corrected batch. Three bounded quality-review subagent attempts
+  did not return; the local code-review checklist found no additional issue.
+- [ ] Commit the corrected batch separately.
 
 Review correction: both reviewers validated that raw payload size was being
 applied before provider/model filtering and pagination. RED: six JSON/CSV cases
 for oversized nonmatching rows, oversized off-page rows, and whitespace-heavy
-selected JSON. GREEN: provider/model metadata and normalized payload sizes are
-projected without payload text; only selected rows use the owner-scoped bounded
-payload read (7 focused rendering tests passed).
+selected JSON. GREEN: provider/model filters are applied by the database;
+constant-size scan rows contain no payload-derived values; only selected rows
+use the owner-scoped bounded payload read. PostgreSQL uses schema-installed JSON
+helpers compatible with the documented PostgreSQL 13+ baseline instead of
+newer `IS JSON` or `json_serialize` syntax (7 focused rendering tests passed).
+
+Second review correction: selected payload reads now receive the builder's
+decreasing remaining-byte budget instead of the original export limit. SQLite
+and PostgreSQL provider/model predicates now share an explicit string-only JSON
+contract so booleans, numbers, nulls, arrays, and objects cannot produce
+backend-specific matches. RED: three focused tests; GREEN: three focused tests.

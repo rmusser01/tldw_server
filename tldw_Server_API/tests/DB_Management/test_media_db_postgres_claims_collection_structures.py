@@ -151,6 +151,8 @@ def test_ensure_postgres_claims_extensions_executes_representative_claims_ddls_a
         'ON "claims_monitoring_events" ("user_id", "id")' in query
         for query in queries
     )
+    assert any("CREATE OR REPLACE FUNCTION tldw_claims_safe_json" in query for query in queries)
+    assert any("CREATE OR REPLACE FUNCTION tldw_claims_compact_json" in query for query in queries)
     assert any('CREATE TABLE IF NOT EXISTS "claim_clusters"' in query for query in queries)
     assert any(
         'CREATE TABLE IF NOT EXISTS "claim_cluster_membership"' in query

@@ -114,9 +114,7 @@ def get_claims_monitoring_event_payload_bounded(
         raise ValueError("max_bytes must be a positive integer")
     if self.backend_type == BackendType.POSTGRESQL:
         normalized_sql = (
-            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
-            "WHEN payload_json IS JSON THEN json_serialize(payload_json::jsonb RETURNING text) "
-            "ELSE '{}' END"
+            "tldw_claims_compact_json(tldw_claims_safe_json(payload_json))"
         )
         size_sql = f"octet_length({normalized_sql})"
     else:
@@ -127,7 +125,7 @@ def get_claims_monitoring_event_payload_bounded(
         size_sql = f"length(CAST(({normalized_sql}) AS BLOB))"
     row = self.execute_query(
         (
-            "SELECT CASE WHEN "  # nosec B608 - expression is selected by backend type.
+            "SELECT CASE WHEN "  # nosec B608
             + size_sql
             + " <= ? THEN "
             + normalized_sql
@@ -217,6 +215,8 @@ def list_claims_monitoring_events_page(
     user_id: str,
     event_type: str | None = None,
     severity: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
     after_created_at: Any = None,
@@ -240,6 +240,32 @@ def list_claims_monitoring_events_page(
     if severity:
         conditions.append("severity = ?")
         params.append(str(severity))
+    if provider is not None:
+        if self.backend_type == BackendType.POSTGRESQL:
+            conditions.append(
+                "CASE WHEN json_typeof(tldw_claims_safe_json(payload_json) -> 'provider') = 'string' "
+                "THEN tldw_claims_safe_json(payload_json) ->> 'provider' END = ?"
+            )
+        else:
+            conditions.append(
+                "CASE WHEN json_valid(payload_json) THEN "
+                "CASE WHEN json_type(payload_json, '$.provider') = 'text' "
+                "THEN json_extract(payload_json, '$.provider') END END = ?"
+            )
+        params.append(str(provider))
+    if model is not None:
+        if self.backend_type == BackendType.POSTGRESQL:
+            conditions.append(
+                "CASE WHEN json_typeof(tldw_claims_safe_json(payload_json) -> 'model') = 'string' "
+                "THEN tldw_claims_safe_json(payload_json) ->> 'model' END = ?"
+            )
+        else:
+            conditions.append(
+                "CASE WHEN json_valid(payload_json) THEN "
+                "CASE WHEN json_type(payload_json, '$.model') = 'text' "
+                "THEN json_extract(payload_json, '$.model') END END = ?"
+            )
+        params.append(str(model))
     if start_time:
         conditions.append("created_at >= ?")
         params.append(str(start_time))
@@ -255,43 +281,8 @@ def list_claims_monitoring_events_page(
         conditions.append("(created_at > ? OR (created_at = ? AND id > ?))")
         params.extend([after_created_at, after_created_at, int(after_id)])
 
-    if self.backend_type == BackendType.POSTGRESQL:
-        normalized_payload_sql = (
-            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
-            "WHEN payload_json IS JSON THEN json_serialize(payload_json::jsonb RETURNING text) "
-            "ELSE '{}' END"
-        )
-        payload_size_sql = f"octet_length({normalized_payload_sql})"
-        payload_provider_sql = (
-            "CASE WHEN payload_json IS JSON OBJECT THEN payload_json::jsonb ->> 'provider' END"
-        )
-        payload_model_sql = (
-            "CASE WHEN payload_json IS JSON OBJECT THEN payload_json::jsonb ->> 'model' END"
-        )
-    else:
-        normalized_payload_sql = (
-            "CASE WHEN payload_json IS NULL OR payload_json = '' THEN '{}' "
-            "WHEN json_valid(payload_json) THEN json(payload_json) ELSE '{}' END"
-        )
-        payload_size_sql = f"length(CAST(({normalized_payload_sql}) AS BLOB))"
-        payload_provider_sql = (
-            "CASE WHEN json_valid(payload_json) THEN "
-            "CASE WHEN json_type(payload_json) = 'object' "
-            "THEN CAST(json_extract(payload_json, '$.provider') AS TEXT) END END"
-        )
-        payload_model_sql = (
-            "CASE WHEN json_valid(payload_json) THEN "
-            "CASE WHEN json_type(payload_json) = 'object' "
-            "THEN CAST(json_extract(payload_json, '$.model') AS TEXT) END END"
-        )
     query = (
-        "SELECT id, user_id, event_type, severity, created_at, "  # nosec B608
-        + payload_size_sql
-        + " AS payload_size_bytes, "
-        + payload_provider_sql
-        + " AS payload_provider, "
-        + payload_model_sql
-        + " AS payload_model "
+        "SELECT id, user_id, event_type, severity, created_at "  # nosec B608
         "FROM claims_monitoring_events WHERE "
         + " AND ".join(conditions)
         + " ORDER BY created_at ASC, id ASC LIMIT ?"
