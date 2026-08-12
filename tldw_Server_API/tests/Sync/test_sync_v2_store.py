@@ -958,6 +958,74 @@ def test_legacy_blob_relocation_cas_updates_storage_and_resolves_matching_bindin
     assert resolved.resolved_blob_id == blob.blob_id
 
 
+def test_legacy_blob_relocation_corrupt_target_does_not_advance_storage_cas(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.blob_store import (
+        LocalSyncBlobStore,
+        SyncBlobStoreError,
+    )
+
+    sync_store.enroll_dataset(_dataset())
+    blob_store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"shared legacy bytes blocked by partial target"
+    payload_hash = "sha256:" + hashlib.sha256(payload).hexdigest()
+    blob_store.write_upload_chunk(
+        upload_id="legacy-partial-upload",
+        chunk_index=0,
+        payload=payload,
+        expected_hash=payload_hash,
+    )
+    legacy_key = blob_store.commit_upload(
+        upload_id="legacy-partial-upload",
+        payload_hash=payload_hash,
+        chunk_indexes=[0],
+    )
+    blob = sync_store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-legacy-partial",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="legacy-partial-provenance",
+            payload_hash=payload_hash,
+            content_type="application/octet-stream",
+            size_bytes=len(payload),
+            storage_backend="local_fs",
+            storage_key=legacy_key,
+        )
+    )
+    namespace = sync_store.get_or_create_storage_namespace(
+        "dataset-1",
+        owner_user_id="user-1",
+    )
+    target_key = blob_store.namespace_storage_key(
+        namespace.storage_namespace_id,
+        payload_hash,
+    )
+    target = blob_store.root / target_key
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload[:4])
+
+    with pytest.raises(SyncBlobStoreError):
+        sync_store.relocate_legacy_blob(
+            blob_store,
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            blob_id=blob.blob_id,
+        )
+
+    stored = sync_store.get_blob_object(
+        "dataset-1",
+        blob_id=blob.blob_id,
+        owner_user_id="user-1",
+    )
+    assert stored is not None
+    assert stored.storage_key == legacy_key
+    assert target.read_bytes() == payload[:4]
+    assert blob_store.read_blob(legacy_key) == payload
+
+
 def test_attachment_binding_lookup_and_unresolved_page_are_bounded_and_indexed(
     sync_store: SyncV2Store,
     monkeypatch: pytest.MonkeyPatch,

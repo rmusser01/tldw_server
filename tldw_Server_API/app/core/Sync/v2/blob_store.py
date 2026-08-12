@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import secrets
 import shutil
 import stat
 import tempfile
@@ -356,10 +355,8 @@ def _require_secure_relocation_capabilities() -> None:
     if (
         not getattr(os, "O_DIRECTORY", 0)
         or not getattr(os, "O_NOFOLLOW", 0)
-        or not {"open", "stat", "mkdir", "unlink", "link"}.issubset(
-            supported_dir_fd
-        )
-        or "link" not in supported_follow
+        or not {"open", "stat", "mkdir"}.issubset(supported_dir_fd)
+        or "stat" not in supported_follow
     ):
         raise SyncBlobStoreError(
             "Sync legacy blob relocation has an unsupported platform"
@@ -677,13 +674,22 @@ def _relocate_open_blob(
     if target_name != f"{expected_digest}.blob" or digest != expected_digest:
         raise SyncBlobStoreError("Sync relocated blob target identity is invalid")
     _storage_namespace_id(namespace)
+    flags = (
+        os.O_RDWR
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
     try:
-        existing = _open_target_at(target_directory, target_name)
-    except FileNotFoundError:
-        existing = None
-    except OSError as exc:
-        raise SyncBlobStoreError("Sync relocated blob target could not be opened safely") from exc
-    if existing is not None:
+        descriptor = os.open(target_name, flags, 0o600, dir_fd=target_directory)
+    except FileExistsError:
+        try:
+            existing = _open_target_at(target_directory, target_name)
+        except OSError as exc:
+            raise SyncBlobStoreError(
+                "Sync relocated blob target could not be opened safely"
+            ) from exc
         with existing:
             _verify_named_open_blob(
                 existing,
@@ -693,60 +699,19 @@ def _relocate_open_blob(
                 expected_size=expected_size,
             )
         return
-
-    temp_name = f".{digest}.{namespace}.{secrets.token_hex(8)}.relocating"
-    flags = (
-        os.O_RDWR
-        | os.O_CREAT
-        | os.O_EXCL
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-    )
-    try:
-        descriptor = os.open(temp_name, flags, 0o600, dir_fd=target_directory)
     except OSError as exc:
-        raise SyncBlobStoreError("Sync relocation temporary file could not be created") from exc
+        raise SyncBlobStoreError(
+            "Sync relocated blob target could not be created safely"
+        ) from exc
 
-    expected = os.fstat(descriptor)
     try:
-        with os.fdopen(descriptor, "r+b", closefd=False) as temp:
+        expected = os.fstat(descriptor)
+        with os.fdopen(descriptor, "r+b", closefd=False) as target:
             source.seek(0)
             while chunk := source.read(STREAM_CHUNK_SIZE):
-                temp.write(chunk)
-            temp.flush()
+                target.write(chunk)
+            target.flush()
             os.fsync(descriptor)
-            _verify_open_blob(
-                temp,
-                payload_hash=payload_hash,
-                expected_size=expected_size,
-            )
-
-        named = os.stat(temp_name, dir_fd=target_directory, follow_symlinks=False)
-        if (
-            named.st_dev != expected.st_dev
-            or named.st_ino != expected.st_ino
-            or not stat.S_ISREG(named.st_mode)
-        ):
-            raise SyncBlobStoreError("Sync relocation temporary inode changed")
-        try:
-            os.link(
-                temp_name,
-                target_name,
-                src_dir_fd=target_directory,
-                dst_dir_fd=target_directory,
-                follow_symlinks=False,
-            )
-        except FileExistsError:
-            with _open_target_at(target_directory, target_name) as existing:
-                _verify_named_open_blob(
-                    existing,
-                    directory=target_directory,
-                    name=target_name,
-                    payload_hash=payload_hash,
-                    expected_size=expected_size,
-                )
-            return
-        with _open_target_at(target_directory, target_name) as target:
             _verify_named_open_blob(
                 target,
                 directory=target_directory,
