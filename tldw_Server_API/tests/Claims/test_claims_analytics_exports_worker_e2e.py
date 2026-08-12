@@ -152,7 +152,6 @@ async def test_claims_analytics_export_api_worker_and_download_flow(
                         "event_type": "unsupported_ratio",
                         "severity": "high",
                         "created_at": event["created_at"],
-                        "delivered_at": None,
                         "payload": {"ratio": 0.75},
                     }
                 ],

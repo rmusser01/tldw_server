@@ -425,6 +425,11 @@ def ensure_postgres_claims_extensions(
             connection=conn,
         )
         backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user_id')} "
+            f"ON {ident('claims_monitoring_events')} ({ident('user_id')}, {ident('id')})",
+            connection=conn,
+        )
+        backend.execute(
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_type')} "
             f"ON {ident('claims_monitoring_events')} ({ident('event_type')})",
             connection=conn,

@@ -28,7 +28,7 @@ CSV_COLUMNS = ("id", "event_type", "severity", "created_at", "payload_json")
 
 _OWNER_ID_RE = re.compile(r"^[1-9][0-9]*$")
 _SCALAR_FILTERS = ("event_type", "severity", "provider", "model")
-_EVENT_COLUMNS = ("id", "user_id", "event_type", "severity", "created_at", "delivered_at")
+_EVENT_COLUMNS = ("id", "user_id", "event_type", "severity", "created_at")
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 _NORMALIZED_REQUEST_KEYS = {
     "owner_user_id",
@@ -370,8 +370,6 @@ def _decode_event(
 
     event = {column: row.get(column) for column in _EVENT_COLUMNS if column in row}
     event["created_at"] = canonical_created_at
-    if event.get("delivered_at") is not None:
-        _, event["delivered_at"] = _database_timestamp(event["delivered_at"])
     raw_payload = row.get("payload_json")
     try:
         payload = json.loads(raw_payload) if raw_payload else {}

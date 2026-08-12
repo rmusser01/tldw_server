@@ -1098,6 +1098,7 @@ class MediaDatabase:
     );
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user ON claims_monitoring_events(user_id);
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id ON claims_monitoring_events(user_id, created_at, id);
+    CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_id ON claims_monitoring_events(user_id, id);
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_type ON claims_monitoring_events(event_type);
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered ON claims_monitoring_events(delivered_at);
 

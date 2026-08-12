@@ -1,6 +1,7 @@
 import importlib
 import sqlite3
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -2137,6 +2138,8 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
                 )
             if query == "PRAGMA table_info(claims_monitoring_events)":
                 return FakeCursor(rows=[(0, "id"), (1, "event_type")])
+            if query == "PRAGMA table_info(claims_analytics_exports)":
+                return FakeCursor(rows=[(0, "export_id"), (1, "snapshot_at")])
             if query == (
                 "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered "
                 "ON claims_monitoring_events(delivered_at);"
@@ -2145,6 +2148,11 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
             if query == (
                 "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id "
                 "ON claims_monitoring_events(user_id, created_at, id);"
+            ):
+                return None
+            if query == (
+                "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_id "
+                "ON claims_monitoring_events(user_id, id);"
             ):
                 return None
             raise AssertionError(f"unexpected query {query!r}")
@@ -2160,9 +2168,11 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
     assert conn.queries == [
         "SELECT name FROM sqlite_master WHERE type='table' AND name='Claims'",
         "PRAGMA table_info(Claims)",
+        "PRAGMA table_info(claims_analytics_exports)",
         "PRAGMA table_info(claims_monitoring_events)",
         "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered ON claims_monitoring_events(delivered_at);",
         "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id ON claims_monitoring_events(user_id, created_at, id);",
+        "CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_id ON claims_monitoring_events(user_id, id);",
     ]
     assert conn.scripts == [
         "\n".join(
@@ -2173,6 +2183,7 @@ def test_sqlite_claims_extensions_repairs_missing_claim_columns_and_events_deliv
             ]
         ),
         "claims schema sql",
+        "ALTER TABLE claims_analytics_exports ADD COLUMN snapshot_event_id INTEGER;",
         "ALTER TABLE claims_monitoring_events ADD COLUMN delivered_at DATETIME;",
     ]
 
@@ -2604,7 +2615,27 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
             version_row = raw_conn.execute(
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()
+            event_index_columns = {
+                row["name"]: [
+                    column["name"]
+                    for column in raw_conn.execute(
+                        f"PRAGMA index_info({row['name']})"
+                    ).fetchall()
+                ]
+                for row in raw_conn.execute(
+                    "PRAGMA index_list(claims_monitoring_events)"
+                ).fetchall()
+            }
             assert version_row["version"] == 24
+            assert event_index_columns["idx_claims_monitoring_events_user_created_id"] == [
+                "user_id",
+                "created_at",
+                "id",
+            ]
+            assert event_index_columns["idx_claims_monitoring_events_user_id"] == [
+                "user_id",
+                "id",
+            ]
             assert {
                 "latest_transcription_run_id",
                 "next_transcription_run_id",
@@ -2827,6 +2858,12 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
                 "PRAGMA index_list(claims_analytics_exports)"
             ).fetchall()
         }
+        event_indexes = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA index_list(claims_monitoring_events)"
+            ).fetchall()
+        }
         version = conn.execute(
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()[0]
@@ -2839,6 +2876,10 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
         assert columns["snapshot_event_id"] == {"type": "INTEGER", "notnull": 0}
         assert "job_status" not in columns
         assert "idx_claims_analytics_exports_job_id" in indexes
+        assert {
+            "idx_claims_monitoring_events_user_created_id",
+            "idx_claims_monitoring_events_user_id",
+        }.issubset(event_indexes)
     finally:
         db.close_connection()
 
@@ -2960,26 +3001,71 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
 
 
 @pytest.mark.integration
-def test_current_v24_sqlite_bootstrap_restores_claims_monitoring_event_snapshot_index(
+def test_current_v24_sqlite_bootstrap_repairs_export_snapshot_column_and_event_indexes(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "media_v24_claims_events.sqlite"
     db = MediaDatabase(str(db_path), client_id="claims-event-snapshot-index")
     try:
         with sqlite3.connect(db_path) as conn:
-            conn.execute("DROP INDEX idx_claims_monitoring_events_user_created_id")
+            conn.executescript(
+                """
+                DROP INDEX idx_claims_monitoring_events_user_created_id;
+                DROP INDEX IF EXISTS idx_claims_monitoring_events_user_id;
+                ALTER TABLE claims_analytics_exports RENAME TO claims_analytics_exports_v24;
+                CREATE TABLE claims_analytics_exports (
+                    export_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    format TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload_json TEXT,
+                    payload_csv TEXT,
+                    filters_json TEXT,
+                    pagination_json TEXT,
+                    error_message TEXT,
+                    job_id INTEGER,
+                    error_code TEXT,
+                    snapshot_at TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                DROP TABLE claims_analytics_exports_v24;
+                """
+            )
 
         db._initialize_schema()
+        created = db.create_claims_analytics_export(
+            export_id="current-v24-repaired",
+            user_id="owner-1",
+            format="json",
+            status="queued",
+            snapshot_event_id=0,
+        )
 
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
-            columns = [
+            event_index_columns = [
                 row["name"]
                 for row in conn.execute(
                     "PRAGMA index_info(idx_claims_monitoring_events_user_created_id)"
                 ).fetchall()
             ]
-        assert columns == ["user_id", "created_at", "id"]
+            high_water_index_columns = [
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA index_info(idx_claims_monitoring_events_user_id)"
+                ).fetchall()
+            ]
+            export_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(claims_analytics_exports)"
+                ).fetchall()
+            }
+        assert created["snapshot_event_id"] == 0
+        assert "snapshot_event_id" in export_columns
+        assert event_index_columns == ["user_id", "created_at", "id"]
+        assert high_water_index_columns == ["user_id", "id"]
     finally:
         db.close_connection()
 
@@ -2993,6 +3079,16 @@ def test_sqlite_migration_024_loads_as_idempotent(tmp_path) -> None:
 
     assert migration.name == "claims_analytics_export_jobs"
     assert migration.idempotent is True
+
+
+@pytest.mark.unit
+def test_sqlite_migration_024_defers_monitoring_event_indexes_to_extension() -> None:
+    migration_path = (
+        Path(__file__).parents[2]
+        / "app/core/DB_Management/migrations/024_claims_analytics_export_jobs.sql"
+    )
+
+    assert "claims_monitoring_events" not in migration_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.integration

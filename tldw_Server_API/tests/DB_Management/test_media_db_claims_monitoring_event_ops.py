@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
     MediaDatabase,
 )
@@ -109,6 +112,17 @@ def test_claims_monitoring_event_high_water_is_owner_scoped(tmp_path: Path) -> N
         assert db.get_claims_monitoring_event_high_water(user_id="1") == third["id"]
         assert db.get_claims_monitoring_event_high_water(user_id="2") == second["id"]
         assert first["id"] < third["id"]
+
+        plan_rows = db.get_connection().execute(
+            "EXPLAIN QUERY PLAN SELECT COALESCE(MAX(id), 0) "
+            "FROM claims_monitoring_events "
+            "INDEXED BY idx_claims_monitoring_events_user_id WHERE user_id = ?",
+            ("1",),
+        ).fetchall()
+        assert any(
+            "idx_claims_monitoring_events_user_id" in str(row["detail"])
+            for row in plan_rows
+        )
     finally:
         db.close_connection()
 
@@ -123,7 +137,9 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
         "created_at": "2026-03-22T00:00:01Z",
         "delivered_at": None,
     }
-    execute_calls: list[tuple[str, tuple[object, ...], bool]] = []
+    execute_calls: list[tuple[str, tuple[object, ...], bool, object | None]] = []
+    transaction_events: list[str] = []
+    transaction_connection = object()
 
     class _Cursor:
         def __init__(self, row: dict[str, object]) -> None:
@@ -135,6 +151,12 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
     class _FakePostgresDB:
         backend_type = BackendType.POSTGRESQL
 
+        @contextmanager
+        def transaction(self):
+            transaction_events.append("enter")
+            yield transaction_connection
+            transaction_events.append("exit")
+
         def _get_current_utc_timestamp_str(self) -> str:
             return "2026-03-22T00:00:01Z"
 
@@ -144,8 +166,9 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
             params: tuple[object, ...] | None = None,
             *,
             commit: bool = False,
+            connection: object | None = None,
         ) -> _Cursor:
-            execute_calls.append((sql, tuple(params or ()), commit))
+            execute_calls.append((sql, tuple(params or ()), commit, connection))
             if sql.startswith("INSERT INTO claims_monitoring_events"):
                 return _Cursor({"id": 17})
             return _Cursor(loaded_row)
@@ -159,8 +182,12 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
     )
 
     assert created == loaded_row
-    assert execute_calls[0][0].endswith(" RETURNING id")
-    assert execute_calls[0][1] == (
+    assert transaction_events == ["enter", "exit"]
+    assert "pg_advisory_xact_lock_shared" in execute_calls[0][0]
+    assert execute_calls[0][1] == ("claims_monitoring_events:1",)
+    assert execute_calls[0][2:] == (False, transaction_connection)
+    assert execute_calls[1][0].endswith(" RETURNING id")
+    assert execute_calls[1][1] == (
         "1",
         "unsupported_ratio",
         "warning",
@@ -168,12 +195,119 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
         "2026-03-22T00:00:01Z",
         None,
     )
-    assert execute_calls[0][2] is True
-    assert execute_calls[1][0].startswith(
+    assert execute_calls[1][2:] == (False, transaction_connection)
+    assert execute_calls[2][0].startswith(
         "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "
     )
-    assert execute_calls[1][1] == (17,)
-    assert execute_calls[1][2] is False
+    assert execute_calls[2][1] == (17,)
+    assert execute_calls[2][2:] == (False, None)
+
+
+def test_postgres_high_water_takes_exclusive_owner_lock_before_max_query() -> None:
+    calls: list[tuple[str, tuple[object, ...], bool, object | None]] = []
+    transaction_connection = object()
+
+    class _Cursor:
+        def __init__(self, row=None) -> None:
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    class _FakePostgresDB:
+        backend_type = BackendType.POSTGRESQL
+
+        @contextmanager
+        def transaction(self):
+            yield transaction_connection
+
+        def execute_query(
+            self,
+            sql: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            commit: bool = False,
+            connection: object | None = None,
+        ) -> _Cursor:
+            calls.append((sql, tuple(params or ()), commit, connection))
+            return _Cursor({"event_id": 23} if "MAX(id)" in sql else None)
+
+    assert claims_monitoring_event_ops.get_claims_monitoring_event_high_water(
+        _FakePostgresDB(), user_id="owner-7"
+    ) == 23
+    assert "pg_advisory_xact_lock(" in calls[0][0]
+    assert "pg_advisory_xact_lock_shared" not in calls[0][0]
+    assert calls[0][1] == ("claims_monitoring_events:owner-7",)
+    assert calls[0][2:] == (False, transaction_connection)
+    assert "MAX(id)" in calls[1][0]
+    assert calls[1][1] == ("owner-7",)
+    assert calls[1][2:] == (False, transaction_connection)
+
+
+@pytest.mark.integration
+def test_postgres_high_water_waits_for_admitted_insert_commit(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="claims-monitoring-event-fence",
+        backend=backend,
+    )
+    insert_executed = threading.Event()
+    release_insert = threading.Event()
+    snapshot_started = threading.Event()
+    snapshot_finished = threading.Event()
+    inserted: dict[str, int] = {}
+    captured: dict[str, int] = {}
+    original_execute = backend.execute
+
+    def delayed_execute(query, params=None, connection=None):
+        result = original_execute(query, params, connection=connection)
+        if (
+            threading.current_thread().name == "claims-insert"
+            and query.lstrip().startswith("INSERT INTO claims_monitoring_events")
+        ):
+            insert_executed.set()
+            assert release_insert.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(backend, "execute", delayed_execute)
+
+    def insert_event() -> None:
+        inserted["id"] = int(
+            db.insert_claims_monitoring_event(
+                user_id="owner-lock",
+                event_type="unsupported_ratio",
+            )["id"]
+        )
+
+    def capture_high_water() -> None:
+        snapshot_started.set()
+        captured["id"] = db.get_claims_monitoring_event_high_water(user_id="owner-lock")
+        snapshot_finished.set()
+
+    insert_thread = threading.Thread(target=insert_event, name="claims-insert")
+    snapshot_thread = threading.Thread(target=capture_high_water, name="claims-snapshot")
+    try:
+        insert_thread.start()
+        assert insert_executed.wait(timeout=5)
+        snapshot_thread.start()
+        assert snapshot_started.wait(timeout=5)
+        assert snapshot_finished.wait(timeout=0.2) is False
+        release_insert.set()
+        insert_thread.join(timeout=5)
+        snapshot_thread.join(timeout=5)
+
+        assert not insert_thread.is_alive()
+        assert not snapshot_thread.is_alive()
+        assert captured["id"] == inserted["id"]
+    finally:
+        release_insert.set()
+        insert_thread.join(timeout=5)
+        snapshot_thread.join(timeout=5)
+        db.close_connection()
 
 
 def test_list_claims_monitoring_events_filters_and_preserves_created_at_order(

@@ -213,7 +213,12 @@ The existing `claims_analytics_exports` table gains nullable fields:
 - `snapshot_at`: UTC request snapshot cutoff.
 - `snapshot_event_id`: nullable owner-scoped monitoring-event high-water captured
   with the artifact. It is internal storage metadata and is not exposed through
-  Jobs payloads/results or the export lifecycle API.
+Jobs payloads/results or the export lifecycle API.
+
+The renderer projects only immutable monitoring-event fields: `id`, `user_id`,
+`event_type`, `severity`, `created_at`, and decoded `payload`. It omits mutable
+delivery bookkeeping, including `delivered_at`, so a worker retry after delivery
+updates produces the same artifact bytes.
 
 `job_status` is not a table field. It is projected at read time from Jobs so
 Claims does not maintain a second lifecycle state machine.
@@ -222,10 +227,14 @@ Claims does not maintain a second lifecycle state machine.
 sanitized public message. Raw exceptions are never persisted.
 
 Fresh schemas and upgrade migrations must add the same fields for SQLite and
-PostgreSQL. Add an index on `job_id`, retain owner-based indexes, and keep the
+PostgreSQL. Add an index on `job_id`, retain owner-based indexes, and keep both
+the `claims_monitoring_events(user_id, id)` high-water index and
 `claims_monitoring_events(user_id, created_at, id)` scan index identical across
-backends. Migration tests cover both a fresh database and upgrade from the
-current schema.
+backends. SQLite post-migration bootstrap repairs these unmerged v24 artifacts
+when needed. PostgreSQL event inserts take a shared transaction-scoped advisory
+lock for the owner before insert/sequence allocation, while high-water capture
+takes the matching exclusive lock before `MAX(id)` in its Media DB transaction.
+Migration tests cover both a fresh database and upgrade from the current schema.
 
 ### Artifact Status
 

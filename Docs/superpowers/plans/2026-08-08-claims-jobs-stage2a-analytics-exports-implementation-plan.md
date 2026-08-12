@@ -1560,3 +1560,49 @@ If no files changed, do not create an empty commit.
 - Rebase before opening the PR, rerun the focused and security gates after the rebase, and address review comments by verifying each finding before editing.
 - The AI-authored PR is not merge-ready until the human requester supplies the required `Change summary` explaining what changed and why these implementation choices were made.
 - Roll out handlers and schema first, then workers, then the producer flag. Roll back by disabling the producer first and leaving workers running to drain accepted exports.
+
+## Task 12 Review Hardening Follow-up (2026-08-11)
+
+**Goal:** Close the validated migration-ordering, mutable-rendering, PostgreSQL
+commit-ordering, and high-water index findings without changing schema version 24
+or public API/Jobs contracts.
+
+### Stage 1: Regression tests (RED)
+
+- [x] Extend SQLite v22-to-current and current-v24 bootstrap tests to cover a
+  missing monitoring-event table during migration 024 and a missing
+  `snapshot_event_id` column on an already-current export table.
+- [x] Add retry-after-delivery JSON determinism coverage and remove assertions
+  that treat mutable `delivered_at` as export content.
+- [x] Add PostgreSQL transaction-fake coverage proving shared lock-before-insert
+  and exclusive lock-before-high-water ordering, plus an official-fixture
+  concurrency test.
+- [x] Add SQLite/PostgreSQL `(user_id, id)` index parity and SQLite query-plan
+  coverage while retaining `(user_id, created_at, id)`.
+- [x] Run only the new focused test nodes and record the expected failures before
+  production edits.
+
+### Stage 2: Minimal implementation (GREEN)
+
+- [x] Remove monitoring-event DDL from SQLite migration 024 and let the
+  post-migration Claims extension ensure both event indexes.
+- [x] Introspect `claims_analytics_exports` in SQLite Claims-extension bootstrap
+  and add nullable `snapshot_event_id` when missing.
+- [x] Exclude `delivered_at` from JSON export event projections and document the
+  immutable exported event fields.
+- [x] For PostgreSQL only, wrap monitoring-event insert and owner high-water in
+  Media DB transactions; acquire a shared transaction advisory lock before the
+  insert and an exclusive transaction advisory lock before `MAX(id)`.
+- [x] Add `(user_id, id)` to SQLite/PostgreSQL fresh and repair schema paths and
+  the PostgreSQL v24 migration body.
+
+### Stage 3: Focused verification and commit
+
+- [ ] Run Claims export, monitoring-event DB, SQLite schema/migration, PostgreSQL
+  structure/migration, API, and worker suites. Accept only skips emitted by the
+  official PostgreSQL fixture.
+- [ ] Run Ruff, compileall, Bandit on production touched scope, and
+  `git diff --check`; inspect SQL placeholders, transaction boundaries, and
+  API/Jobs privacy.
+- [ ] Stage only follow-up files and commit separately with
+  `fix: harden Claims export snapshot fence`.

@@ -11,6 +11,27 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
 )
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
+_EVENT_ADVISORY_LOCK_PREFIX = "claims_monitoring_events:"
+
+
+def _lock_postgres_event_owner(
+    self,
+    *,
+    user_id: str,
+    connection: Any,
+    shared: bool,
+) -> None:
+    lock_sql = (
+        "SELECT pg_advisory_xact_lock_shared(hashtextextended(?, 0))"
+        if shared
+        else "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"
+    )
+    self.execute_query(
+        lock_sql,
+        (f"{_EVENT_ADVISORY_LOCK_PREFIX}{user_id}",),
+        commit=False,
+        connection=connection,
+    )
 
 
 def insert_claims_monitoring_event(
@@ -29,22 +50,42 @@ def insert_claims_monitoring_event(
     )
     if self.backend_type == BackendType.POSTGRESQL:
         insert_sql += " RETURNING id"
-    cursor = self.execute_query(
-        insert_sql,
-        (
-            str(user_id),
-            str(event_type),
-            severity,
-            payload_json,
-            now,
-            None,
-        ),
-        commit=True,
-    )
     if self.backend_type == BackendType.POSTGRESQL:
-        row = cursor.fetchone()
-        event_id = int(row["id"]) if row else 0
+        with self.transaction() as conn:
+            _lock_postgres_event_owner(
+                self,
+                user_id=str(user_id),
+                connection=conn,
+                shared=True,
+            )
+            cursor = self.execute_query(
+                insert_sql,
+                (
+                    str(user_id),
+                    str(event_type),
+                    severity,
+                    payload_json,
+                    now,
+                    None,
+                ),
+                commit=False,
+                connection=conn,
+            )
+            row = cursor.fetchone()
+            event_id = int(row["id"]) if row else 0
     else:
+        cursor = self.execute_query(
+            insert_sql,
+            (
+                str(user_id),
+                str(event_type),
+                severity,
+                payload_json,
+                now,
+                None,
+            ),
+            commit=True,
+        )
         event_id = int(getattr(cursor, "lastrowid", 0) or 0)
     return get_claims_monitoring_event(self, event_id) if event_id else {}
 
@@ -61,10 +102,27 @@ def get_claims_monitoring_event(self, event_id: int) -> dict[str, Any]:
 
 def get_claims_monitoring_event_high_water(self, *, user_id: str) -> int:
     """Return the owner's greatest persisted monitoring-event ID, or zero."""
-    row = self.execute_query(
-        "SELECT COALESCE(MAX(id), 0) AS event_id FROM claims_monitoring_events WHERE user_id = ?",
-        (str(user_id),),
-    ).fetchone()
+    if self.backend_type == BackendType.POSTGRESQL:
+        with self.transaction() as conn:
+            _lock_postgres_event_owner(
+                self,
+                user_id=str(user_id),
+                connection=conn,
+                shared=False,
+            )
+            row = self.execute_query(
+                "SELECT COALESCE(MAX(id), 0) AS event_id "
+                "FROM claims_monitoring_events WHERE user_id = ?",
+                (str(user_id),),
+                commit=False,
+                connection=conn,
+            ).fetchone()
+    else:
+        row = self.execute_query(
+            "SELECT COALESCE(MAX(id), 0) AS event_id "
+            "FROM claims_monitoring_events WHERE user_id = ?",
+            (str(user_id),),
+        ).fetchone()
     if not row:
         return 0
     try:

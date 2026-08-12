@@ -372,7 +372,15 @@ At artifact acceptance, Claims also records an internal owner-scoped monitoring
 event-ID high-water. Rendering and retries apply that high-water with the
 timestamp cutoff so events added later with equal or backdated timestamps are
 excluded. This internal value is not exposed in the API or Jobs contracts; the
-matching `(user_id, created_at, id)` index is present on SQLite and PostgreSQL.
+matching `(user_id, id)` high-water and `(user_id, created_at, id)` keyset-scan
+indexes are present on SQLite and PostgreSQL. PostgreSQL monitoring-event
+inserts take a shared transaction-scoped owner lock before insert admission,
+while high-water capture takes the matching exclusive lock before `MAX(id)`, so
+the captured ID boundary includes every admitted event that commits first.
+Rendered event content is limited to immutable `id`, `user_id`, `event_type`,
+`severity`, `created_at`, and decoded `payload` fields. Mutable delivery state
+such as `delivered_at` is intentionally omitted so worker retries reproduce the
+same payload after delivery bookkeeping changes.
 Synchronous requests that exceed the configured byte limit return HTTP 413 with
 the stable `claims_export_too_large` code; asynchronous requests expose the safe
 failed artifact through the normal status APIs.

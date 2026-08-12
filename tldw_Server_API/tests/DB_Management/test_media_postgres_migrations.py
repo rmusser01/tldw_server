@@ -803,6 +803,10 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                 connection=conn,
             )
             backend.execute(
+                "DROP INDEX IF EXISTS idx_claims_monitoring_events_user_id",
+                connection=conn,
+            )
+            backend.execute(
                 "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS job_id",
                 connection=conn,
             )
@@ -863,6 +867,9 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
             )
             assert _index_exists(
                 backend, conn, "idx_claims_monitoring_events_user_created_id"
+            )
+            assert _index_exists(
+                backend, conn, "idx_claims_monitoring_events_user_id"
             )
             assert [dict(row) for row in export_rows] == [
                 {

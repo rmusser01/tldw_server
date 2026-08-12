@@ -292,6 +292,7 @@ def _render(
     normalized: dict[str, Any],
     *,
     max_bytes: int = DEFAULT_EXPORT_MAX_BYTES,
+    snapshot_event_id: int | None = None,
 ) -> dict[str, Any]:
     return render_export(
         db,
@@ -301,6 +302,7 @@ def _render(
         pagination=normalized["pagination"],
         snapshot_at=normalized["snapshot_at"],
         max_bytes=max_bytes,
+        snapshot_event_id=snapshot_event_id,
     )
 
 
@@ -755,7 +757,7 @@ def test_render_canonicalizes_native_datetimes_and_uses_native_cursor() -> None:
     event = json.loads(result["payload_json"])["events"][0]
 
     assert event["created_at"] == "2026-08-08T11:05:06.789Z"
-    assert event["delivered_at"] == "2026-08-08T11:06:07.987Z"
+    assert "delivered_at" not in event
     assert db.calls[1]["after_created_at"] is native_created_at
     assert db.calls[1]["after_id"] == EXPORT_SCAN_PAGE_SIZE
 
@@ -772,14 +774,20 @@ def test_render_canonicalizes_sqlite_timestamp_strings_for_json_and_csv() -> Non
     csv_rows = list(csv.reader(io.StringIO(csv_result["payload_csv"], newline="")))
 
     assert json_event["created_at"] == "2026-08-08T11:05:06.789Z"
-    assert json_event["delivered_at"] == "2026-08-08T11:06:07.987Z"
+    assert "delivered_at" not in json_event
     assert csv_rows[1][3] == "2026-08-08T11:05:06.789Z"
 
 
-def test_render_preserves_none_delivered_at() -> None:
-    result = _render(ScriptedPageDB([[_event(1, delivered_at=None)]]), _normalized())
+def test_retry_after_delivery_mutation_keeps_json_payload_identical() -> None:
+    db = FakeMonitoringDB([_event(1, delivered_at=None)])
+    normalized = _normalized()
 
-    assert json.loads(result["payload_json"])["events"][0]["delivered_at"] is None
+    first = _render(db, normalized, snapshot_event_id=1)
+    db.rows[0]["delivered_at"] = "2026-08-08T11:30:00.000Z"
+    retry = _render(db, normalized, snapshot_event_id=1)
+
+    assert retry["payload_json"] == first["payload_json"]
+    assert "delivered_at" not in json.loads(retry["payload_json"])["events"][0]
 
 
 def test_render_keeps_malformed_payload_json_tolerant_as_empty_object() -> None:
