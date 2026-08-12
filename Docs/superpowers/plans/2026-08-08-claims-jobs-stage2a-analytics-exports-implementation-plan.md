@@ -1652,7 +1652,7 @@ outputs accumulate, and apply orphan grace after retention for pruned Jobs.
 - [x] Complete fresh specification and quality reviews. Specification re-review
   approved the corrected batch. Three bounded quality-review subagent attempts
   did not return; the local code-review checklist found no additional issue.
-- [ ] Commit the corrected batch separately.
+- [x] Commit the corrected batch separately as `d88a27a4bb`.
 
 Review correction: both reviewers validated that raw payload size was being
 applied before provider/model filtering and pagination. RED: six JSON/CSV cases
