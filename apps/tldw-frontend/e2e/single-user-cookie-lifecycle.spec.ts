@@ -317,6 +317,8 @@ const inspectWebSocket = async (page: Page, url: string): Promise<WebSocketResul
       new Promise<WebSocketResult>((resolve) => {
         const socket = new WebSocket(target)
         let settled = false
+        let opened = false
+        let openedUrl = socket.url
         const finish = (result: WebSocketResult) => {
           if (settled) return
           settled = true
@@ -324,17 +326,16 @@ const inspectWebSocket = async (page: Page, url: string): Promise<WebSocketResul
         }
         const timeout = window.setTimeout(() => {
           socket.close()
-          finish({ opened: false, closeCode: -1, url: socket.url })
+          finish({ opened, closeCode: -1, url: openedUrl })
         }, 15_000)
         socket.onopen = () => {
-          window.clearTimeout(timeout)
-          const openedUrl = socket.url
+          opened = true
+          openedUrl = socket.url
           socket.close(1000)
-          finish({ opened: true, closeCode: 1000, url: openedUrl })
         }
         socket.onclose = (event) => {
           window.clearTimeout(timeout)
-          finish({ opened: false, closeCode: event.code, url: socket.url })
+          finish({ opened, closeCode: event.code, url: openedUrl })
         }
         socket.onerror = () => undefined
       }),
