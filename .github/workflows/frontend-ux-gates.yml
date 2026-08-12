@@ -87,7 +87,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
@@ -243,7 +243,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build advanced frontend production bundle for smoke gate
         working-directory: apps/tldw-frontend
