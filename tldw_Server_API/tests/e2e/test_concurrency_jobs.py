@@ -43,8 +43,7 @@ def test_chatbooks_async_cancel(api_client, data_tracker):
     )
     note_id = str(note.get("id") or note.get("note_id") or "")
     assert note_id, f"No note id returned: {note}"
-    if note_id.isdigit():
-        data_tracker.add_note(int(note_id))
+    data_tracker.add_note(note_id)
 
     # Start a bounded async export containing only the note created above.
     payload = {
