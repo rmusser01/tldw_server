@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-import tldw_Server_API.app.core.Sync.v2.blob_store as blob_store_module
 from tldw_Server_API.app.core.Sync.v2.blob_store import (
     LocalSyncBlobStore,
     SyncBlobStoreError,
@@ -342,24 +341,24 @@ def test_legacy_blob_relocation_rejects_source_symlink_swap_after_path_resolutio
     legacy_path = store.resolve_storage_key(legacy_key)
     outside = tmp_path / "outside-race.blob"
     outside.write_bytes(payload)
-    original_temp_path = blob_store_module._relocation_temp_path
+    original_open = os.open
+    swapped = False
 
     def swap_source_after_resolution(
-        target: Path,
+        path: Any,
+        flags: int,
+        mode: int = 0o777,
         *,
-        digest: str,
-        namespace: str,
-    ) -> Path:
-        temp_path = original_temp_path(target, digest=digest, namespace=namespace)
-        legacy_path.unlink()
-        legacy_path.symlink_to(outside)
-        return temp_path
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        if path == legacy_path.name and dir_fd is not None and not swapped:
+            swapped = True
+            os.unlink(path, dir_fd=dir_fd)
+            os.symlink(outside, path, dir_fd=dir_fd)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(
-        blob_store_module,
-        "_relocation_temp_path",
-        swap_source_after_resolution,
-    )
+    monkeypatch.setattr(os, "open", swap_source_after_resolution)
 
     with pytest.raises(SyncBlobStoreError, match="relocation"):
         store.relocate_legacy_blob(
@@ -371,6 +370,7 @@ def test_legacy_blob_relocation_rejects_source_symlink_swap_after_path_resolutio
 
     target_key = store.namespace_storage_key("6" * 32, payload_hash)
     assert not (store.root / target_key).exists()
+    assert swapped is True
     assert outside.read_bytes() == payload
 
 
@@ -388,18 +388,32 @@ def test_legacy_blob_relocation_rejects_target_symlink_swap_during_reverificatio
     target.write_bytes(payload)
     outside = tmp_path / "outside-target-race.blob"
     outside.write_bytes(payload)
-    original_hash = blob_store_module._sha256_file
+    target_parent = target.parent.stat()
+    original_open = os.open
     swapped = False
 
-    def swap_target_before_hash(path: Path) -> str:
+    def swap_target_before_hash(
+        path: Any,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
         nonlocal swapped
-        if path == target and not swapped:
+        parent = None if dir_fd is None else os.fstat(dir_fd)
+        if (
+            path == target.name
+            and parent is not None
+            and parent.st_dev == target_parent.st_dev
+            and parent.st_ino == target_parent.st_ino
+            and not swapped
+        ):
             swapped = True
-            target.unlink()
-            target.symlink_to(outside)
-        return original_hash(path)
+            os.unlink(path, dir_fd=dir_fd)
+            os.symlink(outside, path, dir_fd=dir_fd)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(blob_store_module, "_sha256_file", swap_target_before_hash)
+    monkeypatch.setattr(os, "open", swap_target_before_hash)
 
     with pytest.raises(SyncBlobStoreError):
         store.relocate_legacy_blob(
@@ -410,7 +424,144 @@ def test_legacy_blob_relocation_rejects_target_symlink_swap_during_reverificatio
         )
 
     assert store.read_blob(legacy_key) == payload
+    assert swapped is True
     assert outside.read_bytes() == payload
+
+
+def test_legacy_blob_relocation_never_reopens_temporary_file_by_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy anchored temp bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    original_open = Path.open
+
+    def reject_relocation_temp_reopen(self: Path, *args: Any, **kwargs: Any):
+        if self.name.endswith(".relocating"):
+            raise AssertionError("relocation temp must remain descriptor-anchored")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", reject_relocation_temp_reopen)
+
+    relocated_key = store.relocate_legacy_blob(
+        legacy_storage_key=legacy_key,
+        storage_namespace_id="8" * 32,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    )
+
+    assert store.read_blob(relocated_key) == payload
+    assert store.read_blob(legacy_key) == payload
+
+
+def test_legacy_blob_relocation_rejects_temporary_inode_swap_before_publish(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy temp inode race bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "a" * 32
+    target_key = store.namespace_storage_key(namespace, payload_hash)
+    target = store.root / target_key
+    outside = tmp_path / "outside-temp-race.blob"
+    outside.write_bytes(payload)
+    original_link = os.link
+    attacked = False
+
+    def swap_temp_before_link(
+        source: Any,
+        destination: Any,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> None:
+        nonlocal attacked
+        source_name = os.fspath(source)
+        if source_name.endswith(".relocating") and not attacked:
+            attacked = True
+            if src_dir_fd is None:
+                Path(source_name).unlink()
+                Path(source_name).symlink_to(outside)
+            else:
+                os.unlink(source_name, dir_fd=src_dir_fd)
+                os.symlink(outside, source_name, dir_fd=src_dir_fd)
+        original_link(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+
+    monkeypatch.setattr(os, "link", swap_temp_before_link)
+
+    with pytest.raises(SyncBlobStoreError):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert attacked is True
+    assert os.path.lexists(target) is False
+    assert outside.read_bytes() == payload
+    assert store.read_blob(legacy_key) == payload
+
+
+def test_legacy_blob_relocation_fails_closed_on_intermediate_directory_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"legacy intermediate race bytes"
+    legacy_key, payload_hash = _legacy_blob(store, payload)
+    namespace = "9" * 32
+    outside = tmp_path / "outside-namespace"
+    outside.mkdir()
+    original_open = os.open
+    attacked = False
+
+    def swap_namespace_before_anchored_open(
+        path: Any,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal attacked
+        if (
+            path == namespace
+            and dir_fd is not None
+            and flags & getattr(os, "O_DIRECTORY", 0)
+            and not attacked
+        ):
+            attacked = True
+            os.rename(
+                namespace,
+                namespace + ".moved",
+                src_dir_fd=dir_fd,
+                dst_dir_fd=dir_fd,
+            )
+            os.symlink(outside, namespace, target_is_directory=True, dir_fd=dir_fd)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap_namespace_before_anchored_open)
+
+    with pytest.raises(SyncBlobStoreError):
+        store.relocate_legacy_blob(
+            legacy_storage_key=legacy_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert attacked is True
+    assert list(outside.iterdir()) == []
+    assert store.read_blob(legacy_key) == payload
 
 
 @pytest.mark.parametrize("failure", ["missing", "corrupt", "symlink"])

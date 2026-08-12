@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncAttachmentCreate,
+    SyncAttachmentRevisionBinding,
     SyncAttachmentRevisionBindingCreate,
     SyncBackgroundLeaseCreate,
     SyncBackgroundPolicyUpsert,
@@ -435,6 +436,7 @@ def test_attachment_binding_schema_has_exact_constraints_and_indexes(
     assert "length(storage_namespace_id) = 32" in namespace_sql
     assert {
         "idx_sync_attachment_bindings_unresolved",
+        "idx_sync_attachment_bindings_pending_digest",
         "idx_sync_attachment_bindings_blob",
     }.issubset(binding_indexes)
     assert {
@@ -494,21 +496,61 @@ def test_existing_current_schema_additively_ensures_binding_and_namespace_tables
 
     assert sync_store.db.backend.table_exists("sync_attachment_revision_bindings")
     assert sync_store.db.backend.table_exists("sync_dataset_storage_namespaces")
+    binding_indexes = {
+        row["name"]
+        for row in sync_store.db.execute(
+            "PRAGMA index_list(sync_attachment_revision_bindings)"
+        ).rows
+    }
+    assert "idx_sync_attachment_bindings_pending_digest" in binding_indexes
     assert sync_store.get_dataset("dataset-1") is not None
+
+
+def test_attachment_binding_create_requires_consistent_acceptance_availability() -> None:
+    with pytest.raises(ValueError, match="available.*resolved_blob_id"):
+        _attachment_binding(availability_at_acceptance="available")
+    with pytest.raises(ValueError, match="metadata_only.*resolved_blob_id"):
+        _attachment_binding(
+            availability_at_acceptance="metadata_only",
+            resolved_blob_id="blob-impossible-at-acceptance",
+        )
+
+    create = _attachment_binding()
+    stored = SyncAttachmentRevisionBinding(
+        dataset_id=create.dataset_id,
+        attachment_id=create.attachment_id,
+        attachment_revision=create.attachment_revision,
+        blob_hash=create.blob_hash,
+        size_bytes=create.size_bytes,
+        establishing_server_cursor=create.establishing_server_cursor,
+        availability_at_acceptance=create.availability_at_acceptance,
+        resolved_blob_id="blob-late",
+        retention_released_at=None,
+        created_at="2026-08-11T21:00:00+00:00",
+    )
+    assert stored.availability_at_acceptance == "metadata_only"
+    assert stored.resolved_blob_id == "blob-late"
 
 
 def test_attachment_binding_identity_is_immutable_and_pending_resolution_is_exact(
     sync_store: SyncV2Store,
 ) -> None:
     sync_store.enroll_dataset(_dataset())
-    created = sync_store.create_attachment_revision_binding(_attachment_binding())
-    replay = sync_store.create_attachment_revision_binding(_attachment_binding())
+    created = sync_store.create_attachment_revision_binding(
+        _attachment_binding(),
+        owner_user_id="user-1",
+    )
+    replay = sync_store.create_attachment_revision_binding(
+        _attachment_binding(),
+        owner_user_id="user-1",
+    )
 
     assert replay == created
     assert created.resolved_blob_id is None
     with pytest.raises(SyncIdempotencyConflictError):
         sync_store.create_attachment_revision_binding(
-            _attachment_binding(size_bytes=4096)
+            _attachment_binding(size_bytes=4096),
+            owner_user_id="user-1",
         )
 
     matching = sync_store.complete_blob_upload(
@@ -524,12 +566,13 @@ def test_attachment_binding_identity_is_immutable_and_pending_resolution_is_exac
             storage_key="blobs/v2/" + "1" * 32 + "/" + "a" * 64 + ".blob",
         )
     )
-    resolved = sync_store.resolve_attachment_revision_binding(
+    resolved = sync_store.get_attachment_revision_binding(
         created.dataset_id,
         created.attachment_id,
         created.attachment_revision,
-        blob_id=matching.blob_id,
+        owner_user_id="user-1",
     )
+    assert resolved is not None
     assert resolved.resolved_blob_id == matching.blob_id
     assert resolved.availability_at_acceptance == "metadata_only"
 
@@ -552,6 +595,53 @@ def test_attachment_binding_identity_is_immutable_and_pending_resolution_is_exac
             created.attachment_id,
             created.attachment_revision,
             blob_id=other.blob_id,
+            owner_user_id="user-1",
+        )
+
+
+def test_public_attachment_binding_methods_deny_wrong_dataset_owner(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    binding_create = _attachment_binding()
+
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.create_attachment_revision_binding(
+            binding_create,
+            owner_user_id="user-2",
+        )
+
+    binding = sync_store.create_attachment_revision_binding(
+        binding_create,
+        owner_user_id="user-1",
+    )
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.get_attachment_revision_binding(
+            binding.dataset_id,
+            binding.attachment_id,
+            binding.attachment_revision,
+            owner_user_id="user-2",
+        )
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.list_unresolved_attachment_revision_bindings(
+            binding.dataset_id,
+            owner_user_id="user-2",
+        )
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.resolve_attachment_revision_binding(
+            binding.dataset_id,
+            binding.attachment_id,
+            binding.attachment_revision,
+            blob_id="blob-not-authorized",
+            owner_user_id="user-2",
+        )
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.release_attachment_revision_binding(
+            binding.dataset_id,
+            binding.attachment_id,
+            binding.attachment_revision,
+            released_at="2026-08-11T21:00:00+00:00",
+            owner_user_id="user-2",
         )
 
 
@@ -559,18 +649,23 @@ def test_attachment_binding_retention_release_is_monotonic_and_idempotent(
     sync_store: SyncV2Store,
 ) -> None:
     sync_store.enroll_dataset(_dataset())
-    binding = sync_store.create_attachment_revision_binding(_attachment_binding())
+    binding = sync_store.create_attachment_revision_binding(
+        _attachment_binding(),
+        owner_user_id="user-1",
+    )
     released = sync_store.release_attachment_revision_binding(
         binding.dataset_id,
         binding.attachment_id,
         binding.attachment_revision,
         released_at="2026-08-11T21:00:00+00:00",
+        owner_user_id="user-1",
     )
     replay = sync_store.release_attachment_revision_binding(
         binding.dataset_id,
         binding.attachment_id,
         binding.attachment_revision,
         released_at="2026-08-12T21:00:00+00:00",
+        owner_user_id="user-1",
     )
 
     assert released.retention_released_at == "2026-08-11T21:00:00+00:00"
@@ -642,7 +737,8 @@ def test_legacy_blob_relocation_cas_updates_storage_and_resolves_matching_bindin
         _attachment_binding(
             blob_hash=payload_hash,
             size_bytes=len(payload),
-        )
+        ),
+        owner_user_id="user-1",
     )
 
     relocated = sync_store.relocate_legacy_blob(
@@ -661,6 +757,7 @@ def test_legacy_blob_relocation_cas_updates_storage_and_resolves_matching_bindin
         binding.dataset_id,
         binding.attachment_id,
         binding.attachment_revision,
+        owner_user_id="user-1",
     )
 
     assert replay == relocated
@@ -683,8 +780,26 @@ def test_attachment_binding_lookup_and_unresolved_page_are_bounded_and_indexed(
             _attachment_binding(
                 attachment_revision=revision,
                 establishing_server_cursor=revision,
-            )
+            ),
+            owner_user_id="user-1",
         )
+    current_attachment_id = "33333333-3333-4333-8333-333333333333"
+    current = sync_store.create_attachment_revision_binding(
+        _attachment_binding(
+            attachment_id=current_attachment_id,
+            attachment_revision=1,
+            establishing_server_cursor=2_000,
+        ),
+        owner_user_id="user-1",
+    )
+    sync_store.db.execute(
+        """
+        INSERT INTO sync_current_heads (
+            dataset_id, domain, object_id, latest_server_cursor
+        ) VALUES (?, 'attachment.ref', ?, ?)
+        """,
+        ("dataset-1", current_attachment_id, current.establishing_server_cursor),
+    )
 
     statements: list[str] = []
     original_execute = sync_store.db.execute
@@ -699,20 +814,22 @@ def test_attachment_binding_lookup_and_unresolved_page_are_bounded_and_indexed(
         "dataset-1",
         _attachment_binding().attachment_id,
         1,
+        owner_user_id="user-1",
     )
     detail_query_count = len(statements)
     statements.clear()
     page = sync_store.list_unresolved_attachment_revision_bindings(
         "dataset-1",
+        owner_user_id="user-1",
         after_establishing_server_cursor=0,
         limit=10_000,
     )
     page_query_count = len(statements)
 
     assert detail is not None
-    assert detail_query_count == 1
+    assert detail_query_count == 2
     assert len(page) == 1_000
-    assert page_query_count == 1
+    assert page_query_count == 2
     plan = " ".join(
         str(row["detail"])
         for row in original_execute(
@@ -726,6 +843,53 @@ def test_attachment_binding_lookup_and_unresolved_page_are_bounded_and_indexed(
     )
     assert "idx_sync_attachment_bindings_unresolved" in plan
     assert "USE TEMP B-TREE" not in plan.upper()
+    digest_plan = " ".join(
+        str(row["detail"])
+        for row in original_execute(
+            "EXPLAIN QUERY PLAN SELECT attachment_id FROM "
+            "sync_attachment_revision_bindings WHERE dataset_id = ? AND blob_hash = ? "
+            "AND size_bytes = ? AND resolved_blob_id IS NULL "
+            "AND retention_released_at IS NULL "
+            "ORDER BY establishing_server_cursor, attachment_id, attachment_revision LIMIT 1000",
+            ("dataset-1", current.blob_hash, current.size_bytes),
+        ).rows
+    )
+    assert "idx_sync_attachment_bindings_pending_digest" in digest_plan
+    assert "USE TEMP B-TREE" not in digest_plan.upper()
+
+    blob = sync_store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-auto-resolve",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="legacy-provenance-must-not-select",
+            payload_hash=current.blob_hash,
+            content_type="application/octet-stream",
+            size_bytes=current.size_bytes,
+            storage_backend="local_fs",
+            storage_key="blobs/v2/" + "8" * 32 + "/" + "a" * 64 + ".blob",
+        )
+    )
+    resolved_current = sync_store.get_attachment_revision_binding(
+        "dataset-1",
+        current_attachment_id,
+        1,
+        owner_user_id="user-1",
+    )
+    resolution_counts = original_execute(
+        """
+        SELECT
+            SUM(CASE WHEN resolved_blob_id = ? THEN 1 ELSE 0 END) AS resolved_count,
+            SUM(CASE WHEN resolved_blob_id IS NULL THEN 1 ELSE 0 END) AS unresolved_count
+        FROM sync_attachment_revision_bindings
+        WHERE dataset_id = ?
+        """,
+        (blob.blob_id, "dataset-1"),
+    ).rows[0]
+    assert resolved_current is not None
+    assert resolved_current.resolved_blob_id == blob.blob_id
+    assert int(resolution_counts["resolved_count"]) == 1_001
+    assert int(resolution_counts["unresolved_count"]) == 5
 
 
 def test_attachment_binding_acceptance_observation_does_not_change_envelope_identity(
@@ -759,6 +923,7 @@ def test_attachment_binding_acceptance_observation_does_not_change_envelope_iden
             "dataset-1",
             envelope.object_id,
             envelope.object_revision or 0,
+            owner_user_id="user-1",
         )
         for store in stores
     ]
@@ -790,7 +955,7 @@ def test_attachment_binding_acceptance_observation_does_not_change_envelope_iden
     assert bindings[1].resolved_blob_id is None
 
     absent_store = stores[1]
-    late_blob = absent_store.complete_blob_upload(
+    absent_store.complete_blob_upload(
         SyncBlobObjectCreate(
             blob_id="blob-late",
             dataset_id="dataset-1",
@@ -803,12 +968,13 @@ def test_attachment_binding_acceptance_observation_does_not_change_envelope_iden
             storage_key="blobs/v2/" + "2" * 32 + "/" + "a" * 64 + ".blob",
         )
     )
-    resolved = absent_store.resolve_attachment_revision_binding(
+    resolved = absent_store.get_attachment_revision_binding(
         "dataset-1",
         envelope.object_id,
         envelope.object_revision or 0,
-        blob_id=late_blob.blob_id,
+        owner_user_id="user-1",
     )
+    assert resolved is not None
     assert resolved.availability_at_acceptance == "metadata_only"
     assert resolved.resolved_blob_id == "blob-late"
     assert absent_store.insert_envelope(envelope) == accepted[1]
@@ -838,6 +1004,7 @@ def test_attachment_binding_creation_failure_rolls_back_envelope_acceptance(
             "dataset-1",
             "11111111-1111-4111-8111-111111111111",
             1,
+            owner_user_id="user-1",
         )
         is None
     )

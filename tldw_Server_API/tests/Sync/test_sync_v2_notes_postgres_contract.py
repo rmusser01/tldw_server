@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import (
 )
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.errors import SyncDatasetNotFoundError
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncAttachmentRevisionBindingCreate,
@@ -40,6 +41,10 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
         SyncDatabase._require_exact_available_blob_for_binding
     )
     namespace_source = inspect.getsource(SyncDatabase.get_or_create_storage_namespace)
+    acceptance_source = inspect.getsource(
+        SyncDatabase._create_attachment_binding_for_envelope
+    )
+    completion_source = inspect.getsource(SyncDatabase.complete_blob_upload)
 
     assert "CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings" in compact_schema
     assert "PRIMARY KEY (dataset_id, attachment_id, attachment_revision)" in compact_schema
@@ -56,6 +61,12 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     assert (
         "CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob ON "
         "sync_attachment_revision_bindings(dataset_id, resolved_blob_id)"
+    ) in compact_schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest ON "
+        "sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, "
+        "establishing_server_cursor, attachment_id, attachment_revision) WHERE "
+        "resolved_blob_id IS NULL AND retention_released_at IS NULL"
     ) in compact_schema
     assert "CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces" in compact_schema
     assert "storage_namespace_id ~ '^[0-9a-f]{32}$'" in compact_schema
@@ -85,6 +96,11 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     assert "attachment_id = ?" not in blob_lookup_source
     assert "owner_user_id" in namespace_source
     assert "FOR UPDATE" in namespace_source
+    assert "owner_user_id" in lookup_source
+    assert "owner_user_id" in unresolved_source
+    assert "FOR UPDATE" in acceptance_source
+    assert "_get_dataset_row_for_update" in completion_source
+    assert "_resolve_pending_bindings_for_blob" in completion_source
 
 
 def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_indexes(
@@ -112,8 +128,50 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
                 size_bytes=1,
                 establishing_server_cursor=1,
                 availability_at_acceptance="metadata_only",
-            )
+            ),
+            owner_user_id="owner-binding-pg",
         )
+        with pytest.raises(SyncDatasetNotFoundError):
+            store.get_attachment_revision_binding(
+                "dataset-binding-pg",
+                "11111111-1111-4111-8111-111111111111",
+                1,
+                owner_user_id="other-owner-pg",
+            )
+        with pytest.raises(SyncDatasetNotFoundError):
+            store.list_unresolved_attachment_revision_bindings(
+                "dataset-binding-pg",
+                owner_user_id="other-owner-pg",
+            )
+        with pytest.raises(SyncDatasetNotFoundError):
+            store.create_attachment_revision_binding(
+                SyncAttachmentRevisionBindingCreate(
+                    dataset_id="dataset-binding-pg",
+                    attachment_id="22222222-2222-4222-8222-222222222222",
+                    attachment_revision=1,
+                    blob_hash="sha256:" + "b" * 64,
+                    size_bytes=1,
+                    establishing_server_cursor=2,
+                    availability_at_acceptance="metadata_only",
+                ),
+                owner_user_id="other-owner-pg",
+            )
+        with pytest.raises(SyncDatasetNotFoundError):
+            store.resolve_attachment_revision_binding(
+                "dataset-binding-pg",
+                "11111111-1111-4111-8111-111111111111",
+                1,
+                blob_id="other-owner-blob",
+                owner_user_id="other-owner-pg",
+            )
+        with pytest.raises(SyncDatasetNotFoundError):
+            store.release_attachment_revision_binding(
+                "dataset-binding-pg",
+                "11111111-1111-4111-8111-111111111111",
+                1,
+                released_at="2026-08-11T21:00:00+00:00",
+                owner_user_id="other-owner-pg",
+            )
         with backend.transaction() as conn:
             db.execute("SET LOCAL enable_seqscan = off", connection=conn)
             lookup_rows = db.execute(
@@ -141,6 +199,15 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
                 ("owner-binding-pg", "dataset-binding-pg"),
                 connection=conn,
             ).rows
+            digest_rows = db.execute(
+                "EXPLAIN SELECT attachment_id FROM sync_attachment_revision_bindings "
+                "WHERE dataset_id = ? AND blob_hash = ? AND size_bytes = ? "
+                "AND resolved_blob_id IS NULL AND retention_released_at IS NULL "
+                "ORDER BY establishing_server_cursor, attachment_id, attachment_revision "
+                "LIMIT 1000",
+                ("dataset-binding-pg", "sha256:" + "a" * 64, 1),
+                connection=conn,
+            ).rows
         lookup_plan = " ".join(
             str(next(iter(row.values()))) for row in lookup_rows
         )
@@ -148,9 +215,11 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
         namespace_plan = " ".join(
             str(next(iter(row.values()))) for row in namespace_rows
         )
+        digest_plan = " ".join(str(next(iter(row.values()))) for row in digest_rows)
         assert "sync_attachment_revision_bindings_pkey" in lookup_plan
         assert "idx_sync_attachment_bindings_unresolved" in page_plan
         assert "idx_sync_dataset_storage_namespaces_owner" in namespace_plan
+        assert "idx_sync_attachment_bindings_pending_digest" in digest_plan
     finally:
         if db.backend_type == BackendType.POSTGRESQL:
             backend.get_pool().close_all()

@@ -542,6 +542,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
     ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
+    ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
     dataset_id TEXT PRIMARY KEY,
@@ -961,6 +964,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
     ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
+    ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
     dataset_id TEXT PRIMARY KEY,
@@ -2695,6 +2701,18 @@ class SyncDatabase:
     ) -> dict[str, Any]:
         row = self._get_dataset_row(dataset_id, connection=connection)
         if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return row
+
+    def _require_dataset_owner_for_update(
+        self,
+        dataset_id: str,
+        owner_user_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        row = self._get_dataset_row_for_update(dataset_id, connection=connection)
+        if row is None or str(row.get("owner_user_id")) != str(owner_user_id):
             raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
         return row
 
@@ -6597,6 +6615,7 @@ class SyncDatabase:
             or envelope.server_cursor is None
         ):
             raise SyncStoreError("attachment.ref v2 binding metadata is invalid")
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         blob_row = _first(
             self.execute(
                 """
@@ -6608,7 +6627,8 @@ class SyncDatabase:
                    AND status = 'available'
                  ORDER BY blob_id ASC
                  LIMIT 1
-                """,
+                """
+                + suffix,  # nosec B608 - backend-controlled row lock suffix.
                 (envelope.dataset_id, blob_hash, size_value),
                 connection=connection,
             )
@@ -6716,11 +6736,17 @@ class SyncDatabase:
     def create_attachment_revision_binding(
         self,
         binding: SyncAttachmentRevisionBindingCreate,
+        *,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding:
         """Create or exactly replay one immutable attachment revision binding."""
 
         with self.backend.transaction() as conn:
-            self._require_dataset(binding.dataset_id, connection=conn)
+            self._require_dataset_owner_for_update(
+                binding.dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
             return self._create_attachment_revision_binding(
                 binding,
                 connection=conn,
@@ -6731,24 +6757,35 @@ class SyncDatabase:
         dataset_id: str,
         attachment_id: str,
         attachment_revision: int,
+        *,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding | None:
         """Return one dataset-scoped immutable attachment revision binding."""
 
-        row = _first(
-            self.execute(
-                """
-                SELECT * FROM sync_attachment_revision_bindings
-                 WHERE dataset_id = ? AND attachment_id = ? AND attachment_revision = ?
-                """,
-                (dataset_id, attachment_id, attachment_revision),
+        with self.backend.transaction() as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
             )
-        )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_attachment_revision_bindings
+                     WHERE dataset_id = ? AND attachment_id = ?
+                       AND attachment_revision = ?
+                    """,
+                    (dataset_id, attachment_id, attachment_revision),
+                    connection=conn,
+                )
+            )
         return None if row is None else _attachment_revision_binding_from_row(row)
 
     def list_unresolved_attachment_revision_bindings(
         self,
         dataset_id: str,
         *,
+        owner_user_id: str,
         after_establishing_server_cursor: int = 0,
         limit: int = 1000,
     ) -> list[SyncAttachmentRevisionBinding]:
@@ -6757,18 +6794,26 @@ class SyncDatabase:
         if isinstance(limit, bool) or limit < 1:
             raise SyncStoreError("Sync attachment binding page limit must be positive")
         page_limit = min(limit, 1000)
-        rows = self.execute(
-            """
-            SELECT * FROM sync_attachment_revision_bindings
-             WHERE dataset_id = ?
-               AND resolved_blob_id IS NULL
-               AND retention_released_at IS NULL
-               AND establishing_server_cursor > ?
-             ORDER BY establishing_server_cursor, attachment_id, attachment_revision
-             LIMIT ?
-            """,
-            (dataset_id, after_establishing_server_cursor, page_limit),
-        ).rows
+        with self.backend.transaction() as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT * FROM sync_attachment_revision_bindings
+                 WHERE dataset_id = ?
+                   AND resolved_blob_id IS NULL
+                   AND retention_released_at IS NULL
+                   AND establishing_server_cursor > ?
+                 ORDER BY establishing_server_cursor, attachment_id,
+                          attachment_revision
+                 LIMIT ?
+                """,
+                (dataset_id, after_establishing_server_cursor, page_limit),
+                connection=conn,
+            ).rows
         return [_attachment_revision_binding_from_row(row) for row in rows]
 
     def _require_exact_available_blob_for_binding(
@@ -6808,11 +6853,17 @@ class SyncDatabase:
         attachment_revision: int,
         *,
         blob_id: str,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding:
         """CAS one pending binding to one exact verified blob ID."""
 
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
             row = _first(
                 self.execute(
                     """
@@ -6879,6 +6930,7 @@ class SyncDatabase:
         attachment_revision: int,
         *,
         released_at: str,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding:
         """Set the retention-release marker once without erasing audit identity."""
 
@@ -6886,6 +6938,11 @@ class SyncDatabase:
             raise SyncStoreError("Sync attachment binding release timestamp is required")
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
             row = _first(
                 self.execute(
                     """
@@ -6982,20 +7039,53 @@ class SyncDatabase:
         *,
         connection: Any,
     ) -> None:
+        if blob_row.get("status") != "available":
+            return
+        match_params = (
+            blob_row["dataset_id"],
+            blob_row["payload_hash"],
+            int(blob_row["size_bytes"]),
+        )
+        self.execute(
+            """
+            UPDATE sync_attachment_revision_bindings
+               SET resolved_blob_id = ?
+             WHERE dataset_id = ? AND blob_hash = ? AND size_bytes = ?
+               AND resolved_blob_id IS NULL AND retention_released_at IS NULL
+               AND EXISTS (
+                    SELECT 1 FROM sync_current_heads AS head
+                     WHERE head.dataset_id =
+                               sync_attachment_revision_bindings.dataset_id
+                       AND head.domain = 'attachment.ref'
+                       AND head.object_id =
+                               sync_attachment_revision_bindings.attachment_id
+                       AND head.latest_server_cursor =
+                               sync_attachment_revision_bindings.establishing_server_cursor
+               )
+            """,
+            (blob_row["blob_id"], *match_params),
+            connection=connection,
+        )
         rows = self.execute(
             """
             SELECT dataset_id, attachment_id, attachment_revision
               FROM sync_attachment_revision_bindings
              WHERE dataset_id = ? AND blob_hash = ? AND size_bytes = ?
                AND resolved_blob_id IS NULL AND retention_released_at IS NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM sync_current_heads AS head
+                     WHERE head.dataset_id =
+                               sync_attachment_revision_bindings.dataset_id
+                       AND head.domain = 'attachment.ref'
+                       AND head.object_id =
+                               sync_attachment_revision_bindings.attachment_id
+                       AND head.latest_server_cursor =
+                               sync_attachment_revision_bindings.establishing_server_cursor
+               )
              ORDER BY establishing_server_cursor, attachment_id, attachment_revision
              LIMIT 1000
             """,
-            (
-                blob_row["dataset_id"],
-                blob_row["payload_hash"],
-                int(blob_row["size_bytes"]),
-            ),
+            match_params,
             connection=connection,
         ).rows
         for row in rows:
@@ -7006,12 +7096,15 @@ class SyncDatabase:
                  WHERE dataset_id = ? AND attachment_id = ?
                    AND attachment_revision = ? AND resolved_blob_id IS NULL
                    AND retention_released_at IS NULL
+                   AND blob_hash = ? AND size_bytes = ?
                 """,
                 (
                     blob_row["blob_id"],
                     row["dataset_id"],
                     row["attachment_id"],
                     row["attachment_revision"],
+                    blob_row["payload_hash"],
+                    int(blob_row["size_bytes"]),
                 ),
                 connection=connection,
             )
@@ -7392,8 +7485,16 @@ class SyncDatabase:
         """Commit a verified blob and deduplicate by dataset plus payload hash."""
 
         now = utcnow_iso()
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         with self.backend.transaction() as conn:
-            dataset_row = self._require_dataset(blob.dataset_id, connection=conn)
+            dataset_row = self._get_dataset_row_for_update(
+                blob.dataset_id,
+                connection=conn,
+            )
+            if dataset_row is None:
+                raise SyncDatasetNotFoundError(
+                    f"Sync dataset not found: {blob.dataset_id}"
+                )
             if (
                 str(dataset_row["scope_type"]) != "workspace"
                 and str(dataset_row["owner_user_id"]) != str(blob.owner_user_id)
@@ -7442,7 +7543,8 @@ class SyncDatabase:
                     """
                     SELECT * FROM sync_blob_objects
                      WHERE dataset_id = ? AND payload_hash = ?
-                    """,
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
                     (blob.dataset_id, blob.payload_hash),
                     connection=conn,
                 )
@@ -7453,6 +7555,7 @@ class SyncDatabase:
                 raise SyncIdempotencyConflictError(
                     "Sync blob payload hash was reused with different metadata"
                 )
+            self._resolve_pending_bindings_for_blob(row, connection=conn)
             if session is not None:
                 self.execute(
                     """
@@ -8518,6 +8621,15 @@ class SyncDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
                 ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
+                ON sync_attachment_revision_bindings(
+                    dataset_id, blob_hash, size_bytes, establishing_server_cursor,
+                    attachment_id, attachment_revision
+                )
+                WHERE resolved_blob_id IS NULL
+                  AND retention_released_at IS NULL
             """,
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_dataset_storage_namespace_id

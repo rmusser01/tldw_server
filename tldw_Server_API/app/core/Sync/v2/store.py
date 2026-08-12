@@ -799,30 +799,40 @@ class SyncV2Store:
     def create_attachment_revision_binding(
         self,
         binding: SyncAttachmentRevisionBindingCreate,
+        *,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding:
-        return self.db.create_attachment_revision_binding(binding)
+        return self.db.create_attachment_revision_binding(
+            binding,
+            owner_user_id=owner_user_id,
+        )
 
     def get_attachment_revision_binding(
         self,
         dataset_id: str,
         attachment_id: str,
         attachment_revision: int,
+        *,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding | None:
         return self.db.get_attachment_revision_binding(
             dataset_id,
             attachment_id,
             attachment_revision,
+            owner_user_id=owner_user_id,
         )
 
     def list_unresolved_attachment_revision_bindings(
         self,
         dataset_id: str,
         *,
+        owner_user_id: str,
         after_establishing_server_cursor: int = 0,
         limit: int = 1000,
     ) -> list[SyncAttachmentRevisionBinding]:
         return self.db.list_unresolved_attachment_revision_bindings(
             dataset_id,
+            owner_user_id=owner_user_id,
             after_establishing_server_cursor=after_establishing_server_cursor,
             limit=limit,
         )
@@ -834,12 +844,14 @@ class SyncV2Store:
         attachment_revision: int,
         *,
         blob_id: str,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding:
         return self.db.resolve_attachment_revision_binding(
             dataset_id,
             attachment_id,
             attachment_revision,
             blob_id=blob_id,
+            owner_user_id=owner_user_id,
         )
 
     def release_attachment_revision_binding(
@@ -849,12 +861,14 @@ class SyncV2Store:
         attachment_revision: int,
         *,
         released_at: str,
+        owner_user_id: str,
     ) -> SyncAttachmentRevisionBinding:
         return self.db.release_attachment_revision_binding(
             dataset_id,
             attachment_id,
             attachment_revision,
             released_at=released_at,
+            owner_user_id=owner_user_id,
         )
 
     def get_or_create_storage_namespace(

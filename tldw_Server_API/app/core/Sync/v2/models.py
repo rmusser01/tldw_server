@@ -1535,6 +1535,20 @@ class SyncAttachmentRevisionBindingCreate:
         )
         if self.resolved_blob_id is not None and not self.resolved_blob_id.strip():
             raise ValueError("attachment binding resolved_blob_id must be non-empty")
+        if (
+            self.availability_at_acceptance == "available"
+            and self.resolved_blob_id is None
+        ):
+            raise ValueError(
+                "attachment binding available acceptance requires resolved_blob_id"
+            )
+        if (
+            self.availability_at_acceptance == "metadata_only"
+            and self.resolved_blob_id is not None
+        ):
+            raise ValueError(
+                "attachment binding metadata_only acceptance forbids resolved_blob_id"
+            )
 
 
 @dataclass(frozen=True, slots=True)
