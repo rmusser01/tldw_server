@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
 from tldw_Server_API.app.core.Sync.v2.security import (
@@ -676,6 +677,7 @@ def test_restore_intent_upsert_against_current_tombstone_restores_note(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
 ) -> None:
+    sync_service.adapters = SyncAdapterRegistry([NotesDomainAdapter()])
     _push_one(sync_service, _note_envelope())
     created = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
     assert created is not None
@@ -698,28 +700,30 @@ def test_restore_intent_upsert_against_current_tombstone_restores_note(
     assert tombstone is not None
     assert tombstone.deleted is True
 
-    result = _push_one(
-        sync_service,
-        _note_envelope(
-            client_envelope_id="env-restore",
-            client_sequence=3,
-            base_server_cursor=tombstone.latest_server_cursor,
-            base_object_revision=tombstone.object_revision,
-            base_object_hash=tombstone.object_hash,
-            object_revision=3,
-            payload={
-                "title": "Restored note",
-                "content": "Restored exactly.",
-                "conversation_id": None,
-                "message_id": None,
-            },
-            payload_hash="sha256:note-restored",
-            routing_metadata={"restore_intent": True},
-        ),
+    restore = _note_envelope(
+        client_envelope_id="env-restore",
+        client_sequence=3,
+        base_server_cursor=tombstone.latest_server_cursor,
+        base_object_revision=tombstone.object_revision,
+        base_object_hash=tombstone.object_hash,
+        object_revision=3,
+        payload={
+            "title": "Restored note",
+            "content": "Restored exactly.",
+            "conversation_id": None,
+            "message_id": None,
+        },
+        payload_hash="sha256:note-restored",
+        routing_metadata={"restore_intent": True},
     )
+    result = _push_one(sync_service, restore)
+    replay = _push_one(sync_service, restore)
 
     assert [item.client_envelope_id for item in result.accepted] == ["env-restore"]
     assert result.conflicts == []
+    assert [item.client_envelope_id for item in replay.accepted] == ["env-restore"]
+    assert replay.rejected == []
+    assert replay.conflicts == []
     restored = chacha_db.get_note_by_id("note-1")
     assert restored is not None
     assert restored["title"] == "Restored note"

@@ -101,6 +101,33 @@ def _raw_insert(conn: sqlite3.Connection, **overrides: object) -> None:
     )
 
 
+def test_postgres_v4_conversion_namespaces_keyword_indexes() -> None:
+    db = object.__new__(CharactersRAGDB)
+    statements = db._convert_sqlite_schema_to_postgres_statements(db._FULL_SCHEMA_SQL_V4)
+    keyword_index = next(
+        statement
+        for statement in statements
+        if "idx_keywords_sync_id_unique" in statement
+    )
+
+    assert "ON chacha_keywords(sync_id)" in " ".join(keyword_index.split())
+
+
+def test_postgres_v59_accepts_effective_current_schema_owner_role() -> None:
+    migration_source = inspect.getsource(
+        CharactersRAGDB._migrate_from_v58_to_v59_postgres
+    )
+    verification_source = inspect.getsource(
+        CharactersRAGDB._verify_note_attachment_schema_postgres
+    )
+
+    assert "pg_has_role(current_user, namespace_row.nspowner, 'USAGE')" in migration_source
+    assert (
+        "pg_has_role(current_user, attachment_namespace.nspowner, 'USAGE')"
+        in verification_source
+    )
+
+
 def test_sqlite_v58_to_v59_creates_empty_canonical_registry(tmp_path: Path) -> None:
     db_path = tmp_path / "attachments-v58.sqlite"
     _prepare_v58_database(db_path)
@@ -765,6 +792,32 @@ def _postgres_db(backend: _PostgresMigrationBackend) -> CharactersRAGDB:
     db._backend = backend
     db._uses_shared_content_backend = False
     return db
+
+
+class _PostgresV59BeforePostMigrationTablesBackend(_PostgresMigrationBackend):
+    def execute(
+        self,
+        statement: str,
+        params: object = None,
+        *,
+        connection: object,
+    ) -> QueryResult:
+        if "workspace_resource_memberships" in statement:
+            raise RuntimeError('relation "workspace_resource_memberships" does not exist')
+        return super().execute(statement, params, connection=connection)
+
+
+def test_postgres_v59_does_not_require_post_migration_workspace_tables() -> None:
+    backend = _PostgresV59BeforePostMigrationTablesBackend()
+    db = _postgres_db(backend)
+
+    db._migrate_from_v58_to_v59_postgres(object())
+
+    statements = [statement for statement, _ in backend.calls]
+    assert any(
+        "CREATE POLICY note_attachments_tenant_isolation" in statement
+        for statement in statements
+    )
 
 
 def test_postgres_v59_migration_uses_verified_lock_rls_and_version_order() -> None:

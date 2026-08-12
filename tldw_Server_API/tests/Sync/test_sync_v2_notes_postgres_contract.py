@@ -243,6 +243,12 @@ def test_postgres_attachment_authority_catalog_is_exact(
             "dataset_id, resolved_blob_id",
             "",
         ),
+        "idx_sync_attachment_bindings_blob_retention": (
+            "sync_attachment_revision_bindings",
+            False,
+            "dataset_id, resolved_blob_id, establishing_server_cursor, attachment_id, attachment_revision",
+            "retention_released_at IS NULL",
+        ),
         "idx_sync_attachment_bindings_pending_digest": (
             "sync_attachment_revision_bindings",
             False,

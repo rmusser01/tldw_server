@@ -11028,7 +11028,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    attachment_table.relrowsecurity,
                    attachment_table.relforcerowsecurity,
                    attachment_table.relowner = current_user::regrole AS is_schema_owner,
-                   attachment_namespace.nspowner = current_user::regrole
+                   pg_has_role(current_user, attachment_namespace.nspowner, 'USAGE')
                      AS is_current_schema_owner
               FROM pg_class AS attachment_table
               JOIN pg_namespace AS attachment_namespace
@@ -11379,7 +11379,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    table_row.relrowsecurity,
                    table_row.relforcerowsecurity,
                    table_row.relowner = current_user::regrole AS is_schema_owner,
-                   namespace_row.nspowner = current_user::regrole AS is_current_schema_owner
+                   pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
+                     AS is_current_schema_owner
               FROM pg_class AS table_row
               JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
              WHERE namespace_row.nspname = current_schema()
@@ -11412,7 +11413,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if notes_rls_forced:
             backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
-        self._ensure_chacha_rls_postgres(conn)
+        attachment_rls = [
+            statement
+            for statement in build_chacha_rls_sql()
+            if "note_attachments" in statement
+        ]
+        if len(attachment_rls) != 4:
+            raise SchemaError("Notes attachment v59 RLS definition is not canonical.")  # noqa: TRY003
+        for statement in attachment_rls:
+            backend.execute(statement, connection=conn)
         self._verify_note_attachment_schema_postgres(conn)
         self._set_schema_version_postgres(conn, 59)
 
@@ -19219,6 +19228,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 stmt,
                 flags=re.IGNORECASE,
             )
+        stmt = re.sub(
+            r"\bON\s+keywords\s*\(",
+            "ON chacha_keywords(",
+            stmt,
+            flags=re.IGNORECASE,
+        )
         # Adjust references to keywords in foreign keys/content declarations
         stmt = re.sub(
             r"REFERENCES\s+keywords\s*\(\s*id\s*\)",

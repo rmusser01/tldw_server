@@ -1863,6 +1863,31 @@ class SyncV2Service:
                 continue
             envelope = replace(envelope, device_id=envelope.device_id or device_id)
             try:
+                existing = self.store.get_existing_envelope_for_idempotency(
+                    replace(envelope, status="accepted")
+                )
+            except SyncIdempotencyConflictError:
+                try:
+                    existing = self.store.get_existing_envelope_for_idempotency(
+                        replace(envelope, status="conflict")
+                    )
+                except SyncIdempotencyConflictError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="idempotency_conflict",
+                            message="Sync envelope ID was reused with different content",
+                        )
+                    )
+                    continue
+            if (
+                existing is not None
+                and existing.status == "accepted"
+                and existing.apply_status in {"applied", "superseded"}
+            ):
+                accepted.append(self._push_accepted_from_envelope(existing))
+                continue
+            try:
                 outcome = self._evaluate_envelope(dataset, envelope)
             except KeyError:
                 rejected.append(
