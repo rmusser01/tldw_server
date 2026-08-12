@@ -661,30 +661,6 @@ def _verify_named_open_blob(
     return opened
 
 
-def _unlink_name_if_inode_matches(
-    directory: int,
-    name: str,
-    expected_inode: os.stat_result,
-) -> bool:
-    """Unlink only the exact entry created by this relocation attempt."""
-
-    try:
-        named = os.stat(name, dir_fd=directory, follow_symlinks=False)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    if not stat.S_ISREG(named.st_mode) or not _same_inode(named, expected_inode):
-        return False
-    try:
-        os.unlink(name, dir_fd=directory)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
 def _relocate_open_blob(
     source: BinaryIO,
     *,
@@ -732,7 +708,6 @@ def _relocate_open_blob(
         raise SyncBlobStoreError("Sync relocation temporary file could not be created") from exc
 
     expected = os.fstat(descriptor)
-    published = False
     try:
         with os.fdopen(descriptor, "r+b", closefd=False) as temp:
             source.seek(0)
@@ -761,7 +736,6 @@ def _relocate_open_blob(
                 dst_dir_fd=target_directory,
                 follow_symlinks=False,
             )
-            published = True
         except FileExistsError:
             with _open_target_at(target_directory, target_name) as existing:
                 _verify_named_open_blob(
@@ -772,30 +746,21 @@ def _relocate_open_blob(
                     expected_size=expected_size,
                 )
             return
-        try:
-            with _open_target_at(target_directory, target_name) as target:
-                _verify_named_open_blob(
-                    target,
-                    directory=target_directory,
-                    name=target_name,
-                    payload_hash=payload_hash,
-                    expected_size=expected_size,
-                    expected_inode=expected,
-                )
-        except Exception:
-            if published and not _unlink_name_if_inode_matches(
-                target_directory, target_name, expected
-            ):
-                logger.warning("Relocation target cleanup skipped after identity change")
-            raise
+        with _open_target_at(target_directory, target_name) as target:
+            _verify_named_open_blob(
+                target,
+                directory=target_directory,
+                name=target_name,
+                payload_hash=payload_hash,
+                expected_size=expected_size,
+                expected_inode=expected,
+            )
     except SyncBlobStoreError:
         raise
     except OSError as exc:
         raise SyncBlobStoreError("Sync legacy blob relocation failed") from exc
     finally:
         os.close(descriptor)
-        if not _unlink_name_if_inode_matches(target_directory, temp_name, expected):
-            logger.warning("Relocation temporary cleanup skipped after identity change")
 
 
 def _hash_digest(value: str) -> str:
