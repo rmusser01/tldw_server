@@ -652,6 +652,24 @@ def test_attachment_bootstrap_tables_are_in_both_fresh_schema_contracts() -> Non
 
 
 @pytest.mark.unit
+def test_sync_schema_initialization_creates_no_attachment_authority_rows(
+    tmp_path: Path,
+) -> None:
+    database = SyncDatabase(sqlite_path=tmp_path / "schema-only.sqlite")
+
+    for table in (
+        "sync_notes_attachment_source_map",
+        "sync_notes_attachment_cleanup_candidates",
+        "sync_attachment_revision_bindings",
+        "sync_blob_objects",
+        "sync_envelopes",
+    ):
+        assert database.execute(f"SELECT COUNT(*) AS total FROM {table}").rows == [  # nosec B608
+            {"total": 0}
+        ]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "malformed_table",
     [
@@ -922,6 +940,46 @@ def test_attachment_bootstrap_resumes_and_reuses_blob_envelope_and_identity(
         ).rows == [{"total": 2}]
         assert first_path.read_bytes() == b"alpha"
         assert second_path.read_bytes() == b"beta"
+    finally:
+        env.note_db.close_connection()
+
+
+@pytest.mark.integration
+def test_disabling_rollout_after_ready_preserves_canonical_metadata_and_source(
+    tmp_path: Path,
+) -> None:
+    env = _bootstrap_environment(tmp_path)
+    adapter = env.service.adapters.get("attachment.ref")
+    assert isinstance(adapter, AttachmentRefAdapter)
+    adapter.v2_writes_enabled = True
+    source_path = _write_legacy_attachment(env, "rollback.txt", b"rollback-safe")
+    try:
+        ready = _run_attachment_bootstrap_until_ready(env)
+        mapping = env.store.resolve_notes_attachment_source_map(
+            _DATASET_ID,
+            owner_user_id=_OWNER_ID,
+            bootstrap_id="bootstrap-stable",
+            note_id=_NOTE_ID,
+            source_key=f"notes_attachments/{_NOTE_ID}/rollback.txt",
+        )
+        before = env.note_db.note_attachment_store.get(
+            _DATASET_ID,
+            mapping.attachment_id,
+        )
+        adapter.v2_writes_enabled = False
+        after = env.note_db.note_attachment_store.get(
+            _DATASET_ID,
+            mapping.attachment_id,
+        )
+
+        assert ready.metadata["notes_attachment_v2"]["state"] == "ready"
+        assert before is not None and after == before
+        assert source_path.read_bytes() == b"rollback-safe"
+        assert not sync_v2_attachment_ref_v2_is_writable(
+            ready,
+            notes_attachment_sync_enabled=adapter.v2_writes_enabled,
+            supports_attachments=True,
+        )
     finally:
         env.note_db.close_connection()
 
