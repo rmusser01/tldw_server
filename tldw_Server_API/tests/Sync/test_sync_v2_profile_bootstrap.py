@@ -5,8 +5,16 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.sync_v2_models import SyncProfileBootstrapRequest
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
-from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.adapters import (
+    AttachmentRefAdapter,
+    StaticSyncAdapter,
+    SyncAdapterRegistry,
+)
+from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+    attachment_ref_v2_object_hash,
+)
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
@@ -14,6 +22,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_ORGANIZATION_DOMAINS,
     SyncConflictCreate,
     SyncDataset,
+    SyncDatasetCreate,
     SyncEnvelopeCreate,
 )
 from tldw_Server_API.app.core.Sync.v2.security import (
@@ -106,6 +115,42 @@ def _note_envelope(**overrides) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+def _attachment_v2_envelope(*, dataset_id: str) -> SyncEnvelopeCreate:
+    payload = {
+        "attachment_id": "11111111-1111-4111-8111-111111111111",
+        "parent_domain": "notes.note",
+        "parent_object_id": "22222222-2222-4222-8222-222222222222",
+        "file_name": "diagram.png",
+        "original_file_name": "diagram.png",
+        "content_type": "image/png",
+        "size_bytes": 42,
+        "blob_hash": "sha256:" + "a" * 64,
+        "created_at": _clock(),
+        "last_modified": _clock(),
+        "created_by": "device-1",
+    }
+    return SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id="env-attachment-v2",
+        domain="attachment.ref",
+        operation="upsert",
+        object_id=payload["attachment_id"],
+        device_id="device-1",
+        client_sequence=1,
+        schema_version=2,
+        adapter_version=2,
+        object_revision=1,
+        payload=payload,
+        payload_hash=attachment_ref_v2_object_hash(
+            "upsert",
+            payload,
+            object_revision=1,
+        ),
+        created_at_client=_clock(),
+        encryption_metadata={"policy": "server_trusted_v1"},
+    )
+
+
 def test_profile_is_read_only_when_no_bootstrap_exists(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
 
@@ -122,6 +167,40 @@ def test_profile_is_read_only_when_no_bootstrap_exists(tmp_path: Path) -> None:
     assert profile.domain_status == []
     assert store.list_datasets_for_user("user-1") == []
     assert store.list_devices_for_user("user-1") == []
+
+
+def test_profile_capabilities_are_bound_to_active_ready_dataset(tmp_path: Path) -> None:
+    service, store = _service(tmp_path)
+    service.settings = replace(service.settings, supports_attachments=True)
+    service.adapters.register(AttachmentRefAdapter(v2_writes_enabled=True))
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-ready",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_attachment_v2": {"state": "ready"},
+            },
+        )
+    )
+
+    profile = service.profile(user_id="user-1")
+
+    assert profile.active_dataset_id == "dataset-ready"
+    assert profile.capabilities.writable_adapter_versions["notes.note"] == [1]
+    assert profile.capabilities.writable_adapter_versions["attachment.ref"] == [2]
+
+    bootstrap = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=["notes.note", "attachment.ref"],
+    )
+    assert bootstrap.capabilities.writable_adapter_versions["attachment.ref"] == [2]
 
 
 def test_bootstrap_creates_default_dataset_and_is_idempotent(tmp_path: Path) -> None:
@@ -160,6 +239,176 @@ def test_bootstrap_creates_default_dataset_and_is_idempotent(tmp_path: Path) -> 
     assert first.server_cursor == 0
     assert len(store.list_datasets_for_user("user-1")) == 1
     assert len(store.list_devices_for_user("user-1")) == 1
+
+
+def test_bootstrap_persists_canonical_adapter_map_used_by_push(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    service.adapters.register(AttachmentRefAdapter(v2_writes_enabled=False))
+    request = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": [2]},
+            "client_instance": {"app_version": "0.4.0", "platform": "macos"},
+        }
+    )
+
+    profile = service.bootstrap_profile(
+        user_id="user-1",
+        mode=request.mode,
+        device_id=request.device_id,
+        client_instance=request.client_instance,
+        requested_domains=request.requested_domains,
+    )
+
+    stored = store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "attachment.ref": [2]
+    }
+    assert stored.capabilities["client_instance"] == {
+        "app_version": "0.4.0",
+        "platform": "macos",
+    }
+    assert profile.active_dataset_id is not None
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id=profile.active_dataset_id,
+        device_id="device-1",
+        envelopes=[_attachment_v2_envelope(dataset_id=profile.active_dataset_id)],
+    )
+
+    assert result.accepted == []
+    assert result.rejected[0].error_code == "attachment_ref_v2_not_writable"
+
+
+def test_repeat_profile_bootstrap_cannot_downgrade_active_adapter_versions(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    first = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        }
+    )
+    service.bootstrap_profile(
+        user_id="user-1",
+        mode=first.mode,
+        device_id=first.device_id,
+        client_instance=first.client_instance,
+        requested_domains=first.requested_domains,
+    )
+    downgrade = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1]},
+        }
+    )
+
+    with pytest.raises(SyncStoreError, match="cannot remove active versions"):
+        service.bootstrap_profile(
+            user_id="user-1",
+            mode=downgrade.mode,
+            device_id=downgrade.device_id,
+            client_instance=downgrade.client_instance,
+            requested_domains=downgrade.requested_domains,
+        )
+
+    stored = store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1, 2]
+    }
+
+
+def test_bootstrap_adapter_map_omission_remains_v1_only(tmp_path: Path) -> None:
+    service, store = _service(tmp_path)
+    service.adapters.register(AttachmentRefAdapter(v2_writes_enabled=True))
+    request = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["attachment.ref"],
+            "client_instance": {"platform": "macos"},
+        }
+    )
+
+    profile = service.bootstrap_profile(
+        user_id="user-1",
+        mode=request.mode,
+        device_id=request.device_id,
+        client_instance=request.client_instance,
+        requested_domains=request.requested_domains,
+    )
+
+    stored = store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "attachment.ref": [1]
+    }
+    assert profile.active_dataset_id is not None
+    result = service.push(
+        user_id="user-1",
+        dataset_id=profile.active_dataset_id,
+        device_id="device-1",
+        envelopes=[_attachment_v2_envelope(dataset_id=profile.active_dataset_id)],
+    )
+
+    assert result.accepted == []
+    assert result.rejected[0].error_code == "device_adapter_version_not_advertised"
+
+
+def test_partial_bootstrap_adapter_map_defaults_omitted_domain_for_push(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    request = SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["notes.note", "attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        }
+    )
+
+    profile = service.bootstrap_profile(
+        user_id="user-1",
+        mode=request.mode,
+        device_id=request.device_id,
+        client_instance=request.client_instance,
+        requested_domains=request.requested_domains,
+    )
+
+    stored = store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [2],
+    }
+    assert profile.active_dataset_id is not None
+    result = service.push(
+        user_id="user-1",
+        dataset_id=profile.active_dataset_id,
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                dataset_id=profile.active_dataset_id,
+                device_id="device-1",
+            )
+        ],
+    )
+
+    assert len(result.accepted) == 1
+    assert result.rejected == []
 
 
 def test_bootstrap_supports_server_frontend_with_generated_device_id(tmp_path: Path) -> None:

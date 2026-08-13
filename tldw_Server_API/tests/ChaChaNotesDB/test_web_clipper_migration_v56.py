@@ -41,6 +41,7 @@ def _build_v55_fixture(db_path: Path) -> tuple[str, str]:
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DROP TABLE note_attachments")
         conn.execute("DROP TABLE note_clipper_workspace_placements")
         conn.execute("DROP TABLE note_clipper_documents")
         conn.execute(

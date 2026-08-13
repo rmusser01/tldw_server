@@ -352,6 +352,17 @@ def build_chacha_rls_sql() -> list[str]:
         """
     )
 
+    note_attachment_owner = """
+    note_attachments.client_id = current_setting('app.current_user_id', true)
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = note_attachments.note_id
+        AND note.client_id = current_setting('app.current_user_id', true)
+        AND note.client_id = note_attachments.client_id
+    )
+    """.strip()
+    add_tenant_policy("note_attachments", note_attachment_owner)
+
     note_edge_owner = """
     note_edges.user_id = current_setting('app.current_user_id', true)
     AND EXISTS (

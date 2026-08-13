@@ -110,6 +110,7 @@ from tldw_Server_API.app.core.Sync.v2.factory import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceDomainAckCreate,
     SyncEnvelopeCreate,
 )
@@ -186,6 +187,54 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        pull_errors = {
+            "sync_pull_token_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "The Sync pull token is invalid.",
+            ),
+            "sync_pull_token_too_large": (
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "The Sync pull token exceeds the server size limit.",
+            ),
+            "sync_pull_restart_required": (
+                status.HTTP_409_CONFLICT,
+                "Sync negotiation changed; restart the pull from a stable cursor.",
+            ),
+            "sync_device_adapter_version_not_supported": (
+                status.HTTP_400_BAD_REQUEST,
+                "The device and server have no mutually supported adapter version.",
+            ),
+        }
+        for error_code, (status_code, message) in pull_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
+        blob_id_ack_errors = {
+            "sync_blob_id_ack_adapter_v2_required": (
+                status.HTTP_400_BAD_REQUEST,
+                "Blob-ID acknowledgment requires negotiated attachment adapter v2.",
+            ),
+            "sync_blob_id_ack_not_authorized": (
+                status.HTTP_404_NOT_FOUND,
+                "Requested Sync blob was not found or is not accessible.",
+            ),
+            "sync_blob_id_ack_digest_mismatch": (
+                status.HTTP_400_BAD_REQUEST,
+                "Blob-ID acknowledgment digest does not match immutable blob metadata.",
+            ),
+            "sync_blob_id_ack_digest_immutable": (
+                status.HTTP_409_CONFLICT,
+                "Stored Blob-ID acknowledgment digest is immutable.",
+            ),
+        }
+        for error_code, (status_code, message) in blob_id_ack_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
         if "reserved device identifier" in lowered:
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -273,6 +322,7 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             or "requested unsupported domains" in lowered
             or "client_family" in lowered
             or "client_profile_id" in lowered
+            or "adapter version capabilities" in lowered
             or "key recovery bundle" in lowered
             or "key rotation" in lowered
             or "wrapping metadata" in lowered
@@ -374,7 +424,6 @@ def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
             "envelope_id",
             "server_cursor",
             "server_sequence",
-            "object_revision",
             "received_at_server",
             "server_timestamp",
             "status",
@@ -534,9 +583,23 @@ def _api_key_record_export(record: Any) -> SyncKeyRecoveryBundleRecord:
     summary="Return Sync v2 protocol capabilities",
 )
 def get_sync_v2_capabilities(
+    dataset_id: str | None = Query(None),
+    user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
-    return _api_capabilities_from_core(service.capabilities())
+) -> SyncCapabilitiesResponse:
+    user_id = _sync_user_id(user)
+    try:
+        capabilities = service.capabilities(
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=dataset_id,
+        ) from exc
+    return _api_capabilities_from_core(capabilities)
 
 
 @router.get(
@@ -836,6 +899,7 @@ def acknowledge_sync_v2_device_state(
                     dataset_id=request.dataset_id,
                     device_id=request.device_id,
                     domain=ack.domain,
+                    adapter_version=ack.adapter_version,
                     through_server_sequence=ack.through_server_sequence,
                     applied_at=ack.applied_at,
                     idempotency_key=ack.idempotency_key,
@@ -852,6 +916,17 @@ def acknowledge_sync_v2_device_state(
                     idempotency_key=ack.idempotency_key,
                 )
                 for ack in request.blob_acks
+            ],
+            blob_id_acks=[
+                SyncDeviceBlobIdAckCreate(
+                    dataset_id=request.dataset_id,
+                    device_id=request.device_id,
+                    blob_id=ack.blob_id,
+                    payload_hash=ack.payload_hash,
+                    verified_at=ack.verified_at,
+                    idempotency_key=ack.idempotency_key,
+                )
+                for ack in request.blob_id_acks
             ],
         )
     except Exception as exc:

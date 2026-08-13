@@ -82,6 +82,7 @@ def _replace_with_v57_edge_table(
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DROP TABLE note_attachments")
         conn.execute("DROP TABLE note_edges")
         conn.execute(
             """
@@ -139,7 +140,7 @@ def test_sqlite_v57_to_v58_normalizes_legacy_link_and_installs_graph_state(
     migrated = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with migrated.transaction() as conn:
-            assert migrated._get_db_version(conn) == 58
+            assert migrated._get_db_version(conn) == 59
             row = conn.execute("SELECT * FROM note_edges").fetchone()
             assert row["label"] == "Related"
             assert json.loads(row["properties"]) == {"context": {"kind": "research"}}
@@ -229,7 +230,7 @@ def test_sqlite_v57_to_v58_normalizes_legacy_link_and_installs_graph_state(
     reopened = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with reopened.transaction() as conn:
-            assert reopened._get_db_version(conn) == 58
+            assert reopened._get_db_version(conn) == 59
             assert conn.execute("SELECT COUNT(*) FROM note_edges").fetchone()[0] == 1
     finally:
         reopened.close_connection()
@@ -268,6 +269,7 @@ def test_sqlite_v57_to_v58_queues_existing_notes_for_projection_rebuild(
         ):
             conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")  # nosec B608
         for table_name in (
+            "note_attachments",
             "note_wikilink_edges",
             "note_graph_note_state",
             "note_graph_dirty",
@@ -524,11 +526,11 @@ def test_sqlite_migration_map_contains_v57_to_v58_step(tmp_path: Path) -> None:
         db.close_connection()
 
 
-def test_sqlite_fresh_schema_is_v58_and_canonical(tmp_path: Path) -> None:
-    db = CharactersRAGDB(str(tmp_path / "fresh-v58.sqlite"), client_id=OWNER)
+def test_sqlite_fresh_schema_is_current_and_canonical(tmp_path: Path) -> None:
+    db = CharactersRAGDB(str(tmp_path / "fresh-current.sqlite"), client_id=OWNER)
     try:
         with db.transaction() as conn:
-            assert db._get_db_version(conn) == 58
+            assert db._get_db_version(conn) == 59
             columns = {row[1] for row in conn.execute("PRAGMA table_info(note_edges)").fetchall()}
             assert {
                 "label",

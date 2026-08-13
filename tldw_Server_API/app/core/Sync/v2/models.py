@@ -6,7 +6,8 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, cast
+from uuid import UUID
 
 from .notes_link_contract import (
     NOTES_LINK_LABEL_MAX_CHARS,
@@ -56,6 +57,7 @@ SyncBlobAvailabilityStatus = Literal[
     "quarantined",
     "deleted",
 ]
+SyncAttachmentBindingAvailability = Literal["available", "metadata_only"]
 
 
 def normalize_sync_timestamp(value: object | None) -> str | None:
@@ -160,6 +162,8 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
 }
+SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS = 100
+SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN = 8
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "server_trusted_v1",
@@ -200,8 +204,47 @@ SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
 ]
 
 
+def _discoverable_pydantic_object_schema(model: type[Any]) -> dict[str, object]:
+    """Translate a Pydantic object schema into the Sync discovery vocabulary."""
+
+    generated = model.model_json_schema()
+    properties: dict[str, object] = {}
+    key_map = {"minLength": "min_length", "maxLength": "max_length"}
+    for field_name, raw_field in generated["properties"].items():
+        field_schema = {
+            key_map.get(key, key): value
+            for key, value in raw_field.items()
+            if key not in {"title", "default", "const", "anyOf"}
+        }
+        if "const" in raw_field:
+            field_schema["enum"] = [raw_field["const"]]
+        if "anyOf" in raw_field:
+            variants = raw_field["anyOf"]
+            field_schema["type"] = [variant["type"] for variant in variants]
+            for variant in variants:
+                if "maxLength" in variant:
+                    field_schema["max_length"] = variant["maxLength"]
+        if field_name in {"attachment_id", "parent_object_id"}:
+            field_schema["canonical_lowercase"] = True
+        elif field_name == "blob_hash":
+            field_schema.update(format="sha256", canonical_lowercase=True)
+        elif field_name in {"created_at", "last_modified", "deleted_at"}:
+            field_schema["format"] = "date-time"
+        properties[field_name] = field_schema
+    return {
+        "required": generated["required"],
+        "properties": properties,
+        "additional_properties": generated["additionalProperties"],
+    }
+
+
 def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     """Return client-discoverable payload contracts for versioned Sync domains."""
+
+    from .attachment_refs_v2 import (
+        AttachmentRefV2Payload,
+        AttachmentRefV2TombstonePayload,
+    )
 
     keyword_link_schema = {
         "required": ["subject_type", "subject_id", "keyword_sync_id"],
@@ -269,7 +312,30 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         "distinct_endpoints": True,
         "undirected_endpoint_order": "source_note_id <= target_note_id",
     }
+    attachment_ref_upsert = _discoverable_pydantic_object_schema(
+        AttachmentRefV2Payload
+    )
+    attachment_ref_tombstone = _discoverable_pydantic_object_schema(
+        AttachmentRefV2TombstonePayload
+    )
     return {
+        "attachment.ref": {
+            "schema_version": 2,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": attachment_ref_upsert,
+            "tombstone": attachment_ref_tombstone,
+            "restore": {
+                "operation": "upsert",
+                "routing_metadata": {"restore_intent": True},
+                "requires_current_base": True,
+            },
+            "derived_fields": [
+                "availability",
+                "resolved_blob_id",
+                "storage_status",
+                "retention_released_at",
+            ],
+        },
         "notes.note": {
             "schema_version": 1,
             "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
@@ -368,6 +434,144 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
             },
         },
     }
+
+
+def sync_v2_server_supported_adapter_versions() -> dict[SyncDomain, list[int]]:
+    """Return bounded server-supported versions independently of writability."""
+
+    return {
+        domain: ([1, 2] if domain == "attachment.ref" else [1])
+        for domain in SYNC_V2_SUPPORTED_DOMAINS
+    }
+
+
+def sync_v2_dataset_writable_adapter_versions(
+    dataset: SyncDataset | None = None,
+    *,
+    notes_attachment_sync_enabled: bool = False,
+    supports_attachments: bool = False,
+) -> dict[SyncDomain, list[int]]:
+    """Return versions writable under one authoritative dataset/settings gate."""
+
+    versions: dict[SyncDomain, list[int]] = {
+        domain: []
+        for domain in SYNC_V2_SUPPORTED_DOMAINS
+    }
+    if dataset is None:
+        return versions
+    enrolled = set(dataset.domains)
+    for domain in SYNC_V2_SUPPORTED_DOMAINS:
+        if domain in enrolled and domain != "attachment.ref":
+            versions[domain] = [1]
+    if sync_v2_attachment_ref_v2_is_writable(
+        dataset,
+        notes_attachment_sync_enabled=notes_attachment_sync_enabled,
+        supports_attachments=supports_attachments,
+    ):
+        versions["attachment.ref"] = [2]
+    return versions
+
+
+def sync_v2_attachment_ref_v2_is_writable(
+    dataset: SyncDataset | None,
+    *,
+    notes_attachment_sync_enabled: bool,
+    supports_attachments: bool,
+) -> bool:
+    """Return whether attachment.ref v2 mutations are writable for a dataset."""
+
+    if dataset is None:
+        return False
+    attachment_state = dataset.metadata.get("notes_attachment_v2")
+    return bool(
+        notes_attachment_sync_enabled
+        and supports_attachments
+        and dataset.encryption_policy == DEFAULT_M1_ENCRYPTION_POLICY
+        and {"notes.note", "attachment.ref"}.issubset(dataset.domains)
+        and isinstance(attachment_state, Mapping)
+        and attachment_state.get("state") == "ready"
+    )
+
+
+def normalize_sync_v2_requested_domains(value: object) -> list[SyncDomain]:
+    """Validate, bound, and deduplicate one requested Sync-domain sequence."""
+
+    if not isinstance(value, Sequence) or isinstance(
+        value,
+        (str, bytes, bytearray),
+    ):
+        raise ValueError("requested_domains must be a list")
+    domains = list(value)
+    if len(domains) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
+        raise ValueError(
+            "requested_domains may contain at most "
+            f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
+        )
+    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    for domain in domains:
+        if not isinstance(domain, str) or domain not in known:
+            raise ValueError(
+                f"requested_domains contains unknown Sync domain: {domain}"
+            )
+    return [cast(SyncDomain, domain) for domain in dict.fromkeys(domains)]
+
+
+def normalize_supported_adapter_versions(
+    value: object | None,
+    *,
+    requested_domains: Sequence[str],
+) -> dict[SyncDomain, list[int]]:
+    """Validate a bounded device version map; omission preserves version 1."""
+
+    requested = normalize_sync_v2_requested_domains(requested_domains)
+    if value is None:
+        return {cast(SyncDomain, domain): [1] for domain in requested}
+    if not isinstance(value, Mapping):
+        raise ValueError("supported_adapter_versions must be an object")
+    if len(value) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
+        raise ValueError(
+            "supported_adapter_versions may contain at most "
+            f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
+        )
+
+    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    requested_set = set(requested)
+    normalized: dict[SyncDomain, list[int]] = {
+        cast(SyncDomain, domain): [1] for domain in requested
+    }
+    for raw_domain, raw_versions in value.items():
+        if not isinstance(raw_domain, str) or raw_domain not in known:
+            raise ValueError(
+                f"supported_adapter_versions contains unknown Sync domain: {raw_domain}"
+            )
+        if raw_domain not in requested_set:
+            raise ValueError(
+                "supported_adapter_versions domains must also be requested"
+            )
+        if not isinstance(raw_versions, Sequence) or isinstance(
+            raw_versions, (str, bytes, bytearray)
+        ):
+            raise ValueError(
+                "supported_adapter_versions values must be non-empty version lists"
+            )
+        versions = list(raw_versions)
+        if not versions:
+            raise ValueError(
+                "supported_adapter_versions values must be non-empty version lists"
+            )
+        if len(versions) > SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN:
+            raise ValueError(
+                "supported_adapter_versions may contain at most "
+                f"{SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN} versions per domain"
+            )
+        if any(isinstance(version, bool) or not isinstance(version, int) or version < 1 for version in versions):
+            raise ValueError(
+                "supported_adapter_versions must contain positive integers"
+            )
+        if len(set(versions)) != len(versions):
+            raise ValueError("supported_adapter_versions contains duplicate adapter versions")
+        normalized[cast(SyncDomain, raw_domain)] = sorted(versions)
+    return normalized
 
 
 def server_frontend_mutation_enabled_for_policy(policy: EncryptionPolicy | str) -> bool:
@@ -614,7 +818,12 @@ class SyncDeviceDomainAckCreate:
     domain: SyncDomain
     through_server_sequence: int
     applied_at: str
+    adapter_version: int = 1
     idempotency_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.adapter_version < 1:
+            raise ValueError("Sync adapter version must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -627,6 +836,7 @@ class SyncDeviceDomainAck:
     through_server_sequence: int
     applied_at: str
     updated_at: str
+    adapter_version: int = 1
     idempotency_key: str | None = None
 
 
@@ -656,6 +866,31 @@ class SyncDeviceBlobAck:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncDeviceBlobIdAckCreate:
+    """Immutable blob-ID verification evidence accepted from a v2 device."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceBlobIdAck:
+    """Stored immutable blob-ID verification evidence."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncDeviceAcknowledgmentSummary:
     """Aggregated device acknowledgments for one dataset/device."""
 
@@ -663,6 +898,8 @@ class SyncDeviceAcknowledgmentSummary:
     device_id: str
     domain_acks: dict[SyncDomain, SyncDeviceDomainAck] = field(default_factory=dict)
     blob_acks: list[SyncDeviceBlobAck] = field(default_factory=list)
+    version_acks: list[SyncDeviceDomainAck] = field(default_factory=list)
+    blob_id_acks: list[SyncDeviceBlobIdAck] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1010,7 +1247,17 @@ class SyncDeviceCursor:
     device_id: str
     domain: SyncDomain
     last_pulled_sequence: int
+    adapter_version: int = 1
+    max_delivered_sequence: int = 0
     updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.adapter_version < 1:
+            raise ValueError("Sync adapter version must be positive")
+        if self.last_pulled_sequence < 0 or self.max_delivered_sequence < 0:
+            raise ValueError("Sync cursor sequences must be non-negative")
+        if self.max_delivered_sequence > self.last_pulled_sequence:
+            raise ValueError("Sync delivered watermark cannot exceed scan cursor")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1276,6 +1523,119 @@ class SyncAttachment:
         object.__setattr__(self, "entity_id", object_id)
 
 
+def _validate_attachment_binding_identity(
+    *,
+    attachment_id: str,
+    attachment_revision: int,
+    blob_hash: str,
+    size_bytes: int,
+    establishing_server_cursor: int,
+    availability_at_acceptance: SyncAttachmentBindingAvailability,
+) -> None:
+    """Validate immutable attachment-revision binding fields at the store boundary."""
+
+    try:
+        parsed_attachment_id = UUID(attachment_id)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("attachment binding attachment_id must be canonical UUIDv4") from exc
+    if parsed_attachment_id.version != 4 or str(parsed_attachment_id) != attachment_id:
+        raise ValueError("attachment binding attachment_id must be canonical UUIDv4")
+    if isinstance(attachment_revision, bool) or attachment_revision < 1:
+        raise ValueError("attachment binding revision must be positive")
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", blob_hash) is None:
+        raise ValueError("attachment binding blob_hash must be lowercase SHA-256")
+    if isinstance(size_bytes, bool) or size_bytes < 1:
+        raise ValueError("attachment binding size_bytes must be positive")
+    if isinstance(establishing_server_cursor, bool) or establishing_server_cursor < 1:
+        raise ValueError("attachment binding establishing cursor must be positive")
+    if availability_at_acceptance not in {"available", "metadata_only"}:
+        raise ValueError("attachment binding acceptance availability is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentRevisionBindingCreate:
+    """Immutable attachment revision binding accepted by the Sync v2 store."""
+
+    dataset_id: str
+    attachment_id: str
+    attachment_revision: int
+    blob_hash: str
+    size_bytes: int
+    establishing_server_cursor: int
+    availability_at_acceptance: SyncAttachmentBindingAvailability
+    resolved_blob_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip():
+            raise ValueError("attachment binding dataset_id must be non-empty")
+        _validate_attachment_binding_identity(
+            attachment_id=self.attachment_id,
+            attachment_revision=self.attachment_revision,
+            blob_hash=self.blob_hash,
+            size_bytes=self.size_bytes,
+            establishing_server_cursor=self.establishing_server_cursor,
+            availability_at_acceptance=self.availability_at_acceptance,
+        )
+        if self.resolved_blob_id is not None and not self.resolved_blob_id.strip():
+            raise ValueError("attachment binding resolved_blob_id must be non-empty")
+        if (
+            self.availability_at_acceptance == "available"
+            and self.resolved_blob_id is None
+        ):
+            raise ValueError(
+                "attachment binding available acceptance requires resolved_blob_id"
+            )
+        if (
+            self.availability_at_acceptance == "metadata_only"
+            and self.resolved_blob_id is not None
+        ):
+            raise ValueError(
+                "attachment binding metadata_only acceptance forbids resolved_blob_id"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentRevisionBinding:
+    """Stored immutable revision identity plus monotonic blob lifecycle pointers."""
+
+    dataset_id: str
+    attachment_id: str
+    attachment_revision: int
+    blob_hash: str
+    size_bytes: int
+    establishing_server_cursor: int
+    availability_at_acceptance: SyncAttachmentBindingAvailability
+    resolved_blob_id: str | None
+    retention_released_at: str | None
+    created_at: str
+
+    def __post_init__(self) -> None:
+        _validate_attachment_binding_identity(
+            attachment_id=self.attachment_id,
+            attachment_revision=self.attachment_revision,
+            blob_hash=self.blob_hash,
+            size_bytes=self.size_bytes,
+            establishing_server_cursor=self.establishing_server_cursor,
+            availability_at_acceptance=self.availability_at_acceptance,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDatasetStorageNamespace:
+    """Server-issued opaque physical storage namespace for one dataset."""
+
+    dataset_id: str
+    owner_user_id: str
+    storage_namespace_id: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip() or not self.owner_user_id.strip():
+            raise ValueError("storage namespace owner and dataset must be non-empty")
+        if re.fullmatch(r"[0-9a-f]{32}", self.storage_namespace_id) is None:
+            raise ValueError("storage namespace ID must be 32 lowercase hexadecimal characters")
+
+
 @dataclass(frozen=True, slots=True)
 class SyncBlobUploadSession:
     """Core metadata for a resumable Sync v2 M2 blob upload session."""
@@ -1495,8 +1855,11 @@ __all__ = [
     "SYNC_V2_SUPPORTED_DOMAINS",
     "SYNC_V2_SUPPORTED_OPERATIONS",
     "SyncApplyStatus",
+    "SyncAttachmentBindingAvailability",
     "SyncAttachment",
     "SyncAttachmentCreate",
+    "SyncAttachmentRevisionBinding",
+    "SyncAttachmentRevisionBindingCreate",
     "SyncBackgroundDomainStatus",
     "SyncBackgroundLease",
     "SyncBackgroundLeaseCreate",
@@ -1518,6 +1881,7 @@ __all__ = [
     "SyncConflictCreate",
     "SyncDataset",
     "SyncDatasetCreate",
+    "SyncDatasetStorageNamespace",
     "SyncDevice",
     "SyncDeviceCursor",
     "SyncDeviceUpsert",

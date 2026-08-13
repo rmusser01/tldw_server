@@ -15,6 +15,7 @@ from .models import (
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncAttachmentRevisionBinding,
     SyncBackgroundDomainStatus,
     SyncBackgroundLease,
     SyncBackgroundLeaseCreate,
@@ -31,12 +32,15 @@ from .models import (
     SyncConflictCreate,
     SyncDataset,
     SyncDatasetCreate,
+    SyncDatasetStorageNamespace,
     SyncDevice,
     SyncDeviceAcknowledgmentSummary,
     SyncDeviceAuthorization,
     SyncDeviceAuthorizationCreate,
     SyncDeviceBlobAck,
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAck,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceCursor,
     SyncDeviceDomainAck,
     SyncDeviceDomainAckCreate,
@@ -83,8 +87,30 @@ class SyncV2Store:
                 )
             yield guarded
 
-    def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
-        return self.db.upsert_device(device)
+    @contextmanager
+    def retention_guard(self, dataset_id: str, blob_id: str) -> Iterator[SyncV2Store]:
+        """Hold the dataset ordering fence and one transaction for blob GC."""
+
+        with self.db.materialization_transaction(
+            [(dataset_id, "attachment.ref", blob_id)]
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    def upsert_device(
+        self,
+        device: SyncDeviceUpsert,
+        *,
+        capabilities_resolver: Callable[
+            [SyncDevice | None], dict[str, object]
+        ]
+        | None = None,
+    ) -> SyncDevice:
+        return self.db.upsert_device(
+            device,
+            capabilities_resolver=capabilities_resolver,
+        )
 
     def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
         return self.db.get_device(user_id, device_id)
@@ -98,7 +124,11 @@ class SyncV2Store:
         *,
         owner_user_id: str | None = None,
     ) -> SyncDataset | None:
-        return self.db.get_dataset(dataset_id, owner_user_id=owner_user_id)
+        return self.db.get_dataset(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
 
     def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
         return self.db.list_datasets_for_user(user_id)
@@ -109,7 +139,11 @@ class SyncV2Store:
         *,
         include_revoked: bool = False,
     ) -> list[SyncDevice]:
-        return self.db.list_devices_for_user(user_id, include_revoked=include_revoked)
+        return self.db.list_devices_for_user(
+            user_id,
+            include_revoked=include_revoked,
+            connection=self._connection,
+        )
 
     def create_device_authorization(
         self,
@@ -153,20 +187,72 @@ class SyncV2Store:
         self,
         acknowledgment: SyncDeviceDomainAckCreate,
     ) -> SyncDeviceDomainAck:
-        return self.db.upsert_device_domain_ack(acknowledgment)
+        return self.db.upsert_device_domain_ack(
+            acknowledgment,
+            connection=self._connection,
+        )
+
+    def get_device_domain_ack(
+        self,
+        dataset_id: str,
+        device_id: str,
+        domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
+    ) -> SyncDeviceDomainAck | None:
+        return self.db.get_device_domain_ack(
+            dataset_id,
+            device_id,
+            domain,
+            adapter_version=adapter_version,
+            connection=self._connection,
+        )
 
     def upsert_device_blob_ack(
         self,
         acknowledgment: SyncDeviceBlobAckCreate,
     ) -> SyncDeviceBlobAck:
-        return self.db.upsert_device_blob_ack(acknowledgment)
+        return self.db.upsert_device_blob_ack(
+            acknowledgment,
+            connection=self._connection,
+        )
+
+    def upsert_device_blob_id_ack(
+        self,
+        acknowledgment: SyncDeviceBlobIdAckCreate,
+    ) -> SyncDeviceBlobIdAck:
+        return self.db.upsert_device_blob_id_ack(
+            acknowledgment,
+            connection=self._connection,
+        )
 
     def list_device_acknowledgments(
         self,
         dataset_id: str,
         device_id: str,
     ) -> SyncDeviceAcknowledgmentSummary:
-        return self.db.list_device_acknowledgments(dataset_id, device_id)
+        return self.db.list_device_acknowledgments(
+            dataset_id,
+            device_id,
+            connection=self._connection,
+        )
+
+    def acknowledge_device_state_atomic(
+        self,
+        dataset_id: str,
+        device_id: str,
+        *,
+        domain_acks: Sequence[SyncDeviceDomainAckCreate] = (),
+        blob_acks: Sequence[SyncDeviceBlobAckCreate] = (),
+        blob_id_acks: Sequence[SyncDeviceBlobIdAckCreate] = (),
+    ) -> SyncDeviceAcknowledgmentSummary:
+        return self.db.acknowledge_device_state_atomic(
+            dataset_id,
+            device_id,
+            domain_acks=domain_acks,
+            blob_acks=blob_acks,
+            blob_id_acks=blob_id_acks,
+        )
 
     def get_background_policy(
         self,
@@ -373,6 +459,7 @@ class SyncV2Store:
         *,
         limit: int = 100,
         domains: Sequence[SyncDomain] | None = None,
+        adapter_versions: Sequence[int] | None = None,
         status: str | Sequence[str] | None = None,
         exclude_device_id: str | None = None,
     ) -> list[SyncEnvelope]:
@@ -381,6 +468,7 @@ class SyncV2Store:
             since_sequence,
             limit=limit,
             domains=domains,
+            adapter_versions=adapter_versions,
             status=status,
             exclude_device_id=exclude_device_id,
             connection=self._connection,
@@ -408,6 +496,7 @@ class SyncV2Store:
             entity_id=entity_id,
             stable_key=stable_key,
             limit=limit,
+            connection=self._connection,
         )
 
     def get_envelope_for_entity_at_or_before(
@@ -557,8 +646,15 @@ class SyncV2Store:
         dataset_id: str,
         device_id: str,
         domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
     ) -> SyncDeviceCursor | None:
-        return self.db.get_device_cursor(dataset_id, device_id, domain)
+        return self.db.get_device_cursor(
+            dataset_id,
+            device_id,
+            domain,
+            adapter_version=adapter_version,
+        )
 
     def insert_conflict(self, conflict: SyncConflictCreate) -> SyncConflict:
         return self.db.insert_conflict(conflict, connection=self._connection)
@@ -782,6 +878,154 @@ class SyncV2Store:
 
         return self.db.store_attachment(attachment)
 
+    def get_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding | None:
+        return self.db.get_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            owner_user_id=owner_user_id,
+        )
+
+    def get_attachment_revision_binding_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding | None:
+        """Return the latest revision binding resolved to a blob for its owner."""
+
+        return self.db.get_attachment_revision_binding_for_blob(
+            dataset_id,
+            blob_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def list_attachment_revision_bindings_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded compound-keyset page of unreleased blob bindings."""
+
+        return self.db.list_attachment_revision_bindings_for_blob(
+            dataset_id,
+            blob_id,
+            owner_user_id=owner_user_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            after_attachment_id=after_attachment_id,
+            after_attachment_revision=after_attachment_revision,
+            limit=limit,
+            connection=self._connection,
+        )
+
+    def has_attachment_ref_v2_history(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        *,
+        owner_user_id: str,
+    ) -> bool:
+        """Return whether an owned attachment has accepted adapter-v2 history."""
+
+        return self.db.has_attachment_ref_v2_history(
+            dataset_id,
+            attachment_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def list_unresolved_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded cursor page of unresolved attachment bindings."""
+
+        return self.db.list_unresolved_attachment_revision_bindings(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            limit=limit,
+        )
+
+    def resolve_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        blob_id: str,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding:
+        return self.db.resolve_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            blob_id=blob_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def release_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        released_at: str,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding:
+        return self.db.release_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            released_at=released_at,
+            owner_user_id=owner_user_id,
+        )
+
+    def get_or_create_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDatasetStorageNamespace:
+        return self.db.get_or_create_storage_namespace(
+            dataset_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def relocate_legacy_blob(
+        self,
+        blob_store: Any,
+        *,
+        dataset_id: str,
+        owner_user_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject:
+        return self.db.relocate_legacy_blob(
+            blob_store,
+            dataset_id=dataset_id,
+            owner_user_id=owner_user_id,
+            blob_id=blob_id,
+        )
+
     def create_blob_upload_session(
         self,
         session: SyncBlobUploadSessionCreate,
@@ -838,6 +1082,24 @@ class SyncV2Store:
             blob_id=blob_id,
             payload_hash=payload_hash,
             owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def lock_blob_object_for_retention(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncBlobObject | None:
+        if self._connection is None:
+            raise SyncStoreError("Sync blob retention requires a dataset guard")
+        return self.db.get_blob_object(
+            dataset_id,
+            blob_id=blob_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+            for_update=True,
         )
 
     def list_blob_objects_for_dataset(
@@ -850,12 +1112,34 @@ class SyncV2Store:
 
         return self.db.list_blob_objects_for_dataset(dataset_id, status=status)
 
+    def list_blob_objects_for_dataset_page(
+        self,
+        dataset_id: str,
+        *,
+        status: str = "available",
+        after_updated_at: str | None = None,
+        after_blob_id: str | None = None,
+        limit: int = 1000,
+    ) -> list[SyncBlobObject]:
+        return self.db.list_blob_objects_for_dataset_page(
+            dataset_id,
+            status=status,
+            after_updated_at=after_updated_at,
+            after_blob_id=after_blob_id,
+            limit=limit,
+            connection=self._connection,
+        )
+
     def mark_blob_object_deleted(
         self,
         dataset_id: str,
         blob_id: str,
     ) -> SyncBlobObject | None:
-        return self.db.mark_blob_object_deleted(dataset_id, blob_id)
+        return self.db.mark_blob_object_deleted(
+            dataset_id,
+            blob_id,
+            connection=self._connection,
+        )
 
     def get_domain_compaction_sequence(
         self,

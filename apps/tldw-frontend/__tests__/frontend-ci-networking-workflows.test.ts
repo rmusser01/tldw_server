@@ -45,6 +45,16 @@ describe("frontend CI workflow networking", () => {
     }
   })
 
+  it("installs the locked frontend dependency graph in both UX gates", () => {
+    const workflow = readWorkflow("frontend-ux-gates.yml")
+
+    for (const jobId of ["onboarding-gate", "smoke-gate"]) {
+      expect(getJobBlock(workflow, jobId)).toContain(
+        "run: bun install --frozen-lockfile"
+      )
+    }
+  })
+
   it("builds the advanced smoke artifact and retains a quickstart production browser smoke", () => {
     const workflow = readWorkflow("frontend-ux-gates.yml")
     const smokeGate = getJobBlock(workflow, "smoke-gate")

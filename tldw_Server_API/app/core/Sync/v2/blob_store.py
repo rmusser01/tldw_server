@@ -5,12 +5,21 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
+import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Infrastructure.distributed_lock import (
+    LockAcquisitionError,
+    _acquire_platform_file_lock,
+    _release_platform_file_lock,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 STREAM_CHUNK_SIZE = 64 * 1024
@@ -54,7 +63,7 @@ class LocalSyncBlobStore:
             if _sha256_file(target) != expected_hash:
                 raise SyncBlobStoreError(
                     "Sync blob chunk storage key already contains different content"
-                )
+                ) from None
         except OSError as exc:
             raise SyncBlobStoreError("Sync blob chunk write failed") from exc
         finally:
@@ -67,12 +76,17 @@ class LocalSyncBlobStore:
         upload_id: str,
         payload_hash: str,
         chunk_indexes: list[int],
+        storage_namespace_id: str | None = None,
     ) -> str:
         """Assemble verified chunks into a committed blob path atomically."""
 
         digest = _hash_digest(payload_hash)
         upload_segment = _safe_segment(upload_id, field_name="upload_id")
-        final_key = f"blobs/sha256/{digest[:2]}/{digest}.blob"
+        final_key = (
+            self.legacy_storage_key(payload_hash)
+            if storage_namespace_id is None
+            else self.namespace_storage_key(storage_namespace_id, payload_hash)
+        )
         final_path = self.resolve_storage_key(final_key)
         final_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = _commit_temp_path(final_path, digest=digest, upload_segment=upload_segment)
@@ -106,6 +120,129 @@ class LocalSyncBlobStore:
             _discard_temp_path(temp_path)
             raise SyncBlobStoreError("Sync blob upload commit failed") from exc
         return final_key
+
+    @staticmethod
+    def legacy_storage_key(payload_hash: str) -> str:
+        """Return the exact historical global content-addressed storage key."""
+
+        digest = _hash_digest(payload_hash)
+        return f"blobs/sha256/{digest[:2]}/{digest}.blob"
+
+    @staticmethod
+    def namespace_storage_key(
+        storage_namespace_id: str,
+        payload_hash: str,
+    ) -> str:
+        """Return a v2 path composed only from an opaque namespace and digest."""
+
+        namespace = _storage_namespace_id(storage_namespace_id)
+        digest = _hash_digest(payload_hash)
+        return f"blobs/v2/{namespace}/{digest}.blob"
+
+    def verify_blob(
+        self,
+        storage_key: str,
+        *,
+        payload_hash: str,
+        expected_size: int,
+    ) -> None:
+        """Verify one contained blob's exact logical size and lowercase digest."""
+
+        if isinstance(expected_size, bool) or expected_size < 1:
+            raise SyncBlobStoreError("expected_size must be positive")
+        _hash_digest(payload_hash)
+        try:
+            _require_secure_relocation_capabilities()
+            with _open_contained_regular_file(
+                self.root,
+                storage_key,
+                error_message="Sync blob verification failed",
+                recheck_name=True,
+            ) as handle:
+                _verify_open_blob(
+                    handle,
+                    payload_hash=payload_hash,
+                    expected_size=expected_size,
+                )
+        except SyncBlobStoreError:
+            raise
+        except OSError as exc:
+            raise SyncBlobStoreError("Sync blob verification failed") from exc
+
+    def relocate_legacy_blob(
+        self,
+        *,
+        legacy_storage_key: str,
+        storage_namespace_id: str,
+        payload_hash: str,
+        expected_size: int,
+    ) -> str:
+        """Verify/copy/reverify a global key without ever unlinking the source."""
+
+        canonical_legacy_key = self.legacy_storage_key(payload_hash)
+        if legacy_storage_key != canonical_legacy_key:
+            raise SyncBlobStoreError("Sync legacy blob storage key is not canonical")
+        target_key = self.namespace_storage_key(storage_namespace_id, payload_hash)
+        digest = _hash_digest(payload_hash)
+        namespace = _storage_namespace_id(storage_namespace_id)
+        try:
+            _require_secure_relocation_capabilities()
+            with _open_directory_chain(
+                self.root,
+                ("_locks", "legacy-relocation"),
+                create=True,
+            ) as lock_directory:
+                with _lock_file_at(
+                    lock_directory,
+                    f"{namespace}.{digest}.lock",
+                    timeout=10,
+                ):
+                    try:
+                        with _open_contained_regular_file(
+                            self.root,
+                            canonical_legacy_key,
+                            error_message=(
+                                "Sync legacy blob relocation source failed verification"
+                            ),
+                        ) as source_handle:
+                            try:
+                                _verify_open_blob(
+                                    source_handle,
+                                    payload_hash=payload_hash,
+                                    expected_size=expected_size,
+                                )
+                            except SyncBlobStoreError as exc:
+                                raise SyncBlobStoreError(
+                                    "Sync legacy blob relocation source failed verification"
+                                ) from exc
+                            source_handle.seek(0)
+                            with _open_directory_chain(
+                                self.root,
+                                ("blobs", "v2", namespace),
+                                create=True,
+                            ) as target_directory:
+                                _relocate_open_blob(
+                                    source_handle,
+                                    target_directory=target_directory,
+                                    target_name=f"{digest}.blob",
+                                    digest=digest,
+                                    namespace=namespace,
+                                    payload_hash=payload_hash,
+                                    expected_size=expected_size,
+                                )
+                    except SyncBlobStoreError:
+                        raise
+                    except OSError as exc:
+                        raise SyncBlobStoreError(
+                            "Sync legacy blob relocation failed"
+                        ) from exc
+                    return target_key
+        except NotImplementedError as exc:
+            raise SyncBlobStoreError(
+                "Sync legacy blob relocation has an unsupported platform"
+            ) from exc
+        except LockAcquisitionError as exc:
+            raise SyncBlobStoreError("Sync legacy blob relocation lock is unavailable") from exc
 
     def read_blob(self, storage_key: str) -> bytes:
         """Read a committed blob by storage key after path-containment checks."""
@@ -178,10 +315,419 @@ def _sha256_file(path: Path) -> str:
     """Return the SHA-256 digest for a file without loading it all into memory."""
 
     hasher = hashlib.sha256()
-    with path.open("rb") as handle:
+    with _open_regular_file_no_follow(
+        path,
+        error_message="Sync blob path could not be opened safely",
+    ) as handle:
         while chunk := handle.read(STREAM_CHUNK_SIZE):
             hasher.update(chunk)
     return "sha256:" + hasher.hexdigest()
+
+
+def _open_regular_file_no_follow(path: Path, *, error_message: str) -> BinaryIO:
+    """Open a regular file without following a last-component symlink race."""
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise SyncBlobStoreError(error_message) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise SyncBlobStoreError(error_message)
+        return os.fdopen(descriptor, "rb")
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _require_secure_relocation_capabilities() -> None:
+    """Reject platforms lacking the descriptor-relative primitives we rely on."""
+
+    supported_dir_fd = {
+        getattr(function, "__name__", "")
+        for function in getattr(os, "supports_dir_fd", set())
+    }
+    supported_follow = {
+        getattr(function, "__name__", "")
+        for function in getattr(os, "supports_follow_symlinks", set())
+    }
+    if (
+        not getattr(os, "O_DIRECTORY", 0)
+        or not getattr(os, "O_NOFOLLOW", 0)
+        or not {"open", "stat", "mkdir"}.issubset(supported_dir_fd)
+        or "stat" not in supported_follow
+    ):
+        raise SyncBlobStoreError(
+            "Sync legacy blob relocation has an unsupported platform"
+        )
+
+
+@contextmanager
+def _open_directory_chain(
+    root: Path,
+    segments: tuple[str, ...],
+    *,
+    create: bool,
+) -> Iterator[int]:
+    """Open a directory chain through anchored, no-follow descriptors."""
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        current = os.open(root, flags)
+    except OSError as exc:
+        raise SyncBlobStoreError("Sync blob root could not be opened safely") from exc
+    try:
+        for raw_segment in segments:
+            segment = _safe_segment(raw_segment, field_name="storage path segment")
+            try:
+                expected = os.stat(segment, dir_fd=current, follow_symlinks=False)
+                child = os.open(segment, flags, dir_fd=current)
+            except FileNotFoundError:
+                if not create:
+                    raise SyncBlobStoreError(
+                        "Sync blob directory path does not exist"
+                    ) from None
+                try:
+                    os.mkdir(segment, mode=0o700, dir_fd=current)
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise SyncBlobStoreError(
+                        "Sync blob directory could not be created safely"
+                    ) from exc
+                try:
+                    expected = os.stat(
+                        segment,
+                        dir_fd=current,
+                        follow_symlinks=False,
+                    )
+                    child = os.open(segment, flags, dir_fd=current)
+                except OSError as exc:
+                    raise SyncBlobStoreError(
+                        "Sync blob directory could not be opened safely"
+                    ) from exc
+            except OSError as exc:
+                raise SyncBlobStoreError(
+                    "Sync blob directory could not be opened safely"
+                ) from exc
+            opened = os.fstat(child)
+            if (
+                not stat.S_ISDIR(expected.st_mode)
+                or opened.st_dev != expected.st_dev
+                or opened.st_ino != expected.st_ino
+            ):
+                os.close(child)
+                raise SyncBlobStoreError("Sync blob directory identity changed")
+            os.close(current)
+            current = child
+        yield current
+    finally:
+        os.close(current)
+
+
+def _open_lock_file_at(directory: int, name: str) -> int:
+    """Open a stable regular lock file relative to an anchored directory."""
+
+    lock_name = _safe_segment(name, field_name="lock file name")
+    flags = (
+        os.O_RDWR
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    for _attempt in range(16):
+        try:
+            expected = os.stat(lock_name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            try:
+                descriptor = os.open(
+                    lock_name,
+                    flags | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                    dir_fd=directory,
+                )
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file could not be created safely"
+                ) from exc
+            try:
+                expected = os.fstat(descriptor)
+            except OSError as exc:
+                os.close(descriptor)
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file could not be inspected safely"
+                ) from exc
+        except OSError as exc:
+            raise SyncBlobStoreError(
+                "Sync legacy blob relocation lock file could not be inspected safely"
+            ) from exc
+        else:
+            try:
+                descriptor = os.open(lock_name, flags, dir_fd=directory)
+            except OSError as exc:
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file could not be opened safely"
+                ) from exc
+
+        try:
+            opened = os.fstat(descriptor)
+            named = os.stat(lock_name, dir_fd=directory, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(expected.st_mode)
+                or not stat.S_ISREG(opened.st_mode)
+                or not stat.S_ISREG(named.st_mode)
+                or opened.st_dev != expected.st_dev
+                or opened.st_ino != expected.st_ino
+                or named.st_dev != opened.st_dev
+                or named.st_ino != opened.st_ino
+            ):
+                raise SyncBlobStoreError(
+                    "Sync legacy blob relocation lock file identity changed"
+                )
+            return descriptor
+        except Exception:
+            os.close(descriptor)
+            raise
+    raise SyncBlobStoreError(
+        "Sync legacy blob relocation lock file could not be created safely"
+    )
+
+
+@contextmanager
+def _lock_file_at(directory: int, name: str, *, timeout: float) -> Iterator[None]:
+    """Lock a no-follow file descriptor without reopening its pathname."""
+
+    descriptor = _open_lock_file_at(directory, name)
+    deadline = time.monotonic() + timeout
+    acquired = False
+    try:
+        while True:
+            try:
+                _acquire_platform_file_lock(descriptor)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise LockAcquisitionError(
+                        f"Failed to acquire sync relocation lock within {timeout}s"
+                    ) from None
+                time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+        yield
+    finally:
+        if acquired:
+            try:
+                _release_platform_file_lock(descriptor)
+            except OSError:
+                pass
+        os.close(descriptor)
+
+
+@contextmanager
+def _open_contained_regular_file(
+    root: Path,
+    storage_key: str,
+    *,
+    error_message: str,
+    recheck_name: bool = False,
+) -> Iterator[BinaryIO]:
+    """Open one contained regular file without following any path symlink."""
+
+    path = Path(storage_key)
+    if not storage_key or path.is_absolute() or len(path.parts) < 2:
+        raise SyncBlobStoreError(error_message)
+    segments = tuple(
+        _safe_segment(part, field_name="storage path segment") for part in path.parts
+    )
+    with _open_directory_chain(root, segments[:-1], create=False) as directory:
+        flags = (
+            os.O_RDONLY
+            | os.O_NONBLOCK
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        try:
+            descriptor = os.open(segments[-1], flags, dir_fd=directory)
+        except OSError as exc:
+            raise SyncBlobStoreError(error_message) from exc
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise SyncBlobStoreError(error_message)
+            with os.fdopen(descriptor, "rb") as handle:
+                descriptor = -1
+                yield handle
+                if recheck_name:
+                    try:
+                        named = os.stat(
+                            segments[-1],
+                            dir_fd=directory,
+                            follow_symlinks=False,
+                        )
+                    except OSError as exc:
+                        raise SyncBlobStoreError(
+                            "Sync blob path identity changed"
+                        ) from exc
+                    if not stat.S_ISREG(named.st_mode) or not _same_inode(
+                        opened, named
+                    ):
+                        raise SyncBlobStoreError("Sync blob path identity changed")
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+
+def _verify_open_blob(
+    handle: BinaryIO,
+    *,
+    payload_hash: str,
+    expected_size: int,
+) -> None:
+    """Verify size and digest through an already anchored regular-file handle."""
+
+    if isinstance(expected_size, bool) or expected_size < 1:
+        raise SyncBlobStoreError("expected_size must be positive")
+    _hash_digest(payload_hash)
+    try:
+        metadata = os.fstat(handle.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_size:
+            raise SyncBlobStoreError("Sync blob size does not match expected bytes")
+        handle.seek(0)
+        hasher = hashlib.sha256()
+        while chunk := handle.read(STREAM_CHUNK_SIZE):
+            hasher.update(chunk)
+        if "sha256:" + hasher.hexdigest() != payload_hash:
+            raise SyncBlobStoreError("Sync blob digest does not match expected bytes")
+        handle.seek(0)
+    except SyncBlobStoreError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise SyncBlobStoreError("Sync blob verification failed") from exc
+
+
+def _open_target_at(directory: int, name: str) -> BinaryIO:
+    flags = (
+        os.O_RDONLY
+        | os.O_NONBLOCK
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = os.open(name, flags, dir_fd=directory)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise SyncBlobStoreError("Sync relocated blob target is not a regular file")
+        return os.fdopen(descriptor, "rb")
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino
+
+
+def _verify_named_open_blob(
+    handle: BinaryIO,
+    *,
+    directory: int,
+    name: str,
+    payload_hash: str,
+    expected_size: int,
+    expected_inode: os.stat_result | None = None,
+) -> os.stat_result:
+    """Verify bytes and then prove the directory name still names this inode."""
+
+    opened = os.fstat(handle.fileno())
+    if expected_inode is not None and not _same_inode(opened, expected_inode):
+        raise SyncBlobStoreError("Sync relocated blob target inode changed")
+    _verify_open_blob(
+        handle,
+        payload_hash=payload_hash,
+        expected_size=expected_size,
+    )
+    try:
+        named = os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except OSError as exc:
+        raise SyncBlobStoreError("Sync relocated blob target identity changed") from exc
+    if not stat.S_ISREG(named.st_mode) or not _same_inode(opened, named):
+        raise SyncBlobStoreError("Sync relocated blob target identity changed")
+    return opened
+
+
+def _relocate_open_blob(
+    source: BinaryIO,
+    *,
+    target_directory: int,
+    target_name: str,
+    digest: str,
+    namespace: str,
+    payload_hash: str,
+    expected_size: int,
+) -> None:
+    """Publish one verified blob through directory-relative, no-follow handles."""
+
+    expected_digest = _hash_digest(payload_hash)
+    if target_name != f"{expected_digest}.blob" or digest != expected_digest:
+        raise SyncBlobStoreError("Sync relocated blob target identity is invalid")
+    _storage_namespace_id(namespace)
+    flags = (
+        os.O_RDWR
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        descriptor = os.open(target_name, flags, 0o600, dir_fd=target_directory)
+    except FileExistsError:
+        try:
+            existing = _open_target_at(target_directory, target_name)
+        except OSError as exc:
+            raise SyncBlobStoreError(
+                "Sync relocated blob target could not be opened safely"
+            ) from exc
+        with existing:
+            _verify_named_open_blob(
+                existing,
+                directory=target_directory,
+                name=target_name,
+                payload_hash=payload_hash,
+                expected_size=expected_size,
+            )
+        return
+    except OSError as exc:
+        raise SyncBlobStoreError(
+            "Sync relocated blob target could not be created safely"
+        ) from exc
+
+    try:
+        expected = os.fstat(descriptor)
+        with os.fdopen(descriptor, "r+b", closefd=False) as target:
+            source.seek(0)
+            while chunk := source.read(STREAM_CHUNK_SIZE):
+                target.write(chunk)
+            target.flush()
+            os.fsync(descriptor)
+            _verify_named_open_blob(
+                target,
+                directory=target_directory,
+                name=target_name,
+                payload_hash=payload_hash,
+                expected_size=expected_size,
+                expected_inode=expected,
+            )
+    except SyncBlobStoreError:
+        raise
+    except OSError as exc:
+        raise SyncBlobStoreError("Sync legacy blob relocation failed") from exc
+    finally:
+        os.close(descriptor)
 
 
 def _hash_digest(value: str) -> str:
@@ -189,11 +735,19 @@ def _hash_digest(value: str) -> str:
     if not value.startswith(prefix) or len(value) != len(prefix) + 64:
         raise SyncBlobStoreError("payload_hash must be sha256:<64 hex chars>")
     digest = value[len(prefix) :]
-    try:
-        bytes.fromhex(digest)
-    except ValueError as exc:
-        raise SyncBlobStoreError("payload_hash digest must be hex") from exc
+    if any(character not in "0123456789abcdef" for character in digest):
+        raise SyncBlobStoreError("payload_hash digest must be lowercase hex")
     return digest
+
+
+def _storage_namespace_id(value: str) -> str:
+    if len(value) != 32 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise SyncBlobStoreError(
+            "storage_namespace_id must be 32 lowercase hexadecimal characters"
+        )
+    return value
 
 
 def _safe_segment(value: str, *, field_name: str) -> str:

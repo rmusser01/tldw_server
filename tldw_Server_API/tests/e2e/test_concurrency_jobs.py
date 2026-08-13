@@ -6,11 +6,9 @@ Uploads multiple small docs concurrently-ish (sequential for stability), then
 starts a Chatbooks export in async mode and cancels it.
 """
 
-import time
 import pytest
-import httpx
 
-from .fixtures import api_client, data_tracker, create_test_file, cleanup_test_file
+from .fixtures import cleanup_test_file, create_test_file
 
 
 @pytest.mark.critical
@@ -38,33 +36,32 @@ def test_bulk_media_ingest(api_client, data_tracker):
 
 
 @pytest.mark.critical
-def test_chatbooks_async_cancel(api_client):
-    # Start an async export (minimal content selections)
+def test_chatbooks_async_cancel(api_client, data_tracker):
+    note = api_client.create_note(
+        title="E2E Cancel Chatbook Note",
+        content="Deterministic content for the async cancellation test.",
+    )
+    note_id = str(note.get("id") or note.get("note_id") or "")
+    assert note_id, f"No note id returned: {note}"
+    data_tracker.add_note(note_id)
+
+    # Start a bounded async export containing only the note created above.
     payload = {
         "name": "E2E Cancel Chatbook",
         "description": "Cancel flow",
-        "content_selections": {"conversation": []},
+        "content_selections": {"note": [note_id]},
         "async_mode": True,
     }
-    try:
-        r = api_client.client.post("/api/v1/chatbooks/export", json=payload)
-        r.raise_for_status()
-        d = r.json()
-        job_id = d.get("job_id")
-        assert job_id
-    except httpx.HTTPStatusError as e:
-        pytest.skip(f"Chatbooks export not available: {e}")
+    r = api_client.client.post("/api/v1/chatbooks/export", json=payload)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    job_id = d.get("job_id")
+    assert job_id
 
     # Cancel the job
-    try:
-        c = api_client.client.delete(f"/api/v1/chatbooks/export/jobs/{job_id}")
-        # In some configurations, cancellation may be immediate/no-op, or the job
-        # may complete before cancellation can be applied.
-        if c.status_code == 400 and "Cannot cancel" in c.text:
-            pytest.skip("Export job completed before it could be cancelled")
-        assert c.status_code in (200, 202, 404)
-        # Status check (best-effort)
-        s = api_client.client.get(f"/api/v1/chatbooks/export/jobs/{job_id}")
-        assert s.status_code in (200, 404)
-    except httpx.HTTPError as e:
-        pytest.skip(f"Chatbooks cancel path unavailable: {e}")
+    c = api_client.client.delete(f"/api/v1/chatbooks/export/jobs/{job_id}")
+    completed_before_cancel = c.status_code == 400 and "Cannot cancel" in c.text
+    assert c.status_code in (200, 202, 404) or completed_before_cancel
+    # Status check (best-effort)
+    s = api_client.client.get(f"/api/v1/chatbooks/export/jobs/{job_id}")
+    assert s.status_code in (200, 404)

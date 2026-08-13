@@ -18,6 +18,7 @@ from .models import (
     SyncDomain,
     SyncEnvelope,
     client_private_server_frontend_limitation_warning,
+    normalize_supported_adapter_versions,
     server_frontend_mutation_blockers_for_policy,
     server_frontend_mutation_enabled_for_policy,
 )
@@ -102,7 +103,7 @@ class SyncV2ProfileManager:
         self,
         *,
         store: SyncV2Store,
-        capabilities_factory: Callable[[], Any],
+        capabilities_factory: Callable[..., Any],
         id_factory: Callable[[str], str],
         scan_limit: int,
         service: Any | None = None,
@@ -173,7 +174,14 @@ class SyncV2ProfileManager:
             device_id=device_id,
             client_profile_id=client_profile_id,
         )
-        self.store.upsert_device(
+        canonical_client_instance = dict(client_instance or {})
+        supported_adapter_versions = normalize_supported_adapter_versions(
+            canonical_client_instance.pop("supported_adapter_versions", None),
+            requested_domains=requested,
+        )
+        if self.service is None:
+            raise SyncStoreError("Sync profile device registration service is unavailable")
+        self.service._upsert_device(
             SyncDeviceUpsert(
                 device_id=resolved_device_id,
                 user_id=user_id,
@@ -184,8 +192,9 @@ class SyncV2ProfileManager:
                     "client_profile_id": client_profile_id,
                     "sync_mode": normalized_mode,
                     "client_family": client_family,
-                    "client_instance": dict(client_instance or {}),
+                    "client_instance": canonical_client_instance,
                     "requested_domains": requested,
+                    "supported_adapter_versions": supported_adapter_versions,
                 },
             )
         )
@@ -252,7 +261,10 @@ class SyncV2ProfileManager:
         device_id: str | None,
         created: bool | None,
     ) -> SyncProfileStatus:
-        capabilities = self.capabilities_factory()
+        capabilities = self.capabilities_factory(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id if dataset is not None else None,
+        )
         device = self._device_status(user_id, device_id)
         dataset_status = _dataset_status(dataset) if dataset is not None else None
         domain_status = (

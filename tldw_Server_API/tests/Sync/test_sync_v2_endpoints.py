@@ -12,7 +12,11 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
-from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.adapters import (
+    AttachmentRefAdapter,
+    StaticSyncAdapter,
+    SyncAdapterRegistry,
+)
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
@@ -23,6 +27,9 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
+    SyncBlobObjectCreate,
+    SyncDatasetCreate,
+    SyncDeviceCursor,
     SyncDeviceUpsert,
     SyncEnvelope,
     SyncEnvelopeCreate,
@@ -33,6 +40,8 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
+
+pytestmark = pytest.mark.unit
 
 
 def _clock() -> str:
@@ -282,6 +291,70 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
     assert body["warnings"] == []
 
 
+@pytest.mark.parametrize(
+    ("gate_enabled", "state", "expected"),
+    [
+        (False, "ready", []),
+        (True, "initializing", []),
+        (True, "ready", [2]),
+    ],
+)
+def test_capabilities_endpoint_reports_selected_dataset_writable_versions(
+    tmp_path: Path,
+    gate_enabled: bool,
+    state: str,
+    expected: list[int],
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    service.adapters.register(
+        AttachmentRefAdapter(v2_writes_enabled=gate_enabled)
+    )
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={"notes_attachment_v2": {"state": state}},
+        )
+    )
+
+    response = _client_for_service(service).get(
+        "/api/v1/sync/capabilities",
+        params={"dataset_id": "dataset-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["supported_adapter_versions"]["attachment.ref"] == [1, 2]
+    assert response.json()["writable_adapter_versions"]["attachment.ref"] == expected
+
+
+@pytest.mark.unit
+def test_capabilities_endpoint_hides_unauthorized_selected_dataset(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-private",
+            owner_user_id="user-2",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={"notes_attachment_v2": {"state": "ready"}},
+        )
+    )
+
+    response = _client_for_service(service).get(
+        "/api/v1/sync/capabilities",
+        params={"dataset_id": "dataset-private"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error_code"] == "sync_resource_not_found"
+
+
 def test_profile_endpoint_is_read_only_when_no_dataset_exists(
     client: TestClient,
     sync_service: SyncV2Service,
@@ -375,6 +448,15 @@ def test_device_lifecycle_endpoints_authorize_acknowledge_and_revoke(
         },
     )
     resumed = client.post("/api/v1/sync/devices/device-2/resume")
+    sync_service.store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-2",
+            domain="notes.note",
+            last_pulled_sequence=5,
+            max_delivered_sequence=5,
+        )
+    )
     acknowledged = client.post(
         "/api/v1/sync/device-acknowledgments",
         json={
@@ -445,6 +527,197 @@ def test_device_lifecycle_endpoints_authorize_acknowledge_and_revoke(
         device["device_id"]: device["status"]
         for device in auditable.json()
     } == {"device-1": "active", "device-2": "revoked"}
+
+
+def test_device_acknowledgment_endpoint_forwards_exact_adapter_version(
+    tmp_path: Path,
+) -> None:
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "version-ack.db")),
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})]
+        ),
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        capabilities={
+            "requested_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+        },
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    service.store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            adapter_version=2,
+            last_pulled_sequence=5,
+            max_delivered_sequence=5,
+        )
+    )
+
+    response = _client_for_service(service).post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain_acks": [
+                {
+                    "domain": "notes.note",
+                    "adapter_version": 2,
+                    "through_server_sequence": 5,
+                    "applied_at": "2026-05-23T18:30:00+00:00",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["version_acks"]) == 1
+    assert response.json()["version_acks"][0]["adapter_version"] == 2
+    assert response.json()["domain_acks"] == {}
+
+
+def _blob_id_ack_service(tmp_path: Path, *, supports_v2: bool = True) -> SyncV2Service:
+    versions = {1, 2} if supports_v2 else {1}
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "blob-id-ack.db")),
+        adapters=SyncAdapterRegistry(
+            [StaticSyncAdapter(domain="attachment.ref", supported_adapter_versions=versions)]
+        ),
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        capabilities={
+            "requested_domains": ["attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": sorted(versions)},
+        },
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["attachment.ref"],
+    )
+    service.store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-1",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="attachment-provenance",
+            payload_hash="sha256:" + "a" * 64,
+            content_type="application/octet-stream",
+            size_bytes=1,
+            storage_backend="local_fs",
+            storage_key="blob-1.bin",
+        )
+    )
+    return service
+
+
+def test_device_acknowledgment_endpoint_persists_reachable_blob_id_evidence(
+    tmp_path: Path,
+) -> None:
+    response = _client_for_service(_blob_id_ack_service(tmp_path)).post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "blob_id_acks": [
+                {
+                    "blob_id": "blob-1",
+                    "payload_hash": "sha256:" + "a" * 64,
+                    "verified_at": "2026-08-11T20:30:00Z",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["blob_acks"] == []
+    assert response.json()["blob_id_acks"][0]["blob_id"] == "blob-1"
+
+
+@pytest.mark.parametrize(
+    ("supports_v2", "blob_id", "digest", "status_code", "error_code"),
+    [
+        (False, "blob-1", "sha256:" + "a" * 64, 400, "sync_blob_id_ack_adapter_v2_required"),
+        (True, "missing", "sha256:" + "a" * 64, 404, "sync_blob_id_ack_not_authorized"),
+        (True, "blob-1", "sha256:" + "b" * 64, 400, "sync_blob_id_ack_digest_mismatch"),
+    ],
+)
+def test_device_acknowledgment_endpoint_sanitizes_blob_id_ack_errors(
+    tmp_path: Path,
+    supports_v2: bool,
+    blob_id: str,
+    digest: str,
+    status_code: int,
+    error_code: str,
+) -> None:
+    response = _client_for_service(
+        _blob_id_ack_service(tmp_path, supports_v2=supports_v2)
+    ).post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "blob_id_acks": [
+                {
+                    "blob_id": blob_id,
+                    "payload_hash": digest,
+                    "verified_at": "2026-08-11T20:30:00Z",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["detail"]["error_code"] == error_code
+    assert blob_id not in response.json()["detail"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_status"),
+    [
+        ("sync_pull_token_invalid", 400),
+        ("sync_pull_token_too_large", 413),
+        ("sync_pull_restart_required", 409),
+        ("sync_device_adapter_version_not_supported", 400),
+    ],
+)
+def test_pull_endpoint_maps_versioned_token_errors(
+    error_code: str,
+    expected_status: int,
+) -> None:
+    class FailingPullService:
+        def pull(self, **_kwargs):
+            raise SyncStoreError(error_code)
+
+    response = _client_for_service(FailingPullService()).get(  # type: ignore[arg-type]
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "cursor": "opaque-token",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"]["error_code"] == error_code
 
 
 def test_background_sync_policy_lease_and_status_endpoints(
@@ -582,6 +855,34 @@ def test_profile_bootstrap_endpoint_idempotently_creates_dataset_and_device(
     assert {item["domain"] for item in profile.json()["domain_status"]} == set(M1_SYNC_DOMAINS)
     assert len(sync_service.store.list_datasets_for_user("user-1")) == 1
     assert len(sync_service.store.list_devices_for_user("user-1")) == 1
+
+
+@pytest.mark.parametrize(
+    "version_map",
+    [
+        {"attachment.ref": [True]},
+        {"attachment.ref": list(range(1, 10))},
+    ],
+)
+def test_profile_bootstrap_endpoint_rejects_malformed_adapter_maps(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    version_map: dict[str, list[object]],
+) -> None:
+    response = client.post(
+        "/api/v1/sync/profile/bootstrap",
+        json={
+            "client_family": "chatbook",
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": ["attachment.ref"],
+            "supported_adapter_versions": version_map,
+        },
+    )
+
+    assert response.status_code == 422
+    assert sync_service.store.list_devices_for_user("user-1") == []
+    assert sync_service.store.list_datasets_for_user("user-1") == []
 
 
 def test_profile_bootstrap_rejects_reserved_server_origin_device_id(
@@ -839,6 +1140,245 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
     assert enrolled.json()["metadata"] == {"label": "internal-caller"}
 
 
+def test_device_patch_rejects_adapter_version_removal_without_mutating_registration(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    registered = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "supported_domains": ["notes.note"],
+            "supported_adapter_versions": {"notes.note": [1, 2]},
+            "capabilities": {"theme": "dark"},
+        },
+    )
+    assert registered.status_code == 200
+
+    response = client.patch(
+        "/api/v1/sync/devices/device-1",
+        json={
+            "capabilities": {
+                "supported_adapter_versions": {"notes.note": [2]},
+                "theme": "light",
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_validation_failed",
+        "message": "Sync request parameters are invalid.",
+    }
+    stored = sync_service.store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1, 2]
+    }
+    assert stored.capabilities["theme"] == "dark"
+
+
+@pytest.mark.parametrize(
+    "requested_domains",
+    [
+        ["unknown.domain"],
+        ["notes.note"] * 101,
+    ],
+)
+def test_device_registration_rejects_invalid_requested_domains_without_version_map(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    requested_domains: list[str],
+) -> None:
+    response = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "invalid-device",
+            "display_name": "Invalid device",
+            "capabilities": {"requested_domains": requested_domains},
+        },
+    )
+
+    assert response.status_code == 422
+    assert sync_service.store.get_device("user-1", "invalid-device") is None
+
+
+@pytest.mark.parametrize(
+    "requested_domains",
+    [
+        ["unknown.domain"],
+        ["notes.note"] * 101,
+    ],
+)
+def test_device_patch_rejects_invalid_requested_domains_without_version_map(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    requested_domains: list[str],
+) -> None:
+    registered = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "supported_domains": ["notes.note"],
+        },
+    )
+    assert registered.status_code == 200
+    original = sync_service.store.get_device("user-1", "device-1")
+    assert original is not None
+
+    response = client.patch(
+        "/api/v1/sync/devices/device-1",
+        json={"capabilities": {"requested_domains": requested_domains}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_validation_failed",
+        "message": "Sync request parameters are invalid.",
+    }
+    stored = sync_service.store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities == original.capabilities
+
+
+def test_partial_registration_adapter_map_defaults_omitted_domain_for_push(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    registered = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "supported_domains": ["notes.note", "attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        },
+    )
+    enrolled = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": ["notes.note"],
+            "encryption_policy": "server_trusted_v1",
+        },
+    )
+    assert registered.status_code == 200
+    assert enrolled.status_code == 200
+
+    stored = sync_service.store.get_device("user-1", "device-1")
+    assert stored is not None
+    assert stored.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [2],
+    }
+    pushed = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "base_server_cursor": 0,
+            "envelopes": [_note_envelope_json()],
+        },
+    )
+
+    assert pushed.status_code == 200
+    assert [item["client_envelope_id"] for item in pushed.json()["accepted"]] == [
+        "env-note"
+    ]
+    assert pushed.json()["rejected"] == []
+
+
+def test_public_push_rejects_unattested_attachment_bootstrap_routing_safely(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+        attachment_ref_v2_object_hash,
+    )
+
+    service = _build_service(tmp_path, supports_attachments=True)
+    service.adapters.register(AttachmentRefAdapter(v2_writes_enabled=True))
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        capabilities={
+            "requested_domains": ["attachment.ref"],
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        },
+    )
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note", "attachment.ref"],
+            metadata={"notes_attachment_v2": {"state": "ready"}},
+        )
+    )
+    payload = {
+        "attachment_id": "a1111111-1111-4111-8111-111111111111",
+        "parent_domain": "notes.note",
+        "parent_object_id": "b2222222-2222-4222-8222-222222222222",
+        "file_name": "diagram.png",
+        "original_file_name": "diagram.png",
+        "content_type": "image/png",
+        "size_bytes": 42,
+        "blob_hash": "sha256:" + "a" * 64,
+        "created_at": _clock(),
+        "last_modified": _clock(),
+        "created_by": "device-1",
+    }
+    response = _client_for_service(service).post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                {
+                    "dataset_id": "dataset-1",
+                    "client_envelope_id": "env-untrusted-bootstrap",
+                    "device_id": "device-1",
+                    "client_sequence": 1,
+                    "domain": "attachment.ref",
+                    "operation": "upsert",
+                    "object_id": payload["attachment_id"],
+                    "object_revision": 1,
+                    "schema_version": 2,
+                    "adapter_version": 2,
+                    "payload": payload,
+                    "payload_hash": attachment_ref_v2_object_hash(
+                        "upsert",
+                        payload,
+                        object_revision=1,
+                    ),
+                    "created_at_client": _clock(),
+                    "encryption_metadata": {"policy": "server_trusted_v1"},
+                    "routing_metadata": {
+                        "bootstrap_capture": True,
+                        "bootstrap_id": "client-forged-bootstrap",
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["accepted"] == []
+    assert response.json()["rejected"] == [
+        {
+            "client_envelope_id": "env-untrusted-bootstrap",
+            "error_code": "attachment_ref_v2_payload_invalid",
+            "message": "attachment.ref v2 payload validation failed",
+            "retryable": False,
+        }
+    ]
+    assert service.store.list_envelopes_after("dataset-1", 0) == []
+
+
 def test_dataset_enroll_endpoint_rejects_and_never_echoes_forged_server_metadata(
     client: TestClient,
     sync_service: SyncV2Service,
@@ -871,6 +1411,35 @@ def test_dataset_enroll_endpoint_rejects_and_never_echoes_forged_server_metadata
         "message": "Reserved Sync dataset capabilities require profile bootstrap.",
     }
     assert "client-forged" not in response.text
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+
+
+def test_dataset_enroll_endpoint_rejects_forged_attachment_readiness(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    response = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "forged-attachment-ready",
+            "scope_type": "personal",
+            "domains": ["notes.note", "attachment.ref"],
+            "encryption_policy": "server_trusted_v1",
+            "metadata": {
+                "notes_attachment_v2": {
+                    "state": "ready",
+                    "bootstrap_id": "private-bootstrap-id",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_reserved_dataset_enrollment",
+        "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+    }
+    assert "private-bootstrap-id" not in response.text
     assert sync_service.store.list_datasets_for_user("user-1") == []
 
 
@@ -1274,13 +1843,14 @@ def test_push_and_pull_endpoint_expose_apply_outcomes_for_replayable_failures(
         for item in accepted
     ] == [
         ("env-note", 1, 1, "applied"),
-        ("env-failed", 2, None, "failed"),
+        ("env-failed", 2, 1, "failed"),
     ]
     assert accepted[1]["apply_error_code"] == "projection_failed"
     assert "replayable" in accepted[1]["apply_error_message"]
     assert pulled.status_code == 200
     failed = pulled.json()["envelopes"][1]
     assert failed["client_envelope_id"] == "env-failed"
+    assert failed["object_revision"] == 1
     assert failed["apply_status"] == "failed"
     assert failed["apply_error_code"] == "projection_failed"
     assert "replayable" in failed["apply_error_message"]

@@ -57,7 +57,12 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
     return SyncAdapterRegistry(
         [
             (
-                AttachmentRefAdapter()
+                AttachmentRefAdapter(
+                    v2_writes_enabled=_sync_v2_bool_env(
+                        "SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC",
+                        default=False,
+                    )
+                )
                 if domain == "attachment.ref"
                 else NotesDomainAdapter()
                 if domain == "notes.note"

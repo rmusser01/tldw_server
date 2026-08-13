@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -31,3 +32,18 @@ def test_frontend_required_does_not_publish_or_enforce_license_policy() -> None:
     assert "Enforce temporary frontend licensing contribution freeze" not in step_names
     assert "check_frontend_license_gate.py" not in workflow_text
     assert "frontend-license-policy/trusted/" not in workflow_text
+
+
+@pytest.mark.unit
+def test_frontend_coverage_report_cannot_starve_required_gates() -> None:
+    workflow_path = Path(".github/workflows/frontend-required.yml")
+    data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = data["jobs"]["frontend-required"]["steps"]
+
+    coverage_step = next(
+        step for step in steps if step.get("name") == "Frontend coverage summary (report-only)"
+    )
+
+    assert coverage_step["continue-on-error"] is True
+    assert coverage_step["timeout-minutes"] == 17
+    assert "timeout --kill-after=30s 15m bun run test:coverage" in coverage_step["run"]

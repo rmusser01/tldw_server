@@ -505,6 +505,21 @@ def test_note_attachment_upload_rejects_unsupported_extension(client: TestClient
     assert "Unsupported attachment type" in response.json()["detail"]
 
 
+def test_note_attachment_endpoint_wrapper_uses_canonical_filename_policy():
+    assert (
+        notes_router_module._sanitize_attachment_file_name("Résumé Draft?.PDF")
+        == "Résumé_Draft.pdf"
+    )
+
+
+def test_note_attachment_endpoint_wrapper_preserves_unsupported_extension_error():
+    with pytest.raises(HTTPException) as exc_info:
+        notes_router_module._sanitize_attachment_file_name("payload.exe")
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Unsupported attachment type" in str(exc_info.value.detail)
+
+
 def test_note_attachment_upload_rejects_oversized_files(client: TestClient, tmp_path):
     note_id_val = str(uuid.uuid4())
     expected_db_client_id = "test_api_client_for_user_db"

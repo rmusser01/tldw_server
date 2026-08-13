@@ -658,7 +658,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 58  # Schema v58 canonicalizes Notes links and graph projections
+    _CURRENT_SCHEMA_VERSION = 59  # Schema v59 adds the canonical Notes attachment registry
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -668,6 +668,7 @@ class CharactersRAGDB:
             "conversations",
             "messages",
             "notes",
+            "note_attachments",
         }
     )
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
@@ -6554,6 +6555,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
             MessageStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_attachment_store import (
+            NoteAttachmentStore,
+        )
         from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store import (
             NoteGraphProjectionStore,
         )
@@ -6568,6 +6572,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.conversation_store = ConversationStore(self)
         self.message_store = MessageStore(self)
         self.note_store = NoteStore(self)
+        self.note_attachment_store = NoteAttachmentStore(self)
         self.notes_link_store = NotesLinkStore(self)
         self.note_graph_projection_store = NoteGraphProjectionStore(self)
         self.task_store = TaskStore(self)
@@ -7462,6 +7467,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (55, "_migrate_from_v55_to_v56"),
             (56, "_migrate_from_v56_to_v57"),
             (57, "_migrate_from_v57_to_v58"),
+            (58, "_migrate_from_v58_to_v59"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -10807,6 +10813,618 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
         self._set_schema_version_postgres(conn, 58)
 
+    @staticmethod
+    def _note_attachment_uuid_check_sqlite(column_name: str) -> str:
+        """Return the fixed SQLite UUIDv4 check used by schema v59."""
+
+        if column_name not in {"attachment_id", "note_id"}:
+            raise ValueError("Unsupported attachment UUID column")
+        return (
+            f"length({column_name}) = 36 "  # nosec B608 - allowlisted schema identifier.
+            f"AND lower({column_name}) = {column_name} "
+            f"AND substr({column_name}, 9, 1) = '-' "
+            f"AND substr({column_name}, 14, 1) = '-' "
+            f"AND substr({column_name}, 15, 1) = '4' "
+            f"AND substr({column_name}, 19, 1) = '-' "
+            f"AND substr({column_name}, 20, 1) IN ('8', '9', 'a', 'b') "
+            f"AND substr({column_name}, 24, 1) = '-' "
+            f"AND length(replace({column_name}, '-', '')) = 32 "
+            f"AND replace({column_name}, '-', '') NOT GLOB '*[^0-9a-f]*'"
+        )
+
+    def _create_note_attachment_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Create the empty canonical attachment registry and fixed indexes."""
+
+        attachment_uuid = self._note_attachment_uuid_check_sqlite("attachment_id")
+        note_uuid = self._note_attachment_uuid_check_sqlite("note_id")
+        conn.execute(
+            f"""
+            CREATE TABLE note_attachments(
+              client_id TEXT NOT NULL CHECK(length(trim(client_id)) > 0),
+              dataset_id TEXT NOT NULL
+                CHECK(length(dataset_id) BETWEEN 1 AND 255 AND dataset_id = trim(dataset_id)),
+              attachment_id TEXT NOT NULL CHECK({attachment_uuid}),
+              note_id TEXT NOT NULL CHECK({note_uuid})
+                REFERENCES notes(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+              file_name TEXT NOT NULL CHECK(
+                length(file_name) BETWEEN 1 AND 180
+                AND file_name = trim(file_name)
+                AND file_name NOT IN ('.', '..')
+                AND instr(file_name, '/') = 0
+                AND instr(file_name, char(92)) = 0
+                AND instr(file_name, char(0)) = 0
+              ),
+              normalized_file_name TEXT NOT NULL CHECK(
+                length(normalized_file_name) BETWEEN 1 AND 180
+                AND instr(normalized_file_name, '/') = 0
+                AND instr(normalized_file_name, char(92)) = 0
+                AND instr(normalized_file_name, char(0)) = 0
+              ),
+              original_file_name TEXT NOT NULL CHECK(
+                length(original_file_name) BETWEEN 1 AND 255
+                AND length(CAST(original_file_name AS BLOB)) <= 1024
+                AND original_file_name = trim(original_file_name)
+                AND original_file_name NOT IN ('.', '..')
+                AND instr(original_file_name, '/') = 0
+                AND instr(original_file_name, char(92)) = 0
+                AND instr(original_file_name, char(0)) = 0
+              ),
+              content_type TEXT NOT NULL
+                CHECK(length(content_type) BETWEEN 1 AND 255 AND instr(content_type, '/') > 1),
+              size_bytes INTEGER NOT NULL
+                CHECK(typeof(size_bytes) = 'integer' AND size_bytes >= 1),
+              blob_hash TEXT NOT NULL CHECK(
+                length(blob_hash) = 71
+                AND substr(blob_hash, 1, 7) = 'sha256:'
+                AND substr(blob_hash, 8) NOT GLOB '*[^0-9a-f]*'
+              ),
+              object_hash TEXT NOT NULL CHECK(
+                length(object_hash) = 71
+                AND substr(object_hash, 1, 7) = 'sha256:'
+                AND substr(object_hash, 8) NOT GLOB '*[^0-9a-f]*'
+              ),
+              version INTEGER NOT NULL
+                CHECK(typeof(version) = 'integer' AND version >= 1),
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
+              deleted_at TEXT,
+              delete_reason TEXT CHECK(delete_reason IS NULL OR length(delete_reason) <= 256),
+              created_at TEXT NOT NULL CHECK(length(created_at) > 0),
+              last_modified TEXT NOT NULL CHECK(length(last_modified) > 0),
+              created_by TEXT NOT NULL CHECK(length(trim(created_by)) > 0),
+              source_kind TEXT NOT NULL
+                CHECK(source_kind IN ('upload', 'sync', 'legacy_bootstrap')),
+              PRIMARY KEY(client_id, dataset_id, attachment_id),
+              CHECK(
+                (deleted = 0 AND deleted_at IS NULL AND delete_reason IS NULL)
+                OR (deleted = 1 AND deleted_at IS NOT NULL)
+              )
+            )
+            """  # nosec B608 - both interpolated checks use fixed allowlisted columns.
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX uq_note_attachments_live_name "
+            "ON note_attachments(client_id, dataset_id, note_id, normalized_file_name) "
+            "WHERE deleted = 0"
+        )
+        conn.execute(
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_all_page "
+            "ON note_attachments(client_id, dataset_id, note_id, attachment_id)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_page "
+            "ON note_attachments(client_id, dataset_id, note_id, deleted, attachment_id)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_note_attachments_owner_dataset_blob "
+            "ON note_attachments(client_id, dataset_id, blob_hash, attachment_id)"
+        )
+
+    def _migrate_from_v58_to_v59(self, conn: sqlite3.Connection) -> None:
+        """Create schema-v59 registry state without importing legacy attachment bytes."""
+
+        current_version = self._get_db_version(conn)
+        if current_version >= 59:
+            return
+        if current_version != 58:
+            raise SchemaError("Notes attachment v59 migration requires schema version 58.")  # noqa: TRY003
+        tables = self._sqlite_table_names(conn)
+        if "note_attachments" in tables:
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 registry collision requires explicit repair."
+            )
+        if "notes" not in tables:
+            raise SchemaError("Notes attachment v59 requires the canonical notes relation.")  # noqa: TRY003
+        self._create_note_attachment_schema_sqlite(conn)
+        cursor = conn.execute(
+            "UPDATE db_schema_version SET version = 59 WHERE schema_name = ? AND version = 58",
+            (self._SCHEMA_NAME,),
+        )
+        if cursor.rowcount != 1 or self._get_db_version(conn) != 59:
+            raise SchemaError("Notes attachment v59 migration failed version verification.")  # noqa: TRY003
+
+    def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
+        """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
+
+        statements = (
+            """
+            CREATE TABLE note_attachments(
+              client_id TEXT NOT NULL CHECK(char_length(btrim(client_id)) > 0),
+              dataset_id TEXT NOT NULL
+                CHECK(char_length(dataset_id) BETWEEN 1 AND 255 AND dataset_id = btrim(dataset_id)),
+              attachment_id TEXT NOT NULL CHECK(
+                attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              ),
+              note_id TEXT NOT NULL CHECK(
+                note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              ) REFERENCES notes(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+              file_name TEXT NOT NULL CHECK(
+                char_length(file_name) BETWEEN 1 AND 180
+                AND file_name = btrim(file_name)
+                AND file_name NOT IN ('.', '..')
+                AND position('/' IN file_name) = 0
+                AND position(chr(92) IN file_name) = 0
+              ),
+              normalized_file_name TEXT NOT NULL CHECK(
+                char_length(normalized_file_name) BETWEEN 1 AND 180
+                AND position('/' IN normalized_file_name) = 0
+                AND position(chr(92) IN normalized_file_name) = 0
+              ),
+              original_file_name TEXT NOT NULL CHECK(
+                char_length(original_file_name) BETWEEN 1 AND 255
+                AND octet_length(original_file_name) <= 1024
+                AND original_file_name = btrim(original_file_name)
+                AND original_file_name NOT IN ('.', '..')
+                AND position('/' IN original_file_name) = 0
+                AND position(chr(92) IN original_file_name) = 0
+              ),
+              content_type TEXT NOT NULL CHECK(
+                char_length(content_type) BETWEEN 1 AND 255
+                AND position('/' IN content_type) > 1
+              ),
+              size_bytes BIGINT NOT NULL CHECK(size_bytes >= 1),
+              blob_hash TEXT NOT NULL CHECK(blob_hash ~ '^sha256:[0-9a-f]{64}$'),
+              object_hash TEXT NOT NULL CHECK(object_hash ~ '^sha256:[0-9a-f]{64}$'),
+              version BIGINT NOT NULL CHECK(version >= 1),
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              deleted_at TIMESTAMPTZ,
+              delete_reason TEXT
+                CHECK(delete_reason IS NULL OR char_length(delete_reason) <= 256),
+              created_at TIMESTAMPTZ NOT NULL,
+              last_modified TIMESTAMPTZ NOT NULL,
+              created_by TEXT NOT NULL CHECK(char_length(btrim(created_by)) > 0),
+              source_kind TEXT NOT NULL
+                CHECK(source_kind IN ('upload', 'sync', 'legacy_bootstrap')),
+              PRIMARY KEY(client_id, dataset_id, attachment_id),
+              CHECK(
+                (deleted = FALSE AND deleted_at IS NULL AND delete_reason IS NULL)
+                OR (deleted = TRUE AND deleted_at IS NOT NULL)
+              )
+            )
+            """,
+            "CREATE UNIQUE INDEX uq_note_attachments_live_name "
+            "ON note_attachments(client_id, dataset_id, note_id, normalized_file_name) "
+            "WHERE deleted = FALSE",
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_all_page "
+            "ON note_attachments(client_id, dataset_id, note_id, attachment_id)",
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_page "
+            "ON note_attachments(client_id, dataset_id, note_id, deleted, attachment_id)",
+            "CREATE INDEX idx_note_attachments_owner_dataset_blob "
+            "ON note_attachments(client_id, dataset_id, blob_hash, attachment_id)",
+        )
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
+    def _verify_note_attachment_schema_postgres(self, conn: Any) -> None:
+        """Fail closed unless the locked v59 registry catalog is canonical."""
+
+        backend = self.backend
+        backend.execute(
+            "LOCK TABLE notes, note_attachments IN SHARE MODE",
+            connection=conn,
+        )
+        relation_rows = backend.execute(
+            """
+            SELECT attachment_table.relname AS table_name,
+                   attachment_table.relrowsecurity,
+                   attachment_table.relforcerowsecurity,
+                   attachment_table.relowner = current_user::regrole AS is_schema_owner,
+                   pg_has_role(current_user, attachment_namespace.nspowner, 'USAGE')
+                     AS is_current_schema_owner
+              FROM pg_class AS attachment_table
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relkind IN ('r', 'p')
+               AND attachment_table.relname = 'note_attachments'
+            """,
+            connection=conn,
+        ).rows
+        if len(relation_rows) != 1 or any(
+            not bool(relation_rows[0].get(flag))
+            for flag in (
+                "relrowsecurity",
+                "relforcerowsecurity",
+                "is_schema_owner",
+                "is_current_schema_owner",
+            )
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry ownership or RLS catalog drifted."
+            )
+
+        expected_columns = (
+            ("client_id", "text", True, None),
+            ("dataset_id", "text", True, None),
+            ("attachment_id", "text", True, None),
+            ("note_id", "text", True, None),
+            ("file_name", "text", True, None),
+            ("normalized_file_name", "text", True, None),
+            ("original_file_name", "text", True, None),
+            ("content_type", "text", True, None),
+            ("size_bytes", "bigint", True, None),
+            ("blob_hash", "text", True, None),
+            ("object_hash", "text", True, None),
+            ("version", "bigint", True, None),
+            ("deleted", "boolean", True, "false"),
+            ("deleted_at", "timestamp with time zone", False, None),
+            ("delete_reason", "text", False, None),
+            ("created_at", "timestamp with time zone", True, None),
+            ("last_modified", "timestamp with time zone", True, None),
+            ("created_by", "text", True, None),
+            ("source_kind", "text", True, None),
+        )
+        column_rows = backend.execute(
+            """
+            SELECT column_row.attname AS column_name,
+                   format_type(column_row.atttypid, column_row.atttypmod) AS data_type,
+                   column_row.attnotnull AS is_not_null,
+                   pg_get_expr(default_row.adbin, default_row.adrelid, false)
+                     AS default_expression
+              FROM pg_attribute AS column_row
+              JOIN pg_class AS attachment_table
+                ON attachment_table.oid = column_row.attrelid
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+              LEFT JOIN pg_attrdef AS default_row
+                ON default_row.adrelid = attachment_table.oid
+               AND default_row.adnum = column_row.attnum
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relname = 'note_attachments'
+               AND column_row.attnum > 0
+               AND NOT column_row.attisdropped
+             ORDER BY column_row.attnum
+            """,
+            connection=conn,
+        ).rows
+        actual_columns = tuple(
+            (
+                str(row.get("column_name")),
+                str(row.get("data_type")),
+                bool(row.get("is_not_null")),
+                (
+                    None
+                    if row.get("default_expression") is None
+                    else "".join(str(row.get("default_expression")).lower().split())
+                ),
+            )
+            for row in column_rows
+        )
+        if actual_columns != expected_columns:
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry column catalog drifted."
+            )
+
+        # Exact normalized pg_get_constraintdef shapes captured from the v59 DDL.
+        expected_checks = {
+            "note_attachments_client_id_check": "check(char_length(btrim(client_id))>0)",
+            "note_attachments_dataset_id_check": "check(char_length(dataset_id)>=1andchar_length(dataset_id)<=255anddataset_id=btrim(dataset_id))",
+            "note_attachments_attachment_id_check": "check(attachment_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            "note_attachments_note_id_check": "check(note_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            "note_attachments_file_name_check": (
+                "check(char_length(file_name)>=1andchar_length(file_name)<=180andfile_name=btrim(file_name)"
+                "and(file_name<>all(array['.','..']))andposition(('/')in(file_name))=0andposition((chr(92))in(file_name))=0)"
+            ),
+            "note_attachments_normalized_file_name_check": (
+                "check(char_length(normalized_file_name)>=1andchar_length(normalized_file_name)<=180"
+                "andposition(('/')in(normalized_file_name))=0andposition((chr(92))in(normalized_file_name))=0)"
+            ),
+            "note_attachments_original_file_name_check": (
+                "check(char_length(original_file_name)>=1andchar_length(original_file_name)<=255and"
+                "octet_length(original_file_name)<=1024andoriginal_file_name=btrim(original_file_name)"
+                "and(original_file_name<>all(array['.','..']))andposition(('/')in(original_file_name))=0"
+                "andposition((chr(92))in(original_file_name))=0)"
+            ),
+            "note_attachments_content_type_check": (
+                "check(char_length(content_type)>=1andchar_length(content_type)<=255andposition(('/')in(content_type))>1)"
+            ),
+            "note_attachments_size_bytes_check": "check(size_bytes>=1)",
+            "note_attachments_blob_hash_check": "check(blob_hash~'^sha256:[0-9a-f]{64}$')",
+            "note_attachments_object_hash_check": "check(object_hash~'^sha256:[0-9a-f]{64}$')",
+            "note_attachments_version_check": "check(version>=1)",
+            "note_attachments_delete_reason_check": "check(delete_reasonisnullorchar_length(delete_reason)<=256)",
+            "note_attachments_created_by_check": "check(char_length(btrim(created_by))>0)",
+            "note_attachments_source_kind_check": (
+                "check(source_kind=any(array['upload','sync','legacy_bootstrap']))"
+            ),
+            "note_attachments_check": (
+                "check(deleted=falseanddeleted_atisnullanddelete_reasonisnullordeleted=trueanddeleted_atisnotnull)"
+            ),
+        }
+        constraint_names = tuple(expected_checks) + (
+            "note_attachments_pkey",
+            "note_attachments_note_id_fkey",
+        )
+        constraint_rows = backend.execute(
+            """
+            SELECT constraint_row.conname AS constraint_name,
+                   constraint_row.contype AS constraint_type,
+                   pg_get_constraintdef(constraint_row.oid, true) AS constraint_def,
+                   referenced_table.relname AS referenced_table,
+                   referenced_namespace.nspname AS referenced_schema,
+                   referenced_namespace.nspname = current_schema()
+                     AS referenced_in_current_schema,
+                   ARRAY(
+                     SELECT local_column.attname
+                       FROM unnest(constraint_row.conkey) WITH ORDINALITY
+                         AS local_key(attnum, ordinality)
+                       JOIN pg_attribute AS local_column
+                         ON local_column.attrelid = attachment_table.oid
+                        AND local_column.attnum = local_key.attnum
+                      ORDER BY local_key.ordinality
+                   ) AS constrained_columns,
+                   CASE
+                     WHEN constraint_row.confrelid = 0 THEN NULL
+                     ELSE ARRAY(
+                       SELECT referenced_column.attname
+                         FROM unnest(constraint_row.confkey) WITH ORDINALITY
+                           AS referenced_key(attnum, ordinality)
+                         JOIN pg_attribute AS referenced_column
+                           ON referenced_column.attrelid = referenced_table.oid
+                          AND referenced_column.attnum = referenced_key.attnum
+                        ORDER BY referenced_key.ordinality
+                     )
+                   END AS referenced_columns,
+                   constraint_row.convalidated AS constraint_validated,
+                   constraint_row.confdeltype AS delete_action,
+                   constraint_row.confupdtype AS update_action
+              FROM pg_constraint AS constraint_row
+              JOIN pg_class AS attachment_table
+                ON attachment_table.oid = constraint_row.conrelid
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+              LEFT JOIN pg_class AS referenced_table
+                ON referenced_table.oid = constraint_row.confrelid
+              LEFT JOIN pg_namespace AS referenced_namespace
+                ON referenced_namespace.oid = referenced_table.relnamespace
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relname = 'note_attachments'
+               AND constraint_row.contype <> 'n'
+            """,
+            connection=conn,
+        ).rows
+        constraints = {str(row.get("constraint_name")): row for row in constraint_rows}
+        if set(constraints) != set(constraint_names):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry constraint catalog drifted."
+            )
+        if any(not bool(row.get("constraint_validated")) for row in constraints.values()):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry constraint catalog drifted."
+            )
+
+        def _catalog_column_names(value: Any) -> tuple[str, ...]:
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return tuple(part for part in value.strip("{}").split(",") if part)
+            return tuple(str(part) for part in value)
+
+        # Compare the complete pg_get_constraintdef result after only cast/whitespace folding.
+        for name, expected_definition in expected_checks.items():
+            row = constraints[name]
+            definition = "".join(str(row.get("constraint_def") or "").lower().split())
+            definition = definition.replace("::pg_catalog.text", "").replace("::text", "")
+            if str(row.get("constraint_type")) != "c" or definition != expected_definition:
+                raise SchemaError(  # noqa: TRY003
+                    "Notes attachment v59 PostgreSQL registry check catalog drifted."
+                )
+        primary = constraints["note_attachments_pkey"]
+        primary_definition = " ".join(str(primary.get("constraint_def", "")).lower().split())
+        if (
+            str(primary.get("constraint_type")) != "p"
+            or _catalog_column_names(primary.get("constrained_columns"))
+            != ("client_id", "dataset_id", "attachment_id")
+            or "primary key (client_id, dataset_id, attachment_id)" not in primary_definition
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry primary key catalog drifted."
+            )
+        foreign_key = constraints["note_attachments_note_id_fkey"]
+        foreign_definition = " ".join(
+            str(foreign_key.get("constraint_def", "")).lower().split()
+        )
+        if (
+            str(foreign_key.get("constraint_type")) != "f"
+            or str(foreign_key.get("referenced_table")) != "notes"
+            or not str(foreign_key.get("referenced_schema") or "")
+            or not bool(foreign_key.get("referenced_in_current_schema"))
+            or _catalog_column_names(foreign_key.get("constrained_columns")) != ("note_id",)
+            or _catalog_column_names(foreign_key.get("referenced_columns")) != ("id",)
+            or str(foreign_key.get("delete_action")) != "r"
+            or str(foreign_key.get("update_action")) != "r"
+            or "foreign key (note_id)" not in foreign_definition
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry foreign key catalog drifted."
+            )
+
+        expected_indexes = {
+            "uq_note_attachments_live_name": (
+                True, "client_id,dataset_id,note_id,normalized_file_name", True,
+            ),
+            "idx_note_attachments_owner_dataset_note_all_page": (
+                False, "client_id,dataset_id,note_id,attachment_id", False,
+            ),
+            "idx_note_attachments_owner_dataset_note_page": (
+                False, "client_id,dataset_id,note_id,deleted,attachment_id", False,
+            ),
+            "idx_note_attachments_owner_dataset_blob": (
+                False, "client_id,dataset_id,blob_hash,attachment_id", False,
+            ),
+        }
+        index_rows = backend.execute(
+            """
+            SELECT index_table.relname AS index_name,
+                   index_row.indisunique AS is_unique,
+                   index_row.indisvalid AS is_valid,
+                   index_row.indisready AS is_ready,
+                   string_agg(column_row.attname, ',' ORDER BY index_key.ordinality) AS column_names,
+                   pg_get_expr(index_row.indpred, index_row.indrelid) AS predicate
+              FROM pg_index AS index_row
+              JOIN pg_class AS attachment_table ON attachment_table.oid = index_row.indrelid
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+              JOIN pg_class AS index_table ON index_table.oid = index_row.indexrelid
+              CROSS JOIN LATERAL unnest(index_row.indkey)
+                WITH ORDINALITY AS index_key(attnum, ordinality)
+              JOIN pg_attribute AS column_row
+                ON column_row.attrelid = attachment_table.oid
+               AND column_row.attnum = index_key.attnum
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relname = 'note_attachments'
+               AND index_key.ordinality <= index_row.indnkeyatts
+               AND index_table.relname IN (
+                 'uq_note_attachments_live_name',
+                 'idx_note_attachments_owner_dataset_note_all_page',
+                 'idx_note_attachments_owner_dataset_note_page',
+                 'idx_note_attachments_owner_dataset_blob'
+               )
+             GROUP BY index_table.relname, index_row.indisunique,
+                      index_row.indisvalid, index_row.indisready,
+                      index_row.indpred, index_row.indrelid
+            """,
+            connection=conn,
+        ).rows
+        indexes = {str(row.get("index_name")): row for row in index_rows}
+        if set(indexes) != set(expected_indexes):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry index catalog drifted."
+            )
+        for name, (unique, columns, partial) in expected_indexes.items():
+            row = indexes[name]
+            predicate = "".join(str(row.get("predicate") or "").lower().split())
+            if (
+                bool(row.get("is_unique")) is not unique
+                or not bool(row.get("is_valid"))
+                or not bool(row.get("is_ready"))
+                or str(row.get("column_names")) != columns
+                or (partial and predicate != "(deleted=false)")
+                or (not partial and row.get("predicate") is not None)
+            ):
+                raise SchemaError(  # noqa: TRY003
+                    "Notes attachment v59 PostgreSQL registry index catalog drifted."
+                )
+
+        policy_rows = backend.execute(
+            """
+            SELECT policyname AS policy_name, permissive, roles::text AS roles,
+                   cmd AS command, qual AS using_expression, with_check AS check_expression
+              FROM pg_policies
+             WHERE schemaname = current_schema()
+               AND tablename = 'note_attachments'
+             ORDER BY policyname
+            """,
+            connection=conn,
+        ).rows
+        if len(policy_rows) != 1:
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
+            )
+        policy = policy_rows[0]
+        expected_policy_expression = "".join(
+            (
+                "((client_id = current_setting('app.current_user_id'::text, true)) "
+                "AND (EXISTS (SELECT 1 FROM notes note "
+                "WHERE ((note.id = note_attachments.note_id) "
+                "AND (note.client_id = current_setting('app.current_user_id'::text, true)) "
+                "AND (note.client_id = note_attachments.client_id)))))"
+            ).lower().split()
+        )
+        using_expression = "".join(
+            str(policy.get("using_expression") or "").lower().split()
+        )
+        check_expression = "".join(
+            str(policy.get("check_expression") or "").lower().split()
+        )
+        if (
+            str(policy.get("policy_name")) != "note_attachments_tenant_isolation"
+            or str(policy.get("permissive")) != "PERMISSIVE"
+            or str(policy.get("command")) != "ALL"
+            or str(policy.get("roles")) != "{public}"
+            or using_expression != expected_policy_expression
+            or check_expression != expected_policy_expression
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
+            )
+
+    def _migrate_from_v58_to_v59_postgres(self, conn: Any) -> None:
+        """Install the empty registry under verified PostgreSQL schema authority."""
+
+        backend = self.backend
+        backend.execute("LOCK TABLE notes IN ACCESS EXCLUSIVE MODE", connection=conn)
+        states = backend.execute(
+            """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   table_row.relowner = current_user::regrole AS is_schema_owner,
+                   pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
+                     AS is_current_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname = 'notes'
+            """,
+            connection=conn,
+        ).rows
+        if len(states) != 1 or str(states[0].get("table_name")) != "notes":
+            raise SchemaError("Notes attachment v59 cannot verify the notes relation.")  # noqa: TRY003
+        notes_state = states[0]
+        if not bool(notes_state.get("is_schema_owner")) or not bool(
+            notes_state.get("is_current_schema_owner")
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 requires the verified PostgreSQL schema-owner migration path."
+            )
+        notes_rls_enabled = bool(notes_state.get("relrowsecurity"))
+        notes_rls_forced = bool(notes_state.get("relforcerowsecurity"))
+        if notes_rls_forced and not notes_rls_enabled:
+            raise SchemaError("Notes attachment v59 cannot verify the notes RLS state.")  # noqa: TRY003
+        if backend.table_exists("note_attachments", connection=conn):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 registry collision requires explicit repair."
+            )
+        if notes_rls_forced:
+            backend.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY", connection=conn)
+
+        self._create_note_attachment_schema_postgres(conn)
+
+        if notes_rls_forced:
+            backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
+        attachment_rls = [
+            statement
+            for statement in build_chacha_rls_sql()
+            if "note_attachments" in statement
+        ]
+        if len(attachment_rls) != 4:
+            raise SchemaError("Notes attachment v59 RLS definition is not canonical.")  # noqa: TRY003
+        for statement in attachment_rls:
+            backend.execute(statement, connection=conn)
+        self._verify_note_attachment_schema_postgres(conn)
+        self._set_schema_version_postgres(conn, 59)
+
     def _notes_graph_schema_postgres(self, conn: Any) -> None:
         """Create owner-scoped graph projections and direct-write invalidation."""
 
@@ -13672,6 +14290,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 58 and current_db_version == 57:
                         self._migrate_from_v57_to_v58(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 59 and current_db_version == 58:
+                        self._migrate_from_v58_to_v59(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -14094,6 +14715,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 58 and current_db_version == 57:
                     self._migrate_from_v57_to_v58(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 59 and current_db_version == 58:
+                    self._migrate_from_v58_to_v59(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -17835,6 +18459,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._apply_schema_v4_postgres(conn)
             current_version = self._get_schema_version_postgres(conn, lock=True)
 
+            if current_version > target_version:
+                raise SchemaError(  # noqa: TRY003
+                    f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
+                )
+            if current_version == 59:
+                self._verify_note_attachment_schema_postgres(conn)
+
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
 
@@ -18032,6 +18663,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 58:
                 self._migrate_from_v57_to_v58_postgres(conn)
                 current_version = 58
+            if current_version < 59:
+                self._migrate_from_v58_to_v59_postgres(conn)
+                current_version = 59
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -18594,6 +19228,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 stmt,
                 flags=re.IGNORECASE,
             )
+        stmt = re.sub(
+            r"\bON\s+keywords\s*\(",
+            "ON chacha_keywords(",
+            stmt,
+            flags=re.IGNORECASE,
+        )
         # Adjust references to keywords in foreign keys/content declarations
         stmt = re.sub(
             r"REFERENCES\s+keywords\s*\(\s*id\s*\)",

@@ -138,6 +138,7 @@ def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
                 "SELECT id FROM keywords WHERE sync_id = ?",
                 ("11111111-1111-4111-8111-111111111111",),
             ).fetchone()["id"]
+            conn.execute("DROP TABLE note_attachments")
             conn.execute(
                 "UPDATE db_schema_version SET version = 56 WHERE schema_name = ?",
                 (CharactersRAGDB._SCHEMA_NAME,),
