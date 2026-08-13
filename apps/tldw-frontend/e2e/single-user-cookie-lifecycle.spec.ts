@@ -311,6 +311,7 @@ type WebSocketResult = {
   url: string
 }
 
+/** Open one WebSocket and report whether the browser completed the upgrade. */
 const inspectWebSocket = async (
   page: Page,
   url: string,
@@ -346,6 +347,7 @@ const inspectWebSocket = async (
     { target: url, timeoutMilliseconds: timeoutMs }
   )
 
+/** Retry transient transport failures while preserving auth-policy failures. */
 const inspectAuthenticatedWebSocket = async (
   page: Page,
   url: string
