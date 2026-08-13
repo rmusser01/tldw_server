@@ -421,8 +421,9 @@ async def _extract(
     url: str,
     *,
     allow_llm_extraction: bool,
+    use_route_handler: bool = True,
 ) -> dict[str, Any]:
-    handler = dependencies.resolve_handler(plan.handler) if plan.handler != DEFAULT_HANDLER else None
+    handler = dependencies.resolve_handler(plan.handler) if use_route_handler and plan.handler else None
     result = await dependencies.executor.run(
         dependencies.extract,
         html,
@@ -852,6 +853,7 @@ async def _run_blocking_article(
                 html,
                 url,
                 allow_llm_extraction=allow_llm_extraction,
+                use_route_handler=False,
             ),
             prepared.preflight_payload,
         )
