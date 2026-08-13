@@ -533,7 +533,12 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
         waitUntil: "load",
       })
 
-      const wsBase = WEB_URL.replace(/^http/, "ws")
+      // Validate the backend's cookie-authenticated WebSockets directly. Next's
+      // development rewrite proxy is HTTP-oriented and can drop WS upgrades.
+      const wsBase = API_URL.replace("127.0.0.1", "localhost").replace(
+        /^http/,
+        "ws"
+      )
       const representativeSockets = [
         `${wsBase}/api/v1/persona/stream`,
         `${wsBase}/api/v1/acp/multiplex`,
