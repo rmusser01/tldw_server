@@ -15,6 +15,7 @@ from .adapters import (
     SyncAdapterContext,
     SyncHead,
 )
+from .attachment_refs_v2 import attachment_ref_v2_object_hash
 from .errors import (
     SyncIdempotencyConflictError,
     SyncMaterializationPredecessorError,
@@ -57,6 +58,8 @@ class ServerOriginMutationStep:
     routing_metadata: Mapping[str, object] = field(default_factory=dict)
     stable_key: str | None = None
     created_at_client: str | None = None
+    schema_version: int = 1
+    adapter_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +111,7 @@ def capture_server_origin_mutation_batch(
     idempotency_key: str,
     trusted_notes_organization_bootstrap_id: str | None = None,
     trusted_notes_link_bootstrap_id: str | None = None,
+    trusted_notes_attachment_bootstrap_id: str | None = None,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -124,13 +128,21 @@ def capture_server_origin_mutation_batch(
     normalized_key = idempotency_key.strip()
     if not normalized_key:
         raise SyncStoreError("Sync server-origin mutation batch requires an idempotency key")
-    if (
-        trusted_notes_organization_bootstrap_id is not None
-        and trusted_notes_link_bootstrap_id is not None
-    ):
+    trusted_contexts = tuple(
+        item
+        for item in (
+            trusted_notes_organization_bootstrap_id,
+            trusted_notes_link_bootstrap_id,
+            trusted_notes_attachment_bootstrap_id,
+        )
+        if item is not None
+    )
+    if len(trusted_contexts) > 1:
         raise SyncStoreError("Only one trusted bootstrap context may be supplied")
     trusted_bootstrap_id = (
-        trusted_notes_organization_bootstrap_id or trusted_notes_link_bootstrap_id
+        trusted_notes_organization_bootstrap_id
+        or trusted_notes_link_bootstrap_id
+        or trusted_notes_attachment_bootstrap_id
     )
     if trusted_bootstrap_id is not None and bootstrap_step_verifier is None:
         raise SyncStoreError("Sync bootstrap capture requires a source-step verifier")
@@ -171,6 +183,9 @@ def capture_server_origin_mutation_batch(
             envelopes=existing,
             bootstrap_id=trusted_bootstrap_id,
             bootstrap_step_verifier=bootstrap_step_verifier,
+            materialize_verified_bootstrap=(
+                trusted_notes_attachment_bootstrap_id is not None
+            ),
         )
 
     envelopes = _evaluate_plan(
@@ -181,6 +196,9 @@ def capture_server_origin_mutation_batch(
         mutation_plan_hash=mutation_plan_hash,
         bootstrap_id=trusted_bootstrap_id,
         notes_link_bootstrap=trusted_notes_link_bootstrap_id is not None,
+        notes_attachment_bootstrap=(
+            trusted_notes_attachment_bootstrap_id is not None
+        ),
         bootstrap_relationship_verifier=bootstrap_relationship_verifier,
         bootstrap_relationship_absence_verifier=(
             bootstrap_relationship_absence_verifier
@@ -204,6 +222,9 @@ def capture_server_origin_mutation_batch(
         envelopes=inserted,
         bootstrap_id=trusted_bootstrap_id,
         bootstrap_step_verifier=bootstrap_step_verifier,
+        materialize_verified_bootstrap=(
+            trusted_notes_attachment_bootstrap_id is not None
+        ),
     )
 
 
@@ -285,6 +306,7 @@ def _evaluate_plan(
     mutation_plan_hash: str,
     bootstrap_id: str | None = None,
     notes_link_bootstrap: bool = False,
+    notes_attachment_bootstrap: bool = False,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -324,8 +346,14 @@ def _evaluate_plan(
     step_count = len(canonical_steps)
     for index, step in enumerate(canonical_steps):
         prior_head = get_head(step.domain, step.object_id)
-        payload_hash, payload_size = canonical_payload_hash(dict(step.payload))
         object_revision = _next_object_revision(prior_head)
+        payload_hash, payload_size = canonical_payload_hash(dict(step.payload))
+        if notes_attachment_bootstrap and step.domain == "attachment.ref":
+            payload_hash = attachment_ref_v2_object_hash(
+                step.operation,
+                step.payload,
+                object_revision=object_revision,
+            )
         base_server_cursor = prior_head.server_cursor if prior_head is not None else None
         if isinstance(prior_head, SyncEnvelopeCreate) and base_server_cursor is None:
             # Cursor zero is outside stored history and marks an in-plan virtual head;
@@ -355,7 +383,8 @@ def _evaluate_plan(
             object_revision=object_revision,
             entity_version=(object_revision if step.domain == "notes.link" else None),
             parent_id=step.parent_id,
-            schema_version=1,
+            schema_version=step.schema_version,
+            adapter_version=step.adapter_version,
             payload=dict(step.payload),
             payload_hash=payload_hash,
             payload_size_bytes=payload_size,
@@ -385,8 +414,15 @@ def _evaluate_plan(
             list_heads=list_heads,
             trusted_server_origin=bootstrap_id is not None,
             organization_group_state=("initializing" if bootstrap_id is not None else None),
-            organization_bootstrap_id=(None if notes_link_bootstrap else bootstrap_id),
+            organization_bootstrap_id=(
+                bootstrap_id
+                if not notes_link_bootstrap and not notes_attachment_bootstrap
+                else None
+            ),
             notes_link_bootstrap_id=(bootstrap_id if notes_link_bootstrap else None),
+            attachment_ref_bootstrap_id=(
+                bootstrap_id if notes_attachment_bootstrap else None
+            ),
             bootstrap_relationship_verifier=bootstrap_relationship_verifier,
             bootstrap_relationship_absence_verifier=(
                 bootstrap_relationship_absence_verifier
@@ -412,6 +448,7 @@ def _materialize_group(
     envelopes: Sequence[SyncEnvelope],
     bootstrap_id: str | None = None,
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None = None,
+    materialize_verified_bootstrap: bool = False,
 ) -> ServerOriginBatchResult:
     group = list(envelopes)
     _validate_stored_group(
@@ -436,6 +473,7 @@ def _materialize_group(
                 group=group,
                 bootstrap_id=bootstrap_id,
                 bootstrap_step_verifier=bootstrap_step_verifier,
+                materialize_verified_bootstrap=materialize_verified_bootstrap,
             )
     except SyncIdempotencyConflictError:
         raise
@@ -456,6 +494,7 @@ def _materialize_group_guarded(
     group: list[SyncEnvelope],
     bootstrap_id: str | None,
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None,
+    materialize_verified_bootstrap: bool,
 ) -> tuple[ServerOriginBatchResult, bool | None]:
     """Project a complete group while the caller retains all object locks."""
 
@@ -467,10 +506,22 @@ def _materialize_group_guarded(
         if bootstrap_id is not None and bootstrap_step_verifier is not None:
             if envelope.server_cursor is None or not bootstrap_step_verifier(envelope):
                 return _materialization_result(dataset, group), True
-            store.mark_bootstrap_envelope_verified(
-                envelope.server_cursor,
-                bootstrap_id=bootstrap_id,
-            )
+            if materialize_verified_bootstrap:
+                materialization = service._materialize_envelope(
+                    envelope,
+                    store=store,
+                )
+                if materialization.status != "applied":
+                    group = store.list_mutation_group(
+                        dataset.dataset_id,
+                        envelope.mutation_group_id or "",
+                    )
+                    return _materialization_result(dataset, group), True
+            else:
+                store.mark_bootstrap_envelope_verified(
+                    envelope.server_cursor,
+                    bootstrap_id=bootstrap_id,
+                )
             group = store.list_mutation_group(
                 dataset.dataset_id,
                 envelope.mutation_group_id or "",
@@ -599,14 +650,15 @@ def _canonical_step(
     user_id: str,
 ) -> ServerOriginMutationStep:
     routing_metadata = dict(step.routing_metadata)
-    routing_metadata.update(
-        {
-            "source": source,
-            "origin": "server",
-            "server_device_id": SERVER_ORIGIN_DEVICE_ID,
-            "server_owner_user_id": user_id,
-        }
-    )
+    if not (step.domain == "attachment.ref" and step.adapter_version == 2):
+        routing_metadata.update(
+            {
+                "source": source,
+                "origin": "server",
+                "server_device_id": SERVER_ORIGIN_DEVICE_ID,
+                "server_owner_user_id": user_id,
+            }
+        )
     return ServerOriginMutationStep(
         domain=step.domain,
         operation=step.operation,
@@ -616,6 +668,8 @@ def _canonical_step(
         routing_metadata=routing_metadata,
         stable_key=step.stable_key,
         created_at_client=step.created_at_client,
+        schema_version=step.schema_version,
+        adapter_version=step.adapter_version,
     )
 
 
@@ -629,23 +683,29 @@ def _canonical_step_from_envelope(envelope: SyncEnvelope) -> ServerOriginMutatio
         routing_metadata=dict(envelope.routing_metadata),
         stable_key=envelope.stable_key,
         created_at_client=envelope.created_at_client,
+        schema_version=envelope.schema_version,
+        adapter_version=envelope.adapter_version,
     )
 
 
 def _mutation_plan_hash(steps: Sequence[ServerOriginMutationStep]) -> str:
+    plan: list[dict[str, object]] = []
+    for step in steps:
+        encoded_step: dict[str, object] = {
+            "domain": step.domain,
+            "operation": step.operation,
+            "object_id": step.object_id,
+            "payload": step.payload,
+            "parent_id": step.parent_id,
+            "routing_metadata": step.routing_metadata,
+            "stable_key": step.stable_key,
+        }
+        if step.schema_version != 1 or step.adapter_version != 1:
+            encoded_step["schema_version"] = step.schema_version
+            encoded_step["adapter_version"] = step.adapter_version
+        plan.append(encoded_step)
     encoded = json.dumps(
-        [
-            {
-                "domain": step.domain,
-                "operation": step.operation,
-                "object_id": step.object_id,
-                "payload": step.payload,
-                "parent_id": step.parent_id,
-                "routing_metadata": step.routing_metadata,
-                "stable_key": step.stable_key,
-            }
-            for step in steps
-        ],
+        plan,
         sort_keys=True,
         separators=(",", ":"),
         default=str,
@@ -716,6 +776,18 @@ def _require_batch_write_ready(
             or current_bootstrap_id != trusted_bootstrap_id
         ):
             raise SyncStoreError("notes_link_sync_not_ready")
+    if "attachment.ref" in domains:
+        metadata = dataset.metadata.get("notes_attachment_v2")
+        state = metadata.get("state") if isinstance(metadata, Mapping) else None
+        current_bootstrap_id = (
+            metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
+        )
+        if state != "ready" and (
+            state != "initializing"
+            or trusted_bootstrap_id is None
+            or current_bootstrap_id != trusted_bootstrap_id
+        ):
+            raise SyncStoreError("notes_attachment_sync_not_ready")
     if domains.intersection(NOTES_ORGANIZATION_DOMAINS):
         metadata = dataset.metadata.get("notes_organization_v1")
         state = metadata.get("state") if isinstance(metadata, Mapping) else None

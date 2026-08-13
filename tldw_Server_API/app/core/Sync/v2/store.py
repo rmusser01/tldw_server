@@ -472,6 +472,26 @@ class SyncV2Store:
             limit=limit,
         )
 
+    def get_notes_attachment_bootstrap_source_by_hash(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key_hash: str,
+    ) -> tuple[
+        SyncNotesAttachmentSourceMap,
+        SyncNotesAttachmentCleanupCandidate,
+    ] | None:
+        """Resolve one internal bootstrap source by its public-safe hash."""
+
+        return self.db.get_notes_attachment_bootstrap_source_by_hash(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            source_key_hash=source_key_hash,
+        )
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope, connection=self._connection)
 

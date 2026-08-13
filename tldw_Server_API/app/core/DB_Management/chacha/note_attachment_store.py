@@ -405,6 +405,7 @@ class NoteAttachmentStore:
         last_modified: str,
         created_by: str,
         source_kind: str,
+        allow_deleted_note: bool = False,
         conn: Any | None = None,
     ) -> NoteAttachment:
         """Create a live revision-one attachment for one owned note."""
@@ -425,7 +426,11 @@ class NoteAttachmentStore:
         context = nullcontext(conn) if conn is not None else self._db.transaction()
         try:
             with context as transaction_conn:
-                self._require_owned_note(transaction_conn, note_id, allow_deleted=False)
+                self._require_owned_note(
+                    transaction_conn,
+                    note_id,
+                    allow_deleted=allow_deleted_note,
+                )
                 transaction_conn.execute(
                     "INSERT INTO note_attachments("
                     "client_id, dataset_id, attachment_id, note_id, file_name, "

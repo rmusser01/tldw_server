@@ -5095,7 +5095,7 @@ class SyncDatabase:
                 or captured_count < current_captured
                 or not isinstance(current_expected, int)
                 or isinstance(current_expected, bool)
-                or (current_expected != 0 and expected_count != current_expected)
+                or expected_count < current_expected
             ):
                 raise SyncStoreError("notes_attachment_bootstrap_progress_regressed")
             current_hash = current.get("source_hash")
@@ -5303,6 +5303,66 @@ class SyncDatabase:
             if created is None:
                 raise SyncStoreError("Notes attachment cleanup candidate was not persisted")
             return _notes_attachment_cleanup_candidate_from_row(created)
+
+    def get_notes_attachment_bootstrap_source_by_hash(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key_hash: str,
+    ) -> tuple[
+        SyncNotesAttachmentSourceMap,
+        SyncNotesAttachmentCleanupCandidate,
+    ] | None:
+        """Resolve one internal bootstrap source without exposing its path publicly."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", source_key_hash) is None:
+            raise ValueError("Notes attachment source cursor is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            source = _first(
+                self.execute(
+                    "SELECT source_map.*, cleanup.source_relative_path, "
+                    "cleanup.source_path_hash, cleanup.source_blob_hash, "
+                    "cleanup.source_size_bytes, cleanup.source_modified_ns, "
+                    "cleanup.created_at AS cleanup_created_at "
+                    "FROM sync_notes_attachment_source_map AS source_map "
+                    "JOIN sync_notes_attachment_cleanup_candidates AS cleanup "
+                    "ON cleanup.dataset_id = source_map.dataset_id "
+                    "AND cleanup.bootstrap_id = source_map.bootstrap_id "
+                    "AND cleanup.source_key_hash = source_map.source_key_hash "
+                    "WHERE source_map.dataset_id = ? "
+                    "AND source_map.bootstrap_id = ? "
+                    "AND source_map.source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if source is None:
+                return None
+            cleanup_row = {
+                "dataset_id": source["dataset_id"],
+                "bootstrap_id": source["bootstrap_id"],
+                "source_key_hash": source["source_key_hash"],
+                "attachment_id": source["attachment_id"],
+                "source_relative_path": source["source_relative_path"],
+                "source_path_hash": source["source_path_hash"],
+                "source_blob_hash": source["source_blob_hash"],
+                "source_size_bytes": source["source_size_bytes"],
+                "source_modified_ns": source["source_modified_ns"],
+                "created_at": source["cleanup_created_at"],
+            }
+            return (
+                _notes_attachment_source_map_from_row(source),
+                _notes_attachment_cleanup_candidate_from_row(cleanup_row),
+            )
 
     def list_notes_attachment_cleanup_candidates(
         self,

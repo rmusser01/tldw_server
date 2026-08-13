@@ -7,6 +7,7 @@ import heapq
 import json
 import os
 import stat
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -178,6 +179,69 @@ class LegacyAttachmentSource:
                 os.close(note_fd)
         finally:
             os.close(base_fd)
+
+    def iter_candidate_chunks(
+        self,
+        candidate: LegacyAttachmentCandidate,
+        *,
+        chunk_size: int,
+    ) -> Iterator[bytes]:
+        """Stream one unchanged candidate through confined no-follow descriptors."""
+
+        if chunk_size < 1 or chunk_size > 64 * 1024:
+            raise ValueError("candidate chunk size must be 1..65536")
+        if not self._notes.owns_note_id(candidate.note_id):
+            raise LegacyAttachmentSourceError(
+                "notes_attachment_source_note_not_found"
+            )
+        expected_key = self._source_key(candidate.note_id, candidate.file_name)
+        if candidate.source_key != expected_key or candidate.relative_path != expected_key:
+            raise LegacyAttachmentSourceError("notes_attachment_source_unsafe")
+        base_fd = self._open_directory(self._base_dir)
+        try:
+            note_fd = self._open_directory(
+                safe_legacy_note_attachment_dirname(candidate.note_id),
+                dir_fd=base_fd,
+            )
+            try:
+                file_fd = self._open_regular(candidate.file_name, dir_fd=note_fd)
+                try:
+                    before = os.fstat(file_fd)
+                    if (
+                        int(before.st_size) != candidate.size_bytes
+                        or int(before.st_mtime_ns) != candidate.modified_ns
+                    ):
+                        raise LegacyAttachmentSourceError(
+                            "notes_attachment_source_changed"
+                        )
+                    digest = hashlib.sha256()
+                    while chunk := os.read(file_fd, chunk_size):
+                        digest.update(chunk)
+                        yield chunk
+                    after = os.fstat(file_fd)
+                    if (
+                        self._stat_identity(before) != self._stat_identity(after)
+                        or f"sha256:{digest.hexdigest()}" != candidate.sha256
+                    ):
+                        raise LegacyAttachmentSourceError(
+                            "notes_attachment_source_changed"
+                        )
+                finally:
+                    os.close(file_fd)
+            finally:
+                os.close(note_fd)
+        finally:
+            os.close(base_fd)
+
+    def verify_candidate(self, candidate: LegacyAttachmentCandidate) -> bool:
+        """Re-read and verify one immutable candidate snapshot."""
+
+        for _chunk in self.iter_candidate_chunks(
+            candidate,
+            chunk_size=_READ_CHUNK_BYTES,
+        ):
+            pass
+        return True
 
     def _validate_cursor(self, note_id: str, cursor: str | None) -> None:
         if cursor is None:

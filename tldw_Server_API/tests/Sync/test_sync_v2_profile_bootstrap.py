@@ -65,6 +65,7 @@ def _service(
     id_factory=None,
     scan_limit: int = 100,
     dataset_bootstrapper=None,
+    notes_attachment_bootstrapper=None,
 ) -> tuple[SyncV2Service, SyncV2Store]:
     store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_profile.db"))
     service = SyncV2Service(
@@ -77,6 +78,7 @@ def _service(
             restore_manifest_scan_limit=scan_limit,
         ),
         dataset_bootstrapper=dataset_bootstrapper,
+        notes_attachment_bootstrapper=notes_attachment_bootstrapper,
     )
     return service, store
 
@@ -94,6 +96,10 @@ class _PausedOrganizationBootstrapper:
     ) -> SyncDataset:
         self.calls.append((user_id, dataset.dataset_id))
         return service.store.get_dataset(dataset.dataset_id) or dataset
+
+
+class _PausedAttachmentBootstrapper(_PausedOrganizationBootstrapper):
+    pass
 
 
 def _note_envelope(**overrides) -> SyncEnvelopeCreate:
@@ -183,7 +189,17 @@ def test_profile_capabilities_are_bound_to_active_ready_dataset(tmp_path: Path) 
             metadata={
                 "default_personal": True,
                 "client_family": "chatbook",
-                "notes_attachment_v2": {"state": "ready"},
+                "notes_attachment_v2": {
+                    "bootstrap_id": "bootstrap-ready",
+                    "state": "ready",
+                    "target_adapter_version": 2,
+                    "captured_count": 0,
+                    "expected_count": 0,
+                    "source_hash": "e3b0c44298fc1c149afbf4c8996fb924"
+                    "27ae41e4649b934ca495991b7852b855",
+                    "source_cursor": None,
+                    "error_code": None,
+                },
             },
         )
     )
@@ -201,6 +217,33 @@ def test_profile_capabilities_are_bound_to_active_ready_dataset(tmp_path: Path) 
         requested_domains=["notes.note", "attachment.ref"],
     )
     assert bootstrap.capabilities.writable_adapter_versions["attachment.ref"] == [2]
+
+
+def test_profile_bootstrap_begins_and_resumes_attachment_capture(
+    tmp_path: Path,
+) -> None:
+    bootstrapper = _PausedAttachmentBootstrapper()
+    service, store = _service(
+        tmp_path,
+        notes_attachment_bootstrapper=bootstrapper,
+    )
+
+    result = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=["notes.note", "attachment.ref"],
+        client_instance={
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        },
+    )
+
+    assert bootstrapper.calls == [("user-1", result.active_dataset_id)]
+    dataset = store.get_dataset(result.active_dataset_id or "", owner_user_id="user-1")
+    assert dataset is not None
+    assert dataset.metadata["notes_attachment_v2"]["state"] == "initializing"
+    assert dataset.metadata["notes_attachment_v2"]["target_adapter_version"] == 2
+    assert result.capabilities.writable_adapter_versions["attachment.ref"] == []
 
 
 def test_bootstrap_creates_default_dataset_and_is_idempotent(tmp_path: Path) -> None:

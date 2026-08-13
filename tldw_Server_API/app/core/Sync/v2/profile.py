@@ -109,6 +109,7 @@ class SyncV2ProfileManager:
         service: Any | None = None,
         dataset_bootstrapper: Any | None = None,
         notes_link_bootstrapper: Any | None = None,
+        notes_attachment_bootstrapper: Any | None = None,
     ) -> None:
         self.store = store
         self.capabilities_factory = capabilities_factory
@@ -117,6 +118,7 @@ class SyncV2ProfileManager:
         self.service = service
         self.dataset_bootstrapper = dataset_bootstrapper
         self.notes_link_bootstrapper = notes_link_bootstrapper
+        self.notes_attachment_bootstrapper = notes_attachment_bootstrapper
 
     def profile(self, *, user_id: str, device_id: str | None = None) -> SyncProfileStatus:
         """Return current profile state without creating devices or datasets."""
@@ -161,6 +163,7 @@ class SyncV2ProfileManager:
         if organization_requested and organization_requested != set(NOTES_ORGANIZATION_DOMAINS):
             raise SyncStoreError("notes_organization_sync_domains_incomplete")
         notes_link_requested = bool(set(requested).intersection(NOTES_LINK_DOMAINS))
+        notes_attachment_requested = "attachment.ref" in requested
         encryption = getattr(capabilities, "encryption", {})
         if not encryption.get("ready", False):
             raise SyncStoreError(
@@ -223,6 +226,22 @@ class SyncV2ProfileManager:
                 if self.service is None:
                     raise SyncStoreError("Notes link bootstrap service is unavailable")
                 dataset = self.notes_link_bootstrapper.bootstrap(
+                    service=self.service,
+                    user_id=user_id,
+                    dataset=dataset,
+                )
+        if notes_attachment_requested:
+            dataset = self.store.begin_notes_attachment_bootstrap(
+                dataset.dataset_id,
+                owner_user_id=user_id,
+                bootstrap_id=self.id_factory("notes-attachment-bootstrap"),
+            )
+            if self.notes_attachment_bootstrapper is not None:
+                if self.service is None:
+                    raise SyncStoreError(
+                        "Notes attachment bootstrap service is unavailable"
+                    )
+                dataset = self.notes_attachment_bootstrapper.bootstrap(
                     service=self.service,
                     user_id=user_id,
                     dataset=dataset,
