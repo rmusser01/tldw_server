@@ -309,7 +309,7 @@ git commit -m "refactor(embeddings): consume canonical workflow outcomes"
 - Consumes: completed runner, facade, and endpoint changes from Tasks 1-3.
 - Produces: verified Stage 2E branch with current task evidence and no unrecorded security or test failures.
 
-- [ ] **Step 1: Run the complete Stage 2E regression set**
+- [x] **Step 1: Run the complete Stage 2E regression set**
 
 Run:
 
@@ -329,7 +329,9 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 2: Run static checks on every touched Python file**
+Result: 356 passed with 4,695 pre-existing warnings in 165.60 seconds.
+
+- [x] **Step 2: Run static checks on every touched Python file**
 
 Run:
 
@@ -350,7 +352,9 @@ git diff --check
 
 Expected: all commands exit zero.
 
-- [ ] **Step 3: Run Bandit on the touched production scope**
+Result: Ruff, compileall, and `git diff --check` all exited zero.
+
+- [x] **Step 3: Run Bandit on the touched production scope**
 
 Run:
 
@@ -364,15 +368,17 @@ Run:
 
 Expected: no new findings in changed code.
 
-- [ ] **Step 4: Review the final diff against every acceptance criterion**
+Result: zero findings and zero errors; three existing skipped tests and no `nosec` suppressions.
+
+- [x] **Step 4: Review the final diff against every acceptance criterion**
 
 Confirm direct concrete sequencing, facade-only compatibility mapping, fixed-cardinality safe traces, exact finalizing events, cancellation behavior, endpoint-owned governance/accounting, endpoint header mapping, credential-touch parity, feature-flag rollback, and absence of Stage 3 behavior. Remove only regressions introduced by this branch.
 
-- [ ] **Step 5: Record verification and complete TASK-12973.5**
+- [x] **Step 5: Record verification and complete TASK-12973.5**
 
 Through the Backlog.md workflow, check all twelve acceptance criteria and six definition-of-done items, add the exact test/Ruff/compile/Bandit results, record any known pre-existing warnings or skips, and add the final summary and branch reference.
 
-- [ ] **Step 6: Mark this plan complete and commit tracking updates**
+- [x] **Step 6: Mark this plan complete and commit tracking updates**
 
 Change each completed plan checkbox to `[x]`, then run:
 
