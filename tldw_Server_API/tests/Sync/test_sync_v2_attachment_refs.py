@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,7 @@ def test_attachment_ref_v1_compatibility_evaluator_is_test_only() -> None:
 
 
 @pytest.fixture()
-def sync_service(tmp_path: Path) -> SyncV2Service:
+def sync_service(tmp_path: Path) -> Iterator[SyncV2Service]:
     default_sync_v2_registry.cache_clear()
     registry = default_sync_v2_registry()
     registry.register(_LegacyAttachmentRefAdapter())
@@ -148,7 +149,8 @@ def sync_service(tmp_path: Path) -> SyncV2Service:
         dataset_id="dataset-1",
         domains=list(M1_SYNC_DOMAINS),
     )
-    return service
+    yield service
+    default_sync_v2_registry.cache_clear()
 
 
 @pytest.fixture()

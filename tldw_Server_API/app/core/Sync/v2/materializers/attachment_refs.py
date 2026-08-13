@@ -141,6 +141,8 @@ class AttachmentRefMaterializer:
                     source_kind=(
                         "legacy_bootstrap"
                         if envelope.routing_metadata.get("bootstrap_capture") is True
+                        else "upload"
+                        if envelope.device_id == "server-origin"
                         else "sync"
                     ),
                 )

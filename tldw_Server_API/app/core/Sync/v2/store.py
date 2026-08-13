@@ -21,6 +21,7 @@ from .models import (
     SyncBackgroundLeaseCreate,
     SyncBackgroundPolicy,
     SyncBackgroundPolicyUpsert,
+    SyncBlobAvailabilityStatus,
     SyncBlobChunk,
     SyncBlobChunkCreate,
     SyncBlobObject,
@@ -1081,6 +1082,20 @@ class SyncV2Store:
             attachment_id=attachment_id,
             blob_id=blob_id,
             payload_hash=payload_hash,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def list_blob_availability_by_hashes(
+        self,
+        dataset_id: str,
+        payload_hashes: Sequence[str],
+        *,
+        owner_user_id: str,
+    ) -> dict[str, SyncBlobAvailabilityStatus]:
+        return self.db.list_blob_availability_by_hashes(
+            dataset_id,
+            payload_hashes,
             owner_user_id=owner_user_id,
             connection=self._connection,
         )

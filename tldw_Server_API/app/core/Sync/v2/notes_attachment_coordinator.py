@@ -13,6 +13,10 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_attachment_store import 
     NoteAttachment,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    NOTE_ATTACHMENT_MAX_FILENAME_LEN,
+    canonicalize_note_attachment_file_name,
+)
 
 from .adapters import (
     AdapterAccepted,
@@ -72,6 +76,7 @@ class NotesAttachmentMutationPlan:
     base_object_hash: str | None = None
     routing_metadata: Mapping[str, object] = field(default_factory=dict)
     require_available_blob: bool = False
+    allocate_unique_file_name: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.owner_id, str) or not self.owner_id.strip():
@@ -80,9 +85,7 @@ class NotesAttachmentMutationPlan:
             not isinstance(self.idempotency_key, str)
             or not self.idempotency_key.strip()
             or self.idempotency_key != self.idempotency_key.strip()
-            or not (
-            1 <= len(self.idempotency_key.encode("utf-8")) <= 128
-            )
+            or not 1 <= len(self.idempotency_key.encode("utf-8")) <= 128
         ):
             raise ValueError("idempotency_key must be between 1 and 128 bytes")
         if not isinstance(self.source, str) or not self.source.strip():
@@ -96,6 +99,10 @@ class NotesAttachmentMutationPlan:
             value is not None for value in base_values
         ):
             raise ValueError("attachment mutation base tuple must be complete")
+        if self.allocate_unique_file_name and (
+            self.operation != "upsert" or any(value is not None for value in base_values)
+        ):
+            raise ValueError("unique filename allocation is valid only for create")
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
         object.__setattr__(
             self,
@@ -121,13 +128,13 @@ class NotesAttachmentCoordinator:
     service: SyncV2Service
     note_db: CharactersRAGDB
 
-    def resolve_mutation_ready(
+    def resolve_canonical_dataset(
         self,
         *,
         owner_id: str,
         dataset_id: str | None,
     ) -> ReadyAttachmentDataset | None:
-        """Resolve only the owner's active canonical default-personal dataset."""
+        """Resolve the owner's sole canonical default-personal Notes dataset."""
 
         defaults = [
             dataset
@@ -143,6 +150,30 @@ class NotesAttachmentCoordinator:
         dataset = defaults[0]
         if dataset_id is not None and dataset_id != dataset.dataset_id:
             return None
+        attachment_state = dataset.metadata.get("notes_attachment_v2")
+        if (
+            not isinstance(attachment_state, Mapping)
+            or attachment_state.get("state") != "ready"
+            or not {"notes.note", "attachment.ref"}.issubset(dataset.domains)
+        ):
+            return None
+        return ReadyAttachmentDataset(owner_id=owner_id, dataset=dataset)
+
+    def resolve_mutation_ready(
+        self,
+        *,
+        owner_id: str,
+        dataset_id: str | None,
+    ) -> ReadyAttachmentDataset | None:
+        """Resolve only the owner's active canonical default-personal dataset."""
+
+        ready = self.resolve_canonical_dataset(
+            owner_id=owner_id,
+            dataset_id=dataset_id,
+        )
+        if ready is None:
+            return None
+        dataset = ready.dataset
         try:
             adapter = self.service.adapters.get("attachment.ref")
         except KeyError:
@@ -155,7 +186,7 @@ class NotesAttachmentCoordinator:
             supports_attachments=self.service.settings.supports_attachments,
         ):
             return None
-        return ReadyAttachmentDataset(owner_id=owner_id, dataset=dataset)
+        return ready
 
     def require_mutation_ready(
         self,
@@ -174,6 +205,30 @@ class NotesAttachmentCoordinator:
                 "Notes attachment Sync is not ready for canonical mutation"
             )
         return ready
+
+    def replay_by_idempotency_key(
+        self,
+        *,
+        owner_id: str,
+        dataset_id: str | None,
+        idempotency_key: str,
+    ) -> NotesAttachmentMutationResult | None:
+        """Return an already captured request without requiring its object ID."""
+
+        ready = self.require_mutation_ready(
+            owner_id=owner_id,
+            dataset_id=dataset_id,
+        )
+        stable_key = _stable_key_from_idempotency(idempotency_key)
+        envelopes = self.service.store.list_envelopes_for_entity(
+            ready.dataset.dataset_id,
+            "attachment.ref",
+            stable_key=stable_key,
+            limit=1,
+        )
+        if not envelopes:
+            return None
+        return self._resume_existing(ready.dataset, envelopes[0])
 
     def capture(
         self,
@@ -227,39 +282,14 @@ class NotesAttachmentCoordinator:
         )
         _require_requested_base(plan, head)
         object_revision = 1 if head is None else (head.object_revision or 0) + 1
-        payload_hash = attachment_ref_v2_object_hash(
-            plan.operation,
-            payload,
-            object_revision=object_revision,
-        )
-        encoded_payload = json.dumps(
-            payload.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        envelope = SyncEnvelopeCreate(
-            dataset_id=dataset.dataset_id,
-            client_envelope_id=client_envelope_id,
-            domain="attachment.ref",
-            operation=plan.operation,
-            object_id=plan.attachment_id,
-            device_id=SERVER_ORIGIN_DEVICE_ID,
-            base_server_cursor=plan.base_server_cursor,
-            base_object_revision=plan.base_object_revision,
-            base_object_hash=plan.base_object_hash,
-            object_revision=object_revision,
-            parent_id=str(payload.parent_object_id),
-            schema_version=2,
-            adapter_version=2,
-            payload=payload.model_dump(mode="json"),
-            payload_hash=payload_hash,
-            payload_size_bytes=len(encoded_payload),
-            created_at_client=payload.last_modified,
-            deleted=plan.operation == "tombstone",
-            encryption_metadata={"policy": DEFAULT_M1_ENCRYPTION_POLICY},
+        envelope = _build_envelope(
+            plan=plan,
+            dataset=dataset,
+            payload=payload,
             routing_metadata=routing_metadata,
+            client_envelope_id=client_envelope_id,
             stable_key=stable_key,
+            object_revision=object_revision,
         )
 
         stored: SyncEnvelope | None = None
@@ -273,6 +303,25 @@ class NotesAttachmentCoordinator:
                 plan.attachment_id,
             )
             _require_requested_base(plan, guarded_head)
+            if plan.allocate_unique_file_name:
+                payload = payload.model_copy(
+                    update={
+                        "file_name": self._allocate_unique_file_name(
+                            dataset_id=dataset.dataset_id,
+                            note_id=str(payload.parent_object_id),
+                            requested_file_name=payload.file_name,
+                        )
+                    }
+                )
+                envelope = _build_envelope(
+                    plan=plan,
+                    dataset=dataset,
+                    payload=payload,
+                    routing_metadata=routing_metadata,
+                    client_envelope_id=client_envelope_id,
+                    stable_key=stable_key,
+                    object_revision=object_revision,
+                )
             note_after = self._require_owned_note(
                 plan.owner_id,
                 payload,
@@ -381,6 +430,64 @@ class NotesAttachmentCoordinator:
             idempotent_replay=idempotent_replay,
         )
 
+    def _allocate_unique_file_name(
+        self,
+        *,
+        dataset_id: str,
+        note_id: str,
+        requested_file_name: str,
+    ) -> str:
+        """Allocate the ordinary bounded suffix while the dataset guard is held."""
+
+        normalized_names: set[str] = set()
+        after_attachment_id: str | None = None
+        scanned_count = 0
+        while scanned_count <= 1000:
+            page_limit = min(200, 1001 - scanned_count)
+            page = self.note_db.note_attachment_store.list_page(
+                dataset_id,
+                note_id,
+                after_attachment_id=after_attachment_id,
+                limit=page_limit,
+                state="live",
+            )
+            scanned_count += len(page)
+            if scanned_count > 1000:
+                raise NotesAttachmentMutationError(
+                    "Attachment filename allocation exceeds its bounded search"
+                )
+            normalized_names.update(item.normalized_file_name for item in page)
+            if len(page) < page_limit:
+                break
+            after_attachment_id = page[-1].attachment_id
+        else:
+            raise NotesAttachmentMutationError(
+                "Attachment filename allocation exceeds its bounded search"
+            )
+
+        requested_display, requested_normalized = canonicalize_note_attachment_file_name(
+            requested_file_name
+        )
+        if requested_normalized not in normalized_names:
+            return requested_display
+        suffixes = requested_display.split(".")
+        extension = f".{suffixes[-1]}" if len(suffixes) > 1 else ""
+        stem = requested_display[: -len(extension)] if extension else requested_display
+        for index in range(1, 1000):
+            suffix = f"-{index}"
+            stem_limit = max(
+                1,
+                NOTE_ATTACHMENT_MAX_FILENAME_LEN - len(extension) - len(suffix),
+            )
+            candidate, normalized = canonicalize_note_attachment_file_name(
+                f"{stem[:stem_limit]}{suffix}{extension}"
+            )
+            if normalized not in normalized_names:
+                return candidate
+        raise NotesAttachmentMutationError(
+            "Attachment filename allocation exhausted its suffix boundary"
+        )
+
     def _require_owned_note(
         self,
         owner_id: str,
@@ -453,13 +560,65 @@ def _mutation_identity(
     plan: NotesAttachmentMutationPlan,
     dataset: SyncDataset,
 ) -> tuple[str, str]:
-    key_hash = hashlib.sha256(plan.idempotency_key.encode("utf-8")).hexdigest()
+    stable_key = _stable_key_from_idempotency(plan.idempotency_key)
+    key_hash = stable_key.removeprefix("notes-attachment:")
     envelope_hash = hashlib.sha256(
         f"{dataset.dataset_id}:notes-attachment:{key_hash}".encode()
     ).hexdigest()
     return (
-        f"notes-attachment:{key_hash}",
+        stable_key,
         f"server-origin-{envelope_hash[:32]}",
+    )
+
+
+def _stable_key_from_idempotency(idempotency_key: str) -> str:
+    key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    return f"notes-attachment:{key_hash}"
+
+
+def _build_envelope(
+    *,
+    plan: NotesAttachmentMutationPlan,
+    dataset: SyncDataset,
+    payload: AttachmentRefV2Payload,
+    routing_metadata: Mapping[str, object],
+    client_envelope_id: str,
+    stable_key: str,
+    object_revision: int,
+) -> SyncEnvelopeCreate:
+    payload_hash = attachment_ref_v2_object_hash(
+        plan.operation,
+        payload,
+        object_revision=object_revision,
+    )
+    encoded_payload = json.dumps(
+        payload.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return SyncEnvelopeCreate(
+        dataset_id=dataset.dataset_id,
+        client_envelope_id=client_envelope_id,
+        domain="attachment.ref",
+        operation=plan.operation,
+        object_id=plan.attachment_id,
+        device_id=SERVER_ORIGIN_DEVICE_ID,
+        base_server_cursor=plan.base_server_cursor,
+        base_object_revision=plan.base_object_revision,
+        base_object_hash=plan.base_object_hash,
+        object_revision=object_revision,
+        parent_id=str(payload.parent_object_id),
+        schema_version=2,
+        adapter_version=2,
+        payload=payload.model_dump(mode="json"),
+        payload_hash=payload_hash,
+        payload_size_bytes=len(encoded_payload),
+        created_at_client=payload.last_modified,
+        deleted=plan.operation == "tombstone",
+        encryption_metadata={"policy": DEFAULT_M1_ENCRYPTION_POLICY},
+        routing_metadata=dict(routing_metadata),
+        stable_key=stable_key,
     )
 
 
@@ -475,6 +634,11 @@ def _request_matches_existing(
     for generated_field in ("created_at", "last_modified", "deleted_at"):
         requested_payload.pop(generated_field, None)
         existing_payload.pop(generated_field, None)
+    if plan.allocate_unique_file_name:
+        requested_name = requested_payload.pop("file_name", None)
+        existing_name = existing_payload.pop("file_name", None)
+        if not _is_allocated_name_for_request(requested_name, existing_name):
+            return False
     return {
         "dataset_id": dataset.dataset_id,
         "operation": plan.operation,
@@ -498,6 +662,34 @@ def _request_matches_existing(
         ),
         "routing_metadata": dict(envelope.routing_metadata),
     }
+
+
+def _is_allocated_name_for_request(requested: object, allocated: object) -> bool:
+    if not isinstance(requested, str) or not isinstance(allocated, str):
+        return False
+    if requested == allocated:
+        return True
+    suffixes = requested.split(".")
+    extension = f".{suffixes[-1]}" if len(suffixes) > 1 else ""
+    requested_stem = requested[: -len(extension)] if extension else requested
+    allocated_stem = allocated[: -len(extension)] if extension else allocated
+    if extension and not allocated.endswith(extension):
+        return False
+    prefix, separator, raw_index = allocated_stem.rpartition("-")
+    if separator != "-" or not raw_index.isdecimal():
+        return False
+    index = int(raw_index)
+    if not 1 <= index < 1000:
+        return False
+    suffix = f"-{index}"
+    stem_limit = max(
+        1,
+        NOTE_ATTACHMENT_MAX_FILENAME_LEN - len(extension) - len(suffix),
+    )
+    expected, _ = canonicalize_note_attachment_file_name(
+        f"{requested_stem[:stem_limit]}{suffix}{extension}"
+    )
+    return allocated == expected
 
 
 def _existing_request(

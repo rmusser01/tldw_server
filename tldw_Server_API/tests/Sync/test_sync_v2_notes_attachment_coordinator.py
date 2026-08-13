@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -30,6 +31,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_attachment_coordinator import (
     NotesAttachmentMutationError,
     NotesAttachmentMutationPlan,
     NotesAttachmentSyncNotReadyError,
+    _is_allocated_name_for_request,
 )
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
@@ -290,6 +292,50 @@ def test_idempotency_drift_is_rejected_without_a_product_write(coordinator_fixtu
 
     attachment = coordinator.note_db.note_attachment_store.get(DATASET, ATTACHMENT_ID)
     assert attachment is not None and attachment.file_name == "diagram.png"
+
+
+def test_allocated_filename_replay_requires_the_exact_requested_stem() -> None:
+    assert _is_allocated_name_for_request("Report.pdf", "Report-1.pdf") is True
+    assert _is_allocated_name_for_request("ReportLong.pdf", "Report-1.pdf") is False
+
+
+def test_filename_allocation_fails_closed_beyond_its_bounded_search(
+    coordinator_fixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, coordinator = coordinator_fixture
+    attachments = [
+        SimpleNamespace(
+            attachment_id=str(index),
+            normalized_file_name=f"existing-{index}.pdf",
+        )
+        for index in range(1001)
+    ]
+
+    def list_page(
+        dataset_id,
+        note_id,
+        *,
+        after_attachment_id=None,
+        limit=200,
+        state="live",
+    ):
+        del dataset_id, note_id, state
+        start = 0 if after_attachment_id is None else int(after_attachment_id) + 1
+        return attachments[start : start + limit]
+
+    monkeypatch.setattr(
+        coordinator.note_db.note_attachment_store,
+        "list_page",
+        list_page,
+    )
+
+    with pytest.raises(NotesAttachmentMutationError, match="bounded search"):
+        coordinator._allocate_unique_file_name(
+            dataset_id=DATASET,
+            note_id=NOTE_ID,
+            requested_file_name="report.pdf",
+        )
 
 
 def test_note_read_set_race_and_blob_mismatch_reject_before_append(

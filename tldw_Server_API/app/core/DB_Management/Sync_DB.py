@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import typing
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
@@ -46,6 +47,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncBackgroundLeaseCreate,
     SyncBackgroundPolicy,
     SyncBackgroundPolicyUpsert,
+    SyncBlobAvailabilityStatus,
     SyncBlobChunk,
     SyncBlobChunkCreate,
     SyncBlobObject,
@@ -8443,6 +8445,47 @@ class SyncDatabase:
         if row is None:
             return None
         return _blob_object_from_row(row)
+
+    def list_blob_availability_by_hashes(
+        self,
+        dataset_id: str,
+        payload_hashes: Sequence[str],
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> dict[str, SyncBlobAvailabilityStatus]:
+        """Return one bounded owner-scoped availability map without exposing storage."""
+
+        unique_hashes = list(dict.fromkeys(payload_hashes))
+        if len(unique_hashes) > 200:
+            raise SyncStoreError("Sync blob availability query exceeds its boundary")
+        if not unique_hashes:
+            return {}
+        for payload_hash in unique_hashes:
+            digest = payload_hash.removeprefix("sha256:")
+            if (
+                not payload_hash.startswith("sha256:")
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise SyncStoreError("payload_hash must be a canonical SHA-256 digest")
+        placeholders = ",".join("?" for _ in unique_hashes)
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            rows = self.execute(
+                "SELECT payload_hash, status FROM sync_blob_objects "
+                "WHERE dataset_id = ? AND owner_user_id = ? "
+                f"AND payload_hash IN ({placeholders})",  # nosec B608 - placeholders only.
+                (dataset_id, owner_user_id, *unique_hashes),
+                connection=conn,
+            )
+        return {
+            str(row["payload_hash"]): typing.cast(
+                SyncBlobAvailabilityStatus,
+                row["status"],
+            )
+            for row in rows
+        }
 
     def list_blob_objects_for_dataset(
         self,
