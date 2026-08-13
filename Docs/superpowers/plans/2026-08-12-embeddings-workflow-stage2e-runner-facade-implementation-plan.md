@@ -154,11 +154,11 @@ git commit -m "refactor(embeddings): sequence concrete workflow components"
 - Consumes: `EmbeddingPreparationPipeline`, `EmbeddingExecutionCoordinator`, `EmbeddingExecutionOutcome`, and `map_outcome_to_legacy_execution_result(outcome)`.
 - Produces: read-only `preparation_pipeline` and `execution_coordinator` properties plus compatibility methods `prepare(...) -> PreparedEmbeddingRequest` and `execute(...) -> EmbeddingExecutionResult`.
 
-- [ ] **Step 1: Write failing facade-boundary tests**
+- [x] **Step 1: Write failing facade-boundary tests**
 
 Assert the facade exposes the exact pipeline and coordinator instances it wires, `prepare()` delegates once with no phase sink, and `execute()` delegates once then returns the compatibility mapper output. Add a source-boundary assertion that the obsolete `_execute_misses`, `_execute_coherent_fallback`, `_execute_adapter`, `_response_headers`, and `_coerce_executor_output` methods are absent from `EmbeddingRequestOrchestrator`.
 
-- [ ] **Step 2: Run focused facade tests and confirm obsolete methods still fail the boundary**
+- [x] **Step 2: Run focused facade tests and confirm obsolete methods still fail the boundary**
 
 Run:
 
@@ -168,11 +168,11 @@ Run:
 
 Expected: FAIL on missing component accessors and retained obsolete execution branches.
 
-- [ ] **Step 3: Remove superseded private execution code**
+- [x] **Step 3: Remove superseded private execution code**
 
 Delete `_ProviderExecution`, `_NON_FALLBACKABLE_ERROR_CODES`, `_execute_misses`, `_execute_coherent_fallback`, `_execute_adapter`, `_cache_key`, `_response_headers`, `_coerce_executor_output`, `_is_fallback_eligible`, and `_select_exhausted_error` from `orchestrator.py`, along with imports used only by those branches.
 
-- [ ] **Step 4: Expose concrete components read-only and retain compatibility delegation**
+- [x] **Step 4: Expose concrete components read-only and retain compatibility delegation**
 
 Add:
 
@@ -188,7 +188,7 @@ def execution_coordinator(self) -> EmbeddingExecutionCoordinator:
 
 Keep `prepare()` as a direct call to `self._preparation_pipeline.prepare(raw_input, context)` and `execute()` as coordinator delegation followed only by `map_outcome_to_legacy_execution_result(outcome)`.
 
-- [ ] **Step 5: Search all imports before removing compatibility re-exports**
+- [x] **Step 5: Search all imports before removing compatibility re-exports**
 
 Run:
 
@@ -198,7 +198,7 @@ rg "from tldw_Server_API\.app\.core\.Embeddings\.orchestrator import" tldw_Serve
 
 Preserve any currently imported request DTO names in `orchestrator.__all__` unless every caller is migrated in this task; this task does not widen into unrelated import cleanup.
 
-- [ ] **Step 6: Run facade, preparation, coordinator, provider-attempt, and result-mapping tests**
+- [x] **Step 6: Run facade, preparation, coordinator, provider-attempt, and result-mapping tests**
 
 Run:
 
@@ -208,7 +208,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the compatibility-facade reduction**
+- [x] **Step 7: Commit the compatibility-facade reduction**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py

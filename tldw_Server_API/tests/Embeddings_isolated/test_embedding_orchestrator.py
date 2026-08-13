@@ -384,6 +384,33 @@ def test_orchestrator_reexports_prepared_embedding_request_contract():
 
 
 @pytest.mark.unit
+def test_orchestrator_exposes_concrete_workflow_components_read_only():
+    orchestrator = _orchestrator()
+
+    assert orchestrator.preparation_pipeline is orchestrator._preparation_pipeline
+    assert orchestrator.execution_coordinator is orchestrator._execution_coordinator
+    with pytest.raises(AttributeError):
+        orchestrator.preparation_pipeline = object()
+    with pytest.raises(AttributeError):
+        orchestrator.execution_coordinator = object()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "member_name",
+    [
+        "_execute_misses",
+        "_execute_coherent_fallback",
+        "_execute_adapter",
+        "_cache_key",
+        "_response_headers",
+    ],
+)
+def test_orchestrator_has_no_superseded_execution_members(member_name: str):
+    assert not hasattr(EmbeddingRequestOrchestrator, member_name)
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_execute_full_cache_hit_skips_executor_and_preserves_order():
     cache = RecordingCache(
