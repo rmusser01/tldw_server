@@ -53,6 +53,8 @@ from .models import (
     SyncKeyRecord,
     SyncKeyRecordCreate,
     SyncKeyRotationEnvelopeRange,
+    SyncNotesAttachmentCleanupCandidate,
+    SyncNotesAttachmentSourceMap,
     SyncObjectState,
     SyncRestoreManifestStats,
 )
@@ -369,6 +371,105 @@ class SyncV2Store:
             source_hash=source_hash,
             error_code=error_code,
             ready_verifier=ready_verifier,
+        )
+
+    def begin_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        return self.db.begin_notes_attachment_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+        )
+
+    def transition_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        source_cursor: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        return self.db.transition_notes_attachment_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            expected_state=expected_state,
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            source_hash=source_hash,
+            source_cursor=source_cursor,
+            error_code=error_code,
+            ready_verifier=ready_verifier,
+        )
+
+    def resolve_notes_attachment_source_map(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        note_id: str,
+        source_key: str,
+    ) -> SyncNotesAttachmentSourceMap:
+        return self.db.resolve_notes_attachment_source_map(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            note_id=note_id,
+            source_key=source_key,
+        )
+
+    def record_notes_attachment_cleanup_candidate(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key: str,
+        source_relative_path: str,
+        source_blob_hash: str,
+        source_size_bytes: int,
+        source_modified_ns: int,
+    ) -> SyncNotesAttachmentCleanupCandidate:
+        return self.db.record_notes_attachment_cleanup_candidate(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            source_key=source_key,
+            source_relative_path=source_relative_path,
+            source_blob_hash=source_blob_hash,
+            source_size_bytes=source_size_bytes,
+            source_modified_ns=source_modified_ns,
+        )
+
+    def list_notes_attachment_cleanup_candidates(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        after_source_key_hash: str | None = None,
+        limit: int = 1_000,
+    ) -> tuple[SyncNotesAttachmentCleanupCandidate, ...]:
+        return self.db.list_notes_attachment_cleanup_candidates(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            after_source_key_hash=after_source_key_hash,
+            limit=limit,
         )
 
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:

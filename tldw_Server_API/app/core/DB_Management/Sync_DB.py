@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import typing
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -79,6 +80,8 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncKeyRecord,
     SyncKeyRecordCreate,
     SyncKeyRotationEnvelopeRange,
+    SyncNotesAttachmentCleanupCandidate,
+    SyncNotesAttachmentSourceMap,
     SyncObjectState,
     SyncRestoreManifestStats,
     normalize_sync_timestamp,
@@ -573,6 +576,83 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_dataset_storage_namespace_id
 CREATE INDEX IF NOT EXISTS idx_sync_dataset_storage_namespaces_owner
     ON sync_dataset_storage_namespaces(owner_user_id, dataset_id);
 
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_source_map (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (length(source_key_hash) = 71),
+    CHECK (substr(source_key_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_key_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (length(note_id) > 0),
+    CHECK (
+        length(attachment_id) = 36
+        AND lower(attachment_id) = attachment_id
+        AND substr(attachment_id, 9, 1) = '-'
+        AND substr(attachment_id, 14, 1) = '-'
+        AND substr(attachment_id, 15, 1) = '4'
+        AND substr(attachment_id, 19, 1) = '-'
+        AND substr(attachment_id, 20, 1) IN ('8', '9', 'a', 'b')
+        AND substr(attachment_id, 24, 1) = '-'
+        AND length(replace(attachment_id, '-', '')) = 32
+        AND replace(attachment_id, '-', '') NOT GLOB '*[^0-9a-f]*'
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_notes_attachment_source_id
+    ON sync_notes_attachment_source_map(dataset_id, attachment_id);
+
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_cleanup_candidates (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    source_relative_path TEXT NOT NULL,
+    source_path_hash TEXT NOT NULL,
+    source_blob_hash TEXT NOT NULL,
+    source_size_bytes INTEGER NOT NULL,
+    source_modified_ns INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (length(source_key_hash) = 71),
+    CHECK (substr(source_key_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_key_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (
+        length(attachment_id) = 36
+        AND lower(attachment_id) = attachment_id
+        AND substr(attachment_id, 9, 1) = '-'
+        AND substr(attachment_id, 14, 1) = '-'
+        AND substr(attachment_id, 15, 1) = '4'
+        AND substr(attachment_id, 19, 1) = '-'
+        AND substr(attachment_id, 20, 1) IN ('8', '9', 'a', 'b')
+        AND substr(attachment_id, 24, 1) = '-'
+        AND length(replace(attachment_id, '-', '')) = 32
+        AND replace(attachment_id, '-', '') NOT GLOB '*[^0-9a-f]*'
+    ),
+    CHECK (length(source_relative_path) BETWEEN 1 AND 4096),
+    CHECK (length(source_path_hash) = 71),
+    CHECK (substr(source_path_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_path_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (source_path_hash = source_key_hash),
+    CHECK (length(source_blob_hash) = 71),
+    CHECK (substr(source_blob_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_blob_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (typeof(source_size_bytes) = 'integer'),
+    CHECK (typeof(source_modified_ns) = 'integer'),
+    CHECK (source_size_bytes > 0),
+    CHECK (source_modified_ns >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_notes_attachment_cleanup_page
+    ON sync_notes_attachment_cleanup_candidates(
+        dataset_id, bootstrap_id, source_key_hash
+    );
+
 CREATE TABLE IF NOT EXISTS sync_blob_upload_sessions (
     upload_id TEXT PRIMARY KEY,
     dataset_id TEXT NOT NULL,
@@ -1059,6 +1139,51 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_dataset_storage_namespace_id
     ON sync_dataset_storage_namespaces(storage_namespace_id);
 CREATE INDEX IF NOT EXISTS idx_sync_dataset_storage_namespaces_owner
     ON sync_dataset_storage_namespaces(owner_user_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_source_map (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (source_key_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (length(note_id) > 0),
+    CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_notes_attachment_source_id
+    ON sync_notes_attachment_source_map(dataset_id, attachment_id);
+
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_cleanup_candidates (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    source_relative_path TEXT NOT NULL,
+    source_path_hash TEXT NOT NULL,
+    source_blob_hash TEXT NOT NULL,
+    source_size_bytes BIGINT NOT NULL,
+    source_modified_ns BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (source_key_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+    CHECK (length(source_relative_path) BETWEEN 1 AND 4096),
+    CHECK (source_path_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (source_path_hash = source_key_hash),
+    CHECK (source_blob_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (source_size_bytes > 0),
+    CHECK (source_modified_ns >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_notes_attachment_cleanup_page
+    ON sync_notes_attachment_cleanup_candidates(
+        dataset_id, bootstrap_id, source_key_hash
+    );
 
 CREATE TABLE IF NOT EXISTS sync_blob_upload_sessions (
     upload_id TEXT PRIMARY KEY,
@@ -1650,6 +1775,36 @@ def _storage_namespace_from_row(row: dict[str, Any]) -> SyncDatasetStorageNamesp
     )
 
 
+def _notes_attachment_source_map_from_row(
+    row: dict[str, Any],
+) -> SyncNotesAttachmentSourceMap:
+    return SyncNotesAttachmentSourceMap(
+        dataset_id=row["dataset_id"],
+        bootstrap_id=row["bootstrap_id"],
+        source_key_hash=row["source_key_hash"],
+        note_id=row["note_id"],
+        attachment_id=row["attachment_id"],
+        created_at=_timestamp_to_string(row.get("created_at")) or "",
+    )
+
+
+def _notes_attachment_cleanup_candidate_from_row(
+    row: dict[str, Any],
+) -> SyncNotesAttachmentCleanupCandidate:
+    return SyncNotesAttachmentCleanupCandidate(
+        dataset_id=row["dataset_id"],
+        bootstrap_id=row["bootstrap_id"],
+        source_key_hash=row["source_key_hash"],
+        attachment_id=row["attachment_id"],
+        source_relative_path=row["source_relative_path"],
+        source_path_hash=row["source_path_hash"],
+        source_blob_hash=row["source_blob_hash"],
+        source_size_bytes=int(row["source_size_bytes"]),
+        source_modified_ns=int(row["source_modified_ns"]),
+        created_at=_timestamp_to_string(row.get("created_at")) or "",
+    )
+
+
 def _object_state_from_row(row: dict[str, Any]) -> SyncObjectState:
     return SyncObjectState(
         dataset_id=row["dataset_id"],
@@ -2132,6 +2287,7 @@ class SyncDatabase:
             if self.backend.table_exists("sync_key_records", connection=conn):
                 self._ensure_key_record_user_id_column(connection=conn)
                 self._ensure_key_record_rotation_columns(connection=conn)
+            self._preflight_notes_attachment_bootstrap_tables(connection=conn)
             self.backend.create_tables(schema, connection=conn)
             self._ensure_device_lifecycle_columns(connection=conn)
             self._ensure_device_lifecycle_tables(connection=conn)
@@ -2143,6 +2299,7 @@ class SyncDatabase:
             )
             self._ensure_sync_materialization_locks_table(connection=conn)
             self._ensure_attachment_binding_tables(connection=conn)
+            self._ensure_notes_attachment_bootstrap_tables(connection=conn)
             self._ensure_envelope_m1_indexes(connection=conn)
             self._ensure_conflict_indexes(connection=conn)
             self._ensure_key_record_user_id_column(connection=conn)
@@ -4768,6 +4925,421 @@ class SyncDatabase:
             if updated is None:
                 raise SyncStoreError("Sync dataset link bootstrap transition was not persisted")
             return _dataset_from_row(updated)
+
+    @staticmethod
+    def _validate_notes_attachment_bootstrap_id(bootstrap_id: str) -> None:
+        if (
+            not isinstance(bootstrap_id, str)
+            or not bootstrap_id.strip()
+            or bootstrap_id != bootstrap_id.strip()
+            or len(bootstrap_id.encode("utf-8")) > 128
+        ):
+            raise SyncStoreError("Notes attachment bootstrap ID is invalid")
+
+    @staticmethod
+    def _notes_attachment_source_hash(source_key: str) -> str:
+        if not isinstance(source_key, str) or not source_key:
+            raise SyncStoreError("Notes attachment source key is invalid")
+        if len(source_key.encode("utf-8")) > 4_096:
+            raise SyncStoreError("Notes attachment source key is too large")
+        path = PurePosixPath(source_key)
+        if (
+            path.is_absolute()
+            or "\\" in source_key
+            or any(part in {"", ".", ".."} for part in path.parts)
+        ):
+            raise SyncStoreError("Notes attachment source key is invalid")
+        return f"sha256:{hashlib.sha256(source_key.encode('utf-8')).hexdigest()}"
+
+    @staticmethod
+    def _notes_attachment_bootstrap_metadata(
+        row: Mapping[str, Any],
+        bootstrap_id: str,
+    ) -> tuple[dict[str, Any], Mapping[str, Any]]:
+        metadata = decode_json(row.get("metadata_json"), default={})
+        current = metadata.get("notes_attachment_v2")
+        if not isinstance(current, Mapping) or current.get("bootstrap_id") != bootstrap_id:
+            raise SyncStoreError("notes_attachment_bootstrap_compare_and_set_failed")
+        return metadata, current
+
+    def begin_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Enroll attachment.ref v2 and establish one stable bootstrap identity."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_attachment_v2")
+            if isinstance(current, Mapping):
+                if (
+                    current.get("state") not in {"initializing", "ready", "failed"}
+                    or current.get("target_adapter_version") != 2
+                    or not isinstance(current.get("bootstrap_id"), str)
+                ):
+                    raise SyncStoreError("notes_attachment_bootstrap_state_invalid")
+                return _dataset_from_row(row)
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            if "notes.note" not in enrolled:
+                raise SyncStoreError("notes_attachment_note_domain_missing")
+            if "attachment.ref" not in enrolled:
+                enrolled.append("attachment.ref")
+            metadata["notes_attachment_v2"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "target_adapter_version": 2,
+                "captured_count": 0,
+                "expected_count": 0,
+                "source_hash": None,
+                "source_cursor": None,
+                "error_code": None,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            self._ensure_domain_state(
+                dataset_id=dataset_id,
+                domain="attachment.ref",
+                adapter_version=2,
+                server_sequence=0,
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset attachment bootstrap was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        source_cursor: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable attachment bootstrap transition."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        valid_states = {"initializing", "ready", "failed"}
+        if expected_state not in valid_states or state not in valid_states:
+            raise SyncStoreError("Notes attachment bootstrap state is invalid")
+        if (
+            isinstance(captured_count, bool)
+            or isinstance(expected_count, bool)
+            or captured_count < 0
+            or expected_count < 0
+            or captured_count > expected_count
+        ):
+            raise SyncStoreError("Notes attachment bootstrap counts are invalid")
+        if source_hash is not None and re.fullmatch(r"[0-9a-f]{64}", source_hash) is None:
+            raise SyncStoreError("Notes attachment bootstrap source hash is invalid")
+        if source_cursor is not None and (
+            not isinstance(source_cursor, str)
+            or len(source_cursor.encode("utf-8")) > 64 * 1_024
+        ):
+            raise SyncStoreError("Notes attachment bootstrap cursor is invalid")
+        if state == "failed":
+            if error_code is None or re.fullmatch(r"[a-z][a-z0-9_]{0,127}", error_code) is None:
+                raise SyncStoreError("Notes attachment bootstrap failure code is invalid")
+        elif error_code is not None:
+            raise SyncStoreError("Notes attachment bootstrap failure code is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            metadata, current = self._notes_attachment_bootstrap_metadata(
+                row,
+                bootstrap_id,
+            )
+            if current.get("state") != expected_state:
+                raise SyncStoreError("notes_attachment_bootstrap_compare_and_set_failed")
+            if (
+                current.get("target_adapter_version") != 2
+                or "attachment.ref" not in _dataset_domains_from_row(row)
+            ):
+                raise SyncStoreError("notes_attachment_bootstrap_state_invalid")
+            current_captured = current.get("captured_count")
+            current_expected = current.get("expected_count")
+            if (
+                not isinstance(current_captured, int)
+                or isinstance(current_captured, bool)
+                or captured_count < current_captured
+                or not isinstance(current_expected, int)
+                or isinstance(current_expected, bool)
+                or (current_expected != 0 and expected_count != current_expected)
+            ):
+                raise SyncStoreError("notes_attachment_bootstrap_progress_regressed")
+            current_hash = current.get("source_hash")
+            if current_hash not in {None, source_hash}:
+                raise SyncStoreError("notes_attachment_bootstrap_source_changed")
+            if state == "ready":
+                if (
+                    source_hash is None
+                    or captured_count != expected_count
+                    or ready_verifier is None
+                    or not ready_verifier()
+                ):
+                    raise SyncStoreError("notes_attachment_bootstrap_verification_failed")
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? AND domain = 'attachment.ref' "
+                        "AND status = 'accepted' "
+                        "AND apply_status NOT IN ('applied', 'superseded')",
+                        (dataset_id,),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_attachment_bootstrap_verification_failed")
+            metadata["notes_attachment_v2"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "target_adapter_version": 2,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "source_hash": source_hash,
+                "source_cursor": source_cursor,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset attachment bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
+    def resolve_notes_attachment_source_map(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        note_id: str,
+        source_key: str,
+    ) -> SyncNotesAttachmentSourceMap:
+        """Allocate one immutable UUIDv4 for one hashed bootstrap source key."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        if not isinstance(note_id, str) or not note_id.strip():
+            raise SyncStoreError("Notes attachment source note ID is invalid")
+        source_key_hash = self._notes_attachment_source_hash(source_key)
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_source_map "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if existing is not None:
+                if existing.get("note_id") != note_id:
+                    raise SyncStoreError("notes_attachment_source_map_identity_conflict")
+                return _notes_attachment_source_map_from_row(existing)
+            self.execute(
+                "INSERT INTO sync_notes_attachment_source_map "
+                "(dataset_id, bootstrap_id, source_key_hash, note_id, attachment_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    dataset_id,
+                    bootstrap_id,
+                    source_key_hash,
+                    note_id,
+                    str(uuid4()),
+                    utcnow_iso(),
+                ),
+                connection=conn,
+            )
+            created = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_source_map "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if created is None:
+                raise SyncStoreError("Notes attachment source map was not persisted")
+            return _notes_attachment_source_map_from_row(created)
+
+    def record_notes_attachment_cleanup_candidate(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key: str,
+        source_relative_path: str,
+        source_blob_hash: str,
+        source_size_bytes: int,
+        source_modified_ns: int,
+    ) -> SyncNotesAttachmentCleanupCandidate:
+        """Persist immutable, non-authoritative cleanup evidence for one source."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        source_key_hash = self._notes_attachment_source_hash(source_key)
+        source_path_hash = self._notes_attachment_source_hash(source_relative_path)
+        if source_path_hash != source_key_hash:
+            raise SyncStoreError("Notes attachment cleanup source path does not match")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", source_blob_hash) is None:
+            raise SyncStoreError("Notes attachment cleanup blob hash is invalid")
+        if (
+            isinstance(source_size_bytes, bool)
+            or source_size_bytes < 1
+            or isinstance(source_modified_ns, bool)
+            or source_modified_ns < 0
+        ):
+            raise SyncStoreError("Notes attachment cleanup source stat is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            mapping = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_source_map "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if mapping is None:
+                raise SyncStoreError("notes_attachment_source_map_missing")
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_cleanup_candidates "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            expected = {
+                "attachment_id": mapping["attachment_id"],
+                "source_relative_path": source_relative_path,
+                "source_path_hash": source_path_hash,
+                "source_blob_hash": source_blob_hash,
+                "source_size_bytes": source_size_bytes,
+                "source_modified_ns": source_modified_ns,
+            }
+            if existing is not None:
+                if any(existing.get(key) != value for key, value in expected.items()):
+                    raise SyncStoreError("notes_attachment_cleanup_candidate_conflict")
+                return _notes_attachment_cleanup_candidate_from_row(existing)
+            self.execute(
+                "INSERT INTO sync_notes_attachment_cleanup_candidates "
+                "(dataset_id, bootstrap_id, source_key_hash, attachment_id, "
+                "source_relative_path, source_path_hash, source_blob_hash, "
+                "source_size_bytes, source_modified_ns, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    dataset_id,
+                    bootstrap_id,
+                    source_key_hash,
+                    mapping["attachment_id"],
+                    source_relative_path,
+                    source_path_hash,
+                    source_blob_hash,
+                    source_size_bytes,
+                    source_modified_ns,
+                    utcnow_iso(),
+                ),
+                connection=conn,
+            )
+            created = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_cleanup_candidates "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if created is None:
+                raise SyncStoreError("Notes attachment cleanup candidate was not persisted")
+            return _notes_attachment_cleanup_candidate_from_row(created)
+
+    def list_notes_attachment_cleanup_candidates(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        after_source_key_hash: str | None = None,
+        limit: int = 1_000,
+    ) -> tuple[SyncNotesAttachmentCleanupCandidate, ...]:
+        """Return one bounded owner-scoped cleanup-candidate keyset page."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        if isinstance(limit, bool) or not 1 <= limit <= 1_000:
+            raise ValueError("cleanup candidate page limit must be 1..1000")
+        if after_source_key_hash is not None and re.fullmatch(
+            r"sha256:[0-9a-f]{64}", after_source_key_hash
+        ) is None:
+            raise ValueError("cleanup candidate cursor is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            cursor = after_source_key_hash or ""
+            rows = self.execute(
+                "SELECT * FROM sync_notes_attachment_cleanup_candidates "
+                "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash > ? "
+                "ORDER BY source_key_hash LIMIT ?",
+                (dataset_id, bootstrap_id, cursor, limit),
+                connection=conn,
+            ).rows
+            return tuple(
+                _notes_attachment_cleanup_candidate_from_row(item) for item in rows
+            )
 
     def _find_existing_envelope_for_idempotency(
         self,
@@ -10156,6 +10728,307 @@ class SyncDatabase:
                 connection=connection,
                 canonical_schema=schema,
             )
+
+    def _ensure_notes_attachment_bootstrap_tables(self, *, connection: Any) -> None:
+        """Verify bounded legacy-source identity and cleanup evidence authority."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self._verify_notes_attachment_bootstrap_tables_postgres(
+                connection=connection,
+            )
+        else:
+            self._verify_notes_attachment_bootstrap_tables_sqlite(
+                connection=connection,
+                canonical_schema=SYNC_SQLITE_SCHEMA,
+                verify_indexes=True,
+            )
+
+    def _preflight_notes_attachment_bootstrap_tables(self, *, connection: Any) -> None:
+        """Reject partial or malformed pre-existing bootstrap authority."""
+
+        table_names = (
+            "sync_notes_attachment_source_map",
+            "sync_notes_attachment_cleanup_candidates",
+        )
+        existing = [
+            self.backend.table_exists(table_name, connection=connection)
+            for table_name in table_names
+        ]
+        if not any(existing):
+            return
+        if not all(existing):
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        self._ensure_notes_attachment_bootstrap_tables(connection=connection)
+
+    def _verify_notes_attachment_bootstrap_tables_sqlite(
+        self,
+        *,
+        connection: Any,
+        canonical_schema: str,
+        verify_indexes: bool,
+    ) -> None:
+        expected_columns = {
+            "sync_notes_attachment_source_map": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("bootstrap_id", "TEXT", 1, 2),
+                ("source_key_hash", "TEXT", 1, 3),
+                ("note_id", "TEXT", 1, 0),
+                ("attachment_id", "TEXT", 1, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+            "sync_notes_attachment_cleanup_candidates": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("bootstrap_id", "TEXT", 1, 2),
+                ("source_key_hash", "TEXT", 1, 3),
+                ("attachment_id", "TEXT", 1, 0),
+                ("source_relative_path", "TEXT", 1, 0),
+                ("source_path_hash", "TEXT", 1, 0),
+                ("source_blob_hash", "TEXT", 1, 0),
+                ("source_size_bytes", "INTEGER", 1, 0),
+                ("source_modified_ns", "INTEGER", 1, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+        }
+        expected_table_sql: dict[str, str] = {}
+        for statement in canonical_schema.split(";"):
+            compact = self._compact_catalog_sql(statement)
+            for table_name in expected_columns:
+                if f"createtableifnotexists{table_name}(" in compact:
+                    expected_table_sql[table_name] = compact.replace(
+                        "createtableifnotexists",
+                        "createtable",
+                        1,
+                    )
+        for table_name, expected in expected_columns.items():
+            actual = [
+                (row["name"], row["type"], int(row["notnull"]), int(row["pk"]))
+                for row in self.execute(
+                    f"PRAGMA table_info({table_name})",  # nosec B608 - fixed names.
+                    connection=connection,
+                ).rows
+            ]
+            table_row = _first(
+                self.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                    (table_name,),
+                    connection=connection,
+                )
+            )
+            table_sql = self._compact_catalog_sql(
+                None if table_row is None else table_row.get("sql")
+            )
+            if actual != expected or table_sql != expected_table_sql.get(table_name):
+                raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        if not verify_indexes:
+            return
+        rows = self.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' "
+            "AND name IN (?, ?) ORDER BY name",
+            (
+                "idx_sync_notes_attachment_cleanup_page",
+                "uq_sync_notes_attachment_source_id",
+            ),
+            connection=connection,
+        ).rows
+        actual_indexes = {
+            row["name"]: self._compact_catalog_sql(row["sql"]) for row in rows
+        }
+        expected_indexes = {
+            "idx_sync_notes_attachment_cleanup_page": "createindexidx_sync_notes_attachment_cleanup_pageonsync_notes_attachment_cleanup_candidates(dataset_id,bootstrap_id,source_key_hash)",
+            "uq_sync_notes_attachment_source_id": "createuniqueindexuq_sync_notes_attachment_source_idonsync_notes_attachment_source_map(dataset_id,attachment_id)",
+        }
+        if actual_indexes != expected_indexes:
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+
+    def _verify_notes_attachment_bootstrap_tables_postgres(
+        self,
+        *,
+        connection: Any,
+    ) -> None:
+        expected_columns = {
+            "sync_notes_attachment_cleanup_candidates": [
+                ("dataset_id", "text", True),
+                ("bootstrap_id", "text", True),
+                ("source_key_hash", "text", True),
+                ("attachment_id", "text", True),
+                ("source_relative_path", "text", True),
+                ("source_path_hash", "text", True),
+                ("source_blob_hash", "text", True),
+                ("source_size_bytes", "bigint", True),
+                ("source_modified_ns", "bigint", True),
+                ("created_at", "timestamp with time zone", True),
+            ],
+            "sync_notes_attachment_source_map": [
+                ("dataset_id", "text", True),
+                ("bootstrap_id", "text", True),
+                ("source_key_hash", "text", True),
+                ("note_id", "text", True),
+                ("attachment_id", "text", True),
+                ("created_at", "timestamp with time zone", True),
+            ],
+        }
+        rows = self.execute(
+            """
+            SELECT relation.relname AS table_name,
+                   attribute.attname AS column_name,
+                   pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS data_type,
+                   attribute.attnotnull AS is_not_null
+              FROM pg_catalog.pg_class AS relation
+              JOIN pg_catalog.pg_namespace AS namespace
+                ON namespace.oid = relation.relnamespace
+              JOIN pg_catalog.pg_attribute AS attribute
+                ON attribute.attrelid = relation.oid
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN (
+                    'sync_notes_attachment_source_map',
+                    'sync_notes_attachment_cleanup_candidates'
+               )
+               AND relation.relkind = 'r'
+               AND attribute.attnum > 0
+               AND NOT attribute.attisdropped
+             ORDER BY relation.relname, attribute.attnum
+            """,
+            connection=connection,
+        ).rows
+        actual_columns = {name: [] for name in expected_columns}
+        for row in rows:
+            actual_columns[row["table_name"]].append(
+                (row["column_name"], row["data_type"], bool(row["is_not_null"]))
+            )
+        if actual_columns != expected_columns:
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        constraints = self.execute(
+            """
+            SELECT relation.relname AS table_name,
+                   constraint_record.contype AS kind,
+                   constraint_record.convalidated AS is_validated,
+                   pg_catalog.pg_get_constraintdef(
+                       constraint_record.oid, true
+                   ) AS definition
+              FROM pg_catalog.pg_constraint AS constraint_record
+              JOIN pg_catalog.pg_class AS relation
+                ON relation.oid = constraint_record.conrelid
+              JOIN pg_catalog.pg_namespace AS namespace
+                ON namespace.oid = relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN (
+                    'sync_notes_attachment_source_map',
+                    'sync_notes_attachment_cleanup_candidates'
+               )
+               AND constraint_record.contype IN ('p', 'c')
+             ORDER BY relation.relname,
+                      constraint_record.contype,
+                      constraint_record.conname
+            """,
+            connection=connection,
+        ).rows
+        uuid_definition = (
+            "checkattachment_id~"
+            "'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            "[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+        )
+        expected_constraints = {
+            "sync_notes_attachment_source_map": {
+                ("p", "primarykeydataset_id,bootstrap_id,source_key_hash"),
+                ("c", "checklengthdataset_id>0"),
+                (
+                    "c",
+                    "checklengthbootstrap_id>=1andlengthbootstrap_id<=128",
+                ),
+                ("c", "checksource_key_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checklengthnote_id>0"),
+                ("c", uuid_definition),
+            },
+            "sync_notes_attachment_cleanup_candidates": {
+                ("p", "primarykeydataset_id,bootstrap_id,source_key_hash"),
+                ("c", "checklengthdataset_id>0"),
+                (
+                    "c",
+                    "checklengthbootstrap_id>=1andlengthbootstrap_id<=128",
+                ),
+                ("c", "checksource_key_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", uuid_definition),
+                (
+                    "c",
+                    "checklengthsource_relative_path>=1and"
+                    "lengthsource_relative_path<=4096",
+                ),
+                ("c", "checksource_path_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checksource_path_hash=source_key_hash"),
+                ("c", "checksource_blob_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checksource_size_bytes>0"),
+                ("c", "checksource_modified_ns>=0"),
+            },
+        }
+        actual_constraints = {
+            table_name: {
+                (
+                    str(row["kind"]),
+                    self._compact_postgres_catalog_sql(row["definition"]),
+                )
+                for row in constraints
+                if row["table_name"] == table_name
+                and bool(row["is_validated"])
+            }
+            for table_name in expected_constraints
+        }
+        if actual_constraints != expected_constraints or not all(
+            bool(row["is_validated"]) for row in constraints
+        ):
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        indexes = self.execute(
+            """
+            SELECT index_relation.relname AS index_name,
+                   table_relation.relname AS table_name,
+                   index_record.indisunique AS is_unique,
+                   index_record.indisvalid AS is_valid,
+                   index_record.indisready AS is_ready,
+                   pg_catalog.pg_get_indexdef(index_record.indexrelid) AS definition
+              FROM pg_catalog.pg_index AS index_record
+              JOIN pg_catalog.pg_class AS index_relation
+                ON index_relation.oid = index_record.indexrelid
+              JOIN pg_catalog.pg_class AS table_relation
+                ON table_relation.oid = index_record.indrelid
+              JOIN pg_catalog.pg_namespace AS namespace
+                ON namespace.oid = table_relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND index_relation.relname IN (
+                    'idx_sync_notes_attachment_cleanup_page',
+                    'uq_sync_notes_attachment_source_id'
+               )
+             ORDER BY index_relation.relname
+            """,
+            connection=connection,
+        ).rows
+        expected_indexes = {
+            "idx_sync_notes_attachment_cleanup_page": (
+                "sync_notes_attachment_cleanup_candidates",
+                False,
+                "dataset_id,bootstrap_id,source_key_hash",
+            ),
+            "uq_sync_notes_attachment_source_id": (
+                "sync_notes_attachment_source_map",
+                True,
+                "dataset_id,attachment_id",
+            ),
+        }
+        if {row["index_name"] for row in indexes} != set(expected_indexes):
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        for row in indexes:
+            table_name, unique, columns = expected_indexes[row["index_name"]]
+            definition = self._compact_postgres_catalog_sql(row["definition"])
+            try:
+                definition_tail = definition.split("usingbtree", 1)[1]
+            except IndexError:
+                definition_tail = ""
+            if (
+                row["table_name"] != table_name
+                or bool(row["is_unique"]) != unique
+                or not row["is_valid"]
+                or not row["is_ready"]
+                or definition_tail != columns
+            ):
+                raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
 
     @staticmethod
     def _compact_catalog_sql(value: Any) -> str:
