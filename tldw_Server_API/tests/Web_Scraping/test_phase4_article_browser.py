@@ -165,6 +165,16 @@ class _CancelRecordingTask(asyncio.Task[Any]):
         return super().cancel(msg)
 
 
+class _DoneCallbackRejectingTask(asyncio.Task[Any]):
+    def add_done_callback(
+        self,
+        callback: Callable[[asyncio.Future[Any]], object],
+        *,
+        context: Any = None,
+    ) -> None:
+        raise RuntimeError("callback registration failed")
+
+
 class _FakeHttpRoute:
     def __init__(
         self,
@@ -178,14 +188,17 @@ class _FakeHttpRoute:
         self.abort_error = abort_error
         self.continue_calls: list[dict[str, object]] = []
         self.abort_calls = 0
+        self.handled = asyncio.Event()
 
     async def continue_(self, **kwargs: object) -> None:
         self.continue_calls.append(kwargs)
+        self.handled.set()
         if self.continue_error is not None:
             raise self.continue_error
 
     async def abort(self) -> None:
         self.abort_calls += 1
+        self.handled.set()
         if self.abort_error is not None:
             raise self.abort_error
 
@@ -225,22 +238,23 @@ class _FakeWebSocketRoute:
 
 
 class _ResistantRejectedHttpRoute(_FakeHttpRoute):
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, target_closed: asyncio.Event) -> None:
         super().__init__(url)
+        self.target_closed = target_closed
         self.abort_started = asyncio.Event()
-        self.abort_release = asyncio.Event()
 
     async def abort(self) -> None:
         self.abort_calls += 1
+        self.handled.set()
         self.abort_started.set()
-        await self.abort_release.wait()
+        await self.target_closed.wait()
 
 
 class _ResistantRejectedWebSocketRoute(_FakeWebSocketRoute):
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, target_closed: asyncio.Event) -> None:
         super().__init__(url)
+        self.target_closed = target_closed
         self.close_started = asyncio.Event()
-        self.close_release = asyncio.Event()
 
     async def close(
         self,
@@ -250,7 +264,7 @@ class _ResistantRejectedWebSocketRoute(_FakeWebSocketRoute):
     ) -> None:
         self.close_calls.append((code, reason))
         self.close_started.set()
-        await self.close_release.wait()
+        await self.target_closed.wait()
 
 
 class _FakeBrowserRuntime:
@@ -281,11 +295,14 @@ class _FakeBrowserRuntime:
         self.installed_http_handler: Callable[[_FakeHttpRoute], Awaitable[None]] | None = None
         self.installed_websocket_handler: Callable[[_FakeWebSocketRoute], Awaitable[None]] | None = None
         self.callback_tasks: set[asyncio.Task[None]] = set()
+        self.all_callback_tasks: list[asyncio.Task[None]] = []
         self.cleanup_tasks: dict[str, asyncio.Task[Any]] = {}
         self.stuck_cleanup_cancelled: list[str] = []
         self.cleanup_started: dict[str, asyncio.Event] = {}
         self.content_returned = asyncio.Event()
         self.context_closed = asyncio.Event()
+        self.target_closed = asyncio.Event()
+        self.context_close_task_names: list[str] = []
         self.resistant_cleanup_release = asyncio.Event()
         self.resistant_cleanup_finished = asyncio.Event()
         self._callback_schedule_count = 0
@@ -403,9 +420,13 @@ class _FakeContext(_CleanupControlled):
                 for _ in range(start_turns):
                     await asyncio.sleep(0)
             await handler(route)
+            if kind == "http":
+                assert isinstance(route, _FakeHttpRoute)
+                await route.handled.wait()
 
         task = asyncio.create_task(invoke(), name=f"fake-playwright-{kind}-callback")
         self.runtime.callback_tasks.add(task)
+        self.runtime.all_callback_tasks.append(task)
         task.add_done_callback(self.runtime.callback_tasks.discard)
         return task
 
@@ -458,6 +479,10 @@ class _FakeContext(_CleanupControlled):
 
     async def close(self) -> None:
         self.websocket_handler = None
+        self.runtime.target_closed.set()
+        task = asyncio.current_task()
+        assert task is not None
+        self.runtime.context_close_task_names.append(task.get_name())
         try:
             await self.runtime.cleanup("close:context")
         finally:
@@ -1126,7 +1151,7 @@ async def test_callback_starting_after_teardown_admission_closes_is_rejected() -
     _assert_failure(raised.value, stage="callback")
     assert guard.calls == []
     assert route.connect_calls == 0
-    assert route.close_calls == []
+    assert route.close_calls == [(1008, "Policy denied")]
     await _assert_no_browser_tasks()
 
 
@@ -1142,7 +1167,7 @@ async def test_admitted_callback_cannot_admit_new_callback_during_teardown() -> 
 
     _assert_failure(raised.value, stage="callback")
     assert second.connect_calls == 0
-    assert second.close_calls == []
+    assert second.close_calls == [(1008, "Policy denied")]
     await _assert_no_browser_tasks()
 
 
@@ -1237,7 +1262,7 @@ async def test_callback_capacity_rejection_fails_closed_without_dispatch() -> No
 
     _assert_failure(raised.value, stage="capacity")
     assert rejected.connect_calls == 0
-    assert rejected.close_calls == []
+    assert rejected.close_calls == [(1008, "Policy denied")]
     assert gated.cancellation_args is None
 
     gated.release.set()
@@ -1247,24 +1272,33 @@ async def test_callback_capacity_rejection_fails_closed_without_dispatch() -> No
 
 @pytest.mark.unit
 @pytest.mark.parametrize("kind", ["http", "websocket"])
-async def test_callback_overflow_burst_is_actionless_and_not_retained(kind: str) -> None:
+async def test_callback_overflow_burst_uses_one_retained_emergency_shutdown(kind: str) -> None:
     gated = _GatedOutcome(True)
+    runtime = _FakeBrowserRuntime(cleanup_modes={"close:context": "resistant"})
     if kind == "http":
         admitted_kind = "websocket"
         admitted: object = _FakeWebSocketRoute("wss://late.example/admitted")
         rejected: list[Any] = [
-            _ResistantRejectedHttpRoute(f"https://late.example/rejected-{index}") for index in range(12)
+            _ResistantRejectedHttpRoute(
+                f"https://late.example/rejected-{index}",
+                runtime.target_closed,
+            )
+            for index in range(12)
         ]
     else:
         admitted_kind = "websocket"
         admitted = _FakeWebSocketRoute("wss://late.example/admitted")
-        rejected = [_ResistantRejectedWebSocketRoute(f"wss://late.example/rejected-{index}") for index in range(12)]
-    runtime = _FakeBrowserRuntime(
-        dispatches=[
-            (admitted_kind, admitted),
-            *((kind, route) for route in rejected),
+        rejected = [
+            _ResistantRejectedWebSocketRoute(
+                f"wss://late.example/rejected-{index}",
+                runtime.target_closed,
+            )
+            for index in range(12)
         ]
-    )
+    runtime.dispatches = [
+        (admitted_kind, admitted),
+        *((kind, route) for route in rejected),
+    ]
     pool = _pool_type()(1)
     acquisition = asyncio.create_task(
         _adapter(
@@ -1283,27 +1317,28 @@ async def test_callback_overflow_burst_is_actionless_and_not_retained(kind: str)
             await acquisition
 
         _assert_failure(raised.value, stage="capacity")
-        assert _retained_task_count(pool) <= 2
+        assert runtime.context_close_task_names.count("article-browser-emergency-context-shutdown") == 1
+        assert _retained_task_count(pool) == 3
         if kind == "http":
-            assert [route.abort_calls for route in rejected] == [0] * len(rejected)
-            assert not any(route.abort_started.is_set() for route in rejected)
+            assert [route.abort_calls for route in rejected] == [1] * len(rejected)
+            assert [route.continue_calls for route in rejected] == [[] for _ in rejected]
+            assert all(route.handled.is_set() for route in rejected)
+            assert all(
+                task.done() for task in runtime.all_callback_tasks if task.get_name() == "fake-playwright-http-callback"
+            )
         else:
-            assert [route.close_calls for route in rejected] == [[] for _ in rejected]
-            assert not any(route.close_started.is_set() for route in rejected)
+            assert [route.close_calls for route in rejected] == [[(1008, "Policy denied")] for _ in rejected]
+            assert [route.connect_calls for route in rejected] == [0] * len(rejected)
     finally:
         gated.release.set()
-        for route in rejected:
-            if kind == "http":
-                route.abort_release.set()
-            else:
-                route.close_release.set()
+        runtime.resistant_cleanup_release.set()
 
     await _assert_pool_active_count(pool, 0)
     await _assert_no_browser_tasks()
 
 
 @pytest.mark.unit
-async def test_callback_after_released_lease_is_actionless_and_capacity_is_reusable() -> None:
+async def test_http_callback_after_released_lease_handles_closed_target_without_attaching() -> None:
     runtime = _FakeBrowserRuntime()
     pool = _pool_type()(1)
 
@@ -1318,17 +1353,21 @@ async def test_callback_after_released_lease_is_actionless_and_capacity_is_reusa
     for _ in range(8):
         await asyncio.sleep(0)
 
-    late = _FakeWebSocketRoute("wss://late.example/after-release")
-    handler = runtime.installed_websocket_handler
+    late = _FakeHttpRoute("https://late.example/after-release")
+    handler = runtime.installed_http_handler
     assert handler is not None
-    late_task = asyncio.create_task(
-        handler(late),
-        name="fake-playwright-websocket-callback-after-release",
+    context = runtime.context
+    assert context is not None
+    late_task = context._schedule(
+        handler,
+        late,
+        kind="http",
     )
     await asyncio.wait_for(late_task, timeout=0.1)
 
-    assert late.connect_calls == 0
-    assert late.close_calls == []
+    assert late.abort_calls == 1
+    assert late.continue_calls == []
+    assert late.handled.is_set()
     assert pool.active_count == 0
 
     second_runtime = _FakeBrowserRuntime()
@@ -1440,6 +1479,170 @@ async def test_teardown_task_creation_failure_attempts_owners_and_releases_lease
     _assert_failure(raised.value, stage="cleanup")
     assert runtime.events[-3:] == ["close:context", "close:browser", "stop:playwright"]
     assert pool.active_count == 0
+
+
+@pytest.mark.unit
+async def test_cleanup_callback_registration_failure_keeps_permanent_lease_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeBrowserRuntime()
+    pool = _pool_type()(1)
+    original_create_task = asyncio.create_task
+    rejected_tasks: list[asyncio.Task[Any]] = []
+
+    def create_task(
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        name: str | None = None,
+        context: Any = None,
+    ) -> asyncio.Task[Any]:
+        if name == "article-browser-cleanup-page":
+            task = _DoneCallbackRejectingTask(
+                coroutine,
+                loop=asyncio.get_running_loop(),
+                name=name,
+            )
+            rejected_tasks.append(task)
+            return task
+        kwargs: dict[str, object] = {"name": name}
+        if context is not None:
+            kwargs["context"] = context
+        return original_create_task(coroutine, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_task", create_task)
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(
+            runtime,
+            _FakeGuard([]),
+            acquisition_pool=pool,
+        ).acquire(_TARGET, _profile())
+
+    _assert_failure(raised.value, stage="cleanup")
+    assert len(rejected_tasks) == 1
+    task_ref = weakref.ref(rejected_tasks[0])
+    rejected_tasks.clear()
+    gc.collect()
+    assert task_ref() is not None
+    assert pool.active_count == 1
+    assert _retained_task_count(pool) == 1
+
+
+@pytest.mark.unit
+async def test_emergency_shutdown_creation_failure_falls_back_to_normal_teardown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admitted = _GatedOutcome(True)
+    rejected = _FakeWebSocketRoute("wss://late.example/rejected")
+    runtime = _FakeBrowserRuntime(
+        dispatches=[
+            ("websocket", _FakeWebSocketRoute("wss://late.example/admitted")),
+            ("websocket", rejected),
+        ]
+    )
+    pool = _pool_type()(1)
+    original_create_task = asyncio.create_task
+    emergency_attempts = 0
+
+    def create_task(
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        name: str | None = None,
+        context: Any = None,
+    ) -> asyncio.Task[Any]:
+        nonlocal emergency_attempts
+        if name == "article-browser-emergency-context-shutdown":
+            emergency_attempts += 1
+            coroutine.close()
+            raise RuntimeError("https://secret.example/path?token=raw")
+        kwargs: dict[str, object] = {"name": name}
+        if context is not None:
+            kwargs["context"] = context
+        return original_create_task(coroutine, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_task", create_task)
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(
+            runtime,
+            _FakeGuard([admitted]),
+            cleanup_grace_s=0.01,
+            acquisition_pool=pool,
+            callback_capacity=1,
+        ).acquire(_TARGET, _profile())
+
+    _assert_failure(raised.value, stage="capacity")
+    assert emergency_attempts == 1
+    assert rejected.connect_calls == 0
+    assert rejected.close_calls == [(1008, "Policy denied")]
+    assert "article-browser-cleanup-context" in runtime.context_close_task_names
+
+    admitted.release.set()
+    await _assert_pool_active_count(pool, 0)
+
+
+@pytest.mark.unit
+async def test_emergency_shutdown_callback_registration_failure_keeps_permanent_lease_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admitted = _GatedOutcome(True)
+    rejected = _FakeWebSocketRoute("wss://late.example/rejected")
+    runtime = _FakeBrowserRuntime(
+        dispatches=[
+            ("websocket", _FakeWebSocketRoute("wss://late.example/admitted")),
+            ("websocket", rejected),
+        ]
+    )
+    pool = _pool_type()(1)
+    original_create_task = asyncio.create_task
+    rejected_tasks: list[asyncio.Task[Any]] = []
+
+    def create_task(
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        name: str | None = None,
+        context: Any = None,
+    ) -> asyncio.Task[Any]:
+        if name == "article-browser-emergency-context-shutdown":
+            task = _DoneCallbackRejectingTask(
+                coroutine,
+                loop=asyncio.get_running_loop(),
+                name=name,
+            )
+            rejected_tasks.append(task)
+            return task
+        kwargs: dict[str, object] = {"name": name}
+        if context is not None:
+            kwargs["context"] = context
+        return original_create_task(coroutine, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_task", create_task)
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(
+            runtime,
+            _FakeGuard([admitted]),
+            cleanup_grace_s=0.01,
+            acquisition_pool=pool,
+            callback_capacity=1,
+        ).acquire(_TARGET, _profile())
+
+    _assert_failure(raised.value, stage="capacity")
+    assert rejected.close_calls == [(1008, "Policy denied")]
+    assert len(rejected_tasks) == 1
+
+    admitted.release.set()
+    for _ in range(100):
+        if _retained_task_count(pool) == 1:
+            break
+        await asyncio.sleep(0)
+
+    task_ref = weakref.ref(rejected_tasks[0])
+    rejected_tasks.clear()
+    gc.collect()
+    assert task_ref() is not None
+    assert pool.active_count == 1
+    assert _retained_task_count(pool) == 1
 
 
 @pytest.mark.unit
