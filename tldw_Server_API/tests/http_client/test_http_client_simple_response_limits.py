@@ -24,6 +24,7 @@ class _StreamingResponse:
         self.encoding = "utf-8"
         self._chunks = chunks
         self.closed = False
+        self.callback_results: list[object] = []
 
     def iter_raw(self):
         yield from self._chunks
@@ -89,7 +90,12 @@ class _StreamingCurlSession:
 
     def get(self, url: str, **kwargs: object) -> _StreamingResponse:
         self.get_calls.append({"url": url, **kwargs})
-        return self.__class__.responses.pop(0)
+        response = self.__class__.responses.pop(0)
+        content_callback = kwargs.get("content_callback")
+        if callable(content_callback):
+            for chunk in response._chunks:
+                response.callback_results.append(content_callback(chunk))
+        return response
 
 
 @pytest.fixture(autouse=True)
@@ -191,9 +197,11 @@ def test_simple_curl_fetch_reads_bounded_stream_and_closes_session(
 
     session = curl_streaming_backend.instances[0]
     assert result["text"] == "abcde"
-    assert session.get_calls[0]["stream"] is True
+    assert session.get_calls[0].get("stream") is not True
+    assert callable(session.get_calls[0]["content_callback"])
     assert session.get_calls[0]["accept_encoding"] is None
     assert session.get_calls[0]["headers"] == {"Accept-Encoding": "identity"}
+    assert response.callback_results == [2, 3]
     assert response.closed is True
     assert session.closed is True
 

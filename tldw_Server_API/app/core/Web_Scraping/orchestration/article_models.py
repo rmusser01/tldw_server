@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_head
 
 DEFAULT_MAX_ARTICLE_BYTES = 16_777_216
 DEFAULT_MAX_BROWSER_TRANSFER_BYTES = 67_108_864
+MAX_CONFIGURED_RESPONSE_BYTES = 1_073_741_824
 DEFAULT_BROWSER_RETRIES = 3
 DEFAULT_BROWSER_TIMEOUT_MS = 60_000
 DEFAULT_STEALTH_WAIT_MS = 5_000
@@ -56,17 +57,21 @@ def _freeze_mapping(value: Mapping[Any, Any] | None) -> Mapping[str, Any]:
 
 
 def _positive_integer_or_default(value: Any, default: int) -> int:
-    """Accept only integer configuration values strictly greater than zero."""
+    """Accept positive integer budgets up to the explicit server ceiling."""
     if type(value) is int:
-        return value if value > 0 else default
+        return value if 0 < value <= MAX_CONFIGURED_RESPONSE_BYTES else default
     if type(value) is str:
         normalized = value.strip()
-        if normalized.isascii() and normalized.isdecimal():
+        if (
+            normalized.isascii()
+            and normalized.isdecimal()
+            and len(normalized) <= len(str(MAX_CONFIGURED_RESPONSE_BYTES))
+        ):
             try:
                 parsed = int(normalized)
             except (ValueError, OverflowError):
                 return default
-            return parsed if parsed > 0 else default
+            return parsed if 0 < parsed <= MAX_CONFIGURED_RESPONSE_BYTES else default
     return default
 
 

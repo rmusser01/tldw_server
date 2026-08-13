@@ -120,9 +120,9 @@ Only the following behavior changes are approved in this phase:
    access while preserving its distinct result shape.
 7. Raw provider, regex, selector, and transport exception text is replaced at
    public boundaries by the stable sanitized codes defined in this design.
-8. Submission of extraction work is bounded by the existing worker setting and
-   a conservative default instead of relying on an unbounded default executor
-   queue.
+8. Submission of extraction work is bounded by the existing worker setting,
+   an explicit 64-worker ceiling, and a conservative default instead of relying
+   on an unbounded default executor queue.
 9. The direct async Playwright article path installs target, redirect,
    subresource, service-worker, and WebSocket egress controls before navigation.
    The current path performs only target-level admission.
@@ -450,9 +450,11 @@ Phase 4 adds two normalized server settings:
 - `web_scraper_max_browser_transfer_bytes`, default 67,108,864 bytes, bounds
   aggregate encoded browser response data for one article navigation.
 
-Only positive integers are accepted; absent, malformed, zero, or negative values
-use the defaults. The normalized limits are immutable for one scrape request and
-injectable in tests.
+Only positive integers no greater than 1,073,741,824 bytes (1 GiB) are accepted;
+absent, malformed, zero, negative, overlong-decimal, or larger values use the
+defaults. Decimal length is checked before integer conversion so the bound does
+not depend on the interpreter's integer-string protections. The normalized
+limits are immutable for one scrape request and injectable in tests.
 
 The limits apply to `scrape_article`, `scrape_article_blocking`, and
 `scrape_article_sync`. They do not change the Phase 5 crawl-bound
@@ -473,7 +475,11 @@ forwards it to the selected HTTP backend, and a backend that cannot enforce a
 non-`None` limit fails closed instead of dispatching an unbounded request.
 Phase 4C extends the central simple `http_client.fetch` path so both its httpx
 and curl backends enforce the optional bound while streaming/accumulating the
-body. Callers that omit the option retain existing behavior.
+body. The curl backend uses curl-cffi's synchronous native `content_callback`,
+not its background producer queue, and retains at most the configured bytes in
+the application buffer. Extra bytes are consumed without retention until the
+hop status is available: terminal overflow fails, while redirect bodies remain
+ignored as before. Callers that omit the option retain existing behavior.
 
 Before returning rendered HTML, one browser-side operation serializes the
 document, measures its UTF-8 byte length, and returns the string only when it is
@@ -626,8 +632,10 @@ An `ExtractionExecutorManager` owns one process-scoped executor generation. A
 generation contains its process ID, monotonically increasing generation ID,
 normalized worker count, `ThreadPoolExecutor`, `threading.BoundedSemaphore`, and
 closed flag. The worker count is captured when the generation is created: a
-positive `EXTRACTOR_MAX_WORKERS` value is used when configured, otherwise the
-default is four. Environment changes do not silently resize a live generation.
+positive `EXTRACTOR_MAX_WORKERS` value no greater than 64 is used when
+configured, otherwise the default is four. Decimal length is checked before
+conversion so Python 3.10 and later interpreters apply the same bound.
+Environment changes do not silently resize a live generation.
 
 A manager lock protects generation creation, replacement, and submission. Async
 callers attempt non-blocking acquisition on the current generation's semaphore

@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
 from .article_models import ArticleFailure
 
 DEFAULT_EXTRACTOR_MAX_WORKERS = 4
+MAX_EXTRACTOR_WORKERS = 64
 DEFAULT_EXTRACTOR_ADMISSION_TIMEOUT_SECONDS = 30.0
 _INITIAL_ADMISSION_DELAY_SECONDS = 0.01
 _MAX_ADMISSION_DELAY_SECONDS = 0.1
@@ -96,18 +97,18 @@ class _Transition:
 
 
 def _normalize_worker_count(value: Any) -> int:
-    """Accept only positive, non-boolean integer worker counts."""
+    """Accept positive, non-boolean worker counts up to the server ceiling."""
 
-    if type(value) is int and value > 0:
+    if type(value) is int and 0 < value <= MAX_EXTRACTOR_WORKERS:
         return value
     if type(value) is str:
         normalized = value.strip()
-        if normalized.isascii() and normalized.isdecimal():
+        if normalized.isascii() and normalized.isdecimal() and len(normalized) <= len(str(MAX_EXTRACTOR_WORKERS)):
             try:
                 parsed = int(normalized)
             except (ValueError, OverflowError):
                 return DEFAULT_EXTRACTOR_MAX_WORKERS
-            if parsed > 0:
+            if 0 < parsed <= MAX_EXTRACTOR_WORKERS:
                 return parsed
     return DEFAULT_EXTRACTOR_MAX_WORKERS
 
@@ -324,6 +325,8 @@ class ExtractionExecutorManager:
                 self._transition = transition
                 owns_transition = True
 
+        if transition is None:
+            raise ArticleFailure("extraction_error", "reload")
         if owns_transition:
             try:
                 self._start_transition_thread(
@@ -338,8 +341,6 @@ class ExtractionExecutorManager:
                     startup_failed=True,
                 )
 
-        if transition is None:
-            raise ArticleFailure("extraction_error", "reload")
         await self._wait_for_transition(transition)
 
     async def shutdown(self) -> None:
@@ -361,6 +362,8 @@ class ExtractionExecutorManager:
                 self._transition = transition
                 owns_transition = True
 
+        if transition is None:
+            return
         if owns_transition:
             try:
                 self._start_transition_thread(
@@ -375,8 +378,7 @@ class ExtractionExecutorManager:
                     startup_failed=True,
                 )
 
-        if transition is not None:
-            await self._wait_for_transition(transition)
+        await self._wait_for_transition(transition)
 
     def reset_for_tests(self) -> None:
         """Synchronously discard all owned state and restore initial admission."""

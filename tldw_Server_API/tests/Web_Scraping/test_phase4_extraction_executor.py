@@ -113,6 +113,9 @@ print(
         0,
         -1,
         "bad",
+        65,
+        "65",
+        pytest.param("9" * 1_000, id="python-310-oversized-numeric"),
         pytest.param("9" * 5_000, id="oversized-numeric"),
     ],
 )
@@ -127,6 +130,37 @@ async def test_invalid_worker_settings_use_four(
     generation = manager.current_generation
     assert generation is not None
     assert generation.worker_count == 4
+
+
+@pytest.mark.asyncio
+async def test_worker_setting_accepts_the_explicit_ceiling(
+    managers: list[ExtractionExecutorManager],
+) -> None:
+    created_with: list[int] = []
+
+    class Executor:
+        def submit(self, func: Any) -> Future[Any]:
+            future: Future[Any] = Future()
+            future.set_result(func())
+            return future
+
+        def shutdown(self, **_kwargs: Any) -> None:
+            return None
+
+    def factory(worker_count: int) -> Executor:
+        created_with.append(worker_count)
+        return Executor()
+
+    manager = _own(
+        managers,
+        ExtractionExecutorManager(
+            worker_count_loader=lambda: "64",
+            executor_factory=factory,
+        ),
+    )
+
+    assert await manager.run(lambda: "ok") == "ok"
+    assert created_with == [64]
 
 
 @pytest.mark.asyncio

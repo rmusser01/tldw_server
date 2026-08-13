@@ -28,7 +28,10 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScrapePlan
         ({"web_scraper_max_browser_transfer_bytes": -1}, (16_777_216, 67_108_864)),
         ({"web_scraper_max_article_bytes": 1.5}, (16_777_216, 67_108_864)),
         ({"web_scraper_max_browser_transfer_bytes": "2.0"}, (16_777_216, 67_108_864)),
+        ({"web_scraper_max_article_bytes": "9" * 1_000}, (16_777_216, 67_108_864)),
         ({"web_scraper_max_article_bytes": "9" * 5_000}, (16_777_216, 67_108_864)),
+        ({"web_scraper_max_article_bytes": 1_073_741_825}, (16_777_216, 67_108_864)),
+        ({"web_scraper_max_browser_transfer_bytes": "1073741825"}, (16_777_216, 67_108_864)),
     ],
 )
 def test_article_limits_fall_back_when_configured_values_are_not_positive_integers(
@@ -49,6 +52,18 @@ def test_article_limits_use_positive_integer_config_values() -> None:
     )
 
     assert limits == ArticleLimits(max_article_bytes=1024, max_browser_transfer_bytes=4096)
+
+
+def test_article_limits_accept_the_explicit_configuration_ceiling() -> None:
+    limits = ArticleLimits(
+        max_article_bytes=1_073_741_824,
+        max_browser_transfer_bytes="1073741824",
+    )
+
+    assert limits == ArticleLimits(
+        max_article_bytes=1_073_741_824,
+        max_browser_transfer_bytes=1_073_741_824,
+    )
 
 
 def test_full_loaded_config_uses_raw_limits_and_legacy_route_values() -> None:

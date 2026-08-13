@@ -1341,6 +1341,29 @@ def _read_bounded_chunks(chunks: Iterable[bytes], max_response_bytes: int) -> by
     return bytes(body)
 
 
+class _BoundedBodyCollector:
+    """Collect callback-delivered bytes without retaining data past the limit."""
+
+    def __init__(self, max_response_bytes: int) -> None:
+        self._max_response_bytes = max_response_bytes
+        self._body = bytearray()
+        self.overflow = False
+
+    @property
+    def body(self) -> bytes:
+        return bytes(self._body)
+
+    def __call__(self, chunk: bytes) -> int:
+        remaining = self._max_response_bytes - len(self._body)
+        if len(chunk) > remaining:
+            if remaining > 0:
+                self._body.extend(chunk[:remaining])
+            self.overflow = True
+        else:
+            self._body.extend(chunk)
+        return len(chunk)
+
+
 def _decode_bounded_response_body(response: Any, body: bytes) -> str:
     """Decode raw bounded response bytes using the response encoding when known."""
     encoding = str(getattr(response, "encoding", "") or "utf-8")
@@ -4777,12 +4800,14 @@ def fetch(*args, **kwargs):
                         raise RuntimeError(
                             "Selected backend does not support bounded response streaming"
                         )
+                    body_collector = _BoundedBodyCollector(max_response_bytes)
+
                     req_kwargs: dict[str, Any] = {
                         "headers": hop_headers,
                         "cookies": hop_cookies,
                         "allow_redirects": False,
-                        "stream": True,
                         "accept_encoding": None,
+                        "content_callback": body_collector,
                     }
                     if timeout is not None:
                         req_kwargs["timeout"] = timeout
@@ -4805,15 +4830,9 @@ def fetch(*args, **kwargs):
                                     "Compressed responses are not allowed with "
                                     "max_response_bytes"
                                 )
-                            iter_content = getattr(streamed, "iter_content", None)
-                            if not callable(iter_content):
-                                raise RuntimeError(
-                                    "Selected backend does not support bounded response streaming"
-                                )
-                            body = _read_bounded_chunks(
-                                iter_content(),
-                                max_response_bytes,
-                            )
+                            if body_collector.overflow:
+                                raise ValueError("Response exceeds max_response_bytes limit")
+                            body = body_collector.body
                         resp = HttpResponse(
                             status=status_code,
                             headers=response_headers,
