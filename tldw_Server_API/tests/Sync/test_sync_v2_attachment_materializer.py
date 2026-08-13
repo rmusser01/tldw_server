@@ -8,8 +8,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.integration
-
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
@@ -125,6 +123,7 @@ def _accept_and_apply(
     return accepted, result
 
 
+@pytest.mark.integration
 def test_create_projects_into_registry_and_preserves_pending_binding(projection) -> None:
     note_db, store, materializer = projection
 
@@ -145,6 +144,7 @@ def test_create_projects_into_registry_and_preserves_pending_binding(projection)
     assert binding.resolved_blob_id is None
 
 
+@pytest.mark.integration
 def test_create_observes_present_blob_without_changing_envelope_identity(projection) -> None:
     note_db, store, materializer = projection
     store.complete_blob_upload(
@@ -179,6 +179,7 @@ def test_create_observes_present_blob_without_changing_envelope_identity(project
     assert note_db.note_attachment_store.get(DATASET, ATTACHMENT_ID) is not None
 
 
+@pytest.mark.integration
 def test_late_blob_resolution_never_rehashes_or_enriches_accepted_envelope(projection) -> None:
     _, store, materializer = projection
     accepted, result = _accept_and_apply(store, materializer, _envelope())
@@ -212,6 +213,7 @@ def test_late_blob_resolution_never_rehashes_or_enriches_accepted_envelope(proje
     assert binding.resolved_blob_id == "blob-late"
 
 
+@pytest.mark.integration
 def test_rename_then_replace_advance_registry_exactly_once(projection) -> None:
     note_db, store, materializer = projection
     first, _ = _accept_and_apply(store, materializer, _envelope())
@@ -245,6 +247,7 @@ def test_rename_then_replace_advance_registry_exactly_once(projection) -> None:
     assert row.version == 3 and row.object_hash == third.payload_hash
 
 
+@pytest.mark.integration
 def test_tombstone_and_routing_only_restore_preserve_stable_identity(projection) -> None:
     note_db, store, materializer = projection
     created, _ = _accept_and_apply(store, materializer, _envelope())
@@ -283,6 +286,7 @@ def test_tombstone_and_routing_only_restore_preserve_stable_identity(projection)
     assert row.attachment_id == ATTACHMENT_ID and row.note_id == NOTE_ID
 
 
+@pytest.mark.integration
 def test_exact_and_postcondition_replay_do_not_advance_product_revision(projection) -> None:
     note_db, store, materializer = projection
     submitted = _envelope()
@@ -312,6 +316,7 @@ def test_exact_and_postcondition_replay_do_not_advance_product_revision(projecti
     assert row.created_at == CREATED_AT and row.last_modified == CREATED_AT
 
 
+@pytest.mark.integration
 def test_stale_base_is_rejected_before_product_write(projection) -> None:
     note_db, store, materializer = projection
     first, _ = _accept_and_apply(store, materializer, _envelope())
@@ -331,6 +336,7 @@ def test_stale_base_is_rejected_before_product_write(projection) -> None:
     assert row is not None and row.version == 1 and row.file_name == "diagram.png"
 
 
+@pytest.mark.integration
 def test_first_tombstone_is_a_conflict_without_creating_a_live_product_row(
     projection,
 ) -> None:
@@ -349,6 +355,7 @@ def test_first_tombstone_is_a_conflict_without_creating_a_live_product_row(
     assert note_db.note_attachment_store.get(DATASET, ATTACHMENT_ID) is None
 
 
+@pytest.mark.integration
 def test_name_collision_and_hidden_parent_fail_without_partial_projection(projection) -> None:
     note_db, store, materializer = projection
     _accept_and_apply(store, materializer, _envelope())

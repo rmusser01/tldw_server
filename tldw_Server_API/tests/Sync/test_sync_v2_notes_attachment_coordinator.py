@@ -9,8 +9,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.integration
-
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
@@ -157,6 +155,7 @@ def _store_blob(service: SyncV2Service, *, blob_hash: str = BLOB_HASH) -> None:
     )
 
 
+@pytest.mark.integration
 def test_optional_dataset_resolves_only_the_canonical_default(coordinator_fixture) -> None:
     _, service, coordinator = coordinator_fixture
 
@@ -175,6 +174,7 @@ def test_optional_dataset_resolves_only_the_canonical_default(coordinator_fixtur
     assert service.store.get_dataset(DATASET) is not None
 
 
+@pytest.mark.integration
 def test_inactive_or_wrong_owner_resolution_is_none_and_never_falls_back(
     coordinator_fixture,
 ) -> None:
@@ -194,6 +194,7 @@ def test_inactive_or_wrong_owner_resolution_is_none_and_never_falls_back(
     ("gate", "supports_blobs", "state"),
     [(False, True, "ready"), (True, False, "ready"), (True, True, "failed")],
 )
+@pytest.mark.integration
 def test_readiness_failures_happen_before_product_writes(
     coordinator_fixture,
     gate: bool,
@@ -218,6 +219,7 @@ def test_readiness_failures_happen_before_product_writes(
     assert note_db.note_attachment_store.get(DATASET, ATTACHMENT_ID) is None
 
 
+@pytest.mark.integration
 def test_capture_rechecks_note_and_blob_then_returns_durable_response(
     coordinator_fixture,
 ) -> None:
@@ -239,6 +241,7 @@ def test_capture_rechecks_note_and_blob_then_returns_durable_response(
     assert binding.availability_at_acceptance == "available"
 
 
+@pytest.mark.integration
 def test_exact_retry_reuses_manifest_without_advancing_revision(coordinator_fixture) -> None:
     _, service, coordinator = coordinator_fixture
     _store_blob(service)
@@ -259,6 +262,7 @@ def test_exact_retry_reuses_manifest_without_advancing_revision(coordinator_fixt
     ) == 1
 
 
+@pytest.mark.integration
 def test_exact_retry_uses_the_indexed_stable_key_lookup(
     coordinator_fixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -282,6 +286,7 @@ def test_exact_retry_uses_the_indexed_stable_key_lookup(
     assert replay.envelope.server_cursor == first.envelope.server_cursor
 
 
+@pytest.mark.integration
 def test_idempotency_drift_is_rejected_without_a_product_write(coordinator_fixture) -> None:
     _, service, coordinator = coordinator_fixture
     _store_blob(service)
@@ -296,11 +301,13 @@ def test_idempotency_drift_is_rejected_without_a_product_write(coordinator_fixtu
     assert attachment is not None and attachment.file_name == "diagram.png"
 
 
+@pytest.mark.integration
 def test_allocated_filename_replay_requires_the_exact_requested_stem() -> None:
     assert _is_allocated_name_for_request("Report.pdf", "Report-1.pdf") is True
     assert _is_allocated_name_for_request("ReportLong.pdf", "Report-1.pdf") is False
 
 
+@pytest.mark.integration
 def test_filename_allocation_fails_closed_beyond_its_bounded_search(
     coordinator_fixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -340,6 +347,7 @@ def test_filename_allocation_fails_closed_beyond_its_bounded_search(
         )
 
 
+@pytest.mark.integration
 def test_note_read_set_race_and_blob_mismatch_reject_before_append(
     coordinator_fixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -374,6 +382,7 @@ def test_note_read_set_race_and_blob_mismatch_reject_before_append(
     assert note_db.note_attachment_store.get(DATASET, ATTACHMENT_ID) is None
 
 
+@pytest.mark.integration
 def test_blob_mismatch_rejects_before_append(coordinator_fixture) -> None:
     note_db, service, coordinator = coordinator_fixture
     _store_blob(service, blob_hash="sha256:" + "b" * 64)
@@ -390,6 +399,7 @@ def test_blob_mismatch_rejects_before_append(coordinator_fixture) -> None:
     assert note_db.note_attachment_store.get(DATASET, ATTACHMENT_ID) is None
 
 
+@pytest.mark.integration
 def test_failed_projection_manifest_is_resumed_to_exact_postcondition(
     coordinator_fixture,
 ) -> None:
@@ -407,6 +417,7 @@ def test_failed_projection_manifest_is_resumed_to_exact_postcondition(
     assert replay.attachment.version == 1
 
 
+@pytest.mark.integration
 def test_tombstone_plan_uses_exact_base_and_routing_restore_remains_separate(
     coordinator_fixture,
 ) -> None:

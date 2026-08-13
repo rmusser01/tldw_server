@@ -43,8 +43,6 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
-pytestmark = pytest.mark.integration
-
 ATTACHMENT_ID = "2c4cb609-c4db-44f9-8e35-f078bd36d6b2"
 NOTE_ID = "a1677eb1-1f41-4c86-a8dd-1eaa14b014e2"
 OBJECT_HASH = "sha256:" + "a" * 64
@@ -244,6 +242,7 @@ def _item_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
+@pytest.mark.integration
 def test_notes_attachment_schema_accepts_canonical_item_page_and_mutation_response():
     item = NotesAttachmentItem.model_validate(_item_payload())
     page = NotesAttachmentPage.model_validate(
@@ -267,11 +266,13 @@ def test_notes_attachment_schema_accepts_canonical_item_page_and_mutation_respon
         ({**_item_payload(), "storage_key": "secret"}, NotesAttachmentItem),
     ],
 )
+@pytest.mark.integration
 def test_notes_attachment_schema_rejects_extra_fields(payload: dict[str, object], model: type):
     with pytest.raises(ValidationError):
         model.model_validate(payload)
 
 
+@pytest.mark.integration
 def test_notes_attachment_schema_enforces_rename_only_and_reason_bounds():
     rename = NotesAttachmentRenameRequest.model_validate({"file_name": " Quarterly Report.PDF "})
     assert rename.file_name == "Quarterly_Report.pdf"
@@ -283,6 +284,7 @@ def test_notes_attachment_schema_enforces_rename_only_and_reason_bounds():
         NotesAttachmentRenameRequest.model_validate({"file_name": "payload.exe"})
 
 
+@pytest.mark.integration
 def test_notes_attachment_schema_validates_from_upload_identifier():
     request = NotesAttachmentFromUploadRequest.model_validate({"upload_id": "upload-1"})
     assert request.upload_id == "upload-1"
@@ -292,6 +294,7 @@ def test_notes_attachment_schema_validates_from_upload_identifier():
             NotesAttachmentFromUploadRequest.model_validate({"upload_id": upload_id})
 
 
+@pytest.mark.integration
 def test_attachment_blob_upload_request_requires_one_strict_intent() -> None:
     base = {
         "dataset_id": "dataset-1",
@@ -347,6 +350,7 @@ def test_attachment_blob_upload_request_requires_one_strict_intent() -> None:
     assert generic.metadata == {}
 
 
+@pytest.mark.integration
 def test_notes_attachment_etag_grammar_is_exact():
     etag = format_notes_attachment_etag(ATTACHMENT_ID, 3, OBJECT_HASH)
     parsed = parse_notes_attachment_if_match(etag)
@@ -365,6 +369,7 @@ def test_notes_attachment_etag_grammar_is_exact():
             parse_notes_attachment_if_match(value)
 
 
+@pytest.mark.integration
 def test_notes_attachment_idempotency_key_and_keyset_cursor_boundaries():
     assert validate_notes_attachment_idempotency_key("request-1") == "request-1"
     assert validate_notes_attachment_keyset_cursor("opaque.cursor") == "opaque.cursor"
@@ -377,6 +382,7 @@ def test_notes_attachment_idempotency_key_and_keyset_cursor_boundaries():
             validate_notes_attachment_keyset_cursor(value)
 
 
+@pytest.mark.integration
 def test_notes_attachment_item_rejects_inconsistent_lifecycle_and_etag():
     with pytest.raises(ValidationError):
         NotesAttachmentItem.model_validate(_item_payload(state="tombstoned"))
@@ -394,11 +400,13 @@ def test_notes_attachment_item_rejects_inconsistent_lifecycle_and_etag():
         {"created_by": " device-1"},
     ],
 )
+@pytest.mark.integration
 def test_notes_attachment_item_rejects_coerced_or_unnormalized_authority_fields(overrides):
     with pytest.raises(ValidationError):
         NotesAttachmentItem.model_validate(_item_payload(**overrides))
 
 
+@pytest.mark.integration
 def test_canonical_static_route_precedes_legacy_filename_and_lists_keyset_page(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
@@ -413,6 +421,7 @@ def test_canonical_static_route_precedes_legacy_filename_and_lists_keyset_page(
     assert response.json() == {"items": [], "next_cursor": None, "has_more": False}
 
 
+@pytest.mark.integration
 def test_from_upload_requires_headers_and_supports_exact_lifecycle_replay(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
@@ -585,6 +594,7 @@ def test_from_upload_requires_headers_and_supports_exact_lifecycle_replay(
     assert restore_replay.json()["etag"] == restored.json()["etag"]
 
 
+@pytest.mark.integration
 def test_canonical_content_supports_conditionals_and_single_byte_ranges(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
@@ -655,6 +665,7 @@ def test_canonical_content_supports_conditionals_and_single_byte_ranges(
     assert unbound.status_code == 404
 
 
+@pytest.mark.integration
 def test_active_legacy_filename_routes_are_canonical_compatibility_aliases(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
     tmp_path: Path,
@@ -719,6 +730,7 @@ def test_active_legacy_filename_routes_are_canonical_compatibility_aliases(
     assert tombstone is not None and tombstone.deleted is True
 
 
+@pytest.mark.integration
 def test_active_legacy_attachment_routes_map_invalid_idempotency_keys_to_400(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
@@ -752,6 +764,7 @@ def test_active_legacy_attachment_routes_map_invalid_idempotency_keys_to_400(
         (b"%PDF-1.7\nvalid bytes\n%%EOF\n", "text/plain"),
     ],
 )
+@pytest.mark.integration
 def test_active_one_shot_upload_rejects_mismatched_content_before_blob_work(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
     payload: bytes,
@@ -775,6 +788,7 @@ def test_active_one_shot_upload_rejects_mismatched_content_before_blob_work(
     )
 
 
+@pytest.mark.integration
 def test_active_one_shot_upload_enforces_the_effective_sync_blob_limit(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
@@ -797,6 +811,7 @@ def test_active_one_shot_upload_enforces_the_effective_sync_blob_limit(
     )
 
 
+@pytest.mark.integration
 def test_active_one_shot_upload_rejects_noncanonical_media_type_before_blob_work(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
@@ -818,6 +833,7 @@ def test_active_one_shot_upload_rejects_noncanonical_media_type_before_blob_work
     )
 
 
+@pytest.mark.integration
 def test_canonical_keyset_pages_batch_availability_and_reject_bad_cursors(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
     monkeypatch: pytest.MonkeyPatch,
@@ -882,6 +898,7 @@ def test_canonical_keyset_pages_batch_availability_and_reject_bad_cursors(
     assert oversized.status_code == 413
 
 
+@pytest.mark.integration
 def test_canonical_routes_hide_deleted_parent_and_fail_closed_when_writes_are_disabled(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
@@ -933,6 +950,7 @@ def test_canonical_routes_hide_deleted_parent_and_fail_closed_when_writes_are_di
     assert hidden_detail.status_code == 404
 
 
+@pytest.mark.integration
 def test_rollout_inactive_preserves_legacy_filesystem_routes_and_rejects_canonical_api(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
     tmp_path: Path,
@@ -981,6 +999,7 @@ def test_rollout_inactive_preserves_legacy_filesystem_routes_and_rejects_canonic
 
 
 @pytest.mark.parametrize("state", ["initializing", "failed"])
+@pytest.mark.integration
 def test_canonical_routes_fail_closed_before_attachment_initialization_is_ready(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
     state: str,
@@ -1006,6 +1025,7 @@ def test_canonical_routes_fail_closed_before_attachment_initialization_is_ready(
     )
 
 
+@pytest.mark.integration
 def test_canonical_routes_require_attachment_domain_enrollment(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
