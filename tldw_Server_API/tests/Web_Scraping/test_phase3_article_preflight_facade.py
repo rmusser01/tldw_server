@@ -142,6 +142,7 @@ def failed_article(url: str) -> dict[str, Any]:
 @dataclass
 class ArticleHarness:
     article: ModuleType
+    dependencies: Any
     policy_checker: FakePolicyChecker
     fetch_client: FakeFetchClient
     evaluate_target: AsyncMock
@@ -252,6 +253,7 @@ def install_article_defaults(
     monkeypatch.setattr(canonical, "_build_default_dependencies", lambda _cookies: dependencies)
     return ArticleHarness(
         article=article,
+        dependencies=dependencies,
         policy_checker=policy_checker,
         fetch_client=fetch_client,
         evaluate_target=evaluate,
