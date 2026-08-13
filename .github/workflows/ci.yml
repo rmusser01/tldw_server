@@ -979,6 +979,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
@@ -1754,6 +1755,7 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -2444,6 +2446,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -3215,6 +3218,7 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -3776,6 +3780,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -4547,6 +4552,7 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -5031,6 +5037,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -5802,6 +5809,7 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -6292,6 +6300,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -7063,6 +7072,7 @@ jobs:
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
+              tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py

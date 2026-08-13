@@ -12,6 +12,8 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
+    BatchRenewLeasesCommand,
+    BatchRenewLeasesResult,
     LifecycleResult,
     NoTransitionReason,
     ReleaseJobCommand,
@@ -189,14 +191,12 @@ def _classify_lifecycle_no_transition(
     return LifecycleResult.no_transition(NoTransitionReason.WRONG_STATUS, row=current)
 
 
-def renew_lease(
-    conn: Any,
-    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
-    *,
+def _renew_lease_statement(
     command: RenewLeaseCommand,
+    *,
     now: datetime,
-) -> LifecycleResult:
-    """Renew one processing Postgres job lease without shortening it."""
+) -> tuple[str, tuple[Any, ...]]:
+    """Build the PostgreSQL statement for one lease renewal attempt."""
 
     has_percent = command.progress_percent is not None
     has_message = command.progress_message is not None
@@ -209,10 +209,23 @@ def renew_lease(
     params.append(command.job_id)
     if command.enforce:
         params.extend((command.worker_id, command.lease_id))
+    return sql, tuple(params)
+
+
+def renew_lease(
+    conn: Any,
+    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
+    *,
+    command: RenewLeaseCommand,
+    now: datetime,
+) -> LifecycleResult:
+    """Renew one processing Postgres job lease without shortening it."""
+
+    sql, params = _renew_lease_statement(command, now=now)
 
     with conn:
         with cursor_factory(conn) as cur:
-            cur.execute(sql, tuple(params))
+            cur.execute(sql, params)
             row = cur.fetchone()
             if row is None:
                 return _classify_lifecycle_no_transition(
@@ -223,6 +236,37 @@ def renew_lease(
                     lease_id=command.lease_id,
                 )
             return LifecycleResult.applied(row=dict(row))
+
+
+def renew_leases_batch(
+    conn: Any,
+    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
+    *,
+    command: BatchRenewLeasesCommand,
+    clock: Callable[[], datetime],
+) -> BatchRenewLeasesResult:
+    """Renew an ordered PostgreSQL lease batch in one transaction."""
+
+    applied_count = 0
+    with conn:
+        with cursor_factory(conn) as cur:
+            now = clock()
+            for item in command.items:
+                item_command = RenewLeaseCommand(
+                    job_id=item.job_id,
+                    seconds=item.seconds,
+                    enforce=command.enforce,
+                    worker_id=item.worker_id,
+                    lease_id=item.lease_id,
+                )
+                sql, params = _renew_lease_statement(item_command, now=now)
+                cur.execute(sql, params)
+                if cur.fetchone() is not None:
+                    applied_count += 1
+            return BatchRenewLeasesResult(
+                requested_count=len(command.items),
+                applied_count=applied_count,
+            )
 
 
 def release_job(

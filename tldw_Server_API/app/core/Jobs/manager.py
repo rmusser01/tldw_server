@@ -63,6 +63,8 @@ from .operations.contracts import (
     AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
+    BatchRenewLeaseItem,
+    BatchRenewLeasesCommand,
     CreateJobCommand,
     OperationOutcome,
     ReleaseJobCommand,
@@ -72,10 +74,12 @@ from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
 from .operations.postgres import release_job as _postgres_release_job
 from .operations.postgres import renew_lease as _postgres_renew_lease
+from .operations.postgres import renew_leases_batch as _postgres_renew_leases_batch
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
 from .operations.sqlite import release_job as _sqlite_release_job
 from .operations.sqlite import renew_lease as _sqlite_renew_lease
+from .operations.sqlite import renew_leases_batch as _sqlite_renew_leases_batch
 from .pg_migrations import (
     POSTGRES_ARCHIVE_CURSOR_TIME_SQL,
     ensure_job_counters_pg,
@@ -4591,83 +4595,41 @@ class JobManager:
         if enforce is None:
             enforce = self._should_enforce_ack()
         conn = self._connect()
-        affected = 0
         try:
-            if self.backend == "postgres":
-                with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
-                        now_ts = self._clock.now_utc()
-                        for it in items:
-                            secs = max(
-                                1,
-                                min(
-                                    int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"),
-                                    int(it.get("seconds") or 0),
-                                ),
-                            )
-                            if enforce:
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET leased_until = GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval) "
-                                        "WHERE id = %s AND status='processing' AND worker_id = %s AND lease_id = %s"
-                                    ),
-                                    (
-                                        now_ts,
-                                        now_ts,
-                                        secs,
-                                        int(it.get("job_id")),
-                                        it.get("worker_id"),
-                                        it.get("lease_id"),
-                                    ),
-                                )
-                            else:
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET leased_until = GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval) "
-                                        "WHERE id = %s AND status='processing'"
-                                    ),
-                                    (now_ts, now_ts, secs, int(it.get("job_id"))),
-                                )
-                            affected += cur.rowcount or 0
-            else:
-                with conn:
-                    for it in items:
-                        secs = max(
+            command = BatchRenewLeasesCommand(
+                items=tuple(
+                    BatchRenewLeaseItem(
+                        seconds=max(
                             1,
                             min(
-                                int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"), int(it.get("seconds") or 0)
+                                int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"),
+                                int(item.get("seconds") or 0),
                             ),
-                        )
-                        now_str = self._clock.now_utc().astimezone(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
-                        if enforce:
-                            cur = conn.execute(
-                                (
-                                    "UPDATE jobs SET leased_until = MAX(COALESCE(leased_until, DATETIME(?)), DATETIME(?, ?)) "
-                                    "WHERE id = ? AND status='processing' AND worker_id = ? AND lease_id = ?"
-                                ),
-                                (
-                                    now_str,
-                                    now_str,
-                                    f"+{secs} seconds",
-                                    int(it.get("job_id")),
-                                    it.get("worker_id"),
-                                    it.get("lease_id"),
-                                ),
-                            )
-                            affected += int(cur.rowcount or 0)
-                        else:
-                            cur = conn.execute(
-                                (
-                                    "UPDATE jobs SET leased_until = MAX(COALESCE(leased_until, DATETIME(?)), DATETIME(?, ?)) "
-                                    "WHERE id = ? AND status='processing'"
-                                ),
-                                (now_str, now_str, f"+{secs} seconds", int(it.get("job_id"))),
-                            )
-                            affected += int(cur.rowcount or 0)
-            return int(affected)
+                        ),
+                        job_id=int(item.get("job_id")),
+                        worker_id=item.get("worker_id"),
+                        lease_id=item.get("lease_id"),
+                    )
+                    for item in items
+                ),
+                enforce=bool(enforce),
+            )
+            if self.backend == "postgres":
+                result = _postgres_renew_leases_batch(
+                    conn,
+                    self._pg_cursor,
+                    command=command,
+                    clock=self._clock.now_utc,
+                )
+            else:
+                result = _sqlite_renew_leases_batch(
+                    conn,
+                    command=command,
+                    clock=self._clock.now_utc,
+                )
+            return int(result.applied_count)
         finally:
-            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                conn.close()
+            _close_connection_nonfatal(conn, operation="batch lease renewal")
 
     def batch_complete_jobs(self, items: list[dict[str, Any]], *, enforce: bool | None = None) -> int:
         if enforce is None:

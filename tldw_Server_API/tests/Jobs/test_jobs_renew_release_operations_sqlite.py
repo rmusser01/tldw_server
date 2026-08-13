@@ -12,11 +12,15 @@ import pytest
 
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    BatchRenewLeaseItem,
+    BatchRenewLeasesCommand,
+    BatchRenewLeasesResult,
     NoTransitionReason,
     OperationOutcome,
     ReleaseJobCommand,
     RenewLeaseCommand,
 )
+from tldw_Server_API.app.core.Jobs.operations.sqlite import renew_leases_batch
 from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
     release_job,
     renew_lease,
@@ -49,8 +53,12 @@ RELEASE_RESULT_FIELDS = {
 
 
 @pytest.fixture()
-def conn(tmp_path: Path) -> sqlite3.Connection:
-    db_path = ensure_jobs_tables(tmp_path / "jobs.db")
+def db_path(tmp_path: Path) -> Path:
+    return ensure_jobs_tables(tmp_path / "jobs.db")
+
+
+@pytest.fixture()
+def conn(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     try:
@@ -130,6 +138,242 @@ def _release_command(
         lease_id=lease_id,
         reason="yield",
     )
+
+
+class RecordingClock:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> datetime:
+        self.calls += 1
+        return NOW
+
+
+class FailOnSecondClock:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> datetime:
+        self.calls += 1
+        if self.calls == 2:
+            raise RuntimeError("forced clock failure")
+        return NOW
+
+
+def test_sqlite_batch_renew_counts_attempts_and_commits_expected_noops(
+    conn: sqlite3.Connection,
+) -> None:
+    valid_id = _insert_job(conn, uuid="valid")
+    queued_id = _insert_job(conn, uuid="queued", status="queued")
+    stale_id = _insert_job(conn, uuid="stale")
+    long_id = _insert_job(conn, uuid="long", leased_until="2026-01-02 13:00:00")
+    command = BatchRenewLeasesCommand(
+        items=(
+            BatchRenewLeaseItem(valid_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(999_999, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(queued_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(stale_id, 30, "worker-2", "lease-1"),
+            BatchRenewLeaseItem(valid_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(long_id, 30, "worker-1", "lease-1"),
+        ),
+        enforce=True,
+    )
+    clock = RecordingClock()
+
+    result = renew_leases_batch(conn, command=command, clock=clock)
+
+    assert result == BatchRenewLeasesResult(requested_count=6, applied_count=3)
+    assert clock.calls == 6
+    assert conn.execute("SELECT leased_until FROM jobs WHERE id = ?", (long_id,)).fetchone()[0] == "2026-01-02 13:00:00"
+
+
+def test_sqlite_batch_renew_empty_command_skips_clock(
+    conn: sqlite3.Connection,
+) -> None:
+    clock = RecordingClock()
+
+    result = renew_leases_batch(
+        conn,
+        command=BatchRenewLeasesCommand(items=(), enforce=True),
+        clock=clock,
+    )
+
+    assert result == BatchRenewLeasesResult(requested_count=0, applied_count=0)
+    assert clock.calls == 0
+
+
+def test_sqlite_batch_renew_leaves_caller_transaction_open(
+    conn: sqlite3.Connection,
+) -> None:
+    job_id = _insert_job(conn, uuid="caller-transaction")
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = renew_leases_batch(
+        conn,
+        command=BatchRenewLeasesCommand(
+            items=(BatchRenewLeaseItem(job_id, 30, "worker-1", "lease-1"),),
+            enforce=True,
+        ),
+        clock=RecordingClock(),
+    )
+
+    assert result == BatchRenewLeasesResult(requested_count=1, applied_count=1)
+    assert conn.in_transaction is True
+    conn.rollback()
+    current = conn.execute(
+        "SELECT leased_until FROM jobs WHERE id = ?",
+        (job_id,),
+    ).fetchone()
+    assert current[0] == "2026-01-02 11:45:00"
+
+
+def test_sqlite_batch_renew_failure_rolls_back_savepoint_only(
+    conn: sqlite3.Connection,
+) -> None:
+    first_job_id = _insert_job(conn, uuid="first")
+    second_job_id = _insert_job(conn, uuid="second")
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "UPDATE jobs SET progress_message = 'caller-owned' WHERE id = ?",
+        (second_job_id,),
+    )
+    command = BatchRenewLeasesCommand(
+        items=(
+            BatchRenewLeaseItem(first_job_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(second_job_id, 30, "worker-1", "lease-1"),
+        ),
+        enforce=True,
+    )
+
+    with pytest.raises(RuntimeError, match="forced clock failure"):
+        renew_leases_batch(conn, command=command, clock=FailOnSecondClock())
+
+    assert conn.in_transaction is True
+    rows = conn.execute(
+        "SELECT leased_until, progress_message FROM jobs WHERE id IN (?, ?) ORDER BY id",
+        (first_job_id, second_job_id),
+    ).fetchall()
+    assert [row["leased_until"] for row in rows] == [
+        "2026-01-02 11:45:00",
+        "2026-01-02 11:45:00",
+    ]
+    assert rows[1]["progress_message"] == "caller-owned"
+    conn.rollback()
+    persisted = conn.execute(
+        "SELECT progress_message FROM jobs WHERE id = ?",
+        (second_job_id,),
+    ).fetchone()
+    assert persisted[0] == "old progress"
+
+
+def test_sqlite_batch_renew_preserves_error_when_transaction_is_aborted(
+    conn: sqlite3.Connection,
+) -> None:
+    first_job_id = _insert_job(conn, uuid="first")
+    second_job_id = _insert_job(conn, uuid="second", worker_id="worker-2")
+    conn.execute(
+        "CREATE TRIGGER abort_batch_transaction BEFORE UPDATE ON jobs "
+        "WHEN OLD.worker_id = 'worker-2' "
+        "BEGIN SELECT RAISE(ROLLBACK, 'forced full rollback'); END"
+    )
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "UPDATE jobs SET progress_message = 'caller-owned' WHERE id = ?",
+        (first_job_id,),
+    )
+    command = BatchRenewLeasesCommand(
+        items=(
+            BatchRenewLeaseItem(first_job_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(second_job_id, 30, "worker-2", "lease-1"),
+        ),
+        enforce=True,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError, match="forced full rollback") as exc_info:
+        renew_leases_batch(conn, command=command, clock=RecordingClock())
+
+    assert isinstance(exc_info.value.__cause__, sqlite3.OperationalError)
+    assert "no such savepoint" in str(exc_info.value.__cause__)
+    assert conn.in_transaction is False
+    rows = conn.execute(
+        "SELECT leased_until, progress_message FROM jobs WHERE id IN (?, ?) ORDER BY id",
+        (first_job_id, second_job_id),
+    ).fetchall()
+    assert [(row["leased_until"], row["progress_message"]) for row in rows] == [
+        ("2026-01-02 11:45:00", "old progress"),
+        ("2026-01-02 11:45:00", "old progress"),
+    ]
+
+
+def test_sqlite_batch_renew_rolls_back_when_clock_fails(
+    conn: sqlite3.Connection,
+    db_path: Path,
+) -> None:
+    first_job_id = _insert_job(conn, uuid="first")
+    second_job_id = _insert_job(conn, uuid="second")
+    command = BatchRenewLeasesCommand(
+        items=(
+            BatchRenewLeaseItem(first_job_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(second_job_id, 30, "worker-1", "lease-1"),
+        ),
+        enforce=True,
+    )
+
+    with pytest.raises(RuntimeError, match="forced clock failure"):
+        renew_leases_batch(conn, command=command, clock=FailOnSecondClock())
+
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        leases = connection.execute(
+            "SELECT id, leased_until FROM jobs WHERE id IN (?, ?) ORDER BY id",
+            (first_job_id, second_job_id),
+        ).fetchall()
+    finally:
+        connection.close()
+    assert [(row["id"], row["leased_until"]) for row in leases] == [
+        (first_job_id, "2026-01-02 11:45:00"),
+        (second_job_id, "2026-01-02 11:45:00"),
+    ]
+
+
+def test_sqlite_batch_renew_rolls_back_when_second_update_fails(
+    conn: sqlite3.Connection,
+    db_path: Path,
+) -> None:
+    first_job_id = _insert_job(conn, uuid="first")
+    second_job_id = _insert_job(conn, uuid="second", worker_id="worker-2")
+    conn.execute(
+        "CREATE TRIGGER fail_batch_renewal BEFORE UPDATE ON jobs "
+        "WHEN OLD.worker_id = 'worker-2' "
+        "BEGIN SELECT RAISE(ABORT, 'forced batch renewal failure'); END"
+    )
+    conn.commit()
+    command = BatchRenewLeasesCommand(
+        items=(
+            BatchRenewLeaseItem(first_job_id, 30, "worker-1", "lease-1"),
+            BatchRenewLeaseItem(second_job_id, 30, "worker-2", "lease-1"),
+        ),
+        enforce=True,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError, match="forced batch renewal failure"):
+        renew_leases_batch(conn, command=command, clock=RecordingClock())
+
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        leases = connection.execute(
+            "SELECT id, leased_until FROM jobs WHERE id IN (?, ?) ORDER BY id",
+            (first_job_id, second_job_id),
+        ).fetchall()
+    finally:
+        connection.close()
+    assert [(row["id"], row["leased_until"]) for row in leases] == [
+        (first_job_id, "2026-01-02 11:45:00"),
+        (second_job_id, "2026-01-02 11:45:00"),
+    ]
 
 
 @pytest.mark.parametrize(
