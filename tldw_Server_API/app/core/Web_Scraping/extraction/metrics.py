@@ -47,6 +47,9 @@ METRIC_LABEL_CONTRACT = _freeze_label_contract(
         "extraction_content_length_bytes": {
             "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"})
         },
+        "extraction_executor_total": {
+            "outcome": frozenset({"queued", "running", "saturated", "cancelled", "discarded"})
+        },
         "extraction_retry_total": {
             "strategy": frozenset({"jsonld", "schema", "regex", "llm", "cluster", "trafilatura", "unknown"}),
             "attempt": frozenset({"1", "2", "3", "4_plus"}),

@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScrapePlan
         ({"web_scraper_max_browser_transfer_bytes": -1}, (16_777_216, 67_108_864)),
         ({"web_scraper_max_article_bytes": 1.5}, (16_777_216, 67_108_864)),
         ({"web_scraper_max_browser_transfer_bytes": "2.0"}, (16_777_216, 67_108_864)),
+        ({"web_scraper_max_article_bytes": "9" * 5_000}, (16_777_216, 67_108_864)),
     ],
 )
 def test_article_limits_fall_back_when_configured_values_are_not_positive_integers(

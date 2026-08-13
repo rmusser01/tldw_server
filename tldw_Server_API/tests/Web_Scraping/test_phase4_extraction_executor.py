@@ -234,6 +234,67 @@ async def test_saturation_waits_outside_executor_queue_and_is_cancellable(
 
 
 @pytest.mark.asyncio
+async def test_saturated_admission_expires_with_bounded_lifecycle_events(
+    managers: list[ExtractionExecutorManager],
+) -> None:
+    events: list[str] = []
+    manager = _own(
+        managers,
+        ExtractionExecutorManager(
+            worker_count_loader=lambda: 1,
+            admission_timeout_loader=lambda: 0.03,
+            lifecycle_observer=events.append,
+        ),
+    )
+    started = threading.Event()
+    release = threading.Event()
+    first = asyncio.create_task(manager.run(lambda: (started.set(), release.wait())))
+    try:
+        assert await asyncio.to_thread(started.wait, 1.0) is True
+
+        with pytest.raises(ArticleFailure) as raised:
+            await asyncio.wait_for(manager.run(lambda: "must-not-submit"), timeout=0.5)
+
+        assert raised.value.code == "extraction_error"
+        assert raised.value.stage == "capacity"
+        assert events == ["running", "queued", "saturated"]
+        generation = manager.current_generation
+        assert generation is not None
+        assert generation.executor._work_queue.qsize() == 0
+    finally:
+        release.set()
+        await asyncio.gather(first, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_running_cancellation_emits_cancelled_and_discarded_once(
+    managers: list[ExtractionExecutorManager],
+) -> None:
+    events: list[str] = []
+    manager = _own(
+        managers,
+        ExtractionExecutorManager(
+            worker_count_loader=lambda: 1,
+            lifecycle_observer=events.append,
+        ),
+    )
+    started = threading.Event()
+    release = threading.Event()
+    running = asyncio.create_task(manager.run(lambda: (started.set(), release.wait())))
+    try:
+        assert await asyncio.to_thread(started.wait, 1.0) is True
+        running.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await running
+
+        assert events == ["running", "cancelled", "discarded"]
+    finally:
+        release.set()
+        await asyncio.gather(running, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_running_cancellation_returns_immediately_and_holds_slot_until_exit(
     managers: list[ExtractionExecutorManager],
 ) -> None:

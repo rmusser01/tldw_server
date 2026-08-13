@@ -192,6 +192,7 @@ def test_simple_curl_fetch_reads_bounded_stream_and_closes_session(
     session = curl_streaming_backend.instances[0]
     assert result["text"] == "abcde"
     assert session.get_calls[0]["stream"] is True
+    assert session.get_calls[0]["accept_encoding"] is None
     assert session.get_calls[0]["headers"] == {"Accept-Encoding": "identity"}
     assert response.closed is True
     assert session.closed is True

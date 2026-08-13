@@ -62,7 +62,10 @@ def _positive_integer_or_default(value: Any, default: int) -> int:
     if type(value) is str:
         normalized = value.strip()
         if normalized.isascii() and normalized.isdecimal():
-            parsed = int(normalized)
+            try:
+                parsed = int(normalized)
+            except (ValueError, OverflowError):
+                return default
             return parsed if parsed > 0 else default
     return default
 
@@ -316,6 +319,7 @@ class ArticleFailure(Exception):
         super().__init__(code)
         self.code = code
         self.stage = stage
+        self.retry_suppressed = False
 
 
 def article_failure_result(failure: ArticleFailure | str) -> dict[str, Any]:

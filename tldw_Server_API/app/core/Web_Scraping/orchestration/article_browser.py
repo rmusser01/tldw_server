@@ -8,7 +8,7 @@ import binascii
 import inspect
 import math
 import threading
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -135,7 +135,7 @@ class _BrowserAcquisitionLease:
 
     def start_cleanup(
         self,
-        operation: Awaitable[None],
+        operation: Coroutine[Any, Any, None],
         *,
         name: str,
     ) -> tuple[asyncio.Task[Any] | None, str]:
@@ -162,7 +162,7 @@ class _BrowserAcquisitionLease:
 
     def ensure_emergency_shutdown(
         self,
-        factory: Callable[[], Awaitable[None]],
+        factory: Callable[[], Coroutine[Any, Any, None]],
     ) -> str:
         """Atomically own at most one context shutdown for rejected callbacks."""
         operation: Awaitable[None] | None = None
@@ -284,17 +284,27 @@ def _normalize_grace(value: float) -> float:
     return normalized
 
 
-def _http_url_is_valid(url: str) -> bool:
+def _http_policy_url(url: str) -> str | None:
     try:
         parsed = urlsplit(url)
         if parsed.scheme.lower() not in _HTTP_SCHEMES:
-            return False
-        if not parsed.netloc or parsed.hostname is None or parsed.fragment:
-            return False
+            return None
+        if not parsed.netloc or parsed.hostname is None:
+            return None
         _ = parsed.port
     except (TypeError, ValueError):
-        return False
-    return True
+        return None
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+
+
+def _http_url_is_valid(url: str) -> bool:
+    return _http_policy_url(url) is not None
+
+
+def _uncancel_task(task: Any) -> None:
+    uncancel = getattr(task, "uncancel", None)
+    if callable(uncancel):
+        uncancel()
 
 
 def _websocket_policy_url(url: str) -> str | None:
@@ -335,7 +345,7 @@ class _BrowserTransferLedger:
         limit: int,
         outcome: _AcquisitionOutcome,
         lease: _BrowserAcquisitionLease,
-        shutdown_factory: Callable[[], Awaitable[None]],
+        shutdown_factory: Callable[[], Coroutine[Any, Any, None]],
     ) -> None:
         self._limit = limit
         self._outcome = outcome
@@ -507,7 +517,7 @@ class _CallbackLifecycle:
         self,
         outcome: _AcquisitionOutcome,
         lease: _BrowserAcquisitionLease,
-        shutdown_factory: Callable[[], Awaitable[None]],
+        shutdown_factory: Callable[[], Coroutine[Any, Any, None]],
     ) -> None:
         self._outcome = outcome
         self._lease = lease
@@ -682,7 +692,7 @@ class GuardedArticleBrowser:
         return (
             failure.code == "browser_error"
             and failure.stage in _RETRYABLE_BROWSER_STAGES
-            and not bool(getattr(failure, "_browser_retry_suppressed", False))
+            and not failure.retry_suppressed
         )
 
     @staticmethod
@@ -822,11 +832,12 @@ class GuardedArticleBrowser:
         try:
             request = route.request
             url = request.url
-            if not _http_url_is_valid(url):
+            policy_url = _http_policy_url(url)
+            if policy_url is None:
                 await self._abort_http(route, outcome, failure_stage="egress")
                 return
             try:
-                allowed = await self._decision_allowed(url)
+                allowed = await self._decision_allowed(policy_url)
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - egress guard failures fail closed
@@ -919,9 +930,9 @@ class GuardedArticleBrowser:
                 )
                 return
             try:
-                # Playwright starts its browser-owned connection task synchronously.
-                # Later transport failures are not exposed through this public API.
-                connect()
+                connection = connect()
+                if inspect.isawaitable(connection):
+                    await connection
             except Exception:  # noqa: BLE001 - immediate invocation failures fail closed
                 await self._close_websocket(
                     route,
@@ -998,7 +1009,7 @@ class GuardedArticleBrowser:
                 caller_cancelled = True
                 current = asyncio.current_task()
                 if current is not None:
-                    current.uncancel()
+                    _uncancel_task(current)
         return task.result(), caller_cancelled
 
     async def acquire(
@@ -1089,7 +1100,7 @@ class GuardedArticleBrowser:
             route = getattr(context, "route", None)
             route_web_socket = getattr(context, "route_web_socket", None)
             unroute_all = getattr(context, "unroute_all", None)
-            if not all(callable(item) for item in (route, route_web_socket, unroute_all)):
+            if not callable(route) or not callable(route_web_socket) or not callable(unroute_all):
                 raise ArticleFailure("browser_error", "capability")
 
             stage = "routing"
@@ -1225,7 +1236,7 @@ class GuardedArticleBrowser:
             raise transfer_failure
         if primary_error is not None:
             if cleanup_failed and isinstance(primary_error, ArticleFailure):
-                primary_error._browser_retry_suppressed = True
+                primary_error.retry_suppressed = True
             raise primary_error
         if outcome.failure is not None:
             raise outcome.failure

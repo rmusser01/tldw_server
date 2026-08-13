@@ -62,6 +62,13 @@ def _profile() -> DirectBrowserProfile:
     )
 
 
+def test_uncancel_compatibility_accepts_python310_style_task() -> None:
+    class _LegacyTask:
+        pass
+
+    _browser_module()._uncancel_task(_LegacyTask())
+
+
 class _FakeGuard:
     def __init__(self, outcomes: list[object]) -> None:
         self.outcomes = list(outcomes)
@@ -239,6 +246,18 @@ class _FakeWebSocketRoute:
         self.close_calls.append((code, reason))
         if self.close_error is not None:
             raise self.close_error
+
+
+class _AwaitableWebSocketRoute(_FakeWebSocketRoute):
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.connected = asyncio.Event()
+
+    async def connect_to_server(self) -> object:
+        self.connect_calls += 1
+        await asyncio.sleep(0)
+        self.connected.set()
+        return SimpleNamespace(kind="server-route")
 
 
 class _ResistantRejectedHttpRoute(_FakeHttpRoute):
@@ -806,6 +825,33 @@ async def test_websocket_destinations_use_transport_equivalent_policy_urls_only(
     ]
     assert [route.connect_calls for route in sockets] == [1, 1]
     assert [route.close_calls for route in sockets] == [[], []]
+
+
+@pytest.mark.unit
+async def test_http_fragment_navigation_guards_fragmentless_transport_url() -> None:
+    target = f"{_TARGET}#section"
+    route = _FakeHttpRoute(target)
+    runtime = _FakeBrowserRuntime(dispatches=[("http", route)])
+    guard = _FakeGuard([True])
+
+    html = await _adapter(runtime, guard).acquire(target, _profile())
+
+    assert html == "<!doctype html><html><body>ok</body></html>"
+    assert [url for url, _context in guard.calls] == [_TARGET]
+    assert f"goto:{target}" in runtime.events
+    assert route.continue_calls == [{}]
+
+
+@pytest.mark.unit
+async def test_websocket_awaitable_connection_is_completed_before_acquisition_returns() -> None:
+    route = _AwaitableWebSocketRoute("wss://socket.example/live")
+    runtime = _FakeBrowserRuntime(dispatches=[("websocket", route)])
+
+    await _adapter(runtime, _FakeGuard([True])).acquire(_TARGET, _profile())
+
+    assert route.connect_calls == 1
+    assert route.connected.is_set()
+    assert route.close_calls == []
 
 
 @pytest.mark.unit

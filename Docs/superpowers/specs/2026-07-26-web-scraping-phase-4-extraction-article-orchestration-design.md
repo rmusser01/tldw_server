@@ -370,7 +370,9 @@ policy, metrics, browser startup, or network side effects.
 Outside an active loop, it uses the shared article orchestrator with an explicit
 blocking compatibility profile. That profile preserves the current robots
 setting, 30-second timeout, cookie reduction, HTTP status handling, content
-conversion, and result fields. Optional preflight may run through the approved
+conversion, generic extraction settings, and result fields. Route-specific
+extraction handlers and strategy settings are cleared while transport and
+browser routing remain available. Optional preflight may run through the approved
 blocking adapter's fresh event loop after the active-loop guard, but it does not
 silently change those compatibility settings. It does not use the legacy
 per-analyzer background-loop bridge. Browser fallback occurs only where the
@@ -631,7 +633,10 @@ A manager lock protects generation creation, replacement, and submission. Async
 callers attempt non-blocking acquisition on the current generation's semaphore
 and wait with cancellation-aware bounded backoff when capacity is unavailable.
 Backoff starts at 10 milliseconds and is capped at 100 milliseconds; each wait
-ends on admission, cancellation, or the caller's orchestration deadline. After
+ends on admission, cancellation, or the admission deadline. The default
+admission budget is 30 seconds and may be set with the positive finite
+`EXTRACTOR_ADMISSION_TIMEOUT_SECONDS` environment value; injected managers may
+provide the caller's remaining orchestration budget directly. After
 acquiring a permit, submission re-enters the manager lock and verifies that the
 generation is still current, has the current process ID, and is open. A stale
 permit is released to its owning generation and acquisition restarts against the

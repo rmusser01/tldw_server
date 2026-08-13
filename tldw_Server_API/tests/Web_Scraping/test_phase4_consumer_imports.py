@@ -77,6 +77,17 @@ CONSUMER_IMPORTS = {
     },
 }
 
+REQUIRED_LEGACY_IMPORTS = {
+    "tldw_Server_API/app/core/Watchlists/fetchers.py": {"is_content_page"},
+    "tldw_Server_API/app/services/enhanced_web_scraping_service.py": {"is_content_page"},
+    "tldw_Server_API/app/services/web_scraping_service.py": {
+        "recursive_scrape",
+        "scrape_and_summarize_multiple",
+        "scrape_by_url_level",
+        "scrape_from_sitemap",
+    },
+}
+
 
 def _imported_names(path: Path) -> dict[str, set[str]]:
     imported: dict[str, set[str]] = {}
@@ -124,6 +135,7 @@ def test_phase4_consumers_import_only_canonical_article_owners() -> None:
         for module, expected_names in expected_imports.items():
             actual_names = actual_imports.get(module, set())
             if module == LEGACY_MODULE:
+                assert REQUIRED_LEGACY_IMPORTS.get(relative_path, set()) <= actual_names, relative_path
                 assert actual_names <= expected_names, relative_path
             else:
                 assert expected_names <= actual_names, relative_path

@@ -290,6 +290,47 @@ def test_blocking_profile_uses_governed_admission_reduced_cookies_timeout_and_co
     assert observations["browser"].calls == []
 
 
+def test_blocking_profile_keeps_legacy_generic_extraction_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical = _canonical()
+    captured: dict[str, Any] = {}
+
+    def extract(_html: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return _article(_html, url)
+
+    routed_plan = dataclasses.replace(
+        _plan(),
+        handler="custom.module:extract",
+        strategy_order=("regex",),
+        schema_rules={"headline": ".title"},
+        llm_settings={"provider": "custom"},
+        regex_settings={"pattern": "secret"},
+        cluster_settings={"threshold": 0.9},
+    )
+    dependencies, _observations = _dependencies(extract=extract)
+    dependencies = dataclasses.replace(
+        dependencies,
+        resolve_plan=lambda _url, _config: routed_plan,
+        resolve_handler=lambda path: (_ for _ in ()).throw(AssertionError(f"unexpected handler: {path}")),
+    )
+    monkeypatch.setattr(canonical, "_build_default_dependencies", lambda _cookies: dependencies)
+
+    result = _blocking()(URL)
+
+    assert result["extraction_successful"] is True
+    assert captured == {
+        "strategy_order": None,
+        "handler": None,
+        "schema_rules": None,
+        "llm_settings": None,
+        "regex_settings": None,
+        "cluster_settings": None,
+        "allow_llm_extraction": True,
+    }
+
+
 def test_blocking_profile_accepts_only_exact_http_success_without_browser_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

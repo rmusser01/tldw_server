@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextvars
+import math
 import os
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -21,6 +23,7 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
 from .article_models import ArticleFailure
 
 DEFAULT_EXTRACTOR_MAX_WORKERS = 4
+DEFAULT_EXTRACTOR_ADMISSION_TIMEOUT_SECONDS = 30.0
 _INITIAL_ADMISSION_DELAY_SECONDS = 0.01
 _MAX_ADMISSION_DELAY_SECONDS = 0.1
 
@@ -113,6 +116,28 @@ def _load_worker_count() -> Any:
     return os.environ.get("EXTRACTOR_MAX_WORKERS")
 
 
+def _normalize_admission_timeout(value: Any) -> float:
+    if isinstance(value, bool):
+        return DEFAULT_EXTRACTOR_ADMISSION_TIMEOUT_SECONDS
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return DEFAULT_EXTRACTOR_ADMISSION_TIMEOUT_SECONDS
+    if not math.isfinite(timeout) or timeout <= 0:
+        return DEFAULT_EXTRACTOR_ADMISSION_TIMEOUT_SECONDS
+    return timeout
+
+
+def _load_admission_timeout() -> Any:
+    return os.environ.get("EXTRACTOR_ADMISSION_TIMEOUT_SECONDS")
+
+
+def _default_lifecycle_observer(outcome: str) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.extraction.metrics import emit_global_counter
+
+    emit_global_counter("extraction_executor_total", labels={"outcome": outcome})
+
+
 def _default_executor_factory(worker_count: int) -> ThreadPoolExecutor:
     return ThreadPoolExecutor(
         max_workers=worker_count,
@@ -132,12 +157,18 @@ class ExtractionExecutorManager:
         self,
         *,
         worker_count_loader: Callable[[], Any] = _load_worker_count,
+        admission_timeout_loader: Callable[[], Any] = _load_admission_timeout,
         executor_factory: Callable[[int], Any] = _default_executor_factory,
         pid_getter: Callable[[], int] = os.getpid,
+        lifecycle_observer: Callable[[str], None] | None = _default_lifecycle_observer,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._worker_count_loader = worker_count_loader
+        self._admission_timeout_loader = admission_timeout_loader
         self._executor_factory = executor_factory
         self._pid_getter = pid_getter
+        self._lifecycle_observer = lifecycle_observer
+        self._clock = clock
         self._lock = threading.RLock()
         self._pid = pid_getter()
         self._state = ManagerState.RUNNING
@@ -170,74 +201,110 @@ class ExtractionExecutorManager:
         cancelled = threading.Event()
         context = contextvars.copy_context()
         delay = _INITIAL_ADMISSION_DELAY_SECONDS
+        future: Future[_T] | None = None
+        emitted: set[str] = set()
+        try:
+            configured_timeout = self._admission_timeout_loader()
+        except Exception:  # noqa: BLE001 - config failures use the safe default
+            configured_timeout = None
+        admission_deadline = self._clock() + _normalize_admission_timeout(configured_timeout)
 
-        while True:
-            transition: _Transition | None = None
-            with self._lock:
-                self._reconcile_pid_locked()
-                if self._state is ManagerState.SHUTDOWN:
-                    raise ArticleFailure("extraction_error", "shutdown")
-                if self._state is ManagerState.RELOADING:
-                    transition = self._transition
-                    generation = None
-                else:
-                    generation = self._ensure_generation_locked()
-                    self._reap_completed_locked(generation)
-
-            if transition is not None:
-                await self._wait_for_transition(transition)
-                delay = _INITIAL_ADMISSION_DELAY_SECONDS
-                continue
-            if generation is None:
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, _MAX_ADMISSION_DELAY_SECONDS)
-                continue
-            if not generation.permits.acquire(blocking=False):
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, _MAX_ADMISSION_DELAY_SECONDS)
-                continue
-
-            lease = _PermitLease(generation.permits)
-            future: Future[_T] | None = None
-            with self._lock:
-                self._reconcile_pid_locked()
-                stale = (
-                    self._state is not ManagerState.RUNNING
-                    or self._generation is not generation
-                    or generation.closed
-                    or generation.pid != self._pid
-                )
-                if not stale:
-                    worker_call = partial(
-                        self._worker_call,
-                        context,
-                        cancelled,
-                        func,
-                        args,
-                        kwargs,
-                    )
-                    try:
-                        future = cast(
-                            Future[_T],
-                            generation.executor.submit(worker_call),
-                        )
-                    except Exception:  # noqa: BLE001 - sanitize executor boundary
-                        lease.release()
-                        raise ArticleFailure("extraction_error", "submit") from None
-                    generation.outstanding[cast(Future[Any], future)] = lease
-                    future.add_done_callback(partial(self._release_completed, generation, lease))
-
-            if future is None:
-                lease.release()
-                delay = _INITIAL_ADMISSION_DELAY_SECONDS
-                continue
-
+        def observe_once(outcome: str) -> None:
+            if outcome in emitted:
+                return
+            emitted.add(outcome)
+            observer = self._lifecycle_observer
+            if observer is None:
+                return
             try:
+                observer(outcome)
+            except Exception:  # noqa: BLE001 - observability must not replace extraction
+                return
+
+        try:
+            while True:
+                transition: _Transition | None = None
+                with self._lock:
+                    self._reconcile_pid_locked()
+                    if self._state is ManagerState.SHUTDOWN:
+                        raise ArticleFailure("extraction_error", "shutdown")
+                    if self._state is ManagerState.RELOADING:
+                        transition = self._transition
+                        generation = None
+                    else:
+                        generation = self._ensure_generation_locked()
+                        self._reap_completed_locked(generation)
+
+                if transition is not None:
+                    observe_once("queued")
+                    try:
+                        await self._wait_for_transition(
+                            transition,
+                            deadline=admission_deadline,
+                            clock=self._clock,
+                        )
+                    except ArticleFailure:
+                        observe_once("saturated")
+                        raise
+                    delay = _INITIAL_ADMISSION_DELAY_SECONDS
+                    continue
+                if generation is None:
+                    observe_once("queued")
+                    observe_once("saturated")
+                    await self._sleep_for_admission(admission_deadline, delay)
+                    delay = min(delay * 2, _MAX_ADMISSION_DELAY_SECONDS)
+                    continue
+                if not generation.permits.acquire(blocking=False):
+                    observe_once("queued")
+                    observe_once("saturated")
+                    await self._sleep_for_admission(admission_deadline, delay)
+                    delay = min(delay * 2, _MAX_ADMISSION_DELAY_SECONDS)
+                    continue
+
+                lease = _PermitLease(generation.permits)
+                with self._lock:
+                    self._reconcile_pid_locked()
+                    stale = (
+                        self._state is not ManagerState.RUNNING
+                        or self._generation is not generation
+                        or generation.closed
+                        or generation.pid != self._pid
+                    )
+                    if not stale:
+                        worker_call = partial(
+                            self._worker_call,
+                            context,
+                            cancelled,
+                            func,
+                            args,
+                            kwargs,
+                        )
+                        try:
+                            future = cast(
+                                Future[_T],
+                                generation.executor.submit(worker_call),
+                            )
+                        except Exception:  # noqa: BLE001 - sanitize executor boundary
+                            lease.release()
+                            raise ArticleFailure("extraction_error", "submit") from None
+                        generation.outstanding[cast(Future[Any], future)] = lease
+                        future.add_done_callback(partial(self._release_completed, generation, lease))
+
+                if future is None:
+                    lease.release()
+                    delay = _INITIAL_ADMISSION_DELAY_SECONDS
+                    await self._sleep_for_admission(admission_deadline, 0)
+                    continue
+
+                observe_once("running")
                 return await asyncio.wrap_future(future)
-            except asyncio.CancelledError:
+        except asyncio.CancelledError:
+            observe_once("cancelled")
+            if future is not None:
                 cancelled.set()
-                future.cancel()
-                raise
+                if not future.cancel():
+                    observe_once("discarded")
+            raise
 
     async def reload(self) -> None:
         """Drain the current generation and install one fresh config snapshot."""
@@ -552,10 +619,27 @@ class ExtractionExecutorManager:
             return False
         return True
 
+    async def _sleep_for_admission(self, deadline: float, delay: float) -> None:
+        remaining = deadline - self._clock()
+        if remaining <= 0:
+            raise ArticleFailure("extraction_error", "capacity")
+        await asyncio.sleep(min(delay, remaining))
+
     @staticmethod
-    async def _wait_for_transition(transition: _Transition) -> None:
+    async def _wait_for_transition(
+        transition: _Transition,
+        *,
+        deadline: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         while not transition.complete.is_set():
-            await asyncio.sleep(_INITIAL_ADMISSION_DELAY_SECONDS)
+            delay = _INITIAL_ADMISSION_DELAY_SECONDS
+            if deadline is not None:
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    raise ArticleFailure("extraction_error", "capacity")
+                delay = min(delay, remaining)
+            await asyncio.sleep(delay)
         if transition.error is not None:
             raise transition.error
 
@@ -599,6 +683,7 @@ atexit.register(DEFAULT_EXTRACTION_EXECUTOR.close_at_exit)
 
 __all__ = [
     "DEFAULT_EXTRACTION_EXECUTOR",
+    "DEFAULT_EXTRACTOR_ADMISSION_TIMEOUT_SECONDS",
     "DEFAULT_EXTRACTOR_MAX_WORKERS",
     "ExecutorGeneration",
     "ExtractionExecutorManager",

@@ -4782,6 +4782,7 @@ def fetch(*args, **kwargs):
                         "cookies": hop_cookies,
                         "allow_redirects": False,
                         "stream": True,
+                        "accept_encoding": None,
                     }
                     if timeout is not None:
                         req_kwargs["timeout"] = timeout

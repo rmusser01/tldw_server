@@ -61,7 +61,7 @@ class RuntimeWebSocketRoute(Protocol):
     def url(self) -> str:
         raise NotImplementedError
 
-    def connect_to_server(self) -> RuntimeWebSocketRoute:
+    def connect_to_server(self) -> Awaitable[Any] | Any:
         raise NotImplementedError
 
     async def close(

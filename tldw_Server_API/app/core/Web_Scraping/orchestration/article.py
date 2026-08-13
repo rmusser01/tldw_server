@@ -43,7 +43,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchResponse,
     RuntimeRequestContext,
 )
-from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
+from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER, ScraperRouter
 
 _FETCH_TIMEOUT_SECONDS = 15.0
 _BLOCKING_FETCH_TIMEOUT_SECONDS = 30.0
@@ -422,7 +422,7 @@ async def _extract(
     *,
     allow_llm_extraction: bool,
 ) -> dict[str, Any]:
-    handler = dependencies.resolve_handler(plan.handler) if plan.handler else None
+    handler = dependencies.resolve_handler(plan.handler) if plan.handler != DEFAULT_HANDLER else None
     result = await dependencies.executor.run(
         dependencies.extract,
         html,
@@ -451,98 +451,20 @@ async def _run_article(
     dependencies: ArticleDependencies,
 ) -> dict[str, Any]:
     """Run one request through its immutable route and governed dependencies."""
-    config: Mapping[str, Any]
-    try:
-        config = _snapshot_config(await asyncio.to_thread(dependencies.load_config))
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - config loading has one safe empty fallback
-        _log_failure(dependencies, exc, code="fetch_error", stage="config", url=url)
-        config = MappingProxyType({})
-
-    try:
-        plan = await asyncio.to_thread(dependencies.resolve_plan, url, config)
-        if not isinstance(plan, ArticlePlan):
-            raise TypeError("resolve_plan must return ArticlePlan")
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - route loading preserves the config snapshot
-        _log_failure(dependencies, exc, code="fetch_error", stage="plan", url=url)
-        plan = _fallback_plan(url, config, custom_cookies)
-
-    values = _web_scraper_values(config)
-    effective_user_agent = plan.headers.get("User-Agent") or plan.browser.user_agent
-    request_context = RuntimeRequestContext(source="article_extract", stage="pre_fetch")
-    preflight_payload: dict[str, Any] | None = None
-    try:
-        target = await dependencies.evaluate_target(
-            url,
-            respect_robots=plan.respect_robots,
-            user_agent=effective_user_agent,
-            request_context=request_context,
-            config={"web_scraper": values},
-            policy_checker=dependencies.policy_checker,
-        )
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - public policy failures are stable
-        _log_failure(dependencies, exc, code=_SAFE_POLICY_FAILURE, stage="pre_fetch", url=url)
-        return _failure_result(url, _SAFE_POLICY_FAILURE)
-
-    if not bool(getattr(getattr(target, "decision", None), "allowed", False)):
-        if str(getattr(target.decision, "reason", "")).startswith("robots_"):
-            _record_counter(dependencies, "scrape_blocked_by_robots_total", {})
-        return _policy_blocked_result(url, target.decision)
-
-    options = dependencies.preflight_options(values)
-    preflight_result = None
-    if bool(getattr(options, "enabled", False)):
-        try:
-            context = dependencies.build_preflight_context(
-                target,
-                options,
-                policy_checker=dependencies.policy_checker,
-            )
-            preflight_result = await dependencies.run_preflight(target, options, context)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - the analyzer is intentionally fail-open
-            _log_failure(dependencies, exc, code="fetch_error", stage="preflight", url=url)
-            preflight_result = None
-
-    backend = _bounded_backend(plan.backend)
-    route_backend = _bounded_backend(
-        dependencies.backend_setting(plan) if dependencies.backend_setting is not None else plan.backend
+    prepared = await _prepare_article(
+        url,
+        custom_cookies,
+        dependencies=dependencies,
+        source="article_extract",
     )
-    configured_backend = _bounded_backend(values.get("web_scraper_default_backend", _AUTO_BACKEND))
-    automatic_backend = route_backend == _AUTO_BACKEND and configured_backend == _AUTO_BACKEND
-    backend_setting = _AUTO_BACKEND if automatic_backend else backend
-    try:
-        advised_backend, advised_method, advised_result = dependencies.apply_preflight_advice(
-            preflight_result,
-            backend=backend,
-            method=_AUTO_BACKEND,
-            backend_setting=backend_setting,
-        )
-    except Exception as exc:  # noqa: BLE001 - failed advice retains the snapshotted route
-        _log_failure(dependencies, exc, code="fetch_error", stage="preflight_advice", url=url)
-        advised_backend, advised_method, advised_result = backend, _AUTO_BACKEND, None
+    if isinstance(prepared, dict):
+        return prepared
 
-    if not automatic_backend:
-        advised_backend = backend
-    try:
-        preflight_payload = dependencies.public_preflight_payload(
-            advised_result,
-            bool(getattr(options, "include_results", False)),
-        )
-    except Exception as exc:  # noqa: BLE001 - payload creation is optional observability
-        _log_failure(dependencies, exc, code="fetch_error", stage="preflight_payload", url=url)
-
-    cookies: dict[str, str] = {}
-    for cookie in custom_cookies or ():
-        if isinstance(cookie, Mapping) and "name" in cookie and "value" in cookie:
-            cookies[str(cookie["name"])] = str(cookie["value"])
-    cookies.update({str(key): str(value) for key, value in plan.cookies.items()})
+    plan = prepared.plan
+    advised_backend = prepared.advised_backend
+    advised_method = prepared.advised_method
+    cookies = prepared.cookies
+    preflight_payload = prepared.preflight_payload
 
     if advised_backend != _PLAYWRIGHT and advised_method != _PLAYWRIGHT:
         started = dependencies.clock()
@@ -837,7 +759,13 @@ def _blocking_plan(plan: ArticlePlan) -> ArticlePlan:
     return replace(
         plan,
         headers=headers,
+        handler=DEFAULT_HANDLER,
         respect_robots=False,
+        strategy_order=None,
+        schema_rules=None,
+        llm_settings=None,
+        regex_settings=None,
+        cluster_settings=None,
         browser=replace(
             plan.browser,
             user_agent=BLOCKING_ARTICLE_USER_AGENT,

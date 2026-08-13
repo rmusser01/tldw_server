@@ -640,6 +640,14 @@ def test_phase4b_llm_provider_labels_have_one_frozen_contract() -> None:
         contract["llm_tokens_used_total"]["provider"] = frozenset({"other"})  # type: ignore[index]
 
 
+def test_extraction_executor_lifecycle_metric_has_bounded_outcomes() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.extraction import metrics
+
+    assert metrics.METRIC_LABEL_CONTRACT["extraction_executor_total"] == {
+        "outcome": frozenset({"queued", "running", "saturated", "cancelled", "discarded"})
+    }
+
+
 def test_phase4b_only_the_canonical_metric_boundary_owns_metric_sinks() -> None:
     assert METRICS_PATH.is_file()
     assert _metric_boundary_bypasses(sorted(EXTRACTION_ROOT.rglob("*.py"))) == []
@@ -756,6 +764,13 @@ def test_phase4b_metric_contract_covers_every_production_emission_and_allowed_va
             provider=input_provider,
             model="unbounded-model-payload",
             dependencies=dependencies,
+        )
+
+    for outcome in contract["extraction_executor_total"]["outcome"]:
+        metrics.emit_callback_counter(
+            record,
+            "extraction_executor_total",
+            labels={"outcome": outcome},
         )
 
     assert {name for name, _value, _labels in events} == set(contract)
