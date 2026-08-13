@@ -135,7 +135,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # Corrected
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.exceptions import NoteAttachmentPolicyError
+from tldw_Server_API.app.core.exceptions import (
+    NoteAttachmentPolicyError,
+    NotesAttachmentMutationError,
+    NotesAttachmentSyncNotReadyError,
+)
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     NOTE_ATTACHMENT_MAX_FILENAME_LEN as _NOTES_ATTACHMENT_MAX_FILENAME_LEN,
@@ -144,6 +148,7 @@ from tldw_Server_API.app.core.Notes.attachment_policy import (
     sanitize_note_attachment_file_name,
     validate_note_attachment_content_type,
     validate_note_attachment_original_file_name,
+    validate_note_attachment_upload_content,
 )
 from tldw_Server_API.app.core.Notes.organization_capture import (
     compound_note_id,
@@ -160,14 +165,14 @@ from tldw_Server_API.app.core.Personalization import (
     record_note_restored,
     record_note_updated,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncStoreError,
+)
 from tldw_Server_API.app.core.Sync.v2.models import SyncDomain
 from tldw_Server_API.app.core.Sync.v2.notes_attachment_coordinator import (
     NotesAttachmentCoordinator,
-    NotesAttachmentMutationError,
     NotesAttachmentMutationPlan,
     NotesAttachmentMutationResult,
-    NotesAttachmentSyncNotReadyError,
     ReadyAttachmentDataset,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
@@ -435,6 +440,8 @@ def _active_notes_attachment_coordinator(
     db: CharactersRAGDB,
     current_user: User,
 ) -> NotesAttachmentCoordinator | None:
+    """Return the active owner-bound attachment coordinator when rollout is on."""
+
     service = _active_notes_sync_service(current_user)
     if service is None:
         return None
@@ -442,6 +449,8 @@ def _active_notes_attachment_coordinator(
 
 
 def _notes_attachment_http_error(exc: Exception) -> HTTPException:
+    """Map internal attachment failures to stable nondisclosing HTTP errors."""
+
     if isinstance(exc, NotesAttachmentSyncNotReadyError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -497,6 +506,8 @@ def _require_attachment_context(
     dataset_id: str | None,
     writable: bool,
 ) -> tuple[NotesAttachmentCoordinator, ReadyAttachmentDataset]:
+    """Resolve one authorized canonical attachment dataset context."""
+
     coordinator = _active_notes_attachment_coordinator(db, current_user)
     if coordinator is None:
         raise HTTPException(
@@ -532,6 +543,8 @@ def _require_attachment_context(
 
 
 def _require_attachment_idempotency_key(raw_value: str | None) -> str:
+    """Require and validate a canonical attachment idempotency key."""
+
     if raw_value is None:
         raise HTTPException(
             status_code=status.HTTP_428_PRECONDITION_REQUIRED,
@@ -550,6 +563,8 @@ def _require_attachment_idempotency_key(raw_value: str | None) -> str:
 
 
 def _reject_inactive_attachment_dataset(dataset_id: str | None) -> None:
+    """Reject canonical dataset selection while the rollout is inactive."""
+
     if dataset_id is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -564,6 +579,8 @@ def _require_attachment_if_match(
     raw_value: str | None,
     attachment: NoteAttachment,
 ) -> tuple[int, str]:
+    """Require the caller's strong ETag to match the current attachment."""
+
     if raw_value is None:
         raise HTTPException(
             status_code=status.HTTP_428_PRECONDITION_REQUIRED,
@@ -598,6 +615,8 @@ def _require_replay_if_match(
     raw_value: str | None,
     result: NotesAttachmentMutationResult,
 ) -> None:
+    """Require an exact optimistic base for mutation replay."""
+
     if raw_value is None:
         raise HTTPException(
             status_code=status.HTTP_428_PRECONDITION_REQUIRED,
@@ -622,6 +641,17 @@ def _require_replay_if_match(
         )
 
 
+def _optional_attachment_idempotency_key(raw_value: str | None) -> str:
+    """Validate a supplied compatibility key or create a private request key."""
+
+    if raw_value is None:
+        return uuid4().hex
+    try:
+        return validate_notes_attachment_idempotency_key(raw_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _require_attachment_record(
     db: CharactersRAGDB,
     *,
@@ -630,6 +660,8 @@ def _require_attachment_record(
     attachment_id: str,
     include_tombstone: bool,
 ) -> NoteAttachment:
+    """Return one note-bound attachment or a nondisclosing public error."""
+
     _ensure_note_exists_or_404(db, note_id)
     try:
         attachment = db.note_attachment_store.get(dataset_id, attachment_id)
@@ -655,6 +687,8 @@ def _attachment_availability(
     attachment: NoteAttachment,
     availability_by_hash: Mapping[str, str] | None = None,
 ) -> str:
+    """Return the public availability state for an attachment blob."""
+
     if attachment.deleted:
         return "deleted"
     if availability_by_hash is not None:
@@ -680,6 +714,8 @@ def _attachment_item(
     *,
     availability_by_hash: Mapping[str, str] | None = None,
 ) -> NotesAttachmentItem:
+    """Build a strict public attachment item from the product projection."""
+
     return NotesAttachmentItem.model_validate(
         {
             "dataset_id": attachment.dataset_id,
@@ -717,6 +753,8 @@ def _attachment_mutation_response(
     service: SyncV2Service,
     result: NotesAttachmentMutationResult,
 ) -> NotesAttachmentMutationResponse:
+    """Build a strict mutation response with replay evidence."""
+
     item = _attachment_item(service, result.attachment)
     return NotesAttachmentMutationResponse.model_validate(
         {**item.model_dump(), "idempotent_replay": result.idempotent_replay}
@@ -724,6 +762,8 @@ def _attachment_mutation_response(
 
 
 def _attachment_cursor_secret() -> bytes:
+    """Return the configured secret used to authenticate attachment cursors."""
+
     value = str(core_settings.get("JWT_SECRET_KEY") or "").strip()
     if not value:
         raise HTTPException(
@@ -741,6 +781,8 @@ def _encode_attachment_cursor(
     state_filter: str,
     after_attachment_id: str,
 ) -> str:
+    """Encode an owner- and query-bound attachment keyset cursor."""
+
     payload = json.dumps(
         {
             "v": 1,
@@ -769,6 +811,8 @@ def _decode_attachment_cursor(
     note_id: str,
     state_filter: str,
 ) -> str | None:
+    """Decode and authorize an opaque attachment keyset cursor."""
+
     if raw_cursor is None:
         return None
     if len(raw_cursor.encode("utf-8")) > 512:
@@ -824,6 +868,8 @@ def _attachment_payload_from_record(
     content_type: str | None = None,
     size_bytes: int | None = None,
 ) -> dict[str, object]:
+    """Build the next canonical attachment-ref payload from a projection row."""
+
     return {
         "attachment_id": attachment.attachment_id,
         "parent_domain": "notes.note",
@@ -843,6 +889,8 @@ def _attachment_current_head(
     service: SyncV2Service,
     attachment: NoteAttachment,
 ) -> Any:
+    """Return the attachment Sync head when it matches the product projection."""
+
     head = service.store.get_current_head(
         attachment.dataset_id,
         "attachment.ref",
@@ -865,6 +913,8 @@ def _attachment_current_head(
 
 
 def _parse_attachment_range(raw_range: str, size_bytes: int) -> tuple[int, int]:
+    """Parse one RFC 9110 byte range into inclusive bounds."""
+
     match = _NOTES_ATTACHMENT_RANGE_RE.fullmatch(raw_range)
     if match is None or "," in raw_range:
         raise HTTPException(
@@ -1150,6 +1200,8 @@ def _to_attachment_response(note_id: str, file_path: Path) -> dict[str, Any]:
 def _canonical_to_legacy_attachment_response(
     attachment: NoteAttachment,
 ) -> dict[str, object]:
+    """Translate a canonical projection row to the legacy filename response."""
+
     encoded_note_id = quote(attachment.note_id, safe="")
     encoded_file_name = quote(attachment.file_name, safe="")
     return {
@@ -4712,17 +4764,26 @@ async def upload_note_attachment(
                         "message": "The canonical Notes attachment dataset is unavailable.",
                     },
                 )
-            request_key = (
-                validate_notes_attachment_idempotency_key(idempotency_key)
-                if idempotency_key is not None
-                else uuid4().hex
-            )
-            content_type = active_content_type
-            if content_type is None:
+            if active_content_type is None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Attachment content type is required",
                 )
+            try:
+                active_content_type = validate_note_attachment_upload_content(
+                    file_name=safe_file_name,
+                    declared_content_type=active_content_type,
+                    payload=payload,
+                )
+            except NoteAttachmentPolicyError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            request_key = _optional_attachment_idempotency_key(
+                idempotency_key
+            )
+            content_type = active_content_type
             payload_hash = "sha256:" + hashlib.sha256(payload).hexdigest()
             if idempotency_key is not None:
                 replay = coordinator.replay_by_idempotency_key(
@@ -4964,6 +5025,8 @@ async def list_canonical_note_attachments(
     current_user: User = Depends(get_request_user),
     _: None = Depends(rbac_rate_limit("notes.attachments.list")),
 ) -> NotesAttachmentPage:
+    """List one owner-bound keyset page of canonical note attachments."""
+
     _ensure_note_exists_or_404(db, note_id)
     coordinator, ready = _require_attachment_context(
         db,
@@ -5047,6 +5110,8 @@ async def create_note_attachment_from_upload(
     current_user: User = Depends(get_request_user),
     _: None = Depends(rbac_rate_limit("notes.attachments.upload")),
 ) -> NotesAttachmentMutationResponse:
+    """Attach one completed, intent-bound upload to a canonical note."""
+
     _ensure_note_exists_or_404(db, note_id)
     key = _require_attachment_idempotency_key(idempotency_key)
     coordinator, ready = _require_attachment_context(
@@ -5203,6 +5268,8 @@ async def download_canonical_note_attachment(
     current_user: User = Depends(get_request_user),
     _: None = Depends(rbac_rate_limit("notes.attachments.get")),
 ) -> Response:
+    """Stream verified canonical attachment bytes with range semantics."""
+
     coordinator, ready = _require_attachment_context(
         db,
         current_user,
@@ -5317,6 +5384,8 @@ async def get_canonical_note_attachment(
     current_user: User = Depends(get_request_user),
     _: None = Depends(rbac_rate_limit("notes.attachments.get")),
 ) -> NotesAttachmentItem:
+    """Return canonical metadata for one stable attachment identity."""
+
     coordinator, ready = _require_attachment_context(
         db,
         current_user,
@@ -5353,6 +5422,8 @@ async def rename_canonical_note_attachment(
     current_user: User = Depends(get_request_user),
     _: None = Depends(rbac_rate_limit("notes.attachments.upload")),
 ) -> NotesAttachmentMutationResponse:
+    """Rename one canonical attachment under optimistic concurrency."""
+
     key = _require_attachment_idempotency_key(idempotency_key)
     coordinator, ready = _require_attachment_context(
         db,
@@ -5437,6 +5508,8 @@ async def tombstone_canonical_note_attachment(
     current_user: User = Depends(get_request_user),
     _: None = Depends(rbac_rate_limit("notes.attachments.delete")),
 ) -> NotesAttachmentMutationResponse:
+    """Tombstone one canonical attachment under optimistic concurrency."""
+
     key = _require_attachment_idempotency_key(idempotency_key)
     coordinator, ready = _require_attachment_context(
         db,
@@ -5518,6 +5591,8 @@ async def restore_canonical_note_attachment(
     current_user: User = Depends(get_request_user),
     _: None = Depends(rbac_rate_limit("notes.attachments.upload")),
 ) -> NotesAttachmentMutationResponse:
+    """Restore one canonical attachment under optimistic concurrency."""
+
     key = _require_attachment_idempotency_key(idempotency_key)
     coordinator, ready = _require_attachment_context(
         db,
@@ -5713,11 +5788,7 @@ async def delete_note_attachment(
                 dataset_id=dataset_id,
                 writable=True,
             )
-            key = (
-                validate_notes_attachment_idempotency_key(idempotency_key)
-                if idempotency_key is not None
-                else uuid4().hex
-            )
+            key = _optional_attachment_idempotency_key(idempotency_key)
             if idempotency_key is not None:
                 replay = coordinator.replay_by_idempotency_key(
                     owner_id=str(current_user.id),

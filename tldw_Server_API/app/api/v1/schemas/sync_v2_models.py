@@ -1233,6 +1233,8 @@ class _SyncNotesAttachmentIntent(BaseModel):
     @field_validator("note_id", "attachment_id")
     @classmethod
     def _validate_uuid4(cls, value: Any, info: Any) -> str:
+        """Validate one canonical Notes attachment UUIDv4 field."""
+
         from uuid import RFC_4122, UUID
 
         if not isinstance(value, str):
@@ -1259,6 +1261,8 @@ class SyncNotesAttachmentCreateIntent(_SyncNotesAttachmentIntent):
     @field_validator("file_name")
     @classmethod
     def _canonicalize_file_name(cls, value: Any) -> str:
+        """Canonicalize the requested create-intent filename."""
+
         try:
             return canonicalize_note_attachment_file_name(value)[0]
         except NoteAttachmentPolicyError as exc:
@@ -1276,6 +1280,8 @@ class SyncNotesAttachmentReplaceIntent(_SyncNotesAttachmentIntent):
     @field_validator("base_object_hash")
     @classmethod
     def _validate_object_hash(cls, value: Any) -> str:
+        """Validate the optimistic replacement base digest."""
+
         import re
 
         if (

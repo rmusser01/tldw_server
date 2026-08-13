@@ -13,6 +13,10 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_attachment_store import 
     NoteAttachment,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import (
+    NotesAttachmentMutationError,
+    NotesAttachmentSyncNotReadyError,
+)
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     NOTE_ATTACHMENT_MAX_FILENAME_LEN,
     canonicalize_note_attachment_file_name,
@@ -32,7 +36,9 @@ from .attachment_refs_v2 import (
     parse_attachment_ref_v2_payload,
     validate_attachment_ref_v2_routing_metadata,
 )
-from .errors import SyncIdempotencyConflictError, SyncStoreError
+from .errors import (
+    SyncIdempotencyConflictError,
+)
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     SyncDataset,
@@ -42,14 +48,6 @@ from .models import (
 )
 from .server_origin import SERVER_ORIGIN_DEVICE_ID
 from .service import SyncV2Service
-
-
-class NotesAttachmentMutationError(SyncStoreError):
-    """Stable failure for a coordinated Notes attachment mutation."""
-
-
-class NotesAttachmentSyncNotReadyError(NotesAttachmentMutationError):
-    """Raised when canonical attachment mutation is not writable."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +77,8 @@ class NotesAttachmentMutationPlan:
     allocate_unique_file_name: bool = False
 
     def __post_init__(self) -> None:
+        """Validate and freeze the public mutation-plan boundaries."""
+
         if not isinstance(self.owner_id, str) or not self.owner_id.strip():
             raise ValueError("owner_id must be non-empty")
         if (
@@ -399,6 +399,8 @@ class NotesAttachmentCoordinator:
         dataset: SyncDataset,
         envelope: SyncEnvelope,
     ) -> NotesAttachmentMutationResult:
+        """Resume materialization for one exact stored mutation request."""
+
         if envelope.apply_status != "applied":
             self.service._materialize_envelope(envelope)
             envelope = self.service._envelope_snapshot(envelope)
@@ -415,6 +417,8 @@ class NotesAttachmentCoordinator:
         *,
         idempotent_replay: bool,
     ) -> NotesAttachmentMutationResult:
+        """Build the durable coordinator result for an applied envelope."""
+
         attachment = self.note_db.note_attachment_store.get(
             dataset.dataset_id,
             envelope.object_id,
@@ -495,6 +499,8 @@ class NotesAttachmentCoordinator:
         *,
         allow_deleted: bool,
     ) -> dict[str, Any]:
+        """Return the owner-authorized parent note in the required state."""
+
         note = self.note_db.note_store.get_note_by_id(
             str(payload.parent_object_id),
             include_deleted=True,
@@ -514,10 +520,14 @@ def _allows_deleted_parent(
     plan: NotesAttachmentMutationPlan,
     routing_metadata: Mapping[str, object],
 ) -> bool:
+    """Return whether the mutation may target an owned deleted parent."""
+
     return plan.operation == "tombstone" or routing_metadata.get("restore_intent") is True
 
 
 def _note_read_identity(note: Mapping[str, object]) -> tuple[object, ...]:
+    """Return the guarded note fields that define attachment authorization."""
+
     return (
         note.get("id"),
         note.get("client_id"),
@@ -530,6 +540,8 @@ def _require_requested_base(
     plan: NotesAttachmentMutationPlan,
     head: SyncEnvelope | None,
 ) -> None:
+    """Require the caller's optimistic base to match the current head."""
+
     requested = (
         plan.base_server_cursor,
         plan.base_object_revision,
@@ -560,6 +572,8 @@ def _mutation_identity(
     plan: NotesAttachmentMutationPlan,
     dataset: SyncDataset,
 ) -> tuple[str, str]:
+    """Derive stable manifest and envelope identities for one request."""
+
     stable_key = _stable_key_from_idempotency(plan.idempotency_key)
     key_hash = stable_key.removeprefix("notes-attachment:")
     envelope_hash = hashlib.sha256(
@@ -572,6 +586,8 @@ def _mutation_identity(
 
 
 def _stable_key_from_idempotency(idempotency_key: str) -> str:
+    """Derive the privacy-safe stable manifest key for a public request key."""
+
     key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
     return f"notes-attachment:{key_hash}"
 
@@ -586,6 +602,8 @@ def _build_envelope(
     stable_key: str,
     object_revision: int,
 ) -> SyncEnvelopeCreate:
+    """Build the canonical server-origin attachment envelope."""
+
     payload_hash = attachment_ref_v2_object_hash(
         plan.operation,
         payload,
@@ -629,6 +647,8 @@ def _request_matches_existing(
     routing_metadata: Mapping[str, object],
     envelope: SyncEnvelope,
 ) -> bool:
+    """Return whether a stored envelope is the exact submitted request."""
+
     requested_payload = payload.model_dump(mode="json")
     existing_payload = dict(envelope.payload)
     for generated_field in ("created_at", "last_modified", "deleted_at"):
@@ -665,6 +685,8 @@ def _request_matches_existing(
 
 
 def _is_allocated_name_for_request(requested: object, allocated: object) -> bool:
+    """Return whether an allocated compatibility suffix belongs to the request."""
+
     if not isinstance(requested, str) or not isinstance(allocated, str):
         return False
     if requested == allocated:
@@ -699,6 +721,8 @@ def _existing_request(
     stable_key: str,
     client_envelope_id: str,
 ) -> SyncEnvelope | None:
+    """Load the exact prior request by manifest key or envelope identity."""
+
     for envelope in service.store.list_envelopes_for_entity(
         dataset_id,
         "attachment.ref",
@@ -716,6 +740,8 @@ def _existing_request(
 def _require_adapter_acceptance(
     outcome: AdapterAccepted | AdapterRejected | AdapterDeferred | AdapterConflict,
 ) -> None:
+    """Require adapter acceptance and map all other outcomes to failure."""
+
     if isinstance(outcome, AdapterAccepted):
         return
     if isinstance(outcome, AdapterRejected | AdapterDeferred | AdapterConflict):

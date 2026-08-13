@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (

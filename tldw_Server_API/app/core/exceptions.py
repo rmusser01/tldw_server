@@ -59,6 +59,14 @@ class NoteAttachmentPolicyError(ValueError):
     """Raised when attachment metadata is outside the canonical Notes policy."""
 
 
+class NotesAttachmentMutationError(RuntimeError):
+    """Stable failure for a coordinated Notes attachment mutation."""
+
+
+class NotesAttachmentSyncNotReadyError(NotesAttachmentMutationError):
+    """Raised when canonical attachment mutation is not writable."""
+
+
 class PromptImprovementDispatchError(RuntimeError):
     """Sanitized infrastructure failure for endpoint error mapping."""
 

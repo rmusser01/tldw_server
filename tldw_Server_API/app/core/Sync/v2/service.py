@@ -5965,6 +5965,8 @@ def _compact_json_size(value: object) -> int:
 
 
 def _canonical_attachment_uuid(value: object, field_name: str) -> str:
+    """Validate and return a canonical lowercase attachment UUIDv4."""
+
     if not isinstance(value, str):
         raise SyncStoreError(f"Notes attachment {field_name} is invalid")
     try:

@@ -43,6 +43,8 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
+pytestmark = pytest.mark.integration
+
 ATTACHMENT_ID = "2c4cb609-c4db-44f9-8e35-f078bd36d6b2"
 NOTE_ID = "a1677eb1-1f41-4c86-a8dd-1eaa14b014e2"
 OBJECT_HASH = "sha256:" + "a" * 64
@@ -668,7 +670,13 @@ def test_active_legacy_filename_routes_are_canonical_compatibility_aliases(
     created = client.post(
         f"/api/v1/notes/{NOTE_ID}/attachments",
         headers={"Idempotency-Key": "legacy-create-1"},
-        files={"file": ("Legacy Report.PDF", b"legacy payload", "application/pdf")},
+        files={
+            "file": (
+                "Legacy Report.PDF",
+                b"%PDF-1.7\nlegacy payload\n%%EOF\n",
+                "application/pdf",
+            )
+        },
     )
     assert created.status_code == 201, created.text
     assert created.json()["file_name"] == "Legacy_Report.pdf"
@@ -690,7 +698,7 @@ def test_active_legacy_filename_routes_are_canonical_compatibility_aliases(
         f"/api/v1/notes/{NOTE_ID}/attachments/Legacy_Report.pdf"
     )
     assert downloaded.status_code == 200, downloaded.text
-    assert downloaded.content == b"legacy payload"
+    assert downloaded.content == b"%PDF-1.7\nlegacy payload\n%%EOF\n"
 
     deleted = client.delete(
         f"/api/v1/notes/{NOTE_ID}/attachments/Legacy_Report.pdf",
@@ -709,6 +717,62 @@ def test_active_legacy_filename_routes_are_canonical_compatibility_aliases(
     assert delete_drift.status_code == 409, delete_drift.text
     tombstone = note_db.note_attachment_store.get(DATASET_ID, registry.attachment_id)
     assert tombstone is not None and tombstone.deleted is True
+
+
+def test_active_legacy_attachment_routes_map_invalid_idempotency_keys_to_400(
+    canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+) -> None:
+    client, note_db, _ = canonical_api
+
+    rejected_upload = client.post(
+        f"/api/v1/notes/{NOTE_ID}/attachments",
+        headers={"Idempotency-Key": "invalid key"},
+        files={"file": ("report.txt", b"payload", "text/plain")},
+    )
+    rejected_delete = client.delete(
+        f"/api/v1/notes/{NOTE_ID}/attachments/report.txt",
+        headers={"Idempotency-Key": "invalid key"},
+    )
+
+    assert rejected_upload.status_code == 400, rejected_upload.text
+    assert rejected_delete.status_code == 400, rejected_delete.text
+    assert not note_db.note_attachment_store.list_page(
+        DATASET_ID,
+        NOTE_ID,
+        after_attachment_id=None,
+        limit=10,
+        state="all",
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "declared_content_type"),
+    [
+        (b"plain text disguised as a PDF", "application/pdf"),
+        (b"%PDF-1.7\nvalid bytes\n%%EOF\n", "text/plain"),
+    ],
+)
+def test_active_one_shot_upload_rejects_mismatched_content_before_blob_work(
+    canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+    payload: bytes,
+    declared_content_type: str,
+) -> None:
+    client, note_db, _ = canonical_api
+
+    rejected = client.post(
+        f"/api/v1/notes/{NOTE_ID}/attachments",
+        headers={"Idempotency-Key": "mismatched-media-1"},
+        files={"file": ("report.pdf", payload, declared_content_type)},
+    )
+
+    assert rejected.status_code == 400, rejected.text
+    assert not note_db.note_attachment_store.list_page(
+        DATASET_ID,
+        NOTE_ID,
+        after_attachment_id=None,
+        limit=10,
+        state="all",
+    )
 
 
 def test_active_one_shot_upload_enforces_the_effective_sync_blob_limit(

@@ -46,6 +46,8 @@ _ETAG_RE = re.compile(
 
 
 def _canonical_uuid4(value: Any, field_name: str) -> str:
+    """Validate and return a canonical lowercase UUIDv4 string."""
+
     if not isinstance(value, str) or _UUID4_RE.fullmatch(value) is None:
         raise ValueError(f"{field_name} must be a canonical lowercase UUIDv4")
     parsed = UUID(value)
@@ -55,6 +57,8 @@ def _canonical_uuid4(value: Any, field_name: str) -> str:
 
 
 def _visible_ascii(value: Any, *, field_name: str, maximum: int) -> str:
+    """Validate and return bounded visible ASCII input."""
+
     if (
         not isinstance(value, str)
         or not 1 <= len(value) <= maximum
@@ -65,6 +69,8 @@ def _visible_ascii(value: Any, *, field_name: str, maximum: int) -> str:
 
 
 def _canonical_timestamp(value: Any, field_name: str) -> str:
+    """Normalize and return a canonical Sync timestamp."""
+
     normalized = normalize_sync_timestamp(value)
     if normalized is None:
         raise ValueError(f"{field_name} must be a canonical timestamp")
@@ -123,6 +129,8 @@ class NotesAttachmentRenameRequest(_StrictAttachmentModel):
     @field_validator("file_name")
     @classmethod
     def _canonicalize_file_name(cls, value: Any) -> str:
+        """Canonicalize a rename request filename."""
+
         try:
             return canonicalize_note_attachment_file_name(value)[0]
         except NoteAttachmentPolicyError as exc:
@@ -137,6 +145,8 @@ class NotesAttachmentReasonRequest(_StrictAttachmentModel):
     @field_validator("reason")
     @classmethod
     def _validate_reason(cls, value: str | None) -> str | None:
+        """Validate an optional bounded mutation reason."""
+
         if value is not None and any(ord(character) < 32 for character in value):
             raise ValueError("reason must not contain control characters")
         return value
@@ -150,6 +160,8 @@ class NotesAttachmentFromUploadRequest(_StrictAttachmentModel):
     @field_validator("upload_id")
     @classmethod
     def _validate_upload_id(cls, value: Any) -> str:
+        """Validate the opaque completed-upload identifier."""
+
         return _visible_ascii(value, field_name="upload_id", maximum=128)
 
 
@@ -179,11 +191,15 @@ class NotesAttachmentItem(_StrictAttachmentModel):
     @field_validator("note_id")
     @classmethod
     def _validate_note_id(cls, value: Any) -> str:
+        """Validate the parent note identifier."""
+
         return _canonical_uuid4(value, "note_id")
 
     @field_validator("dataset_id", "created_by")
     @classmethod
     def _validate_bounded_authority(cls, value: str, info: Any) -> str:
+        """Validate bounded owner and dataset authority identifiers."""
+
         if value != value.strip():
             raise ValueError(f"{info.field_name} must already be normalized")
         return value
@@ -191,11 +207,15 @@ class NotesAttachmentItem(_StrictAttachmentModel):
     @field_validator("attachment_id")
     @classmethod
     def _validate_attachment_id(cls, value: Any) -> str:
+        """Validate the stable attachment UUIDv4."""
+
         return _canonical_uuid4(value, "attachment_id")
 
     @field_validator("file_name")
     @classmethod
     def _validate_file_name(cls, value: Any) -> str:
+        """Require an already-canonical attachment filename."""
+
         try:
             display_name, _ = canonicalize_note_attachment_file_name(value)
         except NoteAttachmentPolicyError as exc:
@@ -207,6 +227,8 @@ class NotesAttachmentItem(_StrictAttachmentModel):
     @field_validator("original_file_name")
     @classmethod
     def _validate_original_file_name(cls, value: Any) -> str:
+        """Validate the original safe-basename metadata."""
+
         try:
             return validate_note_attachment_original_file_name(value)
         except NoteAttachmentPolicyError as exc:
@@ -215,6 +237,8 @@ class NotesAttachmentItem(_StrictAttachmentModel):
     @field_validator("content_type")
     @classmethod
     def _validate_content_type(cls, value: Any) -> str:
+        """Validate normalized attachment media-type metadata."""
+
         try:
             return validate_note_attachment_content_type(value)
         except NoteAttachmentPolicyError as exc:
@@ -223,6 +247,8 @@ class NotesAttachmentItem(_StrictAttachmentModel):
     @field_validator("blob_hash")
     @classmethod
     def _validate_blob_hash(cls, value: Any) -> str:
+        """Validate the canonical attachment blob digest."""
+
         if not isinstance(value, str) or _BLOB_HASH_RE.fullmatch(value) is None:
             raise ValueError("blob_hash must be a canonical lowercase SHA-256 digest")
         return value
@@ -230,6 +256,8 @@ class NotesAttachmentItem(_StrictAttachmentModel):
     @field_validator("object_hash")
     @classmethod
     def _validate_object_hash(cls, value: Any) -> str:
+        """Validate the canonical attachment object digest."""
+
         if not isinstance(value, str) or _OBJECT_HASH_RE.fullmatch(value) is None:
             raise ValueError("object_hash must be a canonical lowercase SHA-256 digest")
         return value
@@ -237,15 +265,21 @@ class NotesAttachmentItem(_StrictAttachmentModel):
     @field_validator("created_at", "last_modified")
     @classmethod
     def _validate_timestamp(cls, value: Any, info: Any) -> str:
+        """Normalize attachment lifecycle timestamps."""
+
         return _canonical_timestamp(value, info.field_name)
 
     @field_validator("deleted_at")
     @classmethod
     def _validate_deleted_at(cls, value: Any) -> str | None:
+        """Normalize an optional deletion timestamp."""
+
         return None if value is None else _canonical_timestamp(value, "deleted_at")
 
     @model_validator(mode="after")
     def _validate_lifecycle_and_etag(self) -> NotesAttachmentItem:
+        """Enforce lifecycle consistency and the exact strong ETag."""
+
         if self.state == "live" and (self.deleted_at is not None or self.delete_reason is not None):
             raise ValueError("live attachment lifecycle metadata is inconsistent")
         if self.state == "tombstoned" and self.deleted_at is None:
@@ -276,10 +310,14 @@ class NotesAttachmentPage(_StrictAttachmentModel):
     @field_validator("next_cursor")
     @classmethod
     def _validate_next_cursor(cls, value: Any) -> str | None:
+        """Validate an optional opaque keyset cursor."""
+
         return None if value is None else validate_notes_attachment_keyset_cursor(value)
 
     @model_validator(mode="after")
     def _validate_pagination_state(self) -> NotesAttachmentPage:
+        """Require the cursor and continuation flag to agree."""
+
         if self.has_more != (self.next_cursor is not None):
             raise ValueError("next_cursor must be present exactly when has_more is true")
         return self

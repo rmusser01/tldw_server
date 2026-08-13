@@ -1093,6 +1093,8 @@ class SyncV2Store:
         *,
         owner_user_id: str,
     ) -> dict[str, SyncBlobAvailabilityStatus]:
+        """Return bounded owner-authorized blob states keyed by payload hash."""
+
         return self.db.list_blob_availability_by_hashes(
             dataset_id,
             payload_hashes,

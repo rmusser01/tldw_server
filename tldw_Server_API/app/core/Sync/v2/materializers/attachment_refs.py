@@ -63,6 +63,8 @@ class AttachmentRefMaterializer:
         *,
         store: SyncV2Store,
     ) -> MaterializationResult:
+        """Project a strict attachment-ref v2 envelope into product state."""
+
         if self.note_db is None:
             return _mark_failed(
                 envelope,
@@ -317,6 +319,8 @@ class AttachmentRefMaterializer:
 
 
 def _required_revision(envelope: SyncEnvelope) -> int:
+    """Return the strict positive attachment revision from an envelope."""
+
     revision = envelope.object_revision
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         raise AttachmentRefV2ValidationError(
@@ -329,6 +333,8 @@ def _already_materialized(
     envelope: SyncEnvelope,
     current_state: SyncObjectState | None,
 ) -> bool:
+    """Return whether object state already records this exact projection."""
+
     return bool(
         current_state is not None
         and current_state.latest_server_cursor == envelope.server_cursor
@@ -342,6 +348,8 @@ def _v2_state_conflict(
     envelope: SyncEnvelope,
     current_state: SyncObjectState | None,
 ) -> str | None:
+    """Return the stable attachment state conflict code, when any."""
+
     has_base = any(
         value is not None
         for value in (
@@ -380,6 +388,8 @@ def _validate_product_base(
     envelope: SyncEnvelope,
     payload: AttachmentRefV2Payload,
 ) -> None:
+    """Require product state to match the envelope's optimistic base."""
+
     if existing is None:
         if envelope.object_revision != 1:
             raise ConflictError("Attachment product base is missing")
@@ -411,6 +421,8 @@ def _is_exact_product_postcondition(
     revision: int,
     deleted: bool,
 ) -> bool:
+    """Return whether the product row is the exact intended postcondition."""
+
     if attachment is None:
         return False
     return bool(
@@ -442,6 +454,8 @@ def _mark_v2_conflict(
     store: SyncV2Store,
     reason: str,
 ) -> MaterializationResult:
+    """Persist and return a stable attachment projection conflict."""
+
     message = "Notes attachment base state does not match the current projection"
     store.mark_envelope_apply_status(
         envelope.server_cursor or 0,
@@ -463,6 +477,8 @@ def _mark_failed(
     error_code: str,
     message: str,
 ) -> MaterializationResult:
+    """Persist and return a stable attachment projection failure."""
+
     store.mark_envelope_apply_status(
         envelope.server_cursor or 0,
         apply_status="failed",
