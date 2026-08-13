@@ -1013,6 +1013,7 @@ class SyncV2Store:
             attachment_id,
             attachment_revision,
             owner_user_id=owner_user_id,
+            connection=self._connection,
         )
 
     def get_attachment_revision_binding_for_blob(
@@ -1071,6 +1072,28 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def list_unreleased_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded compound-keyset page of unreleased bindings."""
+
+        return self.db.list_unreleased_attachment_revision_bindings(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            after_attachment_id=after_attachment_id,
+            after_attachment_revision=after_attachment_revision,
+            limit=limit,
+            connection=self._connection,
+        )
+
     def list_unresolved_attachment_revision_bindings(
         self,
         dataset_id: str,
@@ -1120,6 +1143,7 @@ class SyncV2Store:
             attachment_revision,
             released_at=released_at,
             owner_user_id=owner_user_id,
+            connection=self._connection,
         )
 
     def get_or_create_storage_namespace(

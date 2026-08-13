@@ -427,7 +427,11 @@ def _shared_blob_candidate(service: SyncV2Service, blob_id: str):
         audit_mode=False,
         minimum_tombstone_age_seconds=0,
     )
-    return next(item for item in dry_run.candidates if item.blob_id == blob_id)
+    return next(
+        item
+        for item in dry_run.candidates
+        if item.candidate_type == "blob_gc" and item.blob_id == blob_id
+    )
 
 
 def test_v2_shared_blob_live_sibling_binding_blocks_gc(tmp_path: Path) -> None:
@@ -613,6 +617,7 @@ def test_retention_apply_revalidates_stale_blob_candidate_under_fence(
         confirm=True,
         apply_envelope_compaction=False,
         apply_tombstone_prune=False,
+        apply_binding_release=False,
         apply_blob_gc=True,
     )
 
@@ -778,6 +783,250 @@ def test_v2_blob_retention_keeps_replacement_evidence_separate(tmp_path: Path) -
     }
     assert by_blob["blob-old"].unacknowledged_device_ids == []
     assert by_blob["blob-new"].unacknowledged_device_ids == ["device-v2"]
+
+
+def test_retention_candidate_binding_release_requires_historical_exact_evidence(
+    tmp_path: Path,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    old_digest = "sha256:" + "a" * 64
+    new_digest = "sha256:" + "b" * 64
+    _store_v2_blob(service, blob_id="blob-old", blob_hash=old_digest)
+    _store_v2_blob(service, blob_id="blob-new", blob_hash=new_digest)
+    first = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[_v2_attachment_envelope(old_digest)],
+    ).accepted[0]
+    first_head = service.store.get_current_head(
+        "dataset-v2", "attachment.ref", _ATTACHMENT_A
+    )
+    assert first_head is not None
+    second = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[
+            _v2_attachment_envelope(
+                new_digest,
+                client_envelope_id="v2-attachment-replacement",
+                client_sequence=2,
+                object_revision=2,
+                payload_hash="sha256:" + "d" * 64,
+                base_server_cursor=first.server_sequence,
+                base_object_revision=first.object_revision,
+                base_object_hash=first_head.payload_hash,
+            )
+        ],
+    ).accepted[0]
+
+    before_ack = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+    )
+    releases = {
+        candidate.attachment_revision: candidate
+        for candidate in before_ack.candidates
+        if candidate.candidate_type == "binding_release"
+    }
+    assert releases[1].blob_id == "blob-old"
+    assert releases[1].required_device_ids == ["device-v2"]
+    assert releases[1].unacknowledged_device_ids == ["device-v2"]
+    assert "retention_blob_ref_unacknowledged" in releases[1].blockers
+    assert "retention_blob_unverified_by_device" in releases[1].blockers
+    assert 2 not in releases
+    response = _client_for_service(service).post(
+        "/api/v1/sync/retention/dry-run",
+        json={"dataset_id": "dataset-v2", "audit_mode": False},
+    )
+    assert response.status_code == 200
+    release_json = next(
+        candidate
+        for candidate in response.json()["candidates"]
+        if candidate["candidate_type"] == "binding_release"
+    )
+    assert release_json["attachment_revision"] == 1
+
+    _ack_v2_attachment_ref_through(service, second.server_sequence)
+    _ack_v2_blob(service, blob_id="blob-old", blob_hash=old_digest)
+    eligible = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+    )
+    old_release = next(
+        candidate
+        for candidate in eligible.candidates
+        if candidate.candidate_type == "binding_release"
+        and candidate.attachment_revision == 1
+    )
+    assert old_release.blockers == []
+
+    applied = service.retention_compact(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        confirm=True,
+        apply_envelope_compaction=False,
+        apply_tombstone_prune=False,
+        apply_blob_gc=False,
+        apply_binding_release=True,
+    )
+    released = service.store.get_attachment_revision_binding(
+        "dataset-v2",
+        _ATTACHMENT_A,
+        1,
+        owner_user_id="user-1",
+    )
+    current = service.store.get_attachment_revision_binding(
+        "dataset-v2",
+        _ATTACHMENT_A,
+        2,
+        owner_user_id="user-1",
+    )
+    assert applied.binding_releases == [
+        {
+            "attachment_id": _ATTACHMENT_A,
+            "attachment_revision": 1,
+            "blob_id": "blob-old",
+            "payload_hash": old_digest,
+            "size_bytes": 1,
+            "establishing_server_cursor": first.server_sequence,
+        }
+    ]
+    assert released is not None and released.retention_released_at == _clock()
+    assert released.blob_hash == old_digest
+    assert released.resolved_blob_id == "blob-old"
+    assert current is not None and current.retention_released_at is None
+
+
+def test_binding_release_candidate_reports_audit_restore_and_repair_holds(
+    tmp_path: Path,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    old_digest = "sha256:" + "a" * 64
+    new_digest = "sha256:" + "b" * 64
+    _store_v2_blob(service, blob_id="blob-old", blob_hash=old_digest)
+    _store_v2_blob(service, blob_id="blob-new", blob_hash=new_digest)
+    first = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[_v2_attachment_envelope(old_digest)],
+    ).accepted[0]
+    first_head = service.store.get_current_head(
+        "dataset-v2", "attachment.ref", _ATTACHMENT_A
+    )
+    assert first_head is not None
+    service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[
+            _v2_attachment_envelope(
+                new_digest,
+                client_envelope_id="v2-attachment-replacement",
+                client_sequence=2,
+                object_revision=2,
+                payload_hash="sha256:" + "d" * 64,
+                base_server_cursor=first.server_sequence,
+                base_object_revision=first.object_revision,
+                base_object_hash=first_head.payload_hash,
+            )
+        ],
+    )
+    service.store.db.execute(
+        "UPDATE sync_blob_objects SET status = 'quarantined' WHERE blob_id = ?",
+        ("blob-old",),
+    )
+
+    dry_run = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=True,
+        minimum_envelope_age_seconds=3600,
+        offline_restore_window_seconds=3600,
+    )
+    candidate = next(
+        candidate
+        for candidate in dry_run.candidates
+        if candidate.candidate_type == "binding_release"
+        and candidate.attachment_revision == 1
+    )
+    assert "retention_audit_mode" in candidate.blockers
+    assert "retention_envelope_window_active" in candidate.blockers
+    assert "retention_restore_window_active" in candidate.blockers
+    assert "retention_blob_quarantined" in candidate.blockers
+
+
+def test_binding_release_tombstone_window_and_later_restore_remain_protected(
+    tmp_path: Path,
+) -> None:
+    service = _v2_retention_service(tmp_path)
+    digest = "sha256:" + "a" * 64
+    _store_v2_blob(service, blob_id="blob-v2", blob_hash=digest)
+    first = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[_v2_attachment_envelope(digest)],
+    ).accepted[0]
+    tombstone = _tombstone_v2_attachment(
+        service,
+        blob_hash=digest,
+        head=first,
+        revision=2,
+    )
+
+    dry_run = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+        minimum_tombstone_age_seconds=3600,
+    )
+    by_revision = {
+        candidate.attachment_revision: candidate
+        for candidate in dry_run.candidates
+        if candidate.candidate_type == "binding_release"
+    }
+    assert "retention_tombstone_window_active" in by_revision[1].blockers
+    assert "retention_tombstone_window_active" in by_revision[2].blockers
+    tombstone_head = service.store.get_current_head(
+        "dataset-v2", "attachment.ref", _ATTACHMENT_A
+    )
+    assert tombstone_head is not None
+
+    restored = service.push(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        device_id="device-v2",
+        envelopes=[
+            _v2_attachment_envelope(
+                digest,
+                client_envelope_id="v2-attachment-restore",
+                client_sequence=3,
+                object_revision=3,
+                payload_hash="sha256:" + "e" * 64,
+                base_server_cursor=tombstone.server_sequence,
+                base_object_revision=tombstone.object_revision,
+                base_object_hash=tombstone_head.payload_hash,
+                routing_metadata={"restore_intent": True},
+            )
+        ],
+    ).accepted[0]
+    after_restore = service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="dataset-v2",
+        audit_mode=False,
+    )
+    release_revisions = {
+        candidate.attachment_revision
+        for candidate in after_restore.candidates
+        if candidate.candidate_type == "binding_release"
+    }
+    assert restored.object_revision == 3
+    assert 3 not in release_revisions
 
 
 @pytest.mark.parametrize("mutation", ["missing", "mismatch"])

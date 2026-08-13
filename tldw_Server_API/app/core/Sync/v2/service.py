@@ -520,6 +520,7 @@ class SyncRetentionCandidate:
     server_sequence: int | None = None
     blob_id: str | None = None
     attachment_id: str | None = None
+    attachment_revision: int | None = None
     payload_hash: str | None = None
     size_bytes: int | None = None
     blockers: list[str] = field(default_factory=list)
@@ -562,6 +563,7 @@ class SyncRetentionApplyResult:
     blockers: list[str] = field(default_factory=list)
     blocker_counts: dict[str, int] = field(default_factory=dict)
     domain_compactions: list[dict[str, object]] = field(default_factory=list)
+    binding_releases: list[dict[str, object]] = field(default_factory=list)
     blob_gc: list[dict[str, object]] = field(default_factory=list)
 
 
@@ -1429,6 +1431,7 @@ class SyncV2Service:
         confirm: bool = False,
         apply_envelope_compaction: bool = True,
         apply_tombstone_prune: bool = True,
+        apply_binding_release: bool = True,
         apply_blob_gc: bool = True,
         minimum_envelope_age_seconds: int = 0,
         minimum_tombstone_age_seconds: int = 0,
@@ -1455,6 +1458,7 @@ class SyncV2Service:
                 candidate,
                 apply_envelope_compaction=apply_envelope_compaction,
                 apply_tombstone_prune=apply_tombstone_prune,
+                apply_binding_release=apply_binding_release,
                 apply_blob_gc=apply_blob_gc,
             )
         ]
@@ -1472,7 +1476,12 @@ class SyncV2Service:
                 blocker_counts=dict(dry_run.blocker_counts),
             )
 
-        blocked = [candidate for candidate in selected if candidate.blockers]
+        blocked = [
+            candidate
+            for candidate in selected
+            if candidate.blockers
+            and candidate.candidate_type not in {"binding_release", "blob_gc"}
+        ]
         if blocked:
             return SyncRetentionApplyResult(
                 dataset_id=dataset_id,
@@ -1495,6 +1504,25 @@ class SyncV2Service:
             ],
         )
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        initially_blocked_bindings = [
+            candidate
+            for candidate in selected
+            if candidate.candidate_type == "binding_release" and candidate.blockers
+        ]
+        binding_releases, revalidated_binding_blocked = (
+            self._apply_retention_binding_releases(
+                dataset=dataset,
+                candidates=[
+                    candidate
+                    for candidate in selected
+                    if candidate.candidate_type == "binding_release"
+                    and not candidate.blockers
+                ],
+                minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+                minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                offline_restore_window_seconds=offline_restore_window_seconds,
+            )
+        )
         blob_gc, revalidated_blob_blocked = self._apply_retention_blob_gc(
             dataset=dataset,
             candidates=[
@@ -1505,7 +1533,12 @@ class SyncV2Service:
         )
         applied_count = sum(
             int(item["candidate_count"]) for item in domain_compactions
-        ) + len(blob_gc)
+        ) + len(binding_releases) + len(blob_gc)
+        revalidated_blocked = (
+            initially_blocked_bindings
+            + revalidated_binding_blocked
+            + revalidated_blob_blocked
+        )
         return SyncRetentionApplyResult(
             dataset_id=dataset_id,
             dry_run=False,
@@ -1513,17 +1546,18 @@ class SyncV2Service:
             evaluated_at=self.clock(),
             candidate_count=dry_run.candidate_count,
             applied_count=applied_count,
-            blocked_count=len(revalidated_blob_blocked),
+            blocked_count=len(revalidated_blocked),
             skipped_count=(
-                dry_run.candidate_count - len(selected) + len(revalidated_blob_blocked)
+                dry_run.candidate_count - len(selected) + len(revalidated_blocked)
             ),
             blockers=(
                 ["retention_revalidation_blocked"]
-                if revalidated_blob_blocked
+                if revalidated_blocked
                 else []
             ),
-            blocker_counts=_retention_blocker_counts(revalidated_blob_blocked),
+            blocker_counts=_retention_blocker_counts(revalidated_blocked),
             domain_compactions=domain_compactions,
+            binding_releases=binding_releases,
             blob_gc=blob_gc,
         )
 
@@ -1626,6 +1660,18 @@ class SyncV2Service:
             )
 
         remaining_budget = scan_limit - len(envelopes)
+        if "attachment.ref" in selected_domains and remaining_budget > 0:
+            binding_candidates = self._retention_binding_release_candidates(
+                dataset=dataset,
+                active_devices=active_devices,
+                audit_mode=audit_mode,
+                restore_window_blocked=restore_window_blocked,
+                minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+                minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                limit=remaining_budget,
+            )
+            candidates.extend(binding_candidates)
+            remaining_budget -= len(binding_candidates)
         if "attachment.ref" in selected_domains and remaining_budget > 0:
             candidates.extend(
                 self._retention_blob_candidates(
@@ -4516,6 +4562,79 @@ class SyncV2Service:
             )
         return applied
 
+    def _apply_retention_binding_releases(
+        self,
+        *,
+        dataset: SyncDataset,
+        candidates: Sequence[SyncRetentionCandidate],
+        minimum_envelope_age_seconds: int,
+        minimum_tombstone_age_seconds: int,
+        offline_restore_window_seconds: int,
+    ) -> tuple[list[dict[str, object]], list[SyncRetentionCandidate]]:
+        """Revalidate and monotonically release historical bindings under the fence."""
+
+        applied: list[dict[str, object]] = []
+        blocked: list[SyncRetentionCandidate] = []
+        for candidate in candidates:
+            if candidate.attachment_id is None or candidate.attachment_revision is None:
+                continue
+            guard_key = candidate.blob_id or candidate.attachment_id
+            with self.store.retention_guard(dataset.dataset_id, guard_key) as guarded:
+                current_dataset = guarded.get_dataset(
+                    dataset.dataset_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                binding = guarded.get_attachment_revision_binding(
+                    dataset.dataset_id,
+                    candidate.attachment_id,
+                    candidate.attachment_revision,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                if (
+                    current_dataset is None
+                    or binding is None
+                    or binding.retention_released_at is not None
+                ):
+                    continue
+                current_devices = self._retention_active_devices(
+                    current_dataset,
+                    store=guarded,
+                )
+                revalidated = self._retention_binding_release_candidate(
+                    dataset=current_dataset,
+                    binding=binding,
+                    active_devices=current_devices,
+                    audit_mode=False,
+                    restore_window_blocked=self._retention_restore_window_active(
+                        current_devices,
+                        offline_restore_window_seconds,
+                    ),
+                    minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+                    minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                    store=guarded,
+                )
+                if revalidated.blockers:
+                    blocked.append(revalidated)
+                    continue
+                released = guarded.release_attachment_revision_binding(
+                    dataset.dataset_id,
+                    binding.attachment_id,
+                    binding.attachment_revision,
+                    released_at=self.clock(),
+                    owner_user_id=dataset.owner_user_id,
+                )
+            applied.append(
+                {
+                    "attachment_id": released.attachment_id,
+                    "attachment_revision": released.attachment_revision,
+                    "blob_id": released.resolved_blob_id,
+                    "payload_hash": released.blob_hash,
+                    "size_bytes": released.size_bytes,
+                    "establishing_server_cursor": released.establishing_server_cursor,
+                }
+            )
+        return applied, blocked
+
     def _apply_retention_blob_gc(
         self,
         *,
@@ -4700,6 +4819,199 @@ class SyncV2Service:
                 )
             )
         return candidates
+
+    def _retention_binding_release_candidates(
+        self,
+        *,
+        dataset: SyncDataset,
+        active_devices: Sequence[SyncDevice],
+        audit_mode: bool,
+        restore_window_blocked: bool,
+        minimum_envelope_age_seconds: int,
+        minimum_tombstone_age_seconds: int,
+        limit: int,
+        store: SyncV2Store | None = None,
+    ) -> list[SyncRetentionCandidate]:
+        """Return a bounded keyset scan of unreleased binding candidates."""
+
+        active_store = store or self.store
+        candidates: list[SyncRetentionCandidate] = []
+        after_cursor = 0
+        after_attachment_id = ""
+        after_attachment_revision = 0
+        while len(candidates) < limit:
+            page_limit = min(SYNC_RETENTION_BINDING_PAGE_SIZE, limit - len(candidates))
+            bindings = active_store.list_unreleased_attachment_revision_bindings(
+                dataset.dataset_id,
+                owner_user_id=dataset.owner_user_id,
+                after_establishing_server_cursor=after_cursor,
+                after_attachment_id=after_attachment_id,
+                after_attachment_revision=after_attachment_revision,
+                limit=page_limit,
+            )
+            if not bindings:
+                break
+            candidates.extend(
+                self._retention_binding_release_candidate(
+                    dataset=dataset,
+                    binding=binding,
+                    active_devices=active_devices,
+                    audit_mode=audit_mode,
+                    restore_window_blocked=restore_window_blocked,
+                    minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+                    minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                    store=active_store,
+                )
+                for binding in bindings
+            )
+            last = bindings[-1]
+            after_cursor = last.establishing_server_cursor
+            after_attachment_id = last.attachment_id
+            after_attachment_revision = last.attachment_revision
+            if len(bindings) < page_limit:
+                break
+        return candidates
+
+    def _retention_binding_release_candidate(
+        self,
+        *,
+        dataset: SyncDataset,
+        binding: SyncAttachmentRevisionBinding,
+        active_devices: Sequence[SyncDevice],
+        audit_mode: bool,
+        restore_window_blocked: bool,
+        minimum_envelope_age_seconds: int,
+        minimum_tombstone_age_seconds: int,
+        store: SyncV2Store | None = None,
+    ) -> SyncRetentionCandidate:
+        """Evaluate immutable binding evidence without mutable reference counters."""
+
+        active_store = store or self.store
+        blockers: list[str] = []
+        if audit_mode:
+            blockers.append("retention_audit_mode")
+        if restore_window_blocked:
+            blockers.append("retention_restore_window_active")
+        if self._retention_workspace_ack_scope_blocked(dataset):
+            blockers.append("retention_workspace_ack_scope_unknown")
+
+        envelope = active_store.get_envelope_by_server_cursor(
+            binding.establishing_server_cursor
+        )
+        envelope_valid = (
+            envelope is not None
+            and envelope.dataset_id == dataset.dataset_id
+            and envelope.domain == "attachment.ref"
+            and envelope.adapter_version == 2
+            and envelope.object_id == binding.attachment_id
+            and envelope.object_revision == binding.attachment_revision
+        )
+        if not envelope_valid:
+            blockers.append("retention_blob_binding_invalid")
+        elif self._retention_window_active(
+            envelope.server_timestamp,
+            minimum_envelope_age_seconds,
+        ):
+            blockers.append("retention_envelope_window_active")
+
+        head = active_store.get_current_head(
+            dataset.dataset_id,
+            "attachment.ref",
+            binding.attachment_id,
+        )
+        state = active_store.get_object_state(
+            dataset.dataset_id,
+            "attachment.ref",
+            binding.attachment_id,
+        )
+        current_revision = None if head is None else head.object_revision
+        if (
+            head is None
+            or current_revision is None
+            or current_revision < binding.attachment_revision
+        ):
+            blockers.append("retention_blob_binding_invalid")
+        current_binding = current_revision == binding.attachment_revision
+        current_live = current_binding and (
+            (state is not None and not state.deleted)
+            or (head is not None and head.operation != "tombstone" and not head.deleted)
+        )
+        if current_live:
+            blockers.append("retention_active_blob_reference")
+        elif head is not None and (
+            head.operation == "tombstone" or head.deleted
+        ) and self._retention_window_active(
+            head.server_timestamp,
+            minimum_tombstone_age_seconds,
+        ):
+            blockers.append("retention_tombstone_window_active")
+
+        required_devices = [
+            device
+            for device in active_devices
+            if _device_supports_adapter_version(device, "attachment.ref", 2)
+        ]
+        ref_unacknowledged: list[str] = []
+        blob_unacknowledged: list[str] = []
+        blob: SyncBlobObject | None = None
+        if not current_live:
+            ref_unacknowledged = self._retention_unacknowledged_devices(
+                dataset_id=dataset.dataset_id,
+                domain="attachment.ref",
+                adapter_version=2,
+                server_sequence=binding.establishing_server_cursor,
+                active_devices=required_devices,
+                store=active_store,
+            )
+            if ref_unacknowledged:
+                blockers.append("retention_blob_ref_unacknowledged")
+            if binding.resolved_blob_id is not None:
+                blob = active_store.get_blob_object(
+                    dataset.dataset_id,
+                    blob_id=binding.resolved_blob_id,
+                    owner_user_id=dataset.owner_user_id,
+                    include_unavailable=True,
+                )
+                if (
+                    blob is None
+                    or blob.payload_hash != binding.blob_hash
+                    or blob.size_bytes != binding.size_bytes
+                ):
+                    blockers.append("retention_blob_binding_invalid")
+                elif blob.status == "quarantined":
+                    blockers.append("retention_blob_quarantined")
+                elif blob.status not in {"available", "deleted"}:
+                    blockers.append("retention_blob_repair_pending")
+                blob_unacknowledged = self._retention_blob_unacknowledged_devices(
+                    dataset_id=dataset.dataset_id,
+                    attachment_id=binding.attachment_id,
+                    blob_id=binding.resolved_blob_id,
+                    payload_hash=binding.blob_hash,
+                    adapter_version=2,
+                    active_devices=required_devices,
+                    store=active_store,
+                )
+                if blob_unacknowledged:
+                    blockers.append("retention_blob_unverified_by_device")
+
+        return SyncRetentionCandidate(
+            candidate_type="binding_release",
+            dataset_id=dataset.dataset_id,
+            domain="attachment.ref",
+            object_id=binding.attachment_id,
+            server_sequence=binding.establishing_server_cursor,
+            blob_id=binding.resolved_blob_id,
+            attachment_id=binding.attachment_id,
+            attachment_revision=binding.attachment_revision,
+            payload_hash=binding.blob_hash,
+            size_bytes=binding.size_bytes,
+            blockers=list(dict.fromkeys(blockers)),
+            required_device_ids=[device.device_id for device in required_devices],
+            unacknowledged_device_ids=sorted(
+                set(ref_unacknowledged) | set(blob_unacknowledged)
+            ),
+            reason="historical attachment revision binding",
+        )
 
     def _retention_blob_candidate(
         self,
@@ -6154,12 +6466,15 @@ def _retention_apply_candidate_enabled(
     *,
     apply_envelope_compaction: bool,
     apply_tombstone_prune: bool,
+    apply_binding_release: bool,
     apply_blob_gc: bool,
 ) -> bool:
     if candidate.candidate_type == "envelope_compaction":
         return apply_envelope_compaction
     if candidate.candidate_type == "tombstone_prune":
         return apply_tombstone_prune
+    if candidate.candidate_type == "binding_release":
+        return apply_binding_release
     if candidate.candidate_type == "blob_gc":
         return apply_blob_gc
     return False

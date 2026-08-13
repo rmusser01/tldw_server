@@ -100,6 +100,11 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
         "establishing_server_cursor, attachment_id, attachment_revision) WHERE "
         "resolved_blob_id IS NULL AND retention_released_at IS NULL"
     ) in compact_schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release ON "
+        "sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, "
+        "attachment_id, attachment_revision) WHERE retention_released_at IS NULL"
+    ) in compact_schema
     assert "CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces" in compact_schema
     assert "storage_namespace_id ~ '^[0-9a-f]{32}$'" in compact_schema
     assert (
@@ -255,6 +260,12 @@ def test_postgres_attachment_authority_catalog_is_exact(
             "dataset_id, resolved_blob_id, establishing_server_cursor, attachment_id, attachment_revision",
             "retention_released_at IS NULL",
         ),
+        "idx_sync_attachment_bindings_retention_release": (
+            "sync_attachment_revision_bindings",
+            False,
+            "dataset_id, establishing_server_cursor, attachment_id, attachment_revision",
+            "retention_released_at IS NULL",
+        ),
         "idx_sync_attachment_bindings_pending_digest": (
             "sync_attachment_revision_bindings",
             False,
@@ -403,6 +414,23 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
                 ("dataset-binding-pg", "sha256:" + "a" * 64, 1),
                 connection=conn,
             ).rows
+            release_rows = db.execute(
+                "EXPLAIN SELECT attachment_id FROM sync_attachment_revision_bindings "
+                "AS binding WHERE binding.dataset_id = ? "
+                "AND binding.retention_released_at IS NULL AND NOT EXISTS (SELECT 1 "
+                "FROM sync_current_heads AS head JOIN sync_envelopes AS envelope ON "
+                "envelope.server_sequence = head.latest_server_cursor WHERE "
+                "head.dataset_id = binding.dataset_id AND head.domain = 'attachment.ref' "
+                "AND head.object_id = binding.attachment_id "
+                "AND envelope.adapter_version = 2 AND envelope.object_revision = "
+                "binding.attachment_revision AND envelope.operation <> 'tombstone') AND "
+                "(binding.establishing_server_cursor, binding.attachment_id, "
+                "binding.attachment_revision) > (?, ?, ?) ORDER BY "
+                "binding.establishing_server_cursor, binding.attachment_id, "
+                "binding.attachment_revision LIMIT ?",
+                ("dataset-binding-pg", 0, "", 0, 1000),
+                connection=conn,
+            ).rows
         lookup_plan = " ".join(
             str(next(iter(row.values()))) for row in lookup_rows
         )
@@ -411,10 +439,12 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
             str(next(iter(row.values()))) for row in namespace_rows
         )
         digest_plan = " ".join(str(next(iter(row.values()))) for row in digest_rows)
+        release_plan = " ".join(str(next(iter(row.values()))) for row in release_rows)
         assert "sync_attachment_revision_bindings_pkey" in lookup_plan
         assert "idx_sync_attachment_bindings_unresolved" in page_plan
         assert "idx_sync_dataset_storage_namespaces_owner" in namespace_plan
         assert "idx_sync_attachment_bindings_pending_digest" in digest_plan
+        assert "idx_sync_attachment_bindings_retention_release" in release_plan
     finally:
         if db.backend_type == BackendType.POSTGRESQL:
             backend.get_pool().close_all()

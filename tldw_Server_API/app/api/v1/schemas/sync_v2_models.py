@@ -658,7 +658,12 @@ class SyncBackgroundStatusResponse(BaseModel):
     server_time: str | None = None
 
 
-SyncRetentionCandidateType = Literal["envelope_compaction", "tombstone_prune", "blob_gc"]
+SyncRetentionCandidateType = Literal[
+    "envelope_compaction",
+    "tombstone_prune",
+    "binding_release",
+    "blob_gc",
+]
 
 
 class SyncRetentionDryRunRequest(BaseModel):
@@ -684,6 +689,7 @@ class SyncRetentionCandidateResponse(BaseModel):
     server_sequence: int | None = Field(None, ge=1)
     blob_id: str | None = None
     attachment_id: str | None = None
+    attachment_revision: int | None = Field(None, ge=1)
     payload_hash: str | None = None
     size_bytes: int | None = Field(None, ge=0)
     blockers: list[str] = Field(default_factory=list)
@@ -718,6 +724,7 @@ class SyncRetentionCompactRequest(BaseModel):
     confirm: bool = False
     apply_envelope_compaction: bool = True
     apply_tombstone_prune: bool = True
+    apply_binding_release: bool = True
     apply_blob_gc: bool = True
     minimum_envelope_age_seconds: int = Field(0, ge=0)
     minimum_tombstone_age_seconds: int = Field(0, ge=0)
@@ -740,6 +747,7 @@ class SyncRetentionCompactResponse(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     blocker_counts: dict[str, int] = Field(default_factory=dict)
     domain_compactions: list[dict[str, Any]] = Field(default_factory=list)
+    binding_releases: list[dict[str, Any]] = Field(default_factory=list)
     blob_gc: list[dict[str, Any]] = Field(default_factory=list)
 
 

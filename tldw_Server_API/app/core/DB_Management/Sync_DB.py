@@ -557,6 +557,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
         attachment_id, attachment_revision
     )
     WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+    ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
     ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
@@ -1121,6 +1124,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
         dataset_id, resolved_blob_id, establishing_server_cursor,
         attachment_id, attachment_revision
     )
+    WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+    ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
     WHERE retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
     ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
@@ -8045,10 +8051,11 @@ class SyncDatabase:
         attachment_revision: int,
         *,
         owner_user_id: str,
+        connection: Any | None = None,
     ) -> SyncAttachmentRevisionBinding | None:
         """Return one dataset-scoped immutable attachment revision binding."""
 
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_attachment_binding_dataset_owner(
                 dataset_id,
                 owner_user_id,
@@ -8132,6 +8139,62 @@ class SyncDatabase:
                 (
                     dataset_id,
                     blob_id,
+                    after_establishing_server_cursor,
+                    after_attachment_id,
+                    after_attachment_revision,
+                    page_limit,
+                ),
+                connection=conn,
+            ).rows
+        return [_attachment_revision_binding_from_row(row) for row in rows]
+
+    def list_unreleased_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """Return one bounded keyset page of unreleased dataset bindings."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync attachment binding page limit must be positive")
+        page_limit = min(limit, 1000)
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT binding.* FROM sync_attachment_revision_bindings AS binding
+                 WHERE binding.dataset_id = ?
+                   AND binding.retention_released_at IS NULL
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM sync_current_heads AS head
+                          JOIN sync_envelopes AS envelope
+                            ON envelope.server_sequence = head.latest_server_cursor
+                         WHERE head.dataset_id = binding.dataset_id
+                           AND head.domain = 'attachment.ref'
+                           AND head.object_id = binding.attachment_id
+                           AND envelope.adapter_version = 2
+                           AND envelope.object_revision = binding.attachment_revision
+                           AND envelope.operation <> 'tombstone'
+                   )
+                   AND (binding.establishing_server_cursor, binding.attachment_id,
+                        binding.attachment_revision) > (?, ?, ?)
+                 ORDER BY binding.establishing_server_cursor, binding.attachment_id,
+                          binding.attachment_revision
+                 LIMIT ?
+                """,
+                (
+                    dataset_id,
                     after_establishing_server_cursor,
                     after_attachment_id,
                     after_attachment_revision,
@@ -8331,13 +8394,14 @@ class SyncDatabase:
         *,
         released_at: str,
         owner_user_id: str,
+        connection: Any | None = None,
     ) -> SyncAttachmentRevisionBinding:
         """Set the retention-release marker once without erasing audit identity."""
 
         if not released_at.strip():
             raise SyncStoreError("Sync attachment binding release timestamp is required")
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_owner_for_update(
                 dataset_id,
                 owner_user_id,
@@ -10765,6 +10829,11 @@ class SyncDatabase:
                 WHERE retention_released_at IS NULL
             """,
             """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+                ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+                WHERE retention_released_at IS NULL
+            """,
+            """
             CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
                 ON sync_attachment_revision_bindings(
                     dataset_id, blob_hash, size_bytes, establishing_server_cursor,
@@ -11136,6 +11205,7 @@ class SyncDatabase:
             "idx_sync_attachment_bindings_unresolved": "createindexidx_sync_attachment_bindings_unresolvedonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
             "idx_sync_attachment_bindings_blob": "createindexidx_sync_attachment_bindings_blobonsync_attachment_revision_bindings(dataset_id,resolved_blob_id)",
             "idx_sync_attachment_bindings_blob_retention": "createindexidx_sync_attachment_bindings_blob_retentiononsync_attachment_revision_bindings(dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision)whereretention_released_atisnull",
+            "idx_sync_attachment_bindings_retention_release": "createindexidx_sync_attachment_bindings_retention_releaseonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereretention_released_atisnull",
             "idx_sync_attachment_bindings_pending_digest": "createindexidx_sync_attachment_bindings_pending_digestonsync_attachment_revision_bindings(dataset_id,blob_hash,size_bytes,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
             "uq_sync_dataset_storage_namespace_id": "createuniqueindexuq_sync_dataset_storage_namespace_idonsync_dataset_storage_namespaces(storage_namespace_id)",
             "idx_sync_dataset_storage_namespaces_owner": "createindexidx_sync_dataset_storage_namespaces_owneronsync_dataset_storage_namespaces(owner_user_id,dataset_id)",
@@ -11169,6 +11239,7 @@ class SyncDatabase:
                     'idx_sync_attachment_bindings_unresolved',
                     'idx_sync_attachment_bindings_blob',
                     'idx_sync_attachment_bindings_blob_retention',
+                    'idx_sync_attachment_bindings_retention_release',
                     'idx_sync_attachment_bindings_pending_digest',
                     'uq_sync_dataset_storage_namespace_id',
                     'idx_sync_dataset_storage_namespaces_owner'
@@ -11323,6 +11394,12 @@ class SyncDatabase:
                 "sync_attachment_revision_bindings",
                 False,
                 "dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision",
+                "retention_released_atisnull",
+            ),
+            "idx_sync_attachment_bindings_retention_release": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,establishing_server_cursor,attachment_id,attachment_revision",
                 "retention_released_atisnull",
             ),
             "idx_sync_attachment_bindings_pending_digest": (

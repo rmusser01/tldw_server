@@ -1219,6 +1219,7 @@ def compact_sync_v2_retention(
             confirm=request.confirm,
             apply_envelope_compaction=request.apply_envelope_compaction,
             apply_tombstone_prune=request.apply_tombstone_prune,
+            apply_binding_release=request.apply_binding_release,
             apply_blob_gc=request.apply_blob_gc,
             minimum_envelope_age_seconds=request.minimum_envelope_age_seconds,
             minimum_tombstone_age_seconds=request.minimum_tombstone_age_seconds,
