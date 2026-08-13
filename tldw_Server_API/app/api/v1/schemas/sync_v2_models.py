@@ -658,7 +658,12 @@ class SyncBackgroundStatusResponse(BaseModel):
     server_time: str | None = None
 
 
-SyncRetentionCandidateType = Literal["envelope_compaction", "tombstone_prune", "blob_gc"]
+SyncRetentionCandidateType = Literal[
+    "envelope_compaction",
+    "tombstone_prune",
+    "binding_release",
+    "blob_gc",
+]
 
 
 class SyncRetentionDryRunRequest(BaseModel):
@@ -684,6 +689,7 @@ class SyncRetentionCandidateResponse(BaseModel):
     server_sequence: int | None = Field(None, ge=1)
     blob_id: str | None = None
     attachment_id: str | None = None
+    attachment_revision: int | None = Field(None, ge=1)
     payload_hash: str | None = None
     size_bytes: int | None = Field(None, ge=0)
     blockers: list[str] = Field(default_factory=list)
@@ -718,6 +724,7 @@ class SyncRetentionCompactRequest(BaseModel):
     confirm: bool = False
     apply_envelope_compaction: bool = True
     apply_tombstone_prune: bool = True
+    apply_binding_release: bool = True
     apply_blob_gc: bool = True
     minimum_envelope_age_seconds: int = Field(0, ge=0)
     minimum_tombstone_age_seconds: int = Field(0, ge=0)
@@ -740,6 +747,7 @@ class SyncRetentionCompactResponse(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     blocker_counts: dict[str, int] = Field(default_factory=dict)
     domain_compactions: list[dict[str, Any]] = Field(default_factory=list)
+    binding_releases: list[dict[str, Any]] = Field(default_factory=list)
     blob_gc: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -803,6 +811,65 @@ class SyncDiagnosticsRetentionSummaryResponse(BaseModel):
     blocker_counts: dict[str, int] = Field(default_factory=dict)
 
 
+class SyncRecoveryActionDescriptorResponse(BaseModel):
+    """One explicit recovery hint; returning it never invokes the action."""
+
+    action: Literal[
+        "resume_upload",
+        "retry_upload",
+        "retry_verify",
+        "repair_projection",
+        "resolve_conflict",
+        "restore_attachment",
+        "restore_note",
+        "release_quarantine",
+        "bootstrap_resume",
+        "gc_retry",
+        "wait_for_retention",
+    ]
+    reason_code: str
+    target_type: Literal[
+        "dataset", "attachment", "blob", "upload", "conflict", "envelope"
+    ] = "dataset"
+    target_id: str | None = None
+    retryable: bool = True
+    requires_confirmation: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncAttachmentDiagnosticSampleResponse(BaseModel):
+    """One bounded owner-authorized attachment lifecycle sample."""
+
+    category: str
+    code: str
+    attachment_id: str | None = None
+    blob_id: str | None = None
+    server_cursor: int | None = Field(None, ge=1)
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncAttachmentDiagnosticsResponse(BaseModel):
+    """Bounded read-only Notes attachment lifecycle diagnostics."""
+
+    counts: dict[str, int] = Field(default_factory=dict)
+    samples: list[SyncAttachmentDiagnosticSampleResponse] = Field(
+        default_factory=list,
+        max_length=500,
+    )
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=32,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncDiagnosticsResponse(BaseModel):
     """Redacted Sync v2 diagnostics response."""
 
@@ -818,6 +885,9 @@ class SyncDiagnosticsResponse(BaseModel):
     )
     retention: SyncDiagnosticsRetentionSummaryResponse = Field(
         default_factory=SyncDiagnosticsRetentionSummaryResponse
+    )
+    attachment_lifecycle: SyncAttachmentDiagnosticsResponse = Field(
+        default_factory=SyncAttachmentDiagnosticsResponse
     )
 
 
@@ -896,6 +966,10 @@ class SyncNotesAttachmentBootstrapDiagnosticsResponse(BaseModel):
     cleanup_candidates: list[SyncNotesAttachmentCleanupSampleResponse] = Field(
         default_factory=list,
         max_length=100,
+    )
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=4,
     )
 
     model_config = ConfigDict(extra="forbid")
@@ -1035,6 +1109,7 @@ class SyncRestorePreviewLocalInventoryItem(BaseModel):
     dataset_id: str | None = None
     domain: SyncDomain
     object_id: str = Field(..., min_length=1, validation_alias=AliasChoices("object_id", "entity_id"))
+    adapter_version: int = Field(1, ge=1)
     object_revision: int | None = Field(None, ge=0, validation_alias=AliasChoices("object_revision", "entity_version"))
     object_hash: str | None = Field(None, validation_alias=AliasChoices("object_hash", "payload_hash"))
     deleted: bool = False
@@ -1132,6 +1207,7 @@ class SyncRestoreOrderedAction(BaseModel):
     object_id: str
     operation: SyncOperation
     server_cursor: int = Field(..., ge=0)
+    adapter_version: int = Field(..., ge=1)
     mutation_group_id: str | None = None
     mutation_step: int | None = Field(None, ge=0)
     mutation_step_count: int | None = Field(None, ge=1)
@@ -1153,6 +1229,7 @@ class SyncRestorePreviewAttachmentRef(BaseModel):
     payload_hash: str
     availability: str
     server_cursor: int = Field(..., ge=0)
+    adapter_version: int = Field(..., ge=1)
 
 
 class SyncRestorePreviewWarning(BaseModel):

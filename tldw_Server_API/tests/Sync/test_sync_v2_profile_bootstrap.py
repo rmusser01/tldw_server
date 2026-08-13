@@ -255,7 +255,7 @@ def test_profile_bootstrap_begins_and_resumes_attachment_capture(
     assert result.capabilities.writable_adapter_versions["attachment.ref"] == []
 
 
-def test_attachment_bootstrap_diagnostics_are_bounded_and_path_free(
+def test_attachment_diagnostic_recovery_action_is_bounded_and_path_free(
     tmp_path: Path,
 ) -> None:
     bootstrapper = _PausedAttachmentBootstrapper()
@@ -319,6 +319,9 @@ def test_attachment_bootstrap_diagnostics_are_bounded_and_path_free(
     assert diagnostics.cleanup_candidates[0].attachment_id == mapping.attachment_id
     assert diagnostics.cleanup_candidates[0].state == "captured"
     assert diagnostics.cleanup_candidates[0].blocker_code is None
+    assert [action.action for action in diagnostics.recovery_actions] == [
+        "bootstrap_resume"
+    ]
     serialized = repr(diagnostics)
     assert "private-name.pdf" not in serialized
     assert "notes_attachments" not in serialized

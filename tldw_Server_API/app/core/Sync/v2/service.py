@@ -114,6 +114,7 @@ from .mutation_group_validation import (
 from .profile import (
     SyncNotesAttachmentBootstrapDiagnostics,
     SyncProfileStatus,
+    SyncRecoveryActionDescriptor,
     SyncV2ProfileManager,
 )
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
@@ -520,6 +521,7 @@ class SyncRetentionCandidate:
     server_sequence: int | None = None
     blob_id: str | None = None
     attachment_id: str | None = None
+    attachment_revision: int | None = None
     payload_hash: str | None = None
     size_bytes: int | None = None
     blockers: list[str] = field(default_factory=list)
@@ -562,6 +564,7 @@ class SyncRetentionApplyResult:
     blockers: list[str] = field(default_factory=list)
     blocker_counts: dict[str, int] = field(default_factory=dict)
     domain_compactions: list[dict[str, object]] = field(default_factory=list)
+    binding_releases: list[dict[str, object]] = field(default_factory=list)
     blob_gc: list[dict[str, object]] = field(default_factory=list)
 
 
@@ -632,6 +635,27 @@ class SyncDiagnosticsRetentionSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncAttachmentDiagnosticSample:
+    """One bounded owner-authorized attachment lifecycle sample."""
+
+    category: str
+    code: str
+    attachment_id: str | None = None
+    blob_id: str | None = None
+    server_cursor: int | None = None
+    recovery_actions: list[SyncRecoveryActionDescriptor] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentDiagnostics:
+    """Bounded read-only Notes attachment lifecycle diagnostics."""
+
+    counts: dict[str, int] = field(default_factory=dict)
+    samples: list[SyncAttachmentDiagnosticSample] = field(default_factory=list)
+    recovery_actions: list[SyncRecoveryActionDescriptor] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
 class SyncDiagnosticsReport:
     """Redacted dataset diagnostics report."""
 
@@ -642,6 +666,9 @@ class SyncDiagnosticsReport:
     blob_health: SyncDiagnosticsBlobHealth = field(default_factory=SyncDiagnosticsBlobHealth)
     key_summary: SyncDiagnosticsKeySummary = field(default_factory=SyncDiagnosticsKeySummary)
     retention: SyncDiagnosticsRetentionSummary = field(default_factory=SyncDiagnosticsRetentionSummary)
+    attachment_lifecycle: SyncAttachmentDiagnostics = field(
+        default_factory=SyncAttachmentDiagnostics
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -793,6 +820,7 @@ class SyncRestoreOrderedAction:
     object_id: str
     operation: SyncOperation
     server_cursor: int
+    adapter_version: int
     mutation_group_id: str | None = None
     mutation_step: int | None = None
     mutation_step_count: int | None = None
@@ -811,6 +839,7 @@ class SyncRestorePreviewAttachmentRef:
     payload_hash: str
     availability: str
     server_cursor: int
+    adapter_version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -1363,12 +1392,28 @@ class SyncV2Service:
         dataset_id: str,
         device_id: str | None = None,
         retention_limit: int | None = None,
+        attachment_sample_limit: int = 0,
+        attachment_total_sample_limit: int = 500,
     ) -> SyncDiagnosticsReport:
         """Return redacted Sync v2 dataset diagnostics."""
 
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        if (
+            isinstance(attachment_sample_limit, bool)
+            or attachment_sample_limit < 0
+            or attachment_sample_limit > 100
+        ):
+            raise SyncStoreError(
+                "sync_attachment_diagnostic_category_sample_limit_exceeded"
+            )
+        if (
+            isinstance(attachment_total_sample_limit, bool)
+            or attachment_total_sample_limit < 0
+            or attachment_total_sample_limit > 500
+        ):
+            raise SyncStoreError("sync_attachment_diagnostic_total_sample_limit_exceeded")
         scan_limit = self.settings.restore_manifest_scan_limit
         envelopes = self.store.list_accepted_envelopes_for_replay(
             dataset_id,
@@ -1378,7 +1423,6 @@ class SyncV2Service:
         conflicts = self.store.list_conflicts(dataset_id, status="unresolved")
         active_devices = self._retention_active_devices(dataset)
         blob_quota = self.store.summarize_blob_quota(user_id, dataset_id=dataset_id)
-        blob_objects = self.store.list_blob_objects_for_dataset(dataset_id)
         key_records = self.store.list_key_records(dataset_id, user_id=user_id)
         retention = self.retention_dry_run(
             user_id=user_id,
@@ -1387,22 +1431,32 @@ class SyncV2Service:
             audit_mode=True,
             limit=retention_limit or min(scan_limit, 100),
         )
+        domain_diagnostics = self._diagnostics_domains(
+            domains=dataset.domains,
+            envelopes=envelopes,
+            conflicts=conflicts,
+        )
+        attachment_lifecycle = self._attachment_lifecycle_diagnostics(
+            dataset=dataset,
+            user_id=user_id,
+            envelopes=envelopes,
+            conflicts=conflicts,
+            retention=retention,
+            sample_limit=attachment_sample_limit,
+            total_sample_limit=attachment_total_sample_limit,
+        )
         return SyncDiagnosticsReport(
             dataset_id=dataset_id,
             generated_at=self.clock(),
-            domains=self._diagnostics_domains(
-                domains=dataset.domains,
-                envelopes=envelopes,
-                conflicts=conflicts,
-            ),
+            domains=domain_diagnostics,
             devices=self._diagnostics_devices(
                 dataset_id=dataset_id,
                 domains=dataset.domains,
                 devices=active_devices,
             ),
             blob_health=SyncDiagnosticsBlobHealth(
-                blob_object_count=len(blob_objects),
-                available_blob_bytes=sum(blob.size_bytes for blob in blob_objects),
+                blob_object_count=attachment_lifecycle.counts.get("blob_total", 0),
+                available_blob_bytes=blob_quota.used_blob_bytes,
                 active_upload_count=blob_quota.active_upload_count,
                 reserved_blob_bytes=blob_quota.reserved_blob_bytes,
                 quota_limit_bytes=self.settings.user_blob_quota_bytes,
@@ -1415,6 +1469,7 @@ class SyncV2Service:
                 blocked_count=retention.blocked_count,
                 blocker_counts=dict(retention.blocker_counts),
             ),
+            attachment_lifecycle=attachment_lifecycle,
         )
 
     def retention_compact(
@@ -1427,6 +1482,7 @@ class SyncV2Service:
         confirm: bool = False,
         apply_envelope_compaction: bool = True,
         apply_tombstone_prune: bool = True,
+        apply_binding_release: bool = True,
         apply_blob_gc: bool = True,
         minimum_envelope_age_seconds: int = 0,
         minimum_tombstone_age_seconds: int = 0,
@@ -1453,6 +1509,7 @@ class SyncV2Service:
                 candidate,
                 apply_envelope_compaction=apply_envelope_compaction,
                 apply_tombstone_prune=apply_tombstone_prune,
+                apply_binding_release=apply_binding_release,
                 apply_blob_gc=apply_blob_gc,
             )
         ]
@@ -1470,7 +1527,12 @@ class SyncV2Service:
                 blocker_counts=dict(dry_run.blocker_counts),
             )
 
-        blocked = [candidate for candidate in selected if candidate.blockers]
+        blocked = [
+            candidate
+            for candidate in selected
+            if candidate.blockers
+            and candidate.candidate_type not in {"binding_release", "blob_gc"}
+        ]
         if blocked:
             return SyncRetentionApplyResult(
                 dataset_id=dataset_id,
@@ -1493,35 +1555,64 @@ class SyncV2Service:
             ],
         )
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-        blob_gc, revalidated_blob_blocked = self._apply_retention_blob_gc(
-            dataset=dataset,
-            candidates=[
-                candidate for candidate in selected if candidate.candidate_type == "blob_gc"
-            ],
-            minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
-            offline_restore_window_seconds=offline_restore_window_seconds,
+        initially_blocked_bindings = [
+            candidate
+            for candidate in selected
+            if candidate.candidate_type == "binding_release" and candidate.blockers
+        ]
+        binding_releases, revalidated_binding_blocked = (
+            self._apply_retention_binding_releases(
+                dataset=dataset,
+                candidates=[
+                    candidate
+                    for candidate in selected
+                    if candidate.candidate_type == "binding_release"
+                    and not candidate.blockers
+                ],
+                minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+                minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                offline_restore_window_seconds=offline_restore_window_seconds,
+            )
+        )
+        blob_gc, revalidated_blob_blocked, blob_fence_mutated = (
+            self._apply_retention_blob_gc(
+                dataset=dataset,
+                candidates=[
+                    candidate
+                    for candidate in selected
+                    if candidate.candidate_type == "blob_gc"
+                ],
+                minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                offline_restore_window_seconds=offline_restore_window_seconds,
+            )
         )
         applied_count = sum(
             int(item["candidate_count"]) for item in domain_compactions
-        ) + len(blob_gc)
+        ) + len(binding_releases) + len(blob_gc)
+        revalidated_blocked = (
+            initially_blocked_bindings
+            + revalidated_binding_blocked
+            + revalidated_blob_blocked
+        )
         return SyncRetentionApplyResult(
             dataset_id=dataset_id,
             dry_run=False,
-            mutation_performed=applied_count > 0,
+            mutation_performed=applied_count > 0 or blob_fence_mutated,
             evaluated_at=self.clock(),
             candidate_count=dry_run.candidate_count,
             applied_count=applied_count,
-            blocked_count=len(revalidated_blob_blocked),
+            blocked_count=len(revalidated_blocked),
             skipped_count=(
-                dry_run.candidate_count - len(selected) + len(revalidated_blob_blocked)
+                dry_run.candidate_count - len(selected) + len(revalidated_blocked)
             ),
             blockers=(
                 ["retention_revalidation_blocked"]
-                if revalidated_blob_blocked
+                if revalidated_blocked
                 else []
             ),
-            blocker_counts=_retention_blocker_counts(revalidated_blob_blocked),
+            blocker_counts=_retention_blocker_counts(revalidated_blocked),
             domain_compactions=domain_compactions,
+            binding_releases=binding_releases,
             blob_gc=blob_gc,
         )
 
@@ -1624,6 +1715,18 @@ class SyncV2Service:
             )
 
         remaining_budget = scan_limit - len(envelopes)
+        if "attachment.ref" in selected_domains and remaining_budget > 0:
+            binding_candidates = self._retention_binding_release_candidates(
+                dataset=dataset,
+                active_devices=active_devices,
+                audit_mode=audit_mode,
+                restore_window_blocked=restore_window_blocked,
+                minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+                minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                limit=remaining_budget,
+            )
+            candidates.extend(binding_candidates)
+            remaining_budget -= len(binding_candidates)
         if "attachment.ref" in selected_domains and remaining_budget > 0:
             candidates.extend(
                 self._retention_blob_candidates(
@@ -2208,8 +2311,11 @@ class SyncV2Service:
     ) -> SyncRestorePreview:
         """Return metadata needed to preview a restore plan for Sync v2 M1."""
 
-        if device_id is not None:
+        restore_device = (
             self._require_registered_device(user_id, device_id)
+            if device_id is not None
+            else None
+        )
         selected_domains = set(domains or [])
         selected_object_id_set = _normalize_selection_set(selected_object_ids)
         selected_attachment_id_set = _normalize_selection_set(selected_attachment_ids)
@@ -2232,7 +2338,7 @@ class SyncV2Service:
         total_counts: dict[str, int] = {}
         key_status: dict[str, dict[str, bool]] = {}
         warnings: list[SyncRestorePreviewWarning] = []
-        planned_inventory_keys: set[tuple[str, SyncDomain, str]] = set()
+        planned_inventory_keys: set[tuple[str, SyncDomain, str, int]] = set()
         candidate_count = 0
         planned_action_count = 0
 
@@ -2240,6 +2346,10 @@ class SyncV2Service:
             dataset_domains = [
                 domain for domain in dataset.domains if not selected_domains or domain in selected_domains
             ]
+            adapter_versions_by_domain = {
+                domain: self._restore_adapter_versions(restore_device, domain)
+                for domain in dataset_domains
+            }
             stats = self.store.summarize_restore_manifest_dataset(
                 dataset.dataset_id,
                 user_id=user_id,
@@ -2259,13 +2369,12 @@ class SyncV2Service:
                         dataset_id=dataset.dataset_id,
                     )
                 )
-            for domain, count in stats.approximate_counts.items():
-                total_counts[domain] = total_counts.get(domain, 0) + count
             domain_envelopes: dict[SyncDomain, list[SyncEnvelope]] = {}
             for domain in dataset_domains:
                 envelopes = self._list_restore_preview_domain_envelopes(
                     dataset_id=dataset.dataset_id,
                     domain=domain,
+                    adapter_versions=adapter_versions_by_domain[domain],
                     max_candidates=(
                         self.settings.restore_preview_candidate_limit
                         - candidate_count
@@ -2273,6 +2382,27 @@ class SyncV2Service:
                 )
                 candidate_count += len(envelopes)
                 domain_envelopes[domain] = envelopes
+            approximate_counts = dict(stats.approximate_counts)
+            byte_estimates = dict(stats.byte_estimates)
+            if "attachment.ref" in domain_envelopes:
+                attachment_envelopes = domain_envelopes["attachment.ref"]
+                approximate_counts["attachment.ref"] = len(attachment_envelopes)
+                byte_estimates["attachment.ref"] = sum(
+                    envelope.payload_size_bytes or 0
+                    for envelope in attachment_envelopes
+                )
+            approximate_counts = {
+                domain: count
+                for domain, count in approximate_counts.items()
+                if domain in dataset_domains and count
+            }
+            byte_estimates = {
+                domain: count
+                for domain, count in byte_estimates.items()
+                if domain in dataset_domains and count
+            }
+            for domain, count in approximate_counts.items():
+                total_counts[domain] = total_counts.get(domain, 0) + count
             latest_cursors: dict[str, int] = {}
             dataset_ranges: list[SyncRestorePreviewEnvelopeRange] = []
             for domain, envelopes in domain_envelopes.items():
@@ -2294,12 +2424,12 @@ class SyncV2Service:
                 SyncRestorePreviewDataset(
                     dataset_id=dataset.dataset_id,
                     domains=dataset_domains,
-                    approximate_counts=stats.approximate_counts,
-                    byte_estimates=stats.byte_estimates,
+                    approximate_counts=approximate_counts,
+                    byte_estimates=byte_estimates,
                     latest_cursor=latest_cursor,
                     latest_cursors=latest_cursors,
                     envelope_ranges=dataset_ranges,
-                    total_count=sum(stats.approximate_counts.values()),
+                    total_count=sum(approximate_counts.values()),
                     encryption_policy=dataset.encryption_policy,
                     key_recovery_available=stats.key_recovery_available,
                 )
@@ -2310,6 +2440,8 @@ class SyncV2Service:
                 if domain not in OBJECT_RESTORE_DOMAINS:
                     continue
                 for envelope in domain_envelopes.get(domain, []):
+                    if domain == "attachment.ref" and envelope.adapter_version != 2:
+                        continue
                     if envelope.apply_status == "superseded":
                         continue
                     latest_object_envelopes[(domain, envelope.object_id)] = envelope
@@ -2325,6 +2457,7 @@ class SyncV2Service:
                     latest_object_envelopes=latest_object_envelopes,
                     selected_domains=selected_domains,
                     selected_object_ids=selected_object_id_set,
+                    adapter_versions_by_domain=adapter_versions_by_domain,
                 )
                 remaining_actions = (
                     self.settings.restore_preview_action_limit - planned_action_count
@@ -2364,13 +2497,17 @@ class SyncV2Service:
                 restore_fingerprints.append((server_revision, server_hash, deleted))
                 final_plan_index_by_identity[(domain, object_id)] = plan_index
 
-            initially_matching_final_keys: set[tuple[str, SyncDomain, str]] = set()
+            initially_matching_final_keys: set[
+                tuple[str, SyncDomain, str, int]
+            ] = set()
             for (domain, object_id), plan_index in final_plan_index_by_identity.items():
+                envelope = ordered_restore_envelopes[plan_index]
                 local_item = find_local_inventory_item(
                     local_index,
                     dataset_id=dataset.dataset_id,
                     domain=domain,
                     object_id=object_id,
+                    adapter_version=envelope.adapter_version,
                 )
                 server_revision, server_hash, deleted = restore_fingerprints[plan_index]
                 if local_item is not None and local_inventory_matches(
@@ -2380,7 +2517,12 @@ class SyncV2Service:
                     deleted=deleted,
                 ):
                     initially_matching_final_keys.add(
-                        (dataset.dataset_id, domain, object_id)
+                        (
+                            dataset.dataset_id,
+                            domain,
+                            object_id,
+                            envelope.adapter_version,
+                        )
                     )
 
             for plan_index, envelope in enumerate(ordered_restore_envelopes):
@@ -2392,6 +2534,7 @@ class SyncV2Service:
                     dataset_id=dataset.dataset_id,
                     domain=domain,
                     object_id=object_id,
+                    adapter_version=envelope.adapter_version,
                 )
                 local_matches = (
                     local_item is not None
@@ -2402,7 +2545,12 @@ class SyncV2Service:
                         deleted=deleted,
                     )
                 )
-                inventory_key = (dataset.dataset_id, domain, object_id)
+                inventory_key = (
+                    dataset.dataset_id,
+                    domain,
+                    object_id,
+                    envelope.adapter_version,
+                )
                 if envelope.apply_status == "conflict":
                     conflict_type = "stored_apply_conflict"
                     object_conflicts.append(
@@ -2440,6 +2588,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2503,6 +2652,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2520,6 +2670,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2549,6 +2700,7 @@ class SyncV2Service:
                         dataset_id=dataset.dataset_id,
                         domain=domain,
                         object_id=object_id,
+                        adapter_version=envelope.adapter_version,
                         object_revision=server_revision,
                         object_hash=server_hash,
                         deleted=True,
@@ -2574,6 +2726,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2599,6 +2752,7 @@ class SyncV2Service:
                         dataset_id=dataset.dataset_id,
                         domain=domain,
                         object_id=object_id,
+                        adapter_version=envelope.adapter_version,
                         object_revision=server_revision,
                         object_hash=server_hash,
                         deleted=False,
@@ -2633,22 +2787,53 @@ class SyncV2Service:
                     continue
                 seen_refs.add(ref_key)
                 server_blob = None
+                server_availability = "metadata_only"
                 if self.settings.supports_attachments:
                     blob_owner_user_id = self._blob_owner_user_id(
                         dataset=dataset,
                         user_id=user_id,
                     )
-                    server_blob = self.store.get_blob_object(
-                        dataset.dataset_id,
-                        attachment_id=metadata.attachment_id,
-                        payload_hash=metadata.payload_hash,
-                        owner_user_id=blob_owner_user_id,
-                    )
+                    if envelope.adapter_version == 2:
+                        binding = (
+                            self.store.get_attachment_revision_binding(
+                                dataset.dataset_id,
+                                metadata.attachment_id,
+                                envelope.object_revision,
+                                owner_user_id=dataset.owner_user_id,
+                            )
+                            if envelope.object_revision is not None
+                            else None
+                        )
+                        if binding is not None and binding.resolved_blob_id is not None:
+                            candidate = self.store.get_blob_object(
+                                dataset.dataset_id,
+                                blob_id=binding.resolved_blob_id,
+                                owner_user_id=blob_owner_user_id,
+                                include_unavailable=True,
+                            )
+                            if (
+                                candidate is not None
+                                and candidate.payload_hash == binding.blob_hash
+                                and candidate.size_bytes == binding.size_bytes
+                            ):
+                                server_blob = candidate
+                    else:
+                        server_blob = self.store.get_blob_object(
+                            dataset.dataset_id,
+                            attachment_id=metadata.attachment_id,
+                            payload_hash=metadata.payload_hash,
+                            owner_user_id=blob_owner_user_id,
+                        )
+                    if server_blob is not None:
+                        server_availability = server_blob.status
                 metadata_claims_server_blob = (
+                    envelope.adapter_version == 1
+                    and
                     not self.settings.supports_attachments
                     and _attachment_ref_has_server_blob(metadata.availability)
                 )
-                server_availability = "available" if server_blob is not None or metadata_claims_server_blob else "metadata_only"
+                if metadata_claims_server_blob:
+                    server_availability = "available"
                 download_status = attachment_restore_status(
                     attachment_availability,
                     attachment_id=metadata.attachment_id,
@@ -2684,6 +2869,7 @@ class SyncV2Service:
                     payload_hash=metadata.payload_hash,
                     availability=server_availability,
                     server_cursor=envelope.server_cursor or 0,
+                    adapter_version=envelope.adapter_version,
                 )
                 attachment_refs.append(summary)
                 if required_for_restore and server_availability != "available" and not attachment_available_locally(
@@ -3222,30 +3408,45 @@ class SyncV2Service:
                 owner_user_id=user_id,
             )
             storage_namespace_id = namespace.storage_namespace_id
-        try:
-            storage_key = blob_store.commit_upload(
-                upload_id=upload_id,
-                payload_hash=session.payload_hash,
-                chunk_indexes=list(range(session.chunk_count)),
-                storage_namespace_id=storage_namespace_id,
-            )
-        except SyncBlobStoreError as exc:
-            raise SyncStoreError(str(exc)) from exc
-        blob = self.store.complete_blob_upload(
-            SyncBlobObjectCreate(
-                blob_id=self.id_factory("blob"),
-                dataset_id=dataset_id,
-                owner_user_id=user_id,
-                attachment_id=session.attachment_id,
-                payload_hash=session.payload_hash,
-                content_type=session.content_type,
-                size_bytes=session.size_bytes,
-                storage_backend=self.settings.blob_storage_backend,
-                storage_key=storage_key,
-                encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
-                metadata={},
+        expected_storage_key = (
+            blob_store.legacy_storage_key(session.payload_hash)
+            if storage_namespace_id is None
+            else blob_store.namespace_storage_key(
+                storage_namespace_id,
+                session.payload_hash,
             )
         )
+        blob_create = SyncBlobObjectCreate(
+            blob_id=self.id_factory("blob"),
+            dataset_id=dataset_id,
+            owner_user_id=user_id,
+            attachment_id=session.attachment_id,
+            payload_hash=session.payload_hash,
+            content_type=session.content_type,
+            size_bytes=session.size_bytes,
+            storage_backend=self.settings.blob_storage_backend,
+            storage_key=expected_storage_key,
+            encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
+            metadata={},
+        )
+        with self.store.blob_write_guard(
+            dataset_id,
+            session.domain,
+            session.object_id,
+        ) as guarded:
+            guarded.require_blob_upload_completion_allowed(blob_create)
+            try:
+                storage_key = blob_store.commit_upload(
+                    upload_id=upload_id,
+                    payload_hash=session.payload_hash,
+                    chunk_indexes=list(range(session.chunk_count)),
+                    storage_namespace_id=storage_namespace_id,
+                )
+            except SyncBlobStoreError as exc:
+                raise SyncStoreError(str(exc)) from exc
+            if storage_key != expected_storage_key:
+                raise SyncStoreError("Sync blob storage key changed during commit")
+            blob = guarded.complete_blob_upload(blob_create)
         try:
             blob_store.discard_upload(upload_id)
         except OSError as exc:
@@ -4334,6 +4535,556 @@ class SyncV2Service:
             for domain, domain_stats in stats.items()
         ]
 
+    def _attachment_lifecycle_diagnostics(
+        self,
+        *,
+        dataset: SyncDataset,
+        user_id: str,
+        envelopes: Sequence[SyncEnvelope],
+        conflicts: Sequence[SyncConflict],
+        retention: SyncRetentionDryRunResult,
+        sample_limit: int,
+        total_sample_limit: int,
+    ) -> SyncAttachmentDiagnostics:
+        """Build bounded read-only attachment lifecycle counts and safe hints."""
+
+        counts = {
+            "registry_total": 0,
+            "registry_live": 0,
+            "registry_hidden": 0,
+            "registry_tombstoned": 0,
+            "binding_total": 0,
+            "metadata_only": 0,
+            "missing": 0,
+            "blob_total": 0,
+            "available": 0,
+            "verify_failed": 0,
+            "quarantined": 0,
+            "deleting": 0,
+            "deleted": 0,
+            "orphan": 0,
+            "active_uploads": 0,
+            "cleanup_candidates": 0,
+            "retention_blockers": sum(retention.blocker_counts.values()),
+            "projection_pending": 0,
+            "projection_failed": 0,
+            "unresolved_conflicts": sum(
+                conflict.domain == "attachment.ref" for conflict in conflicts
+            ),
+        }
+        if "attachment.ref" in dataset.domains:
+            projection = self.store.summarize_domain_envelopes(
+                dataset.dataset_id,
+                "attachment.ref",
+            )
+            counts["projection_pending"] = projection.pending_apply_count
+            counts["projection_failed"] = projection.failed_apply_count
+        sample_buckets: dict[str, list[SyncAttachmentDiagnosticSample]] = {}
+        actions: list[SyncRecoveryActionDescriptor] = []
+
+        def descriptor(
+            action: str,
+            reason_code: str,
+            *,
+            target_type: str = "dataset",
+            target_id: str | None = None,
+            requires_confirmation: bool = False,
+        ) -> SyncRecoveryActionDescriptor:
+            return SyncRecoveryActionDescriptor(
+                action=action,
+                reason_code=reason_code,
+                target_type=target_type,
+                target_id=target_id,
+                requires_confirmation=requires_confirmation,
+            )
+
+        def add_action(action: SyncRecoveryActionDescriptor) -> None:
+            action = replace(action, target_type="dataset", target_id=None)
+            identity = (
+                action.action,
+                action.reason_code,
+                action.target_type,
+                action.target_id,
+            )
+            if all(
+                (
+                    item.action,
+                    item.reason_code,
+                    item.target_type,
+                    item.target_id,
+                )
+                != identity
+                for item in actions
+            ):
+                actions.append(action)
+
+        def add_sample(sample: SyncAttachmentDiagnosticSample) -> None:
+            if sample_limit == 0:
+                return
+            bucket = sample_buckets.setdefault(sample.category, [])
+            if len(bucket) < sample_limit:
+                bucket.append(sample)
+
+        registry_row = self.store.db.execute(
+            """
+            SELECT COUNT(*) AS total_count,
+                   COALESCE(SUM(CASE WHEN envelope.operation = 'tombstone'
+                                     THEN 1 ELSE 0 END), 0) AS tombstoned_count
+              FROM sync_current_heads AS head
+              JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = head.latest_server_cursor
+              JOIN sync_datasets AS dataset ON dataset.dataset_id = head.dataset_id
+             WHERE head.dataset_id = ? AND dataset.owner_user_id = ?
+               AND head.domain = 'attachment.ref' AND envelope.adapter_version = 2
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows[0]
+        counts["registry_total"] = int(registry_row.get("total_count") or 0)
+        counts["registry_tombstoned"] = int(
+            registry_row.get("tombstoned_count") or 0
+        )
+        counts["registry_live"] = (
+            counts["registry_total"] - counts["registry_tombstoned"]
+        )
+        attachment_heads = (
+            [
+                head
+                for head in self.store.list_current_heads(
+                    dataset.dataset_id,
+                    "attachment.ref",
+                    limit=min(self.settings.restore_manifest_scan_limit, 1_000),
+                    offset=0,
+                )
+                if head.adapter_version == 2
+            ]
+            if "attachment.ref" in dataset.domains
+            else []
+        )
+        counts["registry_scan_truncated"] = int(
+            counts["registry_total"] > len(attachment_heads)
+        )
+        for head in attachment_heads:
+            if head.operation == "tombstone":
+                category = "registry_tombstoned"
+                action = descriptor(
+                    "restore_attachment",
+                    "sync_attachment_tombstoned",
+                    target_type="attachment",
+                    target_id=head.object_id,
+                )
+            else:
+                parent_id = None
+                payload = head.payload or head.payload_clear
+                if isinstance(payload, Mapping):
+                    raw_parent = payload.get("parent_object_id")
+                    if isinstance(raw_parent, str):
+                        parent_id = raw_parent
+                parent = (
+                    self.store.get_current_head(
+                        dataset.dataset_id,
+                        "notes.note",
+                        parent_id,
+                    )
+                    if parent_id
+                    else None
+                )
+                if parent is not None and parent.operation == "tombstone":
+                    category = "registry_hidden"
+                    action = descriptor(
+                        "restore_note",
+                        "sync_attachment_parent_note_tombstoned",
+                        target_type="attachment",
+                        target_id=head.object_id,
+                    )
+                else:
+                    category = "registry_live"
+                    action = None
+            if category == "registry_hidden":
+                counts["registry_hidden"] += 1
+                counts["registry_live"] -= 1
+            sample_actions = [] if action is None else [action]
+            if action is not None:
+                add_action(action)
+            add_sample(
+                SyncAttachmentDiagnosticSample(
+                    category=category,
+                    code=f"sync_attachment_{category}",
+                    attachment_id=head.object_id,
+                    server_cursor=head.server_cursor,
+                    recovery_actions=sample_actions,
+                )
+            )
+
+        binding_row = self.store.db.execute(
+            """
+            SELECT COUNT(*) AS total_count,
+                   COALESCE(SUM(CASE WHEN binding.resolved_blob_id IS NULL
+                                     THEN 1 ELSE 0 END), 0) AS metadata_only_count,
+                   COALESCE(SUM(CASE WHEN binding.resolved_blob_id IS NOT NULL
+                                          AND blob.blob_id IS NULL
+                                     THEN 1 ELSE 0 END), 0) AS missing_count
+              FROM sync_attachment_revision_bindings AS binding
+              JOIN sync_datasets AS dataset
+                ON dataset.dataset_id = binding.dataset_id
+              LEFT JOIN sync_blob_objects AS blob
+                ON blob.dataset_id = binding.dataset_id
+               AND blob.blob_id = binding.resolved_blob_id
+             WHERE binding.dataset_id = ? AND dataset.owner_user_id = ?
+               AND binding.retention_released_at IS NULL
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows[0]
+        counts["binding_total"] = int(binding_row.get("total_count") or 0)
+        counts["metadata_only"] = int(
+            binding_row.get("metadata_only_count") or 0
+        )
+        counts["missing"] = int(binding_row.get("missing_count") or 0)
+        for category, action_name, reason_code, predicate in (
+            (
+                "metadata_only",
+                "retry_upload",
+                "sync_attachment_blob_metadata_only",
+                "binding.resolved_blob_id IS NULL",
+            ),
+            (
+                "missing",
+                "retry_upload",
+                "sync_attachment_blob_missing",
+                "binding.resolved_blob_id IS NOT NULL AND blob.blob_id IS NULL",
+            ),
+        ):
+            if counts[category] == 0:
+                continue
+            add_action(descriptor(action_name, reason_code))
+            if sample_limit == 0:
+                continue
+            rows = self.store.db.execute(
+                f"""
+                SELECT binding.attachment_id, binding.establishing_server_cursor,
+                       binding.resolved_blob_id
+                  FROM sync_attachment_revision_bindings AS binding
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = binding.dataset_id
+                  LEFT JOIN sync_blob_objects AS blob
+                    ON blob.dataset_id = binding.dataset_id
+                   AND blob.blob_id = binding.resolved_blob_id
+                 WHERE binding.dataset_id = ? AND dataset.owner_user_id = ?
+                   AND binding.retention_released_at IS NULL AND {predicate}
+                 ORDER BY binding.establishing_server_cursor, binding.attachment_id
+                 LIMIT ?
+                """,  # nosec B608 - predicate is selected from fixed literals above.
+                (dataset.dataset_id, dataset.owner_user_id, sample_limit),
+            ).rows
+            for row in rows:
+                action = descriptor(
+                    action_name,
+                    reason_code,
+                    target_type="attachment",
+                    target_id=str(row["attachment_id"]),
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category=category,
+                        code=reason_code,
+                        attachment_id=str(row["attachment_id"]),
+                        blob_id=(
+                            None
+                            if row.get("resolved_blob_id") is None
+                            else str(row["resolved_blob_id"])
+                        ),
+                        server_cursor=int(row["establishing_server_cursor"]),
+                        recovery_actions=[action],
+                    )
+                )
+
+        for row in self.store.db.execute(
+            """
+            SELECT blob.status, COUNT(*) AS status_count
+              FROM sync_blob_objects AS blob
+              JOIN sync_datasets AS dataset ON dataset.dataset_id = blob.dataset_id
+             WHERE blob.dataset_id = ? AND dataset.owner_user_id = ?
+             GROUP BY blob.status
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows:
+            status_name = str(row["status"])
+            status_count = int(row.get("status_count") or 0)
+            counts["blob_total"] += status_count
+            counts[status_name] = counts.get(status_name, 0) + status_count
+
+        blob_actions = {
+            "verify_failed": ("retry_verify", "sync_attachment_blob_verify_failed"),
+            "quarantined": (
+                "release_quarantine",
+                "sync_attachment_blob_quarantined",
+            ),
+            "deleting": ("gc_retry", "sync_attachment_blob_deleting"),
+            "deleted": ("retry_upload", "sync_attachment_blob_deleted"),
+        }
+        for status_name, (action_name, reason_code) in blob_actions.items():
+            if counts.get(status_name, 0) == 0:
+                continue
+            add_action(descriptor(action_name, reason_code))
+            if sample_limit == 0:
+                continue
+            for blob in self.store.list_blob_objects_for_dataset_page(
+                dataset.dataset_id,
+                status=status_name,
+                limit=sample_limit,
+            ):
+                action = descriptor(
+                    action_name,
+                    reason_code,
+                    target_type="blob",
+                    target_id=blob.blob_id,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category=status_name,
+                        code=reason_code,
+                        attachment_id=blob.attachment_id,
+                        blob_id=blob.blob_id,
+                        recovery_actions=[action],
+                    )
+                )
+
+        orphan_row = self.store.db.execute(
+            """
+            SELECT COUNT(*) AS orphan_count
+              FROM sync_blob_objects AS blob
+              JOIN sync_datasets AS dataset ON dataset.dataset_id = blob.dataset_id
+             WHERE blob.dataset_id = ? AND dataset.owner_user_id = ?
+               AND blob.status = 'available'
+               AND NOT EXISTS (
+                    SELECT 1 FROM sync_attachment_revision_bindings AS binding
+                     WHERE binding.dataset_id = blob.dataset_id
+                       AND binding.resolved_blob_id = blob.blob_id
+                       AND binding.retention_released_at IS NULL
+               )
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows[0]
+        counts["orphan"] = int(orphan_row.get("orphan_count") or 0)
+        if counts["orphan"]:
+            add_action(
+                descriptor(
+                    "wait_for_retention",
+                    "sync_attachment_blob_orphaned",
+                    requires_confirmation=True,
+                )
+            )
+            if sample_limit:
+                rows = self.store.db.execute(
+                    """
+                    SELECT blob.attachment_id, blob.blob_id
+                      FROM sync_blob_objects AS blob
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = blob.dataset_id
+                     WHERE blob.dataset_id = ? AND dataset.owner_user_id = ?
+                       AND blob.status = 'available'
+                       AND NOT EXISTS (
+                            SELECT 1
+                              FROM sync_attachment_revision_bindings AS binding
+                             WHERE binding.dataset_id = blob.dataset_id
+                               AND binding.resolved_blob_id = blob.blob_id
+                               AND binding.retention_released_at IS NULL
+                       )
+                     ORDER BY blob.updated_at, blob.blob_id LIMIT ?
+                    """,
+                    (dataset.dataset_id, dataset.owner_user_id, sample_limit),
+                ).rows
+                for row in rows:
+                    action = descriptor(
+                        "wait_for_retention",
+                        "sync_attachment_blob_orphaned",
+                        target_type="blob",
+                        target_id=str(row["blob_id"]),
+                        requires_confirmation=True,
+                    )
+                    add_sample(
+                        SyncAttachmentDiagnosticSample(
+                            category="orphan",
+                            code=action.reason_code,
+                            attachment_id=str(row["attachment_id"]),
+                            blob_id=str(row["blob_id"]),
+                            recovery_actions=[action],
+                        )
+                    )
+
+        quota = self.store.summarize_blob_quota(user_id, dataset_id=dataset.dataset_id)
+        counts["active_uploads"] = quota.active_upload_count
+        if counts["active_uploads"]:
+            add_action(descriptor("resume_upload", "sync_attachment_upload_incomplete"))
+            if sample_limit:
+                rows = self.store.db.execute(
+                    """
+                    SELECT upload.upload_id, upload.attachment_id
+                      FROM sync_blob_upload_sessions AS upload
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = upload.dataset_id
+                     WHERE upload.dataset_id = ? AND dataset.owner_user_id = ?
+                       AND upload.status IN ('created', 'uploading')
+                     ORDER BY upload.created_at, upload.upload_id LIMIT ?
+                    """,
+                    (dataset.dataset_id, dataset.owner_user_id, sample_limit),
+                ).rows
+                for row in rows:
+                    action = descriptor(
+                        "resume_upload",
+                        "sync_attachment_upload_incomplete",
+                        target_type="upload",
+                        target_id=str(row["upload_id"]),
+                    )
+                    add_sample(
+                        SyncAttachmentDiagnosticSample(
+                            category="active_upload",
+                            code=action.reason_code,
+                            attachment_id=str(row["attachment_id"]),
+                            recovery_actions=[action],
+                        )
+                    )
+
+        attachment_metadata = dataset.metadata.get("notes_attachment_v2")
+        bootstrap_id = (
+            attachment_metadata.get("bootstrap_id")
+            if isinstance(attachment_metadata, Mapping)
+            else None
+        )
+        if isinstance(bootstrap_id, str) and bootstrap_id:
+            cleanup_row = self.store.db.execute(
+                """
+                SELECT COUNT(*) AS cleanup_count
+                  FROM sync_notes_attachment_cleanup_candidates AS cleanup
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = cleanup.dataset_id
+                 WHERE cleanup.dataset_id = ? AND dataset.owner_user_id = ?
+                   AND cleanup.bootstrap_id = ?
+                """,
+                (dataset.dataset_id, dataset.owner_user_id, bootstrap_id),
+            ).rows[0]
+            counts["cleanup_candidates"] = int(
+                cleanup_row.get("cleanup_count") or 0
+            )
+            if counts["cleanup_candidates"]:
+                add_action(
+                    descriptor(
+                        "wait_for_retention",
+                        "sync_attachment_cleanup_candidate_retained",
+                        requires_confirmation=True,
+                    )
+                )
+            cleanup = (
+                self.store.list_notes_attachment_cleanup_candidates(
+                    dataset.dataset_id,
+                    owner_user_id=dataset.owner_user_id,
+                    bootstrap_id=bootstrap_id,
+                    limit=sample_limit,
+                )
+                if sample_limit
+                else ()
+            )
+            for item in cleanup:
+                cleanup_action = descriptor(
+                    "wait_for_retention",
+                    "sync_attachment_cleanup_candidate_retained",
+                    target_type="attachment",
+                    target_id=item.attachment_id,
+                    requires_confirmation=True,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category="cleanup_candidate",
+                        code=cleanup_action.reason_code,
+                        attachment_id=item.attachment_id,
+                        recovery_actions=[cleanup_action],
+                    )
+                )
+
+        if counts["projection_pending"] or counts["projection_failed"]:
+            add_action(
+                descriptor(
+                    "repair_projection",
+                    "sync_attachment_projection_incomplete",
+                )
+            )
+            for envelope in envelopes:
+                if envelope.domain != "attachment.ref" or envelope.apply_status not in {
+                    "pending",
+                    "failed",
+                }:
+                    continue
+                action = descriptor(
+                    "repair_projection",
+                    "sync_attachment_projection_incomplete",
+                    target_type="envelope",
+                    target_id=envelope.client_envelope_id,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category=f"projection_{envelope.apply_status}",
+                        code=(
+                            envelope.apply_error_code
+                            or "sync_attachment_projection_incomplete"
+                        ),
+                        attachment_id=envelope.object_id,
+                        server_cursor=envelope.server_cursor,
+                        recovery_actions=[action],
+                    )
+                )
+        if counts["unresolved_conflicts"]:
+            add_action(
+                descriptor("resolve_conflict", "sync_attachment_conflict_unresolved")
+            )
+            for conflict in conflicts:
+                if conflict.domain != "attachment.ref":
+                    continue
+                action = descriptor(
+                    "resolve_conflict",
+                    "sync_attachment_conflict_unresolved",
+                    target_type="conflict",
+                    target_id=conflict.conflict_id,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category="conflict",
+                        code="sync_attachment_conflict_unresolved",
+                        attachment_id=conflict.entity_id,
+                        server_cursor=conflict.server_sequence,
+                        recovery_actions=[action],
+                    )
+                )
+        bootstrap_state = (
+            str(attachment_metadata.get("state"))
+            if isinstance(attachment_metadata, Mapping)
+            and attachment_metadata.get("state") is not None
+            else "not_started"
+        )
+        counts[f"bootstrap_{bootstrap_state}"] = 1
+        if bootstrap_state in {"initializing", "failed"}:
+            add_action(
+                descriptor(
+                    "bootstrap_resume",
+                    "sync_attachment_bootstrap_incomplete",
+                )
+            )
+        if counts["retention_blockers"]:
+            add_action(
+                descriptor(
+                    "wait_for_retention",
+                    "sync_attachment_retention_blocked",
+                    requires_confirmation=True,
+                )
+            )
+
+        samples = [sample for bucket in sample_buckets.values() for sample in bucket]
+        if len(samples) > total_sample_limit:
+            raise SyncStoreError("sync_attachment_diagnostic_total_sample_limit_exceeded")
+        return SyncAttachmentDiagnostics(
+            counts=counts,
+            samples=samples,
+            recovery_actions=actions,
+        )
+
     def _diagnostics_devices(
         self,
         *,
@@ -4431,6 +5182,79 @@ class SyncV2Service:
             )
         return applied
 
+    def _apply_retention_binding_releases(
+        self,
+        *,
+        dataset: SyncDataset,
+        candidates: Sequence[SyncRetentionCandidate],
+        minimum_envelope_age_seconds: int,
+        minimum_tombstone_age_seconds: int,
+        offline_restore_window_seconds: int,
+    ) -> tuple[list[dict[str, object]], list[SyncRetentionCandidate]]:
+        """Revalidate and monotonically release historical bindings under the fence."""
+
+        applied: list[dict[str, object]] = []
+        blocked: list[SyncRetentionCandidate] = []
+        for candidate in candidates:
+            if candidate.attachment_id is None or candidate.attachment_revision is None:
+                continue
+            guard_key = candidate.blob_id or candidate.attachment_id
+            with self.store.retention_guard(dataset.dataset_id, guard_key) as guarded:
+                current_dataset = guarded.get_dataset(
+                    dataset.dataset_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                binding = guarded.get_attachment_revision_binding(
+                    dataset.dataset_id,
+                    candidate.attachment_id,
+                    candidate.attachment_revision,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                if (
+                    current_dataset is None
+                    or binding is None
+                    or binding.retention_released_at is not None
+                ):
+                    continue
+                current_devices = self._retention_active_devices(
+                    current_dataset,
+                    store=guarded,
+                )
+                revalidated = self._retention_binding_release_candidate(
+                    dataset=current_dataset,
+                    binding=binding,
+                    active_devices=current_devices,
+                    audit_mode=False,
+                    restore_window_blocked=self._retention_restore_window_active(
+                        current_devices,
+                        offline_restore_window_seconds,
+                    ),
+                    minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+                    minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                    store=guarded,
+                )
+                if revalidated.blockers:
+                    blocked.append(revalidated)
+                    continue
+                released = guarded.release_attachment_revision_binding(
+                    dataset.dataset_id,
+                    binding.attachment_id,
+                    binding.attachment_revision,
+                    released_at=self.clock(),
+                    owner_user_id=dataset.owner_user_id,
+                )
+            applied.append(
+                {
+                    "attachment_id": released.attachment_id,
+                    "attachment_revision": released.attachment_revision,
+                    "blob_id": released.resolved_blob_id,
+                    "payload_hash": released.blob_hash,
+                    "size_bytes": released.size_bytes,
+                    "establishing_server_cursor": released.establishing_server_cursor,
+                }
+            )
+        return applied, blocked
+
     def _apply_retention_blob_gc(
         self,
         *,
@@ -4438,12 +5262,18 @@ class SyncV2Service:
         candidates: Sequence[SyncRetentionCandidate],
         minimum_tombstone_age_seconds: int,
         offline_restore_window_seconds: int,
-    ) -> tuple[list[dict[str, object]], list[SyncRetentionCandidate]]:
+    ) -> tuple[
+        list[dict[str, object]],
+        list[SyncRetentionCandidate],
+        bool,
+    ]:
         applied: list[dict[str, object]] = []
         blocked: list[SyncRetentionCandidate] = []
+        fence_mutated = False
         for candidate in candidates:
             if candidate.blob_id is None:
                 continue
+            namespace_id: str | None = None
             with self.store.retention_guard(
                 dataset.dataset_id,
                 candidate.blob_id,
@@ -4459,18 +5289,28 @@ class SyncV2Service:
                 )
                 if current_dataset is None or blob is None:
                     continue
-                active_devices = self._retention_active_devices(
-                    current_dataset,
-                    store=guarded,
+                if blob.status == "deleted":
+                    continue
+                active_devices = (
+                    []
+                    if blob.status == "deleting"
+                    else self._retention_active_devices(
+                        current_dataset,
+                        store=guarded,
+                    )
                 )
                 revalidated = self._retention_blob_candidate(
                     dataset=current_dataset,
                     blob=blob,
                     active_devices=active_devices,
                     audit_mode=False,
-                    restore_window_blocked=self._retention_restore_window_active(
-                        active_devices,
-                        offline_restore_window_seconds,
+                    restore_window_blocked=(
+                        False
+                        if blob.status == "deleting"
+                        else self._retention_restore_window_active(
+                            active_devices,
+                            offline_restore_window_seconds,
+                        )
                     ),
                     minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
                     store=guarded,
@@ -4478,7 +5318,67 @@ class SyncV2Service:
                 if revalidated.blockers:
                     blocked.append(revalidated)
                     continue
-                blob = guarded.mark_blob_object_deleted(
+                namespace = guarded.get_storage_namespace(
+                    dataset.dataset_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                if namespace is None:
+                    blocked.append(
+                        replace(
+                            revalidated,
+                            blockers=["retention_blob_storage_key_not_namespaced"],
+                        )
+                    )
+                    continue
+                namespace_id = namespace.storage_namespace_id
+                if blob.status == "available":
+                    blob = guarded.fence_blob_object_deleting(
+                        dataset.dataset_id,
+                        candidate.blob_id,
+                    )
+                    if blob is None or blob.status != "deleting":
+                        continue
+                    fence_mutated = True
+                elif blob.status != "deleting":
+                    continue
+            if self.blob_store is None or namespace_id is None:
+                blocked.append(
+                    replace(
+                        candidate,
+                        blockers=["retention_blob_storage_unavailable"],
+                    )
+                )
+                continue
+            try:
+                self.blob_store.delete_namespace_blob(
+                    storage_key=blob.storage_key,
+                    storage_namespace_id=namespace_id,
+                    payload_hash=blob.payload_hash,
+                    expected_size=blob.size_bytes,
+                )
+            except SyncBlobStoreError:
+                blocked.append(
+                    replace(
+                        candidate,
+                        blockers=["retention_blob_delete_retry"],
+                        reason="physical blob deletion retry",
+                    )
+                )
+                continue
+            with self.store.retention_guard(
+                dataset.dataset_id,
+                candidate.blob_id,
+            ) as guarded:
+                current = guarded.lock_blob_object_for_retention(
+                    dataset.dataset_id,
+                    candidate.blob_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                if current is None or current.status == "deleted":
+                    continue
+                if current.status != "deleting":
+                    continue
+                blob = guarded.finalize_blob_object_deleted(
                     dataset.dataset_id,
                     candidate.blob_id,
                 )
@@ -4492,7 +5392,7 @@ class SyncV2Service:
                     "size_bytes": blob.size_bytes,
                 }
             )
-        return applied, blocked
+        return applied, blocked, fence_mutated
 
     def _retention_active_devices(
         self,
@@ -4599,22 +5499,220 @@ class SyncV2Service:
     ) -> list[SyncRetentionCandidate]:
         active_store = store or self.store
         candidates: list[SyncRetentionCandidate] = []
-        for blob in active_store.list_blob_objects_for_dataset_page(
-            dataset.dataset_id,
-            limit=limit,
-        ):
-            candidates.append(
-                self._retention_blob_candidate(
+        for status in ("deleting", "available"):
+            remaining = limit - len(candidates)
+            if remaining <= 0:
+                break
+            for blob in active_store.list_blob_objects_for_dataset_page(
+                dataset.dataset_id,
+                status=status,
+                limit=remaining,
+            ):
+                candidates.append(
+                    self._retention_blob_candidate(
+                        dataset=dataset,
+                        blob=blob,
+                        active_devices=active_devices,
+                        audit_mode=audit_mode,
+                        restore_window_blocked=restore_window_blocked,
+                        minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                        store=active_store,
+                    )
+                )
+        return candidates
+
+    def _retention_binding_release_candidates(
+        self,
+        *,
+        dataset: SyncDataset,
+        active_devices: Sequence[SyncDevice],
+        audit_mode: bool,
+        restore_window_blocked: bool,
+        minimum_envelope_age_seconds: int,
+        minimum_tombstone_age_seconds: int,
+        limit: int,
+        store: SyncV2Store | None = None,
+    ) -> list[SyncRetentionCandidate]:
+        """Return a bounded keyset scan of unreleased binding candidates."""
+
+        active_store = store or self.store
+        candidates: list[SyncRetentionCandidate] = []
+        after_cursor = 0
+        after_attachment_id = ""
+        after_attachment_revision = 0
+        while len(candidates) < limit:
+            page_limit = min(SYNC_RETENTION_BINDING_PAGE_SIZE, limit - len(candidates))
+            bindings = active_store.list_unreleased_attachment_revision_bindings(
+                dataset.dataset_id,
+                owner_user_id=dataset.owner_user_id,
+                after_establishing_server_cursor=after_cursor,
+                after_attachment_id=after_attachment_id,
+                after_attachment_revision=after_attachment_revision,
+                limit=page_limit,
+            )
+            if not bindings:
+                break
+            candidates.extend(
+                self._retention_binding_release_candidate(
                     dataset=dataset,
-                    blob=blob,
+                    binding=binding,
                     active_devices=active_devices,
                     audit_mode=audit_mode,
                     restore_window_blocked=restore_window_blocked,
+                    minimum_envelope_age_seconds=minimum_envelope_age_seconds,
                     minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
                     store=active_store,
                 )
+                for binding in bindings
             )
+            last = bindings[-1]
+            after_cursor = last.establishing_server_cursor
+            after_attachment_id = last.attachment_id
+            after_attachment_revision = last.attachment_revision
+            if len(bindings) < page_limit:
+                break
         return candidates
+
+    def _retention_binding_release_candidate(
+        self,
+        *,
+        dataset: SyncDataset,
+        binding: SyncAttachmentRevisionBinding,
+        active_devices: Sequence[SyncDevice],
+        audit_mode: bool,
+        restore_window_blocked: bool,
+        minimum_envelope_age_seconds: int,
+        minimum_tombstone_age_seconds: int,
+        store: SyncV2Store | None = None,
+    ) -> SyncRetentionCandidate:
+        """Evaluate immutable binding evidence without mutable reference counters."""
+
+        active_store = store or self.store
+        blockers: list[str] = []
+        if audit_mode:
+            blockers.append("retention_audit_mode")
+        if restore_window_blocked:
+            blockers.append("retention_restore_window_active")
+        if self._retention_workspace_ack_scope_blocked(dataset):
+            blockers.append("retention_workspace_ack_scope_unknown")
+
+        envelope = active_store.get_envelope_by_server_cursor(
+            binding.establishing_server_cursor
+        )
+        envelope_valid = (
+            envelope is not None
+            and envelope.dataset_id == dataset.dataset_id
+            and envelope.domain == "attachment.ref"
+            and envelope.adapter_version == 2
+            and envelope.object_id == binding.attachment_id
+            and envelope.object_revision == binding.attachment_revision
+        )
+        if not envelope_valid:
+            blockers.append("retention_blob_binding_invalid")
+        elif self._retention_window_active(
+            envelope.server_timestamp,
+            minimum_envelope_age_seconds,
+        ):
+            blockers.append("retention_envelope_window_active")
+
+        head = active_store.get_current_head(
+            dataset.dataset_id,
+            "attachment.ref",
+            binding.attachment_id,
+        )
+        state = active_store.get_object_state(
+            dataset.dataset_id,
+            "attachment.ref",
+            binding.attachment_id,
+        )
+        current_revision = None if head is None else head.object_revision
+        if (
+            head is None
+            or current_revision is None
+            or current_revision < binding.attachment_revision
+        ):
+            blockers.append("retention_blob_binding_invalid")
+        current_binding = current_revision == binding.attachment_revision
+        current_live = current_binding and (
+            (state is not None and not state.deleted)
+            or (head is not None and head.operation != "tombstone" and not head.deleted)
+        )
+        if current_live:
+            blockers.append("retention_active_blob_reference")
+        elif head is not None and (
+            head.operation == "tombstone" or head.deleted
+        ) and self._retention_window_active(
+            head.server_timestamp,
+            minimum_tombstone_age_seconds,
+        ):
+            blockers.append("retention_tombstone_window_active")
+
+        required_devices = [
+            device
+            for device in active_devices
+            if _device_supports_adapter_version(device, "attachment.ref", 2)
+        ]
+        ref_unacknowledged: list[str] = []
+        blob_unacknowledged: list[str] = []
+        blob: SyncBlobObject | None = None
+        if not current_live:
+            ref_unacknowledged = self._retention_unacknowledged_devices(
+                dataset_id=dataset.dataset_id,
+                domain="attachment.ref",
+                adapter_version=2,
+                server_sequence=binding.establishing_server_cursor,
+                active_devices=required_devices,
+                store=active_store,
+            )
+            if ref_unacknowledged:
+                blockers.append("retention_blob_ref_unacknowledged")
+            if binding.resolved_blob_id is not None:
+                blob = active_store.get_blob_object(
+                    dataset.dataset_id,
+                    blob_id=binding.resolved_blob_id,
+                    owner_user_id=dataset.owner_user_id,
+                    include_unavailable=True,
+                )
+                if (
+                    blob is None
+                    or blob.payload_hash != binding.blob_hash
+                    or blob.size_bytes != binding.size_bytes
+                ):
+                    blockers.append("retention_blob_binding_invalid")
+                elif blob.status == "quarantined":
+                    blockers.append("retention_blob_quarantined")
+                elif blob.status not in {"available", "deleted"}:
+                    blockers.append("retention_blob_repair_pending")
+                blob_unacknowledged = self._retention_blob_unacknowledged_devices(
+                    dataset_id=dataset.dataset_id,
+                    attachment_id=binding.attachment_id,
+                    blob_id=binding.resolved_blob_id,
+                    payload_hash=binding.blob_hash,
+                    adapter_version=2,
+                    active_devices=required_devices,
+                    store=active_store,
+                )
+                if blob_unacknowledged:
+                    blockers.append("retention_blob_unverified_by_device")
+
+        return SyncRetentionCandidate(
+            candidate_type="binding_release",
+            dataset_id=dataset.dataset_id,
+            domain="attachment.ref",
+            object_id=binding.attachment_id,
+            server_sequence=binding.establishing_server_cursor,
+            blob_id=binding.resolved_blob_id,
+            attachment_id=binding.attachment_id,
+            attachment_revision=binding.attachment_revision,
+            payload_hash=binding.blob_hash,
+            size_bytes=binding.size_bytes,
+            blockers=list(dict.fromkeys(blockers)),
+            required_device_ids=[device.device_id for device in required_devices],
+            unacknowledged_device_ids=sorted(
+                set(ref_unacknowledged) | set(blob_unacknowledged)
+            ),
+            reason="historical attachment revision binding",
+        )
 
     def _retention_blob_candidate(
         self,
@@ -4631,6 +5729,26 @@ class SyncV2Service:
         blockers: list[str] = []
         if audit_mode:
             blockers.append("retention_audit_mode")
+        blockers.extend(
+            self._retention_blob_storage_blockers(
+                dataset=dataset,
+                blob=blob,
+                store=active_store,
+            )
+        )
+        if blob.status == "deleting":
+            return SyncRetentionCandidate(
+                candidate_type="blob_gc",
+                dataset_id=dataset.dataset_id,
+                domain="attachment.ref",
+                object_id=blob.attachment_id,
+                blob_id=blob.blob_id,
+                attachment_id=blob.attachment_id,
+                payload_hash=blob.payload_hash,
+                size_bytes=blob.size_bytes,
+                blockers=list(dict.fromkeys(blockers)),
+                reason="physical blob deletion retry",
+            )
         if restore_window_blocked:
             blockers.append("retention_restore_window_active")
         if self._retention_workspace_ack_scope_blocked(dataset):
@@ -4726,6 +5844,35 @@ class SyncV2Service:
             ),
             reason="server blob retained for attachment restore",
         )
+
+    def _retention_blob_storage_blockers(
+        self,
+        *,
+        dataset: SyncDataset,
+        blob: SyncBlobObject,
+        store: SyncV2Store,
+    ) -> list[str]:
+        if self.blob_store is None:
+            return ["retention_blob_storage_unavailable"]
+        namespace = store.get_storage_namespace(
+            dataset.dataset_id,
+            owner_user_id=dataset.owner_user_id,
+        )
+        if namespace is None:
+            return ["retention_blob_storage_key_not_namespaced"]
+        try:
+            expected_key = self.blob_store.namespace_storage_key(
+                namespace.storage_namespace_id,
+                blob.payload_hash,
+            )
+        except SyncBlobStoreError:
+            return ["retention_blob_storage_key_not_namespaced"]
+        if (
+            blob.storage_backend != self.settings.blob_storage_backend
+            or blob.storage_key != expected_key
+        ):
+            return ["retention_blob_storage_key_not_namespaced"]
+        return []
 
     def _retention_blob_adapter_version(
         self,
@@ -5693,6 +6840,7 @@ class SyncV2Service:
         latest_object_envelopes: Mapping[tuple[SyncDomain, str], SyncEnvelope],
         selected_domains: set[SyncDomain],
         selected_object_ids: set[str],
+        adapter_versions_by_domain: Mapping[SyncDomain, Sequence[int]] | None = None,
     ) -> list[SyncEnvelope]:
         """Expand selected restore heads to complete persisted mutation units."""
 
@@ -5725,6 +6873,14 @@ class SyncV2Service:
                 member.object_id not in selected_object_ids for member in active_group
             ):
                 raise RestorePlanningError("Restore object filter splits a mutation group")
+            if adapter_versions_by_domain is not None and any(
+                member.adapter_version
+                not in adapter_versions_by_domain.get(member.domain, ())
+                for member in active_group
+            ):
+                raise RestorePlanningError(
+                    "Restore adapter-version filter splits a mutation group"
+                )
             processed_groups.add(group_id)
             for member in active_group:
                 if member.domain not in OBJECT_RESTORE_DOMAINS:
@@ -5753,6 +6909,7 @@ class SyncV2Service:
         *,
         dataset_id: str,
         domain: SyncDomain,
+        adapter_versions: Sequence[int],
         max_candidates: int,
     ) -> list[SyncEnvelope]:
         page_limit = self.settings.restore_manifest_scan_limit
@@ -5770,6 +6927,7 @@ class SyncV2Service:
                 since_sequence,
                 limit=request_limit,
                 domains=[domain],
+                adapter_versions=adapter_versions,
                 status="accepted",
             )
             if not page:
@@ -5784,6 +6942,25 @@ class SyncV2Service:
             if len(page) < request_limit:
                 break
         return envelopes
+
+    def _restore_adapter_versions(
+        self,
+        device: SyncDevice | None,
+        domain: SyncDomain,
+    ) -> list[int]:
+        """Return server-supported versions safe to expose to one restore client."""
+
+        if device is None:
+            return [1]
+        try:
+            supported = self.adapters.get(domain).supported_adapter_versions
+        except KeyError:
+            return []
+        return sorted(
+            version
+            for version in supported
+            if _device_supports_adapter_version(device, domain, version)
+        )
 
     def _manifest_dataset(
         self,
@@ -6039,12 +7216,15 @@ def _retention_apply_candidate_enabled(
     *,
     apply_envelope_compaction: bool,
     apply_tombstone_prune: bool,
+    apply_binding_release: bool,
     apply_blob_gc: bool,
 ) -> bool:
     if candidate.candidate_type == "envelope_compaction":
         return apply_envelope_compaction
     if candidate.candidate_type == "tombstone_prune":
         return apply_tombstone_prune
+    if candidate.candidate_type == "binding_release":
+        return apply_binding_release
     if candidate.candidate_type == "blob_gc":
         return apply_blob_gc
     return False

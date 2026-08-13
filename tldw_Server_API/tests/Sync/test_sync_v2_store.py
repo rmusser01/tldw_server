@@ -1038,6 +1038,7 @@ def test_attachment_binding_schema_has_exact_constraints_and_indexes(
         "idx_sync_attachment_bindings_unresolved",
         "idx_sync_attachment_bindings_pending_digest",
         "idx_sync_attachment_bindings_blob",
+        "idx_sync_attachment_bindings_retention_release",
     }.issubset(binding_indexes)
     assert {
         "uq_sync_dataset_storage_namespace_id",
@@ -1380,6 +1381,78 @@ def test_attachment_binding_retention_release_is_monotonic_and_idempotent(
     assert replay == released
     assert replay.blob_hash == binding.blob_hash
     assert replay.establishing_server_cursor == binding.establishing_server_cursor
+
+
+def test_attachment_binding_release_candidate_page_is_bounded_and_indexed(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    timestamp = "2026-08-11T21:00:00+00:00"
+    rows = [
+        (
+            "dataset-1",
+            f"{index:08x}-1111-4111-8111-{index:012x}",
+            1,
+            "sha256:" + f"{index:064x}",
+            1,
+            index,
+            "metadata_only",
+            timestamp,
+        )
+        for index in range(1, 1003)
+    ]
+    with sync_store.db.backend.transaction() as connection:
+        for row in rows:
+            sync_store.db.execute(
+                """
+                INSERT INTO sync_attachment_revision_bindings (
+                    dataset_id, attachment_id, attachment_revision, blob_hash,
+                    size_bytes, establishing_server_cursor,
+                    availability_at_acceptance, resolved_blob_id,
+                    retention_released_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                """,
+                row,
+                connection=connection,
+            )
+
+    first = sync_store.list_unreleased_attachment_revision_bindings(
+        "dataset-1",
+        owner_user_id="user-1",
+        limit=10_000,
+    )
+    second = sync_store.list_unreleased_attachment_revision_bindings(
+        "dataset-1",
+        owner_user_id="user-1",
+        after_establishing_server_cursor=first[-1].establishing_server_cursor,
+        after_attachment_id=first[-1].attachment_id,
+        after_attachment_revision=first[-1].attachment_revision,
+        limit=10_000,
+    )
+    assert len(first) == 1000
+    assert [item.establishing_server_cursor for item in second] == [1001, 1002]
+
+    plan = " ".join(
+        str(row["detail"])
+        for row in sync_store.db.execute(
+            "EXPLAIN QUERY PLAN SELECT attachment_id FROM "
+            "sync_attachment_revision_bindings AS binding WHERE binding.dataset_id = ? "
+            "AND binding.retention_released_at IS NULL AND NOT EXISTS (SELECT 1 "
+            "FROM sync_current_heads AS head JOIN sync_envelopes AS envelope ON "
+            "envelope.server_sequence = head.latest_server_cursor WHERE "
+            "head.dataset_id = binding.dataset_id AND head.domain = 'attachment.ref' "
+            "AND head.object_id = binding.attachment_id AND envelope.adapter_version = 2 "
+            "AND envelope.object_revision = "
+            "binding.attachment_revision AND envelope.operation <> 'tombstone') AND "
+            "(binding.establishing_server_cursor, binding.attachment_id, "
+            "binding.attachment_revision) > (?, ?, ?) ORDER BY "
+            "binding.establishing_server_cursor, binding.attachment_id, "
+            "binding.attachment_revision LIMIT ?",
+            ("dataset-1", 0, "", 0, 1000),
+        ).rows
+    )
+    assert "idx_sync_attachment_bindings_retention_release" in plan
+    assert "USE TEMP B-TREE" not in plan.upper()
 
 
 def test_storage_namespace_is_server_issued_owner_scoped_and_stable(

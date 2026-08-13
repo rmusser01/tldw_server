@@ -30,6 +30,51 @@ The required `attachment.ref` payload metadata fields are `attachment_id`,
 `parent_domain`, `parent_object_id`, `content_type`, `size_bytes`,
 `payload_hash`, and `availability`.
 
+## Notes attachment adapter version 2
+
+The canonical Notes attachment lifecycle is an additive adapter version for the
+existing `attachment.ref` domain. Version 1 remains readable and restorable but
+is immutable. A device must explicitly advertise
+`supported_adapter_versions.attachment.ref: [1, 2]` (or `[2]`) before it can
+push or acknowledge version-2 envelopes. Omission means version 1. Version maps
+are monotonic-additive for an active device; a refresh cannot silently remove a
+previously advertised version.
+
+Capabilities expose two separate maps:
+
+- `supported_adapter_versions` describes schemas the server can parse;
+- `writable_adapter_versions` describes schemas writable for the selected,
+  owner-authorized dataset under its current rollout, encryption, enrollment,
+  and bootstrap state.
+
+The strict version-2 `upsert` payload is:
+
+| Field | Contract |
+| --- | --- |
+| `attachment_id` | Canonical lowercase UUIDv4 and equal to envelope `object_id`. |
+| `parent_domain` | Exactly `notes.note`. |
+| `parent_object_id` | Canonical lowercase UUIDv4 of the owning note. |
+| `file_name` | Canonical Notes-safe display name after NFKC normalization, extension allowlisting, and collision suffixing. |
+| `original_file_name` | Safe basename, at most 255 characters and 1024 UTF-8 bytes. |
+| `content_type` | Already-trimmed lowercase `type/subtype`; parameters are rejected. |
+| `size_bytes` | Positive integer within the effective Notes/Sync attachment limit. |
+| `blob_hash` | Canonical lowercase `sha256:<64 hex>` digest of the bytes. |
+| `created_at`, `last_modified` | Normalized UTC timestamps. |
+| `created_by` | Non-empty device or server-origin identity. |
+
+Version-2 tombstones retain the same immutable identity and provenance fields
+and add `deleted_at` plus an optional bounded `reason`. Unknown payload
+or routing fields are rejected. The envelope `payload_hash` is the canonical
+object hash over the complete normalized semantic payload, object revision, and
+live/tombstone state; it is not merely the blob digest.
+
+Pull cursors and domain acknowledgments are keyed by
+`(device, dataset, domain, adapter_version)`. Mixed-version pulls use a signed,
+bounded continuation token carrying per-version watermarks; legacy version-1
+numeric cursors remain valid. Blob verification evidence for version 2 uses the
+immutable `blob_id` plus digest in `blob_id_acks`; legacy attachment-ID evidence
+is never reinterpreted as version-2 proof.
+
 The additive Notes organization capability is one indivisible six-domain group:
 
 - `notes.keyword`
@@ -283,6 +328,11 @@ link, membership, or projection changes cannot serve a stale cached page.
 
 ### Capability Shape
 
+The example below assumes an owner-selected dataset whose Notes attachment
+bootstrap is ready and both attachment rollout gates are enabled. An unbound or
+not-ready capability response omits version 2 from the writable map while still
+reporting it as server-supported.
+
 ```json
 {
   "protocol_version": "sync-v2-m1",
@@ -323,6 +373,14 @@ link, membership, or projection changes cannot serve a stale cached page.
     "notes.folder": ["upsert", "tombstone"],
     "notes.folder_link": ["upsert", "tombstone"],
     "notes.link": ["upsert", "tombstone"]
+  },
+  "supported_adapter_versions": {
+    "notes.note": [1],
+    "attachment.ref": [1, 2]
+  },
+  "writable_adapter_versions": {
+    "notes.note": [1],
+    "attachment.ref": [1, 2]
   },
   "encryption": {
     "policy": "server_trusted_v1",

@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     StaticSyncAdapter,
     SyncAdapterRegistry,
 )
+from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+    attachment_ref_v2_object_hash,
+)
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
@@ -31,7 +34,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
+    SyncAttachmentRevisionBindingCreate,
     SyncBlobObjectCreate,
+    SyncBlobUploadSessionCreate,
+    SyncConflictCreate,
     SyncDatasetCreate,
     SyncDeviceCursor,
     SyncDeviceUpsert,
@@ -357,6 +363,357 @@ def test_capabilities_endpoint_hides_unauthorized_selected_dataset(
 
     assert response.status_code == 404
     assert response.json()["detail"]["error_code"] == "sync_resource_not_found"
+
+
+def _sync_diagnostics_snapshot(service: SyncV2Service) -> dict[str, list[dict[str, Any]]]:
+    tables = (
+        "sync_datasets",
+        "sync_envelopes",
+        "sync_current_heads",
+        "sync_conflicts",
+        "sync_attachment_revision_bindings",
+        "sync_blob_objects",
+        "sync_blob_upload_sessions",
+        "sync_notes_attachment_cleanup_candidates",
+    )
+    return {
+        table: service.store.db.execute(f"SELECT * FROM {table}").rows  # nosec B608
+        for table in tables
+    }
+
+
+def _insert_diagnostic_attachment(
+    service: SyncV2Service,
+    *,
+    attachment_id: str,
+    parent_object_id: str,
+    client_envelope_id: str,
+    object_revision: int = 1,
+    operation: str = "upsert",
+    base: SyncEnvelope | None = None,
+) -> SyncEnvelope:
+    payload: dict[str, Any] = {
+        "attachment_id": attachment_id,
+        "parent_domain": "notes.note",
+        "parent_object_id": parent_object_id,
+        "file_name": f"{attachment_id[:8]}.pdf",
+        "original_file_name": f"{attachment_id[:8]}.pdf",
+        "content_type": "application/pdf",
+        "size_bytes": 17,
+        "blob_hash": "sha256:" + attachment_id.replace("-", "") * 2,
+        "created_at": _clock(),
+        "last_modified": _clock(),
+        "created_by": "diagnostic-device",
+    }
+    if operation == "tombstone":
+        payload["deleted_at"] = _clock()
+    return service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id=client_envelope_id,
+            domain="attachment.ref",
+            operation=operation,
+            object_id=attachment_id,
+            object_revision=object_revision,
+            schema_version=2,
+            adapter_version=2,
+            payload=payload,
+            payload_hash=attachment_ref_v2_object_hash(
+                operation,
+                payload,
+                object_revision=object_revision,
+            ),
+            created_at_client=_clock(),
+            base_server_cursor=None if base is None else base.server_cursor,
+            base_object_revision=None if base is None else base.object_revision,
+            base_object_hash=None if base is None else base.payload_hash,
+        )
+    )
+
+
+def test_attachment_diagnostics_are_read_only_bounded_and_actionable(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+    parent_id = "b2222222-2222-4222-8222-222222222222"
+    parent = service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id="diagnostic-parent-upsert",
+            domain="notes.note",
+            operation="upsert",
+            object_id=parent_id,
+            object_revision=1,
+            payload={"title": "Diagnostic parent", "content": ""},
+            payload_hash="sha256:" + "d" * 64,
+            apply_status="applied",
+        )
+    )
+    service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id="diagnostic-parent-tombstone",
+            domain="notes.note",
+            operation="tombstone",
+            object_id=parent_id,
+            object_revision=2,
+            payload={},
+            payload_hash="sha256:" + "e" * 64,
+            apply_status="applied",
+            base_server_cursor=parent.server_cursor,
+            base_object_revision=parent.object_revision,
+            base_object_hash=parent.payload_hash,
+        )
+    )
+    live = _insert_diagnostic_attachment(
+        service,
+        attachment_id="a7111111-1111-4111-8111-111111111111",
+        parent_object_id="b7111111-1111-4111-8111-111111111111",
+        client_envelope_id="diagnostic-attachment-live",
+    )
+    hidden = _insert_diagnostic_attachment(
+        service,
+        attachment_id="a8111111-1111-4111-8111-111111111111",
+        parent_object_id=parent_id,
+        client_envelope_id="diagnostic-attachment-hidden",
+    )
+    tombstone_base = _insert_diagnostic_attachment(
+        service,
+        attachment_id="a9111111-1111-4111-8111-111111111111",
+        parent_object_id="b9111111-1111-4111-8111-111111111111",
+        client_envelope_id="diagnostic-attachment-before-tombstone",
+    )
+    _insert_diagnostic_attachment(
+        service,
+        attachment_id=tombstone_base.object_id,
+        parent_object_id="b9111111-1111-4111-8111-111111111111",
+        client_envelope_id="diagnostic-attachment-tombstone",
+        object_revision=2,
+        operation="tombstone",
+        base=tombstone_base,
+    )
+    service.store.mark_envelope_apply_status(
+        hidden.server_cursor,
+        apply_status="failed",
+        apply_error_code="sync_attachment_projection_failed",
+        apply_error_message="private projection detail",
+    )
+    service.store.db.execute(
+        """
+        UPDATE sync_attachment_revision_bindings
+           SET resolved_blob_id = 'blob-missing'
+         WHERE dataset_id = ? AND attachment_id = ? AND attachment_revision = 1
+        """,
+        ("dataset-1", live.object_id),
+    )
+    service.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="attachment-conflict-diagnostic",
+            dataset_id="dataset-1",
+            domain="attachment.ref",
+            object_id=hidden.object_id,
+            conflict_type="revision_mismatch",
+            server_cursor=hidden.server_cursor,
+            metadata={"private_detail": "must-not-leak"},
+        )
+    )
+    service.store.begin_notes_attachment_bootstrap(
+        "dataset-1",
+        owner_user_id="user-1",
+        bootstrap_id="bootstrap-diagnostic",
+    )
+    source_key = "notes_attachments/diagnostic/private.pdf"
+    service.store.resolve_notes_attachment_source_map(
+        "dataset-1",
+        owner_user_id="user-1",
+        bootstrap_id="bootstrap-diagnostic",
+        note_id=parent_id,
+        source_key=source_key,
+    )
+    service.store.record_notes_attachment_cleanup_candidate(
+        "dataset-1",
+        owner_user_id="user-1",
+        bootstrap_id="bootstrap-diagnostic",
+        source_key=source_key,
+        source_relative_path=source_key,
+        source_blob_hash="sha256:" + "7" * 64,
+        source_size_bytes=17,
+        source_modified_ns=1,
+    )
+    blob = service.store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-quarantined",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="a1111111-1111-4111-8111-111111111111",
+            payload_hash="sha256:" + "a" * 64,
+            content_type="application/pdf",
+            size_bytes=12,
+            storage_backend="local_fs",
+            storage_key="blobs/v2/" + "b" * 32 + "/" + "a" * 64 + ".blob",
+        )
+    )
+    service.store.db.execute(
+        "UPDATE sync_blob_objects SET status = 'quarantined' WHERE blob_id = ?",
+        (blob.blob_id,),
+    )
+    for index, status in enumerate(("verify_failed", "deleting", "deleted"), start=1):
+        digest = f"{index}" * 64
+        created = service.store.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id=f"blob-{status}",
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                attachment_id=f"a{index + 2}111111-1111-4111-8111-111111111111",
+                payload_hash="sha256:" + digest,
+                content_type="application/pdf",
+                size_bytes=12 + index,
+                storage_backend="local_fs",
+                storage_key=f"blobs/v2/{digest[:32]}/{digest}.blob",
+            )
+        )
+        service.store.db.execute(
+            """
+            UPDATE sync_blob_objects
+               SET status = ?, deleted_at = CASE WHEN ? = 'deleted' THEN ? ELSE NULL END
+             WHERE blob_id = ?
+            """,
+            (status, status, _clock(), created.blob_id),
+        )
+    service.store.create_blob_upload_session(
+        SyncBlobUploadSessionCreate(
+            upload_id="upload-diagnostic",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            device_id=None,
+            attachment_id="a6111111-1111-4111-8111-111111111111",
+            domain="attachment.ref",
+            object_id="a6111111-1111-4111-8111-111111111111",
+            content_type="application/pdf",
+            size_bytes=16,
+            payload_hash="sha256:" + "6" * 64,
+            chunk_size=16,
+            chunk_count=1,
+            reserved_quota_bytes=16,
+        )
+    )
+    with service.store.db.materialization_transaction(
+        [("dataset-1", "attachment.ref", "a2222222-2222-4222-8222-222222222222")]
+    ) as connection:
+        service.store.db._create_attachment_revision_binding(
+            SyncAttachmentRevisionBindingCreate(
+                dataset_id="dataset-1",
+                attachment_id="a2222222-2222-4222-8222-222222222222",
+                attachment_revision=1,
+                blob_hash="sha256:" + "c" * 64,
+                size_bytes=8,
+                establishing_server_cursor=1,
+                availability_at_acceptance="metadata_only",
+            ),
+            connection=connection,
+        )
+    before = _sync_diagnostics_snapshot(service)
+
+    response = _client_for_service(service).get(
+        "/api/v1/sync/diagnostics",
+        params={
+            "dataset_id": "dataset-1",
+            "attachment_sample_limit": 1,
+            "attachment_total_sample_limit": 500,
+        },
+    )
+
+    assert response.status_code == 200
+    attachment = response.json()["attachment_lifecycle"]
+    assert attachment["counts"]["quarantined"] == 1
+    assert attachment["counts"]["verify_failed"] == 1
+    assert attachment["counts"]["deleting"] == 1
+    assert attachment["counts"]["deleted"] == 1
+    assert attachment["counts"]["active_uploads"] == 1
+    assert attachment["counts"]["registry_live"] == 1
+    assert attachment["counts"]["registry_hidden"] == 1
+    assert attachment["counts"]["registry_tombstoned"] == 1
+    assert attachment["counts"]["metadata_only"] >= 1
+    assert attachment["counts"]["missing"] == 1
+    assert attachment["counts"]["cleanup_candidates"] == 1
+    assert attachment["counts"]["projection_pending"] >= 1
+    assert attachment["counts"]["projection_failed"] == 1
+    assert attachment["counts"]["unresolved_conflicts"] == 1
+    assert len(attachment["samples"]) <= 500
+    assert all(
+        sum(sample["category"] == category for sample in attachment["samples"]) <= 1
+        for category in {sample["category"] for sample in attachment["samples"]}
+    )
+    assert {action["action"] for action in attachment["recovery_actions"]} >= {
+        "release_quarantine",
+        "retry_upload",
+        "retry_verify",
+        "gc_retry",
+        "resume_upload",
+        "restore_attachment",
+        "restore_note",
+        "repair_projection",
+        "resolve_conflict",
+        "bootstrap_resume",
+        "wait_for_retention",
+    }
+    assert _sync_diagnostics_snapshot(service) == before
+    assert all("storage_key" not in sample for sample in attachment["samples"])
+    assert all("payload_hash" not in sample for sample in attachment["samples"])
+
+    no_samples = _client_for_service(service).get(
+        "/api/v1/sync/diagnostics",
+        params={"dataset_id": "dataset-1"},
+    )
+    assert no_samples.status_code == 200
+    assert no_samples.json()["attachment_lifecycle"]["samples"] == []
+
+    aggregate_oversized = _client_for_service(service).get(
+        "/api/v1/sync/diagnostics",
+        params={
+            "dataset_id": "dataset-1",
+            "attachment_sample_limit": 1,
+            "attachment_total_sample_limit": 1,
+        },
+    )
+    assert aggregate_oversized.status_code == 413
+    assert aggregate_oversized.json()["detail"]["error_code"] == (
+        "sync_attachment_diagnostic_total_sample_limit_exceeded"
+    )
+    assert _sync_diagnostics_snapshot(service) == before
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"attachment_sample_limit": 101},
+        {"attachment_total_sample_limit": 501},
+    ],
+)
+def test_attachment_diagnostics_reject_oversized_samples(
+    sync_service: SyncV2Service,
+    params: dict[str, int],
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+
+    response = _client_for_service(sync_service).get(
+        "/api/v1/sync/diagnostics",
+        params={"dataset_id": "dataset-1", **params},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"]["error_code"].startswith(
+        "sync_attachment_diagnostic_"
+    )
 
 
 def test_profile_endpoint_is_read_only_when_no_dataset_exists(
@@ -893,6 +1250,7 @@ def test_attachment_bootstrap_diagnostics_endpoint_is_read_only_and_bounded(
         "source_candidate_count": 7,
         "source_candidate_count_is_lower_bound": False,
         "cleanup_candidates": [],
+        "recovery_actions": [],
     }
     assert sync_service.store.list_datasets_for_user("user-1") == []
     assert sync_service.store.list_devices_for_user("user-1") == []
@@ -931,6 +1289,7 @@ def test_attachment_bootstrap_diagnostics_for_fresh_user_does_not_create_sync_db
         "source_candidate_count": None,
         "source_candidate_count_is_lower_bound": False,
         "cleanup_candidates": [],
+        "recovery_actions": [],
     }
     assert not sync_db_path.exists()
 

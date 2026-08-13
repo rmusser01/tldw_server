@@ -12,11 +12,15 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+    attachment_ref_v2_object_hash,
+)
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    SyncBlobObjectCreate,
     SyncEnvelope,
     SyncEnvelopeCreate,
 )
@@ -222,6 +226,61 @@ def _attachment_ref_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+ATTACHMENT_V2_ID = "a1111111-1111-4111-8111-111111111111"
+NOTE_V2_ID = "b2222222-2222-4222-8222-222222222222"
+ATTACHMENT_V2_HASH = "sha256:" + "a" * 64
+ATTACHMENT_V2_TIMESTAMP = "2026-08-13T12:00:00+00:00"
+
+
+def _attachment_ref_v2_envelope(**overrides: Any) -> SyncEnvelopeCreate:
+    operation = str(overrides.get("operation", "upsert"))
+    revision = int(overrides.get("object_revision", 1))
+    payload: dict[str, Any] = {
+        "attachment_id": ATTACHMENT_V2_ID,
+        "parent_domain": "notes.note",
+        "parent_object_id": NOTE_V2_ID,
+        "file_name": "diagram.png",
+        "original_file_name": "diagram.png",
+        "content_type": "image/png",
+        "size_bytes": 512,
+        "blob_hash": ATTACHMENT_V2_HASH,
+        "created_at": ATTACHMENT_V2_TIMESTAMP,
+        "last_modified": ATTACHMENT_V2_TIMESTAMP,
+        "created_by": "device-1",
+    }
+    if operation == "tombstone":
+        payload.update(
+            {
+                "deleted_at": ATTACHMENT_V2_TIMESTAMP,
+                "reason": "restore-test",
+            }
+        )
+    values: dict[str, Any] = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": f"env-attachment-v2-{revision}-{operation}",
+        "domain": "attachment.ref",
+        "operation": operation,
+        "object_id": ATTACHMENT_V2_ID,
+        "device_id": "device-1",
+        "client_sequence": 300 + revision,
+        "schema_version": 2,
+        "adapter_version": 2,
+        "object_revision": revision,
+        "payload": payload,
+        "payload_hash": attachment_ref_v2_object_hash(
+            operation,
+            payload,
+            object_revision=revision,
+        ),
+        "payload_size_bytes": 512,
+        "created_at_client": ATTACHMENT_V2_TIMESTAMP,
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "stable_key": f"attachment:{ATTACHMENT_V2_ID}",
+    }
+    values.update(overrides)
+    return SyncEnvelopeCreate(**values)
+
+
 def _source_cache_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     payload: dict[str, Any] = {
         "dataset_id": "dataset-1",
@@ -304,6 +363,35 @@ def _enable_ready_notes_link(service: SyncV2Service) -> None:
             json.dumps({"notes_link_v1": {"state": "ready"}}),
             "dataset-1",
         ),
+    )
+
+
+def _enable_ready_attachment_v2(service: SyncV2Service) -> None:
+    service.store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ? "
+        "WHERE dataset_id = ?",
+        (
+            json.dumps([*M1_SYNC_DOMAINS, "attachment.ref"]),
+            json.dumps({"notes_attachment_v2": {"state": "ready"}}),
+            "dataset-1",
+        ),
+    )
+    service.settings = replace(service.settings, supports_attachments=True)
+
+
+def _register_attachment_v2_device(service: SyncV2Service) -> None:
+    service.register_device(
+        user_id="user-1",
+        display_name="device-v2",
+        client_type="chatbook",
+        device_id="device-v2",
+        capabilities={
+            "requested_domains": ["notes.note", "attachment.ref"],
+            "supported_adapter_versions": {
+                "notes.note": [1],
+                "attachment.ref": [2],
+            },
+        },
     )
 
 
@@ -558,6 +646,7 @@ def test_notes_link_restore_preview_orders_live_group_after_both_note_providers(
         "object_id": edge_id,
         "operation": "upsert",
         "server_cursor": grouped[1].server_cursor,
+        "adapter_version": 1,
         "mutation_group_id": "server-origin-notes-link-restore",
         "mutation_step": 1,
         "mutation_step_count": 2,
@@ -896,7 +985,7 @@ def test_restore_preview_surfaces_tombstones_as_delete_actions(
 def test_restore_preview_includes_attachment_refs_and_missing_blob_warning(
     sync_service: SyncV2Service,
 ) -> None:
-    _push(sync_service, _attachment_ref_envelope())
+    sync_service.store.insert_envelope(_attachment_ref_envelope())
 
     preview = sync_service.restore_preview(
         user_id="user-1",
@@ -912,6 +1001,181 @@ def test_restore_preview_includes_attachment_refs_and_missing_blob_warning(
         "sync_key_recovery_missing",
         "sync_attachment_blob_missing",
     ]
+
+
+def test_attachment_ref_v2_restore_orders_live_ref_after_parent_note() -> None:
+    attachment = _stored_envelope(_attachment_ref_v2_envelope(), 1)
+    note = _stored_envelope(
+        _note_envelope(
+            object_id=NOTE_V2_ID,
+            client_envelope_id="env-note-v2-parent",
+        ),
+        2,
+    )
+
+    ordered = order_restore_envelopes([attachment, note])
+
+    assert [(item.domain, item.object_id) for item in ordered] == [
+        ("notes.note", NOTE_V2_ID),
+        ("attachment.ref", ATTACHMENT_V2_ID),
+    ]
+
+
+def test_attachment_ref_v2_restore_tombstone_has_no_live_parent_dependency() -> None:
+    tombstone = _stored_envelope(
+        _attachment_ref_v2_envelope(operation="tombstone", object_revision=2),
+        3,
+    )
+
+    assert order_restore_envelopes([tombstone]) == [tombstone]
+
+
+def test_attachment_ref_v2_restore_is_negotiated_and_preserves_adapter_version(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_attachment_v2(sync_service)
+    _register_attachment_v2_device(sync_service)
+    sync_service.store.insert_envelope(
+        _note_envelope(
+            object_id=NOTE_V2_ID,
+            client_envelope_id="env-note-v2-preview",
+        )
+    )
+    sync_service.store.insert_envelope(_attachment_ref_v2_envelope())
+
+    legacy = sync_service.restore_preview(
+        user_id="user-1",
+        device_id="device-1",
+        dataset_ids=["dataset-1"],
+        local_inventory=[],
+    )
+    device_less = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        local_inventory=[],
+    )
+    version_two = sync_service.restore_preview(
+        user_id="user-1",
+        device_id="device-v2",
+        dataset_ids=["dataset-1"],
+        local_inventory=[],
+    )
+
+    assert legacy.attachment_refs == []
+    assert device_less.attachment_refs == []
+    assert [item.domain for item in version_two.ordered_actions] == [
+        "notes.note",
+        "attachment.ref",
+    ]
+    assert [item.adapter_version for item in version_two.ordered_actions] == [1, 2]
+    assert version_two.attachment_refs[0].adapter_version == 2
+
+
+def test_attachment_ref_v2_local_inventory_requires_matching_adapter_version(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_attachment_v2(sync_service)
+    _register_attachment_v2_device(sync_service)
+    sync_service.store.insert_envelope(
+        _note_envelope(
+            object_id=NOTE_V2_ID,
+            client_envelope_id="env-note-v2-local-inventory",
+        )
+    )
+    stored = sync_service.store.insert_envelope(_attachment_ref_v2_envelope())
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        device_id="device-v2",
+        dataset_ids=["dataset-1"],
+        local_inventory=[
+            {
+                "domain": "attachment.ref",
+                "adapter_version": 1,
+                "object_id": ATTACHMENT_V2_ID,
+                "object_revision": 1,
+                "object_hash": stored.payload_hash,
+                "deleted": False,
+            }
+        ],
+    )
+
+    attachment_action = next(
+        item
+        for item in preview.ordered_actions
+        if item.domain == "attachment.ref"
+    )
+    assert attachment_action.action == "apply"
+
+
+@pytest.mark.parametrize("blob_status", ["available", "quarantined", "deleted"])
+def test_attachment_binding_drives_v2_restore_blob_completeness(
+    sync_service: SyncV2Service,
+    blob_status: str,
+) -> None:
+    _enable_ready_attachment_v2(sync_service)
+    _register_attachment_v2_device(sync_service)
+    sync_service.store.insert_envelope(
+        _note_envelope(
+            object_id=NOTE_V2_ID,
+            client_envelope_id=f"env-note-v2-binding-{blob_status}",
+        )
+    )
+    sync_service.store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-v2-restore",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="legacy-provenance-is-not-authority",
+            payload_hash=ATTACHMENT_V2_HASH,
+            content_type="image/png",
+            size_bytes=512,
+            storage_backend="local_fs",
+            storage_key="blobs/v2/" + "1" * 32 + "/" + "a" * 64 + ".blob",
+        )
+    )
+    sync_service.store.insert_envelope(_attachment_ref_v2_envelope())
+    if blob_status != "available":
+        sync_service.store.db.execute(
+            "UPDATE sync_blob_objects SET status = ? WHERE blob_id = ?",
+            (blob_status, "blob-v2-restore"),
+        )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        device_id="device-v2",
+        dataset_ids=["dataset-1"],
+        local_inventory=[],
+    )
+
+    assert preview.attachment_refs[0].availability == blob_status
+    assert preview.blob_details[0].server_availability == blob_status
+
+
+def test_attachment_binding_missing_bytes_remains_metadata_restoreable(
+    sync_service: SyncV2Service,
+) -> None:
+    _enable_ready_attachment_v2(sync_service)
+    _register_attachment_v2_device(sync_service)
+    sync_service.store.insert_envelope(
+        _note_envelope(
+            object_id=NOTE_V2_ID,
+            client_envelope_id="env-note-v2-missing-bytes",
+        )
+    )
+    sync_service.store.insert_envelope(_attachment_ref_v2_envelope())
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        device_id="device-v2",
+        dataset_ids=["dataset-1"],
+        metadata_only=True,
+        local_inventory=[],
+    )
+
+    assert preview.attachment_refs[0].availability == "metadata_only"
+    assert preview.blob_details[0].required_for_restore is False
+    assert preview.missing_blobs == []
 
 
 def test_restore_preview_includes_source_cache_entries_and_local_conflicts(
@@ -1860,6 +2124,7 @@ def test_restore_preview_endpoint_exposes_one_safe_canonical_ordered_plan(
         "object_id",
         "operation",
         "server_cursor",
+        "adapter_version",
         "mutation_group_id",
         "mutation_step",
         "mutation_step_count",
@@ -1939,6 +2204,7 @@ def test_restore_preview_round5_distinguishes_same_object_across_datasets(
         "object_id",
         "operation",
         "server_cursor",
+        "adapter_version",
         "mutation_group_id",
         "mutation_step",
         "mutation_step_count",

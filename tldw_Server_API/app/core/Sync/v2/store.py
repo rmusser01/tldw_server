@@ -101,6 +101,22 @@ class SyncV2Store:
             guarded._connection = connection
             yield guarded
 
+    @contextmanager
+    def blob_write_guard(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+    ) -> Iterator[SyncV2Store]:
+        """Hold the dataset ordering fence through blob publication and commit."""
+
+        with self.db.materialization_transaction(
+            [(dataset_id, domain, object_id)]
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
     def upsert_device(
         self,
         device: SyncDeviceUpsert,
@@ -1013,6 +1029,7 @@ class SyncV2Store:
             attachment_id,
             attachment_revision,
             owner_user_id=owner_user_id,
+            connection=self._connection,
         )
 
     def get_attachment_revision_binding_for_blob(
@@ -1071,6 +1088,28 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def list_unreleased_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded compound-keyset page of unreleased bindings."""
+
+        return self.db.list_unreleased_attachment_revision_bindings(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            after_attachment_id=after_attachment_id,
+            after_attachment_revision=after_attachment_revision,
+            limit=limit,
+            connection=self._connection,
+        )
+
     def list_unresolved_attachment_revision_bindings(
         self,
         dataset_id: str,
@@ -1120,6 +1159,7 @@ class SyncV2Store:
             attachment_revision,
             released_at=released_at,
             owner_user_id=owner_user_id,
+            connection=self._connection,
         )
 
     def get_or_create_storage_namespace(
@@ -1131,6 +1171,18 @@ class SyncV2Store:
         return self.db.get_or_create_storage_namespace(
             dataset_id,
             owner_user_id=owner_user_id,
+        )
+
+    def get_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDatasetStorageNamespace | None:
+        return self.db.get_storage_namespace(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
         )
 
     def relocate_legacy_blob(
@@ -1187,7 +1239,18 @@ class SyncV2Store:
         )
 
     def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
-        return self.db.complete_blob_upload(blob)
+        return self.db.complete_blob_upload(blob, connection=self._connection)
+
+    def require_blob_upload_completion_allowed(
+        self,
+        blob: SyncBlobObjectCreate,
+    ) -> None:
+        if self._connection is None:
+            raise SyncStoreError("Sync blob completion requires a dataset guard")
+        self.db.require_blob_upload_completion_allowed(
+            blob,
+            connection=self._connection,
+        )
 
     def get_blob_object(
         self,
@@ -1197,6 +1260,7 @@ class SyncV2Store:
         blob_id: str | None = None,
         payload_hash: str | None = None,
         owner_user_id: str | None = None,
+        include_unavailable: bool = False,
     ) -> SyncBlobObject | None:
         return self.db.get_blob_object(
             dataset_id,
@@ -1204,6 +1268,7 @@ class SyncV2Store:
             blob_id=blob_id,
             payload_hash=payload_hash,
             owner_user_id=owner_user_id,
+            include_unavailable=include_unavailable,
             connection=self._connection,
         )
 
@@ -1236,6 +1301,7 @@ class SyncV2Store:
             dataset_id,
             blob_id=blob_id,
             owner_user_id=owner_user_id,
+            include_unavailable=True,
             connection=self._connection,
             for_update=True,
         )
@@ -1268,12 +1334,27 @@ class SyncV2Store:
             connection=self._connection,
         )
 
-    def mark_blob_object_deleted(
+    def fence_blob_object_deleting(
         self,
         dataset_id: str,
         blob_id: str,
     ) -> SyncBlobObject | None:
-        return self.db.mark_blob_object_deleted(
+        if self._connection is None:
+            raise SyncStoreError("Sync blob deletion requires a dataset guard")
+        return self.db.fence_blob_object_deleting(
+            dataset_id,
+            blob_id,
+            connection=self._connection,
+        )
+
+    def finalize_blob_object_deleted(
+        self,
+        dataset_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject | None:
+        if self._connection is None:
+            raise SyncStoreError("Sync blob deletion requires a dataset guard")
+        return self.db.finalize_blob_object_deleted(
             dataset_id,
             blob_id,
             connection=self._connection,

@@ -557,6 +557,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
         attachment_id, attachment_revision
     )
     WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+    ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
     ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
     WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
@@ -1121,6 +1124,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
         dataset_id, resolved_blob_id, establishing_server_cursor,
         attachment_id, attachment_revision
     )
+    WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+    ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
     WHERE retention_released_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
     ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
@@ -7918,14 +7924,13 @@ class SyncDatabase:
         blob_row = _first(
             self.execute(
                 """
-                SELECT blob.blob_id
+                SELECT blob.blob_id, blob.status
                   FROM sync_blob_objects AS blob
                   JOIN sync_datasets AS dataset
                     ON dataset.dataset_id = blob.dataset_id
                  WHERE blob.dataset_id = ?
                    AND blob.payload_hash = ?
                    AND blob.size_bytes = ?
-                   AND blob.status = 'available'
                    AND (
                         dataset.scope_type = 'workspace'
                         OR blob.owner_user_id = dataset.owner_user_id
@@ -7938,6 +7943,11 @@ class SyncDatabase:
                 connection=connection,
             )
         )
+        if blob_row is not None and blob_row.get("status") in {"deleting", "deleted"}:
+            raise SyncStoreError(
+                f"Sync attachment binding cannot target a {blob_row['status']} blob"
+            )
+        blob_available = blob_row is not None and blob_row.get("status") == "available"
         binding = SyncAttachmentRevisionBindingCreate(
             dataset_id=envelope.dataset_id,
             attachment_id=attachment_id,
@@ -7946,9 +7956,9 @@ class SyncDatabase:
             size_bytes=size_value,
             establishing_server_cursor=envelope.server_cursor,
             availability_at_acceptance=(
-                "available" if blob_row is not None else "metadata_only"
+                "available" if blob_available else "metadata_only"
             ),
-            resolved_blob_id=(None if blob_row is None else str(blob_row["blob_id"])),
+            resolved_blob_id=(None if not blob_available else str(blob_row["blob_id"])),
         )
         return self._create_attachment_revision_binding(
             binding,
@@ -8045,10 +8055,11 @@ class SyncDatabase:
         attachment_revision: int,
         *,
         owner_user_id: str,
+        connection: Any | None = None,
     ) -> SyncAttachmentRevisionBinding | None:
         """Return one dataset-scoped immutable attachment revision binding."""
 
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_attachment_binding_dataset_owner(
                 dataset_id,
                 owner_user_id,
@@ -8132,6 +8143,62 @@ class SyncDatabase:
                 (
                     dataset_id,
                     blob_id,
+                    after_establishing_server_cursor,
+                    after_attachment_id,
+                    after_attachment_revision,
+                    page_limit,
+                ),
+                connection=conn,
+            ).rows
+        return [_attachment_revision_binding_from_row(row) for row in rows]
+
+    def list_unreleased_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """Return one bounded keyset page of unreleased dataset bindings."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync attachment binding page limit must be positive")
+        page_limit = min(limit, 1000)
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT binding.* FROM sync_attachment_revision_bindings AS binding
+                 WHERE binding.dataset_id = ?
+                   AND binding.retention_released_at IS NULL
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM sync_current_heads AS head
+                          JOIN sync_envelopes AS envelope
+                            ON envelope.server_sequence = head.latest_server_cursor
+                         WHERE head.dataset_id = binding.dataset_id
+                           AND head.domain = 'attachment.ref'
+                           AND head.object_id = binding.attachment_id
+                           AND envelope.adapter_version = 2
+                           AND envelope.object_revision = binding.attachment_revision
+                           AND envelope.operation <> 'tombstone'
+                   )
+                   AND (binding.establishing_server_cursor, binding.attachment_id,
+                        binding.attachment_revision) > (?, ?, ?)
+                 ORDER BY binding.establishing_server_cursor, binding.attachment_id,
+                          binding.attachment_revision
+                 LIMIT ?
+                """,
+                (
+                    dataset_id,
                     after_establishing_server_cursor,
                     after_attachment_id,
                     after_attachment_revision,
@@ -8331,13 +8398,14 @@ class SyncDatabase:
         *,
         released_at: str,
         owner_user_id: str,
+        connection: Any | None = None,
     ) -> SyncAttachmentRevisionBinding:
         """Set the retention-release marker once without erasing audit identity."""
 
         if not released_at.strip():
             raise SyncStoreError("Sync attachment binding release timestamp is required")
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_owner_for_update(
                 dataset_id,
                 owner_user_id,
@@ -8434,6 +8502,33 @@ class SyncDatabase:
         if row is None:
             raise SyncStoreError("Sync dataset storage namespace could not be resolved")
         return _storage_namespace_from_row(row)
+
+    def get_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> SyncDatasetStorageNamespace | None:
+        """Return the existing opaque namespace under exact owner authority."""
+
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT namespace.*
+                      FROM sync_dataset_storage_namespaces AS namespace
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = namespace.dataset_id
+                     WHERE namespace.dataset_id = ?
+                       AND namespace.owner_user_id = ?
+                       AND dataset.owner_user_id = ?
+                    """,
+                    (dataset_id, owner_user_id, owner_user_id),
+                    connection=conn,
+                )
+            )
+        return None if row is None else _storage_namespace_from_row(row)
 
     def _resolve_pending_bindings_for_blob(
         self,
@@ -8918,12 +9013,60 @@ class SyncDatabase:
                 raise SyncStoreError("Sync blob chunk insert did not produce a retrievable record")
             return _blob_chunk_from_row(row)
 
-    def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
+    def require_blob_upload_completion_allowed(
+        self,
+        blob: SyncBlobObjectCreate,
+        *,
+        connection: Any,
+    ) -> None:
+        """Reject storage publication after a fence or metadata conflict."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT blob.*
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ? AND blob.payload_hash = ?
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = ?
+                   )
+                """,
+                (blob.dataset_id, blob.payload_hash, blob.owner_user_id),
+                connection=connection,
+            )
+        )
+        if row is None:
+            return
+        existing_status = str(row.get("status"))
+        if existing_status == "deleting":
+            raise SyncStoreError("Sync blob is deleting")
+        if existing_status not in {"available", "deleted"}:
+            raise SyncStoreError("Sync blob is not available for upload completion")
+        existing_fingerprint = _blob_object_fingerprint_from_row(row)
+        requested_fingerprint = _blob_object_fingerprint_from_create(blob)
+        existing_fingerprint.pop("status")
+        requested_fingerprint.pop("status")
+        if existing_fingerprint != requested_fingerprint:
+            raise SyncIdempotencyConflictError(
+                "Sync blob payload hash was reused with different metadata"
+            )
+
+    def complete_blob_upload(
+        self,
+        blob: SyncBlobObjectCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncBlobObject:
         """Commit a verified blob and deduplicate by dataset plus payload hash."""
 
+        if blob.status != "available":
+            raise SyncStoreError("Sync blob upload completion must become available")
         now = utcnow_iso()
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             dataset_row = self._get_dataset_row_for_update(
                 blob.dataset_id,
                 connection=conn,
@@ -8997,10 +9140,40 @@ class SyncDatabase:
                 raise SyncStoreError(
                     "Sync blob is unavailable under dataset owner authority"
                 )
-            if _blob_object_fingerprint_from_row(row) != _blob_object_fingerprint_from_create(blob):
+            existing_fingerprint = _blob_object_fingerprint_from_row(row)
+            requested_fingerprint = _blob_object_fingerprint_from_create(blob)
+            existing_status = str(existing_fingerprint.pop("status"))
+            requested_fingerprint.pop("status")
+            if existing_status == "deleting":
+                raise SyncStoreError("Sync blob is deleting")
+            if existing_fingerprint != requested_fingerprint:
                 raise SyncIdempotencyConflictError(
                     "Sync blob payload hash was reused with different metadata"
                 )
+            if existing_status == "deleted":
+                self.execute(
+                    """
+                    UPDATE sync_blob_objects
+                       SET status = 'available', deleted_at = NULL, updated_at = ?
+                     WHERE dataset_id = ? AND blob_id = ? AND status = 'deleted'
+                    """,
+                    (now, blob.dataset_id, row["blob_id"]),
+                    connection=conn,
+                )
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_blob_objects
+                         WHERE dataset_id = ? AND blob_id = ?
+                        """,
+                        (blob.dataset_id, row["blob_id"]),
+                        connection=conn,
+                    )
+                )
+                if row is None or row["status"] != "available":
+                    raise SyncStoreError("Sync blob repair did not become available")
+            elif existing_status != "available":
+                raise SyncStoreError("Sync blob is not available for upload completion")
             self._resolve_pending_bindings_for_blob(row, connection=conn)
             if session is not None:
                 self.execute(
@@ -9022,6 +9195,7 @@ class SyncDatabase:
         blob_id: str | None = None,
         payload_hash: str | None = None,
         owner_user_id: str | None = None,
+        include_unavailable: bool = False,
         connection: Any | None = None,
         for_update: bool = False,
     ) -> SyncBlobObject | None:
@@ -9040,7 +9214,7 @@ class SyncDatabase:
                     SELECT *
                       FROM sync_blob_objects
                      WHERE dataset_id = ?
-                       AND status = 'available'
+                       AND (? = 1 OR status = 'available')
                        AND (? IS NULL OR owner_user_id = ?)
                        AND (? IS NULL OR blob_id = ?)
                        AND (? IS NULL OR payload_hash = ?)
@@ -9060,6 +9234,7 @@ class SyncDatabase:
                     + suffix,  # nosec B608 - backend-controlled row lock suffix.
                     (
                         dataset_id,
+                        1 if include_unavailable else 0,
                         owner_user_id,
                         owner_user_id,
                         blob_id,
@@ -9182,44 +9357,68 @@ class SyncDatabase:
             ).rows
         return [_blob_object_from_row(row) for row in rows]
 
-    def mark_blob_object_deleted(
+    def fence_blob_object_deleting(
         self,
         dataset_id: str,
         blob_id: str,
         *,
-        connection: Any | None = None,
+        connection: Any,
     ) -> SyncBlobObject | None:
-        """Soft-delete available blob metadata without removing blob bytes."""
+        """Durably fence one available blob before physical deletion."""
 
         now = utcnow_iso()
-        with self.backend.transaction(connection) as conn:
+        self.execute(
+            """
+            UPDATE sync_blob_objects
+               SET status = 'deleting', updated_at = ?
+             WHERE dataset_id = ? AND blob_id = ?
+               AND status = 'available' AND deleted_at IS NULL
+            """,
+            (now, dataset_id, blob_id),
+            connection=connection,
+        )
+        row = _first(
             self.execute(
                 """
-                UPDATE sync_blob_objects
-                   SET status = 'deleted',
-                       deleted_at = ?
-                 WHERE dataset_id = ?
-                   AND blob_id = ?
-                   AND status = 'available'
-                   AND deleted_at IS NULL
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND blob_id = ?
                 """,
-                (now, dataset_id, blob_id),
-                connection=conn,
+                (dataset_id, blob_id),
+                connection=connection,
             )
-            row = _first(
-                self.execute(
-                    """
-                    SELECT *
-                      FROM sync_blob_objects
-                     WHERE dataset_id = ? AND blob_id = ?
-                    """,
-                    (dataset_id, blob_id),
-                    connection=conn,
-                )
+        )
+        return None if row is None else _blob_object_from_row(row)
+
+    def finalize_blob_object_deleted(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        connection: Any,
+    ) -> SyncBlobObject | None:
+        """Finalize a physically absent fenced blob as deleted."""
+
+        now = utcnow_iso()
+        self.execute(
+            """
+            UPDATE sync_blob_objects
+               SET status = 'deleted', deleted_at = ?, updated_at = ?
+             WHERE dataset_id = ? AND blob_id = ? AND status = 'deleting'
+            """,
+            (now, now, dataset_id, blob_id),
+            connection=connection,
+        )
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND blob_id = ?
+                """,
+                (dataset_id, blob_id),
+                connection=connection,
             )
-        if row is None:
-            return None
-        return _blob_object_from_row(row)
+        )
+        return None if row is None else _blob_object_from_row(row)
 
     def get_domain_compaction_sequence(
         self,
@@ -10763,6 +10962,11 @@ class SyncDatabase:
                 WHERE retention_released_at IS NULL
             """,
             """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+                ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+                WHERE retention_released_at IS NULL
+            """,
+            """
             CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
                 ON sync_attachment_revision_bindings(
                     dataset_id, blob_hash, size_bytes, establishing_server_cursor,
@@ -11134,6 +11338,7 @@ class SyncDatabase:
             "idx_sync_attachment_bindings_unresolved": "createindexidx_sync_attachment_bindings_unresolvedonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
             "idx_sync_attachment_bindings_blob": "createindexidx_sync_attachment_bindings_blobonsync_attachment_revision_bindings(dataset_id,resolved_blob_id)",
             "idx_sync_attachment_bindings_blob_retention": "createindexidx_sync_attachment_bindings_blob_retentiononsync_attachment_revision_bindings(dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision)whereretention_released_atisnull",
+            "idx_sync_attachment_bindings_retention_release": "createindexidx_sync_attachment_bindings_retention_releaseonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereretention_released_atisnull",
             "idx_sync_attachment_bindings_pending_digest": "createindexidx_sync_attachment_bindings_pending_digestonsync_attachment_revision_bindings(dataset_id,blob_hash,size_bytes,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
             "uq_sync_dataset_storage_namespace_id": "createuniqueindexuq_sync_dataset_storage_namespace_idonsync_dataset_storage_namespaces(storage_namespace_id)",
             "idx_sync_dataset_storage_namespaces_owner": "createindexidx_sync_dataset_storage_namespaces_owneronsync_dataset_storage_namespaces(owner_user_id,dataset_id)",
@@ -11167,6 +11372,7 @@ class SyncDatabase:
                     'idx_sync_attachment_bindings_unresolved',
                     'idx_sync_attachment_bindings_blob',
                     'idx_sync_attachment_bindings_blob_retention',
+                    'idx_sync_attachment_bindings_retention_release',
                     'idx_sync_attachment_bindings_pending_digest',
                     'uq_sync_dataset_storage_namespace_id',
                     'idx_sync_dataset_storage_namespaces_owner'
@@ -11321,6 +11527,12 @@ class SyncDatabase:
                 "sync_attachment_revision_bindings",
                 False,
                 "dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision",
+                "retention_released_atisnull",
+            ),
+            "idx_sync_attachment_bindings_retention_release": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,establishing_server_cursor,attachment_id,attachment_revision",
                 "retention_released_atisnull",
             ),
             "idx_sync_attachment_bindings_pending_digest": (

@@ -83,16 +83,14 @@ def canonical_api(
     )
     service = SyncV2Service(
         store=store,
-        adapters=SyncAdapterRegistry(
-            [AttachmentRefDomainAdapter(v2_writes_enabled=True)]
-        ),
+        adapters=SyncAdapterRegistry([AttachmentRefDomainAdapter(v2_writes_enabled=True)]),
         materializers={"attachment.ref": AttachmentRefMaterializer(note_db)},
         blob_store=LocalSyncBlobStore(tmp_path / "blobs"),
         settings=SyncV2Settings(
             supports_attachments=True,
             max_blob_bytes=1024 * 1024,
             max_chunk_bytes=64 * 1024,
-            pull_token_signing_secret="attachment-api-tests",
+            pull_token_signing_secret="attachment-api-tests",  # nosec B106
             server_trusted_encryption=server_trusted_encryption_status_from_config(
                 mode="managed_storage",
                 server_trusted_enabled=True,
@@ -112,9 +110,7 @@ def canonical_api(
 
     app.dependency_overrides[notes_endpoint.get_chacha_db_for_user] = _db_override
     app.dependency_overrides[notes_endpoint.get_request_user] = _user_override
-    app.dependency_overrides[notes_endpoint.get_rate_limiter_dep] = (
-        lambda: _NoopRateLimiter()
-    )
+    app.dependency_overrides[notes_endpoint.get_rate_limiter_dep] = lambda: _NoopRateLimiter()
     monkeypatch.setattr(
         notes_endpoint,
         "get_active_server_origin_sync_service_for_user",
@@ -248,9 +244,7 @@ def test_notes_attachment_schema_accepts_canonical_item_page_and_mutation_respon
     page = NotesAttachmentPage.model_validate(
         {"items": [item.model_dump()], "next_cursor": "cursor-1", "has_more": True}
     )
-    mutation = NotesAttachmentMutationResponse.model_validate(
-        {**item.model_dump(), "idempotent_replay": False}
-    )
+    mutation = NotesAttachmentMutationResponse.model_validate({**item.model_dump(), "idempotent_replay": False})
 
     assert item.etag == f'"att-{ATTACHMENT_ID}-v3-{OBJECT_HASH.removeprefix("sha256:")}"'
     assert page.items == [item]
@@ -359,7 +353,7 @@ def test_notes_attachment_etag_grammar_is_exact():
     for value in (
         None,
         "*",
-        f'W/{etag}',
+        f"W/{etag}",
         f"{etag}, {etag}",
         f'"att-{ATTACHMENT_ID}-v0-{OBJECT_HASH.removeprefix("sha256:")}"',
         f'"att-{ATTACHMENT_ID.upper()}-v3-{OBJECT_HASH.removeprefix("sha256:")}"',
@@ -615,6 +609,16 @@ def test_canonical_content_supports_conditionals_and_single_byte_ranges(
         params={"dataset_id": DATASET_ID},
         headers={"Range": "bytes=2-5", "If-Range": created["etag"]},
     )
+    suffix = client.get(
+        path,
+        params={"dataset_id": DATASET_ID},
+        headers={"Range": "bytes=-3"},
+    )
+    open_ended = client.get(
+        path,
+        params={"dataset_id": DATASET_ID},
+        headers={"Range": "bytes=7-"},
+    )
     stale_if_range = client.get(
         path,
         params={"dataset_id": DATASET_ID},
@@ -657,6 +661,10 @@ def test_canonical_content_supports_conditionals_and_single_byte_ranges(
     assert partial.status_code == 206 and partial.content == b"2345"
     assert partial.headers["content-range"] == "bytes 2-5/10"
     assert partial.headers["content-length"] == "4"
+    assert suffix.status_code == 206 and suffix.content == b"789"
+    assert suffix.headers["content-range"] == "bytes 7-9/10"
+    assert open_ended.status_code == 206 and open_ended.content == b"789"
+    assert open_ended.headers["content-range"] == "bytes 7-9/10"
     assert stale_if_range.status_code == 200 and stale_if_range.content == payload
     assert not_modified.status_code == 304 and not not_modified.content
     assert unsatisfied.status_code == 416
@@ -705,9 +713,7 @@ def test_active_legacy_filename_routes_are_canonical_compatibility_aliases(
     assert listed.json()["count"] == 1
     assert listed.json()["attachments"][0]["file_name"] == "Legacy_Report.pdf"
 
-    downloaded = client.get(
-        f"/api/v1/notes/{NOTE_ID}/attachments/Legacy_Report.pdf"
-    )
+    downloaded = client.get(f"/api/v1/notes/{NOTE_ID}/attachments/Legacy_Report.pdf")
     assert downloaded.status_code == 200, downloaded.text
     assert downloaded.content == b"%PDF-1.7\nlegacy payload\n%%EOF\n"
 
@@ -991,9 +997,7 @@ def test_rollout_inactive_preserves_legacy_filesystem_routes_and_rejects_canonic
     assert canonical.status_code == 409
     assert canonical.json()["detail"]["error_code"] == "notes_attachment_sync_inactive"
     assert inactive_dataset_alias.status_code == 409
-    assert inactive_dataset_alias.json()["detail"]["error_code"] == (
-        "notes_attachment_sync_inactive"
-    )
+    assert inactive_dataset_alias.json()["detail"]["error_code"] == ("notes_attachment_sync_inactive")
     assert created.status_code == 201, created.text
     assert listed.status_code == 200 and listed.json()["count"] == 1
     assert downloaded.status_code == 200 and downloaded.content == b"legacy bytes"
@@ -1010,8 +1014,7 @@ def test_canonical_routes_fail_closed_before_attachment_initialization_is_ready(
     service.store.db.execute(
         "UPDATE sync_datasets SET metadata_json = ? WHERE dataset_id = ?",
         (
-            '{"client_family":"chatbook","default_personal":true,'
-            f'"notes_attachment_v2":{{"state":"{state}"}}}}',
+            f'{{"client_family":"chatbook","default_personal":true,"notes_attachment_v2":{{"state":"{state}"}}}}',
             DATASET_ID,
         ),
     )
@@ -1022,9 +1025,7 @@ def test_canonical_routes_fail_closed_before_attachment_initialization_is_ready(
     )
 
     assert listed.status_code == 409, listed.text
-    assert listed.json()["detail"]["error_code"] == (
-        "notes_attachment_dataset_unavailable"
-    )
+    assert listed.json()["detail"]["error_code"] == ("notes_attachment_dataset_unavailable")
 
 
 @pytest.mark.integration
@@ -1043,6 +1044,4 @@ def test_canonical_routes_require_attachment_domain_enrollment(
     )
 
     assert listed.status_code == 409, listed.text
-    assert listed.json()["detail"]["error_code"] == (
-        "notes_attachment_dataset_unavailable"
-    )
+    assert listed.json()["detail"]["error_code"] == ("notes_attachment_dataset_unavailable")

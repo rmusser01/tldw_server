@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAda
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncBlobObjectCreate,
+    SyncBlobUploadSessionCreate,
     SyncConflictCreate,
     SyncDeviceUpsert,
     SyncEnvelopeCreate,
@@ -208,19 +209,25 @@ def _seed_diagnostics_state(service: SyncV2Service) -> None:
             storage_key="secret-storage-key",
         )
     )
-    service.create_blob_upload_session(
-        user_id="user-1",
-        dataset_id="dataset-1",
-        device_id="device-1",
-        domain="attachment.ref",
-        entity_id="attachment-2",
-        attachment_id="attachment-2",
-        content_type="application/pdf",
-        size_bytes=32,
-        payload_hash=_sha256(b"pending diagnostic blob"),
-        chunk_size=16,
-        chunk_count=2,
-        idempotency_key="pending-upload",
+    service.store.create_blob_upload_session(
+        SyncBlobUploadSessionCreate(
+            upload_id="blob-upload-diagnostic",
+            owner_user_id="user-1",
+            reserved_quota_bytes=32,
+            status="created",
+            metadata={},
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="attachment.ref",
+            object_id="attachment-2",
+            attachment_id="attachment-2",
+            content_type="application/pdf",
+            size_bytes=32,
+            payload_hash=_sha256(b"pending diagnostic blob"),
+            chunk_size=16,
+            chunk_count=2,
+            idempotency_key="pending-upload",
+        )
     )
     service.store.store_key_record(
         SyncKeyRecordCreate(

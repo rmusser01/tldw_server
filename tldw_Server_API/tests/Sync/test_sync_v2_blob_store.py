@@ -96,6 +96,152 @@ def test_local_blob_store_commits_verified_chunks_atomically(tmp_path: Path):
     assert not (tmp_path / "sync_blobs" / "_uploads" / "upload-1").exists()
 
 
+def test_physical_gc_deletes_only_exact_storage_namespace_blob(tmp_path: Path) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"dataset-scoped attachment"
+    payload_hash = _sha256(payload)
+    first_namespace = "a" * 32
+    second_namespace = "b" * 32
+
+    keys: list[str] = []
+    for index, namespace in enumerate((first_namespace, second_namespace), start=1):
+        upload_id = f"upload-{index}"
+        store.write_upload_chunk(
+            upload_id=upload_id,
+            chunk_index=0,
+            payload=payload,
+            expected_hash=payload_hash,
+        )
+        keys.append(
+            store.commit_upload(
+                upload_id=upload_id,
+                payload_hash=payload_hash,
+                chunk_indexes=[0],
+                storage_namespace_id=namespace,
+            )
+        )
+
+    assert store.delete_namespace_blob(
+        storage_key=keys[0],
+        storage_namespace_id=first_namespace,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    ) is True
+    assert not store.resolve_storage_key(keys[0]).exists()
+    assert store.read_blob(keys[1]) == payload
+    assert store.delete_namespace_blob(
+        storage_key=keys[0],
+        storage_namespace_id=first_namespace,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    ) is False
+
+
+def test_physical_gc_treats_missing_namespace_directory_as_already_absent(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"already absent namespace"
+    payload_hash = _sha256(payload)
+    namespace = "a" * 32
+
+    assert store.delete_namespace_blob(
+        storage_key=store.namespace_storage_key(namespace, payload_hash),
+        storage_namespace_id=namespace,
+        payload_hash=payload_hash,
+        expected_size=len(payload),
+    ) is False
+
+
+def test_physical_gc_rejects_global_or_mismatched_storage_namespace(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload_hash = _sha256(b"attachment")
+
+    with pytest.raises(SyncBlobStoreError, match="namespace"):
+        store.delete_namespace_blob(
+            storage_key=store.legacy_storage_key(payload_hash),
+            storage_namespace_id="a" * 32,
+            payload_hash=payload_hash,
+            expected_size=len(b"attachment"),
+        )
+    with pytest.raises(SyncBlobStoreError, match="namespace"):
+        store.delete_namespace_blob(
+            storage_key=store.namespace_storage_key("b" * 32, payload_hash),
+            storage_namespace_id="a" * 32,
+            payload_hash=payload_hash,
+            expected_size=len(b"attachment"),
+        )
+
+
+def test_physical_gc_rejects_symlink_and_preserves_external_target(
+    tmp_path: Path,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"external payload"
+    payload_hash = _sha256(payload)
+    namespace = "a" * 32
+    storage_key = store.namespace_storage_key(namespace, payload_hash)
+    target = store.resolve_storage_key(storage_key)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    external = tmp_path / "external.blob"
+    external.write_bytes(payload)
+    target.symlink_to(external)
+
+    with pytest.raises(SyncBlobStoreError, match="opened safely"):
+        store.delete_namespace_blob(
+            storage_key=storage_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert external.read_bytes() == payload
+    assert target.is_symlink()
+
+
+def test_physical_gc_transient_unlink_failure_preserves_verified_blob(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"transient unlink"
+    payload_hash = _sha256(payload)
+    namespace = "a" * 32
+    upload_id = "unlink-failure"
+    store.write_upload_chunk(
+        upload_id=upload_id,
+        chunk_index=0,
+        payload=payload,
+        expected_hash=payload_hash,
+    )
+    storage_key = store.commit_upload(
+        upload_id=upload_id,
+        payload_hash=payload_hash,
+        chunk_indexes=[0],
+        storage_namespace_id=namespace,
+    )
+    original_unlink = os.unlink
+
+    def fail_target_unlink(path: Any, *args: Any, **kwargs: Any) -> None:
+        if path == payload_hash.removeprefix("sha256:") + ".blob":
+            raise PermissionError("busy")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", fail_target_unlink)
+
+    with pytest.raises(SyncBlobStoreError, match="deletion failed"):
+        store.delete_namespace_blob(
+            storage_key=storage_key,
+            storage_namespace_id=namespace,
+            payload_hash=payload_hash,
+            expected_size=len(payload),
+        )
+
+    assert store.read_blob(storage_key) == payload
+
+
 def test_local_blob_store_streams_commit_and_read_without_read_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
