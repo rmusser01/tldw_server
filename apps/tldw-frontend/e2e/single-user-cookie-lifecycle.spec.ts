@@ -541,11 +541,13 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
         /^http/,
         "ws"
       )
+      // Probe audio last because it starts a heavier streaming session before
+      // observing the client close; its teardown must not delay other upgrades.
       const representativeSockets = [
+        `${wsBase}/api/v1/prompt-studio/ws`,
         `${wsBase}/api/v1/persona/stream`,
         `${wsBase}/api/v1/acp/multiplex`,
         `${wsBase}/api/v1/audio/stream/transcribe`,
-        `${wsBase}/api/v1/prompt-studio/ws`,
       ]
       for (const socketUrl of representativeSockets) {
         const result = await inspectAuthenticatedWebSocket(page, socketUrl)
