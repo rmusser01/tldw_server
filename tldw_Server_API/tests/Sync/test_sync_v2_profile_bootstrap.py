@@ -31,6 +31,8 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
+pytestmark = pytest.mark.unit
+
 
 def _clock() -> str:
     return "2026-05-23T18:12:00+00:00"

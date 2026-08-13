@@ -67,6 +67,10 @@ class LegacyAttachmentSourceError(RuntimeError):
         self.error_code = error_code
 
 
+class NotesAttachmentBootstrapInterrupted(RuntimeError):
+    """Testable interruption that deliberately leaves durable progress resumable."""
+
+
 class NotesAttachmentMutationError(RuntimeError):
     """Stable failure for a coordinated Notes attachment mutation."""
 

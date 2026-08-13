@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.exceptions import (
     LegacyAttachmentSourceError,
     NoteAttachmentPolicyError,
+    NotesAttachmentBootstrapInterrupted,
 )
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     canonicalize_note_attachment_file_name,
@@ -61,10 +62,6 @@ class _SourcePage:
     cursor_note_id: str | None
     cursor_source_key: str | None
     exhausted: bool
-
-
-class NotesAttachmentBootstrapInterrupted(RuntimeError):
-    """Testable interruption that deliberately leaves durable progress resumable."""
 
 
 class NotesAttachmentBootstrapper:
@@ -764,6 +761,8 @@ def _source_page(
 
 
 def _initial_cursor(phase: str) -> _BootstrapCursor:
+    """Create an empty bootstrap cursor for the requested processing phase."""
+
     return _BootstrapCursor(
         phase=phase,
         note_id=None,

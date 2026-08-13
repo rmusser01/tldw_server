@@ -24,7 +24,11 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
     ALLOWED_SYNC_OPERATIONS,
     ALLOWED_SYNC_SEND_ENTITIES,
@@ -491,6 +495,18 @@ def _api_attachment_bootstrap_diagnostics_from_core(
     return SyncNotesAttachmentBootstrapDiagnosticsResponse(**asdict(diagnostics))
 
 
+def _api_empty_attachment_bootstrap_diagnostics(
+    *,
+    dry_run: bool,
+) -> SyncNotesAttachmentBootstrapDiagnosticsResponse:
+    """Return diagnostics without initializing Sync v2 storage."""
+
+    return SyncNotesAttachmentBootstrapDiagnosticsResponse(
+        state="not_started",
+        dry_run=dry_run,
+    )
+
+
 def _api_blob_session_from_core(session: Any) -> SyncBlobUploadSessionResponse:
     return SyncBlobUploadSessionResponse(**asdict(session))
 
@@ -656,15 +672,30 @@ def get_sync_v2_profile(
     "/profile/attachment-bootstrap",
     response_model=SyncNotesAttachmentBootstrapDiagnosticsResponse,
     summary="Return bounded Notes attachment bootstrap diagnostics",
+    dependencies=[Depends(check_rate_limit)],
 )
 def get_sync_v2_attachment_bootstrap_diagnostics(
     dataset_id: str | None = Query(None),
     sample_limit: int = Query(0),
     dry_run: bool = Query(False),
     user: User = Depends(get_request_user),
-    service: SyncV2Service = Depends(get_sync_v2_service),
-):
+    service: SyncV2Service | None = Depends(get_sync_v2_profile_service),
+) -> SyncNotesAttachmentBootstrapDiagnosticsResponse:
     user_id = _sync_user_id(user)
+    if sample_limit < 0:
+        raise _safe_sync_v2_http_error(
+            SyncStoreError("sync_attachment_bootstrap_sample_limit_invalid"),
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+    if sample_limit > 100:
+        raise _safe_sync_v2_http_error(
+            SyncStoreError("sync_attachment_bootstrap_sample_limit_exceeded"),
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+    if service is None:
+        return _api_empty_attachment_bootstrap_diagnostics(dry_run=dry_run)
     try:
         diagnostics = service.notes_attachment_bootstrap_diagnostics(
             user_id=user_id,

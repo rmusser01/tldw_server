@@ -5,11 +5,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import (
@@ -901,6 +905,61 @@ def test_attachment_bootstrap_diagnostics_endpoint_is_read_only_and_bounded(
     assert oversized.json()["detail"]["error_code"] == (
         "sync_attachment_bootstrap_sample_limit_exceeded"
     )
+
+
+def test_attachment_bootstrap_diagnostics_for_fresh_user_does_not_create_sync_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_db_path = tmp_path / "fresh_attachment_diagnostics.db"
+    monkeypatch.setenv("SYNC_V2_SQLITE_PATH", str(sync_db_path))
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = _test_user
+    client = TestClient(app)
+
+    response = client.get("/api/v1/sync/profile/attachment-bootstrap")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "state": "not_started",
+        "captured_count": 0,
+        "expected_count": 0,
+        "cursor": None,
+        "error_code": None,
+        "dry_run": False,
+        "source_candidate_count": None,
+        "source_candidate_count_is_lower_bound": False,
+        "cleanup_candidates": [],
+    }
+    assert not sync_db_path.exists()
+
+    oversized = client.get(
+        "/api/v1/sync/profile/attachment-bootstrap",
+        params={"sample_limit": 101},
+    )
+    assert oversized.status_code == 413
+    assert not sync_db_path.exists()
+
+
+def test_attachment_bootstrap_diagnostics_enforces_ingress_rate_limit(
+    sync_service: SyncV2Service,
+) -> None:
+    async def _deny_rate_limit() -> None:
+        raise HTTPException(status_code=429, detail="rate limited")
+
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = _test_user
+    app.dependency_overrides[sync_endpoint.get_sync_v2_profile_service] = (
+        lambda: sync_service
+    )
+    app.dependency_overrides[check_rate_limit] = _deny_rate_limit
+    client = TestClient(app)
+
+    response = client.get("/api/v1/sync/profile/attachment-bootstrap")
+
+    assert response.status_code == 429
 
 
 def test_profile_bootstrap_and_status_expose_safe_attachment_progress(
