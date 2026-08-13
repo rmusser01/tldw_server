@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Embeddings.orchestrator import EmbeddingExecutorOutput
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingExecutionError,
-    EmbeddingExecutionResult,
+    EmbeddingExecutionOutcome,
     EmbeddingInputError,
     EmbeddingPolicyError,
     EmbeddingProviderError,
@@ -111,26 +111,56 @@ class FakeOrchestrator:
         self.prepared_total_tokens = prepared_total_tokens
         self.prepare_calls = []
         self.execute_calls = []
+        self.preparation_pipeline = self
+        self.execution_coordinator = self
 
-    def prepare(self, raw_input, context):
+    def prepare(self, raw_input, context, phase_sink=None):
         self.prepare_calls.append((raw_input, context))
         if self.prepare_error is not None:
             raise self.prepare_error
+        if phase_sink is not None:
+            for phase in ("resolving_intent", "normalizing", "resolving_policy", "planning"):
+                phase_sink(phase)
         return FakePrepared(total_tokens=self.prepared_total_tokens)
 
     async def execute(self, prepared):
         self.execute_calls.append(prepared)
         if self.execute_error is not None:
             raise self.execute_error
-        return self.result or EmbeddingExecutionResult(
-            vectors=[[0.25, 0.75]],
-            provider="huggingface",
-            model="sentence-transformers/all-MiniLM-L6-v2",
-            prompt_tokens=3,
-            total_tokens=3,
-            cache_hits=0,
-            cache_misses=1,
-        )
+        return self.result or _execution_outcome()
+
+
+def _execution_outcome(
+    *,
+    vectors: list[list[float]] | None = None,
+    provider: str = "huggingface",
+    model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    prompt_tokens: int = 3,
+    total_tokens: int = 3,
+    cache_hits: int = 0,
+    cache_misses: int = 1,
+    requested_dimensions: int | None = None,
+    effective_dimension_policy: str = "reduce",
+    attempt_count: int = 1,
+    fallback_attempt_count: int = 0,
+    fallback_from: str | None = None,
+    embeddings_from_adapter: bool = False,
+) -> EmbeddingExecutionOutcome:
+    return EmbeddingExecutionOutcome(
+        vectors=tuple(tuple(vector) for vector in (vectors or [[0.25, 0.75]])),
+        provider=provider,
+        model=model,
+        prompt_tokens=prompt_tokens,
+        total_tokens=total_tokens,
+        cache_hits=cache_hits,
+        cache_misses=cache_misses,
+        requested_dimensions=requested_dimensions,
+        effective_dimension_policy=effective_dimension_policy,
+        attempt_count=attempt_count,
+        fallback_attempt_count=fallback_attempt_count,
+        fallback_from=fallback_from,
+        embeddings_from_adapter=embeddings_from_adapter,
+    )
 
 
 def _user() -> User:
@@ -1111,7 +1141,7 @@ def test_orchestrator_path_uses_inline_runner_and_prefers_total_token_actuals(
 
     monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
     fake_orchestrator = FakeOrchestrator(
-        result=EmbeddingExecutionResult(
+        result=_execution_outcome(
             vectors=[[0.25, 0.75]],
             provider="huggingface",
             model="sentence-transformers/all-MiniLM-L6-v2",
@@ -1150,20 +1180,30 @@ def test_orchestrator_path_uses_inline_runner_and_prefers_total_token_actuals(
     )
 
     class RunnerProbe:
-        def __init__(self, orchestrator, *, trace_collector=None, pre_execute=None):
+        def __init__(
+            self,
+            preparation_pipeline,
+            execution_coordinator,
+            *,
+            trace_collector=None,
+            pre_execute=None,
+        ):
             assert trace_collector is None
-            self.orchestrator = orchestrator
+            assert preparation_pipeline is fake_orchestrator.preparation_pipeline
+            assert execution_coordinator is fake_orchestrator.execution_coordinator
+            self.preparation_pipeline = preparation_pipeline
+            self.execution_coordinator = execution_coordinator
             self.pre_execute = pre_execute
 
         async def run(self, raw_input, context):
             runner_calls.append(("runner_started", raw_input))
-            prepared = self.orchestrator.prepare(raw_input, context)
+            prepared = self.preparation_pipeline.prepare(raw_input, context)
             runner_calls.append(("prepared", prepared.normalized_input.total_tokens))
             assert self.pre_execute is not None
             await self.pre_execute(prepared)
-            result = await self.orchestrator.execute(prepared)
-            runner_calls.append(("executed", result.provider))
-            return result
+            outcome = await self.execution_coordinator.execute(prepared)
+            runner_calls.append(("executed", outcome.provider))
+            return outcome
 
     monkeypatch.setattr(mod, "EmbeddingInlineWorkflowRunner", RunnerProbe)
 
@@ -1264,7 +1304,7 @@ def test_orchestrator_zero_total_commits_prompt_then_reserved_units(
     monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
     fake_orchestrator = FakeOrchestrator(
         prepared_total_tokens=prepared_tokens,
-        result=EmbeddingExecutionResult(
+        result=_execution_outcome(
             vectors=[[0.25, 0.75]],
             provider="huggingface",
             model="sentence-transformers/all-MiniLM-L6-v2",
@@ -1340,15 +1380,7 @@ async def test_orchestrator_cancellation_commits_reserved_units_and_decrements_a
             self.execute_calls.append(prepared)
             execute_entered.set()
             await execute_release.wait()
-            return self.result or EmbeddingExecutionResult(
-                vectors=[[0.25, 0.75]],
-                provider="huggingface",
-                model="sentence-transformers/all-MiniLM-L6-v2",
-                prompt_tokens=3,
-                total_tokens=3,
-                cache_hits=0,
-                cache_misses=1,
-            )
+            return self.result or _execution_outcome()
 
     fake_orchestrator = BlockingOrchestrator(prepared_total_tokens=3)
 
@@ -1517,7 +1549,7 @@ def test_orchestrator_success_survives_noncritical_rg_commit_failure(client, mon
 
     monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
     fake_orchestrator = FakeOrchestrator(
-        result=EmbeddingExecutionResult(
+        result=_execution_outcome(
             vectors=[[0.25, 0.75]],
             provider="huggingface",
             model="sentence-transformers/all-MiniLM-L6-v2",
@@ -1738,21 +1770,26 @@ def test_orchestrator_rate_limit_error_includes_retry_after(client, monkeypatch)
     assert response.json()["detail"] == "Rate limit exceeded"
 
 
-def test_orchestrator_response_headers_are_applied(client, monkeypatch):
+def test_orchestrator_canonical_outcome_headers_are_mapped_at_endpoint(client, monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
 
     monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
-    fake_orchestrator = FakeOrchestrator(
-        result=EmbeddingExecutionResult(
-            vectors=[[0.25, 0.75]],
-            provider="huggingface",
-            model="sentence-transformers/all-MiniLM-L6-v2",
-            prompt_tokens=3,
-            total_tokens=3,
-            cache_hits=0,
-            cache_misses=1,
-            response_headers={"X-Embeddings-Provider": "huggingface"},
-        )
+    outcome = _execution_outcome(
+        vectors=[[0.25, 0.75]],
+        provider="huggingface",
+        model="sentence-transformers/all-MiniLM-L6-v2",
+        prompt_tokens=3,
+        total_tokens=3,
+        cache_hits=0,
+        cache_misses=1,
+    )
+    fake_orchestrator = FakeOrchestrator(result=outcome)
+    header_mapper = Mock(return_value={"X-Embeddings-Provider": "huggingface"})
+    monkeypatch.setattr(
+        mod,
+        "map_embedding_response_headers",
+        header_mapper,
+        raising=False,
     )
     monkeypatch.setattr(
         mod,
@@ -1770,6 +1807,7 @@ def test_orchestrator_response_headers_are_applied(client, monkeypatch):
     assert response.status_code == status.HTTP_200_OK
     assert response.headers["X-Embeddings-Provider"] == "huggingface"
     assert response.json()["model"] == "huggingface:sentence-transformers/all-MiniLM-L6-v2"
+    header_mapper.assert_called_once_with(outcome)
 
 
 def test_orchestrator_cache_hits_increment_legacy_metric(client, monkeypatch):
@@ -1778,8 +1816,8 @@ def test_orchestrator_cache_hits_increment_legacy_metric(client, monkeypatch):
     monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
     cache_hits = _RecordingCounter()
     fake_orchestrator = FakeOrchestrator(
-        result=EmbeddingExecutionResult(
-            vectors=[[0.25, 0.75]],
+        result=_execution_outcome(
+            vectors=[[0.25, 0.75], [0.5, 0.5]],
             provider="huggingface",
             model="sentence-transformers/all-MiniLM-L6-v2",
             prompt_tokens=3,

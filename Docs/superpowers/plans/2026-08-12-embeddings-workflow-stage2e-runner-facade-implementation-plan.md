@@ -227,11 +227,11 @@ git commit -m "refactor(embeddings): reduce orchestrator to compatibility facade
 - Consumes: facade component properties, `EmbeddingInlineWorkflowRunner.run(...) -> EmbeddingExecutionOutcome`, and `map_embedding_response_headers(outcome) -> dict[str, str]`.
 - Produces: unchanged HTTP response semantics and endpoint-owned resource/credential/metrics behavior for the workflow-enabled path.
 
-- [ ] **Step 1: Write failing canonical-outcome endpoint tests**
+- [x] **Step 1: Write failing canonical-outcome endpoint tests**
 
 Update workflow-path fakes to return `EmbeddingExecutionOutcome` without `response_headers`. Patch `map_embedding_response_headers` and assert its returned headers are applied to the FastAPI `Response`. Assert the runner factory receives the facade's preparation pipeline and execution coordinator rather than the facade itself.
 
-- [ ] **Step 2: Add exact successful resource-actual fallback tests**
+- [x] **Step 2: Add exact successful resource-actual fallback tests**
 
 Parameterize successful outcomes and expected committed actual units:
 
@@ -245,7 +245,7 @@ Parameterize successful outcomes and expected committed actual units:
 
 Keep existing failure-after-reservation and cancellation tests asserting reserved units are committed from the endpoint `finally` block and the active-request gauge is decremented.
 
-- [ ] **Step 3: Run focused endpoint tests and confirm they fail against legacy result/header handling**
+- [x] **Step 3: Run focused endpoint tests and confirm they fail against legacy result/header handling**
 
 Run:
 
@@ -255,11 +255,11 @@ Run:
 
 Expected: FAIL where the endpoint still reads compatibility `response_headers` and the runner factory still receives the facade as one combined object.
 
-- [ ] **Step 4: Construct the runner from concrete facade components**
+- [x] **Step 4: Construct the runner from concrete facade components**
 
 Change `_build_embedding_inline_workflow_runner()` to pass `orchestrator.preparation_pipeline` and `orchestrator.execution_coordinator` as separate constructor arguments while preserving `pre_execute` and the default disabled collector.
 
-- [ ] **Step 5: Consume the canonical outcome and map HTTP headers at the endpoint boundary**
+- [x] **Step 5: Consume the canonical outcome and map HTTP headers at the endpoint boundary**
 
 Import `EmbeddingExecutionOutcome` from `request_types` and `map_embedding_response_headers` from `result_mapping`. Treat the workflow result as the canonical outcome for final provider/model credential touch, cache metrics, response formatting, usage logging, and duration metrics. Replace compatibility-header iteration with:
 
@@ -268,7 +268,7 @@ for header_name, header_value in map_embedding_response_headers(outcome).items()
     response.headers[header_name] = header_value
 ```
 
-- [ ] **Step 6: Preserve endpoint-owned accounting and cleanup**
+- [x] **Step 6: Preserve endpoint-owned accounting and cleanup**
 
 Calculate successful actual units explicitly in this order:
 
@@ -278,7 +278,7 @@ rg_actual_units = int(outcome.total_tokens or outcome.prompt_tokens or rg_reserv
 
 Leave reservation acquisition after preparation through `pre_execute`, commit in `finally`, failure/cancellation reserved-unit charging, and active gauge decrement in their existing endpoint scope. Do not add resource-governor or gauge ownership to the runner.
 
-- [ ] **Step 7: Verify credential, fallback, cache, and rollback parity**
+- [x] **Step 7: Verify credential, fallback, cache, and rollback parity**
 
 Run the complete endpoint parity module and assert the feature flag still selects the unchanged legacy path. Confirm workflow success performs the endpoint final touch for the actual outcome provider/model while existing executor tests retain validated-batch, adapter, and accepted-late-result touches.
 
@@ -290,7 +290,7 @@ Run:
 
 Expected: PASS with only the already approved Stage 2C fallback-write-identity and Stage 2D source-routing divergences.
 
-- [ ] **Step 8: Commit the endpoint boundary migration**
+- [x] **Step 8: Commit the endpoint boundary migration**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py
