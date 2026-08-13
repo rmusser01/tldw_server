@@ -6,7 +6,7 @@ import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 
 def _normalize_viewport_dimension(value: Any, *, field_name: str) -> int:
@@ -61,7 +61,7 @@ class RuntimeWebSocketRoute(Protocol):
     def url(self) -> str:
         raise NotImplementedError
 
-    def connect_to_server(self) -> Awaitable[Any] | Any:
+    def connect_to_server(self) -> RuntimeWebSocketRoute:
         raise NotImplementedError
 
     async def close(
@@ -141,6 +141,13 @@ class RuntimeBrowserContext(Protocol):
         self,
         pattern: str,
         handler: Callable[[RuntimeWebSocketRoute], Awaitable[None]],
+    ) -> None:
+        raise NotImplementedError
+
+    async def unroute_all(
+        self,
+        *,
+        behavior: Literal["default", "ignoreErrors", "wait"] | None = None,
     ) -> None:
         raise NotImplementedError
 

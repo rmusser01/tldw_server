@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from dataclasses import replace
+import math
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -20,6 +22,7 @@ from .article_models import ArticleFailure, DirectBrowserProfile
 _ROUTE_PATTERN = "**/*"
 _HTTP_SCHEMES = frozenset({"http", "https"})
 _WEBSOCKET_POLICY_SCHEMES = {"ws": "http", "wss": "https"}
+_DEFAULT_CLEANUP_GRACE_S = 1.0
 
 
 class _DefaultPlaywrightLauncher:
@@ -39,8 +42,19 @@ def _playwright_has_required_routing() -> bool:
     return (
         callable(getattr(BrowserContext, "route", None))
         and callable(getattr(BrowserContext, "route_web_socket", None))
+        and callable(getattr(BrowserContext, "unroute_all", None))
         and callable(getattr(WebSocketRoute, "connect_to_server", None))
     )
+
+
+def _normalize_grace(value: float) -> float:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return _DEFAULT_CLEANUP_GRACE_S
+    if not math.isfinite(normalized) or normalized <= 0:
+        return _DEFAULT_CLEANUP_GRACE_S
+    return normalized
 
 
 def _http_url_is_valid(url: str) -> bool:
@@ -68,24 +82,112 @@ def _websocket_policy_url(url: str) -> str | None:
     return urlunsplit((policy_scheme, parsed.netloc, parsed.path, parsed.query, ""))
 
 
-class _RouteOutcome:
-    """Latch the first sanitized route failure for one acquisition."""
+class _AcquisitionOutcome:
+    """Latch sanitized route failure and callback cancellation state."""
 
     def __init__(self) -> None:
         self.failure: ArticleFailure | None = None
+        self.callback_cancelled = False
 
     def fail(self, stage: str) -> None:
         if self.failure is None:
             self.failure = ArticleFailure("browser_error", stage)
 
 
-async def _connect_websocket(route: RuntimeWebSocketRoute) -> None:
-    connect = getattr(route, "connect_to_server", None)
-    if not callable(connect):
-        raise ArticleFailure("browser_error", "capability")
-    result = connect()
+class _CallbackLifecycle:
+    """Track independently scheduled Playwright callback invocations."""
+
+    def __init__(self, outcome: _AcquisitionOutcome) -> None:
+        self._outcome = outcome
+        self._active: set[asyncio.Task[Any]] = set()
+        self._forced_cancellations: set[asyncio.Task[Any]] = set()
+
+    def handler(
+        self,
+        operation: Callable[[Any], Awaitable[None]],
+    ) -> Callable[[Any], Awaitable[None]]:
+        def _tracked(route: Any) -> Awaitable[None]:
+            task = asyncio.current_task()
+            if task is None:
+                self._outcome.fail("callback")
+
+                async def _missing_task() -> None:
+                    return None
+
+                return _missing_task()
+            self._active.add(task)
+
+            async def _invoke() -> None:
+                try:
+                    await operation(route)
+                except asyncio.CancelledError:
+                    if task in self._forced_cancellations:
+                        self._outcome.fail("callback_drain")
+                    else:
+                        self._outcome.callback_cancelled = True
+                except Exception:  # noqa: BLE001 - callback failures are sanitized
+                    self._outcome.fail("callback")
+                finally:
+                    self._active.discard(task)
+                    self._forced_cancellations.discard(task)
+
+            return _invoke()
+
+        return _tracked
+
+    async def drain(self, grace_s: float) -> bool:
+        active = tuple(task for task in self._active if not task.done())
+        if not active:
+            return False
+        _, pending = await asyncio.wait(active, timeout=grace_s)
+        if not pending:
+            return False
+        self._outcome.fail("callback_drain")
+        self._forced_cancellations.update(pending)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        return True
+
+
+@dataclass(slots=True)
+class _OwnedResource:
+    resource: Any
+    method_name: str
+    kind: str
+
+
+async def _invoke_method(
+    resource: Any,
+    method_name: str,
+    kwargs: dict[str, Any] | None = None,
+) -> None:
+    method = getattr(resource, method_name)
+    if not callable(method):
+        raise TypeError("cleanup method is unavailable")
+    result = method(**(kwargs or {}))
     if inspect.isawaitable(result):
         await result
+
+
+async def _bounded_method(
+    owner: _OwnedResource,
+    *,
+    grace_s: float,
+    kwargs: dict[str, Any] | None = None,
+) -> bool:
+    task = asyncio.create_task(
+        _invoke_method(owner.resource, owner.method_name, kwargs),
+        name=f"article-browser-cleanup-{owner.kind}",
+    )
+    _, pending = await asyncio.wait({task}, timeout=grace_s)
+    if pending:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return True
+    if task.cancelled():
+        return True
+    return task.exception() is not None
 
 
 class GuardedArticleBrowser:
@@ -98,11 +200,13 @@ class GuardedArticleBrowser:
         context: RuntimeRequestContext,
         launcher: Any | None = None,
         capability_check: Any = _playwright_has_required_routing,
+        cleanup_grace_s: float = _DEFAULT_CLEANUP_GRACE_S,
     ) -> None:
         self._egress_guard = egress_guard
         self._context = context
         self._launcher = launcher or _DefaultPlaywrightLauncher()
         self._capability_check = capability_check
+        self._cleanup_grace_s = _normalize_grace(cleanup_grace_s)
 
     async def _decision_allowed(self, url: str) -> bool:
         decision = await self._egress_guard.decide(
@@ -114,7 +218,7 @@ class GuardedArticleBrowser:
     async def _abort_http(
         self,
         route: RuntimeBrowserRoute,
-        outcome: _RouteOutcome,
+        outcome: _AcquisitionOutcome,
         *,
         failure_stage: str,
     ) -> None:
@@ -130,7 +234,7 @@ class GuardedArticleBrowser:
     async def _http_handler(
         self,
         route: RuntimeBrowserRoute,
-        outcome: _RouteOutcome,
+        outcome: _AcquisitionOutcome,
     ) -> None:
         try:
             request = route.request
@@ -168,7 +272,7 @@ class GuardedArticleBrowser:
     @staticmethod
     async def _close_websocket(
         route: RuntimeWebSocketRoute,
-        outcome: _RouteOutcome,
+        outcome: _AcquisitionOutcome,
         *,
         code: int,
         reason: str,
@@ -186,7 +290,7 @@ class GuardedArticleBrowser:
     async def _websocket_handler(
         self,
         route: RuntimeWebSocketRoute,
-        outcome: _RouteOutcome,
+        outcome: _AcquisitionOutcome,
     ) -> None:
         try:
             policy_url = _websocket_policy_url(route.url)
@@ -221,7 +325,8 @@ class GuardedArticleBrowser:
                     failure_stage="egress",
                 )
                 return
-            if not callable(getattr(route, "connect_to_server", None)):
+            connect = getattr(route, "connect_to_server", None)
+            if not callable(connect):
                 await self._close_websocket(
                     route,
                     outcome,
@@ -231,18 +336,10 @@ class GuardedArticleBrowser:
                 )
                 return
             try:
-                await _connect_websocket(route)
-            except asyncio.CancelledError:
-                raise
-            except ArticleFailure:
-                await self._close_websocket(
-                    route,
-                    outcome,
-                    code=1008,
-                    reason="Policy denied",
-                    failure_stage="capability",
-                )
-            except Exception:  # noqa: BLE001 - route action failures fail closed
+                # Playwright starts its browser-owned connection task synchronously.
+                # Later transport failures are not exposed through this public API.
+                connect()
+            except Exception:  # noqa: BLE001 - immediate invocation failures fail closed
                 await self._close_websocket(
                     route,
                     outcome,
@@ -261,23 +358,51 @@ class GuardedArticleBrowser:
                 failure_stage="egress",
             )
 
+    async def _teardown(
+        self,
+        resources: list[_OwnedResource],
+        *,
+        context: Any | None,
+        http_routing_started: bool,
+        lifecycle: _CallbackLifecycle,
+    ) -> bool:
+        cleanup_failed = False
+        by_kind = {owner.kind: owner for owner in resources}
+        if context is not None and http_routing_started:
+            cleanup_failed |= await _bounded_method(
+                _OwnedResource(context, "unroute_all", "http-routes"),
+                grace_s=self._cleanup_grace_s,
+                kwargs={"behavior": "wait"},
+            )
+        for kind in ("page", "context"):
+            owner = by_kind.get(kind)
+            if owner is not None:
+                cleanup_failed |= await _bounded_method(
+                    owner,
+                    grace_s=self._cleanup_grace_s,
+                )
+        cleanup_failed |= await lifecycle.drain(self._cleanup_grace_s)
+        for kind in ("browser", "playwright"):
+            owner = by_kind.get(kind)
+            if owner is not None:
+                cleanup_failed |= await _bounded_method(
+                    owner,
+                    grace_s=self._cleanup_grace_s,
+                )
+        return cleanup_failed
+
     @staticmethod
-    async def _cleanup(resources: list[tuple[Any, str]]) -> BaseException | None:
-        first_error: BaseException | None = None
-        for resource, method_name in reversed(resources):
-            method = getattr(resource, method_name, None)
-            if not callable(method):
-                continue
+    async def _await_teardown(task: asyncio.Task[bool]) -> tuple[bool, bool]:
+        caller_cancelled = False
+        while not task.done():
             try:
-                result = method()
-                if inspect.isawaitable(result):
-                    await result
-            except asyncio.CancelledError as exc:
-                first_error = exc
-            except Exception as exc:  # noqa: BLE001 - attempt every owned cleanup
-                if first_error is None:
-                    first_error = exc
-        return first_error
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                caller_cancelled = True
+                current = asyncio.current_task()
+                if current is not None:
+                    current.uncancel()
+        return task.result(), caller_cancelled
 
     async def acquire(self, url: str, profile: DirectBrowserProfile) -> str:
         """Return rendered HTML after freshly guarding every browser dispatch."""
@@ -290,16 +415,19 @@ class GuardedArticleBrowser:
         if not _http_url_is_valid(url):
             raise ArticleFailure("browser_error", "egress")
 
-        resources: list[tuple[Any, str]] = []
-        route_outcome = _RouteOutcome()
+        resources: list[_OwnedResource] = []
+        outcome = _AcquisitionOutcome()
+        lifecycle = _CallbackLifecycle(outcome)
         primary_error: BaseException | None = None
         html: str | None = None
+        context: Any | None = None
+        http_routing_started = False
         stage = "launch"
         try:
             playwright = await self._launcher.start()
-            resources.append((playwright, "stop"))
+            resources.append(_OwnedResource(playwright, "stop", "playwright"))
             browser = await playwright.chromium.launch(headless=True)
-            resources.append((browser, "close"))
+            resources.append(_OwnedResource(browser, "close", "browser"))
             stage = "context"
             context = await browser.new_context(
                 service_workers="block",
@@ -309,24 +437,26 @@ class GuardedArticleBrowser:
                     "height": profile.viewport_height,
                 },
             )
-            resources.append((context, "close"))
+            resources.append(_OwnedResource(context, "close", "context"))
 
             route = getattr(context, "route", None)
             route_web_socket = getattr(context, "route_web_socket", None)
-            if not callable(route) or not callable(route_web_socket):
+            unroute_all = getattr(context, "unroute_all", None)
+            if not all(callable(item) for item in (route, route_web_socket, unroute_all)):
                 raise ArticleFailure("browser_error", "capability")
 
             stage = "routing"
             await route(
                 _ROUTE_PATTERN,
-                lambda intercepted: self._http_handler(intercepted, route_outcome),
+                lifecycle.handler(lambda intercepted: self._http_handler(intercepted, outcome)),
             )
+            http_routing_started = True
             await route_web_socket(
                 _ROUTE_PATTERN,
-                lambda intercepted: self._websocket_handler(intercepted, route_outcome),
+                lifecycle.handler(lambda intercepted: self._websocket_handler(intercepted, outcome)),
             )
             page = await context.new_page()
-            resources.append((page, "close"))
+            resources.append(_OwnedResource(page, "close", "page"))
 
             stage = "navigation"
             await page.goto(
@@ -334,27 +464,33 @@ class GuardedArticleBrowser:
                 wait_until="domcontentloaded",
                 timeout=profile.timeout_ms,
             )
-            if route_outcome.failure is not None:
-                raise route_outcome.failure
             stage = "content"
             html = str(await page.content())
-            if route_outcome.failure is not None:
-                raise route_outcome.failure
         except asyncio.CancelledError as exc:
             primary_error = exc
         except ArticleFailure as exc:
             primary_error = exc
         except Exception:  # noqa: BLE001 - sanitize the Playwright boundary
-            primary_error = route_outcome.failure or ArticleFailure("browser_error", stage)
+            primary_error = outcome.failure or ArticleFailure("browser_error", stage)
 
-        cleanup_error = await self._cleanup(resources)
-        if isinstance(primary_error, asyncio.CancelledError):
-            raise primary_error
-        if isinstance(cleanup_error, asyncio.CancelledError):
-            raise cleanup_error
+        teardown_task = asyncio.create_task(
+            self._teardown(
+                resources,
+                context=context,
+                http_routing_started=http_routing_started,
+                lifecycle=lifecycle,
+            ),
+            name="article-browser-teardown",
+        )
+        cleanup_failed, teardown_cancelled = await self._await_teardown(teardown_task)
+
+        if isinstance(primary_error, asyncio.CancelledError) or teardown_cancelled or outcome.callback_cancelled:
+            raise asyncio.CancelledError()
         if primary_error is not None:
             raise primary_error
-        if cleanup_error is not None:
+        if outcome.failure is not None:
+            raise outcome.failure
+        if cleanup_failed:
             raise ArticleFailure("browser_error", "cleanup")
         if html is None:
             raise ArticleFailure("browser_error", "content")
