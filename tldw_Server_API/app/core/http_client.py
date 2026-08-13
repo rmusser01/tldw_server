@@ -4790,25 +4790,34 @@ def fetch(*args, **kwargs):
                     streamed = request_stream(cur_url, **req_kwargs)
                     try:
                         response_headers = dict(getattr(streamed, "headers", {}) or {})
-                        if _uses_compressed_content_encoding(response_headers):
-                            raise ValueError(
-                                "Compressed responses are not allowed with "
-                                "max_response_bytes"
-                            )
-                        iter_content = getattr(streamed, "iter_content", None)
-                        if not callable(iter_content):
-                            raise RuntimeError(
-                                "Selected backend does not support bounded response streaming"
-                            )
-                        body = _read_bounded_chunks(
-                            iter_content(),
-                            max_response_bytes,
+                        status_code = int(getattr(streamed, "status_code", 0))
+                        response_url = str(getattr(streamed, "url", cur_url))
+                        is_followed_redirect = (
+                            follow_redirects
+                            and status_code in (301, 302, 303, 307, 308)
                         )
+                        if is_followed_redirect:
+                            body = b""
+                        else:
+                            if _uses_compressed_content_encoding(response_headers):
+                                raise ValueError(
+                                    "Compressed responses are not allowed with "
+                                    "max_response_bytes"
+                                )
+                            iter_content = getattr(streamed, "iter_content", None)
+                            if not callable(iter_content):
+                                raise RuntimeError(
+                                    "Selected backend does not support bounded response streaming"
+                                )
+                            body = _read_bounded_chunks(
+                                iter_content(),
+                                max_response_bytes,
+                            )
                         resp = HttpResponse(
-                            status=int(getattr(streamed, "status_code", 0)),
+                            status=status_code,
                             headers=response_headers,
                             text=_decode_bounded_response_body(streamed, body),
-                            url=str(getattr(streamed, "url", cur_url)),
+                            url=response_url,
                             backend="curl",
                         )
                     finally:

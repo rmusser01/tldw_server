@@ -197,6 +197,47 @@ def test_simple_curl_fetch_reads_bounded_stream_and_closes_session(
     assert session.closed is True
 
 
+def test_simple_curl_fetch_follows_compressed_oversized_redirect_before_reading_body(
+    curl_streaming_backend: type[_StreamingCurlSession],
+) -> None:
+    redirect = _StreamingResponse(
+        URL,
+        [b"redirect body exceeds the bound"],
+        status_code=302,
+        headers={"Location": "/final", "Content-Encoding": "gzip"},
+    )
+    final = _StreamingResponse("https://example.com/final", [b"final"])
+    curl_streaming_backend.responses = [redirect, final]
+
+    result = hc.fetch(URL, backend="curl", max_response_bytes=5)
+
+    session = curl_streaming_backend.instances[0]
+    assert result["url"] == "https://example.com/final"
+    assert result["text"] == "final"
+    assert [call["url"] for call in session.get_calls] == [URL, "https://example.com/final"]
+    assert redirect.closed is True
+    assert final.closed is True
+    assert session.closed is True
+
+
+def test_simple_curl_fetch_rejects_compressed_terminal_bounded_response(
+    curl_streaming_backend: type[_StreamingCurlSession],
+) -> None:
+    response = _StreamingResponse(
+        URL,
+        [b"compressed"],
+        headers={"Content-Encoding": "gzip"},
+    )
+    curl_streaming_backend.responses = [response]
+
+    with pytest.raises(ValueError, match="Compressed responses are not allowed with max_response_bytes"):
+        hc.fetch(URL, backend="curl", max_response_bytes=64)
+
+    session = curl_streaming_backend.instances[0]
+    assert response.closed is True
+    assert session.closed is True
+
+
 def test_simple_httpx_fetch_rejects_compressed_bounded_response(
     httpx_streaming_backend: type[_StreamingHTTPXClient],
 ) -> None:

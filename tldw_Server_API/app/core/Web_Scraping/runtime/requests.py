@@ -59,7 +59,7 @@ def _normalize_positive_integer(value: Any, *, field_name: str) -> int:
         normalized = int(value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{field_name} must be a positive integer") from exc
-    if isinstance(value, float) and not value.is_integer():
+    if not isinstance(value, str) and value != normalized:
         raise ValueError(f"{field_name} must be a positive integer")
     if isinstance(value, str) and str(normalized) != value.strip():
         raise ValueError(f"{field_name} must be a positive integer")
@@ -101,8 +101,8 @@ class FetchRequest:
     allow_redirects: bool | str = True
     impersonate: str | None = None
     proxies: Mapping[str, str] | str | None = None
-    max_response_bytes: int | None = None
     context: RuntimeRequestContext = field(default_factory=RuntimeRequestContext)
+    max_response_bytes: int | None = None
 
     def __post_init__(self) -> None:
         normalized_url = str(self.url or "").strip()
