@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import math
+import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -23,8 +24,137 @@ _ROUTE_PATTERN = "**/*"
 _HTTP_SCHEMES = frozenset({"http", "https"})
 _WEBSOCKET_POLICY_SCHEMES = {"ws": "http", "wss": "https"}
 _DEFAULT_CLEANUP_GRACE_S = 1.0
+_DEFAULT_ACQUISITION_CAPACITY = 32
+_MAX_ACQUISITION_CAPACITY = 256
+_DEFAULT_CALLBACK_CAPACITY = 64
+_MAX_CALLBACK_CAPACITY = 1024
 _CALLBACK_IDLE_TURNS = 3
-_FORCED_CALLBACK_CANCEL = object()
+
+
+def _strict_capacity(value: object, *, maximum: int, label: str) -> int:
+    if type(value) is not int or not 1 <= value <= maximum:
+        raise ValueError(f"Browser {label} capacity must be an integer from 1 to {maximum}")
+    return value
+
+
+class _BrowserAcquisitionPool:
+    """Hold finite process-wide capacity until admitted async work really exits."""
+
+    def __init__(self, capacity: int) -> None:
+        self.capacity = _strict_capacity(
+            capacity,
+            maximum=_MAX_ACQUISITION_CAPACITY,
+            label="acquisition",
+        )
+        self._slots = threading.BoundedSemaphore(self.capacity)
+        self._lock = threading.Lock()
+        self._leases: set[_BrowserAcquisitionLease] = set()
+
+    @property
+    def active_count(self) -> int:
+        with self._lock:
+            return len(self._leases)
+
+    def acquire(self, *, callback_capacity: int) -> _BrowserAcquisitionLease | None:
+        if not self._slots.acquire(blocking=False):
+            return None
+        try:
+            lease = _BrowserAcquisitionLease(
+                pool=self,
+                callback_capacity=callback_capacity,
+            )
+        except BaseException:
+            self._slots.release()
+            raise
+        with self._lock:
+            self._leases.add(lease)
+        return lease
+
+    def _release(self, lease: _BrowserAcquisitionLease) -> None:
+        with self._lock:
+            if lease not in self._leases:
+                return
+            self._leases.remove(lease)
+        self._slots.release()
+
+
+class _BrowserAcquisitionLease:
+    """Own one acquisition and every callback or cleanup task it admits."""
+
+    def __init__(
+        self,
+        *,
+        pool: _BrowserAcquisitionPool,
+        callback_capacity: int,
+    ) -> None:
+        self._pool = pool
+        self._callback_capacity = callback_capacity
+        self._lock = threading.Lock()
+        self._tasks: dict[asyncio.Task[Any], bool] = {}
+        self._active_callbacks = 0
+        self._callback_generation = 0
+        self._callback_admission_open = True
+        self._owner_finished = False
+        self._released = False
+
+    def admit_callback(self, task: asyncio.Task[Any]) -> str:
+        with self._lock:
+            self._callback_generation += 1
+            if not self._callback_admission_open:
+                return "closed"
+            if self._active_callbacks >= self._callback_capacity:
+                return "capacity"
+            self._active_callbacks += 1
+            self._tasks[task] = True
+        task.add_done_callback(self._task_done)
+        return "admitted"
+
+    def retain_cleanup(self, task: asyncio.Task[Any]) -> None:
+        with self._lock:
+            self._tasks[task] = False
+        task.add_done_callback(self._task_done)
+
+    def retain_rejection(self, task: asyncio.Task[Any]) -> None:
+        self.retain_cleanup(task)
+
+    def close_callback_admission(self) -> None:
+        with self._lock:
+            self._callback_admission_open = False
+
+    def callback_snapshot(self) -> tuple[int, tuple[asyncio.Task[Any], ...]]:
+        with self._lock:
+            tasks = tuple(task for task, is_callback in self._tasks.items() if is_callback and not task.done())
+            return self._callback_generation, tasks
+
+    def owner_finished(self) -> None:
+        release = False
+        with self._lock:
+            self._owner_finished = True
+            release = self._mark_released_if_idle()
+        if release:
+            self._pool._release(self)
+
+    def _task_done(self, task: asyncio.Task[Any]) -> None:
+        try:
+            _task_failed(task)
+        finally:
+            release = False
+            with self._lock:
+                is_callback = self._tasks.pop(task, None)
+                if is_callback:
+                    self._active_callbacks -= 1
+                release = self._mark_released_if_idle()
+            if release:
+                self._pool._release(self)
+
+    def _mark_released_if_idle(self) -> bool:
+        if self._released or not self._owner_finished or self._tasks:
+            return False
+        self._released = True
+        return True
+
+
+_BROWSER_ACQUISITION_POOL = _BrowserAcquisitionPool(_DEFAULT_ACQUISITION_CAPACITY)
 
 
 class _DefaultPlaywrightLauncher:
@@ -99,14 +229,18 @@ class _AcquisitionOutcome:
 class _CallbackLifecycle:
     """Track independently scheduled Playwright callback invocations."""
 
-    def __init__(self, outcome: _AcquisitionOutcome) -> None:
+    def __init__(
+        self,
+        outcome: _AcquisitionOutcome,
+        lease: _BrowserAcquisitionLease,
+    ) -> None:
         self._outcome = outcome
-        self._active: set[asyncio.Task[Any]] = set()
-        self._generation = 0
+        self._lease = lease
 
     def handler(
         self,
         operation: Callable[[Any], Awaitable[None]],
+        rejection: Callable[[Any, str], Awaitable[None]],
     ) -> Callable[[Any], Awaitable[None]]:
         def _tracked(route: Any) -> Awaitable[None]:
             task = asyncio.current_task()
@@ -117,33 +251,44 @@ class _CallbackLifecycle:
                     return None
 
                 return _missing_task()
-            self._generation += 1
-            self._active.add(task)
-            task.add_done_callback(_consume_task_exception)
+
+            admission = self._lease.admit_callback(task)
+            if admission != "admitted":
+                self._lease.retain_rejection(task)
+                failure_stage = "capacity" if admission == "capacity" else "callback"
+                self._outcome.fail(failure_stage)
+
+                async def _reject() -> None:
+                    try:
+                        await rejection(route, failure_stage)
+                    except asyncio.CancelledError:
+                        self._outcome.callback_cancelled = True
+                    except Exception:  # noqa: BLE001 - rejection failures are sanitized
+                        self._outcome.fail("callback")
+
+                return _reject()
 
             async def _invoke() -> None:
                 try:
                     await operation(route)
-                except asyncio.CancelledError as exc:
-                    if exc.args and exc.args[0] is _FORCED_CALLBACK_CANCEL:
-                        self._outcome.fail("callback_drain")
-                    else:
-                        self._outcome.callback_cancelled = True
+                except asyncio.CancelledError:
+                    self._outcome.callback_cancelled = True
                 except Exception:  # noqa: BLE001 - callback failures are sanitized
                     self._outcome.fail("callback")
-                finally:
-                    self._active.discard(task)
 
             return _invoke()
 
         return _tracked
+
+    def close_admission(self) -> None:
+        self._lease.close_callback_admission()
 
     async def drain(self, grace_s: float) -> bool:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + grace_s
         stable_idle_turns = 0
         while loop.time() < deadline:
-            active = tuple(task for task in self._active if not task.done())
+            generation, active = self._lease.callback_snapshot()
             if active:
                 stable_idle_turns = 0
                 remaining = deadline - loop.time()
@@ -154,9 +299,9 @@ class _CallbackLifecycle:
                     break
                 continue
 
-            generation = self._generation
             await asyncio.sleep(0)
-            if any(not task.done() for task in self._active) or self._generation != generation:
+            next_generation, next_active = self._lease.callback_snapshot()
+            if next_active or next_generation != generation:
                 stable_idle_turns = 0
                 continue
             stable_idle_turns += 1
@@ -164,10 +309,6 @@ class _CallbackLifecycle:
                 return False
 
         self._outcome.fail("callback_drain")
-        for task in tuple(self._active):
-            if not task.done():
-                task.add_done_callback(_consume_task_exception)
-                task.cancel(_FORCED_CALLBACK_CANCEL)
         return True
 
 
@@ -178,10 +319,13 @@ class _OwnedResource:
     kind: str
 
 
-def _consume_task_exception(task: asyncio.Task[Any]) -> None:
+def _task_failed(task: asyncio.Task[Any]) -> bool:
     if task.cancelled():
-        return
-    task.exception()
+        return True
+    try:
+        return task.exception() is not None
+    except BaseException:  # noqa: BLE001 - task bookkeeping must remain fail closed
+        return True
 
 
 async def _invoke_method(
@@ -200,23 +344,27 @@ async def _invoke_method(
 async def _bounded_method(
     owner: _OwnedResource,
     *,
+    lease: _BrowserAcquisitionLease,
     grace_s: float,
     kwargs: dict[str, Any] | None = None,
 ) -> bool:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + grace_s
-    task = asyncio.create_task(
-        _invoke_method(owner.resource, owner.method_name, kwargs),
-        name=f"article-browser-cleanup-{owner.kind}",
-    )
+    operation = _invoke_method(owner.resource, owner.method_name, kwargs)
+    try:
+        task = asyncio.create_task(
+            operation,
+            name=f"article-browser-cleanup-{owner.kind}",
+        )
+    except Exception:  # noqa: BLE001 - cleanup creation failures are sanitized
+        operation.close()
+        return True
+    lease.retain_cleanup(task)
     _, pending = await asyncio.wait({task}, timeout=max(0.0, deadline - loop.time()))
     if pending:
-        task.add_done_callback(_consume_task_exception)
         task.cancel()
         return True
-    if task.cancelled():
-        return True
-    return task.exception() is not None
+    return _task_failed(task)
 
 
 class GuardedArticleBrowser:
@@ -230,12 +378,20 @@ class GuardedArticleBrowser:
         launcher: Any | None = None,
         capability_check: Any = _playwright_has_required_routing,
         cleanup_grace_s: float = _DEFAULT_CLEANUP_GRACE_S,
+        acquisition_pool: _BrowserAcquisitionPool = _BROWSER_ACQUISITION_POOL,
+        callback_capacity: int = _DEFAULT_CALLBACK_CAPACITY,
     ) -> None:
         self._egress_guard = egress_guard
         self._context = context
         self._launcher = launcher or _DefaultPlaywrightLauncher()
         self._capability_check = capability_check
         self._cleanup_grace_s = _normalize_grace(cleanup_grace_s)
+        self._acquisition_pool = acquisition_pool
+        self._callback_capacity = _strict_capacity(
+            callback_capacity,
+            maximum=_MAX_CALLBACK_CAPACITY,
+            label="callback",
+        )
 
     async def _decision_allowed(self, url: str) -> bool:
         decision = await self._egress_guard.decide(
@@ -394,12 +550,15 @@ class GuardedArticleBrowser:
         context: Any | None,
         http_routing_started: bool,
         lifecycle: _CallbackLifecycle,
+        lease: _BrowserAcquisitionLease,
     ) -> bool:
         cleanup_failed = False
         by_kind = {owner.kind: owner for owner in resources}
+        lifecycle.close_admission()
         if context is not None and http_routing_started:
             cleanup_failed |= await _bounded_method(
                 _OwnedResource(context, "unroute_all", "http-routes"),
+                lease=lease,
                 grace_s=self._cleanup_grace_s,
                 kwargs={"behavior": "wait"},
             )
@@ -408,6 +567,7 @@ class GuardedArticleBrowser:
             if owner is not None:
                 cleanup_failed |= await _bounded_method(
                     owner,
+                    lease=lease,
                     grace_s=self._cleanup_grace_s,
                 )
         cleanup_failed |= await lifecycle.drain(self._cleanup_grace_s)
@@ -416,6 +576,7 @@ class GuardedArticleBrowser:
             if owner is not None:
                 cleanup_failed |= await _bounded_method(
                     owner,
+                    lease=lease,
                     grace_s=self._cleanup_grace_s,
                 )
         return cleanup_failed
@@ -435,6 +596,22 @@ class GuardedArticleBrowser:
 
     async def acquire(self, url: str, profile: DirectBrowserProfile) -> str:
         """Return rendered HTML after freshly guarding every browser dispatch."""
+        lease = self._acquisition_pool.acquire(
+            callback_capacity=self._callback_capacity,
+        )
+        if lease is None:
+            raise ArticleFailure("browser_error", "capacity")
+        try:
+            return await self._acquire_with_lease(url, profile, lease)
+        finally:
+            lease.owner_finished()
+
+    async def _acquire_with_lease(
+        self,
+        url: str,
+        profile: DirectBrowserProfile,
+        lease: _BrowserAcquisitionLease,
+    ) -> str:
         try:
             available = bool(self._capability_check())
         except Exception:  # noqa: BLE001 - capability introspection fails closed
@@ -446,7 +623,7 @@ class GuardedArticleBrowser:
 
         resources: list[_OwnedResource] = []
         outcome = _AcquisitionOutcome()
-        lifecycle = _CallbackLifecycle(outcome)
+        lifecycle = _CallbackLifecycle(outcome, lease)
         primary_error: BaseException | None = None
         html: str | None = None
         context: Any | None = None
@@ -477,12 +654,28 @@ class GuardedArticleBrowser:
             stage = "routing"
             await route(
                 _ROUTE_PATTERN,
-                lifecycle.handler(lambda intercepted: self._http_handler(intercepted, outcome)),
+                lifecycle.handler(
+                    lambda intercepted: self._http_handler(intercepted, outcome),
+                    lambda intercepted, failure_stage: self._abort_http(
+                        intercepted,
+                        outcome,
+                        failure_stage=failure_stage,
+                    ),
+                ),
             )
             http_routing_started = True
             await route_web_socket(
                 _ROUTE_PATTERN,
-                lifecycle.handler(lambda intercepted: self._websocket_handler(intercepted, outcome)),
+                lifecycle.handler(
+                    lambda intercepted: self._websocket_handler(intercepted, outcome),
+                    lambda intercepted, failure_stage: self._close_websocket(
+                        intercepted,
+                        outcome,
+                        code=1008,
+                        reason="Policy denied",
+                        failure_stage=failure_stage,
+                    ),
+                ),
             )
             page = await context.new_page()
             resources.append(_OwnedResource(page, "close", "page"))
@@ -502,16 +695,42 @@ class GuardedArticleBrowser:
         except Exception:  # noqa: BLE001 - sanitize the Playwright boundary
             primary_error = outcome.failure or ArticleFailure("browser_error", stage)
 
-        teardown_task = asyncio.create_task(
-            self._teardown(
+        teardown_operation = self._teardown(
+            resources,
+            context=context,
+            http_routing_started=http_routing_started,
+            lifecycle=lifecycle,
+            lease=lease,
+        )
+        cleanup_failed = False
+        teardown_cancelled = False
+        try:
+            teardown_task = asyncio.create_task(
+                teardown_operation,
+                name="article-browser-teardown",
+            )
+        except Exception:  # noqa: BLE001 - creation failures are sanitized
+            teardown_operation.close()
+            cleanup_failed = True
+            fallback_operation = self._teardown(
                 resources,
                 context=context,
                 http_routing_started=http_routing_started,
                 lifecycle=lifecycle,
-            ),
-            name="article-browser-teardown",
-        )
-        cleanup_failed, teardown_cancelled = await self._await_teardown(teardown_task)
+                lease=lease,
+            )
+            try:
+                teardown_task = asyncio.get_running_loop().create_task(
+                    fallback_operation,
+                    name="article-browser-teardown-fallback",
+                )
+            except Exception:  # noqa: BLE001 - lease finalization remains authoritative
+                fallback_operation.close()
+            else:
+                fallback_failed, teardown_cancelled = await self._await_teardown(teardown_task)
+                cleanup_failed |= fallback_failed
+        else:
+            cleanup_failed, teardown_cancelled = await self._await_teardown(teardown_task)
 
         if isinstance(primary_error, asyncio.CancelledError) or teardown_cancelled or outcome.callback_cancelled:
             raise asyncio.CancelledError()

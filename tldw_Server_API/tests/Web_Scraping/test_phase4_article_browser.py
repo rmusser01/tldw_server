@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
-from collections.abc import Awaitable, Callable
+import weakref
+from collections.abc import Awaitable, Callable, Coroutine
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,12 +20,22 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.requests import RuntimeReques
 _TARGET = "https://article.example/start"
 
 
-def _browser_type() -> type[Any]:
+def _browser_module() -> Any:
     try:
-        module = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser")
+        return importlib.import_module("tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser")
     except ModuleNotFoundError:
         pytest.fail("GuardedArticleBrowser implementation is missing", pytrace=False)
-    return module.GuardedArticleBrowser
+
+
+def _browser_type() -> type[Any]:
+    return _browser_module().GuardedArticleBrowser
+
+
+def _pool_type() -> type[Any]:
+    pool_type = getattr(_browser_module(), "_BrowserAcquisitionPool", None)
+    if pool_type is None:
+        pytest.fail("Browser acquisition pool implementation is missing", pytrace=False)
+    return pool_type
 
 
 def _profile() -> DirectBrowserProfile:
@@ -123,12 +135,34 @@ class _CancellationResistantOutcome:
     async def resolve(self) -> object:
         self.started.set()
         try:
-            await asyncio.Event().wait()
+            await self.release.wait()
         except asyncio.CancelledError as exc:
             self.cancellation_args = exc.args
-        await self.release.wait()
+            await self.release.wait()
         self.finished.set()
         raise RuntimeError("https://secret.example/path?token=raw")
+
+
+class _CancelRecordingTask(asyncio.Task[Any]):
+    def __init__(
+        self,
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        loop: asyncio.AbstractEventLoop,
+        context: Any = None,
+        name: str | None = None,
+    ) -> None:
+        kwargs = {"loop": loop}
+        if context is not None:
+            kwargs["context"] = context
+        if name is not None:
+            kwargs["name"] = name
+        super().__init__(coroutine, **kwargs)
+        self.cancel_messages: list[object | None] = []
+
+    def cancel(self, msg: object | None = None) -> bool:
+        self.cancel_messages.append(msg)
+        return super().cancel(msg)
 
 
 class _FakeHttpRoute:
@@ -216,6 +250,7 @@ class _FakeBrowserRuntime:
         self.websocket_routes: list[_FakeWebSocketRoute] = []
         self.context: _FakeContext | None = None
         self.callback_tasks: set[asyncio.Task[None]] = set()
+        self.cleanup_tasks: dict[str, asyncio.Task[Any]] = {}
         self.stuck_cleanup_cancelled: list[str] = []
         self.cleanup_started: dict[str, asyncio.Event] = {}
         self.content_returned = asyncio.Event()
@@ -231,6 +266,9 @@ class _FakeBrowserRuntime:
             raise error
 
     async def cleanup(self, stage: str) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        self.cleanup_tasks[stage] = task
         self.events.append(stage)
         self.cleanup_started.setdefault(stage, asyncio.Event()).set()
         if self.cleanup_modes.get(stage) == "stuck":
@@ -453,6 +491,8 @@ def _adapter(
     *,
     capability_check: Callable[[], bool] | None = None,
     cleanup_grace_s: float | None = None,
+    acquisition_pool: Any | None = None,
+    callback_capacity: int | None = None,
 ) -> Any:
     context = RuntimeRequestContext(
         source="article_extract",
@@ -463,6 +503,10 @@ def _adapter(
     kwargs: dict[str, object] = {}
     if cleanup_grace_s is not None:
         kwargs["cleanup_grace_s"] = cleanup_grace_s
+    if acquisition_pool is not None:
+        kwargs["acquisition_pool"] = acquisition_pool
+    if callback_capacity is not None:
+        kwargs["callback_capacity"] = callback_capacity
     return _browser_type()(
         egress_guard=guard,
         context=context,
@@ -693,6 +737,35 @@ async def test_missing_websocket_connect_capability_fails_with_capability_bounda
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("capacity", [True, False, 0, -1, 1.0, "1", 257])
+def test_browser_acquisition_pool_rejects_non_strict_or_unbounded_capacity(
+    capacity: object,
+) -> None:
+    with pytest.raises(ValueError, match="capacity"):
+        _pool_type()(capacity)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("callback_capacity", [True, False, 0, -1, 1.0, "1", 1025])
+async def test_browser_adapter_rejects_non_strict_or_unbounded_callback_capacity(
+    callback_capacity: object,
+) -> None:
+    runtime = _FakeBrowserRuntime()
+
+    with pytest.raises(ValueError, match="callback capacity"):
+        _browser_type()(
+            egress_guard=_FakeGuard([]),
+            context=RuntimeRequestContext(source="article_extract", stage="browser"),
+            launcher=runtime.launcher,
+            capability_check=lambda: True,
+            acquisition_pool=_pool_type()(1),
+            callback_capacity=callback_capacity,
+        )
+
+    assert runtime.events == []
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("mode", ["false", "raises"])
 async def test_static_route_capability_absence_fails_before_browser_launch(mode: str) -> None:
     runtime = _FakeBrowserRuntime()
@@ -711,6 +784,35 @@ async def test_static_route_capability_absence_fails_before_browser_launch(mode:
 
     _assert_failure(raised.value, stage="capability")
     assert runtime.events == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("url", "capability", "stage"),
+    [
+        (_TARGET, False, "capability"),
+        ("file:///private/etc/passwd", True, "egress"),
+    ],
+)
+async def test_prelaunch_rejection_releases_reserved_acquisition_capacity(
+    url: str,
+    capability: bool,
+    stage: str,
+) -> None:
+    pool = _pool_type()(1)
+    runtime = _FakeBrowserRuntime()
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(
+            runtime,
+            _FakeGuard([]),
+            capability_check=lambda: capability,
+            acquisition_pool=pool,
+        ).acquire(url, _profile())
+
+    _assert_failure(raised.value, stage=stage)
+    assert runtime.events == []
+    assert pool.active_count == 0
 
 
 @pytest.mark.unit
@@ -866,6 +968,14 @@ async def _assert_no_browser_tasks() -> None:
     ] == []
 
 
+async def _assert_pool_active_count(pool: Any, expected: int) -> None:
+    for _ in range(100):
+        if pool.active_count == expected:
+            return
+        await asyncio.sleep(0)
+    assert pool.active_count == expected
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("kind", ["http", "websocket"])
 async def test_late_denial_after_content_cannot_return_html(kind: str) -> None:
@@ -920,75 +1030,75 @@ async def test_callback_cancelled_error_propagates_after_deterministic_cleanup()
 
 
 @pytest.mark.unit
-async def test_callback_drain_is_bounded_cancels_stuck_task_and_leaves_no_orphan() -> None:
-    gated = _GatedOutcome(True)
+async def test_callback_drain_is_bounded_without_internally_cancelling_late_work() -> None:
+    resistant = _CancellationResistantOutcome()
     runtime = _FakeBrowserRuntime(dispatches=[("websocket", _FakeWebSocketRoute("wss://late.example/socket"))])
+    pool = _pool_type()(1)
     loop = asyncio.get_running_loop()
     started = loop.time()
 
     with pytest.raises(ArticleFailure) as raised:
-        await _adapter(runtime, _FakeGuard([gated]), cleanup_grace_s=0.01).acquire(
-            _TARGET,
-            _profile(),
-        )
+        await _adapter(
+            runtime,
+            _FakeGuard([resistant]),
+            cleanup_grace_s=0.01,
+            acquisition_pool=pool,
+        ).acquire(_TARGET, _profile())
 
     assert loop.time() - started < 0.5
     _assert_failure(raised.value, stage="callback_drain")
-    assert gated.cancellation_args
-    assert gated.cancellation_args != ("external-callback",)
+    assert resistant.cancellation_args is None
+    assert pool.active_count == 1
+
+    blocked_runtime = _FakeBrowserRuntime()
+    with pytest.raises(ArticleFailure) as blocked:
+        await _adapter(
+            blocked_runtime,
+            _FakeGuard([]),
+            acquisition_pool=pool,
+        ).acquire(_TARGET, _profile())
+
+    _assert_failure(blocked.value, stage="capacity")
+    assert blocked_runtime.events == []
+
+    resistant.release.set()
+    await resistant.finished.wait()
+    await _assert_pool_active_count(pool, 0)
     await _assert_no_browser_tasks()
 
 
 @pytest.mark.unit
-async def test_callback_queued_before_context_close_is_admitted_after_initial_idle_turn() -> None:
+async def test_callback_starting_after_teardown_admission_closes_is_rejected() -> None:
     route = _FakeWebSocketRoute("wss://late.example/queued")
-    gated = _GatedOutcome(False)
     runtime = _FakeBrowserRuntime(
         dispatches=[("websocket", route)],
         callback_start_turns_after_close=[0],
         release_callbacks_after_close_timer=True,
     )
-    acquisition = asyncio.create_task(
-        _adapter(runtime, _FakeGuard([gated])).acquire(_TARGET, _profile()),
-        name="test-queued-callback-acquisition",
-    )
-
-    await gated.started.wait()
-    for _ in range(8):
-        await asyncio.sleep(0)
-    assert acquisition.done() is False
-    gated.release.set()
+    guard = _FakeGuard([])
 
     with pytest.raises(ArticleFailure) as raised:
-        await acquisition
+        await _adapter(runtime, guard).acquire(_TARGET, _profile())
 
-    _assert_failure(raised.value, stage="egress")
+    _assert_failure(raised.value, stage="callback")
+    assert guard.calls == []
+    assert route.connect_calls == 0
     assert route.close_calls == [(1008, "Policy denied")]
     await _assert_no_browser_tasks()
 
 
 @pytest.mark.unit
-async def test_callback_arriving_while_drain_waits_is_included_before_success() -> None:
+async def test_admitted_callback_cannot_admit_new_callback_during_teardown() -> None:
     first = _FakeWebSocketRoute("wss://late.example/first")
     second = _FakeWebSocketRoute("wss://late.example/second")
     runtime = _FakeBrowserRuntime(dispatches=[("websocket", first)])
-    second_outcome = _GatedOutcome(False)
-    guard = _FakeGuard([_DispatchingOutcome(runtime, second, True), second_outcome])
-    acquisition = asyncio.create_task(
-        _adapter(runtime, guard).acquire(_TARGET, _profile()),
-        name="test-arriving-during-drain-acquisition",
-    )
-
-    await second_outcome.started.wait()
-    for _ in range(8):
-        await asyncio.sleep(0)
-    assert acquisition.done() is False
-    second_outcome.release.set()
+    guard = _FakeGuard([_DispatchingOutcome(runtime, second, True)])
 
     with pytest.raises(ArticleFailure) as raised:
-        await acquisition
+        await _adapter(runtime, guard).acquire(_TARGET, _profile())
 
-    _assert_failure(raised.value, stage="egress")
+    _assert_failure(raised.value, stage="callback")
+    assert second.connect_calls == 0
     assert second.close_calls == [(1008, "Policy denied")]
     await _assert_no_browser_tasks()
 
@@ -1015,17 +1125,101 @@ async def test_external_callback_task_cancellation_remains_acquisition_cancellat
 
 
 @pytest.mark.unit
-async def test_callback_drain_uses_one_deadline_and_never_awaits_resistant_task_unbounded() -> None:
-    resistant = _CancellationResistantOutcome()
-    runtime = _FakeBrowserRuntime(dispatches=[("websocket", _FakeWebSocketRoute("wss://late.example/resistant"))])
+async def test_external_callback_cancellation_near_drain_deadline_has_no_internal_cancel() -> None:
+    loop = asyncio.get_running_loop()
+    previous_factory = loop.get_task_factory()
+    loop.set_task_factory(
+        lambda loop, coroutine, **kwargs: _CancelRecordingTask(
+            coroutine,
+            loop=loop,
+            **kwargs,
+        )
+    )
+    gated = _GatedOutcome(True)
+    runtime = _FakeBrowserRuntime(
+        dispatches=[
+            (
+                "websocket",
+                _FakeWebSocketRoute("wss://late.example/external-deadline"),
+            )
+        ]
+    )
     acquisition = asyncio.create_task(
-        _adapter(runtime, _FakeGuard([resistant]), cleanup_grace_s=0.01).acquire(
+        _adapter(runtime, _FakeGuard([gated]), cleanup_grace_s=0.03).acquire(
             _TARGET,
             _profile(),
         ),
+        name="test-deadline-callback-cancellation-acquisition",
+    )
+
+    try:
+        await gated.started.wait()
+        await runtime.context_closed.wait()
+        callback = next(task for task in runtime.callback_tasks if not task.done())
+        assert isinstance(callback, _CancelRecordingTask)
+        loop.call_later(0.02, callback.cancel, "external-callback")
+
+        with pytest.raises(asyncio.CancelledError):
+            await acquisition
+
+        assert callback.cancel_messages == ["external-callback"]
+        assert gated.cancellation_args == ("external-callback",)
+    finally:
+        loop.set_task_factory(previous_factory)
+
+    await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+async def test_callback_capacity_rejection_fails_closed_without_dispatch() -> None:
+    first = _FakeWebSocketRoute("wss://late.example/first")
+    rejected = _FakeWebSocketRoute("wss://late.example/rejected")
+    gated = _GatedOutcome(True)
+    runtime = _FakeBrowserRuntime(dispatches=[("websocket", first), ("websocket", rejected)])
+    pool = _pool_type()(1)
+    acquisition = asyncio.create_task(
+        _adapter(
+            runtime,
+            _FakeGuard([gated]),
+            cleanup_grace_s=0.01,
+            acquisition_pool=pool,
+            callback_capacity=1,
+        ).acquire(_TARGET, _profile()),
+        name="test-callback-capacity-acquisition",
+    )
+
+    await gated.started.wait()
+    with pytest.raises(ArticleFailure) as raised:
+        await acquisition
+
+    _assert_failure(raised.value, stage="capacity")
+    assert rejected.connect_calls == 0
+    assert rejected.close_calls == [(1008, "Policy denied")]
+    assert gated.cancellation_args is None
+
+    gated.release.set()
+    await _assert_pool_active_count(pool, 0)
+    await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+async def test_callback_late_exception_is_durably_retained_and_consumed() -> None:
+    resistant = _CancellationResistantOutcome()
+    runtime = _FakeBrowserRuntime(dispatches=[("websocket", _FakeWebSocketRoute("wss://late.example/resistant"))])
+    pool = _pool_type()(1)
+    loop = asyncio.get_running_loop()
+    unobserved: list[dict[str, object]] = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unobserved.append(context))
+    acquisition = asyncio.create_task(
+        _adapter(
+            runtime,
+            _FakeGuard([resistant]),
+            cleanup_grace_s=0.01,
+            acquisition_pool=pool,
+        ).acquire(_TARGET, _profile()),
         name="test-resistant-callback-acquisition",
     )
-    loop = asyncio.get_running_loop()
     started = loop.time()
 
     try:
@@ -1033,14 +1227,22 @@ async def test_callback_drain_uses_one_deadline_and_never_awaits_resistant_task_
             await asyncio.wait_for(asyncio.shield(acquisition), timeout=0.2)
         assert loop.time() - started < 0.2
         _assert_failure(raised.value, stage="callback_drain")
-        assert resistant.cancellation_args
+        assert resistant.cancellation_args is None
+        callback = next(task for task in runtime.callback_tasks if not task.done())
+        callback_ref = weakref.ref(callback)
+        runtime.callback_tasks.discard(callback)
+        del callback
+        gc.collect()
+        assert callback_ref() is not None
+        assert pool.active_count == 1
     finally:
         resistant.release.set()
         await resistant.finished.wait()
-        if not acquisition.done():
-            with pytest.raises(ArticleFailure):
-                await acquisition
+        await _assert_pool_active_count(pool, 0)
+        await asyncio.sleep(0)
+        loop.set_exception_handler(previous_handler)
 
+    assert unobserved == []
     await _assert_no_browser_tasks()
 
 
@@ -1057,6 +1259,47 @@ async def test_cleanup_accessor_or_method_failure_is_sanitized_and_all_owners_at
     _assert_failure(raised.value, stage="cleanup")
     assert runtime.events[-3:] == ["close:context", "close:browser", "stop:playwright"]
     await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "failing_name",
+    ["article-browser-teardown", "article-browser-cleanup-page"],
+)
+async def test_teardown_task_creation_failure_attempts_owners_and_releases_lease(
+    monkeypatch: pytest.MonkeyPatch,
+    failing_name: str,
+) -> None:
+    runtime = _FakeBrowserRuntime()
+    pool = _pool_type()(1)
+    original_create_task = asyncio.create_task
+
+    def create_task(
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        name: str | None = None,
+        context: Any = None,
+    ) -> asyncio.Task[Any]:
+        if name == failing_name:
+            coroutine.close()
+            raise RuntimeError("https://secret.example/path?token=raw")
+        kwargs: dict[str, object] = {"name": name}
+        if context is not None:
+            kwargs["context"] = context
+        return original_create_task(coroutine, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_task", create_task)
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(
+            runtime,
+            _FakeGuard([]),
+            acquisition_pool=pool,
+        ).acquire(_TARGET, _profile())
+
+    _assert_failure(raised.value, stage="cleanup")
+    assert runtime.events[-3:] == ["close:context", "close:browser", "stop:playwright"]
+    assert pool.active_count == 0
 
 
 @pytest.mark.unit
@@ -1086,15 +1329,18 @@ async def test_stuck_cleanup_is_bounded_cancelled_consumed_and_all_owners_attemp
 @pytest.mark.unit
 async def test_cancellation_resistant_cleanup_cannot_block_later_owners_or_teardown_bound() -> None:
     runtime = _FakeBrowserRuntime(cleanup_modes={"close:page": "resistant"})
+    pool = _pool_type()(1)
     loop = asyncio.get_running_loop()
     unobserved: list[dict[str, object]] = []
     previous_handler = loop.get_exception_handler()
     loop.set_exception_handler(lambda _loop, context: unobserved.append(context))
     acquisition = asyncio.create_task(
-        _adapter(runtime, _FakeGuard([]), cleanup_grace_s=0.01).acquire(
-            _TARGET,
-            _profile(),
-        ),
+        _adapter(
+            runtime,
+            _FakeGuard([]),
+            cleanup_grace_s=0.01,
+            acquisition_pool=pool,
+        ).acquire(_TARGET, _profile()),
         name="test-resistant-cleanup-acquisition",
     )
 
@@ -1104,9 +1350,27 @@ async def test_cancellation_resistant_cleanup_cannot_block_later_owners_or_teard
         _assert_failure(raised.value, stage="cleanup")
         assert runtime.events[-3:] == ["close:context", "close:browser", "stop:playwright"]
         assert runtime.stuck_cleanup_cancelled == ["close:page"]
+        assert pool.active_count == 1
+
+        cleanup_task = runtime.cleanup_tasks.pop("close:page")
+        cleanup_ref = weakref.ref(cleanup_task)
+        del cleanup_task
+        gc.collect()
+        assert cleanup_ref() is not None
+
+        blocked_runtime = _FakeBrowserRuntime()
+        with pytest.raises(ArticleFailure) as blocked:
+            await _adapter(
+                blocked_runtime,
+                _FakeGuard([]),
+                acquisition_pool=pool,
+            ).acquire(_TARGET, _profile())
+        _assert_failure(blocked.value, stage="capacity")
+        assert blocked_runtime.events == []
 
         runtime.resistant_cleanup_release.set()
         await runtime.resistant_cleanup_finished.wait()
+        await _assert_pool_active_count(pool, 0)
         await asyncio.sleep(0)
         assert unobserved == []
     finally:
