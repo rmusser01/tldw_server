@@ -150,6 +150,15 @@ from tldw_Server_API.app.core.Notes.attachment_policy import (
     validate_note_attachment_original_file_name,
     validate_note_attachment_upload_content,
 )
+from tldw_Server_API.app.core.Notes.legacy_attachment_source import (
+    LEGACY_ATTACHMENT_META_SUFFIX as _NOTES_ATTACHMENT_META_SUFFIX,
+)
+from tldw_Server_API.app.core.Notes.legacy_attachment_source import (
+    legacy_attachment_base_directory,
+    legacy_attachment_metadata_path,
+    legacy_attachment_note_directory,
+    safe_legacy_note_attachment_dirname,
+)
 from tldw_Server_API.app.core.Notes.organization_capture import (
     compound_note_id,
     compound_note_request_fingerprint,
@@ -202,7 +211,6 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     SyncServerOriginBatchMaterializationError,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
-from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
 
 #
@@ -235,8 +243,6 @@ _NOTES_NONCRITICAL_EXCEPTIONS = (
 
 router = APIRouter()
 
-_NOTES_ATTACHMENTS_DIRNAME = "notes_attachments"
-_NOTES_ATTACHMENT_META_SUFFIX = ".meta.json"
 _NOTES_ATTACHMENT_DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT = 1000
 _NOTES_ATTACHMENT_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)\Z")
@@ -829,6 +835,17 @@ def _decode_attachment_cursor(
         signature = base64.urlsafe_b64decode(
             signature_segment + "=" * (-len(signature_segment) % 4)
         )
+        if any(
+            base64.urlsafe_b64encode(decoded_segment)
+            .decode("ascii")
+            .rstrip("=")
+            != encoded_segment
+            for decoded_segment, encoded_segment in (
+                (payload, payload_segment),
+                (signature, signature_segment),
+            )
+        ):
+            raise ValueError("noncanonical base64url")
         expected = hmac.digest(_attachment_cursor_secret(), payload, "sha256")
         if not hmac.compare_digest(signature, expected):
             raise ValueError("signature mismatch")
@@ -1047,31 +1064,32 @@ def _reconcile_note_tasks_after_save(
 
 
 def _safe_note_attachment_dirname(note_id: str) -> str:
-    text = str(note_id or "").strip()
-    if not text:
-        return "note"
-    safe = sanitize_filename(text, max_total_length=96).replace(" ", "_").strip("._")
-    if safe and safe not in {".", ".."}:
-        return safe
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-    return f"note_{digest}"
+    return safe_legacy_note_attachment_dirname(note_id)
 
 
 def _get_note_attachments_base_dir(user_id: int | str) -> Path:
-    user_base_dir = DatabasePaths.get_user_base_directory(user_id)
-    base_dir = (user_base_dir / _NOTES_ATTACHMENTS_DIRNAME).resolve()
-    user_base_resolved = user_base_dir.resolve()
+    user_root = DatabasePaths.get_user_base_directory(user_id)
+    base_dir = legacy_attachment_base_directory(user_id, user_root=user_root)
+    user_root_resolved = user_root.resolve()
+    base_dir_resolved = base_dir.resolve()
     try:
-        base_dir.relative_to(user_base_resolved)
+        base_dir_resolved.relative_to(user_root_resolved)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid attachment storage path") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Invalid attachment storage path",
+        ) from exc
     base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir
+    return base_dir_resolved
 
 
 def _get_note_attachments_dir(user_id: int | str, note_id: str, *, create: bool = False) -> Path:
     base_dir = _get_note_attachments_base_dir(user_id)
-    note_dir = (base_dir / _safe_note_attachment_dirname(note_id)).resolve()
+    note_dir = legacy_attachment_note_directory(
+        user_id,
+        note_id,
+        user_root=base_dir.parent,
+    ).resolve()
     try:
         note_dir.relative_to(base_dir)
     except ValueError as exc:
@@ -1119,7 +1137,7 @@ def _resolve_unique_attachment_path(note_dir: Path, file_name: str) -> Path:
 
 
 def _attachment_metadata_path(file_path: Path) -> Path:
-    return file_path.with_name(f"{file_path.name}{_NOTES_ATTACHMENT_META_SUFFIX}")
+    return legacy_attachment_metadata_path(file_path)
 
 
 def _parse_uploaded_at(value: Any, fallback: datetime) -> datetime:

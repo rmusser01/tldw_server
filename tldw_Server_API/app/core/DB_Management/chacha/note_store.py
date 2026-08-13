@@ -748,6 +748,36 @@ class NoteStore:
         cursor = self._db.execute_query(query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
+    def list_note_ids_page(
+        self,
+        *,
+        after_note_id: str | None,
+        limit: int,
+    ) -> tuple[str, ...]:
+        """List owned note IDs, including trash, in stable keyset order."""
+
+        if not 1 <= limit <= 200:
+            raise ValueError("note page limit must be 1..200")
+        query = "SELECT id FROM notes WHERE id > ?"
+        params: list[Any] = [after_note_id or ""]
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " AND client_id = ?"
+            params.append(self._db.client_id)
+        query += " ORDER BY id LIMIT ?"
+        params.append(limit)
+        rows = self._db.execute_query(query, tuple(params)).fetchall()
+        return tuple(str(row["id"]) for row in rows)
+
+    def owns_note_id(self, note_id: str) -> bool:
+        """Return whether this database owner has the note, including trash."""
+
+        query = "SELECT 1 FROM notes WHERE id = ?"
+        params: list[Any] = [note_id]
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " AND client_id = ?"
+            params.append(self._db.client_id)
+        return self._db.execute_query(query, tuple(params)).fetchone() is not None
+
     def list_deleted_notes(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """List only soft-deleted notes (trash)."""
         return self.list_notes(limit=limit, offset=offset, only_deleted=True)

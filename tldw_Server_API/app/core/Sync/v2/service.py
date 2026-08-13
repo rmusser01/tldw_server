@@ -111,7 +111,11 @@ from .mutation_group_validation import (
     StoredMutationGroupValidationError,
     validate_stored_mutation_group,
 )
-from .profile import SyncProfileStatus, SyncV2ProfileManager
+from .profile import (
+    SyncNotesAttachmentBootstrapDiagnostics,
+    SyncProfileStatus,
+    SyncV2ProfileManager,
+)
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
 from .restore import (
     OBJECT_RESTORE_DOMAINS,
@@ -857,6 +861,7 @@ class SyncV2Service:
         workspace_access_checker: WorkspaceAccessChecker | None = None,
         dataset_bootstrapper: object | None = None,
         notes_link_bootstrapper: object | None = None,
+        notes_attachment_bootstrapper: object | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -868,6 +873,7 @@ class SyncV2Service:
         self.workspace_access_checker = workspace_access_checker
         self.dataset_bootstrapper = dataset_bootstrapper
         self.notes_link_bootstrapper = notes_link_bootstrapper
+        self.notes_attachment_bootstrapper = notes_attachment_bootstrapper
 
     def capabilities(
         self,
@@ -1746,6 +1752,23 @@ class SyncV2Service:
             user_id=user_id,
             dataset_id=dataset_id,
             device_id=device_id,
+        )
+
+    def notes_attachment_bootstrap_diagnostics(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str | None = None,
+        sample_limit: int = 0,
+        dry_run: bool = False,
+    ) -> SyncNotesAttachmentBootstrapDiagnostics:
+        """Return bounded read-only diagnostics for legacy attachment bootstrap."""
+
+        return self._profile_manager().notes_attachment_bootstrap_diagnostics(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            sample_limit=sample_limit,
+            dry_run=dry_run,
         )
 
     def push(
@@ -2888,6 +2911,7 @@ class SyncV2Service:
         idempotency_key: str | None = None,
         encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY,
         metadata: dict[str, object] | None = None,
+        trusted_notes_attachment_bootstrap_id: str | None = None,
     ) -> SyncBlobUploadSession:
         """Create or resume a quota-checked M2 blob upload session."""
 
@@ -2917,6 +2941,7 @@ class SyncV2Service:
                 attachment_id=attachment_id,
                 content_type=content_type,
                 metadata=normalized_metadata,
+                trusted_bootstrap_id=trusted_notes_attachment_bootstrap_id,
             )
         elif "notes_attachment_intent" in normalized_metadata:
             raise SyncStoreError(
@@ -2950,6 +2975,7 @@ class SyncV2Service:
         attachment_id: str,
         content_type: str,
         metadata: dict[str, object],
+        trusted_bootstrap_id: str | None = None,
     ) -> dict[str, object]:
         """Validate and bind one strict immutable Notes attachment upload intent."""
 
@@ -2957,7 +2983,14 @@ class SyncV2Service:
             adapter = self.adapters.get("attachment.ref")
         except KeyError as exc:
             raise SyncStoreError("Notes attachment upload intent is unavailable") from exc
-        if not sync_v2_attachment_ref_v2_is_writable(
+        state = dataset.metadata.get("notes_attachment_v2")
+        trusted_bootstrap = bool(
+            trusted_bootstrap_id is not None
+            and isinstance(state, Mapping)
+            and state.get("state") == "initializing"
+            and state.get("bootstrap_id") == trusted_bootstrap_id
+        )
+        if not trusted_bootstrap and not sync_v2_attachment_ref_v2_is_writable(
             dataset,
             notes_attachment_sync_enabled=bool(
                 getattr(adapter, "v2_writes_enabled", False)
@@ -5577,6 +5610,7 @@ class SyncV2Service:
             service=self,
             dataset_bootstrapper=self.dataset_bootstrapper,
             notes_link_bootstrapper=self.notes_link_bootstrapper,
+            notes_attachment_bootstrapper=self.notes_attachment_bootstrapper,
         )
 
     def _update_cursors(

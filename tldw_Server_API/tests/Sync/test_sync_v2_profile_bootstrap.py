@@ -31,6 +31,8 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
+pytestmark = pytest.mark.unit
+
 
 def _clock() -> str:
     return "2026-05-23T18:12:00+00:00"
@@ -65,6 +67,7 @@ def _service(
     id_factory=None,
     scan_limit: int = 100,
     dataset_bootstrapper=None,
+    notes_attachment_bootstrapper=None,
 ) -> tuple[SyncV2Service, SyncV2Store]:
     store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_profile.db"))
     service = SyncV2Service(
@@ -77,6 +80,7 @@ def _service(
             restore_manifest_scan_limit=scan_limit,
         ),
         dataset_bootstrapper=dataset_bootstrapper,
+        notes_attachment_bootstrapper=notes_attachment_bootstrapper,
     )
     return service, store
 
@@ -94,6 +98,17 @@ class _PausedOrganizationBootstrapper:
     ) -> SyncDataset:
         self.calls.append((user_id, dataset.dataset_id))
         return service.store.get_dataset(dataset.dataset_id) or dataset
+
+
+class _PausedAttachmentBootstrapper(_PausedOrganizationBootstrapper):
+    def dry_run(self, *, service: SyncV2Service, user_id: str):
+        del service
+        self.calls.append((user_id, "dry-run"))
+        return {
+            "candidate_count": 1_000,
+            "candidate_count_is_lower_bound": True,
+            "error_code": None,
+        }
 
 
 def _note_envelope(**overrides) -> SyncEnvelopeCreate:
@@ -183,7 +198,17 @@ def test_profile_capabilities_are_bound_to_active_ready_dataset(tmp_path: Path) 
             metadata={
                 "default_personal": True,
                 "client_family": "chatbook",
-                "notes_attachment_v2": {"state": "ready"},
+                "notes_attachment_v2": {
+                    "bootstrap_id": "bootstrap-ready",
+                    "state": "ready",
+                    "target_adapter_version": 2,
+                    "captured_count": 0,
+                    "expected_count": 0,
+                    "source_hash": "e3b0c44298fc1c149afbf4c8996fb924"
+                    "27ae41e4649b934ca495991b7852b855",
+                    "source_cursor": None,
+                    "error_code": None,
+                },
             },
         )
     )
@@ -201,6 +226,156 @@ def test_profile_capabilities_are_bound_to_active_ready_dataset(tmp_path: Path) 
         requested_domains=["notes.note", "attachment.ref"],
     )
     assert bootstrap.capabilities.writable_adapter_versions["attachment.ref"] == [2]
+
+
+def test_profile_bootstrap_begins_and_resumes_attachment_capture(
+    tmp_path: Path,
+) -> None:
+    bootstrapper = _PausedAttachmentBootstrapper()
+    service, store = _service(
+        tmp_path,
+        notes_attachment_bootstrapper=bootstrapper,
+    )
+
+    result = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=["notes.note", "attachment.ref"],
+        client_instance={
+            "supported_adapter_versions": {"attachment.ref": [2]},
+        },
+    )
+
+    assert bootstrapper.calls == [("user-1", result.active_dataset_id)]
+    dataset = store.get_dataset(result.active_dataset_id or "", owner_user_id="user-1")
+    assert dataset is not None
+    assert dataset.metadata["notes_attachment_v2"]["state"] == "initializing"
+    assert dataset.metadata["notes_attachment_v2"]["target_adapter_version"] == 2
+    assert result.capabilities.writable_adapter_versions["attachment.ref"] == []
+
+
+def test_attachment_bootstrap_diagnostics_are_bounded_and_path_free(
+    tmp_path: Path,
+) -> None:
+    bootstrapper = _PausedAttachmentBootstrapper()
+    service, store = _service(
+        tmp_path,
+        notes_attachment_bootstrapper=bootstrapper,
+    )
+    profile = service.bootstrap_profile(
+        user_id="user-1",
+        mode="offline_sync",
+        device_id="device-1",
+        requested_domains=[*M1_SYNC_DOMAINS, "attachment.ref"],
+    )
+    assert profile.dataset is not None
+    dataset_id = profile.dataset.dataset_id
+    dataset = store.get_dataset(dataset_id, owner_user_id="user-1")
+    assert dataset is not None
+    bootstrap_id = dataset.metadata["notes_attachment_v2"]["bootstrap_id"]
+    source_key = "notes_attachments/note-1/private-name.pdf"
+    mapping = store.resolve_notes_attachment_source_map(
+        dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id=bootstrap_id,
+        note_id="note-1",
+        source_key=source_key,
+    )
+    store.record_notes_attachment_cleanup_candidate(
+        dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id=bootstrap_id,
+        source_key=source_key,
+        source_relative_path=source_key,
+        source_blob_hash="sha256:" + "1" * 64,
+        source_size_bytes=12,
+        source_modified_ns=42,
+    )
+    store.transition_notes_attachment_bootstrap(
+        dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id=bootstrap_id,
+        expected_state="initializing",
+        state="initializing",
+        captured_count=1,
+        expected_count=1,
+        source_hash=None,
+        source_cursor='{"private":"notes_attachments/note-1/private-name.pdf"}',
+    )
+
+    diagnostics = service.notes_attachment_bootstrap_diagnostics(
+        user_id="user-1",
+        dataset_id=dataset_id,
+        sample_limit=1,
+        dry_run=False,
+    )
+
+    assert diagnostics.state == "initializing"
+    assert diagnostics.captured_count == diagnostics.expected_count == 1
+    assert diagnostics.cursor is not None
+    assert diagnostics.cursor.startswith("sha256:")
+    assert diagnostics.cleanup_candidates[0].source_key_hash.startswith("sha256:")
+    assert diagnostics.cleanup_candidates[0].attachment_id == mapping.attachment_id
+    assert diagnostics.cleanup_candidates[0].state == "captured"
+    assert diagnostics.cleanup_candidates[0].blocker_code is None
+    serialized = repr(diagnostics)
+    assert "private-name.pdf" not in serialized
+    assert "notes_attachments" not in serialized
+    assert bootstrap_id not in serialized
+
+
+def test_attachment_bootstrap_dry_run_is_read_only_and_owner_scoped(
+    tmp_path: Path,
+) -> None:
+    bootstrapper = _PausedAttachmentBootstrapper()
+    service, store = _service(
+        tmp_path,
+        notes_attachment_bootstrapper=bootstrapper,
+    )
+
+    diagnostics = service.notes_attachment_bootstrap_diagnostics(
+        user_id="user-1",
+        sample_limit=0,
+        dry_run=True,
+    )
+
+    assert diagnostics.state == "not_started"
+    assert diagnostics.dry_run is True
+    assert diagnostics.source_candidate_count == 1_000
+    assert diagnostics.source_candidate_count_is_lower_bound is True
+    assert store.list_datasets_for_user("user-1") == []
+    assert store.list_devices_for_user("user-1") == []
+    assert bootstrapper.calls == [("user-1", "dry-run")]
+
+    other = store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="other-dataset",
+            owner_user_id="other-user",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+        )
+    )
+    with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+        service.notes_attachment_bootstrap_diagnostics(
+            user_id="user-1",
+            dataset_id=other.dataset_id,
+        )
+
+
+def test_attachment_bootstrap_diagnostics_reject_oversized_samples(
+    tmp_path: Path,
+) -> None:
+    service, _store = _service(tmp_path)
+
+    with pytest.raises(
+        SyncStoreError,
+        match="sync_attachment_bootstrap_sample_limit_exceeded",
+    ):
+        service.notes_attachment_bootstrap_diagnostics(
+            user_id="user-1",
+            sample_limit=101,
+        )
 
 
 def test_bootstrap_creates_default_dataset_and_is_idempotent(tmp_path: Path) -> None:

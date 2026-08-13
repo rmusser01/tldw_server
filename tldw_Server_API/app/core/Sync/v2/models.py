@@ -1621,6 +1621,67 @@ class SyncAttachmentRevisionBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncNotesAttachmentSourceMap:
+    """Stable bootstrap attachment identity for one hashed legacy source key."""
+
+    dataset_id: str
+    bootstrap_id: str
+    source_key_hash: str
+    note_id: str
+    attachment_id: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip() or not self.bootstrap_id.strip():
+            raise ValueError("attachment source map identity must be non-empty")
+        if not self.note_id.strip():
+            raise ValueError("attachment source map note_id must be non-empty")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", self.source_key_hash) is None:
+            raise ValueError("attachment source map hash must be lowercase SHA-256")
+        try:
+            parsed_attachment_id = UUID(self.attachment_id)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("attachment source map ID must be canonical UUIDv4") from exc
+        if parsed_attachment_id.version != 4 or str(parsed_attachment_id) != self.attachment_id:
+            raise ValueError("attachment source map ID must be canonical UUIDv4")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncNotesAttachmentCleanupCandidate:
+    """Non-authoritative legacy source evidence retained after canonical import."""
+
+    dataset_id: str
+    bootstrap_id: str
+    source_key_hash: str
+    attachment_id: str
+    source_relative_path: str = field(repr=False)
+    source_path_hash: str
+    source_blob_hash: str
+    source_size_bytes: int
+    source_modified_ns: int
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip() or not self.bootstrap_id.strip():
+            raise ValueError("attachment cleanup identity must be non-empty")
+        if not self.source_relative_path.strip():
+            raise ValueError("attachment cleanup source path must be non-empty")
+        for value in (self.source_key_hash, self.source_path_hash, self.source_blob_hash):
+            if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
+                raise ValueError("attachment cleanup hash must be lowercase SHA-256")
+        try:
+            parsed_attachment_id = UUID(self.attachment_id)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("attachment cleanup ID must be canonical UUIDv4") from exc
+        if parsed_attachment_id.version != 4 or str(parsed_attachment_id) != self.attachment_id:
+            raise ValueError("attachment cleanup ID must be canonical UUIDv4")
+        if isinstance(self.source_size_bytes, bool) or self.source_size_bytes < 1:
+            raise ValueError("attachment cleanup size must be positive")
+        if isinstance(self.source_modified_ns, bool) or self.source_modified_ns < 0:
+            raise ValueError("attachment cleanup modified time is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class SyncDatasetStorageNamespace:
     """Server-issued opaque physical storage namespace for one dataset."""
 
@@ -1864,6 +1925,8 @@ __all__ = [
     "SyncAttachmentCreate",
     "SyncAttachmentRevisionBinding",
     "SyncAttachmentRevisionBindingCreate",
+    "SyncNotesAttachmentCleanupCandidate",
+    "SyncNotesAttachmentSourceMap",
     "SyncBackgroundDomainStatus",
     "SyncBackgroundLease",
     "SyncBackgroundLeaseCreate",

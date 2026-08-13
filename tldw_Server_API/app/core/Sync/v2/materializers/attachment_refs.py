@@ -147,6 +147,9 @@ class AttachmentRefMaterializer:
                         if envelope.device_id == "server-origin"
                         else "sync"
                     ),
+                    allow_deleted_note=(
+                        envelope.routing_metadata.get("bootstrap_capture") is True
+                    ),
                 )
             elif envelope.operation == "tombstone":
                 if not isinstance(payload, AttachmentRefV2TombstonePayload):

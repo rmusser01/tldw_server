@@ -871,6 +871,36 @@ class SyncNotesOrganizationStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class SyncNotesAttachmentCleanupSampleResponse(BaseModel):
+    """One bounded public-safe legacy cleanup candidate."""
+
+    source_key_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    attachment_id: str
+    state: Literal["captured"] = "captured"
+    blocker_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncNotesAttachmentBootstrapDiagnosticsResponse(BaseModel):
+    """Read-only bounded legacy attachment bootstrap diagnostics."""
+
+    state: Literal["not_started", "initializing", "ready", "failed"]
+    captured_count: int = Field(0, ge=0)
+    expected_count: int = Field(0, ge=0)
+    cursor: str | None = Field(None, pattern=r"^sha256:[0-9a-f]{64}$")
+    error_code: str | None = None
+    dry_run: bool = False
+    source_candidate_count: int | None = Field(None, ge=0, le=1_000)
+    source_candidate_count_is_lower_bound: bool = False
+    cleanup_candidates: list[SyncNotesAttachmentCleanupSampleResponse] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncProfileDatasetStatusResponse(BaseModel):
     """Default personal dataset metadata in profile responses."""
 
@@ -886,6 +916,7 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
     notes_organization: SyncNotesOrganizationStatusResponse | None = None
     notes_link: SyncNotesOrganizationStatusResponse | None = None
+    notes_attachment: SyncNotesOrganizationStatusResponse | None = None
 
 
 class SyncProfileDomainStatusResponse(BaseModel):
@@ -2077,6 +2108,8 @@ __all__ = [
     "SyncProfileBootstrapMode",
     "SyncProfileBootstrapRequest",
     "SyncProfileBootstrapResponse",
+    "SyncNotesAttachmentBootstrapDiagnosticsResponse",
+    "SyncNotesAttachmentCleanupSampleResponse",
     "SyncNotesOrganizationStatusResponse",
     "SyncProfileDatasetStatusResponse",
     "SyncProfileDeviceStatusResponse",

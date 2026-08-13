@@ -59,6 +59,18 @@ class NoteAttachmentPolicyError(ValueError):
     """Raised when attachment metadata is outside the canonical Notes policy."""
 
 
+class LegacyAttachmentSourceError(RuntimeError):
+    """Sanitized failure while reading a legacy Notes attachment source."""
+
+    def __init__(self, error_code: str) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
+
+
+class NotesAttachmentBootstrapInterrupted(RuntimeError):
+    """Testable interruption that deliberately leaves durable progress resumable."""
+
+
 class NotesAttachmentMutationError(RuntimeError):
     """Stable failure for a coordinated Notes attachment mutation."""
 

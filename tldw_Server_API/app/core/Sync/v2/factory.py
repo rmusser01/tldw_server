@@ -44,6 +44,7 @@ from .models import (
     WORKSPACE_SYNC_DOMAINS,
     SyncDomain,
 )
+from .notes_attachment_bootstrap import NotesAttachmentBootstrapper
 from .notes_link_bootstrap import NotesLinkBootstrapper
 from .notes_organization_bootstrap import NotesOrganizationBootstrapper
 from .security import server_trusted_encryption_status_from_env
@@ -124,6 +125,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         workspace_access_checker=_workspace_access_checker,
         dataset_bootstrapper=NotesOrganizationBootstrapper(note_db),
         notes_link_bootstrapper=NotesLinkBootstrapper(note_db),
+        notes_attachment_bootstrapper=NotesAttachmentBootstrapper(note_db),
     )
 
 

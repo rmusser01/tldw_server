@@ -5,11 +5,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import (
@@ -855,6 +859,237 @@ def test_profile_bootstrap_endpoint_idempotently_creates_dataset_and_device(
     assert {item["domain"] for item in profile.json()["domain_status"]} == set(M1_SYNC_DOMAINS)
     assert len(sync_service.store.list_datasets_for_user("user-1")) == 1
     assert len(sync_service.store.list_devices_for_user("user-1")) == 1
+
+
+def test_attachment_bootstrap_diagnostics_endpoint_is_read_only_and_bounded(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    class _DryRunBootstrapper:
+        def dry_run(self, *, service: SyncV2Service, user_id: str):
+            assert service is sync_service
+            assert user_id == "user-1"
+            return {
+                "candidate_count": 7,
+                "candidate_count_is_lower_bound": False,
+                "error_code": None,
+            }
+
+    sync_service.notes_attachment_bootstrapper = _DryRunBootstrapper()
+
+    response = client.get(
+        "/api/v1/sync/profile/attachment-bootstrap",
+        params={"dry_run": "true", "sample_limit": 0},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "state": "not_started",
+        "captured_count": 0,
+        "expected_count": 0,
+        "cursor": None,
+        "error_code": None,
+        "dry_run": True,
+        "source_candidate_count": 7,
+        "source_candidate_count_is_lower_bound": False,
+        "cleanup_candidates": [],
+    }
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+    assert sync_service.store.list_devices_for_user("user-1") == []
+
+    oversized = client.get(
+        "/api/v1/sync/profile/attachment-bootstrap",
+        params={"sample_limit": 101},
+    )
+    assert oversized.status_code == 413
+    assert oversized.json()["detail"]["error_code"] == (
+        "sync_attachment_bootstrap_sample_limit_exceeded"
+    )
+
+
+def test_attachment_bootstrap_diagnostics_for_fresh_user_does_not_create_sync_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_db_path = tmp_path / "fresh_attachment_diagnostics.db"
+    monkeypatch.setenv("SYNC_V2_SQLITE_PATH", str(sync_db_path))
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = _test_user
+    client = TestClient(app)
+
+    response = client.get("/api/v1/sync/profile/attachment-bootstrap")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "state": "not_started",
+        "captured_count": 0,
+        "expected_count": 0,
+        "cursor": None,
+        "error_code": None,
+        "dry_run": False,
+        "source_candidate_count": None,
+        "source_candidate_count_is_lower_bound": False,
+        "cleanup_candidates": [],
+    }
+    assert not sync_db_path.exists()
+
+    oversized = client.get(
+        "/api/v1/sync/profile/attachment-bootstrap",
+        params={"sample_limit": 101},
+    )
+    assert oversized.status_code == 413
+    assert not sync_db_path.exists()
+
+
+def test_attachment_bootstrap_diagnostics_enforces_ingress_rate_limit(
+    sync_service: SyncV2Service,
+) -> None:
+    async def _deny_rate_limit() -> None:
+        raise HTTPException(status_code=429, detail="rate limited")
+
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = _test_user
+    app.dependency_overrides[sync_endpoint.get_sync_v2_profile_service] = (
+        lambda: sync_service
+    )
+    app.dependency_overrides[check_rate_limit] = _deny_rate_limit
+    client = TestClient(app)
+
+    response = client.get("/api/v1/sync/profile/attachment-bootstrap")
+
+    assert response.status_code == 429
+
+
+def test_profile_bootstrap_and_status_expose_safe_attachment_progress(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    started = client.post(
+        "/api/v1/sync/profile/bootstrap",
+        json={
+            "mode": "offline_sync",
+            "device_id": "device-1",
+            "requested_domains": [*M1_SYNC_DOMAINS, "attachment.ref"],
+        },
+    )
+    status_response = client.get("/api/v1/sync/profile")
+
+    assert started.status_code == status_response.status_code == 200
+    expected = {
+        "state": "initializing",
+        "captured_count": 0,
+        "expected_count": 0,
+        "error_code": None,
+    }
+    assert started.json()["dataset"]["notes_attachment"] == expected
+    assert status_response.json()["dataset"]["notes_attachment"] == expected
+    assert "bootstrap_id" not in started.text
+    assert "source_cursor" not in started.text
+
+    dataset_id = started.json()["dataset"]["dataset_id"]
+    dataset = sync_service.store.get_dataset(dataset_id, owner_user_id="user-1")
+    assert dataset is not None
+    bootstrap_id = dataset.metadata["notes_attachment_v2"]["bootstrap_id"]
+    empty_hash = hashlib.sha256(b"").hexdigest()
+    sync_service.store.transition_notes_attachment_bootstrap(
+        dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id=bootstrap_id,
+        expected_state="initializing",
+        state="ready",
+        captured_count=0,
+        expected_count=0,
+        source_hash=empty_hash,
+        source_cursor=None,
+        ready_verifier=lambda: True,
+    )
+    ready = client.get("/api/v1/sync/profile")
+    assert ready.json()["dataset"]["notes_attachment"]["state"] == "ready"
+
+    sync_service.store.transition_notes_attachment_bootstrap(
+        dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id=bootstrap_id,
+        expected_state="ready",
+        state="failed",
+        captured_count=0,
+        expected_count=0,
+        source_hash=empty_hash,
+        source_cursor=None,
+        error_code="notes_attachment_source_changed",
+    )
+    failed = client.get("/api/v1/sync/profile")
+    assert failed.json()["dataset"]["notes_attachment"] == {
+        "state": "failed",
+        "captured_count": 0,
+        "expected_count": 0,
+        "error_code": "notes_attachment_source_changed",
+    }
+
+
+def test_attachment_bootstrap_diagnostics_enforce_owner_and_hide_legacy_path(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    own = sync_service.store.get_or_create_default_personal_dataset("user-1")
+    own = sync_service.store.begin_notes_attachment_bootstrap(
+        own.dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id="bootstrap-private",
+    )
+    source_key = "notes_attachments/note-secret/private-name.pdf"
+    mapping = sync_service.store.resolve_notes_attachment_source_map(
+        own.dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id="bootstrap-private",
+        note_id="note-secret",
+        source_key=source_key,
+    )
+    sync_service.store.record_notes_attachment_cleanup_candidate(
+        own.dataset_id,
+        owner_user_id="user-1",
+        bootstrap_id="bootstrap-private",
+        source_key=source_key,
+        source_relative_path=source_key,
+        source_blob_hash="sha256:" + "2" * 64,
+        source_size_bytes=10,
+        source_modified_ns=1,
+    )
+    other = sync_service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="other-dataset",
+            owner_user_id="other-user",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+        )
+    )
+
+    response = client.get(
+        "/api/v1/sync/profile/attachment-bootstrap",
+        params={"dataset_id": own.dataset_id, "sample_limit": 1},
+    )
+    denied = client.get(
+        "/api/v1/sync/profile/attachment-bootstrap",
+        params={"dataset_id": other.dataset_id, "sample_limit": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cleanup_candidates"] == [
+        {
+            "source_key_hash": "sha256:"
+            + hashlib.sha256(source_key.encode()).hexdigest(),
+            "attachment_id": mapping.attachment_id,
+            "state": "captured",
+            "blocker_code": None,
+        }
+    ]
+    assert "private-name.pdf" not in response.text
+    assert "notes_attachments" not in response.text
+    assert "bootstrap-private" not in response.text
+    assert denied.status_code == 404
+    assert "other-dataset" not in denied.text
 
 
 @pytest.mark.parametrize(

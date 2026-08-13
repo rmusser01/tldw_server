@@ -1,7 +1,7 @@
 {
   "note": "Regenerate with `make openapi-fingerprint`. A change here means the backend API contract drifted; regenerate the frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
   "openapi_version": "3.1.0",
-  "path_count": 2009,
-  "schema_count": 2931,
-  "sha256": "def9b462e24624c5fae37912b9cc3bdf62daf66cd8bc3cb4c9909f0295d98618"
+  "path_count": 2010,
+  "schema_count": 2933,
+  "sha256": "064bfde3ac3e876fca5c198c61a88b62c2c01d21bb72943287843b7ddf2828da"
 }
