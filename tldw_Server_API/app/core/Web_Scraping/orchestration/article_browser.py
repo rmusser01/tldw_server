@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import inspect
 import math
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -18,7 +20,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.browser import (
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressGuard
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import RuntimeRequestContext
 
-from .article_models import ArticleFailure, DirectBrowserProfile
+from .article_models import ArticleFailure, ArticleLimits, DirectBrowserProfile
 
 _ROUTE_PATTERN = "**/*"
 _HTTP_SCHEMES = frozenset({"http", "https"})
@@ -29,6 +31,16 @@ _MAX_ACQUISITION_CAPACITY = 256
 _DEFAULT_CALLBACK_CAPACITY = 64
 _MAX_CALLBACK_CAPACITY = 1024
 _CALLBACK_IDLE_TURNS = 3
+_BROWSER_RETRY_DELAY_S = 2.0
+_RETRYABLE_BROWSER_STAGES = frozenset({"launch", "context", "page", "navigation", "stealth", "wait", "content"})
+_HTML_SERIALIZATION_EXPRESSION = """(maxBytes) => {
+  const doctype = document.doctype
+    ? new XMLSerializer().serializeToString(document.doctype) + "\\n"
+    : "";
+  const html = doctype + document.documentElement.outerHTML;
+  const size = new TextEncoder().encode(html).length;
+  return size <= maxBytes ? { ok: true, html } : { ok: false, size };
+}"""
 
 
 def _strict_capacity(value: object, *, maximum: int, label: str) -> int:
@@ -238,6 +250,14 @@ class _DefaultPlaywrightLauncher:
         return await async_playwright().start()
 
 
+async def _default_stealth_hook(page: Any) -> None:
+    try:
+        from playwright_stealth import stealth_async
+    except ImportError:
+        return
+    await stealth_async(page)
+
+
 def _playwright_has_required_routing() -> bool:
     try:
         from playwright.async_api import BrowserContext, WebSocketRoute
@@ -292,10 +312,95 @@ class _AcquisitionOutcome:
     def __init__(self) -> None:
         self.failure: ArticleFailure | None = None
         self.callback_cancelled = False
+        self._lock = threading.Lock()
 
     def fail(self, stage: str) -> None:
-        if self.failure is None:
-            self.failure = ArticleFailure("browser_error", stage)
+        self.latch(ArticleFailure("browser_error", stage))
+
+    def latch(self, failure: ArticleFailure) -> None:
+        with self._lock:
+            if self.failure is None:
+                self.failure = failure
+
+
+class _BrowserTransferLedger:
+    """Synchronously account CDP transfer events and latch one terminal failure."""
+
+    def __init__(
+        self,
+        *,
+        limit: int,
+        outcome: _AcquisitionOutcome,
+        lease: _BrowserAcquisitionLease,
+        shutdown_factory: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._limit = limit
+        self._outcome = outcome
+        self._lease = lease
+        self._shutdown_factory = shutdown_factory
+        self._lock = threading.Lock()
+        self._total = 0
+        self._terminal = False
+
+    def on_data_received(self, payload: dict[str, Any]) -> None:
+        try:
+            amount = self._non_negative_integer(payload.get("encodedDataLength"))
+        except (TypeError, ValueError, OverflowError):
+            self._fail(ArticleFailure("browser_error", "capability"))
+            return
+        self._add(amount)
+
+    def on_websocket_frame(self, payload: dict[str, Any]) -> None:
+        try:
+            response = payload.get("response")
+            if not isinstance(response, Mapping):
+                raise TypeError("missing websocket frame")
+            opcode = response.get("opcode")
+            data = response.get("payloadData")
+            if type(opcode) is not int or not isinstance(data, str):
+                raise TypeError("invalid websocket frame")
+            if opcode == 1:
+                amount = len(data.encode("utf-8"))
+            elif opcode == 2:
+                amount = len(base64.b64decode(data, validate=True))
+            else:
+                raise ValueError("unsupported websocket opcode")
+        except (binascii.Error, TypeError, ValueError, UnicodeError):
+            self._fail(ArticleFailure("browser_error", "capability"))
+            return
+        self._add(amount)
+
+    @staticmethod
+    def _non_negative_integer(value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise TypeError("invalid transfer length")
+        normalized = float(value)
+        if not math.isfinite(normalized) or normalized < 0 or not normalized.is_integer():
+            raise ValueError("invalid transfer length")
+        return int(normalized)
+
+    def _add(self, amount: int) -> None:
+        failure: ArticleFailure | None = None
+        with self._lock:
+            if self._terminal:
+                return
+            self._total += amount
+            if self._total > self._limit:
+                self._terminal = True
+                failure = ArticleFailure("response_too_large", "browser_transfer")
+        if failure is not None:
+            self._latch_and_shutdown(failure)
+
+    def _fail(self, failure: ArticleFailure) -> None:
+        with self._lock:
+            if self._terminal:
+                return
+            self._terminal = True
+        self._latch_and_shutdown(failure)
+
+    def _latch_and_shutdown(self, failure: ArticleFailure) -> None:
+        self._outcome.latch(failure)
+        self._lease.ensure_emergency_shutdown(self._shutdown_factory)
 
 
 class _CallbackLifecycle:
@@ -458,6 +563,8 @@ class GuardedArticleBrowser:
         cleanup_grace_s: float = _DEFAULT_CLEANUP_GRACE_S,
         acquisition_pool: _BrowserAcquisitionPool = _BROWSER_ACQUISITION_POOL,
         callback_capacity: int = _DEFAULT_CALLBACK_CAPACITY,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        stealth_hook: Callable[[Any], Awaitable[None]] = _default_stealth_hook,
     ) -> None:
         self._egress_guard = egress_guard
         self._context = context
@@ -465,11 +572,71 @@ class GuardedArticleBrowser:
         self._capability_check = capability_check
         self._cleanup_grace_s = _normalize_grace(cleanup_grace_s)
         self._acquisition_pool = acquisition_pool
+        self._sleep = sleep
+        self._stealth_hook = stealth_hook
         self._callback_capacity = _strict_capacity(
             callback_capacity,
             maximum=_MAX_CALLBACK_CAPACITY,
             label="callback",
         )
+
+    @staticmethod
+    def _should_retry(failure: ArticleFailure) -> bool:
+        return (
+            failure.code == "browser_error"
+            and failure.stage in _RETRYABLE_BROWSER_STAGES
+            and not bool(getattr(failure, "_browser_retry_suppressed", False))
+        )
+
+    @staticmethod
+    async def _install_transfer_accounting(
+        session: Any,
+        ledger: _BrowserTransferLedger,
+    ) -> None:
+        on = getattr(session, "on", None)
+        send = getattr(session, "send", None)
+        if not callable(on) or not callable(send):
+            raise ArticleFailure("browser_error", "capability")
+        try:
+            for event, handler in (
+                ("Network.dataReceived", ledger.on_data_received),
+                ("Network.webSocketFrameReceived", ledger.on_websocket_frame),
+                ("Network.webSocketFrameSent", ledger.on_websocket_frame),
+            ):
+                registered = on(event, handler)
+                if inspect.isawaitable(registered):
+                    await registered
+            enabled = send("Network.enable")
+            if not inspect.isawaitable(enabled):
+                raise TypeError("CDP send is not awaitable")
+            await enabled
+        except asyncio.CancelledError:
+            raise
+        except ArticleFailure:
+            raise
+        except Exception:  # noqa: BLE001 - CDP capability failures are sanitized
+            raise ArticleFailure("browser_error", "capability") from None
+
+    @staticmethod
+    async def _serialize_html(page: Any, max_bytes: int) -> str:
+        evaluate = getattr(page, "evaluate", None)
+        if not callable(evaluate):
+            raise ArticleFailure("browser_error", "capability")
+        result = await evaluate(_HTML_SERIALIZATION_EXPRESSION, max_bytes)
+        if not isinstance(result, Mapping) or type(result.get("ok")) is not bool:
+            raise ArticleFailure("browser_error", "capability")
+        if result["ok"] is True:
+            html = result.get("html")
+            if not isinstance(html, str):
+                raise ArticleFailure("browser_error", "capability")
+            return html
+        if "html" in result:
+            raise ArticleFailure("browser_error", "capability")
+        try:
+            _BrowserTransferLedger._non_negative_integer(result.get("size"))
+        except (TypeError, ValueError, OverflowError):
+            raise ArticleFailure("browser_error", "capability") from None
+        raise ArticleFailure("response_too_large", "rendered_html")
 
     async def _decision_allowed(self, url: str) -> bool:
         decision = await self._egress_guard.decide(
@@ -649,7 +816,7 @@ class GuardedArticleBrowser:
                 grace_s=self._cleanup_grace_s,
                 kwargs={"behavior": "wait"},
             )
-        for kind in ("page", "context"):
+        for kind in ("cdp", "page", "context"):
             owner = by_kind.get(kind)
             if owner is not None:
                 cleanup_failed |= await _bounded_method(
@@ -681,23 +848,44 @@ class GuardedArticleBrowser:
                     current.uncancel()
         return task.result(), caller_cancelled
 
-    async def acquire(self, url: str, profile: DirectBrowserProfile) -> str:
+    async def acquire(
+        self,
+        url: str,
+        profile: DirectBrowserProfile,
+        limits: ArticleLimits | None = None,
+    ) -> str:
         """Return rendered HTML after freshly guarding every browser dispatch."""
-        lease = self._acquisition_pool.acquire(
-            callback_capacity=self._callback_capacity,
-        )
-        if lease is None:
-            raise ArticleFailure("browser_error", "capacity")
-        try:
-            return await self._acquire_with_lease(url, profile, lease)
-        finally:
-            lease.seal()
-            lease.owner_finished()
+        if limits is None:
+            limits = ArticleLimits()
+        elif not isinstance(limits, ArticleLimits):
+            raise TypeError("limits must be an ArticleLimits instance")
+
+        attempts = profile.retries
+        if attempts == 0:
+            return ""
+        for attempt in range(attempts):
+            lease = self._acquisition_pool.acquire(
+                callback_capacity=self._callback_capacity,
+            )
+            if lease is None:
+                raise ArticleFailure("browser_error", "capacity")
+            try:
+                return await self._acquire_with_lease(url, profile, limits, lease)
+            except ArticleFailure as failure:
+                if attempt + 1 >= attempts or not self._should_retry(failure):
+                    raise
+            finally:
+                lease.seal()
+                lease.owner_finished()
+            await self._sleep(_BROWSER_RETRY_DELAY_S)
+
+        raise ArticleFailure("browser_error", "launch")
 
     async def _acquire_with_lease(
         self,
         url: str,
         profile: DirectBrowserProfile,
+        limits: ArticleLimits,
         lease: _BrowserAcquisitionLease,
     ) -> str:
         try:
@@ -739,6 +927,12 @@ class GuardedArticleBrowser:
             )
             resources.append(_OwnedResource(context, "close", "context"))
 
+            if profile.custom_cookies:
+                add_cookies = getattr(context, "add_cookies", None)
+                if not callable(add_cookies):
+                    raise ArticleFailure("browser_error", "capability")
+                await add_cookies([dict(cookie) for cookie in profile.custom_cookies])
+
             route = getattr(context, "route", None)
             route_web_socket = getattr(context, "route_web_socket", None)
             unroute_all = getattr(context, "unroute_all", None)
@@ -771,8 +965,29 @@ class GuardedArticleBrowser:
                     ),
                 ),
             )
+            stage = "page"
             page = await context.new_page()
             resources.append(_OwnedResource(page, "close", "page"))
+
+            new_cdp_session = getattr(context, "new_cdp_session", None)
+            if not callable(new_cdp_session):
+                raise ArticleFailure("browser_error", "capability")
+            try:
+                cdp_session = await new_cdp_session(page)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - CDP capability failures are sanitized
+                raise ArticleFailure("browser_error", "capability") from None
+            if not callable(getattr(cdp_session, "detach", None)):
+                raise ArticleFailure("browser_error", "capability")
+            resources.append(_OwnedResource(cdp_session, "detach", "cdp"))
+            transfer = _BrowserTransferLedger(
+                limit=limits.max_browser_transfer_bytes,
+                outcome=outcome,
+                lease=lease,
+                shutdown_factory=_shutdown_context,
+            )
+            await self._install_transfer_accounting(cdp_session, transfer)
 
             stage = "navigation"
             await page.goto(
@@ -780,8 +995,26 @@ class GuardedArticleBrowser:
                 wait_until="domcontentloaded",
                 timeout=profile.timeout_ms,
             )
+            if outcome.failure is not None:
+                raise outcome.failure
+            if profile.stealth_enabled:
+                stage = "stealth"
+                await self._stealth_hook(page)
+                wait_for_timeout = getattr(page, "wait_for_timeout", None)
+                if not callable(wait_for_timeout):
+                    raise ArticleFailure("browser_error", "capability")
+                stage = "wait"
+                await wait_for_timeout(profile.stealth_wait_ms)
+            else:
+                wait_for_load_state = getattr(page, "wait_for_load_state", None)
+                if not callable(wait_for_load_state):
+                    raise ArticleFailure("browser_error", "capability")
+                stage = "wait"
+                await wait_for_load_state("networkidle", timeout=profile.timeout_ms)
+            if outcome.failure is not None:
+                raise outcome.failure
             stage = "content"
-            html = str(await page.content())
+            html = await self._serialize_html(page, limits.max_article_bytes)
         except asyncio.CancelledError as exc:
             primary_error = exc
         except ArticleFailure as exc:
@@ -829,6 +1062,8 @@ class GuardedArticleBrowser:
         if isinstance(primary_error, asyncio.CancelledError) or teardown_cancelled or outcome.callback_cancelled:
             raise asyncio.CancelledError()
         if primary_error is not None:
+            if cleanup_failed and isinstance(primary_error, ArticleFailure):
+                primary_error._browser_retry_suppressed = True
             raise primary_error
         if outcome.failure is not None:
             raise outcome.failure

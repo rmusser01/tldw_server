@@ -5,6 +5,7 @@ import gc
 import importlib
 import weakref
 from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,12 +13,14 @@ import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
     ArticleFailure,
+    ArticleLimits,
     DirectBrowserProfile,
 )
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressDecision
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import RuntimeRequestContext
 
 _TARGET = "https://article.example/start"
+_DEFAULT_EVALUATION = object()
 
 
 def _browser_module() -> Any:
@@ -272,12 +275,15 @@ class _FakeBrowserRuntime:
         self,
         *,
         dispatches: list[tuple[str, object]] | None = None,
-        stage_errors: dict[str, BaseException] | None = None,
+        stage_errors: dict[str, BaseException | list[BaseException | None]] | None = None,
         html: str = "<!doctype html><html><body>ok</body></html>",
         missing_context_capability: str | None = None,
         cleanup_modes: dict[str, str] | None = None,
         callback_start_turns_after_close: list[int | None] | None = None,
         release_callbacks_after_close_timer: bool = False,
+        cdp_events: list[tuple[str, dict[str, object]]] | None = None,
+        cdp_missing: str | None = None,
+        evaluation_result: object = _DEFAULT_EVALUATION,
     ) -> None:
         self.dispatches = list(dispatches or [])
         self.stage_errors = dict(stage_errors or {})
@@ -286,6 +292,9 @@ class _FakeBrowserRuntime:
         self.cleanup_modes = dict(cleanup_modes or {})
         self.callback_start_turns_after_close = list(callback_start_turns_after_close or [])
         self.release_callbacks_after_close_timer = release_callbacks_after_close_timer
+        self.cdp_events = list(cdp_events or [])
+        self.cdp_missing = cdp_missing
+        self.evaluation_result = evaluation_result
         self.events: list[str] = []
         self.launch_options: dict[str, object] | None = None
         self.context_options: dict[str, object] | None = None
@@ -303,6 +312,11 @@ class _FakeBrowserRuntime:
         self.context_closed = asyncio.Event()
         self.target_closed = asyncio.Event()
         self.context_close_task_names: list[str] = []
+        self.cookies: list[dict[str, object]] = []
+        self.evaluate_calls: list[tuple[str, object]] = []
+        self.cdp_sessions: list[_FakeCDPSession] = []
+        self.sleep_delays: list[float] = []
+        self.stealth_pages: list[_FakePage] = []
         self.resistant_cleanup_release = asyncio.Event()
         self.resistant_cleanup_finished = asyncio.Event()
         self._callback_schedule_count = 0
@@ -310,6 +324,8 @@ class _FakeBrowserRuntime:
 
     def raise_at(self, stage: str) -> None:
         error = self.stage_errors.get(stage)
+        if isinstance(error, list):
+            error = error.pop(0) if error else None
         if error is not None:
             raise error
 
@@ -352,6 +368,39 @@ class _CleanupControlled:
         return object.__getattribute__(self, name)
 
 
+class _FakeCDPSession:
+    def __init__(self, runtime: _FakeBrowserRuntime) -> None:
+        self.runtime = runtime
+        self.handlers: dict[str, Callable[[dict[str, object]], None]] = {}
+        self.detached = False
+        if runtime.cdp_missing == "on":
+            self.on = None  # type: ignore[assignment]
+        if runtime.cdp_missing == "send":
+            self.send = None  # type: ignore[assignment]
+
+    def on(
+        self,
+        event: str,
+        handler: Callable[[dict[str, object]], None],
+    ) -> None:
+        self.runtime.events.append(f"cdp-on:{event}")
+        self.runtime.raise_at(f"cdp-on:{event}")
+        self.handlers[event] = handler
+
+    async def send(self, method: str) -> None:
+        self.runtime.events.append(f"cdp-send:{method}")
+        self.runtime.raise_at(f"cdp-send:{method}")
+
+    def emit(self, event: str, payload: dict[str, object]) -> None:
+        handler = self.handlers.get(event)
+        assert handler is not None, f"CDP handler not installed for {event}"
+        handler(payload)
+
+    async def detach(self) -> None:
+        self.detached = True
+        self.runtime.raise_at("detach:cdp")
+
+
 class _FakePage(_CleanupControlled):
     cleanup_stage = "close:page"
 
@@ -373,6 +422,9 @@ class _FakePage(_CleanupControlled):
                 route = value if isinstance(value, _FakeWebSocketRoute) else _FakeWebSocketRoute(str(value))
                 self.runtime.websocket_routes.append(route)
                 context.dispatch_websocket(route)
+        for event, payload in self.runtime.cdp_events:
+            assert self.runtime.cdp_sessions
+            self.runtime.cdp_sessions[-1].emit(event, payload)
         await asyncio.sleep(0)
 
     async def content(self) -> str:
@@ -380,6 +432,26 @@ class _FakePage(_CleanupControlled):
         self.runtime.raise_at("content")
         self.runtime.content_returned.set()
         return self.runtime.html
+
+    async def evaluate(self, expression: str, argument: object) -> object:
+        self.runtime.events.append("evaluate")
+        self.runtime.evaluate_calls.append((expression, argument))
+        self.runtime.raise_at("evaluate")
+        self.runtime.raise_at("content")
+        self.runtime.content_returned.set()
+        if self.runtime.evaluation_result is not _DEFAULT_EVALUATION:
+            return self.runtime.evaluation_result
+        size = len(self.runtime.html.encode("utf-8"))
+        return {"ok": True, "html": self.runtime.html} if size <= argument else {"ok": False, "size": size}
+
+    async def wait_for_timeout(self, timeout_ms: int) -> None:
+        self.runtime.events.append(f"wait_for_timeout:{timeout_ms}")
+        self.runtime.raise_at("wait_for_timeout")
+
+    async def wait_for_load_state(self, state: str, **kwargs: object) -> None:
+        self.runtime.events.append(f"wait_for_load_state:{state}")
+        self.runtime.events.append(f"wait-options:{sorted(kwargs)}")
+        self.runtime.raise_at("wait_for_load_state")
 
     async def close(self) -> None:
         await self.runtime.cleanup("close:page")
@@ -398,6 +470,8 @@ class _FakeContext(_CleanupControlled):
             self.route_web_socket = None  # type: ignore[assignment]
         if runtime.missing_context_capability == "unroute_all":
             self.unroute_all = None  # type: ignore[assignment]
+        if runtime.missing_context_capability == "new_cdp_session":
+            self.new_cdp_session = None  # type: ignore[assignment]
 
     def _schedule(
         self,
@@ -473,9 +547,17 @@ class _FakeContext(_CleanupControlled):
         self.runtime.raise_at("new_page")
         return _FakePage(self.runtime)
 
-    async def new_cdp_session(self, page: _FakePage) -> object:
+    async def new_cdp_session(self, page: _FakePage) -> _FakeCDPSession:
         self.runtime.events.append("new_cdp_session")
-        return SimpleNamespace(page=page)
+        self.runtime.raise_at("new_cdp_session")
+        session = _FakeCDPSession(self.runtime)
+        self.runtime.cdp_sessions.append(session)
+        return session
+
+    async def add_cookies(self, cookies: list[dict[str, object]]) -> None:
+        self.runtime.events.append("add_cookies")
+        self.runtime.raise_at("add_cookies")
+        self.runtime.cookies.extend(cookies)
 
     async def close(self) -> None:
         self.websocket_handler = None
@@ -551,6 +633,8 @@ def _adapter(
     cleanup_grace_s: float | None = None,
     acquisition_pool: Any | None = None,
     callback_capacity: int | None = None,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
+    stealth_hook: Callable[[Any], Awaitable[None]] | None = None,
 ) -> Any:
     context = RuntimeRequestContext(
         source="article_extract",
@@ -565,6 +649,13 @@ def _adapter(
         kwargs["acquisition_pool"] = acquisition_pool
     if callback_capacity is not None:
         kwargs["callback_capacity"] = callback_capacity
+
+    async def immediate_sleep(_delay: float) -> None:
+        await asyncio.sleep(0)
+
+    kwargs["sleep"] = sleep or immediate_sleep
+    if stealth_hook is not None:
+        kwargs["stealth_hook"] = stealth_hook
     return _browser_type()(
         egress_guard=guard,
         context=context,
@@ -580,6 +671,12 @@ def _assert_failure(exc: ArticleFailure, *, stage: str) -> None:
     assert str(exc) == "browser_error"
     assert "secret" not in str(exc)
     assert "token" not in str(exc)
+
+
+def _assert_limit_failure(exc: ArticleFailure, *, stage: str) -> None:
+    assert exc.code == "response_too_large"
+    assert exc.stage == stage
+    assert str(exc) == "response_too_large"
 
 
 @pytest.mark.unit
@@ -622,7 +719,7 @@ async def test_acquire_guards_target_redirect_and_subresource_fresh_without_tran
     assert runtime.events.index("route:**/*") < runtime.events.index(f"goto:{_TARGET}")
     assert runtime.events.index("route_web_socket:**/*") < runtime.events.index(f"goto:{_TARGET}")
     assert runtime.events[-6:] == [
-        "content",
+        "evaluate",
         "unroute_all:wait",
         "close:page",
         "close:context",
@@ -987,7 +1084,10 @@ async def test_navigation_failure_is_sanitized_and_resources_close_in_reverse_or
     runtime = _FakeBrowserRuntime(stage_errors={"goto": RuntimeError("https://secret.example/path?token=raw")})
 
     with pytest.raises(ArticleFailure) as raised:
-        await _adapter(runtime, _FakeGuard([])).acquire(_TARGET, _profile())
+        await _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            replace(_profile(), retries=1),
+        )
 
     _assert_failure(raised.value, stage="navigation")
     assert runtime.events[-4:] == [
@@ -1753,3 +1853,345 @@ async def test_repeated_caller_cancellation_preserves_cancellation_and_attempts_
     ]
     assert runtime.stuck_cleanup_cancelled == ["close:page", "close:context"]
     await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("missing_context", "cdp_missing", "failing_stage"),
+    [
+        ("new_cdp_session", None, None),
+        (None, "on", None),
+        (None, "send", None),
+        (None, None, "cdp-on:Network.dataReceived"),
+        (None, None, "cdp-send:Network.enable"),
+    ],
+    ids=["session", "event-api", "command-api", "event-registration", "network-enable"],
+)
+async def test_task16_cdp_capability_failures_are_terminal_and_precede_navigation(
+    missing_context: str | None,
+    cdp_missing: str | None,
+    failing_stage: str | None,
+) -> None:
+    errors = {failing_stage: RuntimeError("raw cdp error")} if failing_stage else None
+    runtime = _FakeBrowserRuntime(
+        missing_context_capability=missing_context,
+        cdp_missing=cdp_missing,
+        stage_errors=errors,
+    )
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            _profile(),
+            ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+        )
+
+    _assert_failure(raised.value, stage="capability")
+    assert runtime.events.count("launch") == 1
+    assert not any(event.startswith("goto:") for event in runtime.events)
+
+
+@pytest.mark.unit
+async def test_task16_installs_all_transfer_accounting_before_navigation() -> None:
+    runtime = _FakeBrowserRuntime()
+
+    await _adapter(runtime, _FakeGuard([])).acquire(
+        _TARGET,
+        _profile(),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+    )
+
+    goto_index = runtime.events.index(f"goto:{_TARGET}")
+    assert runtime.events.index("new_cdp_session") < goto_index
+    assert runtime.events.index("cdp-on:Network.dataReceived") < goto_index
+    assert runtime.events.index("cdp-on:Network.webSocketFrameReceived") < goto_index
+    assert runtime.events.index("cdp-on:Network.webSocketFrameSent") < goto_index
+    assert runtime.events.index("cdp-send:Network.enable") < goto_index
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("encoded_length", "limit", "expected_stage"),
+    [(8, 8, None), (9, 8, "browser_transfer")],
+    ids=["exact", "over"],
+)
+async def test_task16_http_encoded_transfer_accepts_exact_and_rejects_over(
+    encoded_length: int,
+    limit: int,
+    expected_stage: str | None,
+) -> None:
+    runtime = _FakeBrowserRuntime(
+        cdp_events=[("Network.dataReceived", {"encodedDataLength": encoded_length})],
+        html="<html></html>",
+    )
+    operation = _adapter(runtime, _FakeGuard([])).acquire(
+        _TARGET,
+        replace(_profile(), retries=3),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=limit),
+    )
+
+    if expected_stage is None:
+        assert await operation == "<html></html>"
+    else:
+        with pytest.raises(ArticleFailure) as raised:
+            await operation
+        _assert_limit_failure(raised.value, stage=expected_stage)
+        assert runtime.events.count("launch") == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("event", "frame", "limit"),
+    [
+        ("Network.webSocketFrameReceived", {"opcode": 1, "payloadData": "éé"}, 4),
+        ("Network.webSocketFrameReceived", {"opcode": 2, "payloadData": "AAEC"}, 3),
+        ("Network.webSocketFrameSent", {"opcode": 1, "payloadData": "éé"}, 4),
+        ("Network.webSocketFrameSent", {"opcode": 2, "payloadData": "AAEC"}, 3),
+    ],
+    ids=["received-text", "received-binary", "sent-text", "sent-binary"],
+)
+async def test_task16_websocket_frames_count_decoded_payload_bytes_exactly(
+    event: str,
+    frame: dict[str, object],
+    limit: int,
+) -> None:
+    runtime = _FakeBrowserRuntime(
+        cdp_events=[(event, {"response": frame})],
+        html="<html></html>",
+    )
+
+    html = await _adapter(runtime, _FakeGuard([])).acquire(
+        _TARGET,
+        _profile(),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=limit),
+    )
+
+    assert html == "<html></html>"
+
+
+@pytest.mark.unit
+async def test_task16_zero_retries_preserves_legacy_no_attempt_result() -> None:
+    runtime = _FakeBrowserRuntime()
+
+    html = await _adapter(runtime, _FakeGuard([])).acquire(
+        _TARGET,
+        replace(_profile(), retries=0),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+    )
+
+    assert html == ""
+    assert runtime.events == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("event", "payload"),
+    [
+        ("Network.dataReceived", {}),
+        ("Network.dataReceived", {"encodedDataLength": True}),
+        ("Network.dataReceived", {"encodedDataLength": -1}),
+        ("Network.webSocketFrameReceived", {}),
+        ("Network.webSocketFrameReceived", {"response": {"opcode": 1, "payloadData": 1}}),
+        ("Network.webSocketFrameReceived", {"response": {"opcode": 2, "payloadData": "***"}}),
+        ("Network.webSocketFrameReceived", {"response": {"opcode": 9, "payloadData": "x"}}),
+    ],
+    ids=[
+        "missing-http-length",
+        "boolean-http-length",
+        "negative-http-length",
+        "missing-frame",
+        "non-string-frame",
+        "invalid-base64",
+        "unsupported-opcode",
+    ],
+)
+async def test_task16_invalid_transfer_payload_fails_closed_without_retry(
+    event: str,
+    payload: dict[str, object],
+) -> None:
+    runtime = _FakeBrowserRuntime(cdp_events=[(event, payload)])
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            replace(_profile(), retries=3),
+            ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=8),
+        )
+
+    _assert_failure(raised.value, stage="capability")
+    assert runtime.events.count("launch") == 1
+
+
+@pytest.mark.unit
+async def test_task16_transfer_overflow_reuses_one_retained_emergency_shutdown() -> None:
+    runtime = _FakeBrowserRuntime(
+        cdp_events=[
+            ("Network.dataReceived", {"encodedDataLength": 9}),
+            ("Network.dataReceived", {"encodedDataLength": 9}),
+            (
+                "Network.webSocketFrameReceived",
+                {"response": {"opcode": 1, "payloadData": "overflow"}},
+            ),
+        ]
+    )
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            replace(_profile(), retries=3),
+            ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=8),
+        )
+
+    _assert_limit_failure(raised.value, stage="browser_transfer")
+    assert runtime.context_close_task_names.count("article-browser-emergency-context-shutdown") == 1
+    assert runtime.events.count("launch") == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("delta", [0, 1], ids=["exact", "over"])
+async def test_task16_rendered_html_is_measured_in_browser_without_page_content(
+    delta: int,
+) -> None:
+    html = "<!DOCTYPE html>\n<html><body>é</body></html>"
+    size = len(html.encode("utf-8"))
+    runtime = _FakeBrowserRuntime(html=html)
+    limit = size - delta
+
+    operation = _adapter(runtime, _FakeGuard([])).acquire(
+        _TARGET,
+        _profile(),
+        ArticleLimits(max_article_bytes=limit, max_browser_transfer_bytes=128),
+    )
+    if delta == 0:
+        assert await operation == html
+    else:
+        with pytest.raises(ArticleFailure) as raised:
+            await operation
+        _assert_limit_failure(raised.value, stage="rendered_html")
+
+    assert "content" not in runtime.events
+    expression, argument = runtime.evaluate_calls[0]
+    assert "new XMLSerializer().serializeToString(document.doctype)" in expression
+    assert "document.documentElement.outerHTML" in expression
+    assert "new TextEncoder().encode(html).length" in expression
+    assert argument == limit
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "result",
+    [None, {}, {"ok": 1}, {"ok": True}, {"ok": True, "html": 1}, {"ok": False}, {"ok": False, "html": "leak"}],
+)
+async def test_task16_malformed_browser_serialization_result_fails_closed_without_retry(
+    result: object,
+) -> None:
+    runtime = _FakeBrowserRuntime(evaluation_result=result)
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            replace(_profile(), retries=3),
+            ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+        )
+
+    _assert_failure(raised.value, stage="capability")
+    assert runtime.events.count("launch") == 1
+    assert "content" not in runtime.events
+
+
+@pytest.mark.unit
+async def test_task16_direct_browser_profile_preserves_cookies_stealth_launch_and_viewport() -> None:
+    runtime = _FakeBrowserRuntime(html="<html></html>")
+
+    async def stealth(page: Any) -> None:
+        runtime.stealth_pages.append(page)
+
+    await _adapter(runtime, _FakeGuard([]), stealth_hook=stealth).acquire(
+        _TARGET,
+        _profile(),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+    )
+
+    assert runtime.launch_options == {"headless": True}
+    assert runtime.context_options == {
+        "service_workers": "block",
+        "user_agent": "Task15 Browser/1.0",
+        "viewport": {"width": 1024, "height": 768},
+    }
+    assert runtime.cookies == [
+        {
+            "name": "caller-cookie",
+            "value": "secret",
+            "domain": "article.example",
+            "path": "/",
+        }
+    ]
+    assert len(runtime.stealth_pages) == 1
+    assert "wait_for_timeout:250" in runtime.events
+    assert not any(event.startswith("wait_for_load_state:") for event in runtime.events)
+
+
+@pytest.mark.unit
+async def test_task16_non_stealth_navigation_waits_for_networkidle_with_timeout() -> None:
+    runtime = _FakeBrowserRuntime(html="<html></html>")
+
+    await _adapter(runtime, _FakeGuard([])).acquire(
+        _TARGET,
+        replace(_profile(), stealth_enabled=False),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+    )
+
+    assert "wait_for_load_state:networkidle" in runtime.events
+    assert "wait-options:['timeout']" in runtime.events
+    assert not any(event.startswith("wait_for_timeout:") for event in runtime.events)
+
+
+@pytest.mark.unit
+async def test_task16_ordinary_navigation_failure_retries_with_injected_sleep() -> None:
+    runtime = _FakeBrowserRuntime(
+        stage_errors={"goto": [RuntimeError("first navigation failed"), None]},
+        html="<html></html>",
+    )
+
+    async def sleep(delay: float) -> None:
+        runtime.sleep_delays.append(delay)
+
+    html = await _adapter(runtime, _FakeGuard([]), sleep=sleep).acquire(
+        _TARGET,
+        replace(_profile(), retries=2, stealth_enabled=False),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+    )
+
+    assert html == "<html></html>"
+    assert runtime.events.count("launch") == 2
+    assert runtime.sleep_delays == [2.0]
+    assert len(runtime.cdp_sessions) == 2
+    assert all(session.detached for session in runtime.cdp_sessions)
+
+
+@pytest.mark.unit
+async def test_task16_caller_cancellation_never_retries() -> None:
+    runtime = _FakeBrowserRuntime(stage_errors={"goto": asyncio.CancelledError()})
+
+    with pytest.raises(asyncio.CancelledError):
+        await _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            replace(_profile(), retries=3),
+            ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+        )
+
+    assert runtime.events.count("launch") == 1
+
+
+@pytest.mark.unit
+async def test_task16_cdp_session_is_owned_and_detached_on_success() -> None:
+    runtime = _FakeBrowserRuntime(html="<html></html>")
+
+    await _adapter(runtime, _FakeGuard([])).acquire(
+        _TARGET,
+        _profile(),
+        ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+    )
+
+    assert len(runtime.cdp_sessions) == 1
+    assert runtime.cdp_sessions[0].detached is True
