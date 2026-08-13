@@ -258,6 +258,30 @@ async def test_runner_preserves_config_snapshot_when_plan_resolution_falls_back(
     assert profile.stealth_enabled is True
     assert profile.stealth_wait_ms == 7
     assert harness.browser.calls[0][2] == ArticleLimits(321, 654)
+    assert result["preflight_analysis"] == {"analysis": {"results": {}}}
+
+
+@pytest.mark.asyncio
+async def test_runner_handles_malformed_url_when_plan_falls_back_before_policy() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    malformed_url = "http://[::1"
+    denied = PreflightTarget(
+        url=malformed_url,
+        decision=PolicyDecision(False, "strict", "robots_disallowed", "pre_fetch", "article_extract"),
+        request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+    )
+    harness = _harness(target=denied)
+
+    def resolve_plan(_url: str, _config: Mapping[str, Any]) -> ArticlePlan:
+        raise RuntimeError("rules unavailable")
+
+    harness.dependencies = dataclasses.replace(harness.dependencies, resolve_plan=resolve_plan)
+    result = await _run_article(malformed_url, None, True, dependencies=harness.dependencies)
+
+    assert result["policy_reason"] == "robots_disallowed"
+    assert result["error"] == "Blocked by outbound policy"
+    assert harness.fetch.requests == []
 
 
 @pytest.mark.asyncio
@@ -427,6 +451,24 @@ async def test_runner_falls_back_to_browser_after_nonextractable_or_failed_http(
 
 
 @pytest.mark.asyncio
+async def test_runner_maps_lightweight_extraction_error_before_browser_recovery() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    harness = _harness(extract_results=[RuntimeError("private extraction detail"), _article()])
+    result = await _run_article(URL, None, True, dependencies=harness.dependencies)
+
+    assert result["extraction_successful"] is True
+    assert harness.logs[0] == {
+        "exception_type": "RuntimeError",
+        "code": "extraction_error",
+        "stage": "extract",
+        "host": "example.com",
+    }
+    assert ("scrape_fetch_total", {"backend": "httpx", "outcome": "error"}) in harness.metrics
+    assert ("scrape_playwright_fallback_total", {"reason": "error"}) in harness.metrics
+
+
+@pytest.mark.asyncio
 async def test_runner_logs_sanitized_fetch_failure_before_browser_recovery() -> None:
     from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
 
@@ -487,6 +529,50 @@ async def test_runner_falls_back_after_js_required_and_records_bounded_metric() 
     assert ("scrape_playwright_fallback_total", {"reason": "js_required"}) in harness.metrics
     assert ("scrape_playwright_fallback_total", {"reason": "no_extract"}) not in harness.metrics
     assert len(harness.browser.calls) == 1
+
+
+def test_log_failure_normalizes_untrusted_article_fields() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _log_failure
+
+    harness = _harness()
+    _log_failure(
+        harness.dependencies,
+        RuntimeError("token=secret"),
+        code="../../hostile-code",
+        stage="untrusted-stage?token=secret",
+        url="https://user:secret@example.com/private",
+    )
+
+    assert harness.logs == [
+        {
+            "exception_type": "RuntimeError",
+            "code": "extraction_error",
+            "stage": "article",
+            "host": "example.com",
+        }
+    ]
+
+
+def test_log_failure_preserves_known_guarded_browser_stage() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _log_failure
+
+    harness = _harness()
+    _log_failure(
+        harness.dependencies,
+        RuntimeError("private cleanup detail"),
+        code="browser_error",
+        stage="cleanup",
+        url=URL,
+    )
+
+    assert harness.logs == [
+        {
+            "exception_type": "RuntimeError",
+            "code": "browser_error",
+            "stage": "cleanup",
+            "host": "example.com",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -626,6 +712,110 @@ async def test_runner_keeps_event_loop_live_while_real_executor_runs() -> None:
     assert result["extraction_successful"] is True
 
 
+@pytest.mark.asyncio
+async def test_runner_keeps_event_loop_live_while_config_load_blocks() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    harness = _harness()
+    loop = asyncio.get_running_loop()
+    heartbeat = threading.Event()
+    release = threading.Event()
+    observed_heartbeat: list[bool] = []
+
+    def release_config() -> None:
+        observed_heartbeat.append(heartbeat.is_set())
+        release.set()
+
+    def blocking_config() -> Mapping[str, Any]:
+        loop.call_soon_threadsafe(heartbeat.set)
+        timer = threading.Timer(0.05, release_config)
+        timer.start()
+        try:
+            assert release.wait(timeout=1.0)
+        finally:
+            timer.join()
+        return {"web_scraper": {"web_scraper_preflight_analyzers": False}}
+
+    harness.dependencies = dataclasses.replace(harness.dependencies, load_config=blocking_config)
+    result = await _run_article(URL, None, True, dependencies=harness.dependencies)
+
+    assert result["extraction_successful"] is True
+    assert observed_heartbeat == [True]
+
+
+@pytest.mark.asyncio
+async def test_runner_forwards_resolved_strategy_settings_exactly() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    def handler(_html: str, _url: str) -> dict[str, Any]:
+        return _article()
+
+    plan = dataclasses.replace(
+        _plan(handler="package.module:handler"),
+        strategy_order=("schema", "regex"),
+        schema_rules={"baseSelector": "//article"},
+        llm_settings={"model": "local"},
+        regex_settings={"patterns": ["ID"]},
+        cluster_settings={"threshold": 0.8},
+    )
+    harness = _harness()
+    harness.dependencies = dataclasses.replace(
+        harness.dependencies,
+        resolve_plan=lambda _url, _config: plan,
+        resolve_handler=lambda _path: handler,
+    )
+    result = await _run_article(URL, None, False, dependencies=harness.dependencies)
+    _func, _args, kwargs = harness.executor.calls[0]
+
+    assert result["extraction_successful"] is True
+    assert kwargs == {
+        "strategy_order": ["schema", "regex"],
+        "handler": handler,
+        "schema_rules": {"baseSelector": "//article"},
+        "llm_settings": {"model": "local"},
+        "regex_settings": {"patterns": ("ID",)},
+        "cluster_settings": {"threshold": 0.8},
+        "allow_llm_extraction": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_public_entry_snapshots_cookies_before_policy_await(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+
+    caller_cookies = [{"name": "session", "value": "before", "domain": "example.com"}]
+    harness = _harness(
+        fetch_outcomes=[FetchResponse(URL, 204, {}, "", "httpx")],
+        browser_outcomes=["<html><body>rendered</body></html>"],
+    )
+    captured: dict[str, Any] = {}
+
+    async def evaluate_target(*_args: Any, **_kwargs: Any) -> PreflightTarget:
+        caller_cookies[0]["value"] = "after"
+        return _allowed_target()
+
+    def build_dependencies(cookie_snapshot: Sequence[Mapping[str, Any]] | None) -> Any:
+        captured["cookies"] = cookie_snapshot
+        plan = dataclasses.replace(
+            _plan(),
+            browser=dataclasses.replace(_plan().browser, custom_cookies=tuple(cookie_snapshot or ())),
+        )
+        return dataclasses.replace(
+            harness.dependencies,
+            evaluate_target=evaluate_target,
+            resolve_plan=lambda _url, _config: plan,
+        )
+
+    monkeypatch.setattr(canonical, "_build_default_dependencies", build_dependencies)
+    result = await canonical.scrape_article(URL, caller_cookies)
+
+    assert result["extraction_successful"] is True
+    assert captured["cookies"] is not caller_cookies
+    assert captured["cookies"][0]["value"] == "before"
+    assert harness.fetch.requests[0].cookies == {"session": "before"}
+    assert harness.browser.calls[0][1].custom_cookies[0]["value"] == "before"
+
+
 def test_article_dependencies_are_frozen_and_slotted() -> None:
     from tldw_Server_API.app.core.Web_Scraping.orchestration.article import ArticleDependencies
 
@@ -651,7 +841,7 @@ def test_public_coroutine_is_a_direct_canonical_export_with_exact_signature() ->
     assert inspect.iscoroutinefunction(canonical)
     assert (
         str(inspect.signature(canonical))
-        == "(url: 'str', custom_cookies: 'list[dict[str, Any]] | None' = None, *, allow_llm_extraction: 'bool' = True) -> 'dict[str, Any]'"
+        == "(url: str, custom_cookies: list[dict[str, Any]] | None = None, *, allow_llm_extraction: bool = True) -> dict[str, typing.Any]"
     )
 
 

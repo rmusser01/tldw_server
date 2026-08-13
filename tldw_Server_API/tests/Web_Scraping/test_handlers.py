@@ -1,5 +1,6 @@
-import types  # noqa: I001
+import dataclasses
 import threading
+import types  # noqa: I001
 
 import pytest
 
@@ -118,10 +119,15 @@ def test_generic_html_handler_preserves_failure_or_empty_content_without_markdow
 
 @pytest.mark.asyncio
 async def test_scrape_article_uses_handler(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael  # noqa: I001
     from unittest.mock import AsyncMock
 
-    from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+        ArticleLimits,
+        ArticlePlan,
+        DirectBrowserProfile,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
 
     policy_decide = AsyncMock(
         return_value=PolicyDecision(
@@ -132,23 +138,10 @@ async def test_scrape_article_uses_handler(monkeypatch):
             source="article_extract",
         )
     )
-    policy_checker = types.SimpleNamespace(decide=policy_decide)
-    monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(ael, "load_and_log_configs", lambda: {"web_scraper": {}})
-    monkeypatch.setattr(ael, "_js_required", lambda *args, **kwargs: False)
-
-    def fake_http_fetch(*args, **kwargs):
-        return (
-            types.SimpleNamespace(
-                status=200,
-                text="<html><body><p>ok</p></body></html>",
-                headers={},
-            ),
-            "httpx",
-        )
 
     event_loop_thread = threading.get_ident()
     extraction_threads = []
+    default_dependencies = canonical._build_default_dependencies
 
     def fake_handler(html, url):
         extraction_threads.append(threading.get_ident())
@@ -161,10 +154,41 @@ async def test_scrape_article_uses_handler(monkeypatch):
             "extraction_successful": True,
         }
 
-    monkeypatch.setattr(ael, "_fetch_article_lightweight", fake_http_fetch)
-    monkeypatch.setattr(ael, "resolve_handler", lambda _: fake_handler)
+    class FetchClient:
+        def fetch(self, request):
+            return FetchResponse(
+                url=request.url,
+                status=200,
+                text="<html><body><p>ok</p></body></html>",
+                headers={},
+                backend="httpx",
+            )
 
-    result = await ael.scrape_article("https://example.com")
+    async def evaluate_target(*_args, **_kwargs):
+        return types.SimpleNamespace(decision=await policy_decide())
+
+    def build_dependencies(cookies):
+        plan = ArticlePlan(
+            url="https://example.com",
+            domain="example.com",
+            backend="httpx",
+            browser=DirectBrowserProfile("test", tuple(cookies), 1, 1_000, False, 0),
+            limits=ArticleLimits(),
+        )
+        dependencies = default_dependencies(cookies)
+        return dataclasses.replace(
+            dependencies,
+            load_config=lambda: {"web_scraper": {"web_scraper_preflight_analyzers": False}},
+            resolve_plan=lambda _url, _config: plan,
+            evaluate_target=evaluate_target,
+            fetch_client=FetchClient(),
+            resolve_handler=lambda _path: fake_handler,
+            js_required=lambda *_args, **_kwargs: False,
+        )
+
+    monkeypatch.setattr(canonical, "_build_default_dependencies", build_dependencies)
+
+    result = await canonical.scrape_article("https://example.com")
 
     policy_decide.assert_awaited_once()
     assert result["title"] == "handled"

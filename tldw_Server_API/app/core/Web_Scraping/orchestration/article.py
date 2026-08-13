@@ -1,9 +1,8 @@
 """Canonical governed orchestration for standard asynchronous article scraping."""
 
-from __future__ import annotations
-
 import asyncio
 import time
+import typing
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +23,7 @@ from tldw_Server_API.app.core.Web_Scraping.handlers import resolve_handler
 from tldw_Server_API.app.core.Web_Scraping.observability import sanitized_host
 from tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser import GuardedArticleBrowser
 from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+    PUBLIC_FAILURE_CODES,
     ArticleFailure,
     ArticlePlan,
     article_failure_result,
@@ -51,6 +51,34 @@ _PLAYWRIGHT = "playwright"
 _HTTP_BACKENDS = frozenset({_AUTO_BACKEND, "curl", "httpx"})
 _SAFE_POLICY_FAILURE = "policy_error"
 _RESPONSE_TOO_LARGE_MESSAGE = "Response exceeds max_response_bytes limit"
+_ARTICLE_LOG_STAGES = frozenset(
+    {
+        "acquire",
+        "article",
+        "browser",
+        "browser_transfer",
+        "capability",
+        "capacity",
+        "cleanup",
+        "config",
+        "content",
+        "context",
+        "egress",
+        "extract",
+        "fetch",
+        "launch",
+        "navigation",
+        "page",
+        "plan",
+        "pre_fetch",
+        "preflight",
+        "preflight_advice",
+        "preflight_payload",
+        "rendered_html",
+        "result",
+        "websocket_route",
+    }
+)
 _JS_REQUIRED_DOMAINS = frozenset(
     {
         "medium.com",
@@ -120,6 +148,15 @@ def _snapshot_value(value: Any) -> Any:
     return value
 
 
+def _snapshot_cookies(
+    value: Sequence[Mapping[str, Any]] | None,
+) -> tuple[Mapping[str, Any], ...]:
+    """Capture caller cookies before the request can suspend."""
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        return ()
+    return tuple(_snapshot_mapping(cookie) for cookie in value if isinstance(cookie, Mapping))
+
+
 def _web_scraper_values(config: Mapping[str, Any]) -> Mapping[str, Any]:
     values = config.get("web_scraper")
     if isinstance(values, Mapping):
@@ -131,10 +168,15 @@ def _fallback_plan(
     url: str, config: Mapping[str, Any], custom_cookies: Sequence[Mapping[str, Any]] | None
 ) -> ArticlePlan:
     """Create the same safe generic route used when router construction fails."""
-    parsed = urlsplit(url)
+    try:
+        domain = sanitized_host(url)
+    except (AttributeError, TypeError, UnicodeError, ValueError):
+        domain = ""
+    if domain == "unknown":
+        domain = ""
     routing = SimpleNamespace(
         url=url,
-        domain=parsed.netloc,
+        domain=domain,
         backend="auto",
         handler="tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
         ua_profile="chrome_120_win",
@@ -278,12 +320,14 @@ def _log_failure(
     stage: str,
     url: str,
 ) -> None:
+    safe_code = code if type(code) is str and code in PUBLIC_FAILURE_CODES else "extraction_error"
+    safe_stage = stage if type(stage) is str and stage in _ARTICLE_LOG_STAGES else "article"
     try:
         dependencies.log(
             "Article orchestration failure.",
             exception_type=type(exc).__name__[:80],
-            code=code,
-            stage=stage,
+            code=safe_code,
+            stage=safe_stage,
             host=sanitized_host(url),
         )
     except Exception:  # noqa: BLE001 - logging must not change article outcomes
@@ -377,7 +421,7 @@ async def _extract(
 
 async def _run_article(
     url: str,
-    custom_cookies: list[dict[str, Any]] | None,
+    custom_cookies: Sequence[Mapping[str, Any]] | None,
     allow_llm_extraction: bool,
     *,
     dependencies: ArticleDependencies,
@@ -385,7 +429,7 @@ async def _run_article(
     """Run one request through its immutable route and governed dependencies."""
     config: Mapping[str, Any]
     try:
-        config = _snapshot_config(dependencies.load_config())
+        config = _snapshot_config(await asyncio.to_thread(dependencies.load_config))
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - config loading has one safe empty fallback
@@ -478,15 +522,38 @@ async def _run_article(
 
     if advised_backend != _PLAYWRIGHT and advised_method != _PLAYWRIGHT:
         started = dependencies.clock()
-        js_required = False
+        requested_backend = _bounded_backend(advised_backend)
+        fetch_metric_backend = "curl" if requested_backend == "curl" else "httpx"
         try:
             response, backend_used = await _fetch_lightweight(
                 dependencies,
                 plan,
                 url=url,
                 cookies=cookies,
-                backend=_bounded_backend(advised_backend),
+                backend=requested_backend,
             )
+        except asyncio.CancelledError:
+            raise
+        except ArticleFailure as exc:
+            if exc.code == "response_too_large":
+                _log_failure(dependencies, exc, code=exc.code, stage=exc.stage, url=url)
+                return _attach_preflight(_failure_result(url, exc.code), preflight_payload)
+            _log_failure(dependencies, exc, code="fetch_error", stage="fetch", url=url)
+            _record_counter(
+                dependencies,
+                "scrape_fetch_total",
+                {"backend": fetch_metric_backend, "outcome": "error"},
+            )
+            _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
+        except Exception as exc:  # noqa: BLE001 - browser fallback remains eligible
+            _log_failure(dependencies, exc, code="fetch_error", stage="fetch", url=url)
+            _record_counter(
+                dependencies,
+                "scrape_fetch_total",
+                {"backend": fetch_metric_backend, "outcome": "error"},
+            )
+            _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
+        else:
             _record_histogram(
                 dependencies,
                 "scrape_fetch_latency_seconds",
@@ -495,50 +562,70 @@ async def _run_article(
             )
             if response.status < 400 and response.text:
                 if dependencies.js_required(response.text, response.headers, url):
-                    js_required = True
                     _record_counter(
                         dependencies,
                         "scrape_playwright_fallback_total",
                         {"reason": "js_required"},
                     )
                 else:
-                    final_extraction = await _extract(
-                        dependencies,
-                        plan,
-                        response.text,
-                        url,
-                        allow_llm_extraction=allow_llm_extraction,
-                    )
-                    if final_extraction.get("extraction_successful"):
-                        content = str(final_extraction.get("content", "") or "")
-                        _record_histogram(
+                    try:
+                        final_extraction = await _extract(
                             dependencies,
-                            "scrape_content_length_bytes",
-                            float(len(content.encode("utf-8", errors="ignore"))),
-                            {"backend": backend_used},
+                            plan,
+                            response.text,
+                            url,
+                            allow_llm_extraction=allow_llm_extraction,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - browser fallback remains eligible
+                        _log_failure(dependencies, exc, code="extraction_error", stage="extract", url=url)
+                        _record_counter(
+                            dependencies,
+                            "scrape_fetch_total",
+                            {"backend": backend_used, "outcome": "error"},
                         )
                         _record_counter(
-                            dependencies, "scrape_fetch_total", {"backend": backend_used, "outcome": "success"}
+                            dependencies,
+                            "scrape_playwright_fallback_total",
+                            {"reason": "error"},
                         )
-                        return _attach_preflight(final_extraction, preflight_payload)
-                    _record_counter(
-                        dependencies, "scrape_fetch_total", {"backend": backend_used, "outcome": "no_extract"}
-                    )
+                    else:
+                        if final_extraction.get("extraction_successful"):
+                            content = str(final_extraction.get("content", "") or "")
+                            _record_histogram(
+                                dependencies,
+                                "scrape_content_length_bytes",
+                                len(content.encode("utf-8", errors="ignore")),
+                                {"backend": backend_used},
+                            )
+                            _record_counter(
+                                dependencies,
+                                "scrape_fetch_total",
+                                {"backend": backend_used, "outcome": "success"},
+                            )
+                            return _attach_preflight(final_extraction, preflight_payload)
+                        _record_counter(
+                            dependencies,
+                            "scrape_fetch_total",
+                            {"backend": backend_used, "outcome": "no_extract"},
+                        )
+                        _record_counter(
+                            dependencies,
+                            "scrape_playwright_fallback_total",
+                            {"reason": "no_extract"},
+                        )
             else:
-                _record_counter(dependencies, "scrape_fetch_total", {"backend": backend_used, "outcome": "no_extract"})
-            if not js_required:
-                _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "no_extract"})
-        except asyncio.CancelledError:
-            raise
-        except ArticleFailure as exc:
-            if exc.code == "response_too_large":
-                _log_failure(dependencies, exc, code=exc.code, stage=exc.stage, url=url)
-                return _attach_preflight(_failure_result(url, exc.code), preflight_payload)
-            _log_failure(dependencies, exc, code=exc.code, stage=exc.stage, url=url)
-            _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
-        except Exception as exc:  # noqa: BLE001 - browser fallback remains eligible
-            _log_failure(dependencies, exc, code="fetch_error", stage="fetch", url=url)
-            _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
+                _record_counter(
+                    dependencies,
+                    "scrape_fetch_total",
+                    {"backend": backend_used, "outcome": "no_extract"},
+                )
+                _record_counter(
+                    dependencies,
+                    "scrape_playwright_fallback_total",
+                    {"reason": "no_extract"},
+                )
 
     browser_started = dependencies.clock()
     try:
@@ -597,7 +684,7 @@ async def _run_article(
         _record_histogram(
             dependencies,
             "scrape_content_length_bytes",
-            float(len(content.encode("utf-8", errors="ignore"))),
+            len(content.encode("utf-8", errors="ignore")),
             {"backend": _PLAYWRIGHT},
         )
         _record_counter(dependencies, "scrape_fetch_total", {"backend": _PLAYWRIGHT, "outcome": "success"})
@@ -668,12 +755,13 @@ async def scrape_article(
     custom_cookies: list[dict[str, Any]] | None = None,
     *,
     allow_llm_extraction: bool = True,
-) -> dict[str, Any]:
+) -> dict[str, typing.Any]:
     """Scrape one article through canonical governed orchestration."""
-    dependencies = _build_default_dependencies(custom_cookies)
+    cookie_snapshot = _snapshot_cookies(custom_cookies)
+    dependencies = _build_default_dependencies(cookie_snapshot)
     return await _run_article(
         url,
-        custom_cookies,
+        cookie_snapshot,
         allow_llm_extraction,
         dependencies=dependencies,
     )
