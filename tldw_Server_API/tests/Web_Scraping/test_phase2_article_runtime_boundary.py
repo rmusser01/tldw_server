@@ -9,6 +9,11 @@ import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
 from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+    ArticleLimits,
+    ArticlePlan,
+    DirectBrowserProfile,
+)
 from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchRequest,
@@ -74,24 +79,15 @@ def _allowed_target(url: str) -> PreflightTarget:
 def _install_article_defaults(
     monkeypatch: pytest.MonkeyPatch,
     *,
+    policy_checker: FakePolicyChecker,
+    fetch_client: FakeFetchClient,
     backend: str = "httpx",
     web_scraper_config: Mapping[str, Any] | None = None,
 ) -> ModuleType:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
 
     config = {"web_scraper": web_scraper_config or {}}
-    monkeypatch.setattr(ael, "load_and_log_configs", lambda: config)
-    monkeypatch.setattr(ael, "_js_required", lambda *args, **kwargs: False)
-
-    rules = {
-        "domains": {
-            "example.com": {
-                "backend": backend,
-                "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
-            }
-        }
-    }
-    monkeypatch.setattr(ael.ScraperRouter, "load_rules_from_yaml", lambda path: rules)
 
     def fake_handler(html: str, url: str) -> dict[str, object]:
         return {
@@ -103,19 +99,59 @@ def _install_article_defaults(
             "extraction_successful": True,
         }
 
-    monkeypatch.setattr(ael, "resolve_handler", lambda _: fake_handler)
-    monkeypatch.setattr(ael, "observe_histogram", lambda *args, **kwargs: None)
-    monkeypatch.setattr(ael, "increment_counter", lambda *args, **kwargs: None)
+    def resolve_plan(url: str, _config: Mapping[str, Any]) -> ArticlePlan:
+        return ArticlePlan(
+            url=url,
+            domain="example.com",
+            backend=backend,
+            handler="tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+            headers={"User-Agent": "test-agent"},
+            browser=DirectBrowserProfile("test-agent", (), 1, 1_000, False, 0),
+            limits=ArticleLimits(4_096, 8_192),
+        )
+
+    def extract(html: str, url: str, **kwargs: Any) -> dict[str, object]:
+        handler = kwargs["handler"]
+        assert handler is not None
+        return handler(html, url)
+
+    class Browser:
+        async def acquire(self, *_args: Any, **_kwargs: Any) -> str:
+            raise AssertionError("browser fallback is not expected")
+
+    class Executor:
+        async def run(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+            return func(*args, **kwargs)
+
+    dependencies = canonical.ArticleDependencies(
+        load_config=lambda: config,
+        resolve_plan=resolve_plan,
+        evaluate_target=lambda *args, **kwargs: preflight_facade.evaluate_target(*args, **kwargs),
+        run_preflight=lambda *args, **kwargs: preflight_facade.run_preflight(*args, **kwargs),
+        apply_preflight_advice=lambda *args, **kwargs: preflight_facade.apply_preflight_advice(*args, **kwargs),
+        fetch_client=fetch_client,
+        browser=Browser(),
+        executor=Executor(),
+        extract=extract,
+        build_preflight_context=lambda *args, **kwargs: preflight_facade.build_execution_context(*args, **kwargs),
+        preflight_options=preflight_facade.PreflightOptions.from_mapping,
+        public_preflight_payload=lambda *args, **kwargs: preflight_facade.public_preflight_payload(*args, **kwargs),
+        resolve_handler=lambda _: fake_handler,
+        js_required=lambda *args, **kwargs: False,
+        convert_content=lambda content: content,
+        increment_counter=lambda *args, **kwargs: None,
+        observe_histogram=lambda *args, **kwargs: None,
+        clock=lambda: 0.0,
+        log=lambda *args, **kwargs: None,
+        policy_checker=policy_checker,
+        backend_setting=lambda _plan: backend,
+    )
+    monkeypatch.setattr(canonical, "_build_default_dependencies", lambda _cookies: dependencies)
     return ael
 
 
 @pytest.mark.unit
 async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
-    ael = _install_article_defaults(
-        monkeypatch,
-        backend="httpx",
-        web_scraper_config={"web_scraper_preflight_analyzers": True},
-    )
     policy_checker = FakePolicyChecker(
         PolicyDecision(
             allowed=False,
@@ -126,12 +162,16 @@ async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch: 
         )
     )
     fetch_client = FakeFetchClient([])
+    ael = _install_article_defaults(
+        monkeypatch,
+        policy_checker=policy_checker,
+        fetch_client=fetch_client,
+        backend="httpx",
+        web_scraper_config={"web_scraper_preflight_analyzers": True},
+    )
     build_context = Mock()
     run_preflight = AsyncMock()
 
-    monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(ael, "preflight_facade", preflight_facade, raising=False)
     monkeypatch.setattr(preflight_facade, "build_execution_context", build_context)
     monkeypatch.setattr(preflight_facade, "run_preflight", run_preflight)
 
@@ -149,10 +189,6 @@ async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch: 
 
 @pytest.mark.unit
 async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    ael = _install_article_defaults(
-        monkeypatch,
-        backend="httpx",
-    )
     policy_checker = FakePolicyChecker(
         PolicyDecision(
             allowed=True,
@@ -173,8 +209,12 @@ async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkey
             )
         ]
     )
-    monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
+    ael = _install_article_defaults(
+        monkeypatch,
+        policy_checker=policy_checker,
+        fetch_client=fetch_client,
+        backend="httpx",
+    )
 
     result = await ael.scrape_article("https://example.com/path")
 
@@ -189,7 +229,6 @@ async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkey
 
 @pytest.mark.unit
 async def test_scrape_article_preserves_curl_to_httpx_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    ael = _install_article_defaults(monkeypatch, backend="curl")
     policy_checker = FakePolicyChecker(
         PolicyDecision(
             allowed=True,
@@ -211,8 +250,12 @@ async def test_scrape_article_preserves_curl_to_httpx_fallback(monkeypatch: pyte
             ),
         ]
     )
-    monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
+    ael = _install_article_defaults(
+        monkeypatch,
+        policy_checker=policy_checker,
+        fetch_client=fetch_client,
+        backend="curl",
+    )
 
     result = await ael.scrape_article("https://example.com/path")
 
@@ -222,14 +265,6 @@ async def test_scrape_article_preserves_curl_to_httpx_fallback(monkeypatch: pyte
 
 @pytest.mark.unit
 async def test_scrape_article_preflight_tls_advice_still_selects_curl(monkeypatch: pytest.MonkeyPatch) -> None:
-    ael = _install_article_defaults(
-        monkeypatch,
-        backend="auto",
-        web_scraper_config={
-            "web_scraper_preflight_analyzers": True,
-            "web_scraper_preflight_include_results": True,
-        },
-    )
     policy_checker = FakePolicyChecker(
         PolicyDecision(
             allowed=False,
@@ -250,10 +285,16 @@ async def test_scrape_article_preflight_tls_advice_still_selects_curl(monkeypatc
             )
         ]
     )
-
-    monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(ael, "preflight_facade", preflight_facade, raising=False)
+    ael = _install_article_defaults(
+        monkeypatch,
+        policy_checker=policy_checker,
+        fetch_client=fetch_client,
+        backend="auto",
+        web_scraper_config={
+            "web_scraper_preflight_analyzers": True,
+            "web_scraper_preflight_include_results": True,
+        },
+    )
     monkeypatch.setattr(
         preflight_facade,
         "evaluate_target",

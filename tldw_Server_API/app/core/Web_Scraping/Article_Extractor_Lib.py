@@ -22,11 +22,9 @@ import json
 import os
 import random
 import tempfile
-import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional, Union
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -38,12 +36,10 @@ from bs4 import BeautifulSoup
 from defusedxml import ElementTree as xET
 from defusedxml import minidom
 from defusedxml.common import DefusedXmlException
-from loguru import logger
 from playwright.async_api import TimeoutError, async_playwright
 from playwright.sync_api import sync_playwright
 from tqdm import tqdm
 
-from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_db
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.http_client import afetch
@@ -52,11 +48,9 @@ from tldw_Server_API.app.core.http_client import fetch as http_fetch
 #
 # Import Local
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
+from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from tldw_Server_API.app.core.Utils.Utils import logging
-from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
 from tldw_Server_API.app.core.Web_Scraping.content import (
     ContentMetadataHandler,
     convert_html_to_markdown,
@@ -83,28 +77,15 @@ from tldw_Server_API.app.core.Web_Scraping.filters import (
     FilterChain,
     URLPatternFilter,
 )
-from tldw_Server_API.app.core.Web_Scraping.handlers import resolve_handler
 from tldw_Server_API.app.core.Web_Scraping.outbound_policy import decide_web_outbound_policy_sync
-from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
-    DefaultFetchClient,
-    FetchClient,
-    FetchRequest,
-    FetchResponse,
-    OutboundPolicyChecker,
     PolicyDecision,
-    RuntimeRequestContext,
 )
-from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.selectors import (
     clear_selector_caches as _clear_selector_caches,
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors import (
     get_selector_cache_stats as _get_selector_cache_stats,
-)
-from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
-    build_browser_headers,
-    pick_ua_profile,
 )
 
 _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS = (
@@ -141,14 +122,6 @@ get_selector_cache_stats = _get_selector_cache_stats
 # FIXME - Add a config file option/check for the user agent
 web_scraping_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-
-def _default_rules_path() -> str:
-    # Resolve project root: .../tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py -> project root
-    here = Path(__file__).resolve()
-    project_root = here.parents[4]  # tldw_Server_API/ at index 3; repo root at 4
-    return str(project_root / "tldw_Server_API" / "Config_Files" / "custom_scrapers.yaml")
-
-
 def _merge_cookie_list_to_map(custom_cookies: Optional[list[dict[str, Any]]]) -> dict[str, str]:
     cookies: dict[str, str] = {}
     if not custom_cookies:
@@ -163,106 +136,6 @@ def _robots_url_for(target_url: str) -> str:
     p = urlparse(target_url)
     return f"{p.scheme}://{p.netloc}/robots.txt"
 
-
-_JS_REQUIRED_DOMAINS = {
-    "medium.com",
-    "substack.com",
-    "notion.site",
-    "notion.so",
-    "webflow.io",
-    "squarespace.com",
-    "wixsite.com",
-    "x.com",
-    "twitter.com",
-    "tiktok.com",
-    "instagram.com",
-    "facebook.com",
-    "linkedin.com",
-}
-
-
-def _js_required(html: str, headers: dict[str, Any], url: Optional[str] = None) -> bool:
-    """Heuristics to detect pages that require JS rendering.
-
-    Signals fallback to Playwright when:
-    - Contains noscript prompts to enable JavaScript
-    - Shows common interstitials (Cloudflare/CAPTCHA)
-    - HTML very small with many scripts / SPA shells
-    - Meta refresh redirect without content
-    - Domain-specific hints when content is thin
-    """
-    try:
-        domain = ""
-        if url:
-            try:
-                domain = urlparse(url).netloc.lower()
-            except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-                domain = ""
-        text = html.lower()
-        if not text.strip():
-            return True
-        # Common phrases
-        js_phrases = (
-            "enable javascript",
-            "please enable javascript",
-            "requires javascript",
-            "enable your javascript",
-            "javascript is disabled",
-            "please turn on javascript",
-            "please turn on js",
-        )
-        if any(p in text for p in js_phrases):
-            return True
-        if "<noscript" in text and any(
-            p in text for p in ("enable javascript", "javascript is disabled", "requires javascript")
-        ):
-            return True
-        # Cloudflare / anti-bot hints
-        bot_phrases = (
-            "cf-browser-verification",
-            "cf-chl-bypass",
-            "cloudflare ray id",
-            "attention required",
-            "checking your browser",
-            "verify you are human",
-            "hcaptcha",
-            "recaptcha",
-            "turnstile",
-            "just a moment",
-        )
-        if any(p in text for p in bot_phrases):
-            return True
-        # Meta refresh
-        if "http-equiv=\"refresh\"" in text or "http-equiv='refresh'" in text:
-            # if no body text present
-            if len(text) < 1500:
-                return True
-        soup = BeautifulSoup(html, "html.parser")
-        visible_text = soup.get_text(" ", strip=True)
-        visible_len = len(visible_text)
-        script_count = len(soup.find_all("script"))
-        if script_count >= 25 and visible_len < 800:
-            return True
-        if script_count >= 10 and visible_len < 400 and (
-            "__next" in text or "__nuxt" in text or "data-reactroot" in text
-        ):
-            return True
-        app_shell_ids = ("__next", "__nuxt", "root", "app", "app-root")
-        if script_count >= 1 and visible_len < 600:
-            for shell_id in app_shell_ids:
-                if f'id="{shell_id}"' in text or f"id='{shell_id}'" in text:
-                    return True
-        if ("data-reactroot" in text or "data-reactid" in text) and visible_len < 600:
-            return True
-        # Domain hints for JS-heavy sites when content is minimal
-        if domain and any(domain == d or domain.endswith("." + d) for d in _JS_REQUIRED_DOMAINS):
-            if visible_len < 1200:
-                return True
-            if script_count >= 15 and visible_len < 2500:
-                return True
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        return False
-    return False
 
 
 def _resp_get(resp: Any, key: str, default: Any = None) -> Any:
@@ -291,9 +164,6 @@ def _resp_get(resp: Any, key: str, default: Any = None) -> Any:
         return default
     return default
 
-
-_ARTICLE_POLICY_CHECKER: OutboundPolicyChecker = DefaultWebOutboundPolicyChecker()
-_ARTICLE_FETCH_CLIENT: FetchClient = DefaultFetchClient()
 
 
 def is_allowed_by_robots(url: str, user_agent: str, *, timeout: float = 5.0) -> bool:
@@ -417,367 +287,7 @@ def _blocked_article_result(
     }
 
 
-def _fetch_article_lightweight(
-    url: str,
-    *,
-    backend_choice: str,
-    headers: dict[str, str],
-    cookies: dict[str, str] | None,
-    timeout: float,
-    impersonate: str | None,
-    proxies: dict[str, str] | None,
-    fetch_client: FetchClient | None = None,
-) -> tuple[FetchResponse, str]:
-    client = fetch_client or _ARTICLE_FETCH_CLIENT
-
-    def _fetch_with_backend(backend: str) -> FetchResponse:
-        return client.fetch(
-            FetchRequest(
-                url=url,
-                method="GET",
-                headers=headers,
-                cookies=cookies or {},
-                timeout=timeout,
-                backend=backend,
-                allow_redirects=True,
-                impersonate=impersonate,
-                proxies=proxies,
-                context=RuntimeRequestContext(source="article_extract", stage="fetch"),
-            )
-        )
-
-    if backend_choice == "curl":
-        try:
-            response = _fetch_with_backend("curl")
-            return response, response.backend or "curl"
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("curl backend failed; falling back to httpx: {}", exc)
-
-    response = _fetch_with_backend("httpx")
-    return response, response.backend or "httpx"
-
-
-async def scrape_article(
-    url: str,
-    custom_cookies: Optional[list[dict[str, Any]]] = None,
-    *,
-    allow_llm_extraction: bool = True,
-) -> dict[str, Any]:
-    logging.info("Scraping article request.")
-    # Resolve scraper plan via router (configurable via YAML)
-    ws_cfg: dict[str, Any] = {}
-
-    def _resolve_scrape_plan() -> Any:
-        nonlocal ws_cfg
-        cfg = load_and_log_configs() or {}
-        ws_cfg = cfg.get("web_scraper", {}) or {}
-        rules_path = ws_cfg.get("custom_scrapers_yaml_path", _default_rules_path())
-        rules = ScraperRouter.load_rules_from_yaml(rules_path)
-        ua_mode = str(ws_cfg.get("web_scraper_ua_mode", "fixed") or "fixed")
-        respect_robots_default = ws_cfg.get("web_scraper_respect_robots", True)
-        if isinstance(respect_robots_default, str):
-            respect_robots_default = _is_truthy(respect_robots_default.strip())
-        router = ScraperRouter(
-            rules,
-            ua_mode=ua_mode,
-            default_respect_robots=bool(respect_robots_default),
-        )
-        return router.resolve(url)
-
-    try:
-        plan = await asyncio.to_thread(_resolve_scrape_plan)
-    except asyncio.CancelledError:
-        raise
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        # Safe default plan
-        class _P:  # minimal stand-in
-            backend = "auto"
-            handler = "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html"
-            ua_profile = pick_ua_profile("fixed")
-            impersonate = None
-            extra_headers = {}
-            cookies = {}
-            respect_robots = True
-
-        plan = _P()  # type: ignore
-
-    handler_path = str(getattr(plan, "handler", "") or "")
-    handler_func = resolve_handler(handler_path) if handler_path else None
-    use_handler = bool(handler_path)
-    strategy_order = getattr(plan, "strategy_order", None)
-    schema_rules = getattr(plan, "schema_rules", None)
-    llm_settings = getattr(plan, "llm_settings", None)
-    regex_settings = getattr(plan, "regex_settings", None)
-    cluster_settings = getattr(plan, "cluster_settings", None)
-
-    # Build effective headers from UA profile + extras
-    ua_headers = build_browser_headers(plan.ua_profile, accept_lang="en-US,en;q=0.9")
-    if isinstance(plan.extra_headers, dict) and plan.extra_headers:
-        ua_headers.update({str(k): str(v) for k, v in plan.extra_headers.items()})
-
-    backend_choice = str(getattr(plan, "backend", "auto") or "auto").lower().strip()
-    if backend_choice not in {"auto", "curl", "httpx", "playwright"}:
-        backend_choice = "auto"
-    if backend_choice == "auto":
-        default_backend = ws_cfg.get("web_scraper_default_backend")
-        if isinstance(default_backend, str):
-            backend_choice = default_backend.lower().strip() or "auto"
-            if backend_choice not in {"auto", "curl", "httpx", "playwright"}:
-                backend_choice = "auto"
-
-    preflight_payload = None
-
-    def _attach_preflight(result: dict[str, Any]) -> dict[str, Any]:
-        if preflight_payload and isinstance(result, dict):
-            result.setdefault("preflight_analysis", preflight_payload)
-        return result
-
-    effective_ua = ua_headers.get("User-Agent", web_scraping_user_agent)
-    try:
-        target = await preflight_facade.evaluate_target(
-            url,
-            respect_robots=bool(getattr(plan, "respect_robots", True)),
-            user_agent=effective_ua,
-            request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
-            config={"web_scraper": ws_cfg},
-            policy_checker=_ARTICLE_POLICY_CHECKER,
-        )
-    except asyncio.CancelledError:
-        raise
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-        logging.error(
-            "Outbound policy evaluation failed. "
-            "source=article_extract stage=pre_fetch "
-            f"exception_type={type(exc).__name__[:80]}"
-        )
-        return _attach_preflight(
-            {
-                "url": url,
-                "title": "N/A",
-                "author": "N/A",
-                "date": "N/A",
-                "content": "",
-                "extraction_successful": False,
-                "error": "Outbound policy evaluation failed. Please contact system administrator.",
-            }
-        )
-
-    if not target.decision.allowed:
-        return _attach_preflight(_blocked_article_result(url, target.decision))
-
-    options = preflight_facade.PreflightOptions.from_mapping(ws_cfg)
-    preflight_result = None
-    try:
-        if options.enabled:
-            context = preflight_facade.build_execution_context(
-                target,
-                options,
-                policy_checker=_ARTICLE_POLICY_CHECKER,
-            )
-            preflight_result = await preflight_facade.run_preflight(target, options, context)
-    except asyncio.CancelledError:
-        raise
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        logging.debug("Preflight analysis failed.")
-
-    backend_choice, preflight_method, preflight_result = preflight_facade.apply_preflight_advice(
-        preflight_result,
-        backend=backend_choice,
-        method="auto",
-        backend_setting=str(getattr(plan, "backend", "auto") or "auto").lower().strip(),
-    )
-    preflight_payload = preflight_facade.public_preflight_payload(
-        preflight_result,
-        options.include_results,
-    )
-
-    if backend_choice != "playwright" and preflight_method != "playwright":
-        # First try lightweight HTTP path (curl/httpx) before Playwright
-        try:
-            cookies_map = _merge_cookie_list_to_map(custom_cookies)
-            # Combine with plan cookies (plan cookies win)
-            if getattr(plan, "cookies", {}):
-                cookies_map.update({str(k): str(v) for k, v in plan.cookies.items()})
-
-            t0 = time.time()
-            resp, backend_used = await asyncio.to_thread(
-                _fetch_article_lightweight,
-                url,
-                backend_choice=backend_choice,
-                headers=ua_headers,
-                cookies=cookies_map or None,
-                timeout=15.0,
-                impersonate=getattr(plan, "impersonate", None),
-                proxies=getattr(plan, "proxies", None) or None,
-            )
-
-            elapsed = max(0.0, time.time() - t0)
-            observe_histogram("scrape_fetch_latency_seconds", elapsed, labels={"backend": backend_used})
-
-            status = _resp_get(resp, "status")
-            if status is None:
-                status = _resp_get(resp, "status_code")
-            text = _resp_get(resp, "text", "")
-            if int(status or 0) < 400 and text:
-                # JS-required detection heuristic: decide earlier fallback
-                if _js_required(text, _resp_get(resp, "headers", {}), url=url):
-                    increment_counter("scrape_playwright_fallback_total", labels={"reason": "js_required"})
-                    raise RuntimeError("js_required_detected")
-                article_data = await run_extraction_in_thread(
-                    extract_article_with_pipeline,
-                    text,
-                    url,
-                    strategy_order=strategy_order,
-                    handler=handler_func if use_handler else None,
-                    schema_rules=schema_rules,
-                    llm_settings=llm_settings,
-                    regex_settings=regex_settings,
-                    cluster_settings=cluster_settings,
-                    allow_llm_extraction=allow_llm_extraction,
-                )
-                if article_data.get("extraction_successful"):
-                    if not use_handler and article_data.get("content"):
-                        article_data["content"] = convert_html_to_markdown(article_data["content"])
-                    content = article_data.get("content", "") or ""
-                    logging.info(f"Article content length: {len(content)}")
-                    observe_histogram(
-                        "scrape_content_length_bytes",
-                        len(content.encode("utf-8", errors="ignore")),
-                        labels={"backend": backend_used},
-                    )
-                    increment_counter("scrape_fetch_total", labels={"backend": backend_used, "outcome": "success"})
-                    return _attach_preflight(article_data)
-            # No extractable content
-            increment_counter("scrape_fetch_total", labels={"backend": backend_used, "outcome": "no_extract"})
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as _e:
-            logging.debug(f"Lightweight fetch path failed or yielded no extractable content: {_e}")
-            increment_counter("scrape_fetch_total", labels={"backend": backend_choice, "outcome": "error"})
-            increment_counter("scrape_playwright_fallback_total", labels={"reason": "error"})
-        else:
-            # Falling back due to no extractable content
-            increment_counter("scrape_playwright_fallback_total", labels={"reason": "no_extract"})
-
-    async def fetch_html(url: str) -> str:
-        # Load and log the configuration
-        loaded_config = load_and_log_configs()
-
-        # load retry count from config
-        scrape_retry_count = loaded_config['web_scraper'].get('web_scraper_retry_count', 3)
-        retries = int(scrape_retry_count) if isinstance(scrape_retry_count, str) else scrape_retry_count
-        # Load retry timeout value from config
-        web_scraper_retry_timeout = loaded_config['web_scraper'].get('web_scraper_retry_timeout', 60)
-        # Interpret config as seconds; Playwright expects milliseconds
-        timeout_sec = int(web_scraper_retry_timeout) if isinstance(web_scraper_retry_timeout, str) else web_scraper_retry_timeout
-        timeout_ms = max(0, int(timeout_sec) * 1000)
-
-        # Whether stealth mode is enabled
-        stealth_raw = loaded_config['web_scraper'].get('web_scraper_stealth_playwright', False)
-        if isinstance(stealth_raw, str):
-            stealth_enabled = _is_truthy(stealth_raw.strip())
-        else:
-            stealth_enabled = bool(stealth_raw)
-
-        for attempt in range(retries):  # Introduced a retry loop to attempt fetching HTML multiple times
-            browser = None
-            try:
-                logging.info(f"Fetching HTML from {url} (Attempt {attempt + 1}/{retries})")
-                t0 = time.time()
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=True)
-                    context = await browser.new_context(
-                        user_agent=effective_ua,
-                        # Simulating a normal browser window size for better compatibility
-                        viewport={"width": 1280, "height": 720},
-                    )
-                    if custom_cookies:
-                        # Apply cookies if provided
-                        await context.add_cookies(custom_cookies)
-
-                    page = await context.new_page()
-
-                    # Check if stealth mode is enabled in the config
-                    if stealth_enabled:
-                        try:
-                            from playwright_stealth import stealth_async
-                            await stealth_async(page)
-                        except ImportError:
-                            # Fallback if stealth_async is not available
-                            logging.debug("playwright_stealth not properly installed, skipping stealth mode")
-
-                    # Navigate to the URL
-                    await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-
-                    # If stealth is enabled, give the page extra time to finish loading/spawning content
-                    if stealth_enabled:
-                        # Try to get from config, fallback to hardcoded default
-                        try:
-                            from tldw_Server_API.app.core.config import config
-                            stealth_wait_ms = config.get("STEALTH_WAIT_MS", 5000)
-                        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"Falling back to default STEALTH_WAIT_MS; error={e}")
-                            stealth_wait_ms = 5000
-                        await page.wait_for_timeout(stealth_wait_ms)  # configurable delay
-                    else:
-                        # Alternatively, wait for network to be idle
-                        await page.wait_for_load_state("networkidle", timeout=timeout_ms)
-
-                    # Capture final HTML
-                    content = await page.content()
-
-                    # Metrics for Playwright path
-                    elapsed = max(0.0, time.time() - t0)
-                    observe_histogram("scrape_fetch_latency_seconds", elapsed, labels={"backend": "playwright"})
-                    increment_counter("scrape_fetch_total", labels={"backend": "playwright", "outcome": "success"})
-                    logging.info(f"HTML fetched successfully from {url}")
-                    log_counter("html_fetched", labels={"url": url})
-
-                # Return the scraped HTML
-                return content
-
-            except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
-                logging.error(f"Error fetching HTML from {url} on attempt {attempt + 1}: {e}")
-                increment_counter("scrape_fetch_total", labels={"backend": "playwright", "outcome": "error"})
-
-                if attempt < retries - 1:
-                    logging.info("Retrying...")
-                    await asyncio.sleep(2)
-                else:
-                    logging.error("Max retries reached, giving up on this URL.")
-                    log_counter("html_fetch_error", labels={"url": url, "error": str(e)})
-                    return ""  # Return empty string on final failure
-
-            finally:
-                # Ensure the browser is closed before returning
-                if browser is not None:
-                    await browser.close()
-
-        # If for some reason you exit the loop without returning (unlikely), return empty string
-        return ""
-
-    html = await fetch_html(url)
-    article_data = await run_extraction_in_thread(
-        extract_article_with_pipeline,
-        html,
-        url,
-        strategy_order=strategy_order,
-        handler=handler_func if use_handler else None,
-        schema_rules=schema_rules,
-        llm_settings=llm_settings,
-        regex_settings=regex_settings,
-        cluster_settings=cluster_settings,
-        allow_llm_extraction=allow_llm_extraction,
-    )
-    if article_data.get("extraction_successful") and not use_handler and article_data.get("content"):
-        article_data["content"] = convert_html_to_markdown(article_data["content"])
-    if article_data.get("extraction_successful"):
-        content = article_data.get("content", "") or ""
-        logging.info(f"Article content length: {len(content)}")
-        observe_histogram(
-            "scrape_content_length_bytes",
-            len(content.encode("utf-8", errors="ignore")),
-            labels={"backend": "playwright"},
-        )
-    return _attach_preflight(article_data)
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _js_required, scrape_article  # noqa: F401
 
 
 def scrape_article_blocking(

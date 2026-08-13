@@ -1,5 +1,6 @@
 """Canonical single-page article orchestration contracts."""
 
+from .article import ArticleDependencies, scrape_article
 from .article_models import (
     PUBLIC_FAILURE_CODES,
     ArticleFailure,
@@ -12,8 +13,10 @@ from .article_models import (
 __all__ = [
     "PUBLIC_FAILURE_CODES",
     "ArticleFailure",
+    "ArticleDependencies",
     "ArticleLimits",
     "ArticlePlan",
     "DirectBrowserProfile",
     "article_failure_result",
+    "scrape_article",
 ]

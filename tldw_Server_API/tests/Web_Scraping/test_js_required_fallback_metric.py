@@ -1,68 +1,89 @@
-import types
+from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as AEL
-
-
-class DummyResp:
-    def __init__(self, text: str):
-        self.data = {"status": 200, "text": text, "url": "https://example.com", "headers": {}, "backend": "httpx"}
-
-    def __getitem__(self, k):
-        return self.data[k]
-
-
-class DummyAsyncPlaywright:
-    async def __aenter__(self):
-        # Raise so we don't actually try to launch browsers in tests
-        raise RuntimeError("playwright disabled in test")
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
 
 @pytest.mark.asyncio
-async def test_js_required_emits_fallback_metric(monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision
-
-    policy_decide = AsyncMock(
-        return_value=PolicyDecision(
-            allowed=True,
-            reason="allowed",
-            mode="test",
-            stage="pre_fetch",
-            source="article_extract",
-        )
+async def test_js_required_emits_one_bounded_fallback_metric(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+        ArticleLimits,
+        ArticlePlan,
+        DirectBrowserProfile,
     )
-    policy_checker = types.SimpleNamespace(decide=policy_decide)
-    monkeypatch.setattr(AEL, "_ARTICLE_POLICY_CHECKER", policy_checker)
+    from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+    from tldw_Server_API.app.core.Web_Scraping.runtime import (
+        FetchResponse,
+        PolicyDecision,
+        RuntimeRequestContext,
+    )
 
-    # stub the lightweight fetch boundary to return JS-required HTML
-    def fake_fetch_article_lightweight(*_args, **_kwargs):
-        return DummyResp("Please enable JavaScript to continue"), "httpx"
-
-    monkeypatch.setattr(AEL, "_fetch_article_lightweight", fake_fetch_article_lightweight)
-
-    # stub async_playwright to avoid launching
-    monkeypatch.setattr(AEL, "async_playwright", lambda: DummyAsyncPlaywright())
-
-    # capture metrics
-    calls = []
+    calls: list[tuple[str, dict[str, str]]] = []
 
     def _increment_counter(name, value=1, labels=None):
         calls.append((name, dict(labels or {})))
 
-    monkeypatch.setattr(AEL, "increment_counter", _increment_counter)
+    class FetchClient:
+        def fetch(self, request: Any) -> FetchResponse:
+            return FetchResponse(
+                url=request.url,
+                status=200,
+                headers={},
+                text="Please enable JavaScript to continue",
+                backend="httpx",
+            )
 
-    # run
-    res = await AEL.scrape_article("https://example.com")
-    policy_decide.assert_awaited_once()
+    class Browser:
+        async def acquire(self, *_args: Any, **_kwargs: Any) -> str:
+            raise RuntimeError("playwright disabled in test")
+
+    class Executor:
+        async def run(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+            return func(*args, **kwargs)
+
+    plan = ArticlePlan(
+        url="https://example.com",
+        domain="example.com",
+        backend="httpx",
+        headers={"User-Agent": "test-agent"},
+        browser=DirectBrowserProfile("test-agent", (), 1, 1000, False, 0),
+        limits=ArticleLimits(4096, 8192),
+    )
+
+    async def evaluate_target(url: str, **_kwargs: Any) -> PreflightTarget:
+        return PreflightTarget(
+            url=url,
+            decision=PolicyDecision(True, "test", "allowed", "pre_fetch", "article_extract"),
+            request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+        )
+
+    dependencies = canonical.ArticleDependencies(
+        load_config=lambda: {"web_scraper": {"web_scraper_preflight_analyzers": False}},
+        resolve_plan=lambda _url, _config: plan,
+        evaluate_target=evaluate_target,
+        run_preflight=lambda *_args, **_kwargs: None,
+        apply_preflight_advice=lambda result, **kwargs: (kwargs["backend"], kwargs["method"], result),
+        fetch_client=FetchClient(),
+        browser=Browser(),
+        executor=Executor(),
+        extract=lambda *_args, **_kwargs: {"extraction_successful": False},
+        build_preflight_context=lambda *_args, **_kwargs: object(),
+        preflight_options=canonical.preflight_facade.PreflightOptions.from_mapping,
+        public_preflight_payload=lambda *_args, **_kwargs: None,
+        resolve_handler=lambda _path: None,
+        js_required=canonical._js_required,
+        convert_content=lambda content: content,
+        increment_counter=_increment_counter,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        clock=lambda: 0.0,
+        log=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(canonical, "_build_default_dependencies", lambda _cookies: dependencies)
+
+    res = await legacy.scrape_article("https://example.com")
     assert res["extraction_successful"] is False
-    # Ensure js_required metric was emitted at least once
-    js_fallbacks = [
-        c for c in calls if c[0] == "scrape_playwright_fallback_total" and c[1].get("reason") == "js_required"
-    ]
-    assert js_fallbacks, f"expected js_required fallback metric, got: {calls}"
+    assert [
+        metric for metric in calls if metric == ("scrape_playwright_fallback_total", {"reason": "js_required"})
+    ] == [("scrape_playwright_fallback_total", {"reason": "js_required"})]
+    assert ("scrape_playwright_fallback_total", {"reason": "no_extract"}) not in calls
