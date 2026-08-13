@@ -1,6 +1,12 @@
 """Canonical single-page article orchestration contracts."""
 
-from .article import ArticleDependencies, scrape_article
+from .article import (
+    ACTIVE_EVENT_LOOP_ERROR,
+    ArticleDependencies,
+    scrape_article,
+    scrape_article_blocking,
+    scrape_article_sync,
+)
 from .article_models import (
     PUBLIC_FAILURE_CODES,
     ArticleFailure,
@@ -19,4 +25,7 @@ __all__ = [
     "DirectBrowserProfile",
     "article_failure_result",
     "scrape_article",
+    "scrape_article_blocking",
+    "scrape_article_sync",
+    "ACTIVE_EVENT_LOOP_ERROR",
 ]

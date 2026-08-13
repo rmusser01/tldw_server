@@ -4,10 +4,10 @@ import asyncio
 import time
 import typing
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
@@ -46,11 +46,16 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
 _FETCH_TIMEOUT_SECONDS = 15.0
+_BLOCKING_FETCH_TIMEOUT_SECONDS = 30.0
 _AUTO_BACKEND = "auto"
 _PLAYWRIGHT = "playwright"
 _HTTP_BACKENDS = frozenset({_AUTO_BACKEND, "curl", "httpx"})
 _SAFE_POLICY_FAILURE = "policy_error"
 _RESPONSE_TOO_LARGE_MESSAGE = "Response exceeds max_response_bytes limit"
+ACTIVE_EVENT_LOOP_ERROR = "Synchronous article scraping cannot run while an event loop is active in this thread"
+BLOCKING_ARTICLE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 _ARTICLE_LOG_STAGES = frozenset(
     {
         "acquire",
@@ -129,6 +134,17 @@ class ArticleDependencies:
     log: Callable[..., None]
     policy_checker: Any = None
     backend_setting: Callable[[ArticlePlan], str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedArticle:
+    """One policy-admitted immutable article request ready for acquisition."""
+
+    plan: ArticlePlan
+    advised_backend: str
+    advised_method: str
+    cookies: Mapping[str, str]
+    preflight_payload: dict[str, Any] | None
 
 
 def _snapshot_config(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -357,6 +373,8 @@ async def _fetch_lightweight(
     url: str,
     cookies: Mapping[str, str],
     backend: str,
+    timeout: float = _FETCH_TIMEOUT_SECONDS,
+    source: str = "article_extract",
 ) -> tuple[FetchResponse, str]:
     def request_for(selected_backend: str) -> FetchRequest:
         return FetchRequest(
@@ -364,12 +382,12 @@ async def _fetch_lightweight(
             method="GET",
             headers=plan.headers,
             cookies=cookies,
-            timeout=_FETCH_TIMEOUT_SECONDS,
+            timeout=timeout,
             backend=selected_backend,
             allow_redirects=True,
             impersonate=plan.impersonate,
             proxies=plan.proxies,
-            context=RuntimeRequestContext(source="article_extract", stage="fetch"),
+            context=RuntimeRequestContext(source=source, stage="fetch"),
             max_response_bytes=plan.limits.max_article_bytes,
         )
 
@@ -699,6 +717,276 @@ async def _run_article(
     return _attach_preflight(result, preflight_payload)
 
 
+async def _prepare_article(
+    url: str,
+    custom_cookies: Sequence[Mapping[str, Any]] | None,
+    *,
+    dependencies: ArticleDependencies,
+    source: str,
+    plan_modifier: Callable[[ArticlePlan], ArticlePlan] | None = None,
+) -> _PreparedArticle | dict[str, Any]:
+    """Load, snapshot, admit, and preflight one request before acquisition."""
+    config: Mapping[str, Any]
+    try:
+        config = _snapshot_config(await asyncio.to_thread(dependencies.load_config))
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - config loading has one safe empty fallback
+        _log_failure(dependencies, exc, code="fetch_error", stage="config", url=url)
+        config = MappingProxyType({})
+
+    try:
+        plan = await asyncio.to_thread(dependencies.resolve_plan, url, config)
+        if not isinstance(plan, ArticlePlan):
+            raise TypeError("resolve_plan must return ArticlePlan")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - route loading preserves the config snapshot
+        _log_failure(dependencies, exc, code="fetch_error", stage="plan", url=url)
+        plan = _fallback_plan(url, config, custom_cookies)
+
+    if plan_modifier is not None:
+        plan = plan_modifier(plan)
+
+    values = _web_scraper_values(config)
+    effective_user_agent = plan.headers.get("User-Agent") or plan.browser.user_agent
+    request_context = RuntimeRequestContext(source=source, stage="pre_fetch")
+    preflight_payload: dict[str, Any] | None = None
+    try:
+        target = await dependencies.evaluate_target(
+            url,
+            respect_robots=plan.respect_robots,
+            user_agent=effective_user_agent,
+            request_context=request_context,
+            config={"web_scraper": values},
+            policy_checker=dependencies.policy_checker,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - public policy failures are stable
+        _log_failure(dependencies, exc, code=_SAFE_POLICY_FAILURE, stage="pre_fetch", url=url)
+        return _failure_result(url, _SAFE_POLICY_FAILURE)
+
+    if not bool(getattr(getattr(target, "decision", None), "allowed", False)):
+        if str(getattr(target.decision, "reason", "")).startswith("robots_"):
+            _record_counter(dependencies, "scrape_blocked_by_robots_total", {})
+        return _policy_blocked_result(url, target.decision)
+
+    options = dependencies.preflight_options(values)
+    preflight_result = None
+    if bool(getattr(options, "enabled", False)):
+        try:
+            context = dependencies.build_preflight_context(
+                target,
+                options,
+                policy_checker=dependencies.policy_checker,
+            )
+            preflight_result = await dependencies.run_preflight(target, options, context)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the analyzer is intentionally fail-open
+            _log_failure(dependencies, exc, code="fetch_error", stage="preflight", url=url)
+            preflight_result = None
+
+    backend = _bounded_backend(plan.backend)
+    route_backend = _bounded_backend(
+        dependencies.backend_setting(plan) if dependencies.backend_setting is not None else plan.backend
+    )
+    configured_backend = _bounded_backend(values.get("web_scraper_default_backend", _AUTO_BACKEND))
+    automatic_backend = route_backend == _AUTO_BACKEND and configured_backend == _AUTO_BACKEND
+    backend_setting = _AUTO_BACKEND if automatic_backend else backend
+    try:
+        advised_backend, advised_method, advised_result = dependencies.apply_preflight_advice(
+            preflight_result,
+            backend=backend,
+            method=_AUTO_BACKEND,
+            backend_setting=backend_setting,
+        )
+    except Exception as exc:  # noqa: BLE001 - failed advice retains the snapshotted route
+        _log_failure(dependencies, exc, code="fetch_error", stage="preflight_advice", url=url)
+        advised_backend, advised_method, advised_result = backend, _AUTO_BACKEND, None
+
+    if not automatic_backend:
+        advised_backend = backend
+    try:
+        preflight_payload = dependencies.public_preflight_payload(
+            advised_result,
+            bool(getattr(options, "include_results", False)),
+        )
+    except Exception as exc:  # noqa: BLE001 - payload creation is optional observability
+        _log_failure(dependencies, exc, code="fetch_error", stage="preflight_payload", url=url)
+
+    cookies: dict[str, str] = {}
+    for cookie in custom_cookies or ():
+        if isinstance(cookie, Mapping) and "name" in cookie and "value" in cookie:
+            cookies[str(cookie["name"])] = str(cookie["value"])
+    cookies.update({str(key): str(value) for key, value in plan.cookies.items()})
+    return _PreparedArticle(
+        plan=plan,
+        advised_backend=advised_backend,
+        advised_method=advised_method,
+        cookies=MappingProxyType(cookies),
+        preflight_payload=preflight_payload,
+    )
+
+
+def _blocking_plan(plan: ArticlePlan) -> ArticlePlan:
+    """Apply the legacy blocking transport profile to an immutable plan."""
+    reduced_cookies = tuple(
+        {"name": str(cookie["name"]), "value": str(cookie["value"])}
+        for cookie in plan.browser.custom_cookies
+        if "name" in cookie and "value" in cookie
+    )
+    headers = dict(plan.headers)
+    headers["User-Agent"] = BLOCKING_ARTICLE_USER_AGENT
+    return replace(
+        plan,
+        headers=headers,
+        respect_robots=False,
+        browser=replace(
+            plan.browser,
+            user_agent=BLOCKING_ARTICLE_USER_AGENT,
+            custom_cookies=reduced_cookies,
+        ),
+    )
+
+
+def _blocking_failure_result(url: str) -> dict[str, Any]:
+    return {
+        "url": url,
+        "title": "N/A",
+        "author": "N/A",
+        "date": "N/A",
+        "content": "",
+        "extraction_successful": False,
+    }
+
+
+async def _run_blocking_article(
+    url: str,
+    custom_cookies: Sequence[Mapping[str, Any]] | None,
+    allow_llm_extraction: bool,
+    *,
+    dependencies: ArticleDependencies,
+) -> dict[str, Any]:
+    """Run the legacy blocking profile with governed async collaborators."""
+    prepared = await _prepare_article(
+        url,
+        custom_cookies,
+        dependencies=dependencies,
+        source="article_extract_blocking",
+        plan_modifier=_blocking_plan,
+    )
+    if isinstance(prepared, dict):
+        if prepared.get("error") == _SAFE_POLICY_FAILURE:
+            result = _blocking_failure_result(url)
+            result["error"] = "Outbound policy evaluation failed"
+            return result
+        return prepared
+
+    use_browser = prepared.advised_backend == _PLAYWRIGHT or prepared.advised_method == _PLAYWRIGHT
+    if not use_browser:
+        try:
+            response, _backend = await _fetch_lightweight(
+                dependencies,
+                prepared.plan,
+                url=url,
+                cookies=prepared.cookies,
+                backend=_bounded_backend(prepared.advised_backend),
+                timeout=_BLOCKING_FETCH_TIMEOUT_SECONDS,
+                source="article_extract_blocking",
+            )
+        except asyncio.CancelledError:
+            raise
+        except ArticleFailure as exc:
+            if exc.code == "response_too_large":
+                return _attach_preflight(_failure_result(url, exc.code), prepared.preflight_payload)
+            return _attach_preflight(_blocking_failure_result(url), prepared.preflight_payload)
+        except Exception:  # noqa: BLE001 - historical blocking fetch failures stay compact
+            return _attach_preflight(_blocking_failure_result(url), prepared.preflight_payload)
+
+        if response.status != 200:
+            return _attach_preflight(_blocking_failure_result(url), prepared.preflight_payload)
+        html = response.text
+    else:
+        try:
+            html = await dependencies.browser.acquire(
+                url,
+                prepared.plan.direct_browser,
+                prepared.plan.limits,
+            )
+        except asyncio.CancelledError:
+            raise
+        except ArticleFailure as exc:
+            return _attach_preflight(_failure_result(url, exc.code), prepared.preflight_payload)
+        except Exception:  # noqa: BLE001 - guarded browser failures are stable
+            return _attach_preflight(_failure_result(url, "browser_error"), prepared.preflight_payload)
+
+    try:
+        return _attach_preflight(
+            await _extract(
+                dependencies,
+                prepared.plan,
+                html,
+                url,
+                allow_llm_extraction=allow_llm_extraction,
+            ),
+            prepared.preflight_payload,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - preserve the compact historical blocking failure shape
+        return _attach_preflight(_blocking_failure_result(url), prepared.preflight_payload)
+
+
+def _raw_failure_result(url: str, code: str) -> dict[str, Any]:
+    safe_code = code if type(code) is str and code in PUBLIC_FAILURE_CODES else "browser_error"
+    return {"url": url, "extraction_successful": False, "error": safe_code}
+
+
+async def _run_raw_browser_article(
+    url: str,
+    *,
+    dependencies: ArticleDependencies,
+) -> dict[str, Any]:
+    """Acquire bounded rendered HTML without extraction for the raw sync helper."""
+    prepared = await _prepare_article(
+        url,
+        (),
+        dependencies=dependencies,
+        source="article_extract_sync",
+    )
+    if isinstance(prepared, dict):
+        return _raw_failure_result(url, "policy_error")
+
+    try:
+        html = await dependencies.browser.acquire(
+            url,
+            prepared.plan.direct_browser,
+            prepared.plan.limits,
+        )
+    except asyncio.CancelledError:
+        raise
+    except ArticleFailure as exc:
+        return _raw_failure_result(url, exc.code)
+    except Exception:  # noqa: BLE001 - direct browser details must not escape this API
+        return _raw_failure_result(url, "browser_error")
+
+    if not isinstance(html, str):
+        return _raw_failure_result(url, "browser_error")
+    try:
+        title_tag = BeautifulSoup(html, "html.parser").find("title")
+        title = title_tag.get_text(strip=True) if title_tag is not None else ""
+    except Exception:  # noqa: BLE001 - malformed markup still has stable public output
+        return _raw_failure_result(url, "browser_error")
+    return {
+        "url": url,
+        "title": title,
+        "content": html,
+        "extraction_successful": True,
+    }
+
+
 def _default_rules_path() -> str:
     return str(Path(__file__).resolve().parents[4] / "Config_Files" / "custom_scrapers.yaml")
 
@@ -773,4 +1061,45 @@ async def scrape_article(
     )
 
 
-__all__ = ["ArticleDependencies", "scrape_article"]
+def _reject_active_event_loop() -> None:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(ACTIVE_EVENT_LOOP_ERROR)
+
+
+def scrape_article_blocking(
+    url: str,
+    custom_cookies: Optional[list[dict[str, Any]]] = None,
+    *,
+    allow_llm_extraction: bool = True,
+) -> dict[str, Any]:
+    """Synchronously scrape an article through the governed blocking profile."""
+    _reject_active_event_loop()
+    cookie_snapshot = _snapshot_cookies(custom_cookies)
+    dependencies = _build_default_dependencies(cookie_snapshot)
+    return asyncio.run(
+        _run_blocking_article(
+            url,
+            cookie_snapshot,
+            allow_llm_extraction,
+            dependencies=dependencies,
+        )
+    )
+
+
+def scrape_article_sync(url: str) -> dict[str, Any]:
+    """Synchronously return governed rendered HTML without article extraction."""
+    _reject_active_event_loop()
+    dependencies = _build_default_dependencies(())
+    return asyncio.run(_run_raw_browser_article(url, dependencies=dependencies))
+
+
+__all__ = [
+    "ACTIVE_EVENT_LOOP_ERROR",
+    "ArticleDependencies",
+    "scrape_article",
+    "scrape_article_blocking",
+    "scrape_article_sync",
+]

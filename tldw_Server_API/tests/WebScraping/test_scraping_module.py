@@ -197,15 +197,15 @@ async def test_article_scrape_blocks_on_shared_policy_before_network(monkeypatch
 
 def test_scrape_article_blocking_sanitizes_policy_evaluation_error(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
 
-    def fail_policy(*args, **kwargs):
+    async def fail_policy(*args, **kwargs):
         raise RuntimeError("secret-token")
 
     monkeypatch.setattr(
-        ael,
-        "decide_web_outbound_policy_sync",
+        canonical.preflight_facade,
+        "evaluate_target",
         fail_policy,
-        raising=False,
     )
 
     result = ael.scrape_article_blocking("https://example.com/private")

@@ -37,7 +37,6 @@ from defusedxml import ElementTree as xET
 from defusedxml import minidom
 from defusedxml.common import DefusedXmlException
 from playwright.async_api import TimeoutError, async_playwright
-from playwright.sync_api import sync_playwright
 from tqdm import tqdm
 
 from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_db
@@ -287,80 +286,12 @@ def _blocked_article_result(
     }
 
 
-from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _js_required, scrape_article  # noqa: F401
-
-
-def scrape_article_blocking(
-    url: str,
-    custom_cookies: Optional[list[dict[str, Any]]] = None,
-    *,
-    allow_llm_extraction: bool = True,
-) -> dict[str, Any]:
-    """Blocking scraper for synchronous code paths.
-
-    Fetches HTML with http_client using a desktop-like user agent and optional cookies,
-    then extracts article content via trafilatura and converts to display text.
-    """
-    try:
-        try:
-            decision = decide_web_outbound_policy_sync(
-                url,
-                respect_robots=False,
-                source="article_extract_blocking",
-                stage="pre_fetch",
-            )
-            if not decision.allowed:
-                return _blocked_article_result(url, decision)
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-            return {
-                "url": url,
-                "title": "N/A",
-                "author": "N/A",
-                "date": "N/A",
-                "content": "",
-                "extraction_successful": False,
-                "error": "Outbound policy evaluation failed",
-            }
-
-        headers = {"User-Agent": web_scraping_user_agent}
-        # If cookies are provided in Playwright-style dicts, reduce to name->value and set Cookie header
-        if custom_cookies:
-            cookie_map = _merge_cookie_list_to_map(custom_cookies)
-            if cookie_map:
-                cookie_hdr = "; ".join([f"{k}={v}" for k, v in cookie_map.items()])
-                headers["Cookie"] = cookie_hdr
-        resp = http_fetch(method="GET", url=url, timeout=30, headers=headers)
-        try:
-            status = _resp_get(resp, "status")
-            if status is None:
-                status = _resp_get(resp, "status_code", 0)
-            text = _resp_get(resp, "text", "")
-            if not text:
-                content = _resp_get(resp, "content", b"")
-                try:
-                    text = content.decode("utf-8") if isinstance(content, (bytes, bytearray)) else str(content)
-                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-                    text = ""
-        finally:
-            close = getattr(resp, "close", None)
-            if callable(close):
-                close()
-
-        if int(status or 0) != 200:
-            logging.error(f"Failed to fetch {url}, status: {status}")
-            return {"url": url, "title": "N/A", "author": "N/A", "date": "N/A", "content": "", "extraction_successful": False}
-
-        article_data = extract_article_data_from_html(
-            text,
-            url,
-            allow_llm_extraction=allow_llm_extraction,
-        )
-        if article_data.get("extraction_successful"):
-            article_data["content"] = convert_html_to_markdown(article_data["content"])
-        return article_data
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Blocking scrape failed for {url}: {e}")
-        return {"url": url, "title": "N/A", "author": "N/A", "date": "N/A", "content": "", "extraction_successful": False}
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article import (  # noqa: F401
+    _js_required,
+    scrape_article,
+    scrape_article_blocking,
+    scrape_article_sync,
+)
 
 
 # FIXME - Add keyword integration/tagging
@@ -1363,33 +1294,6 @@ async def scrape_article_async(
         }
     finally:
         await page.close()
-
-def scrape_article_sync(url: str) -> dict[str, Any]:
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        try:
-            page.goto(url)
-            page.wait_for_load_state("networkidle")
-
-            title = page.title()
-            content = page.content()
-
-            return {
-                'url': url,
-                'title': title,
-                'content': content,
-                'extraction_successful': True
-            }
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
-            logging.error(f"Error scraping article {url}: {str(e)}")
-            return {
-                'url': url,
-                'extraction_successful': False,
-                'error': str(e)
-            }
-        finally:
-            browser.close()
 
 def should_scrape_url(url: str) -> bool:
     """Deprecated: use FilterChain externally where possible.
