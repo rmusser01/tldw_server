@@ -1184,6 +1184,37 @@ class SyncBlobUploadCreateRequest(BaseModel):
     def _validate_chunk_shape(self) -> SyncBlobUploadCreateRequest:
         if self.chunk_size * self.chunk_count < self.size_bytes:
             raise ValueError("chunk_count and chunk_size must cover size_bytes")
+        raw_intent = self.metadata.get("notes_attachment_intent")
+        if self.domain != "attachment.ref":
+            if raw_intent is not None:
+                raise ValueError(
+                    "notes_attachment_intent is reserved for attachment.ref uploads"
+                )
+            return self
+        if not isinstance(raw_intent, dict):
+            raise ValueError("attachment.ref uploads require notes_attachment_intent")
+        intent_type = raw_intent.get("intent")
+        intent_model = (
+            SyncNotesAttachmentCreateIntent
+            if intent_type == "create"
+            else SyncNotesAttachmentReplaceIntent
+            if intent_type == "replace"
+            else None
+        )
+        if intent_model is None:
+            raise ValueError("notes_attachment_intent has an unsupported intent")
+        intent = intent_model.model_validate(raw_intent)
+        if (
+            intent.attachment_id != self.attachment_id
+            or intent.attachment_id != self.object_id
+        ):
+            raise ValueError(
+                "notes_attachment_intent attachment_id must match the upload identity"
+            )
+        self.metadata = {
+            **self.metadata,
+            "notes_attachment_intent": intent.model_dump(mode="json"),
+        }
         return self
 
     @property

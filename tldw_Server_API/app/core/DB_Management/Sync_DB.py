@@ -598,6 +598,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_owner
     ON sync_blob_upload_sessions(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_hash
     ON sync_blob_upload_sessions(dataset_id, payload_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_blob_upload_sessions_owner_key_without_device
+    ON sync_blob_upload_sessions(dataset_id, owner_user_id, idempotency_key)
+    WHERE device_id IS NULL AND idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sync_blob_chunks (
     upload_id TEXT NOT NULL,
@@ -1082,6 +1085,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_owner
     ON sync_blob_upload_sessions(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_hash
     ON sync_blob_upload_sessions(dataset_id, payload_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_blob_upload_sessions_owner_key_without_device
+    ON sync_blob_upload_sessions(dataset_id, owner_user_id, idempotency_key)
+    WHERE device_id IS NULL AND idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sync_blob_chunks (
     upload_id TEXT NOT NULL,
@@ -1562,7 +1568,10 @@ def _blob_upload_session_from_row(
     return SyncBlobUploadSession(
         upload_id=row["upload_id"],
         dataset_id=row["dataset_id"],
+        owner_user_id=row["owner_user_id"],
         attachment_id=row["attachment_id"],
+        domain=row["domain"],
+        object_id=row["entity_id"],
         status=row["status"],
         chunk_size=int(row["chunk_size"]),
         chunk_count=chunk_count,
@@ -1575,6 +1584,7 @@ def _blob_upload_session_from_row(
         quota={"reserved_blob_bytes": int(row["reserved_quota_bytes"])},
         expires_at=_timestamp_to_string(row.get("expires_at")),
         blob_id=row.get("blob_id"),
+        metadata=decode_json(row.get("metadata_json"), default={}),
     )
 
 
@@ -8038,10 +8048,18 @@ class SyncDatabase:
                     self.execute(
                         """
                         SELECT * FROM sync_blob_upload_sessions
-                         WHERE dataset_id = ? AND device_id = ? AND idempotency_key = ?
+                         WHERE dataset_id = ?
+                           AND owner_user_id = ?
+                           AND (
+                                device_id = ?
+                                OR (device_id IS NULL AND ? IS NULL)
+                           )
+                           AND idempotency_key = ?
                         """,
                         (
                             session.dataset_id,
+                            session.owner_user_id,
+                            session.device_id,
                             session.device_id,
                             session.idempotency_key,
                         ),

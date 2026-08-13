@@ -1642,7 +1642,10 @@ class SyncBlobUploadSession:
 
     upload_id: str
     dataset_id: str
+    owner_user_id: str
     attachment_id: str
+    domain: SyncDomain
+    object_id: str
     status: SyncBlobUploadStatus
     chunk_size: int
     chunk_count: int
@@ -1655,6 +1658,7 @@ class SyncBlobUploadSession:
     quota: dict[str, Any] = field(default_factory=dict)
     expires_at: str | None = None
     blob_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

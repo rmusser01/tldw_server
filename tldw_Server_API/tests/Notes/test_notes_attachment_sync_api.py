@@ -17,6 +17,9 @@ from tldw_Server_API.app.api.v1.schemas.notes_attachments import (
     validate_notes_attachment_idempotency_key,
     validate_notes_attachment_keyset_cursor,
 )
+from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+    SyncBlobUploadCreateRequest,
+)
 
 ATTACHMENT_ID = "2c4cb609-c4db-44f9-8e35-f078bd36d6b2"
 NOTE_ID = "a1677eb1-1f41-4c86-a8dd-1eaa14b014e2"
@@ -96,6 +99,61 @@ def test_notes_attachment_schema_validates_from_upload_identifier():
     for upload_id in ("", "x" * 129, "bad\nvalue", "café"):
         with pytest.raises(ValidationError):
             NotesAttachmentFromUploadRequest.model_validate({"upload_id": upload_id})
+
+
+def test_attachment_blob_upload_request_requires_one_strict_intent() -> None:
+    base = {
+        "dataset_id": "dataset-1",
+        "domain": "attachment.ref",
+        "object_id": ATTACHMENT_ID,
+        "attachment_id": ATTACHMENT_ID,
+        "content_type": "application/pdf",
+        "size_bytes": 42,
+        "payload_hash": BLOB_HASH,
+        "chunk_size": 42,
+        "chunk_count": 1,
+    }
+    request = SyncBlobUploadCreateRequest.model_validate(
+        {
+            **base,
+            "metadata": {
+                "notes_attachment_intent": {
+                    "intent": "create",
+                    "note_id": NOTE_ID,
+                    "attachment_id": ATTACHMENT_ID,
+                    "file_name": " Report.PDF ",
+                }
+            },
+        }
+    )
+
+    assert request.metadata["notes_attachment_intent"]["file_name"] == "Report.pdf"
+
+    for metadata in (
+        {},
+        {"notes_attachment_intent": {"intent": "create"}},
+        {
+            "notes_attachment_intent": {
+                "intent": "create",
+                "note_id": NOTE_ID,
+                "attachment_id": ATTACHMENT_ID,
+                "file_name": "report.pdf",
+                "extra": True,
+            }
+        },
+    ):
+        with pytest.raises(ValidationError):
+            SyncBlobUploadCreateRequest.model_validate({**base, "metadata": metadata})
+
+    generic = SyncBlobUploadCreateRequest.model_validate(
+        {
+            **base,
+            "domain": "notes.note",
+            "object_id": NOTE_ID,
+            "metadata": {},
+        }
+    )
+    assert generic.metadata == {}
 
 
 def test_notes_attachment_etag_grammar_is_exact():

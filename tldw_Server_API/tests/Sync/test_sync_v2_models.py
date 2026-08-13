@@ -1369,8 +1369,8 @@ def test_m2_blob_protocol_models_validate_session_manifest_and_restore_completen
         {
             "dataset_id": "dataset-1",
             "device_id": "device-1",
-            "domain": "attachment.ref",
-            "object_id": "attachment-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
             "attachment_id": "attachment-1",
             "content_type": "application/octet-stream",
             "size_bytes": 4096,
@@ -1466,7 +1466,7 @@ def test_m2_blob_protocol_models_validate_session_manifest_and_restore_completen
     )
 
     assert create_request.encryption_policy == "server_trusted_v1"
-    assert create_request.entity_id == "attachment-1"
+    assert create_request.entity_id == "note-1"
     assert session_response.missing_chunks == [2, 3]
     assert chunk_response.chunk_index == 2
     assert complete_response.status == "available"
