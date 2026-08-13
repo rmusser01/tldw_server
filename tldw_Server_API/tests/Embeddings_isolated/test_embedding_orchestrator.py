@@ -1331,10 +1331,10 @@ async def test_retryable_fallback_preflight_failure_continues_to_next_candidate(
     "boundary",
     ["backend_identity", "cache_key", "cache_get", "cache_set"],
 )
-async def test_current_fallback_wide_domain_catch_advances_after_infrastructure_failure(
+async def test_fallback_non_provider_failure_propagates_without_advancing(
     boundary,
 ):
-    """Pin current behavior that Stage 2D will intentionally correct."""
+    """Fallback infrastructure failures must not activate a later provider."""
     cohere_model = "embed-english-v3.0"
     original = EmbeddingExecutionError(
         "internal_execution_failure",
@@ -1443,22 +1443,16 @@ async def test_current_fallback_wide_domain_catch_advances_after_infrastructure_
     ]
     events.clear()
 
-    result = await orchestrator.execute(prepared)
+    with pytest.raises(EmbeddingExecutionError) as raised:
+        await orchestrator.execute(prepared)
 
-    expected_executor_providers = (
-        ["openai", "cohere", "huggingface"]
-        if boundary == "cache_set"
-        else ["openai", "huggingface"]
-    )
-    assert result.provider == "huggingface"
-    assert result.vectors == [[0.5, 0.25]]
-    assert result.fallback_from == "openai"
+    assert raised.value is original
     assert [
         provider
         for action, provider, _ in events
         if action == "candidate"
-    ] == ["openai", "cohere", "huggingface"]
-    assert [call["provider"] for call in executor.calls] == expected_executor_providers
+    ] == ["openai", "cohere"]
+    assert "huggingface" not in [call["provider"] for call in executor.calls]
     assert [call["provider"] for call in executor.calls].count("openai") == 1
     assert [
         event

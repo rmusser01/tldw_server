@@ -550,6 +550,119 @@ def test_orchestrator_endpoint_cache_key_secret_failure_propagates_without_fallb
     assert provider_calls == []
 
 
+@pytest.mark.parametrize(
+    "boundary",
+    ["backend_identity", "cache_key", "cache_get", "cache_set"],
+)
+def test_orchestrator_endpoint_fallback_infrastructure_failure_stops_provider_activation(
+    client,
+    monkeypatch,
+    boundary,
+):
+    from tldw_Server_API.app.api.v1.endpoints import (
+        embeddings_v5_production_enhanced as mod,
+    )
+
+    original = EmbeddingExecutionError(
+        "internal_execution_failure",
+        f"fallback {boundary} failed",
+        retryable=True,
+        provider="cohere",
+        model="embed-english-v3.0",
+    )
+    preflight_providers: list[str] = []
+    provider_calls: list[str] = []
+    fallback_chain = {"openai": ["openai", "cohere", "huggingface"]}
+    fallback_model_map = {
+        "openai:text-embedding-3-small": {
+            "cohere": "embed-english-v3.0",
+            "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
+        }
+    }
+
+    def policy_setting(name, default):
+        if name == "EMBEDDINGS_FALLBACK_CHAIN":
+            return fallback_chain
+        if name == "EMBEDDINGS_FALLBACK_MODEL_MAP":
+            return fallback_model_map
+        return default
+
+    def backend_identity(_executor, provider, model):
+        if boundary == "backend_identity" and provider == "cohere":
+            raise original
+        return f"{provider}:{model}:backend"
+
+    def cache_key(text, provider, model, dimensions=None, backend_identity=None):
+        if boundary == "cache_key" and provider == "cohere":
+            raise original
+        return _friendly_cache_key(
+            text,
+            provider,
+            model,
+            dimensions,
+            backend_identity,
+        )
+
+    async def cache_get(key):
+        if boundary == "cache_get" and key.startswith("cohere|"):
+            raise original
+        return None
+
+    async def cache_set(key, _value):
+        if boundary == "cache_set" and key.startswith("cohere|"):
+            raise original
+        return None
+
+    async def record_preflight(_executor, provider, _model):
+        preflight_providers.append(provider)
+
+    async def record_create(
+        _executor,
+        texts,
+        *,
+        provider,
+        model,
+        dimensions,
+    ):
+        del dimensions
+        provider_calls.append(provider)
+        if provider == "openai":
+            raise EmbeddingProviderError(
+                "provider_unavailable",
+                "primary unavailable",
+                retryable=True,
+                provider=provider,
+                model=model,
+            )
+        return [[0.1, 0.2] for _ in texts]
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    monkeypatch.setenv("EMBEDDINGS_ALLOW_FALLBACK_WITH_HEADER", "true")
+    monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "false")
+    monkeypatch.setattr(mod, "_embedding_policy_setting", policy_setting)
+    monkeypatch.setattr(mod, "get_cache_key", cache_key)
+    monkeypatch.setattr(mod.embedding_cache, "get", cache_get)
+    monkeypatch.setattr(mod.embedding_cache, "set", cache_set)
+    monkeypatch.setattr(mod._EndpointEmbeddingExecutor, "backend_identity", backend_identity)
+    monkeypatch.setattr(
+        mod._EndpointEmbeddingExecutor,
+        "preflight_provider",
+        record_preflight,
+    )
+    monkeypatch.setattr(mod._EndpointEmbeddingExecutor, "create", record_create)
+
+    response = client.post(
+        "/api/v1/embeddings",
+        headers={"x-provider": "openai"},
+        json={"model": "text-embedding-3-small", "input": "fallback boundary"},
+    )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json() == {"detail": f"fallback {boundary} failed"}
+    assert preflight_providers == ["openai", "cohere"]
+    assert "huggingface" not in provider_calls
+
+
 def _run_dual_path_embedding_request(
     client,
     monkeypatch,
