@@ -14,6 +14,10 @@ from pydantic import (
     model_validator,
 )
 
+from tldw_Server_API.app.core.exceptions import NoteAttachmentPolicyError
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    canonicalize_note_attachment_file_name,
+)
 from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_LINK_DOMAINS,
     NOTES_LINK_SYNC_OPERATIONS,
@@ -1180,6 +1184,37 @@ class SyncBlobUploadCreateRequest(BaseModel):
     def _validate_chunk_shape(self) -> SyncBlobUploadCreateRequest:
         if self.chunk_size * self.chunk_count < self.size_bytes:
             raise ValueError("chunk_count and chunk_size must cover size_bytes")
+        raw_intent = self.metadata.get("notes_attachment_intent")
+        if self.domain != "attachment.ref":
+            if raw_intent is not None:
+                raise ValueError(
+                    "notes_attachment_intent is reserved for attachment.ref uploads"
+                )
+            return self
+        if not isinstance(raw_intent, dict):
+            raise ValueError("attachment.ref uploads require notes_attachment_intent")
+        intent_type = raw_intent.get("intent")
+        intent_model = (
+            SyncNotesAttachmentCreateIntent
+            if intent_type == "create"
+            else SyncNotesAttachmentReplaceIntent
+            if intent_type == "replace"
+            else None
+        )
+        if intent_model is None:
+            raise ValueError("notes_attachment_intent has an unsupported intent")
+        intent = intent_model.model_validate(raw_intent)
+        if (
+            intent.attachment_id != self.attachment_id
+            or intent.attachment_id != self.object_id
+        ):
+            raise ValueError(
+                "notes_attachment_intent attachment_id must match the upload identity"
+            )
+        self.metadata = {
+            **self.metadata,
+            "notes_attachment_intent": intent.model_dump(mode="json"),
+        }
         return self
 
     @property
@@ -1187,6 +1222,74 @@ class SyncBlobUploadCreateRequest(BaseModel):
         return self.object_id
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class _SyncNotesAttachmentIntent(BaseModel):
+    """Shared immutable identity for a Notes attachment upload intent."""
+
+    note_id: str
+    attachment_id: str
+
+    @field_validator("note_id", "attachment_id")
+    @classmethod
+    def _validate_uuid4(cls, value: Any, info: Any) -> str:
+        """Validate one canonical Notes attachment UUIDv4 field."""
+
+        from uuid import RFC_4122, UUID
+
+        if not isinstance(value, str):
+            raise ValueError(f"{info.field_name} must be a canonical lowercase UUIDv4")
+        try:
+            parsed = UUID(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"{info.field_name} must be a canonical lowercase UUIDv4"
+            ) from exc
+        if parsed.version != 4 or parsed.variant != RFC_4122 or str(parsed) != value:
+            raise ValueError(f"{info.field_name} must be a canonical lowercase UUIDv4")
+        return value
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncNotesAttachmentCreateIntent(_SyncNotesAttachmentIntent):
+    """Immutable resumable-upload intent for a new Notes attachment."""
+
+    intent: Literal["create"] = "create"
+    file_name: str
+
+    @field_validator("file_name")
+    @classmethod
+    def _canonicalize_file_name(cls, value: Any) -> str:
+        """Canonicalize the requested create-intent filename."""
+
+        try:
+            return canonicalize_note_attachment_file_name(value)[0]
+        except NoteAttachmentPolicyError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+class SyncNotesAttachmentReplaceIntent(_SyncNotesAttachmentIntent):
+    """Immutable resumable-upload intent for attachment content replacement."""
+
+    intent: Literal["replace"] = "replace"
+    base_server_cursor: StrictInt = Field(..., ge=1)
+    base_object_revision: StrictInt = Field(..., ge=1)
+    base_object_hash: str
+
+    @field_validator("base_object_hash")
+    @classmethod
+    def _validate_object_hash(cls, value: Any) -> str:
+        """Validate the optimistic replacement base digest."""
+
+        import re
+
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None
+        ):
+            raise ValueError("base_object_hash must be a lowercase SHA-256 digest")
+        return value
 
 
 class SyncBlobUploadSessionResponse(BaseModel):
@@ -1937,6 +2040,8 @@ __all__ = [
     "SyncBlobUploadCreateRequest",
     "SyncBlobUploadSessionResponse",
     "SyncBlobUploadStatus",
+    "SyncNotesAttachmentCreateIntent",
+    "SyncNotesAttachmentReplaceIntent",
     "SyncCapabilitiesResponse",
     "SyncConflictRecord",
     "SyncConflictResolution",

@@ -74,6 +74,9 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
         SyncDatabase._create_attachment_binding_for_envelope
     )
     completion_source = inspect.getsource(SyncDatabase.complete_blob_upload)
+    availability_source = " ".join(
+        inspect.getsource(SyncDatabase.list_blob_availability_by_hashes).split()
+    )
 
     assert "CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings" in compact_schema
     assert "PRIMARY KEY (dataset_id, attachment_id, attachment_revision)" in compact_schema
@@ -156,6 +159,9 @@ def test_postgres_attachment_binding_and_storage_namespace_sql_plan_contracts() 
     )[1].split("SELECT", 1)[0]
     assert "_get_dataset_row_for_update" in completion_source
     assert "_resolve_pending_bindings_for_blob" in completion_source
+    assert "len(unique_hashes) > 200" in availability_source
+    assert "WHERE dataset_id = ? AND owner_user_id = ?" in availability_source
+    assert "payload_hash IN" in availability_source
 
 
 @pytest.mark.parametrize(

@@ -28,6 +28,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRestoreCompletenessResponse,
     SyncV2Envelope,
 )
+
+ATTACHMENT_INTENT_ID = "2c4cb609-c4db-44f9-8e35-f078bd36d6b2"
+ATTACHMENT_INTENT_NOTE_ID = "a1677eb1-1f41-4c86-a8dd-1eaa14b014e2"
 from tldw_Server_API.app.core.Sync.v2 import models as core_sync_models
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope as CoreSyncEnvelope
 
@@ -1366,8 +1369,8 @@ def test_m2_blob_protocol_models_validate_session_manifest_and_restore_completen
         {
             "dataset_id": "dataset-1",
             "device_id": "device-1",
-            "domain": "attachment.ref",
-            "object_id": "attachment-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
             "attachment_id": "attachment-1",
             "content_type": "application/octet-stream",
             "size_bytes": 4096,
@@ -1463,7 +1466,7 @@ def test_m2_blob_protocol_models_validate_session_manifest_and_restore_completen
     )
 
     assert create_request.encryption_policy == "server_trusted_v1"
-    assert create_request.entity_id == "attachment-1"
+    assert create_request.entity_id == "note-1"
     assert session_response.missing_chunks == [2, 3]
     assert chunk_response.chunk_index == 2
     assert complete_response.status == "available"
@@ -1486,6 +1489,79 @@ def test_m2_blob_upload_rejects_non_sha256_hashes():
                 "chunk_count": 4,
             }
         )
+
+
+def test_attachment_intent_schema_accepts_strict_create_and_replace_models():
+    from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+        SyncNotesAttachmentCreateIntent,
+        SyncNotesAttachmentReplaceIntent,
+    )
+
+    create = SyncNotesAttachmentCreateIntent.model_validate(
+        {
+            "intent": "create",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "file_name": " Report.PDF ",
+        }
+    )
+    replace = SyncNotesAttachmentReplaceIntent.model_validate(
+        {
+            "intent": "replace",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "base_server_cursor": 12,
+            "base_object_revision": 3,
+            "base_object_hash": "sha256:" + "a" * 64,
+        }
+    )
+
+    assert create.file_name == "Report.pdf"
+    assert replace.base_object_hash == "sha256:" + "a" * 64
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "intent": "create",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "file_name": "report.pdf",
+            "base_server_cursor": 1,
+        },
+        {
+            "intent": "replace",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "base_server_cursor": 1,
+            "base_object_revision": 1,
+            "base_object_hash": "sha256:" + "a" * 64,
+            "file_name": "report.pdf",
+        },
+        {
+            "intent": "replace",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "base_server_cursor": 0,
+            "base_object_revision": 1,
+            "base_object_hash": "sha256:" + "a" * 64,
+        },
+    ],
+)
+def test_attachment_intent_schema_rejects_unknown_fields_and_invalid_base(payload):
+    from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+        SyncNotesAttachmentCreateIntent,
+        SyncNotesAttachmentReplaceIntent,
+    )
+
+    model = (
+        SyncNotesAttachmentCreateIntent
+        if payload["intent"] == "create"
+        else SyncNotesAttachmentReplaceIntent
+    )
+    with pytest.raises(ValidationError):
+        model.model_validate(payload)
 
 
 def test_capabilities_accept_m2_blob_transfer_and_quota_details():

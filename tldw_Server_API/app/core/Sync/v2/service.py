@@ -11,9 +11,16 @@ import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
+
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    NoteAttachmentPolicyError,
+    canonicalize_note_attachment_file_name,
+    validate_note_attachment_content_type,
+    validate_note_attachment_original_file_name,
+)
 
 from .adapters import (
     ATTACHMENT_REF_SERVER_AVAILABILITY,
@@ -27,6 +34,7 @@ from .adapters import (
     SyncDomainAdapter,
     extract_attachment_ref_metadata,
 )
+from .attachment_refs_v2 import parse_attachment_ref_v2_payload
 from .blob_store import LocalSyncBlobStore, SyncBlobStoreError
 from .errors import (
     SyncHeadConflictError,
@@ -94,6 +102,7 @@ from .models import (
     client_private_server_frontend_limitation_warning,
     normalize_supported_adapter_versions,
     normalize_sync_v2_requested_domains,
+    sync_v2_attachment_ref_v2_is_writable,
     sync_v2_dataset_writable_adapter_versions,
     sync_v2_domain_schemas,
     sync_v2_server_supported_adapter_versions,
@@ -2887,7 +2896,11 @@ class SyncV2Service:
             raise SyncStoreError("Sync blob upload requires server_trusted_v1 encryption")
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
-        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id, domain=domain)
+        dataset = self._require_blob_dataset(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            domain=domain,
+        )
         self._validate_blob_limits(
             user_id=user_id,
             dataset_id=dataset_id,
@@ -2896,6 +2909,19 @@ class SyncV2Service:
             chunk_count=chunk_count,
         )
         self._validate_sha256_hash(payload_hash, field_name="payload_hash")
+        normalized_metadata = dict(metadata or {})
+        if domain == "attachment.ref":
+            normalized_metadata = self._normalize_notes_attachment_upload_metadata(
+                dataset=dataset,
+                entity_id=entity_id,
+                attachment_id=attachment_id,
+                content_type=content_type,
+                metadata=normalized_metadata,
+            )
+        elif "notes_attachment_intent" in normalized_metadata:
+            raise SyncStoreError(
+                "notes_attachment_intent is reserved for attachment.ref uploads"
+            )
         return self.store.create_blob_upload_session(
             SyncBlobUploadSessionCreate(
                 upload_id=self.id_factory("blob-upload"),
@@ -2912,9 +2938,140 @@ class SyncV2Service:
                 chunk_count=chunk_count,
                 reserved_quota_bytes=size_bytes,
                 idempotency_key=idempotency_key,
-                metadata=dict(metadata or {}),
+                metadata=normalized_metadata,
             )
         )
+
+    def _normalize_notes_attachment_upload_metadata(
+        self,
+        *,
+        dataset: SyncDataset,
+        entity_id: str,
+        attachment_id: str,
+        content_type: str,
+        metadata: dict[str, object],
+    ) -> dict[str, object]:
+        """Validate and bind one strict immutable Notes attachment upload intent."""
+
+        try:
+            adapter = self.adapters.get("attachment.ref")
+        except KeyError as exc:
+            raise SyncStoreError("Notes attachment upload intent is unavailable") from exc
+        if not sync_v2_attachment_ref_v2_is_writable(
+            dataset,
+            notes_attachment_sync_enabled=bool(
+                getattr(adapter, "v2_writes_enabled", False)
+            ),
+            supports_attachments=self.settings.supports_attachments,
+        ):
+            raise SyncStoreError("Notes attachment upload intent is unavailable")
+        raw_intent = metadata.get("notes_attachment_intent")
+        if not isinstance(raw_intent, Mapping):
+            raise SyncStoreError(
+                "attachment.ref uploads require notes_attachment_intent"
+            )
+        if "_notes_attachment_binding" in metadata:
+            raise SyncStoreError("Notes attachment upload metadata is reserved")
+        intent_type = raw_intent.get("intent")
+        allowed = (
+            {"intent", "note_id", "attachment_id", "file_name"}
+            if intent_type == "create"
+            else {
+                "intent",
+                "note_id",
+                "attachment_id",
+                "base_server_cursor",
+                "base_object_revision",
+                "base_object_hash",
+            }
+            if intent_type == "replace"
+            else set()
+        )
+        if not allowed or set(raw_intent) != allowed:
+            raise SyncStoreError("Notes attachment upload intent is invalid")
+        note_id = _canonical_attachment_uuid(raw_intent.get("note_id"), "note_id")
+        intent_attachment_id = _canonical_attachment_uuid(
+            raw_intent.get("attachment_id"),
+            "attachment_id",
+        )
+        if intent_attachment_id != attachment_id or intent_attachment_id != entity_id:
+            raise SyncStoreError(
+                "Notes attachment upload intent does not match its attachment identity"
+            )
+        try:
+            canonical_content_type = validate_note_attachment_content_type(content_type)
+        except NoteAttachmentPolicyError as exc:
+            raise SyncStoreError(str(exc)) from exc
+        if canonical_content_type != content_type:
+            raise SyncStoreError("Notes attachment content type must be canonical")
+
+        canonical_intent = dict(raw_intent)
+        if intent_type == "create":
+            try:
+                file_name, _ = canonicalize_note_attachment_file_name(
+                    raw_intent.get("file_name")
+                )
+                original_file_name = validate_note_attachment_original_file_name(
+                    file_name
+                )
+            except NoteAttachmentPolicyError as exc:
+                raise SyncStoreError(str(exc)) from exc
+            canonical_intent["file_name"] = file_name
+            bound_names = {
+                "file_name": file_name,
+                "original_file_name": original_file_name,
+            }
+        else:
+            base_cursor = raw_intent.get("base_server_cursor")
+            base_revision = raw_intent.get("base_object_revision")
+            base_hash = raw_intent.get("base_object_hash")
+            if (
+                isinstance(base_cursor, bool)
+                or not isinstance(base_cursor, int)
+                or base_cursor < 1
+                or isinstance(base_revision, bool)
+                or not isinstance(base_revision, int)
+                or base_revision < 1
+                or not isinstance(base_hash, str)
+            ):
+                raise SyncStoreError("Notes attachment replacement base is invalid")
+            self._validate_sha256_hash(base_hash, field_name="base_object_hash")
+            head = self.store.get_current_head(
+                dataset.dataset_id,
+                "attachment.ref",
+                attachment_id,
+            )
+            if (
+                head is None
+                or head.adapter_version != 2
+                or head.operation != "upsert"
+                or head.deleted
+                or head.parent_id != note_id
+                or (
+                    head.server_cursor,
+                    head.object_revision,
+                    head.payload_hash,
+                )
+                != (base_cursor, base_revision, base_hash)
+            ):
+                raise SyncStoreError(
+                    "Notes attachment replacement base does not match the current head"
+                )
+            current = parse_attachment_ref_v2_payload("upsert", head.payload)
+            bound_names = {
+                "file_name": current.file_name,
+                "original_file_name": current.original_file_name,
+            }
+        return {
+            **metadata,
+            "notes_attachment_intent": canonical_intent,
+            "_notes_attachment_binding": {
+                "intent": intent_type,
+                "note_id": note_id,
+                "attachment_id": intent_attachment_id,
+                **bound_names,
+            },
+        }
 
     def get_blob_upload_session(
         self,
@@ -3014,13 +3171,30 @@ class SyncV2Service:
             dataset_id=dataset_id,
             upload_id=upload_id,
         )
+        if session.status == "complete" and session.blob_id is not None:
+            existing = self.store.get_blob_object(
+                dataset_id,
+                blob_id=session.blob_id,
+                owner_user_id=user_id,
+            )
+            if existing is None:
+                raise SyncStoreError("Completed Sync blob upload is unavailable")
+            return existing
         if session.missing_chunks:
             raise SyncStoreError("Sync blob upload session is missing chunks")
+        storage_namespace_id: str | None = None
+        if session.domain == "attachment.ref":
+            namespace = self.store.get_or_create_storage_namespace(
+                dataset_id,
+                owner_user_id=user_id,
+            )
+            storage_namespace_id = namespace.storage_namespace_id
         try:
             storage_key = blob_store.commit_upload(
                 upload_id=upload_id,
                 payload_hash=session.payload_hash,
                 chunk_indexes=list(range(session.chunk_count)),
+                storage_namespace_id=storage_namespace_id,
             )
         except SyncBlobStoreError as exc:
             raise SyncStoreError(str(exc)) from exc
@@ -3048,6 +3222,50 @@ class SyncV2Service:
                 exc,
             )
         return blob
+
+    def require_completed_notes_attachment_upload(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        upload_id: str,
+        note_id: str,
+        attachment_id: str,
+    ) -> tuple[SyncBlobUploadSession, SyncBlobObject]:
+        """Return one completed upload only when its immutable Notes intent matches."""
+
+        session = self.get_blob_upload_session(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+        intent = session.metadata.get("notes_attachment_intent")
+        if (
+            session.owner_user_id != user_id
+            or session.domain != "attachment.ref"
+            or session.object_id != attachment_id
+            or session.attachment_id != attachment_id
+            or not isinstance(intent, Mapping)
+            or intent.get("note_id") != note_id
+            or intent.get("attachment_id") != attachment_id
+        ):
+            raise SyncStoreError("Notes attachment upload intent does not match")
+        if session.status != "complete" or session.blob_id is None:
+            raise SyncStoreError("Notes attachment upload is not complete")
+        blob = self.store.get_blob_object(
+            dataset_id,
+            blob_id=session.blob_id,
+            owner_user_id=user_id,
+        )
+        if (
+            blob is None
+            or blob.status != "available"
+            or blob.payload_hash != session.payload_hash
+            or blob.size_bytes != session.size_bytes
+            or blob.content_type != session.content_type
+        ):
+            raise SyncStoreError("Notes attachment upload blob is unavailable")
+        return session, blob
 
     def cancel_blob_upload(
         self,
@@ -5698,6 +5916,10 @@ class SyncV2Service:
             bytes.fromhex(value[len(prefix) :])
         except ValueError as exc:
             raise SyncStoreError(f"Sync blob {field_name} digest must be hex") from exc
+        if value != value.lower():
+            raise SyncStoreError(
+                f"Sync blob {field_name} digest must be lowercase hex"
+            )
 
     def _write_single_chunk_blob(
         self,
@@ -5740,6 +5962,20 @@ class SyncV2Service:
 
 def _compact_json_size(value: object) -> int:
     return len(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+
+def _canonical_attachment_uuid(value: object, field_name: str) -> str:
+    """Validate and return a canonical lowercase attachment UUIDv4."""
+
+    if not isinstance(value, str):
+        raise SyncStoreError(f"Notes attachment {field_name} is invalid")
+    try:
+        parsed = UUID(value)
+    except ValueError as exc:
+        raise SyncStoreError(f"Notes attachment {field_name} is invalid") from exc
+    if parsed.version != 4 or parsed.variant != RFC_4122 or str(parsed) != value:
+        raise SyncStoreError(f"Notes attachment {field_name} is invalid")
+    return value
 
 
 def _parse_sync_timestamp(value: str | None) -> datetime | None:

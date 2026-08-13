@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,7 @@ def test_attachment_ref_v1_compatibility_evaluator_is_test_only() -> None:
 
 
 @pytest.fixture()
-def sync_service(tmp_path: Path) -> SyncV2Service:
+def sync_service(tmp_path: Path) -> Iterator[SyncV2Service]:
     default_sync_v2_registry.cache_clear()
     registry = default_sync_v2_registry()
     registry.register(_LegacyAttachmentRefAdapter())
@@ -148,7 +149,8 @@ def sync_service(tmp_path: Path) -> SyncV2Service:
         dataset_id="dataset-1",
         domains=list(M1_SYNC_DOMAINS),
     )
-    return service
+    yield service
+    default_sync_v2_registry.cache_clear()
 
 
 @pytest.fixture()
@@ -749,6 +751,16 @@ def test_attachment_ref_v2_adapter_rejects_version_one_writes() -> None:
 
     assert isinstance(outcome, AdapterRejected)
     assert outcome.error_code == "attachment_ref_v1_immutable"
+
+
+def test_attachment_ref_v2_uses_the_dedicated_domain_adapter() -> None:
+    from tldw_Server_API.app.core.Sync.v2.domain_adapters.attachment_refs import (
+        AttachmentRefDomainAdapter,
+    )
+
+    adapter = default_sync_v2_registry().get("attachment.ref")
+
+    assert isinstance(adapter, AttachmentRefDomainAdapter)
 
 
 def test_attachment_ref_v2_adapter_rejects_v1_v2_object_id_collision() -> None:

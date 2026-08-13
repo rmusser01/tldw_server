@@ -310,6 +310,38 @@ class NoteAttachmentStore:
         with context as transaction_conn:
             return self._get_locked(transaction_conn, dataset_id, attachment_id)
 
+    def get_live_by_name(
+        self,
+        dataset_id: str,
+        note_id: str,
+        file_name: str,
+        *,
+        conn: Any | None = None,
+    ) -> NoteAttachment | None:
+        """Return one owner-scoped live attachment by its canonical note/name key."""
+
+        dataset_id = self._dataset_id(dataset_id)
+        note_id = self._uuid4(note_id, "note_id")
+        _, normalized_file_name = self._normalized_filename(file_name)
+        context = nullcontext(conn) if conn is not None else self._db.transaction()
+        with context as transaction_conn:
+            row = transaction_conn.execute(
+                self._SELECT
+                + "WHERE attachment.client_id = ? AND attachment.dataset_id = ? "
+                "AND attachment.note_id = ? AND attachment.normalized_file_name = ? "
+                "AND attachment.deleted = ? AND note.client_id = ? AND note.deleted = ?",
+                (
+                    self._owner_id,
+                    dataset_id,
+                    note_id,
+                    normalized_file_name,
+                    self._deleted_value(False),
+                    self._owner_id,
+                    self._deleted_value(False),
+                ),
+            ).fetchone()
+        return self._from_row(row) if row is not None else None
+
     def list_page(
         self,
         dataset_id: str,

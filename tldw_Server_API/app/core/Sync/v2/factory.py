@@ -16,8 +16,9 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
-from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegistry
+from .adapters import StaticSyncAdapter, SyncAdapterRegistry
 from .blob_store import LocalSyncBlobStore
+from .domain_adapters.attachment_refs import AttachmentRefDomainAdapter
 from .domain_adapters.media import MediaMetadataAdapter
 from .domain_adapters.notes import NotesDomainAdapter
 from .domain_adapters.notes_link import NotesLinkDomainAdapter
@@ -57,7 +58,7 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
     return SyncAdapterRegistry(
         [
             (
-                AttachmentRefAdapter(
+                AttachmentRefDomainAdapter(
                     v2_writes_enabled=_sync_v2_bool_env(
                         "SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC",
                         default=False,
@@ -90,7 +91,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
     adapters = default_sync_v2_registry()
     settings = _sync_v2_settings_from_env()
     materializers: dict[SyncDomain, SyncMaterializer] = {
-        "attachment.ref": AttachmentRefMaterializer(),
+        "attachment.ref": AttachmentRefMaterializer(note_db),
         "chat.conversation": ChatConversationMaterializer(note_db),
         "chat.message": ChatMessageMaterializer(note_db),
         "notes.note": NotesMaterializer(note_db),
