@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+from .cluster_settings import normalize_cluster_rule
 from .safe_regex import SafeRegexLimits, search_untrusted
 from .ua_profiles import pick_ua_profile, profile_to_impersonate
 
@@ -469,12 +470,11 @@ class ScraperRouter:
                     normalized = _normalize_validated_string_list(v)
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized
-                elif (
-                    k in {"schema_rules", "schema"}
-                    or k in {"llm_settings", "llm"}
-                    or k in {"regex_settings", "regex"}
-                    or k in {"cluster_settings", "cluster"}
-                ):
+                elif k in {"cluster_settings", "cluster"}:
+                    normalized = _normalize_validated_object_mapping(v)
+                    if normalized is not _INVALID_VALUE:
+                        cleaned[k] = normalize_cluster_rule(normalized)
+                elif k in {"schema_rules", "schema", "llm_settings", "llm", "regex_settings", "regex"}:
                     normalized = _normalize_validated_object_mapping(v)
                     if normalized is not _INVALID_VALUE:
                         cleaned[k] = normalized

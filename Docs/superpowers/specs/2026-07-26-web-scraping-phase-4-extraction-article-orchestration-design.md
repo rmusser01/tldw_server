@@ -258,6 +258,18 @@ Canonical public functions construct defaults at call time while tests and
 higher-level orchestration may inject deterministic replacements. This is the
 supported monkeypatch and test seam after migration.
 
+LLM concurrency admission uses one stable process-wide limiter per canonical
+provider identity. A smaller positive limit supplied by a later request tightens
+that limiter after already-admitted calls drain; a live limiter is never replaced
+or widened. Explicit throttle-state lifecycle reset or process restart creates a
+new limiter. This conservative rule prevents differently configured requests
+from creating overlapping semaphore generations that exceed either limit.
+
+Cluster `min_word_count=0` retains the predecessor's truthy-fallback behavior and
+therefore selects the default positive threshold. This is distinct from finite
+similarity and prefilter thresholds, where an explicit `0.0` remains meaningful
+and is preserved.
+
 The package preserves canonical public functions and constants including:
 
 - `DEFAULT_EXTRACTION_STRATEGY_ORDER`;
@@ -602,6 +614,11 @@ code. It propagates through:
 - browser acquisition, navigation, retry, and cleanup;
 - extraction queueing and result wait;
 - retry delays and inter-strategy checkpoints.
+
+Extraction and LLM retry delays cap the complete exponential-base-plus-jitter
+delay with `EXTRACTOR_RETRY_MAX_DELAY_MS`. The default cap is 30 seconds when
+the setting is absent or invalid; `0` disables retry sleeping without changing
+the configured attempt count.
 
 An `ExtractionExecutorManager` owns one process-scoped executor generation. A
 generation contains its process ID, monotonically increasing generation ID,

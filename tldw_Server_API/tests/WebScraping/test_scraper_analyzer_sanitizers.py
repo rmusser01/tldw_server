@@ -1,13 +1,27 @@
+"""Tests that scraper and pre-scrape analyzer failures remain sanitized."""
+
+from __future__ import annotations
+
+from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
 
 pytestmark = pytest.mark.unit
 
 
 _LEAKY_ERROR = "backend exploded at /tmp/secret-token with api_key=abc123"
+
+
+def _install_extraction_dependencies(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
+    """Install extraction dependencies with selected test overrides."""
+
+    dependencies = replace(pipeline.build_default_dependencies(), **overrides)
+    monkeypatch.setattr(pipeline, "build_default_dependencies", lambda: dependencies)
 
 
 def _assert_safe_text(value):
@@ -173,7 +187,7 @@ def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypat
     def fail_extract(*_args, **_kwargs):
         raise ImportError(_LEAKY_ERROR)
 
-    monkeypatch.setattr(article_extractor, "extract_schema_fields", fail_extract)
+    _install_extraction_dependencies(monkeypatch, extract_schema_fields=fail_extract)
 
     result = article_extractor.extract_article_with_pipeline(
         "<html><body><h1>Title</h1></body></html>",
@@ -191,7 +205,7 @@ def test_article_pipeline_schema_failure_sanitizes_trace_detail(monkeypatch):
     def fail_extract(*_args, **_kwargs):
         raise RuntimeError(_LEAKY_ERROR)
 
-    monkeypatch.setattr(article_extractor, "extract_schema_fields", fail_extract)
+    _install_extraction_dependencies(monkeypatch, extract_schema_fields=fail_extract)
 
     result = article_extractor.extract_article_with_pipeline(
         """
@@ -230,7 +244,7 @@ def test_article_pipeline_schema_validation_failure_is_sanitized_and_falls_back(
     def fail_validation(*_args, **_kwargs):
         raise error
 
-    monkeypatch.setattr(article_extractor, "validate_selector_rules", fail_validation)
+    _install_extraction_dependencies(monkeypatch, validate_selector_rules=fail_validation)
 
     result = article_extractor.extract_article_with_pipeline(
         "<html><body><h1>Title</h1></body></html>",
@@ -269,9 +283,12 @@ def test_article_pipeline_schema_validation_failure_is_not_retried(monkeypatch):
     monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "2")
     monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "10")
     monkeypatch.setenv("EXTRACTOR_RETRY_JITTER_MS", "0")
-    monkeypatch.setattr(article_extractor, "validate_selector_rules", fail_validation)
-    monkeypatch.setattr(article_extractor.time, "sleep", retry_delays.append)
-    monkeypatch.setattr(article_extractor, "increment_counter", record_counter)
+    _install_extraction_dependencies(
+        monkeypatch,
+        validate_selector_rules=fail_validation,
+        sleep=retry_delays.append,
+        increment_counter=record_counter,
+    )
 
     result = article_extractor.extract_article_with_pipeline(
         "<html><body><h1 data-no-retry>Title</h1></body></html>",

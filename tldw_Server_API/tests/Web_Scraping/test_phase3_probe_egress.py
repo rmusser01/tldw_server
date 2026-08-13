@@ -599,12 +599,12 @@ async def test_probe_guard_logs_only_approved_low_cardinality_context_labels(
     ],
 )
 def test_probe_log_host_is_canonical_or_unknown(url: str, expected: str) -> None:
-    host_label = _required_attribute(
-        _probe_implementation_module(),
-        "_sanitized_host_label",
-    )
+    from tldw_Server_API.app.core.Web_Scraping import observability
 
-    label = host_label(url)
+    probe_module = _probe_implementation_module()
+    assert probe_module.sanitized_host is observability.sanitized_host
+
+    label = probe_module.sanitized_host(url)
 
     assert label == expected
     if expected == "unknown":
@@ -623,12 +623,9 @@ def test_probe_log_host_is_canonical_or_unknown(url: str, expected: str) -> None
     ],
 )
 def test_probe_log_host_rejects_raw_c0_controls_and_del(url: str) -> None:
-    host_label = _required_attribute(
-        _probe_implementation_module(),
-        "_sanitized_host_label",
-    )
+    from tldw_Server_API.app.core.Web_Scraping.observability import sanitized_host
 
-    assert host_label(url) == "unknown"
+    assert sanitized_host(url) == "unknown"
 
 
 @pytest.mark.parametrize(
@@ -645,12 +642,9 @@ def test_probe_log_host_requires_canonical_idna_alabels(
     url: str,
     expected: str,
 ) -> None:
-    host_label = _required_attribute(
-        _probe_implementation_module(),
-        "_sanitized_host_label",
-    )
+    from tldw_Server_API.app.core.Web_Scraping.observability import sanitized_host
 
-    assert host_label(url) == expected
+    assert sanitized_host(url) == expected
 
 
 @pytest.mark.asyncio

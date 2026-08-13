@@ -51,9 +51,13 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import (
     log_gauge,
     log_histogram,
 )
+from tldw_Server_API.app.core.Security.safe_pickle import safe_pickle_loads
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.Utils import get_database_dir
 from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.content import convert_html_to_markdown
+from tldw_Server_API.app.core.Web_Scraping.extraction import extract_article_with_pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction_async import run_extraction_in_thread
 from tldw_Server_API.app.core.Web_Scraping.filters import (
     ContentTypeFilter,
     DomainFilter,
@@ -82,10 +86,8 @@ from tldw_Server_API.app.core.Web_Scraping.scoring import (
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER, ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers, profile_to_impersonate
 from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
-from tldw_Server_API.app.core.Security.safe_pickle import safe_pickle_loads
 
 _WEBSCRAPE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -1122,11 +1124,6 @@ class EnhancedWebScraper:
         cluster_settings: Optional[dict[str, Any]] = None,
         allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
-        from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-            convert_html_to_markdown,
-            extract_article_with_pipeline,
-        )
-
         data = extract_article_with_pipeline(
             html,
             url,
@@ -1498,7 +1495,7 @@ class EnhancedWebScraper:
             )
             return {"url": url, "error": str(exc), "extraction_successful": False}
 
-        data = await asyncio.to_thread(
+        data = await run_extraction_in_thread(
             self._extract_from_html_with_pipeline,
             html,
             url,
@@ -1633,7 +1630,7 @@ class EnhancedWebScraper:
             await page.wait_for_load_state("domcontentloaded")
 
             html = await page.content()
-            data = await asyncio.to_thread(
+            data = await run_extraction_in_thread(
                 self._extract_from_html_with_pipeline,
                 html,
                 url,
@@ -1771,7 +1768,7 @@ class EnhancedWebScraper:
             )
             return {"url": url, "error": str(exc), "extraction_successful": False}
 
-        data = await asyncio.to_thread(
+        data = await run_extraction_in_thread(
             self._extract_from_html_with_pipeline,
             html,
             url,

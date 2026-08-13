@@ -69,6 +69,15 @@ def _content_length(strategy: str, value: int = 31) -> dict[str, object]:
     }
 
 
+def _cluster_counter(name: str, labels: dict[str, str]) -> dict[str, object]:
+    return {
+        "emitter": "increment_counter",
+        "kind": "counter",
+        "labels": labels,
+        "name": name,
+    }
+
+
 def _predecessor_change_1_profile() -> dict[str, object]:
     return {
         "metrics": [
@@ -97,6 +106,7 @@ def _predecessor_change_1_profile() -> dict[str, object]:
 
 def _coherent_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
     expected = _predecessor_change_1_profile()
+    expected["cache_stats"] = {"cluster_embedding_cache_size": 0}
     actual = deepcopy(expected)
     result = actual["result"]
     assert isinstance(result, dict)
@@ -122,6 +132,8 @@ def _coherent_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
     metrics[5] = _duration("regex", "enriched")
     metrics.extend(
         [
+            _cluster_counter("extraction_cluster_total", {"status": "started"}),
+            _cluster_counter("extraction_cluster_total", {"status": "no_blocks"}),
             _counter("cluster", "failed"),
             _duration("cluster", "failed"),
             _counter("trafilatura", "success"),
@@ -129,6 +141,111 @@ def _coherent_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
             _content_length("trafilatura", 33),
         ]
     )
+    return actual, expected
+
+
+def _coherent_cluster_success_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
+    expected = _predecessor_change_1_profile()
+    expected["cache_stats"] = {"cluster_embedding_cache_size": 0}
+    actual = deepcopy(expected)
+    cache_stats = actual["cache_stats"]
+    result = actual["result"]
+    assert isinstance(cache_stats, dict)
+    assert isinstance(result, dict)
+    trace = result["extraction_trace"]
+    metrics = actual["metrics"]
+    assert isinstance(trace, list)
+    assert isinstance(metrics, list)
+
+    cache_stats["cluster_embedding_cache_size"] = 1
+    result.update(
+        {
+            "cluster_blocks": ["Contact predecessor@example.com"],
+            "cluster_block_count": 1,
+            "cluster_prefiltered_count": 1,
+            "cluster_total_blocks": 1,
+            "cluster_cluster_count": 1,
+            "cluster_method": "greedy",
+            "cluster_similarity_threshold": 0.4,
+            "cluster_word_threshold": 8,
+            "extraction_strategy": "cluster",
+        }
+    )
+    trace[2] = {"reason": "regex_enriched", "status": "enriched", "strategy": "regex"}
+    trace.append(
+        {
+            "detail": "cluster_blocks=1",
+            "reason": "cluster_extracted",
+            "status": "success",
+            "strategy": "cluster",
+        }
+    )
+    metrics[4] = _counter("regex", "enriched")
+    metrics[5] = _duration("regex", "enriched")
+    metrics.extend(
+        [
+            _cluster_counter("extraction_cluster_total", {"status": "started"}),
+            _cluster_counter(
+                "extraction_cluster_cache_total",
+                {"cache": "embedding", "result": "miss"},
+            ),
+            _cluster_counter(
+                "extraction_cluster_cache_total",
+                {"cache": "embedding", "result": "hit"},
+            ),
+            _cluster_counter("extraction_cluster_total", {"status": "success"}),
+            _counter("cluster", "success"),
+            _duration("cluster", "success"),
+            _content_length("cluster"),
+        ]
+    )
+    return actual, expected
+
+
+def _coherent_fresh_multi_block_cluster_success_change_1_profile() -> tuple[dict[str, object], dict[str, object]]:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    cache_stats = actual["cache_stats"]
+    result = actual["result"]
+    metrics = actual["metrics"]
+    assert isinstance(cache_stats, dict)
+    assert isinstance(result, dict)
+    assert isinstance(metrics, list)
+
+    blocks = [
+        "First distinct article block with enough words for canonical clustering.",
+        "Second distinct article block with enough words for canonical clustering.",
+    ]
+    cache_stats["cluster_embedding_cache_size"] = 3
+    result.update(
+        {
+            "cluster_blocks": blocks,
+            "cluster_block_count": 2,
+            "cluster_prefiltered_count": 2,
+            "cluster_total_blocks": 2,
+            "cluster_cluster_count": 1,
+        }
+    )
+    trace = result["extraction_trace"]
+    assert isinstance(trace, list)
+    terminal = trace[-1]
+    assert isinstance(terminal, dict)
+    terminal["detail"] = "cluster_blocks=2"
+    metrics[7:11] = [
+        _cluster_counter("extraction_cluster_total", {"status": "started"}),
+        _cluster_counter(
+            "extraction_cluster_cache_total",
+            {"cache": "embedding", "result": "miss"},
+        ),
+        _cluster_counter(
+            "extraction_cluster_cache_total",
+            {"cache": "embedding", "result": "miss"},
+        ),
+        _cluster_counter(
+            "extraction_cluster_cache_total",
+            {"cache": "embedding", "result": "miss"},
+        ),
+        _cluster_counter("extraction_cluster_total", {"status": "success"}),
+    ]
     return actual, expected
 
 
@@ -332,9 +449,231 @@ def test_change_1_contract_accepts_explicit_predecessor_equality_profile() -> No
     _assert_change_1(deepcopy(expected), expected)
 
 
-def test_change_1_contract_accepts_complete_coherent_transition() -> None:
+def test_change_1_contract_accepts_ordered_cluster_no_blocks_then_trafilatura() -> None:
     actual, expected = _coherent_change_1_profile()
     _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_extra_cluster_success_after_no_blocks() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics.insert(
+        9,
+        _cluster_counter("extraction_cluster_total", {"status": "success"}),
+    )
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_wrong_cluster_failure_lifecycle_status() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[8] = _cluster_counter("extraction_cluster_total", {"status": "no_clusters"})
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_reordered_cluster_no_blocks_lifecycle() -> None:
+    actual, expected = _coherent_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[7:9] = [metrics[8], metrics[7]]
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_accepts_exact_cluster_success_profile() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+
+    _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_accepts_fresh_multi_block_cluster_success_profile() -> None:
+    actual, expected = _coherent_fresh_multi_block_cluster_success_change_1_profile()
+
+    _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_cache_event_before_cluster_started() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[7:11] = [metrics[8], metrics[7], metrics[9], metrics[10]]
+
+    with pytest.raises(AssertionError, match="contiguous"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_cluster_success_before_final_cache_lookup() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metrics[7:11] = [metrics[7], metrics[8], metrics[10], metrics[9]]
+
+    with pytest.raises(AssertionError, match="contiguous"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_orphan_cluster_fields_on_trafilatura_success() -> None:
+    actual, expected = _coherent_change_1_profile()
+    result = actual["result"]
+    assert isinstance(result, dict)
+    result.update(
+        {
+            "cluster_blocks": ["Valid-looking orphan cluster block."],
+            "cluster_block_count": 1,
+            "cluster_prefiltered_count": 1,
+            "cluster_total_blocks": 1,
+            "cluster_cluster_count": 1,
+            "cluster_method": "greedy",
+            "cluster_similarity_threshold": 0.4,
+            "cluster_word_threshold": 8,
+        }
+    )
+
+    with pytest.raises(AssertionError, match="cluster result fields"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_cache_growth_after_cluster_no_blocks() -> None:
+    actual, expected = _coherent_change_1_profile()
+    actual["cache_stats"] = {"cluster_embedding_cache_size": 17}
+
+    with pytest.raises(AssertionError, match="cache growth"):
+        _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize("label_key", ["url", "base_url", "error", "host", "payload", "pattern"])
+def test_change_1_contract_rejects_sensitive_or_high_cardinality_cluster_metric_labels(
+    label_key: str,
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[7]
+    assert isinstance(metric, dict)
+    labels = metric["labels"]
+    assert isinstance(labels, dict)
+    labels[label_key] = "https://sensitive.example/path?token=secret"
+
+    with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_extra_cluster_metric_event_key() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[7]
+    assert isinstance(metric, dict)
+    metric["raw_error"] = "https://sensitive.example/path?token=secret"
+
+    with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("metric_index", "labels"),
+    [
+        (7, {"status": "https://sensitive.example/raw-status"}),
+        (8, {"cache": "embedding", "result": "customer-12345"}),
+        (8, {"cache": "provider-payload", "result": "miss"}),
+    ],
+)
+def test_change_1_contract_rejects_unbounded_cluster_metric_label_values(
+    metric_index: int,
+    labels: dict[str, str],
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[metric_index]
+    assert isinstance(metric, dict)
+    metric["labels"] = labels
+
+    with pytest.raises(AssertionError, match="violates contract rule"):
+        _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("cluster_blocks", ["valid", 3]),
+        ("cluster_block_count", True),
+        ("cluster_prefiltered_count", 0),
+        ("cluster_total_blocks", -1),
+        ("cluster_cluster_count", 0),
+        ("cluster_method", "provider_payload"),
+        ("cluster_similarity_threshold", 2.0),
+        ("cluster_word_threshold", 0),
+    ],
+)
+def test_change_1_contract_rejects_invalid_cluster_result_fields(
+    field: str,
+    invalid_value: object,
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    result = actual["result"]
+    assert isinstance(result, dict)
+    result[field] = invalid_value
+
+    with pytest.raises(AssertionError, match="violates contract rule|profile"):
+        _assert_change_1(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("cluster_block_count", 2),
+        ("cluster_prefiltered_count", 2),
+        ("cluster_cluster_count", 2),
+    ],
+)
+def test_change_1_contract_rejects_incoherent_cluster_counts(
+    field: str,
+    invalid_value: int,
+) -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    result = actual["result"]
+    assert isinstance(result, dict)
+    result[field] = invalid_value
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_incoherent_cluster_cache_size() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    cache_stats = actual["cache_stats"]
+    assert isinstance(cache_stats, dict)
+    cache_stats["cluster_embedding_cache_size"] = 2
+
+    with pytest.raises(AssertionError, match="violates contract rule|profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_missing_cluster_internal_metrics() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    metrics = actual["metrics"]
+    assert isinstance(metrics, list)
+    del metrics[7:11]
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
+
+
+def test_change_1_contract_rejects_missing_cluster_cache_profile() -> None:
+    actual, expected = _coherent_cluster_success_change_1_profile()
+    actual.pop("cache_stats")
+    expected.pop("cache_stats")
+
+    with pytest.raises(AssertionError, match="profile"):
+        _assert_change_1(actual, expected)
 
 
 def test_change_1_contract_rejects_duplicate_metric() -> None:
@@ -393,11 +732,91 @@ def test_change_1_contract_rejects_unknown_downstream_strategy_with_profile_diag
         _validate_change_1_profile(actual, expected)
 
 
+def test_change_10_unknown_strategy_metric_contract_requires_the_bounded_label() -> None:
+    expected = {
+        "metrics": [
+            {
+                "labels": {"strategy": "mystery", "status": "skipped"},
+                "name": "extraction_strategy_total",
+                "emitter": "log_counter",
+                "kind": "counter",
+            },
+            {
+                "labels": {"strategy": "trafilatura", "status": "success"},
+                "name": "extraction_strategy_total",
+                "emitter": "log_counter",
+                "kind": "counter",
+            },
+        ],
+        "result": {"extraction_trace": [{"strategy": "mystery"}]},
+    }
+    actual = deepcopy(expected)
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+
+    assert_predecessor_behavior(
+        actual,
+        expected,
+        behavior_change=10,
+        difference_contract="change_10_unknown_strategy_metric",
+    )
+
+    actual = deepcopy(expected)
+    actual["metrics"][1]["labels"]["strategy"] = "unknown"
+    with pytest.raises(AssertionError, match=r"\$\.metrics\[1\]\.labels\.strategy"):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    actual = deepcopy(expected)
+    actual["metrics"][0]["name"] = "extraction_retry_total"
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+    with pytest.raises(AssertionError, match=r"\$\.metrics\[0\]\.name"):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    actual = deepcopy(expected)
+    actual["metrics"][0]["labels"]["status"] = "failed"
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+    with pytest.raises(AssertionError, match=r"\$\.metrics\[0\]\.labels\.status"):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    actual = deepcopy(expected)
+    actual["metrics"][0]["labels"]["strategy"] = "unknown"
+    actual["result"]["extraction_trace"][0]["strategy"] = "unknown"
+    with pytest.raises(AssertionError, match=r"\$\.result\.extraction_trace\[0\]\.strategy"):
+        assert_predecessor_behavior(
+            actual,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+    with pytest.raises(AssertionError, match="no predecessor-equality profile"):
+        assert_predecessor_behavior(
+            expected,
+            expected,
+            behavior_change=10,
+            difference_contract="change_10_unknown_strategy_metric",
+        )
+
+
 def test_change_1_contract_rejects_missing_required_paired_metric() -> None:
     actual, expected = _coherent_change_1_profile()
     metrics = actual["metrics"]
     assert isinstance(metrics, list)
-    del metrics[8]
+    del metrics[10]
 
     with pytest.raises(AssertionError, match="profile"):
         _assert_change_1(actual, expected)
@@ -407,7 +826,7 @@ def test_change_1_contract_rejects_incoherent_trace_metric_ordering() -> None:
     actual, expected = _coherent_change_1_profile()
     metrics = actual["metrics"]
     assert isinstance(metrics, list)
-    metrics[7:] = [*metrics[9:12], *metrics[7:9]]
+    metrics[7:] = [*metrics[7:9], *metrics[11:14], *metrics[9:11]]
 
     with pytest.raises(AssertionError, match="profile"):
         _assert_change_1(actual, expected)
@@ -541,7 +960,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
     ("index", "replacement"),
     [
         (
-            7,
+            9,
             {
                 "emitter": "increment_counter",
                 "kind": "counter",
@@ -550,7 +969,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
             },
         ),
         (
-            8,
+            10,
             {
                 "emitter": "observe_histogram",
                 "kind": "counter",
@@ -560,7 +979,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
             },
         ),
         (
-            11,
+            13,
             {
                 "emitter": "observe_histogram",
                 "kind": "histogram",
@@ -570,7 +989,7 @@ def test_change_1_contract_rejects_noncanonical_added_trace(
             },
         ),
         (
-            11,
+            13,
             {
                 "emitter": "observe_histogram",
                 "kind": "histogram",

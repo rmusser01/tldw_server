@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,13 @@ from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 
 from tldw_Server_API.app.core.Watchlists import fetchers
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline as extraction_pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
+    build_default_dependencies,
+)
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
+    cluster as cluster_strategy,
+)
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchRequest,
     FetchResponse,
@@ -87,6 +95,10 @@ def _load_fixture_set(
 
 _FIXTURE_MANIFEST, _FIXTURE_CASES, _FIXTURE_RAW_FILES = _load_fixture_set()
 
+_CURRENT_FIXTURE_DIFFERENCE_CONTRACTS = {
+    "unknown_strategy_is_traced": (10, "change_10_unknown_strategy_metric"),
+}
+
 
 def _load_manifest() -> dict[str, Any]:
     return _FIXTURE_MANIFEST
@@ -97,12 +109,16 @@ def _load_cases(category: str) -> list[dict[str, Any]]:
 
 
 def _assert_case(case: Mapping[str, Any], actual: object) -> None:
+    behavior_change, difference_contract = _CURRENT_FIXTURE_DIFFERENCE_CONTRACTS.get(
+        case["name"],
+        (case.get("behavior_change"), case.get("difference_contract")),
+    )
     try:
         assert_predecessor_behavior(
             actual,
             case["expected"],
-            behavior_change=case.get("behavior_change"),
-            difference_contract=case.get("difference_contract"),
+            behavior_change=behavior_change,
+            difference_contract=difference_contract,
         )
     except AssertionError as exc:
         raise AssertionError(f"Predecessor case failed: {case['name']}") from exc
@@ -163,6 +179,26 @@ def _install_metric_recorder(monkeypatch: pytest.MonkeyPatch) -> _MetricRecorder
     monkeypatch.setattr(article, "log_counter", recorder.counter("log_counter"))
     monkeypatch.setattr(article, "observe_histogram", recorder.histogram("observe_histogram"))
     monkeypatch.setattr(article, "log_histogram", recorder.histogram("log_histogram"))
+    pipeline_dependencies = replace(
+        build_default_dependencies(),
+        increment_counter=recorder.counter("increment_counter"),
+        log_counter=recorder.counter("log_counter"),
+        observe_histogram=recorder.histogram("observe_histogram"),
+    )
+    monkeypatch.setattr(
+        extraction_pipeline,
+        "build_default_dependencies",
+        lambda: pipeline_dependencies,
+    )
+    cluster_dependencies = replace(
+        build_default_dependencies(),
+        increment_counter=recorder.counter("increment_counter"),
+    )
+    monkeypatch.setattr(
+        cluster_strategy,
+        "build_default_dependencies",
+        lambda: cluster_dependencies,
+    )
     return recorder
 
 
@@ -432,6 +468,9 @@ def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:
             4,
             "change_4_selector_regex_failure_returns_original",
         ),
+    }
+    assert _CURRENT_FIXTURE_DIFFERENCE_CONTRACTS == {
+        "unknown_strategy_is_traced": (10, "change_10_unknown_strategy_metric"),
     }
 
 

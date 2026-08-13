@@ -212,3 +212,68 @@ async def test_enhanced_cancellation_discards_late_router_result(
         release.set()
         if started.is_set() and not finished.is_set():
             await asyncio.to_thread(finished.wait, 1.0)
+
+
+@pytest.mark.unit
+async def test_article_extraction_cancellation_is_not_recovered_as_a_fetch_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = install_article_defaults(monkeypatch)
+    harness.extractor.side_effect = asyncio.CancelledError("caller cancelled")
+
+    with pytest.raises(asyncio.CancelledError, match="caller cancelled"):
+        await harness.article.scrape_article(URL)
+
+
+@pytest.mark.unit
+async def test_enhanced_playwright_extraction_cancellation_closes_browser_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = install_enhanced_defaults(monkeypatch)
+
+    class Page:
+        closed = False
+
+        async def goto(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        async def wait_for_load_state(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        async def content(self) -> str:
+            return "<article>Body</article>"
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class Context:
+        closed = False
+
+        def __init__(self) -> None:
+            self.page = Page()
+
+        async def new_page(self) -> Page:
+            return self.page
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class Browser:
+        def __init__(self) -> None:
+            self.context = Context()
+
+        async def new_context(self, **_kwargs: Any) -> Context:
+            return self.context
+
+    async def cancel_extraction(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise asyncio.CancelledError("caller cancelled")
+
+    browser = Browser()
+    harness.scraper._browser = browser
+    monkeypatch.setattr(harness.enhanced, "run_extraction_in_thread", cancel_extraction)
+
+    with pytest.raises(asyncio.CancelledError, match="caller cancelled"):
+        await harness.enhanced.EnhancedWebScraper._scrape_with_playwright(harness.scraper, URL)
+
+    assert browser.context.page.closed is True
+    assert browser.context.closed is True

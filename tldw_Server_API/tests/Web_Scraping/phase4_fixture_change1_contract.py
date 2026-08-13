@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import re
 
+from tldw_Server_API.app.core.Web_Scraping.extraction import caches as extraction_caches
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import cluster as cluster_strategy
 from tldw_Server_API.tests.Web_Scraping.phase4_fixture_difference_engine import (
     ANY_PATH,
     MISSING,
@@ -36,6 +39,21 @@ _COUNTER_METRIC_KEYS = frozenset({"emitter", "kind", "labels", "name"})
 _HISTOGRAM_METRIC_KEYS = _COUNTER_METRIC_KEYS | {"value"}
 _STRATEGY_STATUS_LABEL_KEYS = frozenset({"status", "strategy"})
 _STRATEGY_LABEL_KEYS = frozenset({"strategy"})
+_CLUSTER_TOTAL_LABEL_KEYS = frozenset({"status"})
+_CLUSTER_CACHE_LABEL_KEYS = frozenset({"cache", "result"})
+_CLUSTER_TOTAL_STATUSES = frozenset({"started", "no_blocks", "no_clusters", "empty", "success"})
+_CLUSTER_CACHE_RESULTS = frozenset({"hit", "miss"})
+_CLUSTER_METHODS = frozenset({"greedy", "greedy_fallback", "hierarchical"})
+_CLUSTER_RESULT_FIELDS = (
+    "cluster_blocks",
+    "cluster_block_count",
+    "cluster_prefiltered_count",
+    "cluster_total_blocks",
+    "cluster_cluster_count",
+    "cluster_method",
+    "cluster_similarity_threshold",
+    "cluster_word_threshold",
+)
 
 
 def _regex_becomes_non_terminal(difference: Difference) -> bool:
@@ -147,6 +165,81 @@ def _is_new_regex_or_downstream_metric(difference: Difference) -> bool:
     return False
 
 
+def _cluster_cache_created_by_downstream_extraction(difference: Difference) -> bool:
+    maximum_fresh_entries = min(
+        extraction_caches._CLUSTER_EMBED_CACHE_MAX,
+        cluster_strategy._CLUSTER_MAX_BLOCKS + 1,
+    )
+    return (
+        difference.expected == 0 and type(difference.actual) is int and 0 < difference.actual <= maximum_fresh_entries
+    )
+
+
+def _is_cluster_internal_metric_record(record: object) -> bool:
+    if type(record) is not dict or frozenset(record) != _COUNTER_METRIC_KEYS:
+        return False
+    if record.get("emitter") != "increment_counter" or record.get("kind") != "counter":
+        return False
+    labels = record.get("labels")
+    if type(labels) is not dict:
+        return False
+    if record.get("name") == "extraction_cluster_total":
+        return (
+            frozenset(labels) == _CLUSTER_TOTAL_LABEL_KEYS
+            and type(labels.get("status")) is str
+            and labels["status"] in _CLUSTER_TOTAL_STATUSES
+        )
+    if record.get("name") == "extraction_cluster_cache_total":
+        return (
+            frozenset(labels) == _CLUSTER_CACHE_LABEL_KEYS
+            and labels.get("cache") == "embedding"
+            and type(labels.get("result")) is str
+            and labels["result"] in _CLUSTER_CACHE_RESULTS
+        )
+    return False
+
+
+def _is_cluster_internal_metric(difference: Difference) -> bool:
+    return difference.expected is MISSING and _is_cluster_internal_metric_record(difference.actual)
+
+
+def _is_nonempty_cluster_blocks(value: object) -> bool:
+    return type(value) is list and bool(value) and all(type(block) is str and bool(block.strip()) for block in value)
+
+
+def _is_positive_int(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def _is_default_cluster_total_blocks(value: object) -> bool:
+    return _is_positive_int(value) and value <= cluster_strategy._CLUSTER_MAX_BLOCKS
+
+
+def _is_cluster_method(value: object) -> bool:
+    return type(value) is str and value in _CLUSTER_METHODS
+
+
+def _is_cluster_similarity_threshold(value: object) -> bool:
+    return type(value) is float and math.isfinite(value) and 0.0 <= value <= 1.0
+
+
+_CLUSTER_RESULT_VALIDATORS = {
+    "cluster_blocks": _is_nonempty_cluster_blocks,
+    "cluster_block_count": _is_positive_int,
+    "cluster_prefiltered_count": _is_positive_int,
+    "cluster_total_blocks": _is_default_cluster_total_blocks,
+    "cluster_cluster_count": _is_positive_int,
+    "cluster_method": _is_cluster_method,
+    "cluster_similarity_threshold": _is_cluster_similarity_threshold,
+    "cluster_word_threshold": _is_positive_int,
+}
+
+
+def _new_cluster_result_field_validator(field: str):
+    validator = _CLUSTER_RESULT_VALIDATORS[field]
+    return lambda difference: difference.expected is MISSING and validator(difference.actual)
+
+
 def _profile_dict(value: object, path: str) -> dict[str, object]:
     assert type(value) is dict, f"Change 1 profile requires an object at {path}"
     return value
@@ -246,6 +339,45 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
         actual_result.get("extraction_strategy") == terminal_strategy
     ), "Change 1 profile terminal strategy does not match extraction_strategy"
 
+    present_cluster_fields = [field for field in _CLUSTER_RESULT_FIELDS if field in actual_result]
+    if terminal_strategy != "cluster":
+        assert not present_cluster_fields, (
+            "Change 1 profile cluster result fields require a successful " "terminal cluster strategy"
+        )
+
+    if terminal_strategy == "cluster":
+        missing_fields = [field for field in _CLUSTER_RESULT_FIELDS if field not in actual_result]
+        assert not missing_fields, f"Change 1 profile is missing cluster result fields: {missing_fields}"
+        blocks = actual_result["cluster_blocks"]
+        block_count = actual_result["cluster_block_count"]
+        prefiltered_count = actual_result["cluster_prefiltered_count"]
+        total_blocks = actual_result["cluster_total_blocks"]
+        cluster_count = actual_result["cluster_cluster_count"]
+        assert _is_nonempty_cluster_blocks(blocks), "Change 1 profile requires non-empty cluster blocks"
+        assert all(
+            _CLUSTER_RESULT_VALIDATORS[field](actual_result[field]) for field in _CLUSTER_RESULT_FIELDS
+        ), "Change 1 profile contains an invalid cluster result field"
+        assert isinstance(blocks, list)
+        assert block_count == len(blocks), "Change 1 profile cluster block count must match cluster_blocks"
+        assert (
+            block_count <= prefiltered_count <= total_blocks
+        ), "Change 1 profile requires block_count <= prefiltered_count <= total_blocks"
+        assert (
+            cluster_count <= prefiltered_count
+        ), "Change 1 profile cluster count cannot exceed the prefiltered block count"
+        assert (
+            terminal.get("detail") == f"cluster_blocks={block_count}"
+        ), "Change 1 profile cluster trace detail must match cluster_block_count"
+
+        actual_cache = _profile_dict(actual_root.get("cache_stats"), "$.cache_stats")
+        expected_cache = _profile_dict(expected_root.get("cache_stats"), "$.cache_stats")
+        assert (
+            expected_cache.get("cluster_embedding_cache_size") == 0
+        ), "Change 1 profile requires an empty predecessor cluster cache"
+        assert (
+            type(actual_cache.get("cluster_embedding_cache_size")) is int
+        ), "Change 1 profile requires an integer cluster embedding cache size"
+
     expected_added_metrics: list[tuple[str, str, str | None]] = []
     for entry in trace_records:
         strategy = entry["strategy"]
@@ -261,10 +393,111 @@ def _validate_change_1_profile(actual: object, expected: object) -> None:
             expected_added_metrics.append(("extraction_content_length_bytes", strategy, None))
 
     added_metrics = actual_metrics[len(expected_metrics) :]
-    actual_added_metrics = [_metric_profile(metric) for metric in added_metrics]
-    assert actual_added_metrics == expected_added_metrics, (
-        "Change 1 profile requires ordered counter/timing pairs and one terminal " "content-length metric"
+    cluster_internal_metrics = [
+        _profile_dict(metric, "$.metrics[]")
+        for metric in added_metrics
+        if _profile_dict(metric, "$.metrics[]").get("name")
+        in {"extraction_cluster_total", "extraction_cluster_cache_total"}
+    ]
+    assert all(
+        _is_cluster_internal_metric_record(metric) for metric in cluster_internal_metrics
+    ), "Change 1 profile contains a noncanonical cluster metric"
+    cluster_trace = next(
+        (entry for entry in trace_records if entry.get("strategy") == "cluster"),
+        None,
     )
+    if terminal_strategy == "cluster":
+        total_blocks = actual_result["cluster_total_blocks"]
+        assert type(total_blocks) is int
+        embedding_operations = total_blocks + 1
+        assert (
+            embedding_operations <= extraction_caches._CLUSTER_EMBED_CACHE_MAX
+        ), "Change 1 profile default cluster embeddings must fit the canonical cache"
+        internal_metric_count = embedding_operations + 2
+        assert (
+            len(added_metrics) == internal_metric_count + 3
+        ), "Change 1 profile requires one exact contiguous cluster metric sequence"
+        started_metric = _profile_dict(added_metrics[0], "$.metrics[]")
+        cache_metrics = [_profile_dict(metric, "$.metrics[]") for metric in added_metrics[1 : 1 + embedding_operations]]
+        success_metric = _profile_dict(added_metrics[1 + embedding_operations], "$.metrics[]")
+        pipeline_metrics = added_metrics[internal_metric_count:]
+        assert (
+            _is_cluster_internal_metric_record(started_metric)
+            and started_metric.get("name") == "extraction_cluster_total"
+            and started_metric.get("labels") == {"status": "started"}
+        ), "Change 1 profile requires a contiguous cluster lifecycle starting with started"
+        assert all(
+            _is_cluster_internal_metric_record(metric) and metric.get("name") == "extraction_cluster_cache_total"
+            for metric in cache_metrics
+        ), "Change 1 profile requires contiguous cache lookups between started and success"
+        assert (
+            _is_cluster_internal_metric_record(success_metric)
+            and success_metric.get("name") == "extraction_cluster_total"
+            and success_metric.get("labels") == {"status": "success"}
+        ), "Change 1 profile requires contiguous cluster success after the final cache lookup"
+        assert [_metric_profile(metric) for metric in pipeline_metrics] == expected_added_metrics, (
+            "Change 1 profile requires contiguous pipeline cluster counter, " "duration, and content-length metrics"
+        )
+        cache_results = [_profile_dict(metric["labels"], "$.metrics[].labels")["result"] for metric in cache_metrics]
+        assert cache_results[0] == "miss", "Change 1 profile requires a fresh document-embedding cache miss"
+        miss_count = cache_results.count("miss")
+        actual_cache = _profile_dict(actual_root.get("cache_stats"), "$.cache_stats")
+        assert actual_cache.get("cluster_embedding_cache_size") == miss_count, (
+            "Change 1 profile fresh cache growth must equal the canonical " "embedding miss count"
+        )
+    else:
+        cluster_cache_metrics = [
+            metric for metric in cluster_internal_metrics if metric.get("name") == "extraction_cluster_cache_total"
+        ]
+        assert not cluster_cache_metrics, (
+            "Change 1 profile cluster cache metrics require successful " "terminal cluster extraction"
+        )
+        if cluster_trace is not None:
+            assert cluster_trace == {
+                "detail": "cluster_no_blocks",
+                "reason": "cluster_no_content",
+                "status": "failed",
+                "strategy": "cluster",
+            }, "Change 1 profile only approves the trace-proven cluster_no_blocks fallback"
+            assert (
+                len(added_metrics) == len(expected_added_metrics) + 2
+            ), "Change 1 profile requires one exact cluster_no_blocks metric segment"
+            started_metric = _profile_dict(added_metrics[0], "$.metrics[]")
+            no_blocks_metric = _profile_dict(added_metrics[1], "$.metrics[]")
+            assert (
+                _is_cluster_internal_metric_record(started_metric)
+                and started_metric.get("name") == "extraction_cluster_total"
+                and started_metric.get("labels") == {"status": "started"}
+            ), "Change 1 profile requires cluster started before cluster_no_blocks"
+            assert (
+                _is_cluster_internal_metric_record(no_blocks_metric)
+                and no_blocks_metric.get("name") == "extraction_cluster_total"
+                and no_blocks_metric.get("labels") == {"status": "no_blocks"}
+            ), "Change 1 profile requires cluster no_blocks immediately after started"
+            pipeline_metrics = added_metrics[2:]
+        else:
+            assert (
+                not cluster_internal_metrics
+            ), "Change 1 profile cluster lifecycle metrics require a matching cluster trace"
+            pipeline_metrics = added_metrics
+        assert [
+            _metric_profile(metric) for metric in pipeline_metrics
+        ] == expected_added_metrics, (
+            "Change 1 profile requires lifecycle and ordered pipeline metrics to match the trace"
+        )
+        expected_cache_size = (
+            _profile_dict(expected_root["cache_stats"], "$.cache_stats").get("cluster_embedding_cache_size")
+            if "cache_stats" in expected_root
+            else MISSING
+        )
+        actual_cache_size = (
+            _profile_dict(actual_root["cache_stats"], "$.cache_stats").get("cluster_embedding_cache_size")
+            if "cache_stats" in actual_root
+            else MISSING
+        )
+        assert actual_cache_size == expected_cache_size, (
+            "Change 1 profile rejects cache growth without successful " "terminal cluster extraction"
+        )
 
 
 CHANGE_1_CONTRACT = DifferenceContract(
@@ -317,9 +550,29 @@ CHANGE_1_CONTRACT = DifferenceContract(
             identifier="downstream_metric",
             path=("metrics", ANY_PATH),
             description="regex enrichment emits downstream extraction metrics",
-            validator=_is_new_regex_or_downstream_metric,
+            validator=lambda difference: _is_new_regex_or_downstream_metric(difference)
+            or _is_cluster_internal_metric(difference),
             minimum_count=3,
-            maximum_count=5,
+            maximum_count=cluster_strategy._CLUSTER_MAX_BLOCKS + 6,
+        ),
+        DifferenceRule(
+            identifier="downstream_cluster_cache",
+            path=("cache_stats", "cluster_embedding_cache_size"),
+            description="the newly reached cluster strategy may populate the shared embedding cache",
+            validator=_cluster_cache_created_by_downstream_extraction,
+            minimum_count=0,
+            maximum_count=1,
+        ),
+        *(
+            DifferenceRule(
+                identifier=f"cluster_result_{field}",
+                path=("result", field),
+                description="a successful downstream cluster result may include its established metadata",
+                validator=_new_cluster_result_field_validator(field),
+                minimum_count=0,
+                maximum_count=1,
+            )
+            for field in _CLUSTER_RESULT_FIELDS
         ),
     ),
     allow_predecessor_equality=True,
