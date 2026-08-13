@@ -20,7 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_attachments import (
 
 ATTACHMENT_ID = "2c4cb609-c4db-44f9-8e35-f078bd36d6b2"
 NOTE_ID = "a1677eb1-1f41-4c86-a8dd-1eaa14b014e2"
-OBJECT_HASH = "a" * 64
+OBJECT_HASH = "sha256:" + "a" * 64
 BLOB_HASH = "sha256:" + "b" * 64
 
 
@@ -59,7 +59,7 @@ def test_notes_attachment_schema_accepts_canonical_item_page_and_mutation_respon
         {**item.model_dump(), "idempotent_replay": False}
     )
 
-    assert item.etag == f'"att-{ATTACHMENT_ID}-v3-{OBJECT_HASH}"'
+    assert item.etag == f'"att-{ATTACHMENT_ID}-v3-{OBJECT_HASH.removeprefix("sha256:")}"'
     assert page.items == [item]
     assert mutation.idempotent_replay is False
 
@@ -108,9 +108,9 @@ def test_notes_attachment_etag_grammar_is_exact():
         "*",
         f'W/{etag}',
         f"{etag}, {etag}",
-        f'"att-{ATTACHMENT_ID}-v0-{OBJECT_HASH}"',
-        f'"att-{ATTACHMENT_ID.upper()}-v3-{OBJECT_HASH}"',
-        f'"att-{ATTACHMENT_ID}-v3-{OBJECT_HASH.upper()}"',
+        f'"att-{ATTACHMENT_ID}-v0-{OBJECT_HASH.removeprefix("sha256:")}"',
+        f'"att-{ATTACHMENT_ID.upper()}-v3-{OBJECT_HASH.removeprefix("sha256:")}"',
+        f'"att-{ATTACHMENT_ID}-v3-{OBJECT_HASH.removeprefix("sha256:").upper()}"',
     ):
         with pytest.raises(ValueError):
             parse_notes_attachment_if_match(value)

@@ -1512,12 +1512,12 @@ def test_attachment_intent_schema_accepts_strict_create_and_replace_models():
             "attachment_id": ATTACHMENT_INTENT_ID,
             "base_server_cursor": 12,
             "base_object_revision": 3,
-            "base_object_hash": "a" * 64,
+            "base_object_hash": "sha256:" + "a" * 64,
         }
     )
 
     assert create.file_name == "Report.pdf"
-    assert replace.base_object_revision == 3
+    assert replace.base_object_hash == "sha256:" + "a" * 64
 
 
 @pytest.mark.parametrize(
@@ -1536,7 +1536,7 @@ def test_attachment_intent_schema_accepts_strict_create_and_replace_models():
             "attachment_id": ATTACHMENT_INTENT_ID,
             "base_server_cursor": 1,
             "base_object_revision": 1,
-            "base_object_hash": "a" * 64,
+            "base_object_hash": "sha256:" + "a" * 64,
             "file_name": "report.pdf",
         },
         {
@@ -1545,7 +1545,7 @@ def test_attachment_intent_schema_accepts_strict_create_and_replace_models():
             "attachment_id": ATTACHMENT_INTENT_ID,
             "base_server_cursor": 0,
             "base_object_revision": 1,
-            "base_object_hash": "a" * 64,
+            "base_object_hash": "sha256:" + "a" * 64,
         },
     ],
 )

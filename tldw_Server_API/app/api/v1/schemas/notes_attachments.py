@@ -37,7 +37,7 @@ NotesAttachmentSourceKind = Literal["upload", "sync", "legacy_bootstrap"]
 _UUID4_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
-_OBJECT_HASH_RE = re.compile(r"[0-9a-f]{64}\Z")
+_OBJECT_HASH_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _BLOB_HASH_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _ETAG_RE = re.compile(
     r'"att-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})'
@@ -83,7 +83,7 @@ def format_notes_attachment_etag(
         raise ValueError("version must be a positive integer")
     if not isinstance(object_hash, str) or _OBJECT_HASH_RE.fullmatch(object_hash) is None:
         raise ValueError("object_hash must be a canonical lowercase SHA-256 digest")
-    return f'"att-{canonical_id}-v{version}-{object_hash}"'
+    return f'"att-{canonical_id}-v{version}-{object_hash.removeprefix("sha256:")}"'
 
 
 def parse_notes_attachment_if_match(value: Any) -> tuple[str, int, str]:
@@ -96,7 +96,7 @@ def parse_notes_attachment_if_match(value: Any) -> tuple[str, int, str]:
         raise ValueError("If-Match requires one strong attachment ETag")
     attachment_id, raw_version, object_hash = match.groups()
     _canonical_uuid4(attachment_id, "attachment_id")
-    return attachment_id, int(raw_version), object_hash
+    return attachment_id, int(raw_version), f"sha256:{object_hash}"
 
 
 def validate_notes_attachment_idempotency_key(value: Any) -> str:

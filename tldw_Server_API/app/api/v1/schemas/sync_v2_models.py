@@ -1247,7 +1247,10 @@ class SyncNotesAttachmentReplaceIntent(_SyncNotesAttachmentIntent):
     def _validate_object_hash(cls, value: Any) -> str:
         import re
 
-        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None
+        ):
             raise ValueError("base_object_hash must be a lowercase SHA-256 digest")
         return value
 
