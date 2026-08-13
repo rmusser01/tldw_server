@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-
 _FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
 _TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
 
