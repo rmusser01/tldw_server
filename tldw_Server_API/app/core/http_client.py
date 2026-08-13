@@ -4797,9 +4797,7 @@ def fetch(*args, **kwargs):
                 else:
                     request_stream = getattr(curl_session, "get", None)
                     if not callable(request_stream):
-                        raise RuntimeError(
-                            "Selected backend does not support bounded response streaming"
-                        )
+                        raise RuntimeError("Selected backend does not support bounded response streaming")
                     body_collector = _BoundedBodyCollector(max_response_bytes)
 
                     req_kwargs: dict[str, Any] = {
@@ -4818,18 +4816,12 @@ def fetch(*args, **kwargs):
                         response_headers = dict(getattr(streamed, "headers", {}) or {})
                         status_code = int(getattr(streamed, "status_code", 0))
                         response_url = str(getattr(streamed, "url", cur_url))
-                        is_followed_redirect = (
-                            follow_redirects
-                            and status_code in (301, 302, 303, 307, 308)
-                        )
+                        is_followed_redirect = follow_redirects and status_code in (301, 302, 303, 307, 308)
                         if is_followed_redirect:
                             body = b""
                         else:
                             if _uses_compressed_content_encoding(response_headers):
-                                raise ValueError(
-                                    "Compressed responses are not allowed with "
-                                    "max_response_bytes"
-                                )
+                                raise ValueError("Compressed responses are not allowed with " "max_response_bytes")
                             if body_collector.overflow:
                                 raise ValueError("Response exceeds max_response_bytes limit")
                             body = body_collector.body

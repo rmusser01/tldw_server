@@ -173,6 +173,24 @@ def test_direct_browser_profile_freezes_mutable_cookie_sets_and_byte_buffers() -
     assert profile.custom_cookies[0]["metadata"]["payload"] == b"payload"
 
 
+def test_direct_browser_profile_does_not_apply_response_budget_ceiling_to_viewport() -> None:
+    profile = DirectBrowserProfile(
+        user_agent="agent",
+        custom_cookies=(),
+        retries=1,
+        timeout_ms=2,
+        stealth_enabled=False,
+        stealth_wait_ms=3,
+        viewport_width=1_073_741_825,
+        viewport_height="1073741825",
+    )
+
+    assert (profile.viewport_width, profile.viewport_height) == (
+        1_073_741_825,
+        1_073_741_825,
+    )
+
+
 def test_public_failure_codes_match_the_approved_contract() -> None:
     assert (
         frozenset(

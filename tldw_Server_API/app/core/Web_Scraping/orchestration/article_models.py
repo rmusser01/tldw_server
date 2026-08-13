@@ -57,7 +57,22 @@ def _freeze_mapping(value: Mapping[Any, Any] | None) -> Mapping[str, Any]:
 
 
 def _positive_integer_or_default(value: Any, default: int) -> int:
-    """Accept positive integer budgets up to the explicit server ceiling."""
+    """Accept positive integer values without applying a domain-specific cap."""
+    if type(value) is int:
+        return value if value > 0 else default
+    if type(value) is str:
+        normalized = value.strip()
+        if normalized.isascii() and normalized.isdecimal():
+            try:
+                parsed = int(normalized)
+            except (ValueError, OverflowError):
+                return default
+            return parsed if parsed > 0 else default
+    return default
+
+
+def _response_budget_or_default(value: Any, default: int) -> int:
+    """Accept positive response budgets up to the explicit server ceiling."""
     if type(value) is int:
         return value if 0 < value <= MAX_CONFIGURED_RESPONSE_BYTES else default
     if type(value) is str:
@@ -145,12 +160,12 @@ class ArticleLimits:
         object.__setattr__(
             self,
             "max_article_bytes",
-            _positive_integer_or_default(self.max_article_bytes, DEFAULT_MAX_ARTICLE_BYTES),
+            _response_budget_or_default(self.max_article_bytes, DEFAULT_MAX_ARTICLE_BYTES),
         )
         object.__setattr__(
             self,
             "max_browser_transfer_bytes",
-            _positive_integer_or_default(
+            _response_budget_or_default(
                 self.max_browser_transfer_bytes,
                 DEFAULT_MAX_BROWSER_TRANSFER_BYTES,
             ),
@@ -161,11 +176,11 @@ class ArticleLimits:
         """Build immutable limits from the existing Web-Scraper settings mapping."""
         values = _config_values(config)
         return cls(
-            max_article_bytes=_positive_integer_or_default(
+            max_article_bytes=_response_budget_or_default(
                 values.get("web_scraper_max_article_bytes"),
                 DEFAULT_MAX_ARTICLE_BYTES,
             ),
-            max_browser_transfer_bytes=_positive_integer_or_default(
+            max_browser_transfer_bytes=_response_budget_or_default(
                 values.get("web_scraper_max_browser_transfer_bytes"),
                 DEFAULT_MAX_BROWSER_TRANSFER_BYTES,
             ),
