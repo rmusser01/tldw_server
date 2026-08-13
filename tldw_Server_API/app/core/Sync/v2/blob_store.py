@@ -29,6 +29,10 @@ class SyncBlobStoreError(ValueError):
     """Raised when blob storage input or integrity checks fail."""
 
 
+class _MissingBlobDirectoryError(SyncBlobStoreError):
+    """Raised when a no-create directory chain is absent."""
+
+
 class LocalSyncBlobStore:
     """Path-contained local blob store rooted under a user's sync blob directory."""
 
@@ -244,6 +248,95 @@ class LocalSyncBlobStore:
         except LockAcquisitionError as exc:
             raise SyncBlobStoreError("Sync legacy blob relocation lock is unavailable") from exc
 
+    def delete_namespace_blob(
+        self,
+        *,
+        storage_key: str,
+        storage_namespace_id: str,
+        payload_hash: str,
+        expected_size: int,
+    ) -> bool:
+        """Verify and unlink one exact dataset-namespace blob.
+
+        Returns ``False`` when the exact target is already absent. Global legacy
+        keys and namespace mismatches fail closed.
+        """
+
+        namespace = _storage_namespace_id(storage_namespace_id)
+        digest = _hash_digest(payload_hash)
+        expected_key = self.namespace_storage_key(namespace, payload_hash)
+        if storage_key != expected_key:
+            raise SyncBlobStoreError(
+                "Sync blob deletion requires the exact storage namespace key"
+            )
+        if isinstance(expected_size, bool) or expected_size < 1:
+            raise SyncBlobStoreError("expected_size must be positive")
+        try:
+            _require_secure_relocation_capabilities()
+            with _open_directory_chain(
+                self.root,
+                ("_locks", "blob-gc"),
+                create=True,
+            ) as lock_directory:
+                with _lock_file_at(
+                    lock_directory,
+                    f"{namespace}.{digest}.lock",
+                    timeout=10,
+                ):
+                    with _open_directory_chain(
+                        self.root,
+                        ("blobs", "v2", namespace),
+                        create=False,
+                    ) as target_directory:
+                        target_name = f"{digest}.blob"
+                        try:
+                            target = _open_target_at(target_directory, target_name)
+                        except FileNotFoundError:
+                            return False
+                        except OSError as exc:
+                            raise SyncBlobStoreError(
+                                "Sync namespace blob could not be opened safely"
+                            ) from exc
+                        with target:
+                            opened = _verify_named_open_blob(
+                                target,
+                                directory=target_directory,
+                                name=target_name,
+                                payload_hash=payload_hash,
+                                expected_size=expected_size,
+                            )
+                            try:
+                                named = os.stat(
+                                    target_name,
+                                    dir_fd=target_directory,
+                                    follow_symlinks=False,
+                                )
+                                if not _same_inode(opened, named):
+                                    raise SyncBlobStoreError(
+                                        "Sync namespace blob identity changed"
+                                    )
+                                os.unlink(target_name, dir_fd=target_directory)
+                                os.fsync(target_directory)
+                            except FileNotFoundError:
+                                return False
+                            except SyncBlobStoreError:
+                                raise
+                            except OSError as exc:
+                                raise SyncBlobStoreError(
+                                    "Sync namespace blob deletion failed"
+                                ) from exc
+                        return True
+        except NotImplementedError as exc:
+            raise SyncBlobStoreError(
+                "Sync namespace blob deletion has an unsupported platform"
+            ) from exc
+        except LockAcquisitionError as exc:
+            raise SyncBlobStoreError(
+                "Sync namespace blob deletion lock is unavailable"
+            ) from exc
+        except _MissingBlobDirectoryError:
+            return False
+
     def read_blob(self, storage_key: str) -> bytes:
         """Read a committed blob by storage key after path-containment checks."""
 
@@ -390,7 +483,7 @@ def _open_directory_chain(
                 child = os.open(segment, flags, dir_fd=current)
             except FileNotFoundError:
                 if not create:
-                    raise SyncBlobStoreError(
+                    raise _MissingBlobDirectoryError(
                         "Sync blob directory path does not exist"
                     ) from None
                 try:

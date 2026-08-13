@@ -222,7 +222,9 @@ def _v2_retention_service(tmp_path: Path) -> SyncV2Service:
             [StaticSyncAdapter(domain="attachment.ref", supported_adapter_versions={1, 2})]
         ),
         clock=_clock,
+        blob_store=LocalSyncBlobStore(tmp_path / "v2-retention-blobs"),
         settings=SyncV2Settings(
+            supports_attachments=True,
             server_trusted_encryption=_ready_encryption(),
             pull_token_signing_secret="retention-test-secret",
         ),
@@ -254,12 +256,42 @@ def _v2_retention_service(tmp_path: Path) -> SyncV2Service:
     return service
 
 
+def _namespaced_storage_key(
+    service: SyncV2Service,
+    *,
+    dataset_id: str,
+    owner_user_id: str,
+    payload_hash: str,
+    payload: bytes | None = None,
+) -> str:
+    assert service.blob_store is not None
+    namespace = service.store.get_or_create_storage_namespace(
+        dataset_id,
+        owner_user_id=owner_user_id,
+    )
+    storage_key = service.blob_store.namespace_storage_key(
+        namespace.storage_namespace_id,
+        payload_hash,
+    )
+    target = service.blob_store.resolve_storage_key(storage_key)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if payload is not None:
+        target.write_bytes(payload)
+    return storage_key
+
+
 def _store_v2_blob(
     service: SyncV2Service,
     *,
     blob_id: str,
     blob_hash: str,
 ) -> None:
+    storage_key = _namespaced_storage_key(
+        service,
+        dataset_id="dataset-v2",
+        owner_user_id="user-1",
+        payload_hash=blob_hash,
+    )
     service.store.complete_blob_upload(
         SyncBlobObjectCreate(
             blob_id=blob_id,
@@ -270,7 +302,7 @@ def _store_v2_blob(
             content_type="application/octet-stream",
             size_bytes=1,
             storage_backend="local_fs",
-            storage_key=f"{blob_id}.bin",
+            storage_key=storage_key,
         )
     )
 
@@ -1148,17 +1180,23 @@ def test_retention_limit_uses_one_bounded_blob_page_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for index in range(3):
+        payload_hash = "sha256:" + str(index) * 64
         sync_service.store.complete_blob_upload(
             SyncBlobObjectCreate(
                 blob_id=f"blob-budget-{index}",
                 dataset_id="dataset-1",
                 owner_user_id="user-1",
                 attachment_id=f"attachment-budget-{index}",
-                payload_hash="sha256:" + str(index) * 64,
+                payload_hash=payload_hash,
                 content_type="application/octet-stream",
                 size_bytes=1,
                 storage_backend="local_fs",
-                storage_key=f"blob-budget-{index}.bin",
+                storage_key=_namespaced_storage_key(
+                    sync_service,
+                    dataset_id="dataset-1",
+                    owner_user_id="user-1",
+                    payload_hash=payload_hash,
+                ),
             )
         )
     original = sync_service.store.list_blob_objects_for_dataset
@@ -1398,7 +1436,13 @@ def test_retention_dry_run_keeps_audit_restore_window_and_active_blob_refs_as_bl
             content_type="application/pdf",
             size_bytes=13,
             storage_backend="local_fs",
-            storage_key="blob-1.bin",
+            storage_key=_namespaced_storage_key(
+                sync_service,
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                payload_hash=payload_hash,
+                payload=b"paper payload",
+            ),
         )
     )
     _ack_all_domains(sync_service, through_sequence=pushed.server_sequence)
@@ -1670,7 +1714,13 @@ def test_retention_compact_soft_deletes_eligible_blob_metadata(
             content_type="application/pdf",
             size_bytes=13,
             storage_backend="local_fs",
-            storage_key="blob-1.bin",
+            storage_key=_namespaced_storage_key(
+                sync_service,
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                payload_hash=payload_hash,
+                payload=b"paper payload",
+            ),
         )
     )
     _ack_all_domains(sync_service, through_sequence=tombstone.server_sequence)

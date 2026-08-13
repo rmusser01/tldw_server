@@ -53,6 +53,7 @@ SyncBlobAvailabilityStatus = Literal[
     "metadata_only",
     "uploading",
     "available",
+    "deleting",
     "verify_failed",
     "quarantined",
     "deleted",

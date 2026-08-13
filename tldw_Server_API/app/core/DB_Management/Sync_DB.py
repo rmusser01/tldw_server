@@ -7924,14 +7924,13 @@ class SyncDatabase:
         blob_row = _first(
             self.execute(
                 """
-                SELECT blob.blob_id
+                SELECT blob.blob_id, blob.status
                   FROM sync_blob_objects AS blob
                   JOIN sync_datasets AS dataset
                     ON dataset.dataset_id = blob.dataset_id
                  WHERE blob.dataset_id = ?
                    AND blob.payload_hash = ?
                    AND blob.size_bytes = ?
-                   AND blob.status = 'available'
                    AND (
                         dataset.scope_type = 'workspace'
                         OR blob.owner_user_id = dataset.owner_user_id
@@ -7944,6 +7943,11 @@ class SyncDatabase:
                 connection=connection,
             )
         )
+        if blob_row is not None and blob_row.get("status") in {"deleting", "deleted"}:
+            raise SyncStoreError(
+                f"Sync attachment binding cannot target a {blob_row['status']} blob"
+            )
+        blob_available = blob_row is not None and blob_row.get("status") == "available"
         binding = SyncAttachmentRevisionBindingCreate(
             dataset_id=envelope.dataset_id,
             attachment_id=attachment_id,
@@ -7952,9 +7956,9 @@ class SyncDatabase:
             size_bytes=size_value,
             establishing_server_cursor=envelope.server_cursor,
             availability_at_acceptance=(
-                "available" if blob_row is not None else "metadata_only"
+                "available" if blob_available else "metadata_only"
             ),
-            resolved_blob_id=(None if blob_row is None else str(blob_row["blob_id"])),
+            resolved_blob_id=(None if not blob_available else str(blob_row["blob_id"])),
         )
         return self._create_attachment_revision_binding(
             binding,
@@ -8499,6 +8503,33 @@ class SyncDatabase:
             raise SyncStoreError("Sync dataset storage namespace could not be resolved")
         return _storage_namespace_from_row(row)
 
+    def get_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> SyncDatasetStorageNamespace | None:
+        """Return the existing opaque namespace under exact owner authority."""
+
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT namespace.*
+                      FROM sync_dataset_storage_namespaces AS namespace
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = namespace.dataset_id
+                     WHERE namespace.dataset_id = ?
+                       AND namespace.owner_user_id = ?
+                       AND dataset.owner_user_id = ?
+                    """,
+                    (dataset_id, owner_user_id, owner_user_id),
+                    connection=conn,
+                )
+            )
+        return None if row is None else _storage_namespace_from_row(row)
+
     def _resolve_pending_bindings_for_blob(
         self,
         blob_row: Mapping[str, Any],
@@ -8982,12 +9013,60 @@ class SyncDatabase:
                 raise SyncStoreError("Sync blob chunk insert did not produce a retrievable record")
             return _blob_chunk_from_row(row)
 
-    def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
+    def require_blob_upload_completion_allowed(
+        self,
+        blob: SyncBlobObjectCreate,
+        *,
+        connection: Any,
+    ) -> None:
+        """Reject storage publication after a fence or metadata conflict."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT blob.*
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ? AND blob.payload_hash = ?
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = ?
+                   )
+                """,
+                (blob.dataset_id, blob.payload_hash, blob.owner_user_id),
+                connection=connection,
+            )
+        )
+        if row is None:
+            return
+        existing_status = str(row.get("status"))
+        if existing_status == "deleting":
+            raise SyncStoreError("Sync blob is deleting")
+        if existing_status not in {"available", "deleted"}:
+            raise SyncStoreError("Sync blob is not available for upload completion")
+        existing_fingerprint = _blob_object_fingerprint_from_row(row)
+        requested_fingerprint = _blob_object_fingerprint_from_create(blob)
+        existing_fingerprint.pop("status")
+        requested_fingerprint.pop("status")
+        if existing_fingerprint != requested_fingerprint:
+            raise SyncIdempotencyConflictError(
+                "Sync blob payload hash was reused with different metadata"
+            )
+
+    def complete_blob_upload(
+        self,
+        blob: SyncBlobObjectCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncBlobObject:
         """Commit a verified blob and deduplicate by dataset plus payload hash."""
 
+        if blob.status != "available":
+            raise SyncStoreError("Sync blob upload completion must become available")
         now = utcnow_iso()
         suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             dataset_row = self._get_dataset_row_for_update(
                 blob.dataset_id,
                 connection=conn,
@@ -9061,10 +9140,40 @@ class SyncDatabase:
                 raise SyncStoreError(
                     "Sync blob is unavailable under dataset owner authority"
                 )
-            if _blob_object_fingerprint_from_row(row) != _blob_object_fingerprint_from_create(blob):
+            existing_fingerprint = _blob_object_fingerprint_from_row(row)
+            requested_fingerprint = _blob_object_fingerprint_from_create(blob)
+            existing_status = str(existing_fingerprint.pop("status"))
+            requested_fingerprint.pop("status")
+            if existing_status == "deleting":
+                raise SyncStoreError("Sync blob is deleting")
+            if existing_fingerprint != requested_fingerprint:
                 raise SyncIdempotencyConflictError(
                     "Sync blob payload hash was reused with different metadata"
                 )
+            if existing_status == "deleted":
+                self.execute(
+                    """
+                    UPDATE sync_blob_objects
+                       SET status = 'available', deleted_at = NULL, updated_at = ?
+                     WHERE dataset_id = ? AND blob_id = ? AND status = 'deleted'
+                    """,
+                    (now, blob.dataset_id, row["blob_id"]),
+                    connection=conn,
+                )
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_blob_objects
+                         WHERE dataset_id = ? AND blob_id = ?
+                        """,
+                        (blob.dataset_id, row["blob_id"]),
+                        connection=conn,
+                    )
+                )
+                if row is None or row["status"] != "available":
+                    raise SyncStoreError("Sync blob repair did not become available")
+            elif existing_status != "available":
+                raise SyncStoreError("Sync blob is not available for upload completion")
             self._resolve_pending_bindings_for_blob(row, connection=conn)
             if session is not None:
                 self.execute(
@@ -9248,44 +9357,68 @@ class SyncDatabase:
             ).rows
         return [_blob_object_from_row(row) for row in rows]
 
-    def mark_blob_object_deleted(
+    def fence_blob_object_deleting(
         self,
         dataset_id: str,
         blob_id: str,
         *,
-        connection: Any | None = None,
+        connection: Any,
     ) -> SyncBlobObject | None:
-        """Soft-delete available blob metadata without removing blob bytes."""
+        """Durably fence one available blob before physical deletion."""
 
         now = utcnow_iso()
-        with self.backend.transaction(connection) as conn:
+        self.execute(
+            """
+            UPDATE sync_blob_objects
+               SET status = 'deleting', updated_at = ?
+             WHERE dataset_id = ? AND blob_id = ?
+               AND status = 'available' AND deleted_at IS NULL
+            """,
+            (now, dataset_id, blob_id),
+            connection=connection,
+        )
+        row = _first(
             self.execute(
                 """
-                UPDATE sync_blob_objects
-                   SET status = 'deleted',
-                       deleted_at = ?
-                 WHERE dataset_id = ?
-                   AND blob_id = ?
-                   AND status = 'available'
-                   AND deleted_at IS NULL
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND blob_id = ?
                 """,
-                (now, dataset_id, blob_id),
-                connection=conn,
+                (dataset_id, blob_id),
+                connection=connection,
             )
-            row = _first(
-                self.execute(
-                    """
-                    SELECT *
-                      FROM sync_blob_objects
-                     WHERE dataset_id = ? AND blob_id = ?
-                    """,
-                    (dataset_id, blob_id),
-                    connection=conn,
-                )
+        )
+        return None if row is None else _blob_object_from_row(row)
+
+    def finalize_blob_object_deleted(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        connection: Any,
+    ) -> SyncBlobObject | None:
+        """Finalize a physically absent fenced blob as deleted."""
+
+        now = utcnow_iso()
+        self.execute(
+            """
+            UPDATE sync_blob_objects
+               SET status = 'deleted', deleted_at = ?, updated_at = ?
+             WHERE dataset_id = ? AND blob_id = ? AND status = 'deleting'
+            """,
+            (now, now, dataset_id, blob_id),
+            connection=connection,
+        )
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND blob_id = ?
+                """,
+                (dataset_id, blob_id),
+                connection=connection,
             )
-        if row is None:
-            return None
-        return _blob_object_from_row(row)
+        )
+        return None if row is None else _blob_object_from_row(row)
 
     def get_domain_compaction_sequence(
         self,

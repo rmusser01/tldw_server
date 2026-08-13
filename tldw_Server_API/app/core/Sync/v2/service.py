@@ -1523,13 +1523,17 @@ class SyncV2Service:
                 offline_restore_window_seconds=offline_restore_window_seconds,
             )
         )
-        blob_gc, revalidated_blob_blocked = self._apply_retention_blob_gc(
-            dataset=dataset,
-            candidates=[
-                candidate for candidate in selected if candidate.candidate_type == "blob_gc"
-            ],
-            minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
-            offline_restore_window_seconds=offline_restore_window_seconds,
+        blob_gc, revalidated_blob_blocked, blob_fence_mutated = (
+            self._apply_retention_blob_gc(
+                dataset=dataset,
+                candidates=[
+                    candidate
+                    for candidate in selected
+                    if candidate.candidate_type == "blob_gc"
+                ],
+                minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                offline_restore_window_seconds=offline_restore_window_seconds,
+            )
         )
         applied_count = sum(
             int(item["candidate_count"]) for item in domain_compactions
@@ -1542,7 +1546,7 @@ class SyncV2Service:
         return SyncRetentionApplyResult(
             dataset_id=dataset_id,
             dry_run=False,
-            mutation_performed=applied_count > 0,
+            mutation_performed=applied_count > 0 or blob_fence_mutated,
             evaluated_at=self.clock(),
             candidate_count=dry_run.candidate_count,
             applied_count=applied_count,
@@ -3353,30 +3357,45 @@ class SyncV2Service:
                 owner_user_id=user_id,
             )
             storage_namespace_id = namespace.storage_namespace_id
-        try:
-            storage_key = blob_store.commit_upload(
-                upload_id=upload_id,
-                payload_hash=session.payload_hash,
-                chunk_indexes=list(range(session.chunk_count)),
-                storage_namespace_id=storage_namespace_id,
-            )
-        except SyncBlobStoreError as exc:
-            raise SyncStoreError(str(exc)) from exc
-        blob = self.store.complete_blob_upload(
-            SyncBlobObjectCreate(
-                blob_id=self.id_factory("blob"),
-                dataset_id=dataset_id,
-                owner_user_id=user_id,
-                attachment_id=session.attachment_id,
-                payload_hash=session.payload_hash,
-                content_type=session.content_type,
-                size_bytes=session.size_bytes,
-                storage_backend=self.settings.blob_storage_backend,
-                storage_key=storage_key,
-                encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
-                metadata={},
+        expected_storage_key = (
+            blob_store.legacy_storage_key(session.payload_hash)
+            if storage_namespace_id is None
+            else blob_store.namespace_storage_key(
+                storage_namespace_id,
+                session.payload_hash,
             )
         )
+        blob_create = SyncBlobObjectCreate(
+            blob_id=self.id_factory("blob"),
+            dataset_id=dataset_id,
+            owner_user_id=user_id,
+            attachment_id=session.attachment_id,
+            payload_hash=session.payload_hash,
+            content_type=session.content_type,
+            size_bytes=session.size_bytes,
+            storage_backend=self.settings.blob_storage_backend,
+            storage_key=expected_storage_key,
+            encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
+            metadata={},
+        )
+        with self.store.blob_write_guard(
+            dataset_id,
+            session.domain,
+            session.object_id,
+        ) as guarded:
+            guarded.require_blob_upload_completion_allowed(blob_create)
+            try:
+                storage_key = blob_store.commit_upload(
+                    upload_id=upload_id,
+                    payload_hash=session.payload_hash,
+                    chunk_indexes=list(range(session.chunk_count)),
+                    storage_namespace_id=storage_namespace_id,
+                )
+            except SyncBlobStoreError as exc:
+                raise SyncStoreError(str(exc)) from exc
+            if storage_key != expected_storage_key:
+                raise SyncStoreError("Sync blob storage key changed during commit")
+            blob = guarded.complete_blob_upload(blob_create)
         try:
             blob_store.discard_upload(upload_id)
         except OSError as exc:
@@ -4642,12 +4661,18 @@ class SyncV2Service:
         candidates: Sequence[SyncRetentionCandidate],
         minimum_tombstone_age_seconds: int,
         offline_restore_window_seconds: int,
-    ) -> tuple[list[dict[str, object]], list[SyncRetentionCandidate]]:
+    ) -> tuple[
+        list[dict[str, object]],
+        list[SyncRetentionCandidate],
+        bool,
+    ]:
         applied: list[dict[str, object]] = []
         blocked: list[SyncRetentionCandidate] = []
+        fence_mutated = False
         for candidate in candidates:
             if candidate.blob_id is None:
                 continue
+            namespace_id: str | None = None
             with self.store.retention_guard(
                 dataset.dataset_id,
                 candidate.blob_id,
@@ -4663,18 +4688,28 @@ class SyncV2Service:
                 )
                 if current_dataset is None or blob is None:
                     continue
-                active_devices = self._retention_active_devices(
-                    current_dataset,
-                    store=guarded,
+                if blob.status == "deleted":
+                    continue
+                active_devices = (
+                    []
+                    if blob.status == "deleting"
+                    else self._retention_active_devices(
+                        current_dataset,
+                        store=guarded,
+                    )
                 )
                 revalidated = self._retention_blob_candidate(
                     dataset=current_dataset,
                     blob=blob,
                     active_devices=active_devices,
                     audit_mode=False,
-                    restore_window_blocked=self._retention_restore_window_active(
-                        active_devices,
-                        offline_restore_window_seconds,
+                    restore_window_blocked=(
+                        False
+                        if blob.status == "deleting"
+                        else self._retention_restore_window_active(
+                            active_devices,
+                            offline_restore_window_seconds,
+                        )
                     ),
                     minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
                     store=guarded,
@@ -4682,7 +4717,67 @@ class SyncV2Service:
                 if revalidated.blockers:
                     blocked.append(revalidated)
                     continue
-                blob = guarded.mark_blob_object_deleted(
+                namespace = guarded.get_storage_namespace(
+                    dataset.dataset_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                if namespace is None:
+                    blocked.append(
+                        replace(
+                            revalidated,
+                            blockers=["retention_blob_storage_key_not_namespaced"],
+                        )
+                    )
+                    continue
+                namespace_id = namespace.storage_namespace_id
+                if blob.status == "available":
+                    blob = guarded.fence_blob_object_deleting(
+                        dataset.dataset_id,
+                        candidate.blob_id,
+                    )
+                    if blob is None or blob.status != "deleting":
+                        continue
+                    fence_mutated = True
+                elif blob.status != "deleting":
+                    continue
+            if self.blob_store is None or namespace_id is None:
+                blocked.append(
+                    replace(
+                        candidate,
+                        blockers=["retention_blob_storage_unavailable"],
+                    )
+                )
+                continue
+            try:
+                self.blob_store.delete_namespace_blob(
+                    storage_key=blob.storage_key,
+                    storage_namespace_id=namespace_id,
+                    payload_hash=blob.payload_hash,
+                    expected_size=blob.size_bytes,
+                )
+            except SyncBlobStoreError:
+                blocked.append(
+                    replace(
+                        candidate,
+                        blockers=["retention_blob_delete_retry"],
+                        reason="physical blob deletion retry",
+                    )
+                )
+                continue
+            with self.store.retention_guard(
+                dataset.dataset_id,
+                candidate.blob_id,
+            ) as guarded:
+                current = guarded.lock_blob_object_for_retention(
+                    dataset.dataset_id,
+                    candidate.blob_id,
+                    owner_user_id=dataset.owner_user_id,
+                )
+                if current is None or current.status == "deleted":
+                    continue
+                if current.status != "deleting":
+                    continue
+                blob = guarded.finalize_blob_object_deleted(
                     dataset.dataset_id,
                     candidate.blob_id,
                 )
@@ -4696,7 +4791,7 @@ class SyncV2Service:
                     "size_bytes": blob.size_bytes,
                 }
             )
-        return applied, blocked
+        return applied, blocked, fence_mutated
 
     def _retention_active_devices(
         self,
@@ -4803,21 +4898,26 @@ class SyncV2Service:
     ) -> list[SyncRetentionCandidate]:
         active_store = store or self.store
         candidates: list[SyncRetentionCandidate] = []
-        for blob in active_store.list_blob_objects_for_dataset_page(
-            dataset.dataset_id,
-            limit=limit,
-        ):
-            candidates.append(
-                self._retention_blob_candidate(
-                    dataset=dataset,
-                    blob=blob,
-                    active_devices=active_devices,
-                    audit_mode=audit_mode,
-                    restore_window_blocked=restore_window_blocked,
-                    minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
-                    store=active_store,
+        for status in ("deleting", "available"):
+            remaining = limit - len(candidates)
+            if remaining <= 0:
+                break
+            for blob in active_store.list_blob_objects_for_dataset_page(
+                dataset.dataset_id,
+                status=status,
+                limit=remaining,
+            ):
+                candidates.append(
+                    self._retention_blob_candidate(
+                        dataset=dataset,
+                        blob=blob,
+                        active_devices=active_devices,
+                        audit_mode=audit_mode,
+                        restore_window_blocked=restore_window_blocked,
+                        minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+                        store=active_store,
+                    )
                 )
-            )
         return candidates
 
     def _retention_binding_release_candidates(
@@ -5028,6 +5128,26 @@ class SyncV2Service:
         blockers: list[str] = []
         if audit_mode:
             blockers.append("retention_audit_mode")
+        blockers.extend(
+            self._retention_blob_storage_blockers(
+                dataset=dataset,
+                blob=blob,
+                store=active_store,
+            )
+        )
+        if blob.status == "deleting":
+            return SyncRetentionCandidate(
+                candidate_type="blob_gc",
+                dataset_id=dataset.dataset_id,
+                domain="attachment.ref",
+                object_id=blob.attachment_id,
+                blob_id=blob.blob_id,
+                attachment_id=blob.attachment_id,
+                payload_hash=blob.payload_hash,
+                size_bytes=blob.size_bytes,
+                blockers=list(dict.fromkeys(blockers)),
+                reason="physical blob deletion retry",
+            )
         if restore_window_blocked:
             blockers.append("retention_restore_window_active")
         if self._retention_workspace_ack_scope_blocked(dataset):
@@ -5123,6 +5243,35 @@ class SyncV2Service:
             ),
             reason="server blob retained for attachment restore",
         )
+
+    def _retention_blob_storage_blockers(
+        self,
+        *,
+        dataset: SyncDataset,
+        blob: SyncBlobObject,
+        store: SyncV2Store,
+    ) -> list[str]:
+        if self.blob_store is None:
+            return ["retention_blob_storage_unavailable"]
+        namespace = store.get_storage_namespace(
+            dataset.dataset_id,
+            owner_user_id=dataset.owner_user_id,
+        )
+        if namespace is None:
+            return ["retention_blob_storage_key_not_namespaced"]
+        try:
+            expected_key = self.blob_store.namespace_storage_key(
+                namespace.storage_namespace_id,
+                blob.payload_hash,
+            )
+        except SyncBlobStoreError:
+            return ["retention_blob_storage_key_not_namespaced"]
+        if (
+            blob.storage_backend != self.settings.blob_storage_backend
+            or blob.storage_key != expected_key
+        ):
+            return ["retention_blob_storage_key_not_namespaced"]
+        return []
 
     def _retention_blob_adapter_version(
         self,
