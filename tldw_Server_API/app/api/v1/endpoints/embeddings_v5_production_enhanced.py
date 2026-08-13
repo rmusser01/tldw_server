@@ -23,7 +23,7 @@ import threading
 import time
 import uuid
 from asyncio import Lock
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -3926,7 +3926,7 @@ def _prepared_total_tokens(prepared: Any) -> int:
 
 
 def _format_embedding_result_data(
-    vectors: list[list[float]],
+    vectors: Sequence[Sequence[float]],
     encoding_format: str | None,
     *,
     embeddings_from_adapter: bool = False,
@@ -3934,15 +3934,16 @@ def _format_embedding_result_data(
     output_data: list[EmbeddingData] = []
     fmt = encoding_format or "float"
     for index, embedding in enumerate(vectors):
+        embedding_values = list(embedding)
         arr, did_l2 = decide_and_apply_l2(
-            embedding,
+            embedding_values,
             fmt,
             embeddings_from_adapter=embeddings_from_adapter,
         )
         if fmt == "base64":
             processed_value = base64.b64encode(arr.tobytes()).decode("utf-8")
         else:
-            processed_value = arr.tolist() if did_l2 else embedding
+            processed_value = arr.tolist() if did_l2 else embedding_values
         output_data.append(EmbeddingData(embedding=processed_value, index=index))
     return output_data
 

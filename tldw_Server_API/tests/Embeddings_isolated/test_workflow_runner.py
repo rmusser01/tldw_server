@@ -445,6 +445,32 @@ async def test_pre_execute_failure_is_traced_in_planning_phase_and_reraised_unch
 
 
 @pytest.mark.asyncio
+async def test_pre_execute_cancellation_propagates_without_terminal_trace_event():
+    cancellation = asyncio.CancelledError("reservation cancelled")
+    collector = EmbeddingInMemoryWorkflowTraceCollector()
+    execution_coordinator = FakeExecutionCoordinator()
+
+    async def pre_execute(_prepared):
+        raise cancellation
+
+    runner = EmbeddingInlineWorkflowRunner(
+        FakePreparationPipeline(),
+        execution_coordinator,
+        trace_collector=collector,
+        pre_execute=pre_execute,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await runner.run(["one"], _request_context())
+
+    assert exc_info.value is cancellation
+    assert execution_coordinator.execute_calls == []
+    assert collector.events[-1].event_type == "prepare_completed"
+    assert collector.events[-1].phase == "planning"
+    assert all(event.event_type not in {"workflow_failed", "workflow_completed"} for event in collector.events)
+
+
+@pytest.mark.asyncio
 async def test_runner_never_traces_caller_controlled_provider_model_or_header_names():
     prepared = _prepared_request()
     prepared.execution_plan.provider = "AKIAIOSFODNN7EXAMPLE"

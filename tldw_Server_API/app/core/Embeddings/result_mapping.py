@@ -1,9 +1,8 @@
 """Pure mappings from canonical embedding outcomes to boundary contracts.
 
-HTTP response-header construction is endpoint-owned. The endpoint does not switch
-to the pure header mapper until Stage 2E. ``map_outcome_to_legacy_execution_result``
-is the sole temporary exception: it lives outside the canonical runner path and is
-scheduled for removal in Stage 6.
+HTTP response-header construction is endpoint-owned.
+``map_outcome_to_legacy_execution_result`` is the sole temporary exception: it
+lives outside the canonical runner path and is scheduled for removal in Stage 6.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ def assemble_embedding_execution_outcome(
 def map_embedding_response_headers(
     outcome: EmbeddingExecutionOutcome,
 ) -> dict[str, str]:
-    """Build endpoint-owned headers for endpoint adoption deferred until Stage 2E."""
+    """Build endpoint-owned headers from a canonical execution outcome."""
     headers = {"X-Embeddings-Provider": outcome.provider}
     if outcome.fallback_from and outcome.fallback_from != outcome.provider:
         headers["X-Embeddings-Fallback-From"] = outcome.fallback_from
@@ -66,8 +65,7 @@ def map_outcome_to_legacy_execution_result(
     """Return the sole temporary exception to endpoint-owned header construction.
 
     This mapper lives outside the canonical runner path and is scheduled for
-    removal in Stage 6. The endpoint remains on its existing header path until
-    Stage 2E.
+    removal in Stage 6.
     """
     return EmbeddingExecutionResult(
         vectors=[list(vector) for vector in outcome.vectors],
