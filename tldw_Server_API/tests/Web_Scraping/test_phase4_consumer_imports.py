@@ -87,11 +87,46 @@ def _imported_names(path: Path) -> dict[str, set[str]]:
     return imported
 
 
+def _legacy_module_imports(path: Path) -> set[str]:
+    imports: set[str] = set()
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(
+                alias.name
+                for alias in node.names
+                if alias.name == "Article_Extractor_Lib" or alias.name.endswith(".Article_Extractor_Lib")
+            )
+        elif isinstance(node, ast.ImportFrom):
+            imports.update(alias.name for alias in node.names if alias.name == "Article_Extractor_Lib")
+    return imports
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        f"import {LEGACY_MODULE} as legacy\n",
+        ("from tldw_Server_API.app.core.Web_Scraping " "import Article_Extractor_Lib as legacy\n"),
+    ],
+)
+def test_legacy_module_alias_imports_are_detected(tmp_path: Path, source: str) -> None:
+    consumer = tmp_path / "consumer.py"
+    consumer.write_text(source, encoding="utf-8")
+
+    assert _legacy_module_imports(consumer)
+
+
 def test_phase4_consumers_import_only_canonical_article_owners() -> None:
     for relative_path, expected_imports in CONSUMER_IMPORTS.items():
-        actual_imports = _imported_names(REPO_ROOT / relative_path)
+        consumer_path = REPO_ROOT / relative_path
+        actual_imports = _imported_names(consumer_path)
+        assert not _legacy_module_imports(consumer_path), relative_path
         for module, expected_names in expected_imports.items():
-            assert actual_imports.get(module, set()) == expected_names, relative_path
+            actual_names = actual_imports.get(module, set())
+            if module == LEGACY_MODULE:
+                assert actual_names <= expected_names, relative_path
+            else:
+                assert expected_names <= actual_names, relative_path
 
 
 @pytest.mark.asyncio
