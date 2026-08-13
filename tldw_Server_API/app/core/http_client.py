@@ -1331,6 +1331,33 @@ def _uses_compressed_content_encoding(headers: Any) -> bool:
     )
 
 
+def _read_bounded_chunks(chunks: Iterable[bytes], max_response_bytes: int) -> bytes:
+    """Read an iterator without retaining more than the configured byte limit."""
+    body = bytearray()
+    for chunk in chunks:
+        if len(body) + len(chunk) > max_response_bytes:
+            raise ValueError("Response exceeds max_response_bytes limit")
+        body.extend(chunk)
+    return bytes(body)
+
+
+def _decode_bounded_response_body(response: Any, body: bytes) -> str:
+    """Decode raw bounded response bytes using the response encoding when known."""
+    encoding = str(getattr(response, "encoding", "") or "utf-8")
+    try:
+        return body.decode(encoding, errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
+def _close_simple_response(response: Any) -> None:
+    """Best-effort close for simple fetch streaming responses."""
+    close = getattr(response, "close", None)
+    if callable(close):
+        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            close()
+
+
 def _redact_path_for_logging(host: str, path: str) -> str:
     if host == "api.telegram.org":
         match = _TELEGRAM_BOT_PATH_PATTERN.match(path or "/")
@@ -4579,6 +4606,11 @@ def fetch(*args, **kwargs):
     trust_env = kwargs.get("trust_env")
     proxies = kwargs.get("proxies")
     timeout = kwargs.get("timeout")
+    max_response_bytes = kwargs.get("max_response_bytes")
+
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be a positive integer")
 
     # Enforce egress via stubbed policy helper (tests monkeypatch this).
     # This remains intentionally lightweight so tests can override without
@@ -4598,6 +4630,8 @@ def fetch(*args, **kwargs):
 
     # Sanitize Accept-Encoding as per backend expectations
     req_headers = _sanitize_accept_encoding_for_backend(headers, backend_norm)
+    if max_response_bytes is not None:
+        req_headers = _force_identity_accept_encoding(req_headers)
 
     # Determine redirect behavior, honoring env/Config_Files when caller did not
     # explicitly supply follow_redirects.
@@ -4727,15 +4761,58 @@ def fetch(*args, **kwargs):
                 if not _is_url_allowed(cur_url):
                     raise ValueError("Egress denied for URL")  # noqa: TRY003
 
-                resp = _fetch_curl_simple(
-                    url=cur_url,
-                    headers=hop_headers,
-                    cookies=hop_cookies,
-                    timeout=timeout,
-                    impersonate=impersonate,
-                    proxies=proxies,
-                    session=curl_session,
-                )
+                if max_response_bytes is None:
+                    resp = _fetch_curl_simple(
+                        url=cur_url,
+                        headers=hop_headers,
+                        cookies=hop_cookies,
+                        timeout=timeout,
+                        impersonate=impersonate,
+                        proxies=proxies,
+                        session=curl_session,
+                    )
+                else:
+                    request_stream = getattr(curl_session, "get", None)
+                    if not callable(request_stream):
+                        raise RuntimeError(
+                            "Selected backend does not support bounded response streaming"
+                        )
+                    req_kwargs: dict[str, Any] = {
+                        "headers": hop_headers,
+                        "cookies": hop_cookies,
+                        "allow_redirects": False,
+                        "stream": True,
+                    }
+                    if timeout is not None:
+                        req_kwargs["timeout"] = timeout
+                    if proxies:
+                        req_kwargs["proxies"] = proxies
+                    streamed = request_stream(cur_url, **req_kwargs)
+                    try:
+                        response_headers = dict(getattr(streamed, "headers", {}) or {})
+                        if _uses_compressed_content_encoding(response_headers):
+                            raise ValueError(
+                                "Compressed responses are not allowed with "
+                                "max_response_bytes"
+                            )
+                        iter_content = getattr(streamed, "iter_content", None)
+                        if not callable(iter_content):
+                            raise RuntimeError(
+                                "Selected backend does not support bounded response streaming"
+                            )
+                        body = _read_bounded_chunks(
+                            iter_content(),
+                            max_response_bytes,
+                        )
+                        resp = HttpResponse(
+                            status=int(getattr(streamed, "status_code", 0)),
+                            headers=response_headers,
+                            text=_decode_bounded_response_body(streamed, body),
+                            url=str(getattr(streamed, "url", cur_url)),
+                            backend="curl",
+                        )
+                    finally:
+                        _close_simple_response(streamed)
                 status = int(resp["status"])
 
                 if not follow_redirects or status not in (301, 302, 303, 307, 308):
@@ -4764,7 +4841,93 @@ def fetch(*args, **kwargs):
 
                 cur_url = next_url
 
-    # Minimal client lifecycle for simple fetch with explicit redirect handling
+    if max_response_bytes is not None:
+        client_cls = getattr(_hx, "Client", object) if _hx is not None else object
+        sc = _instantiate_client(client_cls, client_kwargs)
+        with sc as sc:
+            cur_url = url
+            hop_headers = req_headers
+            hop_cookies = cookies
+            redirects = 0
+
+            while True:
+                if not _is_url_allowed(cur_url):
+                    raise ValueError("Egress denied for URL")  # noqa: TRY003
+
+                request_stream = getattr(sc, "stream", None)
+                if not callable(request_stream):
+                    raise RuntimeError(
+                        "Selected backend does not support bounded response streaming"
+                    )
+                with request_stream(
+                    "GET",
+                    cur_url,
+                    headers=hop_headers,
+                    cookies=hop_cookies,
+                    follow_redirects=False,
+                ) as streamed:
+                    status = int(getattr(streamed, "status_code", 0))
+                    response_headers = dict(getattr(streamed, "headers", {}) or {})
+                    response_url = str(getattr(streamed, "url", cur_url))
+
+                    if not follow_redirects or status not in (301, 302, 303, 307, 308):
+                        if _uses_compressed_content_encoding(response_headers):
+                            raise ValueError(
+                                "Compressed responses are not allowed with "
+                                "max_response_bytes"
+                            )
+                        iter_raw = getattr(streamed, "iter_raw", None)
+                        if not callable(iter_raw):
+                            raise RuntimeError(
+                                "Selected backend does not support bounded response streaming"
+                            )
+                        body = _read_bounded_chunks(iter_raw(), max_response_bytes)
+                        return HttpResponse(
+                            status=status,
+                            headers=response_headers,
+                            text=_decode_bounded_response_body(streamed, body),
+                            url=response_url,
+                            backend="httpx",
+                        )
+
+                location = response_headers.get("location") or response_headers.get("Location")
+                if not location:
+                    return HttpResponse(
+                        status=status,
+                        headers=response_headers,
+                        text="",
+                        url=response_url,
+                        backend="httpx",
+                    )
+
+                next_url = _resolve_redirect_url(response_url, str(location))
+                if not next_url or not _redirect_allowed(cur_url, next_url):
+                    return HttpResponse(
+                        status=status,
+                        headers=response_headers,
+                        text="",
+                        url=response_url,
+                        backend="httpx",
+                    )
+
+                if _is_cross_host_redirect(cur_url, next_url) or _is_scheme_downgrade(cur_url, next_url):
+                    hop_headers = _redirect_boundary_headers(hop_headers)
+                    hop_cookies = None
+                    _clear_session_cookie_state(sc)
+
+                redirects += 1
+                if redirects > DEFAULT_MAX_REDIRECTS:
+                    return HttpResponse(
+                        status=status,
+                        headers=response_headers,
+                        text="",
+                        url=response_url,
+                        backend="httpx",
+                    )
+
+                cur_url = next_url
+
+    # Minimal client lifecycle for unbounded simple fetch with explicit redirect handling
     client_cls = getattr(_hx, "Client", object) if _hx is not None else object
     sc = _instantiate_client(client_cls, client_kwargs)
     with sc as sc:

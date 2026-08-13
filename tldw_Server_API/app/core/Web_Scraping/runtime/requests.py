@@ -51,6 +51,23 @@ def _freeze_proxy_value(value: Mapping[str, str] | str | None) -> Mapping[str, s
     return str(value)
 
 
+def _normalize_positive_integer(value: Any, *, field_name: str) -> int:
+    """Normalize an integral, positive runtime limit while rejecting booleans."""
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a positive integer")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{field_name} must be a positive integer") from exc
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"{field_name} must be a positive integer")
+    if isinstance(value, str) and str(normalized) != value.strip():
+        raise ValueError(f"{field_name} must be a positive integer")
+    if normalized <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeRequestContext:
     """Context metadata carried into low-level runtime operations."""
@@ -84,6 +101,7 @@ class FetchRequest:
     allow_redirects: bool | str = True
     impersonate: str | None = None
     proxies: Mapping[str, str] | str | None = None
+    max_response_bytes: int | None = None
     context: RuntimeRequestContext = field(default_factory=RuntimeRequestContext)
 
     def __post_init__(self) -> None:
@@ -112,3 +130,12 @@ class FetchRequest:
         if self.impersonate is not None:
             object.__setattr__(self, "impersonate", str(self.impersonate))
         object.__setattr__(self, "proxies", _freeze_proxy_value(self.proxies))
+        if self.max_response_bytes is not None:
+            object.__setattr__(
+                self,
+                "max_response_bytes",
+                _normalize_positive_integer(
+                    self.max_response_bytes,
+                    field_name="max_response_bytes",
+                ),
+            )

@@ -47,7 +47,20 @@ class DefaultFetchClient:
             )
 
         started = time.monotonic()
-        if request.backend == "curl":
+        if request.max_response_bytes is not None:
+            raw = http_fetch(
+                request.url,
+                headers=_mutable_mapping_or_none(request.headers),
+                cookies=_mutable_mapping_or_none(request.cookies),
+                timeout=request.timeout,
+                backend=request.backend,
+                follow_redirects=request.allow_redirects,
+                impersonate=request.impersonate,
+                proxies=_mutable_proxies(request.proxies),
+                max_response_bytes=request.max_response_bytes,
+            )
+            fallback_backend = request.backend
+        elif request.backend == "curl":
             raw = http_fetch(
                 request.url,
                 headers=_mutable_mapping_or_none(request.headers),

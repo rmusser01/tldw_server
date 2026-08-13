@@ -78,6 +78,36 @@ def test_fetch_request_normalizes_fields_and_proxy_maps() -> None:
 
 
 @pytest.mark.unit
+def test_fetch_request_defaults_max_response_bytes_to_none() -> None:
+    request = FetchRequest(url="https://example.com/article")
+
+    assert request.max_response_bytes is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [7, 7.0, "7"])
+def test_fetch_request_normalizes_positive_max_response_bytes(value: object) -> None:
+    request = FetchRequest(
+        url="https://example.com/article",
+        max_response_bytes=value,
+    )
+
+    assert request.max_response_bytes == 7
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [True, False, 0, -1, 1.5, "not-a-number"])
+def test_fetch_request_rejects_non_positive_integer_max_response_bytes(
+    value: object,
+) -> None:
+    with pytest.raises(ValueError, match="max_response_bytes must be a positive integer"):
+        FetchRequest(
+            url="https://example.com/article",
+            max_response_bytes=value,
+        )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("value", ["false", "0", "no", "off"])
 def test_fetch_request_normalizes_false_like_allow_redirects(value: str) -> None:
     request = FetchRequest(
