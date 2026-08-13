@@ -280,6 +280,11 @@ class _ExplodingTailText(str):
         raise AssertionError("text accounting must stop after crossing the limit")
 
 
+class _UnscannableBinary(str):
+    def __iter__(self) -> Any:
+        raise AssertionError("obvious binary outcomes must not scan payload data")
+
+
 class _FakeBrowserRuntime:
     def __init__(
         self,
@@ -294,6 +299,7 @@ class _FakeBrowserRuntime:
         cdp_events: list[tuple[str, object]] | None = None,
         cdp_missing: str | None = None,
         cdp_responses: dict[str, object] | None = None,
+        cdp_command_gates: dict[str, asyncio.Event] | None = None,
         evaluation_result: object = _DEFAULT_EVALUATION,
     ) -> None:
         self.dispatches = list(dispatches or [])
@@ -306,6 +312,7 @@ class _FakeBrowserRuntime:
         self.cdp_events = list(cdp_events or [])
         self.cdp_missing = cdp_missing
         self.cdp_responses = dict(cdp_responses or {})
+        self.cdp_command_gates = dict(cdp_command_gates or {})
         self.evaluation_result = evaluation_result
         self.events: list[str] = []
         self.launch_options: dict[str, object] | None = None
@@ -327,6 +334,7 @@ class _FakeBrowserRuntime:
         self.cookies: list[dict[str, object]] = []
         self.evaluate_calls: list[tuple[str, object]] = []
         self.cdp_command_calls: list[tuple[str, dict[str, object] | None]] = []
+        self.cdp_command_started: dict[str, asyncio.Event] = {}
         self.cdp_sessions: list[_FakeCDPSession] = []
         self.sleep_delays: list[float] = []
         self.stealth_pages: list[_FakePage] = []
@@ -407,7 +415,12 @@ class _FakeCDPSession:
     ) -> object:
         self.runtime.events.append(f"cdp-send:{method}")
         self.runtime.cdp_command_calls.append((method, params))
+        self.runtime.cdp_command_started.setdefault(method, asyncio.Event()).set()
         self.runtime.raise_at(f"cdp-send:{method}")
+        gate = self.runtime.cdp_command_gates.get(method)
+        if gate is not None:
+            await gate.wait()
+            self.runtime.raise_at(f"cdp-send-after:{method}")
         if method in self.runtime.cdp_responses:
             return self.runtime.cdp_responses[method]
         if method == "Network.enable":
@@ -2177,7 +2190,7 @@ async def test_task16_huge_text_short_circuits_after_crossing_remaining_budget()
 
 
 @pytest.mark.unit
-async def test_task16_huge_binary_rejects_before_base64_decode(
+async def test_task16_huge_binary_rejects_without_scan_or_base64_decode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     browser_module = _browser_module()
@@ -2190,7 +2203,12 @@ async def test_task16_huge_binary_rejects_before_base64_decode(
         cdp_events=[
             (
                 "Network.webSocketFrameReceived",
-                {"response": {"opcode": 2, "payloadData": "AAAA" * 10_000}},
+                {
+                    "response": {
+                        "opcode": 2,
+                        "payloadData": _UnscannableBinary("AAAA" * 10_000),
+                    }
+                },
             )
         ]
     )
@@ -2203,6 +2221,41 @@ async def test_task16_huge_binary_rejects_before_base64_decode(
         )
 
     _assert_limit_failure(raised.value, stage="browser_transfer")
+
+
+@pytest.mark.unit
+async def test_task16_non_multiple_binary_length_rejects_without_scan_or_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    browser_module = _browser_module()
+
+    def forbidden_decode(*_args: object, **_kwargs: object) -> bytes:
+        raise AssertionError("invalid-length base64 must not be decoded")
+
+    monkeypatch.setattr(browser_module.base64, "b64decode", forbidden_decode)
+    runtime = _FakeBrowserRuntime(
+        cdp_events=[
+            (
+                "Network.webSocketFrameReceived",
+                {
+                    "response": {
+                        "opcode": 2,
+                        "payloadData": _UnscannableBinary("AAA"),
+                    }
+                },
+            )
+        ]
+    )
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            replace(_profile(), retries=3),
+            ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=128),
+        )
+
+    _assert_failure(raised.value, stage="capability")
+    assert runtime.events.count("launch") == 1
 
 
 @pytest.mark.unit
@@ -2284,6 +2337,39 @@ async def test_task16_transfer_overflow_reuses_one_retained_emergency_shutdown()
 
     _assert_limit_failure(raised.value, stage="browser_transfer")
     assert runtime.context_close_task_names.count("article-browser-emergency-context-shutdown") == 1
+    assert runtime.events.count("launch") == 1
+
+
+@pytest.mark.unit
+async def test_task16_latched_transfer_overflow_wins_over_pending_cdp_and_teardown_errors() -> None:
+    release_evaluate = asyncio.Event()
+    runtime = _FakeBrowserRuntime(
+        cdp_command_gates={"Runtime.evaluate": release_evaluate},
+        stage_errors={
+            "cdp-send-after:Runtime.evaluate": RuntimeError("CDP target closed"),
+            "detach:cdp": RuntimeError("CDP detach failed"),
+        },
+    )
+    operation = asyncio.create_task(
+        _adapter(runtime, _FakeGuard([])).acquire(
+            _TARGET,
+            replace(_profile(), retries=3),
+            ArticleLimits(max_article_bytes=128, max_browser_transfer_bytes=8),
+        )
+    )
+
+    await runtime.cdp_command_started.setdefault("Runtime.evaluate", asyncio.Event()).wait()
+    session = runtime.cdp_sessions[0]
+    session.emit("Network.dataReceived", {"encodedDataLength": 9})
+    await runtime.context_closed.wait()
+    release_evaluate.set()
+
+    with pytest.raises(ArticleFailure) as raised:
+        await operation
+
+    _assert_limit_failure(raised.value, stage="browser_transfer")
+    assert runtime.context_close_task_names.count("article-browser-emergency-context-shutdown") == 1
+    assert session.detached is True
     assert runtime.events.count("launch") == 1
 
 

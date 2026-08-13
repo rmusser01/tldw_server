@@ -433,36 +433,43 @@ class _BrowserTransferLedger:
             if self._terminal:
                 return
             try:
-                encoded_length = 0
-                padding = 0
-                saw_padding = False
-                for character in data:
-                    encoded_length += 1
-                    if character == "=":
-                        saw_padding = True
-                        padding += 1
-                        if padding > 2:
-                            raise ValueError("invalid base64 padding")
-                    elif character in _BASE64_ALPHABET:
-                        if saw_padding:
-                            raise ValueError("base64 data follows padding")
-                    else:
-                        raise ValueError("invalid base64 character")
+                encoded_length = len(data)
                 if encoded_length % 4 != 0:
                     raise ValueError("invalid base64 length")
-                amount = (encoded_length // 4) * 3 - padding
                 remaining = self._limit - self._total
-                if amount > remaining:
+                minimum_decoded_length = max(0, (encoded_length // 4) * 3 - 2)
+                if minimum_decoded_length > remaining:
                     self._terminal = True
                     failure = ArticleFailure(
                         "response_too_large",
                         "browser_transfer",
                     )
                 else:
-                    decoded = base64.b64decode(data, validate=True)
-                    if len(decoded) != amount:
-                        raise ValueError("invalid base64 decoded length")
-                    self._total += amount
+                    padding = 0
+                    saw_padding = False
+                    for character in data:
+                        if character == "=":
+                            saw_padding = True
+                            padding += 1
+                            if padding > 2:
+                                raise ValueError("invalid base64 padding")
+                        elif character in _BASE64_ALPHABET:
+                            if saw_padding:
+                                raise ValueError("base64 data follows padding")
+                        else:
+                            raise ValueError("invalid base64 character")
+                    amount = (encoded_length // 4) * 3 - padding
+                    if amount > remaining:
+                        self._terminal = True
+                        failure = ArticleFailure(
+                            "response_too_large",
+                            "browser_transfer",
+                        )
+                    else:
+                        decoded = base64.b64decode(data, validate=True)
+                        if len(decoded) != amount:
+                            raise ValueError("invalid base64 decoded length")
+                        self._total += amount
             except (binascii.Error, TypeError, ValueError, UnicodeError):
                 self._terminal = True
                 failure = ArticleFailure("browser_error", "capability")
@@ -1209,6 +1216,13 @@ class GuardedArticleBrowser:
 
         if isinstance(primary_error, asyncio.CancelledError) or teardown_cancelled or outcome.callback_cancelled:
             raise asyncio.CancelledError()
+        transfer_failure = outcome.failure
+        if (
+            transfer_failure is not None
+            and transfer_failure.code == "response_too_large"
+            and transfer_failure.stage == "browser_transfer"
+        ):
+            raise transfer_failure
         if primary_error is not None:
             if cleanup_failed and isinstance(primary_error, ArticleFailure):
                 primary_error._browser_retry_suppressed = True
