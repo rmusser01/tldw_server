@@ -30,7 +30,7 @@
 - Consumes: `EmbeddingPreparationPipeline.prepare(raw_input, context, phase_sink=None) -> PreparedEmbeddingRequest` and `EmbeddingExecutionCoordinator.execute(prepared) -> Awaitable[EmbeddingExecutionOutcome]`.
 - Produces: `EmbeddingInlineWorkflowRunner(preparation_pipeline, execution_coordinator, *, trace_collector=None, pre_execute=None)` and `run(raw_input, context) -> EmbeddingExecutionOutcome`.
 
-- [ ] **Step 1: Replace the orchestrator fake with independent preparation and execution fakes**
+- [x] **Step 1: Replace the orchestrator fake with independent preparation and execution fakes**
 
 Create a synchronous fake preparation component that accepts and invokes the phase sink in this exact order:
 
@@ -42,7 +42,7 @@ return prepared
 
 Create an asynchronous fake coordinator returning `EmbeddingExecutionOutcome` with explicit `attempt_count` and `fallback_attempt_count` values.
 
-- [ ] **Step 2: Write the failing exact-success-sequence test**
+- [x] **Step 2: Write the failing exact-success-sequence test**
 
 Assert this event sequence and phase sequence:
 
@@ -88,7 +88,7 @@ Assert `execute_completed.metadata` equals the fixed aggregate shape:
 
 Assert `response_header_count` is absent and the returned object is the canonical outcome.
 
-- [ ] **Step 3: Run the new runner success test and confirm the old constructor/result contract fails**
+- [x] **Step 3: Run the new runner success test and confirm the old constructor/result contract fails**
 
 Run:
 
@@ -98,7 +98,7 @@ Run:
 
 Expected: FAIL because the runner still accepts one orchestrator and returns `EmbeddingExecutionResult`.
 
-- [ ] **Step 4: Implement direct component injection and phase-sink tracing**
+- [x] **Step 4: Implement direct component injection and phase-sink tracing**
 
 Replace `PrepareExecuteOrchestrator` with two narrow protocols:
 
@@ -117,15 +117,15 @@ class ExecutionCoordinator(Protocol):
 
 Have `run()` pass a phase sink that updates the current phase before recording `phase_changed`. After preparation, record `prepare_completed`, await `pre_execute` while the current phase remains `planning`, record `executing`, call the coordinator, record one aggregate `execute_completed`, record `finalizing`, then record `workflow_completed`.
 
-- [ ] **Step 5: Preserve failure and cancellation semantics**
+- [x] **Step 5: Preserve failure and cancellation semantics**
 
 Adapt existing tests to assert preparation failures report the last phase entered, reservation failures report `planning`, execution failures report `executing`, failure collector errors do not replace the original exception, and `asyncio.CancelledError` propagates without a failed/completed terminal event.
 
-- [ ] **Step 6: Add a property-based cardinality and safety test**
+- [x] **Step 6: Add a property-based cardinality and safety test**
 
 Use Hypothesis to vary input size from 1 through 25 and `fallback_attempt_count` from 0 through 20 while returning a matching aggregate outcome. Assert every successful run emits exactly ten events, exactly one `execute_completed`, no `item_state_changed`, and no event metadata key named `response_header_count`.
 
-- [ ] **Step 7: Run all runner tests**
+- [x] **Step 7: Run all runner tests**
 
 Run:
 
@@ -135,7 +135,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the runner lifecycle change**
+- [x] **Step 8: Commit the runner lifecycle change**
 
 ```bash
 git add tldw_Server_API/app/core/Embeddings/workflow_runner.py tldw_Server_API/tests/Embeddings_isolated/test_workflow_runner.py
@@ -380,4 +380,3 @@ Change each completed plan checkbox to `[x]`, then run:
 git add Docs/superpowers/plans/2026-08-12-embeddings-workflow-stage2e-runner-facade-implementation-plan.md "backlog/tasks/task-12973.5 - Integrate-concrete-Embeddings-steps-with-the-inline-runner.md"
 git commit -m "docs(embeddings): record stage 2e verification"
 ```
-

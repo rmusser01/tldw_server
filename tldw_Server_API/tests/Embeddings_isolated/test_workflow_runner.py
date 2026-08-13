@@ -4,10 +4,12 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
-    EmbeddingExecutionResult,
+    EmbeddingExecutionOutcome,
     EmbeddingProviderError,
     EmbeddingRequestContext,
 )
@@ -56,51 +58,75 @@ def _prepared_request() -> SimpleNamespace:
     )
 
 
-def _execution_result() -> EmbeddingExecutionResult:
-    return EmbeddingExecutionResult(
-        vectors=[[0.1, 0.2], [0.3, 0.4]],
+def _execution_outcome(
+    *,
+    vector_count: int = 2,
+    attempt_count: int = 3,
+    fallback_attempt_count: int = 1,
+) -> EmbeddingExecutionOutcome:
+    fallback_from = "huggingface" if fallback_attempt_count else None
+    return EmbeddingExecutionOutcome(
+        vectors=tuple((float(index), float(index + 1)) for index in range(vector_count)),
         provider="huggingface",
         model="sentence-transformers/all-MiniLM-L6-v2",
         prompt_tokens=3,
         total_tokens=3,
-        cache_hits=1,
-        cache_misses=1,
-        fallback_from=None,
-        response_headers={
-            "x-request-id": "req-provider-secret",
-            "authorization": "Bearer provider-secret",
-        },
+        cache_hits=min(1, vector_count),
+        cache_misses=max(0, vector_count - 1),
+        requested_dimensions=None,
+        effective_dimension_policy="strict",
+        attempt_count=attempt_count,
+        fallback_attempt_count=fallback_attempt_count,
+        fallback_from=fallback_from,
         embeddings_from_adapter=False,
     )
 
 
-class FakeOrchestrator:
+class FakePreparationPipeline:
     def __init__(
         self,
         *,
         prepared: SimpleNamespace | None = None,
-        result: EmbeddingExecutionResult | None = None,
         prepare_error: BaseException | None = None,
-        execute_error: BaseException | None = None,
+        order: list[str] | None = None,
     ) -> None:
         self.prepared = prepared or _prepared_request()
-        self.result = result or _execution_result()
         self.prepare_error = prepare_error
-        self.execute_error = execute_error
+        self.order = order
         self.prepare_calls: list[tuple[object, EmbeddingRequestContext]] = []
-        self.execute_calls: list[object] = []
 
-    def prepare(self, raw_input: object, context: EmbeddingRequestContext) -> SimpleNamespace:
+    def prepare(self, raw_input, context, phase_sink=None) -> SimpleNamespace:
         self.prepare_calls.append((raw_input, context))
-        if self.prepare_error is not None:
-            raise self.prepare_error
+        if self.order is not None:
+            self.order.append("prepare")
+        for phase in ("resolving_intent", "normalizing", "resolving_policy", "planning"):
+            if phase_sink is not None:
+                phase_sink(phase)
+            if phase == "normalizing" and self.prepare_error is not None:
+                raise self.prepare_error
         return self.prepared
 
-    async def execute(self, prepared: object) -> EmbeddingExecutionResult:
+
+class FakeExecutionCoordinator:
+    def __init__(
+        self,
+        *,
+        outcome: EmbeddingExecutionOutcome | None = None,
+        execute_error: BaseException | None = None,
+        order: list[str] | None = None,
+    ) -> None:
+        self.outcome = outcome or _execution_outcome()
+        self.execute_error = execute_error
+        self.order = order
+        self.execute_calls: list[object] = []
+
+    async def execute(self, prepared: object) -> EmbeddingExecutionOutcome:
         self.execute_calls.append(prepared)
+        if self.order is not None:
+            self.order.append("execute")
         if self.execute_error is not None:
             raise self.execute_error
-        return self.result
+        return self.outcome
 
 
 class FailingFailureCollector(EmbeddingInMemoryWorkflowTraceCollector):
@@ -111,38 +137,52 @@ class FailingFailureCollector(EmbeddingInMemoryWorkflowTraceCollector):
 
 
 @pytest.mark.asyncio
-async def test_runner_returns_orchestrator_result_and_records_safe_success_events():
+async def test_runner_returns_canonical_outcome_and_records_exact_safe_success_events():
     raw_input = {"input": ["one", "two"], "api_key": "sk-secret"}
     context = _request_context()
-    result = _execution_result()
-    orchestrator = FakeOrchestrator(result=result)
+    outcome = _execution_outcome()
+    preparation_pipeline = FakePreparationPipeline()
+    execution_coordinator = FakeExecutionCoordinator(outcome=outcome)
     collector = EmbeddingInMemoryWorkflowTraceCollector()
-    runner = EmbeddingInlineWorkflowRunner(orchestrator, trace_collector=collector)
+    runner = EmbeddingInlineWorkflowRunner(
+        preparation_pipeline,
+        execution_coordinator,
+        trace_collector=collector,
+    )
 
     observed = await runner.run(raw_input, context)
 
-    assert observed is result
-    assert orchestrator.prepare_calls == [(raw_input, context)]
-    assert orchestrator.execute_calls == [orchestrator.prepared]
+    assert observed is outcome
+    assert preparation_pipeline.prepare_calls == [(raw_input, context)]
+    assert execution_coordinator.execute_calls == [preparation_pipeline.prepared]
     assert [event.event_type for event in collector.events] == [
         "workflow_started",
+        "phase_changed",
+        "phase_changed",
         "phase_changed",
         "phase_changed",
         "prepare_completed",
         "phase_changed",
         "execute_completed",
+        "phase_changed",
         "workflow_completed",
     ]
     assert [event.phase for event in collector.events] == [
         "created",
+        "resolving_intent",
         "normalizing",
+        "resolving_policy",
         "planning",
         "planning",
         "executing",
         "executing",
         "finalizing",
+        "finalizing",
     ]
     assert [event.status for event in collector.events] == [
+        "running",
+        "running",
+        "running",
         "running",
         "running",
         "running",
@@ -159,7 +199,7 @@ async def test_runner_returns_orchestrator_result_and_records_safe_success_event
         "endpoint_path": "/api/v1/embeddings",
         "runner_mode": "inline",
     }
-    assert collector.events[3].metadata == {
+    assert collector.events[5].metadata == {
         "item_count": 2,
         "total_tokens": 3,
         "prompt_tokens": 3,
@@ -168,13 +208,15 @@ async def test_runner_returns_orchestrator_result_and_records_safe_success_event
         "fallback_chain_length": 1,
         "execution_path": "legacy",
     }
-    assert collector.events[5].metadata == {
+    assert collector.events[7].metadata == {
+        "attempt_count": 3,
+        "fallback_attempt_count": 1,
         "vector_count": 2,
         "cache_hits": 1,
         "cache_misses": 1,
         "adapter_used": False,
-        "response_header_count": 2,
     }
+    assert all("response_header_count" not in event.metadata for event in collector.events)
     assert "sk-secret" not in repr(collector.events)
     assert "provider-secret" not in repr(collector.events)
     assert "Bearer provider-secret" not in repr(collector.events)
@@ -184,31 +226,24 @@ async def test_runner_returns_orchestrator_result_and_records_safe_success_event
 async def test_runner_awaits_optional_pre_execute_hook_between_prepare_and_execute():
     order: list[str] = []
     prepared = _prepared_request()
-    result = _execution_result()
-
-    class OrderedOrchestrator(FakeOrchestrator):
-        def prepare(self, raw_input: object, context: EmbeddingRequestContext) -> SimpleNamespace:
-            order.append("prepare")
-            return super().prepare(raw_input, context)
-
-        async def execute(self, prepared: object) -> EmbeddingExecutionResult:
-            order.append("execute")
-            return await super().execute(prepared)
+    outcome = _execution_outcome()
 
     async def pre_execute(observed_prepared: object) -> None:
         order.append("pre_execute")
         assert observed_prepared is prepared
 
-    orchestrator = OrderedOrchestrator(prepared=prepared, result=result)
+    preparation_pipeline = FakePreparationPipeline(prepared=prepared, order=order)
+    execution_coordinator = FakeExecutionCoordinator(outcome=outcome, order=order)
     runner = EmbeddingInlineWorkflowRunner(
-        orchestrator,
+        preparation_pipeline,
+        execution_coordinator,
         trace_collector=EmbeddingInMemoryWorkflowTraceCollector(),
         pre_execute=pre_execute,
     )
 
     observed = await runner.run(["one", "two"], _request_context())
 
-    assert observed is result
+    assert observed is outcome
     assert order == ["prepare", "pre_execute", "execute"]
 
 
@@ -237,8 +272,11 @@ async def test_runner_awaits_optional_pre_execute_hook_between_prepare_and_execu
 )
 async def test_domain_failures_are_traced_with_safe_metadata_and_reraised_unchanged(error):
     collector = EmbeddingInMemoryWorkflowTraceCollector()
-    orchestrator = FakeOrchestrator(execute_error=error)
-    runner = EmbeddingInlineWorkflowRunner(orchestrator, trace_collector=collector)
+    runner = EmbeddingInlineWorkflowRunner(
+        FakePreparationPipeline(),
+        FakeExecutionCoordinator(execute_error=error),
+        trace_collector=collector,
+    )
 
     with pytest.raises(type(error)) as exc_info:
         await runner.run(["one", "two"], _request_context())
@@ -271,7 +309,8 @@ async def test_prepare_domain_failure_is_traced_in_prepare_phase_and_reraised_un
     )
     collector = EmbeddingInMemoryWorkflowTraceCollector()
     runner = EmbeddingInlineWorkflowRunner(
-        FakeOrchestrator(prepare_error=error),
+        FakePreparationPipeline(prepare_error=error),
+        FakeExecutionCoordinator(),
         trace_collector=collector,
     )
 
@@ -291,7 +330,8 @@ async def test_unexpected_exceptions_trace_failure_kind_and_phase_only_then_rera
     error = RuntimeError("raw provider body with sk-secret")
     collector = EmbeddingInMemoryWorkflowTraceCollector()
     runner = EmbeddingInlineWorkflowRunner(
-        FakeOrchestrator(execute_error=error),
+        FakePreparationPipeline(),
+        FakeExecutionCoordinator(execute_error=error),
         trace_collector=collector,
     )
 
@@ -314,18 +354,25 @@ async def test_unexpected_exceptions_trace_failure_kind_and_phase_only_then_rera
 @pytest.mark.asyncio
 async def test_execute_cancellation_propagates_without_terminal_trace_event():
     cancellation = asyncio.CancelledError("cancelled")
-    orchestrator = FakeOrchestrator(execute_error=cancellation)
+    preparation_pipeline = FakePreparationPipeline()
+    execution_coordinator = FakeExecutionCoordinator(execute_error=cancellation)
     collector = EmbeddingInMemoryWorkflowTraceCollector()
-    runner = EmbeddingInlineWorkflowRunner(orchestrator, trace_collector=collector)
+    runner = EmbeddingInlineWorkflowRunner(
+        preparation_pipeline,
+        execution_coordinator,
+        trace_collector=collector,
+    )
 
     with pytest.raises(asyncio.CancelledError) as exc_info:
         await runner.run(["one", "two"], _request_context())
 
     assert exc_info.value is cancellation
-    assert len(orchestrator.prepare_calls) == 1
-    assert len(orchestrator.execute_calls) == 1
+    assert len(preparation_pipeline.prepare_calls) == 1
+    assert len(execution_coordinator.execute_calls) == 1
     assert [event.event_type for event in collector.events] == [
         "workflow_started",
+        "phase_changed",
+        "phase_changed",
         "phase_changed",
         "phase_changed",
         "prepare_completed",
@@ -333,7 +380,9 @@ async def test_execute_cancellation_propagates_without_terminal_trace_event():
     ]
     assert [event.phase for event in collector.events] == [
         "created",
+        "resolving_intent",
         "normalizing",
+        "resolving_policy",
         "planning",
         "planning",
         "executing",
@@ -347,7 +396,8 @@ async def test_failure_collector_errors_do_not_replace_original_execute_exceptio
     original = RuntimeError("original")
     collector = FailingFailureCollector()
     runner = EmbeddingInlineWorkflowRunner(
-        FakeOrchestrator(execute_error=original),
+        FakePreparationPipeline(),
+        FakeExecutionCoordinator(execute_error=original),
         trace_collector=collector,
     )
 
@@ -357,6 +407,8 @@ async def test_failure_collector_errors_do_not_replace_original_execute_exceptio
     assert exc_info.value is original
     assert [event.event_type for event in collector.events] == [
         "workflow_started",
+        "phase_changed",
+        "phase_changed",
         "phase_changed",
         "phase_changed",
         "prepare_completed",
@@ -373,7 +425,8 @@ async def test_pre_execute_failure_is_traced_in_planning_phase_and_reraised_unch
         raise original
 
     runner = EmbeddingInlineWorkflowRunner(
-        FakeOrchestrator(),
+        FakePreparationPipeline(),
+        FakeExecutionCoordinator(),
         trace_collector=collector,
         pre_execute=pre_execute,
     )
@@ -397,26 +450,30 @@ async def test_runner_never_traces_caller_controlled_provider_model_or_header_na
     prepared.execution_plan.provider = "AKIAIOSFODNN7EXAMPLE"
     prepared.execution_plan.model = "AIzaSyA123456789012345678901234567890123"
     prepared.execution_plan.cache_namespace = "eyJhbGciOiJIUzI1NiJ9.payload.signature"
-    result = EmbeddingExecutionResult(
-        vectors=[[0.1]],
+    outcome = EmbeddingExecutionOutcome(
+        vectors=((0.1,),),
         provider="github_pat_0123456789abcdef",
         model="hf_0123456789abcdef",
         prompt_tokens=1,
         total_tokens=1,
         cache_hits=0,
         cache_misses=1,
+        requested_dimensions=None,
+        effective_dimension_policy="strict",
+        attempt_count=2,
+        fallback_attempt_count=1,
         fallback_from="sk-proj-0123456789abcdef",
-        response_headers={"AIzaSyA123456789012345678901234567890123": "redacted"},
     )
     collector = EmbeddingInMemoryWorkflowTraceCollector()
     runner = EmbeddingInlineWorkflowRunner(
-        FakeOrchestrator(prepared=prepared, result=result),
+        FakePreparationPipeline(prepared=prepared),
+        FakeExecutionCoordinator(outcome=outcome),
         trace_collector=collector,
     )
 
     observed = await runner.run(["one"], _request_context())
 
-    assert observed is result
+    assert observed is outcome
     trace = repr(collector.events)
     assert "AKIA" not in trace
     assert "AIza" not in trace
@@ -428,10 +485,42 @@ async def test_runner_never_traces_caller_controlled_provider_model_or_header_na
 
 @pytest.mark.asyncio
 async def test_default_noop_collector_is_disabled_and_retains_no_events():
-    runner = EmbeddingInlineWorkflowRunner(FakeOrchestrator())
+    runner = EmbeddingInlineWorkflowRunner(FakePreparationPipeline(), FakeExecutionCoordinator())
 
     await runner.run(["one", "two"], _request_context())
 
     assert isinstance(runner.trace_collector, EmbeddingNoopWorkflowTraceCollector)
     assert runner.trace_collector.enabled is False
     assert not hasattr(runner.trace_collector, "events")
+
+
+@pytest.mark.asyncio
+@given(
+    item_count=st.integers(min_value=1, max_value=25),
+    fallback_attempt_count=st.integers(min_value=0, max_value=20),
+)
+async def test_success_trace_cardinality_is_independent_of_input_and_fallback_size(
+    item_count: int,
+    fallback_attempt_count: int,
+):
+    prepared = _prepared_request()
+    prepared.normalized_input.texts = [str(index) for index in range(item_count)]
+    prepared.execution_plan.fallback_chain = [f"fallback-{index}" for index in range(fallback_attempt_count)]
+    outcome = _execution_outcome(
+        vector_count=item_count,
+        attempt_count=fallback_attempt_count + 1,
+        fallback_attempt_count=fallback_attempt_count,
+    )
+    collector = EmbeddingInMemoryWorkflowTraceCollector()
+    runner = EmbeddingInlineWorkflowRunner(
+        FakePreparationPipeline(prepared=prepared),
+        FakeExecutionCoordinator(outcome=outcome),
+        trace_collector=collector,
+    )
+
+    await runner.run(prepared.normalized_input.texts, _request_context())
+
+    assert len(collector.events) == 10
+    assert sum(event.event_type == "execute_completed" for event in collector.events) == 1
+    assert all(event.event_type != "item_state_changed" for event in collector.events)
+    assert all("response_header_count" not in event.metadata for event in collector.events)
