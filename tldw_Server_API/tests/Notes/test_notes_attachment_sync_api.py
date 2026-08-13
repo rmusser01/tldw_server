@@ -886,9 +886,11 @@ def test_canonical_keyset_pages_batch_availability_and_reject_bad_cursors(
     assert len(second.json()["items"]) == 1
     assert availability_queries == 2
 
+    base64url_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    noncanonical_last = base64url_alphabet[base64url_alphabet.index(cursor[-1]) + 1]
     tampered = client.get(
         f"/api/v1/notes/{NOTE_ID}/attachments/canonical",
-        params={"dataset_id": DATASET_ID, "cursor": cursor[:-1] + "x"},
+        params={"dataset_id": DATASET_ID, "cursor": cursor[:-1] + noncanonical_last},
     )
     oversized = client.get(
         f"/api/v1/notes/{NOTE_ID}/attachments/canonical",

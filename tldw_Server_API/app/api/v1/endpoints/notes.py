@@ -835,6 +835,17 @@ def _decode_attachment_cursor(
         signature = base64.urlsafe_b64decode(
             signature_segment + "=" * (-len(signature_segment) % 4)
         )
+        if any(
+            base64.urlsafe_b64encode(decoded_segment)
+            .decode("ascii")
+            .rstrip("=")
+            != encoded_segment
+            for decoded_segment, encoded_segment in (
+                (payload, payload_segment),
+                (signature, signature_segment),
+            )
+        ):
+            raise ValueError("noncanonical base64url")
         expected = hmac.digest(_attachment_cursor_secret(), payload, "sha256")
         if not hmac.compare_digest(signature, expected):
             raise ValueError("signature mismatch")
