@@ -811,6 +811,65 @@ class SyncDiagnosticsRetentionSummaryResponse(BaseModel):
     blocker_counts: dict[str, int] = Field(default_factory=dict)
 
 
+class SyncRecoveryActionDescriptorResponse(BaseModel):
+    """One explicit recovery hint; returning it never invokes the action."""
+
+    action: Literal[
+        "resume_upload",
+        "retry_upload",
+        "retry_verify",
+        "repair_projection",
+        "resolve_conflict",
+        "restore_attachment",
+        "restore_note",
+        "release_quarantine",
+        "bootstrap_resume",
+        "gc_retry",
+        "wait_for_retention",
+    ]
+    reason_code: str
+    target_type: Literal[
+        "dataset", "attachment", "blob", "upload", "conflict", "envelope"
+    ] = "dataset"
+    target_id: str | None = None
+    retryable: bool = True
+    requires_confirmation: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncAttachmentDiagnosticSampleResponse(BaseModel):
+    """One bounded owner-authorized attachment lifecycle sample."""
+
+    category: str
+    code: str
+    attachment_id: str | None = None
+    blob_id: str | None = None
+    server_cursor: int | None = Field(None, ge=1)
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncAttachmentDiagnosticsResponse(BaseModel):
+    """Bounded read-only Notes attachment lifecycle diagnostics."""
+
+    counts: dict[str, int] = Field(default_factory=dict)
+    samples: list[SyncAttachmentDiagnosticSampleResponse] = Field(
+        default_factory=list,
+        max_length=500,
+    )
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=32,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncDiagnosticsResponse(BaseModel):
     """Redacted Sync v2 diagnostics response."""
 
@@ -826,6 +885,9 @@ class SyncDiagnosticsResponse(BaseModel):
     )
     retention: SyncDiagnosticsRetentionSummaryResponse = Field(
         default_factory=SyncDiagnosticsRetentionSummaryResponse
+    )
+    attachment_lifecycle: SyncAttachmentDiagnosticsResponse = Field(
+        default_factory=SyncAttachmentDiagnosticsResponse
     )
 
 
@@ -904,6 +966,10 @@ class SyncNotesAttachmentBootstrapDiagnosticsResponse(BaseModel):
     cleanup_candidates: list[SyncNotesAttachmentCleanupSampleResponse] = Field(
         default_factory=list,
         max_length=100,
+    )
+    recovery_actions: list[SyncRecoveryActionDescriptorResponse] = Field(
+        default_factory=list,
+        max_length=4,
     )
 
     model_config = ConfigDict(extra="forbid")

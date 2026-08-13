@@ -73,6 +73,18 @@ class SyncNotesAttachmentCleanupSample:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncRecoveryActionDescriptor:
+    """Machine-readable, non-mutating recovery guidance."""
+
+    action: str
+    reason_code: str
+    target_type: str = "dataset"
+    target_id: str | None = None
+    retryable: bool = True
+    requires_confirmation: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class SyncNotesAttachmentBootstrapDiagnostics:
     """Bounded read-only attachment bootstrap diagnostics."""
 
@@ -87,6 +99,7 @@ class SyncNotesAttachmentBootstrapDiagnostics:
     cleanup_candidates: list[SyncNotesAttachmentCleanupSample] = field(
         default_factory=list
     )
+    recovery_actions: list[SyncRecoveryActionDescriptor] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,6 +413,16 @@ class SyncV2ProfileManager:
                 source_candidate_count_is_lower_bound
             ),
             cleanup_candidates=samples,
+            recovery_actions=(
+                [
+                    SyncRecoveryActionDescriptor(
+                        action="bootstrap_resume",
+                        reason_code="sync_attachment_bootstrap_incomplete",
+                    )
+                ]
+                if state in {"initializing", "failed"}
+                else []
+            ),
         )
 
     def _build_profile(

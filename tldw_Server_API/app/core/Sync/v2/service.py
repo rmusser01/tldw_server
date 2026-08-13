@@ -114,6 +114,7 @@ from .mutation_group_validation import (
 from .profile import (
     SyncNotesAttachmentBootstrapDiagnostics,
     SyncProfileStatus,
+    SyncRecoveryActionDescriptor,
     SyncV2ProfileManager,
 )
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
@@ -634,6 +635,27 @@ class SyncDiagnosticsRetentionSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncAttachmentDiagnosticSample:
+    """One bounded owner-authorized attachment lifecycle sample."""
+
+    category: str
+    code: str
+    attachment_id: str | None = None
+    blob_id: str | None = None
+    server_cursor: int | None = None
+    recovery_actions: list[SyncRecoveryActionDescriptor] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentDiagnostics:
+    """Bounded read-only Notes attachment lifecycle diagnostics."""
+
+    counts: dict[str, int] = field(default_factory=dict)
+    samples: list[SyncAttachmentDiagnosticSample] = field(default_factory=list)
+    recovery_actions: list[SyncRecoveryActionDescriptor] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
 class SyncDiagnosticsReport:
     """Redacted dataset diagnostics report."""
 
@@ -644,6 +666,9 @@ class SyncDiagnosticsReport:
     blob_health: SyncDiagnosticsBlobHealth = field(default_factory=SyncDiagnosticsBlobHealth)
     key_summary: SyncDiagnosticsKeySummary = field(default_factory=SyncDiagnosticsKeySummary)
     retention: SyncDiagnosticsRetentionSummary = field(default_factory=SyncDiagnosticsRetentionSummary)
+    attachment_lifecycle: SyncAttachmentDiagnostics = field(
+        default_factory=SyncAttachmentDiagnostics
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1367,12 +1392,28 @@ class SyncV2Service:
         dataset_id: str,
         device_id: str | None = None,
         retention_limit: int | None = None,
+        attachment_sample_limit: int = 0,
+        attachment_total_sample_limit: int = 500,
     ) -> SyncDiagnosticsReport:
         """Return redacted Sync v2 dataset diagnostics."""
 
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        if (
+            isinstance(attachment_sample_limit, bool)
+            or attachment_sample_limit < 0
+            or attachment_sample_limit > 100
+        ):
+            raise SyncStoreError(
+                "sync_attachment_diagnostic_category_sample_limit_exceeded"
+            )
+        if (
+            isinstance(attachment_total_sample_limit, bool)
+            or attachment_total_sample_limit < 0
+            or attachment_total_sample_limit > 500
+        ):
+            raise SyncStoreError("sync_attachment_diagnostic_total_sample_limit_exceeded")
         scan_limit = self.settings.restore_manifest_scan_limit
         envelopes = self.store.list_accepted_envelopes_for_replay(
             dataset_id,
@@ -1382,7 +1423,6 @@ class SyncV2Service:
         conflicts = self.store.list_conflicts(dataset_id, status="unresolved")
         active_devices = self._retention_active_devices(dataset)
         blob_quota = self.store.summarize_blob_quota(user_id, dataset_id=dataset_id)
-        blob_objects = self.store.list_blob_objects_for_dataset(dataset_id)
         key_records = self.store.list_key_records(dataset_id, user_id=user_id)
         retention = self.retention_dry_run(
             user_id=user_id,
@@ -1391,22 +1431,32 @@ class SyncV2Service:
             audit_mode=True,
             limit=retention_limit or min(scan_limit, 100),
         )
+        domain_diagnostics = self._diagnostics_domains(
+            domains=dataset.domains,
+            envelopes=envelopes,
+            conflicts=conflicts,
+        )
+        attachment_lifecycle = self._attachment_lifecycle_diagnostics(
+            dataset=dataset,
+            user_id=user_id,
+            envelopes=envelopes,
+            conflicts=conflicts,
+            retention=retention,
+            sample_limit=attachment_sample_limit,
+            total_sample_limit=attachment_total_sample_limit,
+        )
         return SyncDiagnosticsReport(
             dataset_id=dataset_id,
             generated_at=self.clock(),
-            domains=self._diagnostics_domains(
-                domains=dataset.domains,
-                envelopes=envelopes,
-                conflicts=conflicts,
-            ),
+            domains=domain_diagnostics,
             devices=self._diagnostics_devices(
                 dataset_id=dataset_id,
                 domains=dataset.domains,
                 devices=active_devices,
             ),
             blob_health=SyncDiagnosticsBlobHealth(
-                blob_object_count=len(blob_objects),
-                available_blob_bytes=sum(blob.size_bytes for blob in blob_objects),
+                blob_object_count=attachment_lifecycle.counts.get("blob_total", 0),
+                available_blob_bytes=blob_quota.used_blob_bytes,
                 active_upload_count=blob_quota.active_upload_count,
                 reserved_blob_bytes=blob_quota.reserved_blob_bytes,
                 quota_limit_bytes=self.settings.user_blob_quota_bytes,
@@ -1419,6 +1469,7 @@ class SyncV2Service:
                 blocked_count=retention.blocked_count,
                 blocker_counts=dict(retention.blocker_counts),
             ),
+            attachment_lifecycle=attachment_lifecycle,
         )
 
     def retention_compact(
@@ -4483,6 +4534,556 @@ class SyncV2Service:
             )
             for domain, domain_stats in stats.items()
         ]
+
+    def _attachment_lifecycle_diagnostics(
+        self,
+        *,
+        dataset: SyncDataset,
+        user_id: str,
+        envelopes: Sequence[SyncEnvelope],
+        conflicts: Sequence[SyncConflict],
+        retention: SyncRetentionDryRunResult,
+        sample_limit: int,
+        total_sample_limit: int,
+    ) -> SyncAttachmentDiagnostics:
+        """Build bounded read-only attachment lifecycle counts and safe hints."""
+
+        counts = {
+            "registry_total": 0,
+            "registry_live": 0,
+            "registry_hidden": 0,
+            "registry_tombstoned": 0,
+            "binding_total": 0,
+            "metadata_only": 0,
+            "missing": 0,
+            "blob_total": 0,
+            "available": 0,
+            "verify_failed": 0,
+            "quarantined": 0,
+            "deleting": 0,
+            "deleted": 0,
+            "orphan": 0,
+            "active_uploads": 0,
+            "cleanup_candidates": 0,
+            "retention_blockers": sum(retention.blocker_counts.values()),
+            "projection_pending": 0,
+            "projection_failed": 0,
+            "unresolved_conflicts": sum(
+                conflict.domain == "attachment.ref" for conflict in conflicts
+            ),
+        }
+        if "attachment.ref" in dataset.domains:
+            projection = self.store.summarize_domain_envelopes(
+                dataset.dataset_id,
+                "attachment.ref",
+            )
+            counts["projection_pending"] = projection.pending_apply_count
+            counts["projection_failed"] = projection.failed_apply_count
+        sample_buckets: dict[str, list[SyncAttachmentDiagnosticSample]] = {}
+        actions: list[SyncRecoveryActionDescriptor] = []
+
+        def descriptor(
+            action: str,
+            reason_code: str,
+            *,
+            target_type: str = "dataset",
+            target_id: str | None = None,
+            requires_confirmation: bool = False,
+        ) -> SyncRecoveryActionDescriptor:
+            return SyncRecoveryActionDescriptor(
+                action=action,
+                reason_code=reason_code,
+                target_type=target_type,
+                target_id=target_id,
+                requires_confirmation=requires_confirmation,
+            )
+
+        def add_action(action: SyncRecoveryActionDescriptor) -> None:
+            action = replace(action, target_type="dataset", target_id=None)
+            identity = (
+                action.action,
+                action.reason_code,
+                action.target_type,
+                action.target_id,
+            )
+            if all(
+                (
+                    item.action,
+                    item.reason_code,
+                    item.target_type,
+                    item.target_id,
+                )
+                != identity
+                for item in actions
+            ):
+                actions.append(action)
+
+        def add_sample(sample: SyncAttachmentDiagnosticSample) -> None:
+            if sample_limit == 0:
+                return
+            bucket = sample_buckets.setdefault(sample.category, [])
+            if len(bucket) < sample_limit:
+                bucket.append(sample)
+
+        registry_row = self.store.db.execute(
+            """
+            SELECT COUNT(*) AS total_count,
+                   COALESCE(SUM(CASE WHEN envelope.operation = 'tombstone'
+                                     THEN 1 ELSE 0 END), 0) AS tombstoned_count
+              FROM sync_current_heads AS head
+              JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = head.latest_server_cursor
+              JOIN sync_datasets AS dataset ON dataset.dataset_id = head.dataset_id
+             WHERE head.dataset_id = ? AND dataset.owner_user_id = ?
+               AND head.domain = 'attachment.ref' AND envelope.adapter_version = 2
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows[0]
+        counts["registry_total"] = int(registry_row.get("total_count") or 0)
+        counts["registry_tombstoned"] = int(
+            registry_row.get("tombstoned_count") or 0
+        )
+        counts["registry_live"] = (
+            counts["registry_total"] - counts["registry_tombstoned"]
+        )
+        attachment_heads = (
+            [
+                head
+                for head in self.store.list_current_heads(
+                    dataset.dataset_id,
+                    "attachment.ref",
+                    limit=min(self.settings.restore_manifest_scan_limit, 1_000),
+                    offset=0,
+                )
+                if head.adapter_version == 2
+            ]
+            if "attachment.ref" in dataset.domains
+            else []
+        )
+        counts["registry_scan_truncated"] = int(
+            counts["registry_total"] > len(attachment_heads)
+        )
+        for head in attachment_heads:
+            if head.operation == "tombstone":
+                category = "registry_tombstoned"
+                action = descriptor(
+                    "restore_attachment",
+                    "sync_attachment_tombstoned",
+                    target_type="attachment",
+                    target_id=head.object_id,
+                )
+            else:
+                parent_id = None
+                payload = head.payload or head.payload_clear
+                if isinstance(payload, Mapping):
+                    raw_parent = payload.get("parent_object_id")
+                    if isinstance(raw_parent, str):
+                        parent_id = raw_parent
+                parent = (
+                    self.store.get_current_head(
+                        dataset.dataset_id,
+                        "notes.note",
+                        parent_id,
+                    )
+                    if parent_id
+                    else None
+                )
+                if parent is not None and parent.operation == "tombstone":
+                    category = "registry_hidden"
+                    action = descriptor(
+                        "restore_note",
+                        "sync_attachment_parent_note_tombstoned",
+                        target_type="attachment",
+                        target_id=head.object_id,
+                    )
+                else:
+                    category = "registry_live"
+                    action = None
+            if category == "registry_hidden":
+                counts["registry_hidden"] += 1
+                counts["registry_live"] -= 1
+            sample_actions = [] if action is None else [action]
+            if action is not None:
+                add_action(action)
+            add_sample(
+                SyncAttachmentDiagnosticSample(
+                    category=category,
+                    code=f"sync_attachment_{category}",
+                    attachment_id=head.object_id,
+                    server_cursor=head.server_cursor,
+                    recovery_actions=sample_actions,
+                )
+            )
+
+        binding_row = self.store.db.execute(
+            """
+            SELECT COUNT(*) AS total_count,
+                   COALESCE(SUM(CASE WHEN binding.resolved_blob_id IS NULL
+                                     THEN 1 ELSE 0 END), 0) AS metadata_only_count,
+                   COALESCE(SUM(CASE WHEN binding.resolved_blob_id IS NOT NULL
+                                          AND blob.blob_id IS NULL
+                                     THEN 1 ELSE 0 END), 0) AS missing_count
+              FROM sync_attachment_revision_bindings AS binding
+              JOIN sync_datasets AS dataset
+                ON dataset.dataset_id = binding.dataset_id
+              LEFT JOIN sync_blob_objects AS blob
+                ON blob.dataset_id = binding.dataset_id
+               AND blob.blob_id = binding.resolved_blob_id
+             WHERE binding.dataset_id = ? AND dataset.owner_user_id = ?
+               AND binding.retention_released_at IS NULL
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows[0]
+        counts["binding_total"] = int(binding_row.get("total_count") or 0)
+        counts["metadata_only"] = int(
+            binding_row.get("metadata_only_count") or 0
+        )
+        counts["missing"] = int(binding_row.get("missing_count") or 0)
+        for category, action_name, reason_code, predicate in (
+            (
+                "metadata_only",
+                "retry_upload",
+                "sync_attachment_blob_metadata_only",
+                "binding.resolved_blob_id IS NULL",
+            ),
+            (
+                "missing",
+                "retry_upload",
+                "sync_attachment_blob_missing",
+                "binding.resolved_blob_id IS NOT NULL AND blob.blob_id IS NULL",
+            ),
+        ):
+            if counts[category] == 0:
+                continue
+            add_action(descriptor(action_name, reason_code))
+            if sample_limit == 0:
+                continue
+            rows = self.store.db.execute(
+                f"""
+                SELECT binding.attachment_id, binding.establishing_server_cursor,
+                       binding.resolved_blob_id
+                  FROM sync_attachment_revision_bindings AS binding
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = binding.dataset_id
+                  LEFT JOIN sync_blob_objects AS blob
+                    ON blob.dataset_id = binding.dataset_id
+                   AND blob.blob_id = binding.resolved_blob_id
+                 WHERE binding.dataset_id = ? AND dataset.owner_user_id = ?
+                   AND binding.retention_released_at IS NULL AND {predicate}
+                 ORDER BY binding.establishing_server_cursor, binding.attachment_id
+                 LIMIT ?
+                """,  # nosec B608 - predicate is selected from fixed literals above.
+                (dataset.dataset_id, dataset.owner_user_id, sample_limit),
+            ).rows
+            for row in rows:
+                action = descriptor(
+                    action_name,
+                    reason_code,
+                    target_type="attachment",
+                    target_id=str(row["attachment_id"]),
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category=category,
+                        code=reason_code,
+                        attachment_id=str(row["attachment_id"]),
+                        blob_id=(
+                            None
+                            if row.get("resolved_blob_id") is None
+                            else str(row["resolved_blob_id"])
+                        ),
+                        server_cursor=int(row["establishing_server_cursor"]),
+                        recovery_actions=[action],
+                    )
+                )
+
+        for row in self.store.db.execute(
+            """
+            SELECT blob.status, COUNT(*) AS status_count
+              FROM sync_blob_objects AS blob
+              JOIN sync_datasets AS dataset ON dataset.dataset_id = blob.dataset_id
+             WHERE blob.dataset_id = ? AND dataset.owner_user_id = ?
+             GROUP BY blob.status
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows:
+            status_name = str(row["status"])
+            status_count = int(row.get("status_count") or 0)
+            counts["blob_total"] += status_count
+            counts[status_name] = counts.get(status_name, 0) + status_count
+
+        blob_actions = {
+            "verify_failed": ("retry_verify", "sync_attachment_blob_verify_failed"),
+            "quarantined": (
+                "release_quarantine",
+                "sync_attachment_blob_quarantined",
+            ),
+            "deleting": ("gc_retry", "sync_attachment_blob_deleting"),
+            "deleted": ("retry_upload", "sync_attachment_blob_deleted"),
+        }
+        for status_name, (action_name, reason_code) in blob_actions.items():
+            if counts.get(status_name, 0) == 0:
+                continue
+            add_action(descriptor(action_name, reason_code))
+            if sample_limit == 0:
+                continue
+            for blob in self.store.list_blob_objects_for_dataset_page(
+                dataset.dataset_id,
+                status=status_name,
+                limit=sample_limit,
+            ):
+                action = descriptor(
+                    action_name,
+                    reason_code,
+                    target_type="blob",
+                    target_id=blob.blob_id,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category=status_name,
+                        code=reason_code,
+                        attachment_id=blob.attachment_id,
+                        blob_id=blob.blob_id,
+                        recovery_actions=[action],
+                    )
+                )
+
+        orphan_row = self.store.db.execute(
+            """
+            SELECT COUNT(*) AS orphan_count
+              FROM sync_blob_objects AS blob
+              JOIN sync_datasets AS dataset ON dataset.dataset_id = blob.dataset_id
+             WHERE blob.dataset_id = ? AND dataset.owner_user_id = ?
+               AND blob.status = 'available'
+               AND NOT EXISTS (
+                    SELECT 1 FROM sync_attachment_revision_bindings AS binding
+                     WHERE binding.dataset_id = blob.dataset_id
+                       AND binding.resolved_blob_id = blob.blob_id
+                       AND binding.retention_released_at IS NULL
+               )
+            """,
+            (dataset.dataset_id, dataset.owner_user_id),
+        ).rows[0]
+        counts["orphan"] = int(orphan_row.get("orphan_count") or 0)
+        if counts["orphan"]:
+            add_action(
+                descriptor(
+                    "wait_for_retention",
+                    "sync_attachment_blob_orphaned",
+                    requires_confirmation=True,
+                )
+            )
+            if sample_limit:
+                rows = self.store.db.execute(
+                    """
+                    SELECT blob.attachment_id, blob.blob_id
+                      FROM sync_blob_objects AS blob
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = blob.dataset_id
+                     WHERE blob.dataset_id = ? AND dataset.owner_user_id = ?
+                       AND blob.status = 'available'
+                       AND NOT EXISTS (
+                            SELECT 1
+                              FROM sync_attachment_revision_bindings AS binding
+                             WHERE binding.dataset_id = blob.dataset_id
+                               AND binding.resolved_blob_id = blob.blob_id
+                               AND binding.retention_released_at IS NULL
+                       )
+                     ORDER BY blob.updated_at, blob.blob_id LIMIT ?
+                    """,
+                    (dataset.dataset_id, dataset.owner_user_id, sample_limit),
+                ).rows
+                for row in rows:
+                    action = descriptor(
+                        "wait_for_retention",
+                        "sync_attachment_blob_orphaned",
+                        target_type="blob",
+                        target_id=str(row["blob_id"]),
+                        requires_confirmation=True,
+                    )
+                    add_sample(
+                        SyncAttachmentDiagnosticSample(
+                            category="orphan",
+                            code=action.reason_code,
+                            attachment_id=str(row["attachment_id"]),
+                            blob_id=str(row["blob_id"]),
+                            recovery_actions=[action],
+                        )
+                    )
+
+        quota = self.store.summarize_blob_quota(user_id, dataset_id=dataset.dataset_id)
+        counts["active_uploads"] = quota.active_upload_count
+        if counts["active_uploads"]:
+            add_action(descriptor("resume_upload", "sync_attachment_upload_incomplete"))
+            if sample_limit:
+                rows = self.store.db.execute(
+                    """
+                    SELECT upload.upload_id, upload.attachment_id
+                      FROM sync_blob_upload_sessions AS upload
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = upload.dataset_id
+                     WHERE upload.dataset_id = ? AND dataset.owner_user_id = ?
+                       AND upload.status IN ('created', 'uploading')
+                     ORDER BY upload.created_at, upload.upload_id LIMIT ?
+                    """,
+                    (dataset.dataset_id, dataset.owner_user_id, sample_limit),
+                ).rows
+                for row in rows:
+                    action = descriptor(
+                        "resume_upload",
+                        "sync_attachment_upload_incomplete",
+                        target_type="upload",
+                        target_id=str(row["upload_id"]),
+                    )
+                    add_sample(
+                        SyncAttachmentDiagnosticSample(
+                            category="active_upload",
+                            code=action.reason_code,
+                            attachment_id=str(row["attachment_id"]),
+                            recovery_actions=[action],
+                        )
+                    )
+
+        attachment_metadata = dataset.metadata.get("notes_attachment_v2")
+        bootstrap_id = (
+            attachment_metadata.get("bootstrap_id")
+            if isinstance(attachment_metadata, Mapping)
+            else None
+        )
+        if isinstance(bootstrap_id, str) and bootstrap_id:
+            cleanup_row = self.store.db.execute(
+                """
+                SELECT COUNT(*) AS cleanup_count
+                  FROM sync_notes_attachment_cleanup_candidates AS cleanup
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = cleanup.dataset_id
+                 WHERE cleanup.dataset_id = ? AND dataset.owner_user_id = ?
+                   AND cleanup.bootstrap_id = ?
+                """,
+                (dataset.dataset_id, dataset.owner_user_id, bootstrap_id),
+            ).rows[0]
+            counts["cleanup_candidates"] = int(
+                cleanup_row.get("cleanup_count") or 0
+            )
+            if counts["cleanup_candidates"]:
+                add_action(
+                    descriptor(
+                        "wait_for_retention",
+                        "sync_attachment_cleanup_candidate_retained",
+                        requires_confirmation=True,
+                    )
+                )
+            cleanup = (
+                self.store.list_notes_attachment_cleanup_candidates(
+                    dataset.dataset_id,
+                    owner_user_id=dataset.owner_user_id,
+                    bootstrap_id=bootstrap_id,
+                    limit=sample_limit,
+                )
+                if sample_limit
+                else ()
+            )
+            for item in cleanup:
+                cleanup_action = descriptor(
+                    "wait_for_retention",
+                    "sync_attachment_cleanup_candidate_retained",
+                    target_type="attachment",
+                    target_id=item.attachment_id,
+                    requires_confirmation=True,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category="cleanup_candidate",
+                        code=cleanup_action.reason_code,
+                        attachment_id=item.attachment_id,
+                        recovery_actions=[cleanup_action],
+                    )
+                )
+
+        if counts["projection_pending"] or counts["projection_failed"]:
+            add_action(
+                descriptor(
+                    "repair_projection",
+                    "sync_attachment_projection_incomplete",
+                )
+            )
+            for envelope in envelopes:
+                if envelope.domain != "attachment.ref" or envelope.apply_status not in {
+                    "pending",
+                    "failed",
+                }:
+                    continue
+                action = descriptor(
+                    "repair_projection",
+                    "sync_attachment_projection_incomplete",
+                    target_type="envelope",
+                    target_id=envelope.client_envelope_id,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category=f"projection_{envelope.apply_status}",
+                        code=(
+                            envelope.apply_error_code
+                            or "sync_attachment_projection_incomplete"
+                        ),
+                        attachment_id=envelope.object_id,
+                        server_cursor=envelope.server_cursor,
+                        recovery_actions=[action],
+                    )
+                )
+        if counts["unresolved_conflicts"]:
+            add_action(
+                descriptor("resolve_conflict", "sync_attachment_conflict_unresolved")
+            )
+            for conflict in conflicts:
+                if conflict.domain != "attachment.ref":
+                    continue
+                action = descriptor(
+                    "resolve_conflict",
+                    "sync_attachment_conflict_unresolved",
+                    target_type="conflict",
+                    target_id=conflict.conflict_id,
+                )
+                add_sample(
+                    SyncAttachmentDiagnosticSample(
+                        category="conflict",
+                        code="sync_attachment_conflict_unresolved",
+                        attachment_id=conflict.entity_id,
+                        server_cursor=conflict.server_sequence,
+                        recovery_actions=[action],
+                    )
+                )
+        bootstrap_state = (
+            str(attachment_metadata.get("state"))
+            if isinstance(attachment_metadata, Mapping)
+            and attachment_metadata.get("state") is not None
+            else "not_started"
+        )
+        counts[f"bootstrap_{bootstrap_state}"] = 1
+        if bootstrap_state in {"initializing", "failed"}:
+            add_action(
+                descriptor(
+                    "bootstrap_resume",
+                    "sync_attachment_bootstrap_incomplete",
+                )
+            )
+        if counts["retention_blockers"]:
+            add_action(
+                descriptor(
+                    "wait_for_retention",
+                    "sync_attachment_retention_blocked",
+                    requires_confirmation=True,
+                )
+            )
+
+        samples = [sample for bucket in sample_buckets.values() for sample in bucket]
+        if len(samples) > total_sample_limit:
+            raise SyncStoreError("sync_attachment_diagnostic_total_sample_limit_exceeded")
+        return SyncAttachmentDiagnostics(
+            counts=counts,
+            samples=samples,
+            recovery_actions=actions,
+        )
 
     def _diagnostics_devices(
         self,

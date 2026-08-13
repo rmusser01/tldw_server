@@ -308,6 +308,20 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     "message": "Attachment bootstrap diagnostics parameters are invalid.",
                 },
             )
+        attachment_diagnostic_limits = {
+            "sync_attachment_diagnostic_category_sample_limit_exceeded": (
+                "Attachment diagnostics exceed the per-category sample limit."
+            ),
+            "sync_attachment_diagnostic_total_sample_limit_exceeded": (
+                "Attachment diagnostics exceed the total response sample limit."
+            ),
+        }
+        for error_code, message in attachment_diagnostic_limits.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail={"error_code": error_code, "message": message},
+                )
         if "attachment payload exceeds" in lowered:
             return HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -1148,6 +1162,8 @@ def get_sync_v2_diagnostics(
     dataset_id: str = Query(...),
     device_id: str | None = Query(None),
     retention_limit: int | None = Query(None, ge=1),
+    attachment_sample_limit: int = Query(0, ge=0),
+    attachment_total_sample_limit: int = Query(500, ge=0),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
@@ -1157,6 +1173,8 @@ def get_sync_v2_diagnostics(
             dataset_id=dataset_id,
             device_id=device_id,
             retention_limit=retention_limit,
+            attachment_sample_limit=attachment_sample_limit,
+            attachment_total_sample_limit=attachment_total_sample_limit,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
