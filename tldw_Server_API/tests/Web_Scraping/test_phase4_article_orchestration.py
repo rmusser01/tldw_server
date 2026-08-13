@@ -553,26 +553,73 @@ def test_log_failure_normalizes_untrusted_article_fields() -> None:
     ]
 
 
-def test_log_failure_preserves_known_guarded_browser_stage() -> None:
-    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _log_failure
+def test_log_failure_preserves_complete_guarded_browser_stage_contract() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser
+
+    expected_stages = {
+        "browser_transfer",
+        "callback",
+        "callback_drain",
+        "capability",
+        "capacity",
+        "cleanup",
+        "content",
+        "context",
+        "egress",
+        "http_route",
+        "launch",
+        "navigation",
+        "page",
+        "rendered_html",
+        "routing",
+        "stealth",
+        "wait",
+        "websocket_route",
+    }
+    tree = ast.parse(inspect.getsource(article_browser))
+    observed_stages: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id in {"stage", "failure_stage"} for target in node.targets
+        ):
+            observed_stages.update(
+                value.value
+                for value in ast.walk(node.value)
+                if isinstance(value, ast.Constant) and isinstance(value.value, str)
+            )
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "ArticleFailure" and len(node.args) >= 2:
+                stage = node.args[1]
+                if isinstance(stage, ast.Constant) and isinstance(stage.value, str):
+                    observed_stages.add(stage.value)
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "fail" and node.args:
+                stage = node.args[0]
+                if isinstance(stage, ast.Constant) and isinstance(stage.value, str):
+                    observed_stages.add(stage.value)
+            for keyword in node.keywords:
+                if (
+                    keyword.arg == "failure_stage"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ):
+                    observed_stages.add(keyword.value.value)
+
+    assert observed_stages == expected_stages
+    assert expected_stages <= canonical._ARTICLE_LOG_STAGES
 
     harness = _harness()
-    _log_failure(
-        harness.dependencies,
-        RuntimeError("private cleanup detail"),
-        code="browser_error",
-        stage="cleanup",
-        url=URL,
-    )
+    for stage in sorted(expected_stages):
+        canonical._log_failure(
+            harness.dependencies,
+            RuntimeError("private browser detail"),
+            code="browser_error",
+            stage=stage,
+            url=URL,
+        )
 
-    assert harness.logs == [
-        {
-            "exception_type": "RuntimeError",
-            "code": "browser_error",
-            "stage": "cleanup",
-            "host": "example.com",
-        }
-    ]
+    assert [entry["stage"] for entry in harness.logs] == sorted(expected_stages)
 
 
 @pytest.mark.asyncio

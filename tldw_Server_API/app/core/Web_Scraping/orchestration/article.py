@@ -57,6 +57,8 @@ _ARTICLE_LOG_STAGES = frozenset(
         "article",
         "browser",
         "browser_transfer",
+        "callback",
+        "callback_drain",
         "capability",
         "capacity",
         "cleanup",
@@ -66,6 +68,7 @@ _ARTICLE_LOG_STAGES = frozenset(
         "egress",
         "extract",
         "fetch",
+        "http_route",
         "launch",
         "navigation",
         "page",
@@ -76,6 +79,9 @@ _ARTICLE_LOG_STAGES = frozenset(
         "preflight_payload",
         "rendered_html",
         "result",
+        "routing",
+        "stealth",
+        "wait",
         "websocket_route",
     }
 )
