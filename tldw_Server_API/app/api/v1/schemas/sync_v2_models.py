@@ -14,6 +14,10 @@ from pydantic import (
     model_validator,
 )
 
+from tldw_Server_API.app.core.exceptions import NoteAttachmentPolicyError
+from tldw_Server_API.app.core.Notes.attachment_policy import (
+    canonicalize_note_attachment_file_name,
+)
 from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_LINK_DOMAINS,
     NOTES_LINK_SYNC_OPERATIONS,
@@ -1189,6 +1193,65 @@ class SyncBlobUploadCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class _SyncNotesAttachmentIntent(BaseModel):
+    """Shared immutable identity for a Notes attachment upload intent."""
+
+    note_id: str
+    attachment_id: str
+
+    @field_validator("note_id", "attachment_id")
+    @classmethod
+    def _validate_uuid4(cls, value: Any, info: Any) -> str:
+        from uuid import RFC_4122, UUID
+
+        if not isinstance(value, str):
+            raise ValueError(f"{info.field_name} must be a canonical lowercase UUIDv4")
+        try:
+            parsed = UUID(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"{info.field_name} must be a canonical lowercase UUIDv4"
+            ) from exc
+        if parsed.version != 4 or parsed.variant != RFC_4122 or str(parsed) != value:
+            raise ValueError(f"{info.field_name} must be a canonical lowercase UUIDv4")
+        return value
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncNotesAttachmentCreateIntent(_SyncNotesAttachmentIntent):
+    """Immutable resumable-upload intent for a new Notes attachment."""
+
+    intent: Literal["create"] = "create"
+    file_name: str
+
+    @field_validator("file_name")
+    @classmethod
+    def _canonicalize_file_name(cls, value: Any) -> str:
+        try:
+            return canonicalize_note_attachment_file_name(value)[0]
+        except NoteAttachmentPolicyError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+class SyncNotesAttachmentReplaceIntent(_SyncNotesAttachmentIntent):
+    """Immutable resumable-upload intent for attachment content replacement."""
+
+    intent: Literal["replace"] = "replace"
+    base_server_cursor: StrictInt = Field(..., ge=1)
+    base_object_revision: StrictInt = Field(..., ge=1)
+    base_object_hash: str
+
+    @field_validator("base_object_hash")
+    @classmethod
+    def _validate_object_hash(cls, value: Any) -> str:
+        import re
+
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise ValueError("base_object_hash must be a lowercase SHA-256 digest")
+        return value
+
+
 class SyncBlobUploadSessionResponse(BaseModel):
     """Current state for a resumable Sync v2 M2 blob upload session."""
 
@@ -1937,6 +2000,8 @@ __all__ = [
     "SyncBlobUploadCreateRequest",
     "SyncBlobUploadSessionResponse",
     "SyncBlobUploadStatus",
+    "SyncNotesAttachmentCreateIntent",
+    "SyncNotesAttachmentReplaceIntent",
     "SyncCapabilitiesResponse",
     "SyncConflictRecord",
     "SyncConflictResolution",
