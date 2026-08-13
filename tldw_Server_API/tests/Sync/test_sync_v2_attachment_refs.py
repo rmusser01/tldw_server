@@ -751,6 +751,16 @@ def test_attachment_ref_v2_adapter_rejects_version_one_writes() -> None:
     assert outcome.error_code == "attachment_ref_v1_immutable"
 
 
+def test_attachment_ref_v2_uses_the_dedicated_domain_adapter() -> None:
+    from tldw_Server_API.app.core.Sync.v2.domain_adapters.attachment_refs import (
+        AttachmentRefDomainAdapter,
+    )
+
+    adapter = default_sync_v2_registry().get("attachment.ref")
+
+    assert isinstance(adapter, AttachmentRefDomainAdapter)
+
+
 def test_attachment_ref_v2_adapter_rejects_v1_v2_object_id_collision() -> None:
     from tldw_Server_API.app.core.Sync.v2.adapters import (
         AdapterConflict,
