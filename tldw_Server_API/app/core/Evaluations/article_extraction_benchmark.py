@@ -21,10 +21,8 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-    ContentMetadataHandler,
-    extract_article_data_from_html,
-)
+from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
+from tldw_Server_API.app.core.Web_Scraping.extraction import extract_article_data_from_html
 
 TP_FP_FN = tuple[float, float, float]
 

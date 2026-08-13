@@ -308,7 +308,7 @@ async def test_reading_save_dedupes_canonical_url(reading_env, monkeypatch):
         fake_afetch,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+        "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
         fake_scrape_article,
     )
 
@@ -397,7 +397,7 @@ async def test_reading_save_records_fetch_error(reading_env, monkeypatch):
         fake_afetch,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+        "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
         fake_scrape_article,
     )
 

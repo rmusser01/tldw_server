@@ -42,7 +42,7 @@ async def test_registry_disables_url_scrape_action_when_requested():
 
 @pytest.mark.asyncio
 async def test_scrape_url_action_surfaces_shared_policy_block(monkeypatch):
-    import tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib as article_lib
+    import tldw_Server_API.app.core.Web_Scraping.orchestration as article_orchestration
 
     async def _fake_scrape_article(target_url: str):  # noqa: ANN001
         return {
@@ -52,7 +52,7 @@ async def test_scrape_url_action_surfaces_shared_policy_block(monkeypatch):
             "policy_reason": "robots_unreachable",
         }
 
-    monkeypatch.setattr(article_lib, "scrape_article", _fake_scrape_article)
+    monkeypatch.setattr(article_orchestration, "scrape_article", _fake_scrape_article)
 
     registry = create_default_registry(enable_url_scraping=True)
     out = await registry.execute(
@@ -211,7 +211,7 @@ async def test_academic_search_action_processes_raw_results_once(monkeypatch):
 @pytest.mark.asyncio
 async def test_research_loop_skips_duplicate_scrape_url_fetch(monkeypatch):
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
-    import tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib as article_lib
+    import tldw_Server_API.app.core.Web_Scraping.orchestration as article_orchestration
 
     url = "https://example.com/deep-dive"
     llm_responses = iter([
@@ -237,7 +237,7 @@ async def test_research_loop_skips_duplicate_scrape_url_fetch(monkeypatch):
         }
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", _fake_chat_call_async)
-    monkeypatch.setattr(article_lib, "scrape_article", _fake_scrape_article)
+    monkeypatch.setattr(article_orchestration, "scrape_article", _fake_scrape_article)
 
     classification = QueryClassification(
         skip_search=False,
