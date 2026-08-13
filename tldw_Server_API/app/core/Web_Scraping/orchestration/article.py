@@ -832,11 +832,6 @@ async def _prepare_article(
 
 def _blocking_plan(plan: ArticlePlan) -> ArticlePlan:
     """Apply the legacy blocking transport profile to an immutable plan."""
-    reduced_cookies = tuple(
-        {"name": str(cookie["name"]), "value": str(cookie["value"])}
-        for cookie in plan.browser.custom_cookies
-        if "name" in cookie and "value" in cookie
-    )
     headers = dict(plan.headers)
     headers["User-Agent"] = BLOCKING_ARTICLE_USER_AGENT
     return replace(
@@ -846,7 +841,6 @@ def _blocking_plan(plan: ArticlePlan) -> ArticlePlan:
         browser=replace(
             plan.browser,
             user_agent=BLOCKING_ARTICLE_USER_AGENT,
-            custom_cookies=reduced_cookies,
         ),
     )
 

@@ -99,6 +99,7 @@ def _allowed_target(url: str = URL) -> PreflightTarget:
 def _plan(
     cookies: Sequence[Mapping[str, Any]] = (),
     *,
+    plan_cookies: Mapping[str, str] | None = None,
     backend: str = "httpx",
     limits: ArticleLimits | None = None,
 ) -> ArticlePlan:
@@ -115,6 +116,7 @@ def _plan(
             stealth_enabled=False,
             stealth_wait_ms=0,
         ),
+        cookies=plan_cookies or {},
         limits=limits or ArticleLimits(123, 456),
     )
 
@@ -356,6 +358,58 @@ def test_blocking_profile_honors_preflight_browser_advice_and_attaches_payload(
     assert observations["preflight_calls"]
     assert observations["fetch"].requests == []
     assert observations["browser"].calls == [(URL, _blocking_plan_for_assertion(canonical), ArticleLimits(123, 456))]
+
+
+def test_blocking_browser_advice_preserves_scoped_cookies_without_lightweight_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical = _canonical()
+    source_cookie = {
+        "name": "session",
+        "value": "secret",
+        "domain": "example.com",
+        "path": "/account",
+        "httpOnly": True,
+        "secure": True,
+    }
+    expected_cookie = dict(source_cookie)
+    browser = FakeBrowser(["<article><p>browser content</p></article>"])
+    dependencies, observations = _dependencies(
+        config={
+            "web_scraper": {
+                "web_scraper_preflight_analyzers": True,
+            }
+        },
+        browser=browser,
+        preflight={"advice": "use_browser"},
+    )
+
+    async def evaluate_target(*_args: Any, **_kwargs: Any) -> PreflightTarget:
+        source_cookie["domain"] = "mutated.example"
+        source_cookie["path"] = "/mutated"
+        return _allowed_target()
+
+    def build_dependencies(cookie_snapshot: tuple[Mapping[str, Any], ...]) -> Any:
+        plan = _plan(
+            cookie_snapshot,
+            plan_cookies={"route_cookie": "lightweight-only"},
+            backend="auto",
+        )
+        return dataclasses.replace(
+            dependencies,
+            evaluate_target=evaluate_target,
+            resolve_plan=lambda _url, _config: plan,
+            apply_preflight_advice=lambda result, **_kwargs: ("playwright", "auto", result),
+        )
+
+    monkeypatch.setattr(canonical, "_build_default_dependencies", build_dependencies)
+
+    result = _blocking()(URL, [source_cookie])
+
+    assert result["extraction_successful"] is True
+    profile = observations["browser"].calls[0][1]
+    assert [dict(cookie) for cookie in profile.custom_cookies] == [expected_cookie]
+    assert observations["fetch"].requests == []
 
 
 def _blocking_plan_for_assertion(canonical: Any) -> DirectBrowserProfile:
