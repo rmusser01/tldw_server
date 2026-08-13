@@ -33,6 +33,9 @@ _MAX_CALLBACK_CAPACITY = 1024
 _CALLBACK_IDLE_TURNS = 3
 _BROWSER_RETRY_DELAY_S = 2.0
 _RETRYABLE_BROWSER_STAGES = frozenset({"launch", "context", "page", "navigation", "stealth", "wait", "content"})
+_ISOLATED_WORLD_NAME = "tldw-article-serialization-v1"
+_MAX_SAFE_JAVASCRIPT_INTEGER = 2**53 - 1
+_BASE64_ALPHABET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
 _HTML_SERIALIZATION_EXPRESSION = """(maxBytes) => {
   const doctype = document.doctype
     ? new XMLSerializer().serializeToString(document.doctype) + "\\n"
@@ -342,16 +345,20 @@ class _BrowserTransferLedger:
         self._total = 0
         self._terminal = False
 
-    def on_data_received(self, payload: dict[str, Any]) -> None:
+    def on_data_received(self, payload: object) -> None:
         try:
+            if not isinstance(payload, Mapping):
+                raise TypeError("invalid CDP event envelope")
             amount = self._non_negative_integer(payload.get("encodedDataLength"))
         except (TypeError, ValueError, OverflowError):
             self._fail(ArticleFailure("browser_error", "capability"))
             return
         self._add(amount)
 
-    def on_websocket_frame(self, payload: dict[str, Any]) -> None:
+    def on_websocket_frame(self, payload: object) -> None:
         try:
+            if not isinstance(payload, Mapping):
+                raise TypeError("invalid CDP event envelope")
             response = payload.get("response")
             if not isinstance(response, Mapping):
                 raise TypeError("missing websocket frame")
@@ -360,24 +367,107 @@ class _BrowserTransferLedger:
             if type(opcode) is not int or not isinstance(data, str):
                 raise TypeError("invalid websocket frame")
             if opcode == 1:
-                amount = len(data.encode("utf-8"))
+                self._add_text(data)
+                return
             elif opcode == 2:
-                amount = len(base64.b64decode(data, validate=True))
+                self._add_binary(data)
+                return
             else:
                 raise ValueError("unsupported websocket opcode")
         except (binascii.Error, TypeError, ValueError, UnicodeError):
             self._fail(ArticleFailure("browser_error", "capability"))
-            return
-        self._add(amount)
 
     @staticmethod
     def _non_negative_integer(value: object) -> int:
-        if isinstance(value, bool) or not isinstance(value, int | float):
+        if type(value) is int:
+            if value < 0:
+                raise ValueError("invalid transfer length")
+            return value
+        if type(value) is not float:
             raise TypeError("invalid transfer length")
-        normalized = float(value)
-        if not math.isfinite(normalized) or normalized < 0 or not normalized.is_integer():
+        if not math.isfinite(value) or value < 0 or not value.is_integer() or value > _MAX_SAFE_JAVASCRIPT_INTEGER:
             raise ValueError("invalid transfer length")
-        return int(normalized)
+        return int(value)
+
+    def _add_text(self, data: str) -> None:
+        failure: ArticleFailure | None = None
+        with self._lock:
+            if self._terminal:
+                return
+            remaining = self._limit - self._total
+            amount = 0
+            try:
+                for character in data:
+                    codepoint = ord(character)
+                    if codepoint <= 0x7F:
+                        width = 1
+                    elif codepoint <= 0x7FF:
+                        width = 2
+                    elif 0xD800 <= codepoint <= 0xDFFF:
+                        raise UnicodeError("surrogate is not valid UTF-8 text")
+                    elif codepoint <= 0xFFFF:
+                        width = 3
+                    elif codepoint <= 0x10FFFF:
+                        width = 4
+                    else:
+                        raise UnicodeError("invalid Unicode code point")
+                    amount += width
+                    if amount > remaining:
+                        self._terminal = True
+                        failure = ArticleFailure(
+                            "response_too_large",
+                            "browser_transfer",
+                        )
+                        break
+                else:
+                    self._total += amount
+            except Exception:  # noqa: BLE001 - malformed CDP text fails closed
+                self._terminal = True
+                failure = ArticleFailure("browser_error", "capability")
+        if failure is not None:
+            self._latch_and_shutdown(failure)
+
+    def _add_binary(self, data: str) -> None:
+        failure: ArticleFailure | None = None
+        with self._lock:
+            if self._terminal:
+                return
+            try:
+                encoded_length = 0
+                padding = 0
+                saw_padding = False
+                for character in data:
+                    encoded_length += 1
+                    if character == "=":
+                        saw_padding = True
+                        padding += 1
+                        if padding > 2:
+                            raise ValueError("invalid base64 padding")
+                    elif character in _BASE64_ALPHABET:
+                        if saw_padding:
+                            raise ValueError("base64 data follows padding")
+                    else:
+                        raise ValueError("invalid base64 character")
+                if encoded_length % 4 != 0:
+                    raise ValueError("invalid base64 length")
+                amount = (encoded_length // 4) * 3 - padding
+                remaining = self._limit - self._total
+                if amount > remaining:
+                    self._terminal = True
+                    failure = ArticleFailure(
+                        "response_too_large",
+                        "browser_transfer",
+                    )
+                else:
+                    decoded = base64.b64decode(data, validate=True)
+                    if len(decoded) != amount:
+                        raise ValueError("invalid base64 decoded length")
+                    self._total += amount
+            except (binascii.Error, TypeError, ValueError, UnicodeError):
+                self._terminal = True
+                failure = ArticleFailure("browser_error", "capability")
+        if failure is not None:
+            self._latch_and_shutdown(failure)
 
     def _add(self, amount: int) -> None:
         failure: ArticleFailure | None = None
@@ -618,11 +708,67 @@ class GuardedArticleBrowser:
             raise ArticleFailure("browser_error", "capability") from None
 
     @staticmethod
-    async def _serialize_html(page: Any, max_bytes: int) -> str:
-        evaluate = getattr(page, "evaluate", None)
-        if not callable(evaluate):
+    async def _serialize_html(session: Any, max_bytes: int) -> str:
+        if type(max_bytes) is not int or max_bytes < 0:
             raise ArticleFailure("browser_error", "capability")
-        result = await evaluate(_HTML_SERIALIZATION_EXPRESSION, max_bytes)
+        send = getattr(session, "send", None)
+        if not callable(send):
+            raise ArticleFailure("browser_error", "capability")
+
+        async def command(
+            method: str,
+            params: dict[str, object] | None = None,
+        ) -> Mapping[str, Any]:
+            try:
+                operation = send(method) if params is None else send(method, params)
+                if not inspect.isawaitable(operation):
+                    raise TypeError("CDP send is not awaitable")
+                response = await operation
+            except asyncio.CancelledError:
+                raise
+            except ArticleFailure:
+                raise
+            except Exception:  # noqa: BLE001 - CDP failures are sanitized
+                raise ArticleFailure("browser_error", "capability") from None
+            if not isinstance(response, Mapping) or "exceptionDetails" in response:
+                raise ArticleFailure("browser_error", "capability")
+            return response
+
+        frame_tree_response = await command("Page.getFrameTree")
+        frame_tree = frame_tree_response.get("frameTree")
+        if not isinstance(frame_tree, Mapping):
+            raise ArticleFailure("browser_error", "capability")
+        frame = frame_tree.get("frame")
+        if not isinstance(frame, Mapping):
+            raise ArticleFailure("browser_error", "capability")
+        frame_id = frame.get("id")
+        if not isinstance(frame_id, str) or not frame_id:
+            raise ArticleFailure("browser_error", "capability")
+
+        isolated_world_response = await command(
+            "Page.createIsolatedWorld",
+            {
+                "frameId": frame_id,
+                "worldName": _ISOLATED_WORLD_NAME,
+                "grantUniveralAccess": False,
+            },
+        )
+        context_id = isolated_world_response.get("executionContextId")
+        if type(context_id) is not int or context_id < 0:
+            raise ArticleFailure("browser_error", "capability")
+
+        evaluation_response = await command(
+            "Runtime.evaluate",
+            {
+                "expression": f"({_HTML_SERIALIZATION_EXPRESSION})({max_bytes})",
+                "contextId": context_id,
+                "returnByValue": True,
+            },
+        )
+        remote_result = evaluation_response.get("result")
+        if not isinstance(remote_result, Mapping):
+            raise ArticleFailure("browser_error", "capability")
+        result = remote_result.get("value")
         if not isinstance(result, Mapping) or type(result.get("ok")) is not bool:
             raise ArticleFailure("browser_error", "capability")
         if result["ok"] is True:
@@ -989,6 +1135,10 @@ class GuardedArticleBrowser:
             )
             await self._install_transfer_accounting(cdp_session, transfer)
 
+            if profile.stealth_enabled:
+                stage = "stealth"
+                await self._stealth_hook(page)
+
             stage = "navigation"
             await page.goto(
                 url,
@@ -998,8 +1148,6 @@ class GuardedArticleBrowser:
             if outcome.failure is not None:
                 raise outcome.failure
             if profile.stealth_enabled:
-                stage = "stealth"
-                await self._stealth_hook(page)
                 wait_for_timeout = getattr(page, "wait_for_timeout", None)
                 if not callable(wait_for_timeout):
                     raise ArticleFailure("browser_error", "capability")
@@ -1014,7 +1162,7 @@ class GuardedArticleBrowser:
             if outcome.failure is not None:
                 raise outcome.failure
             stage = "content"
-            html = await self._serialize_html(page, limits.max_article_bytes)
+            html = await self._serialize_html(cdp_session, limits.max_article_bytes)
         except asyncio.CancelledError as exc:
             primary_error = exc
         except ArticleFailure as exc:
