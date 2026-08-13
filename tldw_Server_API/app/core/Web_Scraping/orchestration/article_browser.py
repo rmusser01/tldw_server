@@ -23,6 +23,8 @@ _ROUTE_PATTERN = "**/*"
 _HTTP_SCHEMES = frozenset({"http", "https"})
 _WEBSOCKET_POLICY_SCHEMES = {"ws": "http", "wss": "https"}
 _DEFAULT_CLEANUP_GRACE_S = 1.0
+_CALLBACK_IDLE_TURNS = 3
+_FORCED_CALLBACK_CANCEL = object()
 
 
 class _DefaultPlaywrightLauncher:
@@ -100,7 +102,7 @@ class _CallbackLifecycle:
     def __init__(self, outcome: _AcquisitionOutcome) -> None:
         self._outcome = outcome
         self._active: set[asyncio.Task[Any]] = set()
-        self._forced_cancellations: set[asyncio.Task[Any]] = set()
+        self._generation = 0
 
     def handler(
         self,
@@ -115,13 +117,15 @@ class _CallbackLifecycle:
                     return None
 
                 return _missing_task()
+            self._generation += 1
             self._active.add(task)
+            task.add_done_callback(_consume_task_exception)
 
             async def _invoke() -> None:
                 try:
                     await operation(route)
-                except asyncio.CancelledError:
-                    if task in self._forced_cancellations:
+                except asyncio.CancelledError as exc:
+                    if exc.args and exc.args[0] is _FORCED_CALLBACK_CANCEL:
                         self._outcome.fail("callback_drain")
                     else:
                         self._outcome.callback_cancelled = True
@@ -129,24 +133,41 @@ class _CallbackLifecycle:
                     self._outcome.fail("callback")
                 finally:
                     self._active.discard(task)
-                    self._forced_cancellations.discard(task)
 
             return _invoke()
 
         return _tracked
 
     async def drain(self, grace_s: float) -> bool:
-        active = tuple(task for task in self._active if not task.done())
-        if not active:
-            return False
-        _, pending = await asyncio.wait(active, timeout=grace_s)
-        if not pending:
-            return False
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + grace_s
+        stable_idle_turns = 0
+        while loop.time() < deadline:
+            active = tuple(task for task in self._active if not task.done())
+            if active:
+                stable_idle_turns = 0
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                _, pending = await asyncio.wait(active, timeout=remaining)
+                if pending:
+                    break
+                continue
+
+            generation = self._generation
+            await asyncio.sleep(0)
+            if any(not task.done() for task in self._active) or self._generation != generation:
+                stable_idle_turns = 0
+                continue
+            stable_idle_turns += 1
+            if stable_idle_turns >= _CALLBACK_IDLE_TURNS:
+                return False
+
         self._outcome.fail("callback_drain")
-        self._forced_cancellations.update(pending)
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+        for task in tuple(self._active):
+            if not task.done():
+                task.add_done_callback(_consume_task_exception)
+                task.cancel(_FORCED_CALLBACK_CANCEL)
         return True
 
 
@@ -155,6 +176,12 @@ class _OwnedResource:
     resource: Any
     method_name: str
     kind: str
+
+
+def _consume_task_exception(task: asyncio.Task[Any]) -> None:
+    if task.cancelled():
+        return
+    task.exception()
 
 
 async def _invoke_method(
@@ -176,14 +203,16 @@ async def _bounded_method(
     grace_s: float,
     kwargs: dict[str, Any] | None = None,
 ) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + grace_s
     task = asyncio.create_task(
         _invoke_method(owner.resource, owner.method_name, kwargs),
         name=f"article-browser-cleanup-{owner.kind}",
     )
-    _, pending = await asyncio.wait({task}, timeout=grace_s)
+    _, pending = await asyncio.wait({task}, timeout=max(0.0, deadline - loop.time()))
     if pending:
+        task.add_done_callback(_consume_task_exception)
         task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
         return True
     if task.cancelled():
         return True

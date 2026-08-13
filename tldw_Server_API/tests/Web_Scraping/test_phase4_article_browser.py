@@ -61,7 +61,10 @@ class _FakeGuard:
         if not self.outcomes:
             raise AssertionError("unexpected egress decision")
         outcome = self.outcomes.pop(0)
-        if isinstance(outcome, _GatedOutcome):
+        if isinstance(
+            outcome,
+            (_GatedOutcome, _DispatchingOutcome, _CancellationResistantOutcome),
+        ):
             outcome = await outcome.resolve()
         if isinstance(outcome, BaseException):
             raise outcome
@@ -76,11 +79,56 @@ class _GatedOutcome:
         self.outcome = outcome
         self.started = asyncio.Event()
         self.release = asyncio.Event()
+        self.cancellation_args: tuple[object, ...] | None = None
 
     async def resolve(self) -> object:
         self.started.set()
-        await self.release.wait()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError as exc:
+            self.cancellation_args = exc.args
+            raise
         return self.outcome
+
+
+class _DispatchingOutcome:
+    def __init__(
+        self,
+        runtime: _FakeBrowserRuntime,
+        route: _FakeWebSocketRoute,
+        outcome: object,
+    ) -> None:
+        self.runtime = runtime
+        self.route = route
+        self.outcome = outcome
+
+    async def resolve(self) -> object:
+        context = self.runtime.context
+        assert context is not None
+        handler = context.websocket_handler
+        assert handler is not None
+        await self.runtime.context_closed.wait()
+        await asyncio.sleep(0)
+        context._schedule(handler, self.route, kind="websocket")
+        return self.outcome
+
+
+class _CancellationResistantOutcome:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.finished = asyncio.Event()
+        self.cancellation_args: tuple[object, ...] | None = None
+
+    async def resolve(self) -> object:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            self.cancellation_args = exc.args
+        await self.release.wait()
+        self.finished.set()
+        raise RuntimeError("https://secret.example/path?token=raw")
 
 
 class _FakeHttpRoute:
@@ -151,12 +199,16 @@ class _FakeBrowserRuntime:
         html: str = "<!doctype html><html><body>ok</body></html>",
         missing_context_capability: str | None = None,
         cleanup_modes: dict[str, str] | None = None,
+        callback_start_turns_after_close: list[int | None] | None = None,
+        release_callbacks_after_close_timer: bool = False,
     ) -> None:
         self.dispatches = list(dispatches or [])
         self.stage_errors = dict(stage_errors or {})
         self.html = html
         self.missing_context_capability = missing_context_capability
         self.cleanup_modes = dict(cleanup_modes or {})
+        self.callback_start_turns_after_close = list(callback_start_turns_after_close or [])
+        self.release_callbacks_after_close_timer = release_callbacks_after_close_timer
         self.events: list[str] = []
         self.launch_options: dict[str, object] | None = None
         self.context_options: dict[str, object] | None = None
@@ -167,6 +219,10 @@ class _FakeBrowserRuntime:
         self.stuck_cleanup_cancelled: list[str] = []
         self.cleanup_started: dict[str, asyncio.Event] = {}
         self.content_returned = asyncio.Event()
+        self.context_closed = asyncio.Event()
+        self.resistant_cleanup_release = asyncio.Event()
+        self.resistant_cleanup_finished = asyncio.Event()
+        self._callback_schedule_count = 0
         self.launcher = _FakeLauncher(self)
 
     def raise_at(self, stage: str) -> None:
@@ -183,6 +239,14 @@ class _FakeBrowserRuntime:
             except asyncio.CancelledError:
                 self.stuck_cleanup_cancelled.append(stage)
                 raise
+        if self.cleanup_modes.get(stage) == "resistant":
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.stuck_cleanup_cancelled.append(stage)
+            await self.resistant_cleanup_release.wait()
+            self.resistant_cleanup_finished.set()
+            raise RuntimeError("https://secret.example/path?token=raw")
         self.raise_at(stage)
 
 
@@ -256,7 +320,19 @@ class _FakeContext(_CleanupControlled):
         *,
         kind: str,
     ) -> asyncio.Task[None]:
+        index = self.runtime._callback_schedule_count
+        self.runtime._callback_schedule_count += 1
+        start_turns = (
+            self.runtime.callback_start_turns_after_close[index]
+            if index < len(self.runtime.callback_start_turns_after_close)
+            else None
+        )
+
         async def invoke() -> None:
+            if start_turns is not None:
+                await self.runtime.context_closed.wait()
+                for _ in range(start_turns):
+                    await asyncio.sleep(0)
             await handler(route)
 
         task = asyncio.create_task(invoke(), name=f"fake-playwright-{kind}-callback")
@@ -311,7 +387,13 @@ class _FakeContext(_CleanupControlled):
 
     async def close(self) -> None:
         self.websocket_handler = None
-        await self.runtime.cleanup("close:context")
+        try:
+            await self.runtime.cleanup("close:context")
+        finally:
+            if self.runtime.release_callbacks_after_close_timer:
+                asyncio.get_running_loop().call_later(0, self.runtime.context_closed.set)
+            else:
+                self.runtime.context_closed.set()
 
 
 class _FakeBrowser(_CleanupControlled):
@@ -852,6 +934,113 @@ async def test_callback_drain_is_bounded_cancels_stuck_task_and_leaves_no_orphan
 
     assert loop.time() - started < 0.5
     _assert_failure(raised.value, stage="callback_drain")
+    assert gated.cancellation_args
+    assert gated.cancellation_args != ("external-callback",)
+    await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+async def test_callback_queued_before_context_close_is_admitted_after_initial_idle_turn() -> None:
+    route = _FakeWebSocketRoute("wss://late.example/queued")
+    gated = _GatedOutcome(False)
+    runtime = _FakeBrowserRuntime(
+        dispatches=[("websocket", route)],
+        callback_start_turns_after_close=[0],
+        release_callbacks_after_close_timer=True,
+    )
+    acquisition = asyncio.create_task(
+        _adapter(runtime, _FakeGuard([gated])).acquire(_TARGET, _profile()),
+        name="test-queued-callback-acquisition",
+    )
+
+    await gated.started.wait()
+    for _ in range(8):
+        await asyncio.sleep(0)
+    assert acquisition.done() is False
+    gated.release.set()
+
+    with pytest.raises(ArticleFailure) as raised:
+        await acquisition
+
+    _assert_failure(raised.value, stage="egress")
+    assert route.close_calls == [(1008, "Policy denied")]
+    await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+async def test_callback_arriving_while_drain_waits_is_included_before_success() -> None:
+    first = _FakeWebSocketRoute("wss://late.example/first")
+    second = _FakeWebSocketRoute("wss://late.example/second")
+    runtime = _FakeBrowserRuntime(dispatches=[("websocket", first)])
+    second_outcome = _GatedOutcome(False)
+    guard = _FakeGuard([_DispatchingOutcome(runtime, second, True), second_outcome])
+    acquisition = asyncio.create_task(
+        _adapter(runtime, guard).acquire(_TARGET, _profile()),
+        name="test-arriving-during-drain-acquisition",
+    )
+
+    await second_outcome.started.wait()
+    for _ in range(8):
+        await asyncio.sleep(0)
+    assert acquisition.done() is False
+    second_outcome.release.set()
+
+    with pytest.raises(ArticleFailure) as raised:
+        await acquisition
+
+    _assert_failure(raised.value, stage="egress")
+    assert second.close_calls == [(1008, "Policy denied")]
+    await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+async def test_external_callback_task_cancellation_remains_acquisition_cancellation() -> None:
+    gated = _GatedOutcome(True)
+    runtime = _FakeBrowserRuntime(dispatches=[("websocket", _FakeWebSocketRoute("wss://late.example/external-cancel"))])
+    acquisition = asyncio.create_task(
+        _adapter(runtime, _FakeGuard([gated])).acquire(_TARGET, _profile()),
+        name="test-external-callback-cancellation-acquisition",
+    )
+
+    await gated.started.wait()
+    await runtime.content_returned.wait()
+    callback = next(task for task in runtime.callback_tasks if not task.done())
+    callback.cancel("external-callback")
+
+    with pytest.raises(asyncio.CancelledError):
+        await acquisition
+
+    assert gated.cancellation_args == ("external-callback",)
+    await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+async def test_callback_drain_uses_one_deadline_and_never_awaits_resistant_task_unbounded() -> None:
+    resistant = _CancellationResistantOutcome()
+    runtime = _FakeBrowserRuntime(dispatches=[("websocket", _FakeWebSocketRoute("wss://late.example/resistant"))])
+    acquisition = asyncio.create_task(
+        _adapter(runtime, _FakeGuard([resistant]), cleanup_grace_s=0.01).acquire(
+            _TARGET,
+            _profile(),
+        ),
+        name="test-resistant-callback-acquisition",
+    )
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    try:
+        with pytest.raises(ArticleFailure) as raised:
+            await asyncio.wait_for(asyncio.shield(acquisition), timeout=0.2)
+        assert loop.time() - started < 0.2
+        _assert_failure(raised.value, stage="callback_drain")
+        assert resistant.cancellation_args
+    finally:
+        resistant.release.set()
+        await resistant.finished.wait()
+        if not acquisition.done():
+            with pytest.raises(ArticleFailure):
+                await acquisition
+
     await _assert_no_browser_tasks()
 
 
@@ -891,6 +1080,42 @@ async def test_stuck_cleanup_is_bounded_cancelled_consumed_and_all_owners_attemp
         "close:browser",
         "stop:playwright",
     ]
+    await _assert_no_browser_tasks()
+
+
+@pytest.mark.unit
+async def test_cancellation_resistant_cleanup_cannot_block_later_owners_or_teardown_bound() -> None:
+    runtime = _FakeBrowserRuntime(cleanup_modes={"close:page": "resistant"})
+    loop = asyncio.get_running_loop()
+    unobserved: list[dict[str, object]] = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unobserved.append(context))
+    acquisition = asyncio.create_task(
+        _adapter(runtime, _FakeGuard([]), cleanup_grace_s=0.01).acquire(
+            _TARGET,
+            _profile(),
+        ),
+        name="test-resistant-cleanup-acquisition",
+    )
+
+    try:
+        with pytest.raises(ArticleFailure) as raised:
+            await asyncio.wait_for(asyncio.shield(acquisition), timeout=0.2)
+        _assert_failure(raised.value, stage="cleanup")
+        assert runtime.events[-3:] == ["close:context", "close:browser", "stop:playwright"]
+        assert runtime.stuck_cleanup_cancelled == ["close:page"]
+
+        runtime.resistant_cleanup_release.set()
+        await runtime.resistant_cleanup_finished.wait()
+        await asyncio.sleep(0)
+        assert unobserved == []
+    finally:
+        runtime.resistant_cleanup_release.set()
+        if not acquisition.done():
+            with pytest.raises(ArticleFailure):
+                await acquisition
+        loop.set_exception_handler(previous_handler)
+
     await _assert_no_browser_tasks()
 
 
