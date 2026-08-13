@@ -250,6 +250,34 @@ class _RecordingCounter:
         return None
 
 
+class _ParityMetric:
+    def __init__(self, events=None, labels=None) -> None:
+        self._events = events if events is not None else []
+        self._labels = labels or {}
+
+    def labels(self, **kwargs):
+        return _ParityMetric(self._events, dict(kwargs))
+
+    def inc(self, amount=1):
+        self._events.append(("inc", dict(self._labels), amount))
+
+    def dec(self, amount=1):
+        self._events.append(("dec", dict(self._labels), amount))
+
+    def observe(self, _value):
+        self._events.append(("observe", dict(self._labels), 1))
+
+    def snapshot(self):
+        aggregated: dict[tuple[str, tuple[tuple[str, object], ...]], float] = {}
+        for operation, labels, amount in self._events:
+            key = operation, tuple(sorted(labels.items()))
+            aggregated[key] = aggregated.get(key, 0) + float(amount)
+        return sorted(
+            (operation, labels, amount)
+            for (operation, labels), amount in aggregated.items()
+        )
+
+
 class _ParityCache:
     def __init__(self, cached_vectors):
         self.cached_vectors = {
@@ -315,6 +343,15 @@ def _assert_cache_writes_are_float_vectors(cache_sets):
         assert all(isinstance(item, float) for item in vector)
 
 
+def _credential_touch_counts(resolved_credentials):
+    counts: dict[str, int] = {}
+    for provider, credentials in resolved_credentials:
+        await_count = credentials.touch_last_used.await_count
+        if await_count:
+            counts[provider] = counts.get(provider, 0) + await_count
+    return counts
+
+
 def _assert_response_parity(result):
     compared_headers = [
         "X-Embeddings-Provider",
@@ -344,6 +381,9 @@ def _assert_response_parity(result):
     assert [actuals for _handle_id, actuals, _op_id in legacy["rg_commits"]] == [
         actuals for _handle_id, actuals, _op_id in orchestrator["rg_commits"]
     ]
+    assert legacy["metric_events"] == orchestrator["metric_events"]
+    assert legacy["usage_calls"] == orchestrator["usage_calls"]
+    assert legacy["credential_touches"] == orchestrator["credential_touches"]
 
 
 @pytest.mark.asyncio
@@ -718,22 +758,43 @@ def _run_dual_path_embedding_request(
             "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
         },
     }
+    current_path = "legacy"
+    usage_calls: dict[str, list[dict[str, object]]] = {"legacy": [], "orchestrator": []}
+    resolved_credentials: dict[str, list[tuple[str, FakeCredentials]]] = {
+        "legacy": [],
+        "orchestrator": [],
+    }
 
     async def fake_backpressure(*_args, **_kwargs):
         return None
 
-    async def fake_log_usage(*_args, **_kwargs):
-        return None
+    async def fake_log_usage(*_args, **kwargs):
+        usage_calls[current_path].append(
+            {
+                key: kwargs.get(key)
+                for key in (
+                    "operation",
+                    "provider",
+                    "model",
+                    "status",
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "total_tokens",
+                )
+            }
+        )
 
     async def fake_backfill(*_args, **_kwargs):
         return None
 
     async def fake_resolve(provider, *_args, **_kwargs):
         provider = (provider or "").strip().lower()
-        return FakeCredentials(
+        credentials = FakeCredentials(
             api_key="test-provider-key" if provider in {"openai", "cohere", "google"} else None,
             source="user" if provider in {"openai", "cohere", "google"} else "none",
         )
+        resolved_credentials[current_path].append((provider, credentials))
+        return credentials
 
     def fake_policy_setting(name, default):
         if name == "EMBEDDINGS_FALLBACK_CHAIN":
@@ -773,16 +834,18 @@ def _run_dual_path_embedding_request(
             "dimensions": dimensions,
         }
 
-    for metric_name in (
+    compared_metric_names = (
         "active_embedding_requests",
         "embedding_request_duration",
         "embedding_requests_total",
         "embedding_cache_hits",
+        "embedding_dimension_adjustments_total",
+    )
+    for metric_name in (
         "embedding_cache_misses",
         "embedding_fallbacks_total",
         "embedding_provider_failures",
         "embedding_provider_failures_total",
-        "embedding_dimension_adjustments_total",
         "embedding_token_inputs_total",
         "embedding_policy_denied_total",
     ):
@@ -809,6 +872,7 @@ def _run_dual_path_embedding_request(
 
     results = {}
     for label, flag_enabled in (("legacy", False), ("orchestrator", True)):
+        current_path = label
         if flag_enabled:
             monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
         else:
@@ -819,6 +883,12 @@ def _run_dual_path_embedding_request(
         monkeypatch.setattr(mod.embedding_cache, "get", cache.get)
         monkeypatch.setattr(mod.embedding_cache, "set", cache.set)
         monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", provider_call)
+        metric_recorders = {
+            metric_name: _ParityMetric()
+            for metric_name in compared_metric_names
+        }
+        for metric_name, recorder in metric_recorders.items():
+            monkeypatch.setattr(mod, metric_name, recorder, raising=False)
 
         rg_governor = _ParityRGGovernor()
         monkeypatch.setattr(app.state, "rg_governor", rg_governor, raising=False)
@@ -840,6 +910,14 @@ def _run_dual_path_embedding_request(
             "provider_calls": [call.args for call in provider_call.await_args_list],
             "rg_reserves": list(rg_governor.reserves),
             "rg_commits": list(rg_governor.commits),
+            "metric_events": {
+                metric_name: recorder.snapshot()
+                for metric_name, recorder in metric_recorders.items()
+            },
+            "usage_calls": list(usage_calls[label]),
+            "credential_touches": _credential_touch_counts(
+                resolved_credentials[label]
+            ),
         }
 
     _assert_response_parity(results)

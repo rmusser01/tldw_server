@@ -3698,7 +3698,11 @@ def _build_embedding_request_orchestrator(
         dimension_policy=_dimension_policy(),
         guess_provider=guess_provider_for_model,
         backend_identity_resolver=endpoint_executor.backend_identity,
-        record_dimension_adjustment=_record_orchestrator_dimension_adjustment,
+        record_dimension_adjustment=(
+            None
+            if context.encoding_format == "base64"
+            else _record_orchestrator_dimension_adjustment
+        ),
         provider_preflight=endpoint_executor.preflight_provider,
         execution_path="adapter" if context.adapters_enabled else "legacy",
     )
