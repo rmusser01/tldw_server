@@ -1035,6 +1035,7 @@ class SyncRestorePreviewLocalInventoryItem(BaseModel):
     dataset_id: str | None = None
     domain: SyncDomain
     object_id: str = Field(..., min_length=1, validation_alias=AliasChoices("object_id", "entity_id"))
+    adapter_version: int = Field(1, ge=1)
     object_revision: int | None = Field(None, ge=0, validation_alias=AliasChoices("object_revision", "entity_version"))
     object_hash: str | None = Field(None, validation_alias=AliasChoices("object_hash", "payload_hash"))
     deleted: bool = False
@@ -1132,6 +1133,7 @@ class SyncRestoreOrderedAction(BaseModel):
     object_id: str
     operation: SyncOperation
     server_cursor: int = Field(..., ge=0)
+    adapter_version: int = Field(..., ge=1)
     mutation_group_id: str | None = None
     mutation_step: int | None = Field(None, ge=0)
     mutation_step_count: int | None = Field(None, ge=1)
@@ -1153,6 +1155,7 @@ class SyncRestorePreviewAttachmentRef(BaseModel):
     payload_hash: str
     availability: str
     server_cursor: int = Field(..., ge=0)
+    adapter_version: int = Field(..., ge=1)
 
 
 class SyncRestorePreviewWarning(BaseModel):

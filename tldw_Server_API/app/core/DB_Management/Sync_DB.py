@@ -9022,6 +9022,7 @@ class SyncDatabase:
         blob_id: str | None = None,
         payload_hash: str | None = None,
         owner_user_id: str | None = None,
+        include_unavailable: bool = False,
         connection: Any | None = None,
         for_update: bool = False,
     ) -> SyncBlobObject | None:
@@ -9040,7 +9041,7 @@ class SyncDatabase:
                     SELECT *
                       FROM sync_blob_objects
                      WHERE dataset_id = ?
-                       AND status = 'available'
+                       AND (? = 1 OR status = 'available')
                        AND (? IS NULL OR owner_user_id = ?)
                        AND (? IS NULL OR blob_id = ?)
                        AND (? IS NULL OR payload_hash = ?)
@@ -9060,6 +9061,7 @@ class SyncDatabase:
                     + suffix,  # nosec B608 - backend-controlled row lock suffix.
                     (
                         dataset_id,
+                        1 if include_unavailable else 0,
                         owner_user_id,
                         owner_user_id,
                         blob_id,

@@ -23,6 +23,7 @@ OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
         "media.keyword",
         "media.keyword_link",
         "notes.link",
+        "attachment.ref",
         *NOTES_ORGANIZATION_DOMAINS,
     }
 )
@@ -39,12 +40,16 @@ class LocalRestoreInventoryItem:
     dataset_id: str | None
     domain: SyncDomain
     object_id: str
+    adapter_version: int
     object_revision: int | None
     object_hash: str | None
     deleted: bool
 
 
-LocalInventoryIndex = dict[tuple[str | None, SyncDomain, str], LocalRestoreInventoryItem]
+LocalInventoryIndex = dict[
+    tuple[str | None, SyncDomain, str, int],
+    LocalRestoreInventoryItem,
+]
 
 
 def order_restore_envelopes(
@@ -246,6 +251,13 @@ def _restore_dependencies(envelope: SyncEnvelope) -> list[tuple[SyncDomain, str]
                 ("notes.folder", str(payload.get("folder_sync_id"))),
             ]
         )
+    elif envelope.domain == "attachment.ref" and envelope.adapter_version == 2:
+        parent_id = payload.get("parent_object_id")
+        if not isinstance(parent_id, str) or not parent_id:
+            raise RestorePlanningError(
+                "attachment.ref v2 restore dependency is invalid"
+            )
+        dependencies.append(("notes.note", parent_id))
     return dependencies
 
 
@@ -266,11 +278,14 @@ def build_local_inventory_index(
             dataset_id=_string_value(raw.get("dataset_id")),
             domain=cast(SyncDomain, domain),
             object_id=object_id,
+            adapter_version=_positive_int_value(raw.get("adapter_version"), default=1),
             object_revision=_int_value(raw.get("object_revision") or raw.get("entity_version")),
             object_hash=_string_value(raw.get("object_hash") or raw.get("payload_hash")),
             deleted=_bool_value(raw.get("deleted", False)),
         )
-        index[(item.dataset_id, item.domain, item.object_id)] = item
+        index[
+            (item.dataset_id, item.domain, item.object_id, item.adapter_version)
+        ] = item
     return index
 
 
@@ -280,10 +295,13 @@ def find_local_inventory_item(
     dataset_id: str,
     domain: SyncDomain,
     object_id: str,
+    adapter_version: int = 1,
 ) -> LocalRestoreInventoryItem | None:
     """Return dataset-specific local inventory, falling back to dataset-agnostic entries."""
 
-    return index.get((dataset_id, domain, object_id)) or index.get((None, domain, object_id))
+    return index.get(
+        (dataset_id, domain, object_id, adapter_version)
+    ) or index.get((None, domain, object_id, adapter_version))
 
 
 def local_inventory_matches(
@@ -383,6 +401,11 @@ def _int_value(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _positive_int_value(value: object, *, default: int) -> int:
+    parsed = _int_value(value)
+    return parsed if parsed is not None and parsed >= 1 else default
 
 
 def _bool_value(value: object) -> bool:

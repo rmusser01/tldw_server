@@ -793,6 +793,7 @@ class SyncRestoreOrderedAction:
     object_id: str
     operation: SyncOperation
     server_cursor: int
+    adapter_version: int
     mutation_group_id: str | None = None
     mutation_step: int | None = None
     mutation_step_count: int | None = None
@@ -811,6 +812,7 @@ class SyncRestorePreviewAttachmentRef:
     payload_hash: str
     availability: str
     server_cursor: int
+    adapter_version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -2208,8 +2210,11 @@ class SyncV2Service:
     ) -> SyncRestorePreview:
         """Return metadata needed to preview a restore plan for Sync v2 M1."""
 
-        if device_id is not None:
+        restore_device = (
             self._require_registered_device(user_id, device_id)
+            if device_id is not None
+            else None
+        )
         selected_domains = set(domains or [])
         selected_object_id_set = _normalize_selection_set(selected_object_ids)
         selected_attachment_id_set = _normalize_selection_set(selected_attachment_ids)
@@ -2232,7 +2237,7 @@ class SyncV2Service:
         total_counts: dict[str, int] = {}
         key_status: dict[str, dict[str, bool]] = {}
         warnings: list[SyncRestorePreviewWarning] = []
-        planned_inventory_keys: set[tuple[str, SyncDomain, str]] = set()
+        planned_inventory_keys: set[tuple[str, SyncDomain, str, int]] = set()
         candidate_count = 0
         planned_action_count = 0
 
@@ -2240,6 +2245,10 @@ class SyncV2Service:
             dataset_domains = [
                 domain for domain in dataset.domains if not selected_domains or domain in selected_domains
             ]
+            adapter_versions_by_domain = {
+                domain: self._restore_adapter_versions(restore_device, domain)
+                for domain in dataset_domains
+            }
             stats = self.store.summarize_restore_manifest_dataset(
                 dataset.dataset_id,
                 user_id=user_id,
@@ -2259,13 +2268,12 @@ class SyncV2Service:
                         dataset_id=dataset.dataset_id,
                     )
                 )
-            for domain, count in stats.approximate_counts.items():
-                total_counts[domain] = total_counts.get(domain, 0) + count
             domain_envelopes: dict[SyncDomain, list[SyncEnvelope]] = {}
             for domain in dataset_domains:
                 envelopes = self._list_restore_preview_domain_envelopes(
                     dataset_id=dataset.dataset_id,
                     domain=domain,
+                    adapter_versions=adapter_versions_by_domain[domain],
                     max_candidates=(
                         self.settings.restore_preview_candidate_limit
                         - candidate_count
@@ -2273,6 +2281,27 @@ class SyncV2Service:
                 )
                 candidate_count += len(envelopes)
                 domain_envelopes[domain] = envelopes
+            approximate_counts = dict(stats.approximate_counts)
+            byte_estimates = dict(stats.byte_estimates)
+            if "attachment.ref" in domain_envelopes:
+                attachment_envelopes = domain_envelopes["attachment.ref"]
+                approximate_counts["attachment.ref"] = len(attachment_envelopes)
+                byte_estimates["attachment.ref"] = sum(
+                    envelope.payload_size_bytes or 0
+                    for envelope in attachment_envelopes
+                )
+            approximate_counts = {
+                domain: count
+                for domain, count in approximate_counts.items()
+                if domain in dataset_domains and count
+            }
+            byte_estimates = {
+                domain: count
+                for domain, count in byte_estimates.items()
+                if domain in dataset_domains and count
+            }
+            for domain, count in approximate_counts.items():
+                total_counts[domain] = total_counts.get(domain, 0) + count
             latest_cursors: dict[str, int] = {}
             dataset_ranges: list[SyncRestorePreviewEnvelopeRange] = []
             for domain, envelopes in domain_envelopes.items():
@@ -2294,12 +2323,12 @@ class SyncV2Service:
                 SyncRestorePreviewDataset(
                     dataset_id=dataset.dataset_id,
                     domains=dataset_domains,
-                    approximate_counts=stats.approximate_counts,
-                    byte_estimates=stats.byte_estimates,
+                    approximate_counts=approximate_counts,
+                    byte_estimates=byte_estimates,
                     latest_cursor=latest_cursor,
                     latest_cursors=latest_cursors,
                     envelope_ranges=dataset_ranges,
-                    total_count=sum(stats.approximate_counts.values()),
+                    total_count=sum(approximate_counts.values()),
                     encryption_policy=dataset.encryption_policy,
                     key_recovery_available=stats.key_recovery_available,
                 )
@@ -2310,6 +2339,8 @@ class SyncV2Service:
                 if domain not in OBJECT_RESTORE_DOMAINS:
                     continue
                 for envelope in domain_envelopes.get(domain, []):
+                    if domain == "attachment.ref" and envelope.adapter_version != 2:
+                        continue
                     if envelope.apply_status == "superseded":
                         continue
                     latest_object_envelopes[(domain, envelope.object_id)] = envelope
@@ -2325,6 +2356,7 @@ class SyncV2Service:
                     latest_object_envelopes=latest_object_envelopes,
                     selected_domains=selected_domains,
                     selected_object_ids=selected_object_id_set,
+                    adapter_versions_by_domain=adapter_versions_by_domain,
                 )
                 remaining_actions = (
                     self.settings.restore_preview_action_limit - planned_action_count
@@ -2364,13 +2396,17 @@ class SyncV2Service:
                 restore_fingerprints.append((server_revision, server_hash, deleted))
                 final_plan_index_by_identity[(domain, object_id)] = plan_index
 
-            initially_matching_final_keys: set[tuple[str, SyncDomain, str]] = set()
+            initially_matching_final_keys: set[
+                tuple[str, SyncDomain, str, int]
+            ] = set()
             for (domain, object_id), plan_index in final_plan_index_by_identity.items():
+                envelope = ordered_restore_envelopes[plan_index]
                 local_item = find_local_inventory_item(
                     local_index,
                     dataset_id=dataset.dataset_id,
                     domain=domain,
                     object_id=object_id,
+                    adapter_version=envelope.adapter_version,
                 )
                 server_revision, server_hash, deleted = restore_fingerprints[plan_index]
                 if local_item is not None and local_inventory_matches(
@@ -2380,7 +2416,12 @@ class SyncV2Service:
                     deleted=deleted,
                 ):
                     initially_matching_final_keys.add(
-                        (dataset.dataset_id, domain, object_id)
+                        (
+                            dataset.dataset_id,
+                            domain,
+                            object_id,
+                            envelope.adapter_version,
+                        )
                     )
 
             for plan_index, envelope in enumerate(ordered_restore_envelopes):
@@ -2392,6 +2433,7 @@ class SyncV2Service:
                     dataset_id=dataset.dataset_id,
                     domain=domain,
                     object_id=object_id,
+                    adapter_version=envelope.adapter_version,
                 )
                 local_matches = (
                     local_item is not None
@@ -2402,7 +2444,12 @@ class SyncV2Service:
                         deleted=deleted,
                     )
                 )
-                inventory_key = (dataset.dataset_id, domain, object_id)
+                inventory_key = (
+                    dataset.dataset_id,
+                    domain,
+                    object_id,
+                    envelope.adapter_version,
+                )
                 if envelope.apply_status == "conflict":
                     conflict_type = "stored_apply_conflict"
                     object_conflicts.append(
@@ -2440,6 +2487,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2503,6 +2551,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2520,6 +2569,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2549,6 +2599,7 @@ class SyncV2Service:
                         dataset_id=dataset.dataset_id,
                         domain=domain,
                         object_id=object_id,
+                        adapter_version=envelope.adapter_version,
                         object_revision=server_revision,
                         object_hash=server_hash,
                         deleted=True,
@@ -2574,6 +2625,7 @@ class SyncV2Service:
                             object_id=object_id,
                             operation=envelope.operation,
                             server_cursor=envelope.server_cursor or 0,
+                            adapter_version=envelope.adapter_version,
                             mutation_group_id=envelope.mutation_group_id,
                             mutation_step=envelope.mutation_step,
                             mutation_step_count=envelope.mutation_step_count,
@@ -2599,6 +2651,7 @@ class SyncV2Service:
                         dataset_id=dataset.dataset_id,
                         domain=domain,
                         object_id=object_id,
+                        adapter_version=envelope.adapter_version,
                         object_revision=server_revision,
                         object_hash=server_hash,
                         deleted=False,
@@ -2633,22 +2686,53 @@ class SyncV2Service:
                     continue
                 seen_refs.add(ref_key)
                 server_blob = None
+                server_availability = "metadata_only"
                 if self.settings.supports_attachments:
                     blob_owner_user_id = self._blob_owner_user_id(
                         dataset=dataset,
                         user_id=user_id,
                     )
-                    server_blob = self.store.get_blob_object(
-                        dataset.dataset_id,
-                        attachment_id=metadata.attachment_id,
-                        payload_hash=metadata.payload_hash,
-                        owner_user_id=blob_owner_user_id,
-                    )
+                    if envelope.adapter_version == 2:
+                        binding = (
+                            self.store.get_attachment_revision_binding(
+                                dataset.dataset_id,
+                                metadata.attachment_id,
+                                envelope.object_revision,
+                                owner_user_id=dataset.owner_user_id,
+                            )
+                            if envelope.object_revision is not None
+                            else None
+                        )
+                        if binding is not None and binding.resolved_blob_id is not None:
+                            candidate = self.store.get_blob_object(
+                                dataset.dataset_id,
+                                blob_id=binding.resolved_blob_id,
+                                owner_user_id=blob_owner_user_id,
+                                include_unavailable=True,
+                            )
+                            if (
+                                candidate is not None
+                                and candidate.payload_hash == binding.blob_hash
+                                and candidate.size_bytes == binding.size_bytes
+                            ):
+                                server_blob = candidate
+                    else:
+                        server_blob = self.store.get_blob_object(
+                            dataset.dataset_id,
+                            attachment_id=metadata.attachment_id,
+                            payload_hash=metadata.payload_hash,
+                            owner_user_id=blob_owner_user_id,
+                        )
+                    if server_blob is not None:
+                        server_availability = server_blob.status
                 metadata_claims_server_blob = (
+                    envelope.adapter_version == 1
+                    and
                     not self.settings.supports_attachments
                     and _attachment_ref_has_server_blob(metadata.availability)
                 )
-                server_availability = "available" if server_blob is not None or metadata_claims_server_blob else "metadata_only"
+                if metadata_claims_server_blob:
+                    server_availability = "available"
                 download_status = attachment_restore_status(
                     attachment_availability,
                     attachment_id=metadata.attachment_id,
@@ -2684,6 +2768,7 @@ class SyncV2Service:
                     payload_hash=metadata.payload_hash,
                     availability=server_availability,
                     server_cursor=envelope.server_cursor or 0,
+                    adapter_version=envelope.adapter_version,
                 )
                 attachment_refs.append(summary)
                 if required_for_restore and server_availability != "available" and not attachment_available_locally(
@@ -5693,6 +5778,7 @@ class SyncV2Service:
         latest_object_envelopes: Mapping[tuple[SyncDomain, str], SyncEnvelope],
         selected_domains: set[SyncDomain],
         selected_object_ids: set[str],
+        adapter_versions_by_domain: Mapping[SyncDomain, Sequence[int]] | None = None,
     ) -> list[SyncEnvelope]:
         """Expand selected restore heads to complete persisted mutation units."""
 
@@ -5725,6 +5811,14 @@ class SyncV2Service:
                 member.object_id not in selected_object_ids for member in active_group
             ):
                 raise RestorePlanningError("Restore object filter splits a mutation group")
+            if adapter_versions_by_domain is not None and any(
+                member.adapter_version
+                not in adapter_versions_by_domain.get(member.domain, ())
+                for member in active_group
+            ):
+                raise RestorePlanningError(
+                    "Restore adapter-version filter splits a mutation group"
+                )
             processed_groups.add(group_id)
             for member in active_group:
                 if member.domain not in OBJECT_RESTORE_DOMAINS:
@@ -5753,6 +5847,7 @@ class SyncV2Service:
         *,
         dataset_id: str,
         domain: SyncDomain,
+        adapter_versions: Sequence[int],
         max_candidates: int,
     ) -> list[SyncEnvelope]:
         page_limit = self.settings.restore_manifest_scan_limit
@@ -5770,6 +5865,7 @@ class SyncV2Service:
                 since_sequence,
                 limit=request_limit,
                 domains=[domain],
+                adapter_versions=adapter_versions,
                 status="accepted",
             )
             if not page:
@@ -5784,6 +5880,25 @@ class SyncV2Service:
             if len(page) < request_limit:
                 break
         return envelopes
+
+    def _restore_adapter_versions(
+        self,
+        device: SyncDevice | None,
+        domain: SyncDomain,
+    ) -> list[int]:
+        """Return server-supported versions safe to expose to one restore client."""
+
+        if device is None:
+            return [1]
+        try:
+            supported = self.adapters.get(domain).supported_adapter_versions
+        except KeyError:
+            return []
+        return sorted(
+            version
+            for version in supported
+            if _device_supports_adapter_version(device, domain, version)
+        )
 
     def _manifest_dataset(
         self,

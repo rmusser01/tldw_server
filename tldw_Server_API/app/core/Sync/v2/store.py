@@ -1197,6 +1197,7 @@ class SyncV2Store:
         blob_id: str | None = None,
         payload_hash: str | None = None,
         owner_user_id: str | None = None,
+        include_unavailable: bool = False,
     ) -> SyncBlobObject | None:
         return self.db.get_blob_object(
             dataset_id,
@@ -1204,6 +1205,7 @@ class SyncV2Store:
             blob_id=blob_id,
             payload_hash=payload_hash,
             owner_user_id=owner_user_id,
+            include_unavailable=include_unavailable,
             connection=self._connection,
         )
 
