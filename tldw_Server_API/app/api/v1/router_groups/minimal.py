@@ -270,6 +270,15 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             tags=("claims",),
             skip_context="in minimal test app",
         ),
+        ImportedRouterSpec(
+            import_path=(
+                "tldw_Server_API.app.api.v1.endpoints.prompt_studio."
+                "prompt_studio_websocket"
+            ),
+            log_name="prompt_studio_websocket",
+            tags=("prompt-studio",),
+            skip_context="in minimal test app",
+        ),
     ):
         append_imported_router_spec(specs, auxiliary_spec)
 

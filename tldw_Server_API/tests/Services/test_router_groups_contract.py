@@ -4935,6 +4935,13 @@ def test_iter_minimal_optional_router_specs_defers_auxiliary_attr_lookup(
             "tags": ("claims",),
         },
         {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",
+            "expected_name": "prompt_studio_websocket",
+            "path": "/api/v1/prompt-studio/ws",
+            "prefix": "",
+            "tags": ("prompt-studio",),
+        },
+        {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.text2sql",
             "expected_name": "text2sql",
             "path": "/text2sql",
