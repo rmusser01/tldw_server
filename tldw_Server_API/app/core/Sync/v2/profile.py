@@ -2,7 +2,8 @@ from __future__ import annotations
 
 """Profile bootstrap and status helpers for Sync v2 M1."""
 
-from collections.abc import Callable, Sequence
+import hashlib
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,6 +59,34 @@ class SyncProfileDatasetStatus:
     server_frontend_mutation_blockers: list[str] = field(default_factory=list)
     notes_organization: dict[str, object] | None = None
     notes_link: dict[str, object] | None = None
+    notes_attachment: dict[str, object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncNotesAttachmentCleanupSample:
+    """Public-safe cleanup evidence with no legacy name or path."""
+
+    source_key_hash: str
+    attachment_id: str
+    state: str = "captured"
+    blocker_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncNotesAttachmentBootstrapDiagnostics:
+    """Bounded read-only attachment bootstrap diagnostics."""
+
+    state: str
+    captured_count: int = 0
+    expected_count: int = 0
+    cursor: str | None = None
+    error_code: str | None = None
+    dry_run: bool = False
+    source_candidate_count: int | None = None
+    source_candidate_count_is_lower_bound: bool = False
+    cleanup_candidates: list[SyncNotesAttachmentCleanupSample] = field(
+        default_factory=list
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +301,107 @@ class SyncV2ProfileManager:
             created=None,
         )
 
+    def notes_attachment_bootstrap_diagnostics(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str | None = None,
+        sample_limit: int = 0,
+        dry_run: bool = False,
+    ) -> SyncNotesAttachmentBootstrapDiagnostics:
+        """Return bounded source/bootstrap evidence without mutating state."""
+
+        if isinstance(sample_limit, bool) or sample_limit < 0:
+            raise SyncStoreError("sync_attachment_bootstrap_sample_limit_invalid")
+        if sample_limit > 100:
+            raise SyncStoreError("sync_attachment_bootstrap_sample_limit_exceeded")
+        if dataset_id is None:
+            dataset = self._default_personal_dataset(user_id)
+        else:
+            dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+            if dataset is None:
+                raise SyncStoreError(
+                    "Sync dataset was not found or is not accessible"
+                )
+
+        status = _safe_notes_attachment_status(dataset) if dataset is not None else None
+        state = str(status["state"]) if status is not None else "not_started"
+        captured_count = (
+            _safe_non_negative_int(status.get("captured_count")) if status else 0
+        )
+        expected_count = (
+            _safe_non_negative_int(status.get("expected_count")) if status else 0
+        )
+        error_code = status.get("error_code") if status else None
+        cursor = None
+        if dataset is not None:
+            attachment_metadata = dataset.metadata.get("notes_attachment_v2")
+            source_cursor = (
+                attachment_metadata.get("source_cursor")
+                if isinstance(attachment_metadata, Mapping)
+                else None
+            )
+            if isinstance(source_cursor, str) and source_cursor:
+                cursor = "sha256:" + hashlib.sha256(
+                    source_cursor.encode("utf-8")
+                ).hexdigest()
+        samples: list[SyncNotesAttachmentCleanupSample] = []
+        if dataset is not None and sample_limit:
+            metadata = dataset.metadata.get("notes_attachment_v2")
+            bootstrap_id = (
+                metadata.get("bootstrap_id") if isinstance(metadata, Mapping) else None
+            )
+            if isinstance(bootstrap_id, str) and bootstrap_id:
+                samples = [
+                    SyncNotesAttachmentCleanupSample(
+                        source_key_hash=item.source_key_hash,
+                        attachment_id=item.attachment_id,
+                    )
+                    for item in self.store.list_notes_attachment_cleanup_candidates(
+                        dataset.dataset_id,
+                        owner_user_id=user_id,
+                        bootstrap_id=bootstrap_id,
+                        limit=sample_limit,
+                    )
+                ]
+
+        source_candidate_count: int | None = None
+        source_candidate_count_is_lower_bound = False
+        if dry_run:
+            if self.service is None or self.notes_attachment_bootstrapper is None:
+                raise SyncStoreError(
+                    "Notes attachment bootstrap diagnostics are unavailable"
+                )
+            raw = self.notes_attachment_bootstrapper.dry_run(
+                service=self.service,
+                user_id=user_id,
+            )
+            if not isinstance(raw, Mapping):
+                raise SyncStoreError("notes_attachment_bootstrap_dry_run_invalid")
+            source_candidate_count = _safe_non_negative_int(
+                raw.get("candidate_count")
+            )
+            source_candidate_count_is_lower_bound = (
+                raw.get("candidate_count_is_lower_bound") is True
+            )
+            dry_run_error = raw.get("error_code")
+            if isinstance(dry_run_error, str):
+                error_code = dry_run_error
+
+        return SyncNotesAttachmentBootstrapDiagnostics(
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            cursor=cursor if isinstance(cursor, str) else None,
+            error_code=error_code if isinstance(error_code, str) else None,
+            dry_run=dry_run,
+            source_candidate_count=source_candidate_count,
+            source_candidate_count_is_lower_bound=(
+                source_candidate_count_is_lower_bound
+            ),
+            cleanup_candidates=samples,
+        )
+
     def _build_profile(
         self,
         *,
@@ -450,6 +580,7 @@ def _dataset_status(dataset: SyncDataset) -> SyncProfileDatasetStatus:
         ),
         notes_organization=_safe_notes_organization_status(dataset),
         notes_link=_safe_notes_link_status(dataset),
+        notes_attachment=_safe_notes_attachment_status(dataset),
     )
 
 
@@ -479,6 +610,25 @@ def _safe_notes_link_status(dataset: SyncDataset) -> dict[str, object] | None:
     if state not in {"initializing", "ready", "failed"}:
         state = "failed"
         error_code = "notes_link_bootstrap_state_invalid"
+    return {
+        "state": state,
+        "captured_count": _safe_non_negative_int(metadata.get("captured_count")),
+        "expected_count": _safe_non_negative_int(metadata.get("expected_count")),
+        "error_code": error_code if isinstance(error_code, str) else None,
+    }
+
+
+def _safe_notes_attachment_status(
+    dataset: SyncDataset,
+) -> dict[str, object] | None:
+    metadata = dataset.metadata.get("notes_attachment_v2")
+    if not isinstance(metadata, Mapping):
+        return None
+    state = metadata.get("state")
+    error_code = metadata.get("error_code")
+    if state not in {"initializing", "ready", "failed"}:
+        state = "failed"
+        error_code = "notes_attachment_bootstrap_state_invalid"
     return {
         "state": state,
         "captured_count": _safe_non_negative_int(metadata.get("captured_count")),
@@ -553,6 +703,8 @@ __all__ = [
     "BOOTSTRAP_MODES",
     "DEFAULT_CLIENT_FAMILY",
     "SYNC_V2_M1_PROTOCOL_VERSION",
+    "SyncNotesAttachmentBootstrapDiagnostics",
+    "SyncNotesAttachmentCleanupSample",
     "SyncProfileDatasetStatus",
     "SyncProfileDeviceStatus",
     "SyncProfileDomainStatus",

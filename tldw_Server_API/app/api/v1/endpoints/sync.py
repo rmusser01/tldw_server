@@ -72,6 +72,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRotationCommitRequest,
     SyncKeyRotationPreviewRequest,
     SyncKeyRotationResponse,
+    SyncNotesAttachmentBootstrapDiagnosticsResponse,
     SyncProfileBootstrapRequest,
     SyncProfileBootstrapResponse,
     SyncProfileResponse,
@@ -287,6 +288,22 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                     detail={"error_code": error_code, "message": message},
                 )
+        if "sync_attachment_bootstrap_sample_limit_exceeded" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "error_code": "sync_attachment_bootstrap_sample_limit_exceeded",
+                    "message": "Attachment bootstrap diagnostics exceed the sample limit.",
+                },
+            )
+        if "sync_attachment_bootstrap_sample_limit_invalid" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_attachment_bootstrap_sample_limit_invalid",
+                    "message": "Attachment bootstrap diagnostics parameters are invalid.",
+                },
+            )
         if "attachment payload exceeds" in lowered:
             return HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -468,6 +485,12 @@ def _api_bootstrap_profile_from_core(profile: Any) -> SyncProfileBootstrapRespon
     return SyncProfileBootstrapResponse(**asdict(profile))
 
 
+def _api_attachment_bootstrap_diagnostics_from_core(
+    diagnostics: Any,
+) -> SyncNotesAttachmentBootstrapDiagnosticsResponse:
+    return SyncNotesAttachmentBootstrapDiagnosticsResponse(**asdict(diagnostics))
+
+
 def _api_blob_session_from_core(session: Any) -> SyncBlobUploadSessionResponse:
     return SyncBlobUploadSessionResponse(**asdict(session))
 
@@ -627,6 +650,35 @@ def get_sync_v2_profile(
             device_id=device_id,
         ) from exc
     return _api_profile_from_core(profile)
+
+
+@router.get(
+    "/profile/attachment-bootstrap",
+    response_model=SyncNotesAttachmentBootstrapDiagnosticsResponse,
+    summary="Return bounded Notes attachment bootstrap diagnostics",
+)
+def get_sync_v2_attachment_bootstrap_diagnostics(
+    dataset_id: str | None = Query(None),
+    sample_limit: int = Query(0),
+    dry_run: bool = Query(False),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    user_id = _sync_user_id(user)
+    try:
+        diagnostics = service.notes_attachment_bootstrap_diagnostics(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            sample_limit=sample_limit,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=dataset_id,
+        ) from exc
+    return _api_attachment_bootstrap_diagnostics_from_core(diagnostics)
 
 
 @router.post(

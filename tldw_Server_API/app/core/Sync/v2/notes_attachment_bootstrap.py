@@ -87,6 +87,69 @@ class NotesAttachmentBootstrapper:
         self._after_upload = after_upload
         self._after_capture = after_capture
 
+    def dry_run(
+        self,
+        *,
+        service: SyncV2Service,
+        user_id: str,
+    ) -> dict[str, object]:
+        """Return one bounded source count without mutating Sync or legacy state."""
+
+        source = LegacyAttachmentSource(
+            self._note_db,
+            owner_user_id=user_id,
+            user_root=self._user_root,
+        )
+        count = 0
+        lower_bound = False
+        try:
+            note_ids = source.list_note_ids(
+                after_note_id=None,
+                limit=LEGACY_ATTACHMENT_NOTE_PAGE_LIMIT,
+            )
+            for note_id in note_ids:
+                remaining = self._max_candidates_per_run - count
+                if remaining == 0:
+                    lower_bound = True
+                    break
+                candidates = source.list_candidates(
+                    note_id,
+                    after_source_key=None,
+                    limit=remaining,
+                )
+                for candidate in candidates:
+                    if candidate.size_bytes > min(
+                        service.settings.max_attachment_bytes,
+                        service.settings.max_blob_bytes,
+                    ):
+                        raise LegacyAttachmentSourceError(_SAFE_SOURCE_TOO_LARGE)
+                    validate_note_attachment_original_file_name(candidate.file_name)
+                    canonicalize_note_attachment_file_name(candidate.file_name)
+                    _content_type(candidate)
+                    source.verify_candidate(candidate)
+                count += len(candidates)
+                if len(candidates) == remaining:
+                    lower_bound = True
+                    break
+            if len(note_ids) == LEGACY_ATTACHMENT_NOTE_PAGE_LIMIT:
+                lower_bound = True
+            return {
+                "candidate_count": count,
+                "candidate_count_is_lower_bound": lower_bound,
+                "error_code": None,
+            }
+        except (LegacyAttachmentSourceError, NoteAttachmentPolicyError, ValueError) as exc:
+            error_code = (
+                _safe_source_error(exc.error_code)
+                if isinstance(exc, LegacyAttachmentSourceError)
+                else _SAFE_SOURCE_ERROR
+            )
+            return {
+                "candidate_count": count,
+                "candidate_count_is_lower_bound": lower_bound,
+                "error_code": error_code,
+            }
+
     def bootstrap(
         self,
         *,

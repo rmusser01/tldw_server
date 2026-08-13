@@ -824,6 +824,42 @@ def test_attachment_bootstrap_empty_source_reaches_ready(tmp_path: Path) -> None
 
 
 @pytest.mark.integration
+def test_attachment_bootstrap_dry_run_is_bounded_and_does_not_advance_state(
+    tmp_path: Path,
+) -> None:
+    env = _bootstrap_environment(tmp_path, max_candidates_per_run=1)
+    _write_legacy_attachment(env, "alpha.txt", b"alpha")
+    _write_legacy_attachment(env, "beta.txt", b"beta")
+    before = env.service.store.get_dataset(
+        env.dataset.dataset_id,
+        owner_user_id=_OWNER_ID,
+    )
+    try:
+        result = env.bootstrapper.dry_run(
+            service=env.service,
+            user_id=_OWNER_ID,
+        )
+
+        assert result == {
+            "candidate_count": 1,
+            "candidate_count_is_lower_bound": True,
+            "error_code": None,
+        }
+        assert env.service.store.get_dataset(
+            env.dataset.dataset_id,
+            owner_user_id=_OWNER_ID,
+        ) == before
+        assert env.service.store.list_envelopes_after(
+            env.dataset.dataset_id,
+            0,
+            domains=["attachment.ref"],
+            limit=10,
+        ) == []
+    finally:
+        env.note_db.close_connection()
+
+
+@pytest.mark.integration
 def test_attachment_bootstrap_resumes_and_reuses_blob_envelope_and_identity(
     tmp_path: Path,
 ) -> None:

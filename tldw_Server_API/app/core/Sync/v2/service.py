@@ -111,7 +111,11 @@ from .mutation_group_validation import (
     StoredMutationGroupValidationError,
     validate_stored_mutation_group,
 )
-from .profile import SyncProfileStatus, SyncV2ProfileManager
+from .profile import (
+    SyncNotesAttachmentBootstrapDiagnostics,
+    SyncProfileStatus,
+    SyncV2ProfileManager,
+)
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
 from .restore import (
     OBJECT_RESTORE_DOMAINS,
@@ -1748,6 +1752,23 @@ class SyncV2Service:
             user_id=user_id,
             dataset_id=dataset_id,
             device_id=device_id,
+        )
+
+    def notes_attachment_bootstrap_diagnostics(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str | None = None,
+        sample_limit: int = 0,
+        dry_run: bool = False,
+    ) -> SyncNotesAttachmentBootstrapDiagnostics:
+        """Return bounded read-only diagnostics for legacy attachment bootstrap."""
+
+        return self._profile_manager().notes_attachment_bootstrap_diagnostics(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            sample_limit=sample_limit,
+            dry_run=dry_run,
         )
 
     def push(
