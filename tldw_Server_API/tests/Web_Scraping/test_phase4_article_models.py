@@ -8,6 +8,7 @@ from types import MappingProxyType
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+    PUBLIC_FAILURE_CODES,
     ArticleFailure,
     ArticleLimits,
     ArticlePlan,
@@ -25,6 +26,8 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScrapePlan
         ({"web_scraper_max_article_bytes": True}, (16_777_216, 67_108_864)),
         ({"web_scraper_max_article_bytes": 0}, (16_777_216, 67_108_864)),
         ({"web_scraper_max_browser_transfer_bytes": -1}, (16_777_216, 67_108_864)),
+        ({"web_scraper_max_article_bytes": 1.5}, (16_777_216, 67_108_864)),
+        ({"web_scraper_max_browser_transfer_bytes": "2.0"}, (16_777_216, 67_108_864)),
     ],
 )
 def test_article_limits_fall_back_when_configured_values_are_not_positive_integers(
@@ -45,6 +48,32 @@ def test_article_limits_use_positive_integer_config_values() -> None:
     )
 
     assert limits == ArticleLimits(max_article_bytes=1024, max_browser_transfer_bytes=4096)
+
+
+def test_full_loaded_config_uses_raw_limits_and_legacy_route_values() -> None:
+    routing_plan = ScrapePlan(url="https://example.com/article", domain="example.com")
+    loaded_config = {
+        "web_scraper": {
+            "web_scraper_default_backend": "curl",
+            "web_scraper_retry_count": "4",
+            "web_scraper_retry_timeout": "8",
+            "web_scraper_stealth_playwright": "true",
+        },
+        "Web-Scraping": {
+            "web_scraper_max_article_bytes": "1234",
+            "web_scraper_max_browser_transfer_bytes": "5678",
+            "stealth_wait_ms": "90",
+        },
+    }
+
+    plan = ArticlePlan.from_routing_plan(routing_plan, loaded_config)
+
+    assert plan.backend == "curl"
+    assert plan.limits == ArticleLimits(max_article_bytes=1234, max_browser_transfer_bytes=5678)
+    assert plan.browser.retries == 4
+    assert plan.browser.timeout_ms == 8000
+    assert plan.browser.stealth_enabled is True
+    assert plan.browser.stealth_wait_ms == 90
 
 
 def test_article_plan_snapshots_lightweight_and_browser_inputs_without_cross_leaking() -> None:
@@ -99,6 +128,53 @@ def test_article_plan_snapshots_lightweight_and_browser_inputs_without_cross_lea
     assert plan.browser.stealth_enabled is True
     assert plan.browser.stealth_wait_ms == 45
     assert (plan.browser.viewport_width, plan.browser.viewport_height) == (1280, 720)
+
+
+def test_direct_browser_profile_freezes_mutable_cookie_sets_and_byte_buffers() -> None:
+    cookie = {
+        "name": "session",
+        "value": bytearray(b"value"),
+        "metadata": {
+            "scopes": {"read"},
+            "payload": memoryview(bytearray(b"payload")),
+        },
+    }
+
+    profile = DirectBrowserProfile(
+        user_agent="agent",
+        custom_cookies=(cookie,),
+        retries=1,
+        timeout_ms=2,
+        stealth_enabled=False,
+        stealth_wait_ms=3,
+    )
+    cookie["value"][0] = ord("X")
+    cookie["metadata"]["scopes"].add("write")
+    cookie["metadata"]["payload"][0] = ord("X")
+
+    assert profile.custom_cookies[0]["value"] == b"value"
+    assert profile.custom_cookies[0]["metadata"]["scopes"] == frozenset({"read"})
+    assert profile.custom_cookies[0]["metadata"]["payload"] == b"payload"
+
+
+def test_public_failure_codes_match_the_approved_contract() -> None:
+    assert (
+        frozenset(
+            {
+                "policy_error",
+                "regex_invalid",
+                "regex_too_large",
+                "regex_timeout",
+                "selector_invalid",
+                "provider_error",
+                "fetch_error",
+                "browser_error",
+                "response_too_large",
+                "extraction_error",
+            }
+        )
+        == PUBLIC_FAILURE_CODES
+    )
 
 
 @pytest.mark.parametrize(

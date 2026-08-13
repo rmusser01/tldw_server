@@ -1484,8 +1484,6 @@ web_scraper_api_retry = 3
 web_scraper_api_retry_delay = 1
 web_scraper_retry_count = 3
 web_scraper_stealth_playwright = False
-web_scraper_max_article_bytes = 16777216
-web_scraper_max_browser_transfer_bytes = 67108864
 custom_scrapers_yaml_path = tldw_Server_API/Config_Files/custom_scrapers.yaml
 web_scraper_default_backend = auto
 web_scraper_ua_mode = fixed
@@ -1536,6 +1534,8 @@ cache_ttl = 300
 
 [Web-Scraping]
 stealth_wait_ms = 5000
+web_scraper_max_article_bytes = 16777216
+web_scraper_max_browser_transfer_bytes = 67108864
 # Ephemeral web-scraping result store tuning (env-only today):
 # - EPHEMERAL_STORE_TTL_SECONDS (default: 900)
 # - EPHEMERAL_STORE_MAX_ENTRIES (default: 256)

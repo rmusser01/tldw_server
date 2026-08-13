@@ -41,6 +41,10 @@ def _freeze_value(value: Any) -> Any:
         return _freeze_mapping(value)
     if isinstance(value, list | tuple):
         return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(_freeze_value(item) for item in value)
+    if isinstance(value, bytearray | memoryview):
+        return bytes(value)
     return value
 
 
@@ -86,11 +90,24 @@ def _legacy_bool(value: Any, default: bool = False) -> bool:
 
 
 def _config_values(config: Mapping[str, Any] | None) -> Mapping[str, Any]:
-    """Accept either the Web-Scraper subsection or the full loaded mapping."""
+    """Normalize direct or full loaded config without changing the input mapping."""
     if not isinstance(config, Mapping):
         return MappingProxyType({})
-    nested = config.get("web_scraper")
-    return nested if isinstance(nested, Mapping) else config
+    legacy = config.get("web_scraper")
+    raw = config.get("Web-Scraping")
+    if not isinstance(legacy, Mapping) and not isinstance(raw, Mapping):
+        return config
+
+    values = dict(legacy) if isinstance(legacy, Mapping) else {}
+    if isinstance(raw, Mapping):
+        for key in (
+            "web_scraper_max_article_bytes",
+            "web_scraper_max_browser_transfer_bytes",
+            "stealth_wait_ms",
+        ):
+            if key in raw:
+                values[key] = raw[key]
+    return MappingProxyType(values)
 
 
 def _mapping_strings(value: Any) -> dict[str, str]:
@@ -260,7 +277,7 @@ class ArticlePlan:
             DEFAULT_BROWSER_TIMEOUT_MS // 1000,
         )
         stealth_wait_ms = _legacy_non_negative_integer(
-            values.get("STEALTH_WAIT_MS", values.get("web_scraper_stealth_wait_ms")),
+            values.get("stealth_wait_ms", values.get("STEALTH_WAIT_MS", values.get("web_scraper_stealth_wait_ms"))),
             DEFAULT_STEALTH_WAIT_MS,
         )
         browser = DirectBrowserProfile(
