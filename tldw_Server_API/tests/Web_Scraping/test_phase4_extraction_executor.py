@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import json
 import os
+import subprocess
+import sys
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,14 +22,12 @@ from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
     ArticleFailure,
 )
 from tldw_Server_API.app.core.Web_Scraping.orchestration.executor import (
-    DEFAULT_EXTRACTION_EXECUTOR,
     ExecutorGeneration,
     ExtractionExecutorManager,
     ManagerState,
-    reload_extraction_executor,
-    reset_extraction_executor_for_tests,
-    shutdown_extraction_executor,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _manager(*, workers: Any = 1, pid: list[int] | None = None) -> ExtractionExecutorManager:
@@ -53,11 +55,51 @@ def _own(
 
 
 def test_public_contract_is_importable_without_starting_threads() -> None:
-    assert isinstance(DEFAULT_EXTRACTION_EXECUTOR, ExtractionExecutorManager)
-    assert DEFAULT_EXTRACTION_EXECUTOR.current_generation is None
-    assert callable(reload_extraction_executor)
-    assert callable(shutdown_extraction_executor)
-    assert callable(reset_extraction_executor_for_tests)
+    script = """
+import json
+import threading
+
+threads_before = {thread.ident for thread in threading.enumerate()}
+from tldw_Server_API.app.core.Web_Scraping.orchestration.executor import (
+    DEFAULT_EXTRACTION_EXECUTOR,
+    ExtractionExecutorManager,
+    reload_extraction_executor,
+    reset_extraction_executor_for_tests,
+    shutdown_extraction_executor,
+)
+threads_after = {thread.ident for thread in threading.enumerate()}
+print(
+    "EXECUTOR_IMPORT="
+    + json.dumps(
+        {
+            "is_manager": isinstance(DEFAULT_EXTRACTION_EXECUTOR, ExtractionExecutorManager),
+            "generation_is_none": DEFAULT_EXTRACTION_EXECUTOR.current_generation is None,
+            "reload_is_callable": callable(reload_extraction_executor),
+            "reset_is_callable": callable(reset_extraction_executor_for_tests),
+            "shutdown_is_callable": callable(shutdown_extraction_executor),
+            "new_threads": sorted(threads_after - threads_before),
+        },
+        sort_keys=True,
+    )
+)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    marker = next(line for line in completed.stdout.splitlines() if line.startswith("EXECUTOR_IMPORT="))
+
+    assert json.loads(marker.removeprefix("EXECUTOR_IMPORT=")) == {
+        "generation_is_none": True,
+        "is_manager": True,
+        "new_threads": [],
+        "reload_is_callable": True,
+        "reset_is_callable": True,
+        "shutdown_is_callable": True,
+    }
 
 
 @pytest.mark.asyncio

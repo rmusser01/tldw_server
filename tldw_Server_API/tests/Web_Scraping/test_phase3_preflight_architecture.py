@@ -80,10 +80,11 @@ PHASE3_TIMEOUT_TESTS = (Path(__file__).with_name("test_phase3_preflight_browser.
 FORBIDDEN_PREFLIGHT_CONSUMERS = {
     f"{WEB_SCRAPING_PACKAGE}.Article_Extractor_Lib",
     f"{WEB_SCRAPING_PACKAGE}.enhanced_web_scraping",
+    f"{WEB_SCRAPING_PACKAGE}.orchestration.article",
 }
 CONSUMER_PATHS = (
-    WEB_SCRAPING_ROOT / "Article_Extractor_Lib.py",
     WEB_SCRAPING_ROOT / "enhanced_web_scraping.py",
+    WEB_SCRAPING_ROOT / "orchestration/article.py",
 )
 
 # These are the only application imports of scraper_analyzers recorded by the
