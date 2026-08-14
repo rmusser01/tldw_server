@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Callable
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
     BackendType,
@@ -11,9 +15,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
     logger,
-)
-from tldw_Server_API.app.core.DB_Management.backends.base import (
-    DatabaseError as BackendDatabaseError,
 )
 
 if TYPE_CHECKING:
@@ -34,9 +35,58 @@ class TaskStore:
     _PROJECTION_STATUSES = {"live", "unlinked", "deleted", "ambiguous"}
     _MIN_LIMIT = 1
     _MAX_LIMIT = 500
+    _LOCAL_UNBOUND = "local-unbound"
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
+
+    def _scope(
+        self,
+        owner_user_id: str,
+        dataset_id: str,
+    ) -> tuple[str, str]:
+        """Validate one exact canonical owner/dataset scope."""
+        owner = str(owner_user_id).strip()
+        dataset = str(dataset_id).strip()
+        if not owner or not dataset:
+            raise InputError("Task owner and dataset scope cannot be empty.")  # noqa: TRY003
+        return owner, dataset
+
+    def resolve_task_compatibility_scope(self, *, owner_user_id: str) -> tuple[str, str]:
+        """Resolve the sole product-owned task dataset, or the local sentinel when empty."""
+        owner = str(owner_user_id).strip()
+        if not owner:
+            raise InputError("Task owner cannot be empty.")  # noqa: TRY003
+        datasets: set[str] = set()
+        for table in (
+            "note_tasks",
+            "task_events",
+            "note_task_reconciliation_state",
+            "task_projection_drifts",
+        ):
+            cursor = self._read(
+                f"SELECT DISTINCT dataset_id FROM {table} WHERE owner_user_id = ?",  # nosec B608
+                (owner,),
+            )
+            datasets.update(str(row["dataset_id"]) for row in cursor.fetchall())
+        if not datasets:
+            return owner, self._LOCAL_UNBOUND
+        if len(datasets) != 1:
+            raise ConflictError(
+                "Task compatibility scope is ambiguous.", entity="tasks", entity_id=owner
+            )  # noqa: TRY003
+        return owner, datasets.pop()
+
+    def _canonical_task_values(self, task: Mapping[str, Any]) -> tuple[int, str, str | None, str | None]:
+        revision = int(task.get("canonical_revision") or task.get("version") or 1)
+        source = dict(task)
+        if isinstance(source.get("metadata_json"), dict):
+            source["metadata_json"] = self._json_dumps(source["metadata_json"], "metadata")
+        object_hash, code, diagnostic_hash = self._db._canonicalize_legacy_task_v60(
+            source,
+            owner_user_id=str(source["owner_user_id"]),
+        )
+        return revision, object_hash, code, diagnostic_hash
 
     def _deleted_value(self, deleted: bool) -> bool | int:
         """Return the backend-native value for a soft-delete flag."""
@@ -146,12 +196,13 @@ class TaskStore:
         note_id: str,
         task_id: str,
         *,
+        owner_user_id: str,
         conn: TaskConnection,
     ) -> None:
         """Require a task's owning note to exist and not be soft-deleted."""
         cursor = self._read(
-            "SELECT deleted FROM notes WHERE id = ?",
-            (note_id,),
+            "SELECT deleted FROM notes WHERE client_id = ? AND id = ?",
+            (owner_user_id, note_id),
             conn=conn,
         )
         row = cursor.fetchone()
@@ -200,20 +251,27 @@ class TaskStore:
         self,
         task_id: str,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         include_deleted: bool,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
         if include_deleted:
-            cursor = self._read("SELECT * FROM note_tasks WHERE id = ?", (task_id,), conn=conn)
+            cursor = self._read(
+                "SELECT * FROM note_tasks WHERE owner_user_id = ? AND dataset_id = ? AND id = ?",
+                (owner_user_id, dataset_id, task_id),
+                conn=conn,
+            )
             return self._decode_task_row(cursor.fetchone())
         cursor = self._read(
             """
             SELECT t.*
               FROM note_tasks t
               JOIN notes n ON n.id = t.note_id
-             WHERE t.id = ? AND t.deleted = ? AND n.deleted = ?
+             WHERE t.owner_user_id = ? AND t.dataset_id = ? AND t.id = ?
+               AND n.client_id = t.owner_user_id AND t.deleted = ? AND n.deleted = ?
             """,
-            (task_id, self._deleted_value(False), self._deleted_value(False)),
+            (owner_user_id, dataset_id, task_id, self._deleted_value(False), self._deleted_value(False)),
             conn=conn,
         )
         return self._decode_task_row(cursor.fetchone())
@@ -222,30 +280,43 @@ class TaskStore:
         self,
         task_id: str,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
         cursor = self._read(
-            "SELECT * FROM task_note_projections WHERE task_id = ?",
-            (task_id,),
+            "SELECT * FROM task_note_projections WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?",
+            (owner_user_id, dataset_id, task_id),
             conn=conn,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def get_task_projection(self, task_id: str, *, conn: TaskConnection | None = None) -> dict[str, Any] | None:
+    def get_task_projection(
+        self,
+        task_id: str,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any] | None:
         """Return the markdown projection row for one task."""
-        return self._fetch_projection(task_id, conn=conn)
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        return self._fetch_projection(task_id, owner_user_id=owner, dataset_id=dataset, conn=conn)
 
     def get_note_reconciliation_snapshot(
         self,
         *,
         note_id: str,
+        owner_user_id: str,
+        dataset_id: str,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
         """Return note fields needed to validate task reconciliation input."""
+        owner, _dataset = self._scope(owner_user_id, dataset_id)
         cursor = self._read(
-            "SELECT id, version, content, deleted FROM notes WHERE id = ?",
-            (note_id,),
+            "SELECT id, version, content, deleted FROM notes WHERE client_id = ? AND id = ?",
+            (owner, note_id),
             conn=conn,
         )
         row = cursor.fetchone()
@@ -255,6 +326,8 @@ class TaskStore:
         self,
         *,
         note_id: str,
+        owner_user_id: str,
+        dataset_id: str,
         conn: TaskConnection | None = None,
     ) -> list[dict[str, dict[str, Any]]]:
         """Return live tasks for a note together with their projection rows.
@@ -263,16 +336,17 @@ class TaskStore:
         inconsistent projection state. Reconciliation must fail closed in that
         case rather than creating a replacement task beside an orphaned live row.
         """
+        owner, dataset = self._scope(owner_user_id, dataset_id)
         cursor = self._read(
             """
             SELECT *
               FROM note_tasks
-             WHERE note_id = ?
+             WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
                AND deleted = ?
                AND projection_status = ?
              ORDER BY created_at ASC, id ASC
             """,
-            (note_id, self._deleted_value(False), "live"),
+            (owner, dataset, note_id, self._deleted_value(False), "live"),
             conn=conn,
         )
         projected_tasks: list[dict[str, dict[str, Any]]] = []
@@ -280,7 +354,13 @@ class TaskStore:
             task = self._decode_task_row(row)
             if task is None:
                 continue
-            projection_state, projection = self._resolve_projection_state(task, task["id"], conn=conn)
+            projection_state, projection = self._resolve_projection_state(
+                task,
+                task["id"],
+                owner_user_id=owner,
+                dataset_id=dataset,
+                conn=conn,
+            )
             if projection_state != "live":
                 raise ConflictError(
                     f"Task projection is {projection_state} for live task '{task['id']}'.",
@@ -359,9 +439,16 @@ class TaskStore:
         task: dict[str, Any],
         task_id: str,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         conn: TaskConnection,
     ) -> tuple[str, dict[str, Any] | None]:
-        projection = self._fetch_projection(task_id, conn=conn)
+        projection = self._fetch_projection(
+            task_id,
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            conn=conn,
+        )
         task_status = task["projection_status"]
         if projection is None:
             return task_status, None
@@ -389,6 +476,8 @@ class TaskStore:
     def create_task(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         note_id: str,
         text: str,
         status: str = "open",
@@ -415,19 +504,42 @@ class TaskStore:
         metadata_json = self._json_dumps(metadata, "metadata")
         now = self._db._get_current_utc_timestamp_iso()
         completed_at = now if normalized_status == "done" else None
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+            {
+                "owner_user_id": owner,
+                "id": final_task_id,
+                "note_id": note_id,
+                "text": normalized_text,
+                "status": normalized_status,
+                "metadata_json": metadata_json,
+                "projection_status": normalized_projection_status,
+                "deleted": 0,
+                "created_at": now,
+                "updated_at": now,
+                "completed_at": completed_at,
+                "client_id": self._db.client_id,
+                "version": 1,
+                "canonical_revision": 1,
+            }
+        )
 
         def _execute_create(transaction_conn: TaskConnection) -> dict[str, Any]:
-            self._require_active_note(note_id, final_task_id, conn=transaction_conn)
+            self._require_active_note(note_id, final_task_id, owner_user_id=owner, conn=transaction_conn)
             self._execute(
                 transaction_conn,
                 """
                 INSERT INTO note_tasks (
-                    id, note_id, text, status, metadata_json, projection_status, deleted,
-                    created_at, updated_at, completed_at, client_id, version
+                    owner_user_id, dataset_id, id, note_id, text, status, metadata_json,
+                    projection_status, deleted, created_at, updated_at, completed_at, client_id,
+                    version, canonical_revision, canonical_hash, source_diagnostic_code,
+                    source_diagnostic_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    owner,
+                    dataset,
                     final_task_id,
                     note_id,
                     normalized_text,
@@ -440,12 +552,18 @@ class TaskStore:
                     completed_at,
                     self._db.client_id,
                     1,
+                    canonical_revision,
+                    canonical_hash,
+                    diagnostic_code,
+                    diagnostic_hash,
                 ),
             )
             if actor_type:
                 self.record_task_event(
                     task_id=final_task_id,
                     note_id=note_id,
+                    owner_user_id=owner,
+                    dataset_id=dataset,
                     event_type="created",
                     actor_type=actor_type,
                     actor_id=actor_id,
@@ -462,7 +580,13 @@ class TaskStore:
                     ),
                     conn=transaction_conn,
                 )
-            task = self._fetch_task(final_task_id, include_deleted=True, conn=transaction_conn)
+            task = self._fetch_task(
+                final_task_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                include_deleted=True,
+                conn=transaction_conn,
+            )
             if task is None:
                 raise CharactersRAGDBError(f"Failed to read created task '{final_task_id}'.")  # noqa: TRY003
             return task
@@ -474,13 +598,47 @@ class TaskStore:
         except BackendDatabaseError as exc:
             self._raise_backend_error(exc, final_task_id)
 
-    def get_task(self, task_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
+    def get_task(
+        self,
+        task_id: str,
+        include_deleted: bool = False,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+    ) -> dict[str, Any] | None:
         """Return one task by ID."""
-        return self._fetch_task(task_id, include_deleted=include_deleted)
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        return self._fetch_task(
+            task_id,
+            owner_user_id=owner,
+            dataset_id=dataset,
+            include_deleted=include_deleted,
+        )
+
+    def get_task_scoped(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        include_deleted: bool = False,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any] | None:
+        """Return one task only inside the exact canonical owner/dataset scope."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        return self._fetch_task(
+            task_id,
+            owner_user_id=owner,
+            dataset_id=dataset,
+            include_deleted=include_deleted,
+            conn=conn,
+        )
 
     def list_tasks(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         note_id: str | None = None,
         status: str | None = None,
         projection_status: str | None = None,
@@ -492,8 +650,9 @@ class TaskStore:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """List tasks with optional note/status filters."""
-        clauses: list[str] = []
-        params: list[Any] = []
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        clauses: list[str] = ["t.owner_user_id = ?", "t.dataset_id = ?"]
+        params: list[Any] = [owner, dataset]
         if note_id is not None:
             clauses.append("t.note_id = ?")
             params.append(note_id)
@@ -529,7 +688,7 @@ class TaskStore:
             params.append(self._deleted_value(False))
         sql_query = "SELECT t.* FROM note_tasks t"
         if not include_deleted:
-            sql_query += " JOIN notes n ON n.id = t.note_id"
+            sql_query += " JOIN notes n ON n.id = t.note_id AND n.client_id = t.owner_user_id"
         if clauses:
             sql_query += " WHERE " + " AND ".join(clauses)
         sql_query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ? OFFSET ?"
@@ -541,6 +700,8 @@ class TaskStore:
     def update_unlinked_task_metadata_record_only(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         task_id: str,
         expected_version: int,
         metadata: dict[str, Any],
@@ -554,11 +715,15 @@ class TaskStore:
     ) -> dict[str, Any]:
         """Update metadata for an unlinked task without modifying note content."""
         metadata_json = self._json_dumps(metadata, "metadata")
+        owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_metadata_update(transaction_conn: TaskConnection) -> dict[str, Any]:
             old = self._require_active_task(
                 self._require_expected_version(
-                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    self._fetch_task(
+                        task_id, owner_user_id=owner, dataset_id=dataset,
+                        include_deleted=True, conn=transaction_conn,
+                    ),
                     expected_version,
                     task_id,
                 ),
@@ -570,20 +735,38 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
+            self._require_active_note(old["note_id"], task_id, owner_user_id=owner, conn=transaction_conn)
             now = self._db._get_current_utc_timestamp_iso()
+            canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+                {
+                    **old,
+                    "metadata_json": metadata_json,
+                    "updated_at": now,
+                    "version": int(old["version"]) + 1,
+                    "canonical_revision": int(old["canonical_revision"]) + 1,
+                }
+            )
             cursor = self._execute(
                 transaction_conn,
                 """
                 UPDATE note_tasks
                    SET metadata_json = ?,
                        updated_at = ?,
-                       version = version + 1
-                 WHERE id = ? AND version = ? AND deleted = ? AND projection_status = ?
+                       version = version + 1,
+                       canonical_revision = ?, canonical_hash = ?,
+                       source_diagnostic_code = ?, source_diagnostic_hash = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND version = ? AND deleted = ? AND projection_status = ?
                 """,
                 (
                     metadata_json,
                     now,
+                    canonical_revision,
+                    canonical_hash,
+                    diagnostic_code,
+                    diagnostic_hash,
+                    owner,
+                    dataset,
                     task_id,
                     expected_version,
                     self._deleted_value(False),
@@ -596,12 +779,17 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
+            updated = self._fetch_task(
+                task_id, owner_user_id=owner, dataset_id=dataset,
+                include_deleted=True, conn=transaction_conn,
+            )
             if updated is None:
                 raise ConflictError(f"Task with ID '{task_id}' not found.", entity="tasks", entity_id=task_id)  # noqa: TRY003
             self.record_task_event(
                 task_id=task_id,
                 note_id=str(updated["note_id"]),
+                owner_user_id=owner,
+                dataset_id=dataset,
                 event_type="updated",
                 actor_type=actor_type,
                 actor_id=actor_id,
@@ -622,6 +810,8 @@ class TaskStore:
     def update_task_record(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         task_id: str,
         expected_version: int,
         text: str | None = None,
@@ -645,18 +835,24 @@ class TaskStore:
             )  # noqa: TRY003
         normalized_status = self._validate_status(status) if status is not None else None
         metadata_json = self._json_dumps(metadata, "metadata") if metadata is not None else None
+        owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_update(transaction_conn: TaskConnection) -> dict[str, Any]:
             old = self._require_active_task(
                 self._require_expected_version(
-                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    self._fetch_task(
+                        task_id, owner_user_id=owner, dataset_id=dataset,
+                        include_deleted=True, conn=transaction_conn,
+                    ),
                     expected_version,
                     task_id,
                 ),
                 task_id,
             )
-            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
-            projection_state, _ = self._resolve_projection_state(old, task_id, conn=transaction_conn)
+            self._require_active_note(old["note_id"], task_id, owner_user_id=owner, conn=transaction_conn)
+            projection_state, _ = self._resolve_projection_state(
+                old, task_id, owner_user_id=owner, dataset_id=dataset, conn=transaction_conn
+            )
             old["projection_status"] = projection_state
             self._require_record_update_allowed(old, task_id)
             now = self._db._get_current_utc_timestamp_iso()
@@ -670,6 +866,18 @@ class TaskStore:
                 completed_at = now
             elif new_status == "open":
                 completed_at = None
+            canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+                {
+                    **old,
+                    "text": new_text,
+                    "status": new_status,
+                    "metadata_json": new_metadata_json,
+                    "updated_at": now,
+                    "completed_at": completed_at,
+                    "version": int(old["version"]) + 1,
+                    "canonical_revision": int(old["canonical_revision"]) + 1,
+                }
+            )
 
             update_cursor = self._execute(
                 transaction_conn,
@@ -680,8 +888,10 @@ class TaskStore:
                        metadata_json = ?,
                        updated_at = ?,
                        completed_at = ?,
-                       version = version + 1
-                 WHERE id = ? AND version = ?
+                       version = version + 1,
+                       canonical_revision = ?, canonical_hash = ?,
+                       source_diagnostic_code = ?, source_diagnostic_hash = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ? AND version = ?
                 """,
                 (
                     new_text,
@@ -689,6 +899,12 @@ class TaskStore:
                     new_metadata_json,
                     now,
                     completed_at,
+                    canonical_revision,
+                    canonical_hash,
+                    diagnostic_code,
+                    diagnostic_hash,
+                    owner,
+                    dataset,
                     task_id,
                     expected_version,
                 ),
@@ -699,7 +915,10 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
+            updated = self._fetch_task(
+                task_id, owner_user_id=owner, dataset_id=dataset,
+                include_deleted=True, conn=transaction_conn,
+            )
             if updated is None:
                 raise ConflictError(
                     f"Task with ID '{task_id}' not found.", entity="tasks", entity_id=task_id
@@ -708,6 +927,8 @@ class TaskStore:
                 self.record_task_event(
                     task_id=task_id,
                     note_id=updated["note_id"],
+                    owner_user_id=owner,
+                    dataset_id=dataset,
                     event_type="status_changed",
                     actor_type=actor_type,
                     actor_id=actor_id,
@@ -722,6 +943,8 @@ class TaskStore:
                 self.record_task_event(
                     task_id=task_id,
                     note_id=updated["note_id"],
+                    owner_user_id=owner,
+                    dataset_id=dataset,
                     event_type="updated",
                     actor_type=actor_type,
                     actor_id=actor_id,
@@ -742,6 +965,8 @@ class TaskStore:
     def set_task_projection(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         task_id: str,
         note_id: str,
         note_version: int,
@@ -761,14 +986,20 @@ class TaskStore:
         if normalized_projection_status == "deleted":
             raise InputError("projection_status 'deleted' is reserved for soft_delete_task.")  # noqa: TRY003
         now = self._db._get_current_utc_timestamp_iso()
+        owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_projection(transaction_conn: TaskConnection) -> dict[str, Any]:
             task = self._require_active_task(
-                self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                self._fetch_task(
+                    task_id, owner_user_id=owner, dataset_id=dataset,
+                    include_deleted=True, conn=transaction_conn,
+                ),
                 task_id,
             )
-            self._require_active_note(task["note_id"], task_id, conn=transaction_conn)
-            projection_state, _ = self._resolve_projection_state(task, task_id, conn=transaction_conn)
+            self._require_active_note(task["note_id"], task_id, owner_user_id=owner, conn=transaction_conn)
+            projection_state, _ = self._resolve_projection_state(
+                task, task_id, owner_user_id=owner, dataset_id=dataset, conn=transaction_conn
+            )
             if task["note_id"] != note_id:
                 raise ConflictError(
                     f"Task projection note does not match owning note for task '{task_id}'.",
@@ -785,12 +1016,15 @@ class TaskStore:
                            WHEN projection_status != ? THEN version + 1
                            ELSE version
                        END
-                 WHERE id = ? AND note_id = ? AND deleted = ? AND projection_status = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND note_id = ? AND deleted = ? AND projection_status = ?
                 """,
                 (
                     normalized_projection_status,
                     now,
                     normalized_projection_status,
+                    owner,
+                    dataset,
                     task_id,
                     note_id,
                     self._deleted_value(False),
@@ -807,12 +1041,12 @@ class TaskStore:
                 transaction_conn,
                 """
                 INSERT INTO task_note_projections (
-                    task_id, note_id, note_version, line_number, start_offset, end_offset,
+                    owner_user_id, dataset_id, task_id, note_id, note_version, line_number, start_offset, end_offset,
                     normalized_text_hash, occurrence_index, block_fingerprint, raw_line,
                     has_child_content, projection_status, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(task_id) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, dataset_id, task_id) DO UPDATE SET
                     note_id = excluded.note_id,
                     note_version = excluded.note_version,
                     line_number = excluded.line_number,
@@ -827,6 +1061,8 @@ class TaskStore:
                     updated_at = excluded.updated_at
                 """,
                 (
+                    owner,
+                    dataset,
                     task_id,
                     note_id,
                     int(note_version),
@@ -842,7 +1078,9 @@ class TaskStore:
                     now,
                 ),
             )
-            projection = self._fetch_projection(task_id, conn=transaction_conn)
+            projection = self._fetch_projection(
+                task_id, owner_user_id=owner, dataset_id=dataset, conn=transaction_conn
+            )
             if projection is None:
                 raise CharactersRAGDBError(f"Failed to read projection for task '{task_id}'.")  # noqa: TRY003
             return projection
@@ -852,6 +1090,8 @@ class TaskStore:
     def mark_task_unlinked(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         task_id: str,
         expected_version: int,
         actor_type: str | None = None,
@@ -864,17 +1104,24 @@ class TaskStore:
     ) -> dict[str, Any]:
         """Mark a task's projection as unlinked after reconciliation."""
 
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+
         def _execute_unlink(transaction_conn: TaskConnection) -> dict[str, Any]:
             old = self._require_active_task(
                 self._require_expected_version(
-                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    self._fetch_task(
+                        task_id, owner_user_id=owner, dataset_id=dataset,
+                        include_deleted=True, conn=transaction_conn,
+                    ),
                     expected_version,
                     task_id,
                 ),
                 task_id,
             )
-            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
-            projection_state, projection = self._resolve_projection_state(old, task_id, conn=transaction_conn)
+            self._require_active_note(old["note_id"], task_id, owner_user_id=owner, conn=transaction_conn)
+            projection_state, projection = self._resolve_projection_state(
+                old, task_id, owner_user_id=owner, dataset_id=dataset, conn=transaction_conn
+            )
             if projection_state != "live":
                 raise ConflictError(
                     f"Task projection is {projection_state} for task '{task_id}'.",
@@ -890,9 +1137,10 @@ class TaskStore:
                    SET projection_status = ?,
                        updated_at = ?,
                        version = version + 1
-                 WHERE id = ? AND version = ? AND projection_status = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND version = ? AND projection_status = ?
                 """,
-                ("unlinked", now, task_id, expected_version, projection_state),
+                ("unlinked", now, owner, dataset, task_id, expected_version, projection_state),
             )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
@@ -906,7 +1154,7 @@ class TaskStore:
                 UPDATE task_note_projections
                    SET projection_status = ?,
                        updated_at = ?
-                 WHERE task_id = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?
                    AND projection_status = ?
                    AND note_id = ?
                    AND note_version = ?
@@ -918,6 +1166,8 @@ class TaskStore:
                 (
                     "unlinked",
                     now,
+                    owner,
+                    dataset,
                     task_id,
                     projection_state,
                     projection["note_id"],
@@ -934,11 +1184,16 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
+            updated = self._fetch_task(
+                task_id, owner_user_id=owner, dataset_id=dataset,
+                include_deleted=True, conn=transaction_conn,
+            )
             if actor_type:
                 self.record_task_event(
                     task_id=task_id,
                     note_id=old["note_id"],
+                    owner_user_id=owner,
+                    dataset_id=dataset,
                     event_type="unlinked",
                     actor_type=actor_type,
                     actor_id=actor_id,
@@ -961,6 +1216,8 @@ class TaskStore:
     def soft_delete_task(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         task_id: str,
         expected_version: int,
         projection_note_id: str | None = None,
@@ -977,17 +1234,24 @@ class TaskStore:
     ) -> dict[str, Any]:
         """Soft-delete a task, requiring projection context for live projected rows."""
 
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+
         def _execute_delete(transaction_conn: TaskConnection) -> dict[str, Any]:
             old = self._require_active_task(
                 self._require_expected_version(
-                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    self._fetch_task(
+                        task_id, owner_user_id=owner, dataset_id=dataset,
+                        include_deleted=True, conn=transaction_conn,
+                    ),
                     expected_version,
                     task_id,
                 ),
                 task_id,
             )
-            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
-            projection_status, projection = self._resolve_projection_state(old, task_id, conn=transaction_conn)
+            self._require_active_note(old["note_id"], task_id, owner_user_id=owner, conn=transaction_conn)
+            projection_status, projection = self._resolve_projection_state(
+                old, task_id, owner_user_id=owner, dataset_id=dataset, conn=transaction_conn
+            )
             if projection_status == "ambiguous":
                 raise ConflictError(
                     f"Task projection is ambiguous for task '{task_id}'.", entity="tasks", entity_id=task_id
@@ -1014,6 +1278,16 @@ class TaskStore:
                         "Task projection deletion is ambiguous without a matching projection locator."
                     )  # noqa: TRY003
             now = self._db._get_current_utc_timestamp_iso()
+            canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+                {
+                    **old,
+                    "deleted": 1,
+                    "projection_status": "deleted",
+                    "updated_at": now,
+                    "version": int(old["version"]) + 1,
+                    "canonical_revision": int(old["canonical_revision"]) + 1,
+                }
+            )
             update_cursor = self._execute(
                 transaction_conn,
                 """
@@ -1021,13 +1295,22 @@ class TaskStore:
                    SET deleted = ?,
                        projection_status = ?,
                        updated_at = ?,
-                       version = version + 1
-                 WHERE id = ? AND version = ? AND deleted = ? AND projection_status = ?
+                       version = version + 1,
+                       canonical_revision = ?, canonical_hash = ?,
+                       source_diagnostic_code = ?, source_diagnostic_hash = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND version = ? AND deleted = ? AND projection_status = ?
                 """,
                 (
                     self._deleted_value(True),
                     "deleted",
                     now,
+                    canonical_revision,
+                    canonical_hash,
+                    diagnostic_code,
+                    diagnostic_hash,
+                    owner,
+                    dataset,
                     task_id,
                     expected_version,
                     self._deleted_value(False),
@@ -1047,7 +1330,7 @@ class TaskStore:
                     UPDATE task_note_projections
                        SET projection_status = ?,
                            updated_at = ?
-                     WHERE task_id = ?
+                     WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?
                        AND projection_status = ?
                        AND note_id = ?
                        AND note_version = ?
@@ -1059,6 +1342,8 @@ class TaskStore:
                     (
                         "deleted",
                         now,
+                        owner,
+                        dataset,
                         task_id,
                         projection_status,
                         projection["note_id"],
@@ -1076,9 +1361,9 @@ class TaskStore:
                     UPDATE task_note_projections
                        SET projection_status = ?,
                            updated_at = ?
-                     WHERE task_id = ?
+                     WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?
                     """,
-                    ("deleted", now, task_id),
+                    ("deleted", now, owner, dataset, task_id),
                 )
             if projection_status == "live" and not allow_record_only:
                 if getattr(projection_update_cursor, "rowcount", None) == 0:
@@ -1087,11 +1372,16 @@ class TaskStore:
                         entity="tasks",
                         entity_id=task_id,
                     )  # noqa: TRY003
-            updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
+            updated = self._fetch_task(
+                task_id, owner_user_id=owner, dataset_id=dataset,
+                include_deleted=True, conn=transaction_conn,
+            )
             if actor_type:
                 self.record_task_event(
                     task_id=task_id,
                     note_id=old["note_id"],
+                    owner_user_id=owner,
+                    dataset_id=dataset,
                     event_type="deleted",
                     actor_type=actor_type,
                     actor_id=actor_id,
@@ -1114,6 +1404,8 @@ class TaskStore:
     def record_task_event(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         event_type: str,
         actor_type: str,
         task_id: str | None = None,
@@ -1132,18 +1424,44 @@ class TaskStore:
         now = self._db._get_current_utc_timestamp_iso()
         old_value_json = self._json_dumps(old_value, "old_value") if old_value is not None else None
         new_value_json = self._json_dumps(new_value, "new_value") if new_value is not None else None
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        event_hash = self._db._note_task_v60_hash(
+            {
+                "owner_user_id": owner,
+                "dataset_id": dataset,
+                "id": final_event_id,
+                "task_id": task_id,
+                "note_id": note_id,
+                "event_type": event_type,
+                "actor_type": actor_type,
+                "actor_id": actor_id,
+                "tool_name": tool_name,
+                "policy_mode": policy_mode,
+                "approval_id": approval_id,
+                "old_value_json": old_value_json,
+                "new_value_json": new_value_json,
+                "created_at": now,
+                "client_id": self._db.client_id,
+            }
+        )
 
         def _execute_event(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._execute(
                 transaction_conn,
                 """
                 INSERT INTO task_events (
-                    id, task_id, note_id, event_type, actor_type, actor_id, tool_name,
-                    policy_mode, approval_id, old_value_json, new_value_json, created_at, client_id
+                    owner_user_id, dataset_id, id, task_id, note_id, event_type, actor_type,
+                    actor_id, tool_name, policy_mode, approval_id, old_value_json, new_value_json,
+                    created_at, client_id, sync_revision, sync_object_hash, sync_server_cursor,
+                    source_device_id, client_occurred_at, source_kind, corrects_activity_id,
+                    deleted, deleted_at, delete_reason, source_diagnostic_code,
+                    source_diagnostic_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    owner,
+                    dataset,
                     final_event_id,
                     task_id,
                     note_id,
@@ -1157,9 +1475,25 @@ class TaskStore:
                     new_value_json,
                     now,
                     self._db.client_id,
+                    1,
+                    event_hash,
+                    None,
+                    None,
+                    now,
+                    "rest",
+                    None,
+                    self._deleted_value(False),
+                    None,
+                    None,
+                    "legacy_task_activity_unverified",
+                    event_hash,
                 ),
             )
-            cursor = self._read("SELECT * FROM task_events WHERE id = ?", (final_event_id,), conn=transaction_conn)
+            cursor = self._read(
+                "SELECT * FROM task_events WHERE owner_user_id = ? AND dataset_id = ? AND id = ?",
+                (owner, dataset, final_event_id),
+                conn=transaction_conn,
+            )
             event = self._decode_event_row(cursor.fetchone())
             if event is None:
                 raise CharactersRAGDBError(f"Failed to read task event '{final_event_id}'.")  # noqa: TRY003
@@ -1185,13 +1519,16 @@ class TaskStore:
     def list_task_activity(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         task_id: str | None = None,
         note_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """List task events by task or note scope."""
-        clauses: list[str] = []
-        params: list[Any] = []
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        clauses: list[str] = ["owner_user_id = ?", "dataset_id = ?"]
+        params: list[Any] = [owner, dataset]
         if task_id is not None:
             clauses.append("task_id = ?")
             params.append(task_id)
@@ -1212,14 +1549,17 @@ class TaskStore:
     def list_recent_task_activity(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         task_id: str | None = None,
         note_id: str | None = None,
         actor_type: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """List task events newest-first without changing the ascending default helper."""
-        clauses: list[str] = []
-        params: list[Any] = []
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        clauses: list[str] = ["owner_user_id = ?", "dataset_id = ?"]
+        params: list[Any] = [owner, dataset]
         if task_id is not None:
             clauses.append("task_id = ?")
             params.append(task_id)
@@ -1243,6 +1583,8 @@ class TaskStore:
     def list_recent_unread_task_activity(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         user_id: str,
         task_id: str | None = None,
         note_id: str | None = None,
@@ -1250,13 +1592,18 @@ class TaskStore:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """List newest unread task events for a user, applying visibility before limit."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if user_id != owner:
+            return []
         query = """
             SELECT events.*
             FROM task_events AS events
             LEFT JOIN task_event_read_state AS state
-              ON state.event_id = events.id
-             AND state.user_id = ?
-            WHERE (state.event_id IS NULL OR (state.read_at IS NULL AND state.dismissed_at IS NULL))
+              ON state.owner_user_id = events.owner_user_id
+             AND state.dataset_id = events.dataset_id
+             AND state.event_id = events.id AND state.user_id = ?
+            WHERE events.owner_user_id = ? AND events.dataset_id = ?
+              AND (state.event_id IS NULL OR (state.read_at IS NULL AND state.dismissed_at IS NULL))
               AND (? IS NULL OR events.task_id = ?)
               AND (? IS NULL OR events.note_id = ?)
               AND (? IS NULL OR events.actor_type = ?)
@@ -1265,7 +1612,7 @@ class TaskStore:
             query += " ORDER BY events.created_at DESC, events.rowid DESC LIMIT ?"
         else:
             query += " ORDER BY events.created_at DESC, events.id DESC LIMIT ?"
-        params: list[Any] = [user_id, task_id, task_id, note_id, note_id, actor_type, actor_type]
+        params: list[Any] = [user_id, owner, dataset, task_id, task_id, note_id, note_id, actor_type, actor_type]
         params.append(self._clamp_limit(limit))
         cursor = self._read(query, tuple(params))
         return [self._decode_event_row(row) for row in cursor.fetchall()]
@@ -1274,24 +1621,33 @@ class TaskStore:
         self,
         event_id: str,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         user_id: str,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any]:
         """Mark an activity event read for one user."""
         now = self._db._get_current_utc_timestamp_iso()
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if user_id != owner:
+            raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
 
         def _execute_read(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._execute(
                 transaction_conn,
                 """
-                INSERT INTO task_event_read_state (event_id, user_id, read_at, dismissed_at)
-                VALUES (?, ?, ?, NULL)
-                ON CONFLICT(event_id, user_id) DO UPDATE SET
+                INSERT INTO task_event_read_state (
+                    owner_user_id, dataset_id, event_id, user_id, read_at, dismissed_at
+                ) VALUES (?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(owner_user_id, dataset_id, event_id, user_id) DO UPDATE SET
                     read_at = COALESCE(task_event_read_state.read_at, excluded.read_at)
                 """,
-                (event_id, user_id, now),
+                (owner, dataset, event_id, user_id, now),
             )
-            state = self.get_task_activity_read_state(event_id, user_id=user_id, conn=transaction_conn)
+            state = self.get_task_activity_read_state(
+                event_id, user_id=user_id, owner_user_id=owner, dataset_id=dataset,
+                conn=transaction_conn,
+            )
             if state is None:
                 raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
             return state
@@ -1317,25 +1673,34 @@ class TaskStore:
         self,
         event_id: str,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         user_id: str,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any]:
         """Mark an activity event dismissed for one user."""
         now = self._db._get_current_utc_timestamp_iso()
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if user_id != owner:
+            raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
 
         def _execute_dismiss(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._execute(
                 transaction_conn,
                 """
-                INSERT INTO task_event_read_state (event_id, user_id, read_at, dismissed_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(event_id, user_id) DO UPDATE SET
+                INSERT INTO task_event_read_state (
+                    owner_user_id, dataset_id, event_id, user_id, read_at, dismissed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, dataset_id, event_id, user_id) DO UPDATE SET
                     read_at = COALESCE(task_event_read_state.read_at, excluded.read_at),
                     dismissed_at = excluded.dismissed_at
                 """,
-                (event_id, user_id, now, now),
+                (owner, dataset, event_id, user_id, now, now),
             )
-            state = self.get_task_activity_read_state(event_id, user_id=user_id, conn=transaction_conn)
+            state = self.get_task_activity_read_state(
+                event_id, user_id=user_id, owner_user_id=owner, dataset_id=dataset,
+                conn=transaction_conn,
+            )
             if state is None:
                 raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
             return state
@@ -1361,26 +1726,40 @@ class TaskStore:
         self,
         event_id: str,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         user_id: str,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
         """Return read/dismiss state for one event and user."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if user_id != owner:
+            return None
         cursor = self._read(
             """
             SELECT * FROM task_event_read_state
-             WHERE event_id = ? AND user_id = ?
+             WHERE owner_user_id = ? AND dataset_id = ? AND event_id = ? AND user_id = ?
             """,
-            (event_id, user_id),
+            (owner, dataset, event_id, user_id),
             conn=conn,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def get_reconciliation_state(self, note_id: str) -> dict[str, Any] | None:
+    def get_reconciliation_state(
+        self,
+        note_id: str,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any] | None:
         """Return the last task reconciliation state for a note."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
         cursor = self._read(
-            "SELECT * FROM note_task_reconciliation_state WHERE note_id = ?",
-            (note_id,),
+            "SELECT * FROM note_task_reconciliation_state WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
+            (owner, dataset, note_id),
+            conn=conn,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -1388,6 +1767,8 @@ class TaskStore:
     def set_reconciliation_state(
         self,
         *,
+        owner_user_id: str,
+        dataset_id: str,
         note_id: str,
         note_version: int,
         status: str,
@@ -1398,16 +1779,18 @@ class TaskStore:
     ) -> dict[str, Any]:
         """Upsert task reconciliation progress for a note/version."""
         now = self._db._get_current_utc_timestamp_iso()
+        owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_state(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._execute(
                 transaction_conn,
                 """
                 INSERT INTO note_task_reconciliation_state (
-                    note_id, note_version, status, reconciled_at, item_count, warning_count, cursor
+                    owner_user_id, dataset_id, note_id, note_version, status,
+                    reconciled_at, item_count, warning_count, cursor
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(note_id) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, dataset_id, note_id) DO UPDATE SET
                     note_version = excluded.note_version,
                     status = excluded.status,
                     reconciled_at = excluded.reconciled_at,
@@ -1416,6 +1799,8 @@ class TaskStore:
                     cursor = excluded.cursor
                 """,
                 (
+                    owner,
+                    dataset,
                     note_id,
                     int(note_version),
                     status,
@@ -1426,9 +1811,13 @@ class TaskStore:
                 ),
             )
             state = (
-                self.get_reconciliation_state(note_id)
+                self.get_reconciliation_state(
+                    note_id, owner_user_id=owner, dataset_id=dataset
+                )
                 if conn is None
-                else self._get_reconciliation_state_in_conn(note_id, transaction_conn)
+                else self._get_reconciliation_state_in_conn(
+                    note_id, owner_user_id=owner, dataset_id=dataset, conn=transaction_conn
+                )
             )
             if state is None:
                 raise CharactersRAGDBError(f"Failed to read reconciliation state for note '{note_id}'.")  # noqa: TRY003
@@ -1451,23 +1840,38 @@ class TaskStore:
                 reference="note",
             )
 
-    def _get_reconciliation_state_in_conn(self, note_id: str, conn: TaskConnection) -> dict[str, Any] | None:
+    def _get_reconciliation_state_in_conn(
+        self,
+        note_id: str,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        conn: TaskConnection,
+    ) -> dict[str, Any] | None:
         cursor = self._read(
-            "SELECT * FROM note_task_reconciliation_state WHERE note_id = ?",
-            (note_id,),
+            "SELECT * FROM note_task_reconciliation_state WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
+            (owner_user_id, dataset_id, note_id),
             conn=conn,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def candidate_notes_for_task_discovery(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def candidate_notes_for_task_discovery(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
         """Return checklist-bearing notes whose task reconciliation is stale or missing."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
         cursor = self._read(
             """
             SELECT n.id, n.title, n.version, n.last_modified
               FROM notes n
-              LEFT JOIN note_task_reconciliation_state r ON r.note_id = n.id
-             WHERE n.deleted = ?
+              LEFT JOIN note_task_reconciliation_state r
+                ON r.owner_user_id = n.client_id AND r.dataset_id = ? AND r.note_id = n.id
+             WHERE n.client_id = ? AND n.deleted = ?
                AND (
                     n.content LIKE ?
                  OR n.content LIKE ?
@@ -1486,6 +1890,8 @@ class TaskStore:
              LIMIT ?
             """,
             (
+                dataset,
+                owner,
                 self._deleted_value(False),
                 *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
                 *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
@@ -1494,9 +1900,18 @@ class TaskStore:
         )
         return [dict(row) for row in cursor.fetchall()]
 
-    def count_candidate_notes_for_task_discovery(self, *, note_id: str | None = None) -> int:
+    def count_candidate_notes_for_task_discovery(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str | None = None,
+    ) -> int:
         """Count checklist-bearing notes whose task reconciliation is stale or missing."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
         params: list[Any] = [
+            dataset,
+            owner,
             self._deleted_value(False),
             *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
             *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
@@ -1504,8 +1919,9 @@ class TaskStore:
         sql_query = """
             SELECT COUNT(*) AS stale_count
               FROM notes n
-              LEFT JOIN note_task_reconciliation_state r ON r.note_id = n.id
-             WHERE n.deleted = ?
+              LEFT JOIN note_task_reconciliation_state r
+                ON r.owner_user_id = n.client_id AND r.dataset_id = ? AND r.note_id = n.id
+             WHERE n.client_id = ? AND n.deleted = ?
                AND (
                     n.content LIKE ?
                  OR n.content LIKE ?
@@ -1527,6 +1943,83 @@ class TaskStore:
         cursor = self._read(sql_query, tuple(params))
         row = cursor.fetchone()
         return int(row["stale_count"] if row else 0)
+
+    def bind_local_task_graph_to_dataset(
+        self,
+        *,
+        owner_user_id: str,
+        target_dataset_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, int]:
+        """Atomically rekey one owner's complete local task graph to an enrolled dataset."""
+        owner = str(owner_user_id).strip()
+        target = str(target_dataset_id).strip()
+        if not owner or not target or target == self._LOCAL_UNBOUND:
+            raise InputError("A non-sentinel owner and target dataset are required.")  # noqa: TRY003
+        if self._db.backend_type != BackendType.SQLITE:
+            raise InputError("Local task graph binding is only supported by SQLite storage.")  # noqa: TRY003
+
+        tables = (
+            "note_tasks",
+            "task_note_projections",
+            "task_events",
+            "task_event_read_state",
+            "note_task_reconciliation_state",
+            "task_projection_drifts",
+        )
+
+        def _counts(transaction_conn: TaskConnection, dataset: str) -> dict[str, int]:
+            result: dict[str, int] = {}
+            for table in tables:
+                row = self._read(
+                    f"SELECT COUNT(*) AS count FROM {table} "  # nosec B608
+                    "WHERE owner_user_id = ? AND dataset_id = ?",
+                    (owner, dataset),
+                    conn=transaction_conn,
+                ).fetchone()
+                result[table] = int(row["count"])
+            return result
+
+        def _execute_bind(transaction_conn: TaskConnection) -> dict[str, int]:
+            source_counts = _counts(transaction_conn, self._LOCAL_UNBOUND)
+            target_counts = _counts(transaction_conn, target)
+            if any(target_counts.values()):
+                raise ConflictError(
+                    "Task dataset binding target collision.", entity="tasks", entity_id=target
+                )  # noqa: TRY003
+            if not any(source_counts.values()):
+                return source_counts
+
+            # Rekey roots only. Composite ON UPDATE CASCADE relationships carry
+            # projections, task-linked events, read-state, and drift rows.
+            self._execute(
+                transaction_conn,
+                "UPDATE note_tasks SET dataset_id = ? WHERE owner_user_id = ? AND dataset_id = ?",
+                (target, owner, self._LOCAL_UNBOUND),
+            )
+            self._execute(
+                transaction_conn,
+                "UPDATE task_events SET dataset_id = ? WHERE owner_user_id = ? AND dataset_id = ?",
+                (target, owner, self._LOCAL_UNBOUND),
+            )
+            self._execute(
+                transaction_conn,
+                "UPDATE note_task_reconciliation_state SET dataset_id = ? "
+                "WHERE owner_user_id = ? AND dataset_id = ?",
+                (target, owner, self._LOCAL_UNBOUND),
+            )
+
+            remaining = _counts(transaction_conn, self._LOCAL_UNBOUND)
+            rebound = _counts(transaction_conn, target)
+            if any(remaining.values()) or rebound != source_counts:
+                raise ConflictError(
+                    "Task dataset binding failed complete-set verification.",
+                    entity="tasks",
+                    entity_id=target,
+                )  # noqa: TRY003
+            return rebound
+
+        return self._with_transaction(_execute_bind, conn)
 
     def _raise_integrity_error(self, exc: sqlite3.IntegrityError, task_id: str) -> None:
         msg = str(exc).lower()

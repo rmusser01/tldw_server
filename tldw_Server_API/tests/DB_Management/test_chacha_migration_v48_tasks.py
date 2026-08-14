@@ -15,6 +15,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
     with sqlite3.connect(db_path) as conn:
         for table in (
             "note_attachments",
+            "task_projection_drifts",
             "task_event_read_state",
             "task_note_projections",
             "task_events",
@@ -23,6 +24,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
             "tasks",
         ):
             conn.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - test-only fixed table list
+        conn.execute("DROP INDEX IF EXISTS uq_notes_owner_id")
         conn.execute(
             "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
             (47, CharactersRAGDB._SCHEMA_NAME),

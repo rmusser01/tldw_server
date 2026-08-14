@@ -11,21 +11,24 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.notes_module import NotesModule
 
+LOCAL_UNBOUND = "local-unbound"
+
 
 class _FakeTaskStore:
-    def __init__(self, db: "_FakeTaskDB") -> None:
+    def __init__(self, db: _FakeTaskDB) -> None:
         self._db = db
 
-    def _fetch_projection(self, task_id: str) -> dict[str, Any] | None:
+    def _fetch_projection(self, task_id: str, **_scope: Any) -> dict[str, Any] | None:
         projection = self._db.projections.get(task_id)
         return dict(projection) if projection else None
 
-    def get_task_projection(self, task_id: str) -> dict[str, Any] | None:
+    def get_task_projection(self, task_id: str, **_scope: Any) -> dict[str, Any] | None:
         return self._fetch_projection(task_id)
 
 
 class _FakeTaskDB:
     def __init__(self) -> None:
+        self.client_id = "7"
         self.notes: dict[str, dict[str, Any]] = {
             "note-1": {"id": "note-1", "title": "Inbox", "version": 1, "content": "- [ ] Seed\n"},
             "note-2": {"id": "note-2", "title": "Later", "version": 3, "content": ""},
@@ -72,8 +75,11 @@ class _FakeTaskDB:
         self.task_store = _FakeTaskStore(self)
         self.closed = False
 
-    def get_task_projection(self, task_id: str) -> dict[str, Any] | None:
-        return self.task_store.get_task_projection(task_id)
+    def resolve_task_compatibility_scope(self, *, owner_user_id: str) -> tuple[str, str]:
+        return owner_user_id, "local-unbound"
+
+    def get_task_projection(self, task_id: str, **scope: Any) -> dict[str, Any] | None:
+        return self.task_store.get_task_projection(task_id, **scope)
 
     def _task(
         self,
@@ -87,6 +93,8 @@ class _FakeTaskDB:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
+            "owner_user_id": "7",
+            "dataset_id": "local-unbound",
             "id": task_id,
             "note_id": note_id,
             "text": text,
@@ -107,9 +115,14 @@ class _FakeTaskDB:
         task = self.tasks.get(task_id)
         return dict(task) if task else None
 
+    def get_task_scoped(self, *, task_id: str, **_scope: Any) -> dict[str, Any] | None:
+        return self.get_task(task_id)
+
     def list_tasks(
         self,
         *,
+        owner_user_id: str | None = None,  # noqa: ARG002
+        dataset_id: str | None = None,  # noqa: ARG002
         note_id: str | None = None,
         status: str | None = None,
         projection_status: str | None = None,
@@ -155,11 +168,15 @@ class _FakeTaskService:
         self.delete_calls: list[dict[str, Any]] = []
         self.reconcile_note_calls: list[str] = []
 
-    def reconcile_stale_notes(self, *, db: _FakeTaskDB, limit: int, actor: Any) -> Any:  # noqa: ARG002
+    def reconcile_stale_notes(
+        self, *, db: _FakeTaskDB, limit: int, actor: Any, owner_user_id: str | None = None
+    ) -> Any:  # noqa: ARG002
         self.reconcile_stale_calls += 1
         return SimpleNamespace(status="clean", processed_notes=1, remaining_stale_notes=0)
 
-    def ensure_note_reconciled(self, *, db: _FakeTaskDB, note_id: str, actor: Any) -> Any:  # noqa: ARG002
+    def ensure_note_reconciled(
+        self, *, db: _FakeTaskDB, note_id: str, actor: Any, owner_user_id: str | None = None
+    ) -> Any:  # noqa: ARG002
         self.ensure_note_calls.append(note_id)
         return SimpleNamespace(
             note_id=note_id,
@@ -172,7 +189,9 @@ class _FakeTaskService:
             warning_count=0,
         )
 
-    def reconcile_note_current(self, *, db: _FakeTaskDB, note_id: str, actor: Any) -> Any:  # noqa: ARG002
+    def reconcile_note_current(
+        self, *, db: _FakeTaskDB, note_id: str, actor: Any, owner_user_id: str | None = None
+    ) -> Any:  # noqa: ARG002
         self.reconcile_note_calls.append(note_id)
         return SimpleNamespace(
             note_id=note_id,
@@ -195,6 +214,7 @@ class _FakeTaskService:
         metadata: dict[str, Any],
         expected_note_version: int,
         actor: Any,  # noqa: ARG002
+        owner_user_id: str | None = None,  # noqa: ARG002
     ) -> dict[str, Any]:
         self.create_calls += 1
         task_id = f"task-created-{self.create_calls}"
@@ -224,6 +244,7 @@ class _FakeTaskService:
         status: str | None = None,
         metadata: dict[str, Any] | None = None,
         record_only: bool = False,
+        owner_user_id: str | None = None,  # noqa: ARG002
     ) -> dict[str, Any]:
         self.update_calls.append(
             {
@@ -780,7 +801,7 @@ async def test_set_status_already_matching_status_checks_current_note_version() 
 @pytest.mark.asyncio
 async def test_mcp_task_writes_record_runtime_policy_and_idempotency_metadata(tmp_path: Path) -> None:
     db_path = tmp_path / "notes_task_mcp_events.db"
-    db = CharactersRAGDB(str(db_path), client_id="mcp_task_events_test")
+    db = CharactersRAGDB(str(db_path), client_id="7")
     try:
         note_id = str(db.add_note(title="Inbox", content=""))
         note = db.get_note_by_id(note_id)
@@ -791,7 +812,7 @@ async def test_mcp_task_writes_record_runtime_policy_and_idempotency_metadata(tm
     opened_dbs: list[CharactersRAGDB] = []
 
     def _open_db(_ctx: Any) -> CharactersRAGDB:
-        handle = CharactersRAGDB(str(db_path), client_id="mcp_task_events_test")
+        handle = CharactersRAGDB(str(db_path), client_id="7")
         opened_dbs.append(handle)
         return handle
 
@@ -851,9 +872,11 @@ async def test_mcp_task_writes_record_runtime_policy_and_idempotency_metadata(tm
             context=context,
         )
 
-        event_db = CharactersRAGDB(str(db_path), client_id="mcp_task_events_test")
+        event_db = CharactersRAGDB(str(db_path), client_id="7")
         opened_dbs.append(event_db)
-        events = event_db.list_task_activity(task_id=created["id"], limit=20)
+        events = event_db.list_task_activity(
+            owner_user_id="7", dataset_id=LOCAL_UNBOUND, task_id=created["id"], limit=20
+        )
 
         def _event_for(event_type: str, idempotency_key: str) -> dict[str, Any]:
             for event in events:
@@ -887,7 +910,7 @@ async def test_mcp_task_writes_record_runtime_policy_and_idempotency_metadata(tm
 @pytest.mark.asyncio
 async def test_autonomous_mcp_task_write_records_policy_metadata_and_unread_activity(tmp_path: Path) -> None:
     db_path = tmp_path / "notes_task_mcp_autonomous_events.db"
-    db = CharactersRAGDB(str(db_path), client_id="mcp_task_autonomous_events_test")
+    db = CharactersRAGDB(str(db_path), client_id="7")
     try:
         note_id = str(db.add_note(title="Inbox", content=""))
         note = db.get_note_by_id(note_id)
@@ -898,7 +921,7 @@ async def test_autonomous_mcp_task_write_records_policy_metadata_and_unread_acti
     opened_dbs: list[CharactersRAGDB] = []
 
     def _open_db(_ctx: Any) -> CharactersRAGDB:
-        handle = CharactersRAGDB(str(db_path), client_id="mcp_task_autonomous_events_test")
+        handle = CharactersRAGDB(str(db_path), client_id="7")
         opened_dbs.append(handle)
         return handle
 
@@ -927,9 +950,11 @@ async def test_autonomous_mcp_task_write_records_policy_metadata_and_unread_acti
             context=context,
         )
 
-        event_db = CharactersRAGDB(str(db_path), client_id="mcp_task_autonomous_events_test")
+        event_db = CharactersRAGDB(str(db_path), client_id="7")
         opened_dbs.append(event_db)
-        events = event_db.list_task_activity(task_id=created["id"], limit=20)
+        events = event_db.list_task_activity(
+            owner_user_id="7", dataset_id=LOCAL_UNBOUND, task_id=created["id"], limit=20
+        )
         created_events = [
             event
             for event in events
@@ -944,7 +969,13 @@ async def test_autonomous_mcp_task_write_records_policy_metadata_and_unread_acti
         assert event["policy_mode"] == "autonomous"  # nosec B101
         assert event["approval_id"] is None  # nosec B101
 
-        unread = event_db.list_recent_unread_task_activity(user_id="7", actor_type="agent", limit=20)
+        unread = event_db.list_recent_unread_task_activity(
+            owner_user_id="7",
+            dataset_id=LOCAL_UNBOUND,
+            user_id="7",
+            actor_type="agent",
+            limit=20,
+        )
         assert [row["id"] for row in unread] == [event["id"]]  # nosec B101
     finally:
         for handle in opened_dbs:
@@ -954,7 +985,7 @@ async def test_autonomous_mcp_task_write_records_policy_metadata_and_unread_acti
 @pytest.mark.asyncio
 async def test_follow_up_reconciliation_events_do_not_inherit_direct_tool_idempotency_metadata(tmp_path: Path) -> None:
     db_path = tmp_path / "notes_task_mcp_internal_events.db"
-    db = CharactersRAGDB(str(db_path), client_id="mcp_task_internal_events_test")
+    db = CharactersRAGDB(str(db_path), client_id="7")
     try:
         note_id = str(db.add_note(title="Inbox", content="- [ ] Existing sibling\n"))
         note = db.get_note_by_id(note_id)
@@ -965,7 +996,7 @@ async def test_follow_up_reconciliation_events_do_not_inherit_direct_tool_idempo
     opened_dbs: list[CharactersRAGDB] = []
 
     def _open_db(_ctx: Any) -> CharactersRAGDB:
-        handle = CharactersRAGDB(str(db_path), client_id="mcp_task_internal_events_test")
+        handle = CharactersRAGDB(str(db_path), client_id="7")
         opened_dbs.append(handle)
         return handle
 
@@ -988,9 +1019,11 @@ async def test_follow_up_reconciliation_events_do_not_inherit_direct_tool_idempo
             context=context,
         )
 
-        event_db = CharactersRAGDB(str(db_path), client_id="mcp_task_internal_events_test")
+        event_db = CharactersRAGDB(str(db_path), client_id="7")
         opened_dbs.append(event_db)
-        events = event_db.list_task_activity(note_id=note_id, limit=20)
+        events = event_db.list_task_activity(
+            owner_user_id="7", dataset_id=LOCAL_UNBOUND, note_id=note_id, limit=20
+        )
         sibling_events = [event for event in events if event["event_type"] == "created" and event["task_id"]]
         assert len(sibling_events) == 2  # nosec B101
         direct_events = [

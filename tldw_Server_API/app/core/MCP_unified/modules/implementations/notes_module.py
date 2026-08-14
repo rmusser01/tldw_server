@@ -25,6 +25,7 @@ from ....Notes.organization_capture import (
     stable_note_id,
 )
 from ....Notes_Tasks import NotesTaskService, TaskActor
+from ....Notes_Tasks.service import TaskStoreScope, resolve_task_compatibility_scope
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids, merge_requested_ids_with_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
@@ -982,6 +983,7 @@ class NotesModule(BaseModule):
 
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             if note_id is not None:
                 assert_identifier_in_scope(context, "note_id", note_id, label="Note")
                 if reconcile_limit > 0:
@@ -989,10 +991,13 @@ class NotesModule(BaseModule):
                         db=db,
                         note_id=str(note_id),
                         actor=actor,
+                        owner_user_id=str(getattr(context, "user_id", "")),
                     )
                 else:
                     reconciliation = {"status": "clean", "processed_notes": 0, "remaining_stale_notes": 0}
                 tasks = db.list_tasks(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
                     note_id=str(note_id),
                     status=status,
                     projection_status=projection_status,
@@ -1010,10 +1015,13 @@ class NotesModule(BaseModule):
                             db=db,
                             limit=reconcile_limit,
                             actor=actor,
+                            owner_user_id=str(getattr(context, "user_id", "")),
                         )
                     else:
                         reconciliation = {"status": "clean", "processed_notes": 0, "remaining_stale_notes": 0}
                     tasks = db.list_tasks(
+                        owner_user_id=scope.owner_user_id,
+                        dataset_id=scope.dataset_id,
                         status=status,
                         projection_status=projection_status,
                         query=query,
@@ -1036,6 +1044,7 @@ class NotesModule(BaseModule):
                                     db=db,
                                     note_id=str(scoped_note_id),
                                     actor=actor,
+                                    owner_user_id=str(getattr(context, "user_id", "")),
                                 )
                                 processed += 1
                             else:
@@ -1044,6 +1053,8 @@ class NotesModule(BaseModule):
                         while len(fetched_tasks) < target_fetch:
                             page_limit = min(500, target_fetch - len(fetched_tasks))
                             batch = db.list_tasks(
+                                owner_user_id=scope.owner_user_id,
+                                dataset_id=scope.dataset_id,
                                 note_id=str(scoped_note_id),
                                 status=status,
                                 projection_status=projection_status,
@@ -1117,6 +1128,7 @@ class NotesModule(BaseModule):
             self._require_scoped_note(db, context, note_id)
             task = self._task_service.create_task_for_note(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 note_id=note_id,
                 text=text,
                 status=status,
@@ -1142,6 +1154,7 @@ class NotesModule(BaseModule):
             self._require_scoped_task(db, context, task_id)
             task = self._task_service.update_task(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 task_id=task_id,
                 expected_task_version=int(args.get("expected_task_version")),
                 expected_note_version=int(args["expected_note_version"]),
@@ -1183,6 +1196,7 @@ class NotesModule(BaseModule):
                     self._require_task_expected_versions(
                         db,
                         current,
+                        scope=self._task_scope(db, context),
                         expected_task_version=int(item.get("expected_task_version")),
                         expected_note_version=int(item["expected_note_version"]),
                     )
@@ -1195,6 +1209,7 @@ class NotesModule(BaseModule):
                         continue
                     task = self._task_service.update_task(
                         db=db,
+                        owner_user_id=str(getattr(context, "user_id", "")),
                         task_id=task_id,
                         expected_task_version=int(item.get("expected_task_version")),
                         expected_note_version=int(item["expected_note_version"]),
@@ -1222,6 +1237,7 @@ class NotesModule(BaseModule):
         db: CharactersRAGDB,
         task: dict[str, Any],
         *,
+        scope: TaskStoreScope,
         expected_task_version: int,
         expected_note_version: int,
     ) -> None:
@@ -1236,8 +1252,11 @@ class NotesModule(BaseModule):
             )
         if task.get("projection_status") != "live":
             return
-        task_store = getattr(db, "task_store", None)
-        projection = task_store._fetch_projection(task_id) if task_store is not None else None
+        projection = db.get_task_projection(
+            task_id,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+        )
         if projection is None:
             raise ConflictError(
                 f"Task projection is missing for task '{task_id}'.",
@@ -1276,6 +1295,7 @@ class NotesModule(BaseModule):
             self._require_scoped_task(db, context, task_id)
             task = self._task_service.delete_task(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 task_id=task_id,
                 expected_task_version=int(args.get("expected_task_version")),
                 expected_note_version=int(args["expected_note_version"]),
@@ -1305,6 +1325,7 @@ class NotesModule(BaseModule):
                     )
             result = self._task_service.reconcile_note_current(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 note_id=note_id,
                 actor=self._task_actor(context, tool_name=tool_name),
             )
@@ -1319,6 +1340,17 @@ class NotesModule(BaseModule):
         if context is None or not str(getattr(context, "user_id", "") or "").strip():
             raise ValueError("Missing user context for Notes task write")
 
+    @staticmethod
+    def _task_scope(db: CharactersRAGDB, context: Any | None) -> TaskStoreScope:
+        """Resolve task scope from authenticated MCP context only."""
+        owner_user_id = str(getattr(context, "user_id", "") or "").strip()
+        if not owner_user_id:
+            raise ValueError("Missing user context for Notes task access")
+        return resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id,
+        )
+
     def _require_scoped_note(self, db: CharactersRAGDB, context: Any | None, note_id: str) -> dict[str, Any]:
         assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         note = db.get_note_by_id(note_id)
@@ -1327,7 +1359,12 @@ class NotesModule(BaseModule):
         return dict(note)
 
     def _require_scoped_task(self, db: CharactersRAGDB, context: Any | None, task_id: str) -> dict[str, Any]:
-        task = db.get_task(task_id)
+        scope = self._task_scope(db, context)
+        task = db.get_task_scoped(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
         note_id = str(task.get("note_id") or "")
@@ -1344,7 +1381,11 @@ class NotesModule(BaseModule):
         try:
             task_store = getattr(db, "task_store", None)
             if task_store is not None:
-                projection = task_store._fetch_projection(task_id)
+                projection = task_store._fetch_projection(
+                    task_id,
+                    owner_user_id=str(task["owner_user_id"]),
+                    dataset_id=str(task["dataset_id"]),
+                )
         except _NOTES_MODULE_NONCRITICAL_EXCEPTIONS:
             projection = None
 

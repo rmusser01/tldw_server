@@ -15,8 +15,8 @@ from tldw_Server_API.app.core.Notes_Tasks.models import (
 )
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,8 @@ class NotesTaskReconciler:
         note_version: int,
         content: str,
         actor: TaskActor,
+        owner_user_id: str,
+        dataset_id: str,
     ) -> ReconciliationResult:
         parsed = parse_note_checklists(note_id=note_id, note_version=note_version, content=content)
 
@@ -46,8 +48,16 @@ class NotesTaskReconciler:
                 note_id=note_id,
                 note_version=note_version,
                 content=content,
+                owner_user_id=owner_user_id,
+                dataset_id=dataset_id,
             )
-            live_tasks = self._load_live_projected_tasks(db=db, conn=conn, note_id=note_id)
+            live_tasks = self._load_live_projected_tasks(
+                db=db,
+                conn=conn,
+                note_id=note_id,
+                owner_user_id=owner_user_id,
+                dataset_id=dataset_id,
+            )
             parsed_hash_counts = Counter(item.locator.normalized_text_hash for item in parsed.items)
             live_hash_counts = Counter(
                 projected.projection["normalized_text_hash"]
@@ -80,6 +90,8 @@ class NotesTaskReconciler:
                     if self._is_ambiguous_hash(item, parsed_hash_counts, live_hash_counts):
                         ambiguous_count += 1
                     task = db.create_task(
+                        owner_user_id=owner_user_id,
+                        dataset_id=dataset_id,
                         note_id=note_id,
                         text=item.text,
                         status=self._status_for_item(item),
@@ -93,6 +105,8 @@ class NotesTaskReconciler:
                         conn=conn,
                     )
                     db.set_task_projection(
+                        owner_user_id=owner_user_id,
+                        dataset_id=dataset_id,
                         task_id=task["id"],
                         note_id=note_id,
                         note_version=note_version,
@@ -116,6 +130,8 @@ class NotesTaskReconciler:
                 changed_task = self._task_record_differs(task, item)
                 if changed_task:
                     task = db.update_task_record(
+                        owner_user_id=owner_user_id,
+                        dataset_id=dataset_id,
                         task_id=task["id"],
                         expected_version=int(task["version"]),
                         text=item.text,
@@ -131,6 +147,8 @@ class NotesTaskReconciler:
                     )
                     updated_count += 1
                 db.set_task_projection(
+                    owner_user_id=owner_user_id,
+                    dataset_id=dataset_id,
                     task_id=task["id"],
                     note_id=note_id,
                     note_version=note_version,
@@ -151,6 +169,8 @@ class NotesTaskReconciler:
                     continue
                 task = projected.task
                 unlinked = db.mark_task_unlinked(
+                    owner_user_id=owner_user_id,
+                    dataset_id=dataset_id,
                     task_id=task["id"],
                     expected_version=int(task["version"]),
                     actor_type=actor.actor_type,
@@ -166,6 +186,8 @@ class NotesTaskReconciler:
             parser_warning_count = sum(len(item.warnings) for item in parsed.items)
             warning_count = parser_warning_count + ambiguous_count + placeholder_warning_count
             db.set_reconciliation_state(
+                owner_user_id=owner_user_id,
+                dataset_id=dataset_id,
                 note_id=note_id,
                 note_version=note_version,
                 status="clean" if warning_count == 0 else "warnings",
@@ -208,9 +230,13 @@ class NotesTaskReconciler:
         note_id: str,
         note_version: int,
         content: str,
+        owner_user_id: str,
+        dataset_id: str,
     ) -> None:
         note = db.task_store.get_note_reconciliation_snapshot(
             note_id=note_id,
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
             conn=conn,
         )
         if note is None or bool(note["deleted"]):
@@ -237,9 +263,13 @@ class NotesTaskReconciler:
         db: CharactersRAGDB,
         conn: TaskConnection,
         note_id: str,
+        owner_user_id: str,
+        dataset_id: str,
     ) -> list[_ProjectedTask]:
         projected_pairs = db.task_store.list_live_projected_tasks(
             note_id=note_id,
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
             conn=conn,
         )
         return [

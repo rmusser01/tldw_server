@@ -16,6 +16,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 pytestmark = pytest.mark.integration
 
+TASK_OWNER_USER_ID = "notes_tasks_api_user"
+TASK_DATASET_ID = "local-unbound"
+
 
 class _NoopRateLimiter:
     async def check_user_rate_limit(self, *_args, **_kwargs):
@@ -29,7 +32,7 @@ class _FailingNotesTaskService:
 
 @pytest.fixture()
 def notes_tasks_client(tmp_path: Path) -> Generator[tuple[TestClient, CharactersRAGDB], None, None]:
-    db = CharactersRAGDB(str(tmp_path / "notes_tasks_api.db"), client_id="notes_tasks_api_user")
+    db = CharactersRAGDB(str(tmp_path / "notes_tasks_api.db"), client_id=TASK_OWNER_USER_ID)
 
     async def override_user():
         return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
@@ -54,7 +57,16 @@ def notes_tasks_client(tmp_path: Path) -> Generator[tuple[TestClient, Characters
 
 
 def _tasks_by_text(db: CharactersRAGDB, note_id: str) -> dict[str, dict]:
-    return {task["text"]: task for task in db.list_tasks(note_id=note_id, include_deleted=True, limit=100)}
+    return {
+        task["text"]: task
+        for task in db.list_tasks(
+            note_id=note_id,
+            include_deleted=True,
+            limit=100,
+            owner_user_id=TASK_OWNER_USER_ID,
+            dataset_id=TASK_DATASET_ID,
+        )
+    }
 
 
 def _single_note_by_title(db: CharactersRAGDB, title: str) -> dict:
@@ -79,8 +91,18 @@ def test_note_create_returns_saved_note_when_reconciliation_raises(
     saved_note = db.get_note_by_id(created["id"])
     assert saved_note is not None
     assert saved_note["content"] == "- [ ] Alpha\n"
-    assert db.get_reconciliation_state(created["id"]) is None
-    assert db.list_tasks(note_id=created["id"], include_deleted=True, limit=100) == []
+    assert db.get_reconciliation_state(
+        created["id"],
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    ) is None
+    assert db.list_tasks(
+        note_id=created["id"],
+        include_deleted=True,
+        limit=100,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    ) == []
 
 
 def test_note_patch_returns_saved_note_when_reconciliation_raises(
@@ -94,7 +116,11 @@ def test_note_patch_returns_saved_note_when_reconciliation_raises(
     )
     assert create_response.status_code == 201, create_response.text
     created = create_response.json()
-    original_state = db.get_reconciliation_state(created["id"])
+    original_state = db.get_reconciliation_state(
+        created["id"],
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
     assert original_state is not None
     client.app.dependency_overrides[notes_endpoint.get_notes_task_service] = lambda: _FailingNotesTaskService()
 
@@ -110,7 +136,11 @@ def test_note_patch_returns_saved_note_when_reconciliation_raises(
     assert patched["content"] == "- [x] Alpha\n"
     assert saved_note is not None
     assert saved_note["content"] == "- [x] Alpha\n"
-    assert db.get_reconciliation_state(created["id"]) == original_state
+    assert db.get_reconciliation_state(
+        created["id"],
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    ) == original_state
 
 
 def test_note_create_ignores_empty_checklist_placeholder_with_warning_state(
@@ -125,8 +155,18 @@ def test_note_create_ignores_empty_checklist_placeholder_with_warning_state(
 
     assert create_response.status_code == 201, create_response.text
     created = create_response.json()
-    state = db.get_reconciliation_state(created["id"])
-    tasks = db.list_tasks(note_id=created["id"], include_deleted=True, limit=100)
+    state = db.get_reconciliation_state(
+        created["id"],
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
+    tasks = db.list_tasks(
+        note_id=created["id"],
+        include_deleted=True,
+        limit=100,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
     assert [task["text"] for task in tasks] == ["Alpha"]
     assert state is not None
     assert state["status"] == "warnings"
@@ -155,7 +195,11 @@ def test_title_only_put_advances_reconciliation_state_without_changing_tasks(
 
     assert update_response.status_code == 200, update_response.text
     updated = update_response.json()
-    updated_state = db.get_reconciliation_state(note_id)
+    updated_state = db.get_reconciliation_state(
+        note_id,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
     updated_tasks = _tasks_by_text(db, note_id)
     assert updated["version"] == created["version"] + 1
     assert updated_state is not None
@@ -188,7 +232,11 @@ def test_title_only_patch_advances_reconciliation_state_without_changing_tasks(
 
     assert patch_response.status_code == 200, patch_response.text
     patched = patch_response.json()
-    patched_state = db.get_reconciliation_state(note_id)
+    patched_state = db.get_reconciliation_state(
+        note_id,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
     patched_tasks = _tasks_by_text(db, note_id)
     assert patched["version"] == created["version"] + 1
     assert patched_state is not None
@@ -222,7 +270,11 @@ def test_bulk_create_reconciles_checklist_tasks_for_created_note(
     assert payload["failed_count"] == 0
     created_note = payload["results"][0]["note"]
     note_id = created_note["id"]
-    state = db.get_reconciliation_state(note_id)
+    state = db.get_reconciliation_state(
+        note_id,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
     tasks = _tasks_by_text(db, note_id)
 
     assert state is not None
@@ -259,7 +311,11 @@ def test_markdown_import_reconciles_checklist_tasks_for_created_note(
     assert payload["created_count"] == 1
     assert payload["failed_count"] == 0
     imported_note = _single_note_by_title(db, "Import Tasks")
-    state = db.get_reconciliation_state(imported_note["id"])
+    state = db.get_reconciliation_state(
+        imported_note["id"],
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
     tasks = _tasks_by_text(db, imported_note["id"])
 
     assert state is not None
@@ -284,7 +340,11 @@ def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(
     created = create_response.json()
     note_id = created["id"]
 
-    created_state = db.get_reconciliation_state(note_id)
+    created_state = db.get_reconciliation_state(
+        note_id,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
     created_tasks = _tasks_by_text(db, note_id)
     assert created_state is not None
     assert created_state["note_version"] == created["version"]
@@ -302,7 +362,11 @@ def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(
     assert update_response.status_code == 200, update_response.text
     updated = update_response.json()
     updated_tasks = _tasks_by_text(db, note_id)
-    updated_state = db.get_reconciliation_state(note_id)
+    updated_state = db.get_reconciliation_state(
+        note_id,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    )
 
     assert updated["version"] == created["version"] + 1
     assert updated_state is not None
@@ -318,7 +382,11 @@ def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(
     )
     assert conflict_response.status_code == 409, conflict_response.text
 
-    assert db.get_reconciliation_state(note_id) == updated_state
+    assert db.get_reconciliation_state(
+        note_id,
+        owner_user_id=TASK_OWNER_USER_ID,
+        dataset_id=TASK_DATASET_ID,
+    ) == updated_state
     tasks_after_conflict = _tasks_by_text(db, note_id)
     assert tasks_after_conflict["Alpha"]["status"] == "done"
     assert tasks_after_conflict["Beta"]["status"] == "open"

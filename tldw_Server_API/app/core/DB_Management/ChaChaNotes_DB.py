@@ -137,6 +137,12 @@ from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
     validate_notes_link_object_id,
     validate_notes_link_properties,
 )
+from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (  # noqa: E402
+    NotesTaskContractError,
+    canonical_json_bytes,
+    notes_task_object_hash,
+    parse_notes_task_v1,
+)
 from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa: E402
     bounded_inventory_diagnostics,
     decode_inventory_cursor,
@@ -658,8 +664,17 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 59  # Schema v59 adds the canonical Notes attachment registry
+    _CURRENT_SCHEMA_VERSION = 60  # Schema v60 scopes the Notes task graph by owner and dataset
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
+    _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
+    _NOTE_TASK_V60_TABLES = (
+        "note_tasks",
+        "task_note_projections",
+        "task_events",
+        "task_event_read_state",
+        "note_task_reconciliation_state",
+        "task_projection_drifts",
+    )
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
     _SQLITE_CORE_SCHEMA_TABLES = frozenset(
@@ -7468,6 +7483,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (56, "_migrate_from_v56_to_v57"),
             (57, "_migrate_from_v57_to_v58"),
             (58, "_migrate_from_v58_to_v59"),
+            (59, "_migrate_from_v59_to_v60_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -10942,6 +10958,397 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if cursor.rowcount != 1 or self._get_db_version(conn) != 59:
             raise SchemaError("Notes attachment v59 migration failed version verification.")  # noqa: TRY003
 
+    @staticmethod
+    def _note_task_v60_migration_checkpoint(_stage: str) -> None:
+        """No-op seam used to prove rollback at each migration boundary."""
+
+    @staticmethod
+    def _note_task_v60_hash(value: object) -> str:
+        return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+    def _canonicalize_legacy_task_v60(
+        self, row: Mapping[str, Any], *, owner_user_id: str
+    ) -> tuple[str, str | None, str | None]:
+        """Hash representable task data canonically and retain bounded diagnostics otherwise."""
+        source = dict(row)
+        try:
+            metadata = json.loads(str(source.get("metadata_json") or "{}"))
+            if not isinstance(metadata, dict) or set(metadata) - {"due_date", "priority", "estimate"}:
+                raise NotesTaskContractError("legacy task metadata is not canonical")
+            parsed = parse_notes_task_v1(
+                {
+                    "task_id": source["id"], "note_id": source["note_id"],
+                    "title": source["text"], "description": None, "status": source["status"],
+                    "completed_at": source.get("completed_at"), "priority": metadata.get("priority"),
+                    "due_date": metadata.get("due_date"), "estimate": metadata.get("estimate"),
+                    "recurrence": None, "assignee_id": None, "tags": [], "custom": {},
+                },
+                owner_user_id=owner_user_id,
+            )
+            return (
+                notes_task_object_hash(
+                    parsed,
+                    revision=int(source.get("canonical_revision") or source["version"]),
+                    deleted=bool(source["deleted"]),
+                ),
+                None,
+                None,
+            )
+        except (NotesTaskContractError, TypeError, ValueError, json.JSONDecodeError):
+            source_hash = self._note_task_v60_hash({"source": source, "version": 1})
+            return source_hash, "legacy_task_payload_invalid", source_hash
+
+    @staticmethod
+    def _note_task_v60_sqlite_ddl() -> tuple[str, ...]:
+        """Return the fixed six-table v60 SQLite replacement schema."""
+        return (
+            "CREATE UNIQUE INDEX uq_notes_owner_id ON notes(client_id,id)",
+            """
+            CREATE TABLE note_tasks_v60(
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+              id TEXT NOT NULL CHECK(length(trim(id)) > 0),
+              note_id TEXT NOT NULL CHECK(length(trim(note_id)) > 0),
+              text TEXT NOT NULL CHECK(length(text) > 0),
+              status TEXT NOT NULL CHECK(status IN ('open','done')),
+              metadata_json TEXT NOT NULL DEFAULT '{}',
+              projection_status TEXT NOT NULL DEFAULT 'live'
+                CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(typeof(deleted)='integer' AND deleted IN (0,1)),
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT,
+              client_id TEXT NOT NULL,
+              version INTEGER NOT NULL DEFAULT 1 CHECK(typeof(version)='integer' AND version>=1),
+              canonical_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(canonical_revision)='integer' AND canonical_revision>=1),
+              canonical_hash TEXT NOT NULL CHECK(
+                length(canonical_hash)=71 AND substr(canonical_hash,1,7)='sha256:'
+                AND substr(canonical_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              source_diagnostic_code TEXT CHECK(
+                source_diagnostic_code IS NULL OR source_diagnostic_code='legacy_task_payload_invalid'),
+              source_diagnostic_hash TEXT CHECK(source_diagnostic_hash IS NULL OR (
+                length(source_diagnostic_hash)=71 AND substr(source_diagnostic_hash,1,7)='sha256:'
+                AND substr(source_diagnostic_hash,8) NOT GLOB '*[^0-9a-f]*')),
+              PRIMARY KEY(owner_user_id,dataset_id,id),
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_note_projections_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+              task_id TEXT NOT NULL, note_id TEXT NOT NULL,
+              note_version INTEGER NOT NULL CHECK(typeof(note_version)='integer' AND note_version>=1),
+              line_number INTEGER NOT NULL CHECK(typeof(line_number)='integer' AND line_number>=1),
+              start_offset INTEGER NOT NULL CHECK(typeof(start_offset)='integer' AND start_offset>=0),
+              end_offset INTEGER NOT NULL CHECK(typeof(end_offset)='integer' AND end_offset>=start_offset),
+              normalized_text_hash TEXT NOT NULL,
+              occurrence_index INTEGER NOT NULL CHECK(typeof(occurrence_index)='integer' AND occurrence_index>=0),
+              block_fingerprint TEXT NOT NULL, raw_line TEXT NOT NULL,
+              has_child_content INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(has_child_content)='integer' AND has_child_content IN (0,1)),
+              projection_status TEXT NOT NULL DEFAULT 'live'
+                CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(owner_user_id,dataset_id,task_id),
+              FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_events_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, id TEXT NOT NULL,
+              task_id TEXT, note_id TEXT, event_type TEXT NOT NULL, actor_type TEXT NOT NULL,
+              actor_id TEXT, tool_name TEXT, policy_mode TEXT, approval_id TEXT,
+              old_value_json TEXT, new_value_json TEXT, created_at TEXT NOT NULL, client_id TEXT NOT NULL,
+              sync_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(sync_revision)='integer' AND sync_revision IN (1,2)),
+              sync_object_hash TEXT NOT NULL CHECK(
+                length(sync_object_hash)=71 AND substr(sync_object_hash,1,7)='sha256:'
+                AND substr(sync_object_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              sync_server_cursor INTEGER CHECK(sync_server_cursor IS NULL OR
+                (typeof(sync_server_cursor)='integer' AND sync_server_cursor>=1)),
+              source_device_id TEXT, client_occurred_at TEXT NOT NULL,
+              source_kind TEXT NOT NULL DEFAULT 'trusted_bootstrap_v1' CHECK(source_kind IN
+                ('client','rest','mcp','markdown_reconciliation','repair','trusted_bootstrap_v1')),
+              corrects_activity_id TEXT,
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(typeof(deleted)='integer' AND deleted IN (0,1)),
+              deleted_at TEXT,
+              delete_reason TEXT CHECK(delete_reason IS NULL OR delete_reason IN
+                ('user_request','correction','policy')),
+              source_diagnostic_code TEXT,
+              source_diagnostic_hash TEXT CHECK(source_diagnostic_hash IS NULL OR (
+                length(source_diagnostic_hash)=71 AND substr(source_diagnostic_hash,1,7)='sha256:'
+                AND substr(source_diagnostic_hash,8) NOT GLOB '*[^0-9a-f]*')),
+              CHECK((deleted=0 AND deleted_at IS NULL AND delete_reason IS NULL) OR
+                    (deleted=1 AND deleted_at IS NOT NULL AND delete_reason IS NOT NULL)),
+              PRIMARY KEY(owner_user_id,dataset_id,id),
+              FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT,
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT,
+              FOREIGN KEY(owner_user_id,dataset_id,corrects_activity_id)
+                REFERENCES task_events_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE task_event_read_state_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, event_id TEXT NOT NULL,
+              user_id TEXT NOT NULL CHECK(user_id=owner_user_id), read_at TEXT, dismissed_at TEXT,
+              PRIMARY KEY(owner_user_id,dataset_id,event_id,user_id),
+              FOREIGN KEY(owner_user_id,dataset_id,event_id)
+                REFERENCES task_events_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE note_task_reconciliation_state_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, note_id TEXT NOT NULL,
+              note_version INTEGER NOT NULL CHECK(typeof(note_version)='integer' AND note_version>=1),
+              status TEXT NOT NULL, reconciled_at TEXT NOT NULL,
+              item_count INTEGER NOT NULL DEFAULT 0 CHECK(typeof(item_count)='integer' AND item_count>=0),
+              warning_count INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(warning_count)='integer' AND warning_count>=0),
+              cursor TEXT, PRIMARY KEY(owner_user_id,dataset_id,note_id),
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_projection_drifts_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, id TEXT NOT NULL,
+              note_id TEXT NOT NULL, task_id TEXT NOT NULL,
+              marker_base_revision INTEGER NOT NULL
+                CHECK(typeof(marker_base_revision)='integer' AND marker_base_revision>=1),
+              marker_base_hash TEXT NOT NULL, note_head_cursor INTEGER, note_head_hash TEXT,
+              task_head_cursor INTEGER, task_head_hash TEXT,
+              reason_code TEXT NOT NULL CHECK(reason_code IN
+                ('missing_marker_base','malformed_marker','duplicate_marker','marker_scope_mismatch',
+                 'base_unavailable','both_changed','ambiguous_legacy_match','unsupported_markdown')),
+              status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved','dismissed')),
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT,
+              PRIMARY KEY(owner_user_id,dataset_id,id),
+              FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+        )
+
+    def _create_note_task_schema_v60_sqlite(self, conn: sqlite3.Connection) -> None:
+        for statement in self._note_task_v60_sqlite_ddl():
+            conn.execute(statement)
+
+    @staticmethod
+    def _create_note_task_indexes_v60_sqlite(conn: sqlite3.Connection) -> None:
+        statements = (
+            "CREATE INDEX idx_note_tasks_scope_note_page ON note_tasks(owner_user_id,dataset_id,note_id,deleted,created_at,id)",
+            "CREATE INDEX idx_note_tasks_scope_status_page ON note_tasks(owner_user_id,dataset_id,deleted,status,updated_at,id)",
+            "CREATE INDEX idx_note_tasks_scope_projection ON note_tasks(owner_user_id,dataset_id,projection_status,deleted,id)",
+            "CREATE INDEX idx_task_projections_scope_note ON task_note_projections(owner_user_id,dataset_id,note_id,note_version,task_id)",
+            "CREATE INDEX idx_task_projections_scope_status ON task_note_projections(owner_user_id,dataset_id,projection_status,updated_at,task_id)",
+            "CREATE INDEX idx_task_events_scope_task_page ON task_events(owner_user_id,dataset_id,task_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_note_page ON task_events(owner_user_id,dataset_id,note_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_created ON task_events(owner_user_id,dataset_id,created_at,id)",
+            "CREATE INDEX idx_task_event_read_scope_user ON task_event_read_state(owner_user_id,dataset_id,user_id,read_at,dismissed_at,event_id)",
+            "CREATE INDEX idx_task_reconciliation_scope_status ON note_task_reconciliation_state(owner_user_id,dataset_id,status,reconciled_at,note_id)",
+            "CREATE INDEX idx_task_projection_drifts_scope_status ON task_projection_drifts(owner_user_id,dataset_id,status,updated_at,id)",
+            "CREATE INDEX idx_task_projection_drifts_scope_task ON task_projection_drifts(owner_user_id,dataset_id,task_id,status,id)",
+        )
+        for statement in statements:
+            conn.execute(statement)
+
+    def _copy_note_task_graph_v60_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Copy every v59 row into an owner-proven local-unbound scope."""
+        dataset_id = self._LOCAL_UNBOUND_TASK_DATASET_ID
+        task_rows = [dict(row) for row in conn.execute("SELECT * FROM note_tasks ORDER BY id")]
+        task_owners: dict[str, tuple[str, str]] = {}
+        for row in task_rows:
+            note = conn.execute("SELECT client_id FROM notes WHERE id=?", (row["note_id"],)).fetchone()
+            owner = str(note[0]).strip() if note is not None else ""
+            if not owner:
+                raise SchemaError("Notes task v60 migration could not prove a task owner.")  # noqa: TRY003
+            canonical_hash, diagnostic_code, diagnostic_hash = self._canonicalize_legacy_task_v60(
+                row, owner_user_id=owner
+            )
+            task_owners[str(row["id"])] = (owner, str(row["note_id"]))
+            conn.execute(
+                """
+                INSERT INTO note_tasks_v60(
+                  owner_user_id,dataset_id,id,note_id,text,status,metadata_json,projection_status,
+                  deleted,created_at,updated_at,completed_at,client_id,version,canonical_revision,
+                  canonical_hash,source_diagnostic_code,source_diagnostic_hash
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    owner, dataset_id, row["id"], row["note_id"], row["text"], row["status"],
+                    row["metadata_json"], row["projection_status"], row["deleted"], row["created_at"],
+                    row["updated_at"], row["completed_at"], row["client_id"], row["version"],
+                    row["version"], canonical_hash, diagnostic_code, diagnostic_hash,
+                ),
+            )
+
+        projection_rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM task_note_projections ORDER BY task_id"
+        )]
+        for row in projection_rows:
+            scope = task_owners.get(str(row["task_id"]))
+            if scope is None or scope[1] != str(row["note_id"]):
+                raise SchemaError("Notes task v60 migration could not prove projection parents.")  # noqa: TRY003
+            conn.execute(
+                "INSERT INTO task_note_projections_v60 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (scope[0], dataset_id, *tuple(row.values())),
+            )
+
+        event_rows = [dict(row) for row in conn.execute("SELECT * FROM task_events ORDER BY id")]
+        event_owners: dict[str, str] = {}
+        for row in event_rows:
+            task_scope = task_owners.get(str(row["task_id"])) if row["task_id"] is not None else None
+            note_row = (
+                conn.execute("SELECT client_id FROM notes WHERE id=?", (row["note_id"],)).fetchone()
+                if row["note_id"] is not None else None
+            )
+            note_owner = str(note_row[0]).strip() if note_row is not None else None
+            event_owner = task_scope[0] if task_scope is not None else note_owner
+            if not event_owner or (note_owner is not None and event_owner != note_owner):
+                raise SchemaError("Notes task v60 migration could not prove event parents.")  # noqa: TRY003
+            if task_scope is not None and row["note_id"] is not None and task_scope[1] != str(row["note_id"]):
+                raise SchemaError("Notes task v60 migration found mismatched event parents.")  # noqa: TRY003
+            source_hash = self._note_task_v60_hash({"source": row, "version": 1})
+            event_owners[str(row["id"])] = event_owner
+            conn.execute(
+                "INSERT INTO task_events_v60 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    event_owner, dataset_id, *tuple(row.values()), 1, source_hash, None, None,
+                    row["created_at"], "trusted_bootstrap_v1", None, 0, None, None,
+                    "legacy_task_activity_unverified", source_hash,
+                ),
+            )
+
+        read_rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM task_event_read_state ORDER BY event_id,user_id"
+        )]
+        for row in read_rows:
+            read_owner = event_owners.get(str(row["event_id"]))
+            if read_owner is None or str(row["user_id"]) != read_owner:
+                raise SchemaError("Notes task v60 migration could not prove read-state ownership.")  # noqa: TRY003
+            conn.execute(
+                "INSERT INTO task_event_read_state_v60 VALUES (?,?,?,?,?,?)",
+                (read_owner, dataset_id, *tuple(row.values())),
+            )
+
+        reconciliation_rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM note_task_reconciliation_state ORDER BY note_id"
+        )]
+        for row in reconciliation_rows:
+            note = conn.execute("SELECT client_id FROM notes WHERE id=?", (row["note_id"],)).fetchone()
+            reconciliation_owner = str(note[0]).strip() if note is not None else ""
+            if not reconciliation_owner:
+                raise SchemaError("Notes task v60 migration could not prove reconciliation ownership.")  # noqa: TRY003
+            conn.execute(
+                "INSERT INTO note_task_reconciliation_state_v60 VALUES (?,?,?,?,?,?,?,?,?)",
+                (reconciliation_owner, dataset_id, *tuple(row.values())),
+            )
+
+        source_sets = {
+            "note_tasks": task_rows, "task_note_projections": projection_rows,
+            "task_events": event_rows, "task_event_read_state": read_rows,
+            "note_task_reconciliation_state": reconciliation_rows,
+        }
+        ordering = {
+            "note_tasks": "id", "task_note_projections": "task_id", "task_events": "id",
+            "task_event_read_state": "event_id,user_id", "note_task_reconciliation_state": "note_id",
+        }
+        for table, source_rows in source_sets.items():
+            columns = tuple(source_rows[0]) if source_rows else tuple(
+                str(column[1]) for column in conn.execute(f"PRAGMA table_info({table})")
+            )
+            target_rows = [dict(row) for row in conn.execute(
+                f"SELECT {','.join(columns)} FROM {table}_v60 ORDER BY {ordering[table]}"  # nosec B608
+            )]
+            if len(source_rows) != len(target_rows) or self._note_task_v60_hash(source_rows) != self._note_task_v60_hash(target_rows):
+                raise SchemaError(f"Notes task v60 source verification failed for {table}.")  # noqa: TRY003
+
+    def _verify_note_task_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Reject current-v60 SQLite task catalog drift instead of repairing it."""
+        expected_columns = {
+            "note_tasks": {"owner_user_id","dataset_id","id","note_id","text","status","metadata_json",
+                "projection_status","deleted","created_at","updated_at","completed_at","client_id","version",
+                "canonical_revision","canonical_hash","source_diagnostic_code","source_diagnostic_hash"},
+            "task_note_projections": {"owner_user_id","dataset_id","task_id","note_id","note_version",
+                "line_number","start_offset","end_offset","normalized_text_hash","occurrence_index",
+                "block_fingerprint","raw_line","has_child_content","projection_status","updated_at"},
+            "task_events": {"owner_user_id","dataset_id","id","task_id","note_id","event_type","actor_type",
+                "actor_id","tool_name","policy_mode","approval_id","old_value_json","new_value_json","created_at",
+                "client_id","sync_revision","sync_object_hash","sync_server_cursor","source_device_id",
+                "client_occurred_at","source_kind","corrects_activity_id","deleted","deleted_at","delete_reason",
+                "source_diagnostic_code","source_diagnostic_hash"},
+            "task_event_read_state": {"owner_user_id","dataset_id","event_id","user_id","read_at","dismissed_at"},
+            "note_task_reconciliation_state": {"owner_user_id","dataset_id","note_id","note_version","status",
+                "reconciled_at","item_count","warning_count","cursor"},
+            "task_projection_drifts": {"owner_user_id","dataset_id","id","note_id","task_id",
+                "marker_base_revision","marker_base_hash","note_head_cursor","note_head_hash","task_head_cursor",
+                "task_head_hash","reason_code","status","created_at","updated_at","resolved_at"},
+        }
+        if not set(expected_columns).issubset(self._sqlite_table_names(conn)):
+            raise SchemaError("Notes task v60 SQLite table catalog drifted.")  # noqa: TRY003
+        for table, columns in expected_columns.items():
+            actual = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}  # nosec B608
+            if actual != columns:
+                raise SchemaError(f"Notes task v60 SQLite column catalog drifted for {table}.")  # noqa: TRY003
+        if conn.execute("PRAGMA foreign_key_check").fetchall():
+            raise SchemaError("Notes task v60 SQLite foreign-key catalog is invalid.")  # noqa: TRY003
+        expected_indexes = {
+            "idx_note_tasks_scope_note_page","idx_note_tasks_scope_status_page","idx_note_tasks_scope_projection",
+            "idx_task_projections_scope_note","idx_task_projections_scope_status","idx_task_events_scope_task_page",
+            "idx_task_events_scope_note_page","idx_task_events_scope_created","idx_task_event_read_scope_user",
+            "idx_task_reconciliation_scope_status","idx_task_projection_drifts_scope_status",
+            "idx_task_projection_drifts_scope_task",
+        }
+        actual_indexes = {str(row[0]) for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL AND tbl_name IN (?,?,?,?,?,?)",
+            self._NOTE_TASK_V60_TABLES,
+        )}
+        if actual_indexes != expected_indexes:
+            raise SchemaError("Notes task v60 SQLite index catalog drifted.")  # noqa: TRY003
+
+    def _migrate_from_v59_to_v60_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Transactionally replace the legacy task graph with scoped v60 tables."""
+        if self._get_db_version(conn) != 59:
+            raise SchemaError("Notes task v60 migration requires exact schema version 59.")  # noqa: TRY003
+        source_tables = set(self._NOTE_TASK_V60_TABLES[:-1])
+        tables = self._sqlite_table_names(conn)
+        if not source_tables.issubset(tables):
+            raise SchemaError("Notes task v60 migration source catalog is incomplete.")  # noqa: TRY003
+        targets = {f"{table}_v60" for table in self._NOTE_TASK_V60_TABLES}
+        if "task_projection_drifts" in tables or tables.intersection(targets):
+            raise SchemaError("Notes task v60 target-table collision requires explicit repair.")  # noqa: TRY003
+        self._create_note_task_schema_v60_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("create")
+        self._copy_note_task_graph_v60_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("copy")
+        for table in ("task_event_read_state","task_note_projections","note_task_reconciliation_state",
+                      "task_events","note_tasks"):
+            conn.execute(f"DROP TABLE {table}")  # nosec B608 - fixed relation names.
+        for table in self._NOTE_TASK_V60_TABLES:
+            conn.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}")  # nosec B608
+        self._create_note_task_indexes_v60_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("index")
+        self._verify_note_task_schema_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("verify")
+        cursor = conn.execute(
+            "UPDATE db_schema_version SET version=60 WHERE schema_name=? AND version=59",
+            (self._SCHEMA_NAME,),
+        )
+        if cursor.rowcount != 1 or self._get_db_version(conn) != 60:
+            raise SchemaError("Notes task v60 migration failed version verification.")  # noqa: TRY003
+
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
 
@@ -14050,6 +14457,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = 0
                         current_initial_version = 0
                     else:
+                        if target_version == 60:
+                            self._verify_note_task_schema_sqlite(conn)
                         logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
                         # Ensure helpful indexes that may have been introduced post-creation
                         try:
@@ -14292,6 +14701,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 59 and current_db_version == 58:
                         self._migrate_from_v58_to_v59(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 60 and current_db_version == 59:
+                        self._migrate_from_v59_to_v60_sqlite(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -14719,6 +15131,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 59 and current_db_version == 58:
                     self._migrate_from_v58_to_v59(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 60 and current_db_version == 59:
+                    self._migrate_from_v59_to_v60_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -14736,6 +15151,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if final_version_check != target_version:
                     raise SchemaError(  # noqa: TRY003, TRY301
                         f"Schema migration process completed, but final DB version is {final_version_check}, expected {target_version}. Manual check required.")
+                if final_version_check == 60:
+                    self._verify_note_task_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
@@ -35459,6 +35876,8 @@ for _note_store_method in (
 for _task_store_method in (
     "create_task",
     "get_task",
+    "get_task_scoped",
+    "resolve_task_compatibility_scope",
     "get_task_projection",
     "list_tasks",
     "update_unlinked_task_metadata_record_only",
@@ -35477,6 +35896,7 @@ for _task_store_method in (
     "set_reconciliation_state",
     "candidate_notes_for_task_discovery",
     "count_candidate_notes_for_task_discovery",
+    "bind_local_task_graph_to_dataset",
 ):
     setattr(
         CharactersRAGDB,

@@ -53,7 +53,11 @@ def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: 
     saved = db.get_note_by_id(str(note["id"]))
     assert saved is not None
     assert saved["content"] == "Intro\n"
-    assert db.list_tasks(note_id=str(note["id"])) == []
+    assert db.list_tasks(
+        note_id=str(note["id"]),
+        owner_user_id=db.client_id,
+        dataset_id="local-unbound",
+    ) == []
 
 
 @pytest.mark.parametrize(
