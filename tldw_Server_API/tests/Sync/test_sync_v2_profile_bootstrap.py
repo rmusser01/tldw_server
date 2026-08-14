@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -956,3 +957,260 @@ def test_notes_organization_failed_profile_exposes_only_safe_summary(
         "error_code": "notes_organization_bootstrap_source_invalid",
     }
     assert "bootstrap_id" not in failed.dataset.notes_organization
+
+
+def test_dormant_task_domain_readiness_diagnostics_are_owner_scoped_and_sanitized(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    private_cursor = "local-unbound|private task title|actor@example.test"
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-task-readiness",
+            owner_user_id="user-1",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_task_v1": {
+                    "state": "blocked",
+                    "source_cursor": private_cursor,
+                    "source_count": 3,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": "notes_task_source_invalid",
+                    "title": "must not escape",
+                    "markdown": "- [ ] private",
+                },
+                "notes_task_activity_v1": {
+                    "state": "ready",
+                    "source_cursor": "activity-3",
+                    "source_count": 5,
+                    "source_fingerprint": "b" * 64,
+                    "reason_code": None,
+                    "actor_id": "private-actor",
+                    "event_value": {"private": True},
+                },
+                "task_activity_capture_enabled": True,
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_task_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id="dataset-task-readiness",
+    )
+
+    assert diagnostics.task.state == "blocked"
+    assert diagnostics.task.source_count == 3
+    assert diagnostics.task.cursor == "sha256:" + hashlib.sha256(
+        private_cursor.encode("utf-8")
+    ).hexdigest()
+    assert diagnostics.task.source_fingerprint == "a" * 64
+    assert diagnostics.task.reason_code == "notes_task_source_invalid"
+    assert diagnostics.task_activity.state == "ready"
+    assert diagnostics.task_activity.source_count == 5
+    assert diagnostics.task_activity.cursor == "sha256:" + hashlib.sha256(
+        b"activity-3"
+    ).hexdigest()
+    assert diagnostics.task_activity_capture_enabled is True
+    serialized = repr(diagnostics)
+    for secret in (
+        private_cursor,
+        "private task title",
+        "actor@example.test",
+        "must not escape",
+        "private-actor",
+        "event_value",
+        "local-unbound",
+    ):
+        assert secret not in serialized
+
+    with pytest.raises(
+        SyncStoreError,
+        match="Sync dataset was not found or is not accessible",
+    ):
+        service._profile_manager().notes_task_readiness_diagnostics(
+            user_id="other-user",
+            dataset_id="dataset-task-readiness",
+        )
+
+
+def test_dormant_task_domain_malformed_readiness_fails_closed(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-malformed-readiness",
+            owner_user_id="user-1",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "notes_task_v1": {
+                    "state": "ready",
+                    "source_cursor": ["private", "cursor"],
+                    "source_count": True,
+                    "source_fingerprint": "not-a-hash",
+                    "reason_code": "private detail",
+                },
+                "notes_task_activity_v1": None,
+                "task_activity_capture_enabled": "yes",
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_task_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id="dataset-malformed-readiness",
+    )
+
+    assert diagnostics.task.state == "blocked"
+    assert diagnostics.task.source_count == 0
+    assert diagnostics.task.cursor is None
+    assert diagnostics.task.source_fingerprint is None
+    assert diagnostics.task.reason_code == "notes_task_readiness_state_invalid"
+    assert diagnostics.task_activity.state == "blocked"
+    assert diagnostics.task_activity.reason_code == (
+        "notes_task_activity_readiness_state_invalid"
+    )
+    assert diagnostics.task_activity_capture_enabled is False
+    assert "private detail" not in repr(diagnostics)
+
+
+def test_dormant_task_domain_other_domain_reason_fails_closed(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-cross-domain-reason",
+            owner_user_id="user-1",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "notes_task_v1": {
+                    "state": "blocked",
+                    "source_cursor": "cursor-1",
+                    "source_count": 1,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": "notes_task_activity_source_invalid",
+                }
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_task_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id="dataset-cross-domain-reason",
+    )
+
+    assert diagnostics.task.state == "blocked"
+    assert diagnostics.task.source_count == 0
+    assert diagnostics.task.reason_code == "notes_task_readiness_state_invalid"
+
+
+def test_dormant_task_domain_oversized_count_fails_closed(tmp_path: Path) -> None:
+    service, store = _service(tmp_path)
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-oversized-count",
+            owner_user_id="user-1",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "notes_task_v1": {
+                    "state": "bootstrapping",
+                    "source_cursor": "cursor-1",
+                    "source_count": 9_223_372_036_854_775_808,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": None,
+                }
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_task_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id="dataset-oversized-count",
+    )
+
+    assert diagnostics.task.state == "blocked"
+    assert diagnostics.task.source_count == 0
+    assert diagnostics.task.reason_code == "notes_task_readiness_state_invalid"
+
+
+def test_dormant_task_domain_unpaired_surrogate_cursor_fails_closed(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-surrogate-cursor",
+            owner_user_id="user-1",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "notes_task_v1": {
+                    "state": "bootstrapping",
+                    "source_cursor": "\ud800",
+                    "source_count": 1,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": None,
+                }
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_task_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id="dataset-surrogate-cursor",
+    )
+
+    assert diagnostics.task.state == "blocked"
+    assert diagnostics.task.source_count == 0
+    assert diagnostics.task.reason_code == "notes_task_readiness_state_invalid"
+
+
+def test_dormant_task_domain_forged_ready_never_changes_capabilities(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    ready = {
+        "state": "ready",
+        "source_cursor": "cursor-1",
+        "source_count": 1,
+        "source_fingerprint": "a" * 64,
+        "reason_code": None,
+    }
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-forged-ready",
+            owner_user_id="user-1",
+            scope_type="personal",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_task_v1": dict(ready),
+                "notes_task_activity_v1": dict(ready),
+                "task_activity_capture_enabled": True,
+            },
+        )
+    )
+
+    profile = service.profile(user_id="user-1")
+
+    assert "notes.task" not in profile.capabilities.supported_domains
+    assert "notes.task_activity" not in profile.capabilities.supported_domains
+    assert "notes.task" not in profile.capabilities.operations
+    assert "notes.task_activity" not in profile.capabilities.operations
+    assert "notes.task" not in profile.capabilities.domain_schemas
+    assert "notes.task_activity" not in profile.capabilities.domain_schemas
+    assert "notes.task" not in profile.capabilities.supported_adapter_versions
+    assert "notes.task_activity" not in profile.capabilities.supported_adapter_versions
+    assert "notes.task" not in profile.capabilities.writable_adapter_versions
+    assert "notes.task_activity" not in profile.capabilities.writable_adapter_versions
+    assert profile.dataset is not None
+    assert "notes.task" not in profile.dataset.domains
+    assert "notes.task_activity" not in profile.dataset.domains

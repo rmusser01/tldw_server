@@ -28,6 +28,48 @@ from .store import SyncV2Store
 SYNC_V2_M1_PROTOCOL_VERSION = "sync-v2-m1"
 BOOTSTRAP_MODES = frozenset({"server_frontend", "offline_sync"})
 DEFAULT_CLIENT_FAMILY = "chatbook"
+_DORMANT_TASK_READINESS_STATES = frozenset(
+    {
+        "not_enrolled",
+        "enrolling",
+        "bootstrapping",
+        "verifying",
+        "ready",
+        "blocked",
+    }
+)
+_DORMANT_TASK_READINESS_REASON_CODES_BY_DOMAIN = {
+    "notes_task": frozenset(
+        {
+            "notes_task_source_invalid",
+            "notes_task_source_changed",
+            "notes_task_source_scope_invalid",
+            "notes_task_source_catalog_invalid",
+            "notes_task_verification_failed",
+        }
+    ),
+    "notes_task_activity": frozenset(
+        {
+            "notes_task_activity_source_invalid",
+            "notes_task_activity_source_changed",
+            "notes_task_activity_source_scope_invalid",
+            "notes_task_activity_source_catalog_invalid",
+            "notes_task_activity_verification_failed",
+        }
+    ),
+}
+_DORMANT_TASK_READINESS_CURSOR_MAX_BYTES = 4_096
+_DORMANT_TASK_READINESS_COUNT_MAX = 9_223_372_036_854_775_807
+_DORMANT_TASK_READINESS_MISSING = object()
+
+
+def _is_valid_dormant_task_cursor(value: object) -> bool:
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    try:
+        return len(value.encode("utf-8")) <= _DORMANT_TASK_READINESS_CURSOR_MAX_BYTES
+    except UnicodeEncodeError:
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +142,26 @@ class SyncNotesAttachmentBootstrapDiagnostics:
         default_factory=list
     )
     recovery_actions: list[SyncRecoveryActionDescriptor] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDormantTaskDomainReadiness:
+    """Privacy-safe internal readiness for one dormant task domain."""
+
+    state: str = "not_enrolled"
+    source_count: int = 0
+    cursor: str | None = None
+    source_fingerprint: str | None = None
+    reason_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDormantTaskReadinessDiagnostics:
+    """Owner-scoped dormant task readiness without source payload values."""
+
+    task: SyncDormantTaskDomainReadiness
+    task_activity: SyncDormantTaskDomainReadiness
+    task_activity_capture_enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +374,37 @@ class SyncV2ProfileManager:
             dataset=dataset,
             device_id=device_id,
             created=None,
+        )
+
+    def notes_task_readiness_diagnostics(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+    ) -> SyncDormantTaskReadinessDiagnostics:
+        """Return owner-only, payload-free readiness for dormant task domains."""
+
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        return SyncDormantTaskReadinessDiagnostics(
+            task=_safe_dormant_task_readiness(
+                dataset.metadata.get(
+                    "notes_task_v1",
+                    _DORMANT_TASK_READINESS_MISSING,
+                ),
+                domain="notes_task",
+            ),
+            task_activity=_safe_dormant_task_readiness(
+                dataset.metadata.get(
+                    "notes_task_activity_v1",
+                    _DORMANT_TASK_READINESS_MISSING,
+                ),
+                domain="notes_task_activity",
+            ),
+            task_activity_capture_enabled=(
+                dataset.metadata.get("task_activity_capture_enabled") is True
+            ),
         )
 
     def notes_attachment_bootstrap_diagnostics(
@@ -660,6 +753,85 @@ def _safe_notes_attachment_status(
     }
 
 
+def _safe_dormant_task_readiness(
+    metadata: object,
+    *,
+    domain: str,
+) -> SyncDormantTaskDomainReadiness:
+    if metadata is _DORMANT_TASK_READINESS_MISSING:
+        return SyncDormantTaskDomainReadiness()
+
+    invalid = SyncDormantTaskDomainReadiness(
+        state="blocked",
+        reason_code=f"{domain}_readiness_state_invalid",
+    )
+    if not isinstance(metadata, Mapping):
+        return invalid
+    required = {
+        "state",
+        "source_cursor",
+        "source_count",
+        "source_fingerprint",
+        "reason_code",
+    }
+    if not required.issubset(metadata):
+        return invalid
+    state = metadata.get("state")
+    source_cursor = metadata.get("source_cursor")
+    source_count = metadata.get("source_count")
+    source_fingerprint = metadata.get("source_fingerprint")
+    reason_code = metadata.get("reason_code")
+    if state not in _DORMANT_TASK_READINESS_STATES:
+        return invalid
+    if (
+        isinstance(source_count, bool)
+        or not isinstance(source_count, int)
+        or source_count < 0
+        or source_count > _DORMANT_TASK_READINESS_COUNT_MAX
+    ):
+        return invalid
+    if source_cursor is not None and not _is_valid_dormant_task_cursor(source_cursor):
+        return invalid
+    if source_fingerprint is not None and (
+        not isinstance(source_fingerprint, str)
+        or len(source_fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in source_fingerprint)
+    ):
+        return invalid
+    if reason_code is not None and reason_code not in (
+        _DORMANT_TASK_READINESS_REASON_CODES_BY_DOMAIN[domain]
+    ):
+        return invalid
+    if (state == "blocked") != (reason_code is not None):
+        return invalid
+    if state in {"not_enrolled", "enrolling"} and (
+        source_cursor is not None
+        or source_count != 0
+        or source_fingerprint is not None
+    ):
+        return invalid
+    if source_count > 0 and (
+        source_cursor is None or source_fingerprint is None
+    ):
+        return invalid
+    if source_cursor is not None and source_fingerprint is None:
+        return invalid
+    if state in {"verifying", "ready"} and source_fingerprint is None:
+        return invalid
+    cursor_hash = (
+        "sha256:" + hashlib.sha256(source_cursor.encode("utf-8")).hexdigest()
+        if source_cursor is not None
+        else None
+    )
+    return SyncDormantTaskDomainReadiness(
+        state=str(state),
+        source_count=source_count,
+        cursor=cursor_hash,
+        source_fingerprint=source_fingerprint,
+        reason_code=reason_code if isinstance(reason_code, str) else None,
+    )
+
+
 def _safe_non_negative_int(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
@@ -726,6 +898,8 @@ __all__ = [
     "BOOTSTRAP_MODES",
     "DEFAULT_CLIENT_FAMILY",
     "SYNC_V2_M1_PROTOCOL_VERSION",
+    "SyncDormantTaskDomainReadiness",
+    "SyncDormantTaskReadinessDiagnostics",
     "SyncNotesAttachmentBootstrapDiagnostics",
     "SyncNotesAttachmentCleanupSample",
     "SyncProfileDatasetStatus",
