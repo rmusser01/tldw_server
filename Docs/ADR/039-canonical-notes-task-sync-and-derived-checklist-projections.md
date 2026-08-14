@@ -18,7 +18,9 @@ state, and reconciliation bookkeeping as derived local state.
 The canonical product authorities remain the existing ChaChaNotes task tables:
 
 - `note_tasks` owns each task's stable identity, parent note, mutable fields,
-  optimistic version, and soft-delete lifecycle;
+  canonical Sync revision/hash, and soft-delete lifecycle. Its existing `version`
+  remains the REST row version because projection-only operations already advance
+  it; a new canonical revision/hash advances only for portable task mutations;
 - `task_events` owns immutable user-visible task history; and
 - `task_event_read_state`, `task_note_projections`, and
   `note_task_reconciliation_state` remain local projections or UI state and are
@@ -50,15 +52,20 @@ fingerprint replay is idempotent, while reuse of the ID with different content i
 a conflict. Activity tombstone is one-way and cannot rewrite or restore event
 content.
 
-An activity must resolve to at least one authorized parent. When both task and note
-identities are supplied, the task must belong to that note. PostgreSQL RLS and all
-service queries enforce owner, dataset, and parent-note authority. Migrations are
-transactional and fail closed on catalog drift. Existing data and REST behavior are
-preserved before a dataset explicitly enrolls in the new domains.
+Every activity has a required authorized note and an optional task. When a task is
+present, it must belong to that note. All five existing task-side tables, plus the
+new drift table, gain collision-safe owner/dataset identity, forced PostgreSQL RLS,
+and owner-scoped service predicates. Migrations are transactional and fail closed
+on catalog drift. Existing data and REST behavior are preserved before a dataset
+explicitly enrolls in the new domains.
 
 Markdown checklist text is a deterministic projection, not a competing authority.
-Reconciliation compares the last common projection with the current canonical task
-and current Markdown:
+Each managed checklist line carries a hidden versioned marker containing its task
+ID and exact last-projected task revision/hash. The marker reconstructs identity
+after projection-cache loss; the immutable Sync envelope named by that tuple
+reconstructs the last-common projected field snapshot. If that base is unavailable,
+reconciliation fails safe to review rather than guessing by text. Reconciliation
+compares that base with the current canonical task and current Markdown:
 
 - Markdown-only changes become canonical task mutations plus activity;
 - task-only changes rebuild the Markdown projection;
@@ -73,18 +80,18 @@ product materialization. Product and Sync databases do not share a distributed
 transaction; idempotent repair closes a product-commit/status-commit split.
 
 Rollout uses existing per-dataset enrollment and readiness. It adds no new global
-environment flag. A domain may be supported by the server without being advertised
-as dataset-writable. `notes.task` becomes writable only after its parent-note and
-task bootstrap is complete. `notes.task_activity` additionally requires activity
-bootstrap. Existing datasets are never silently enrolled.
+environment flag. Neither domain is publicly advertised as supported or writable
+until the fourth PR supplies deterministic task/activity group expansion,
+projection convergence, bootstrap verification, and repair. Existing datasets are
+never silently enrolled.
 
 TASK-13006 is delivered as four atomic pull requests:
 
 1. contract, storage, migration, RLS, catalog verification, and dormant readiness;
-2. the complete `notes.task` lifecycle and server-origin capture;
-3. immutable `notes.task_activity` capture and bootstrap; and
-4. Markdown projection convergence, compound mutation groups, end-to-end testing,
-   and public documentation.
+2. a complete but dormant `notes.task` lifecycle and bootstrap;
+3. complete but dormant immutable `notes.task_activity` capture and bootstrap; and
+4. deterministic compound mutation groups, Markdown projection convergence,
+   capability activation, end-to-end testing, and public documentation.
 
 ## Context
 

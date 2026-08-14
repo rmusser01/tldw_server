@@ -34,7 +34,8 @@ The reviewed server already provides:
 
 The current task payload is narrower than the required wire contract. `note_tasks`
 stores a stable ID, parent note, `text`, open/done status, metadata, projection
-status, soft delete, timestamps, client ID, and optimistic version. The existing
+status, soft delete, timestamps, client ID, and a projection-influenced REST row
+version. The existing
 metadata supports due date, priority, and estimate. There is no `notes.task` or
 `notes.task_activity` adapter, activity tombstone, or explicit task-table
 PostgreSQL RLS contract.
@@ -84,9 +85,10 @@ weakening production, then the full task baseline passed:
 | --- | --- | --- |
 | Current task | `note_tasks` | `notes.task` v1 whole-object upsert/tombstone |
 | User-visible task history | `task_events` | `notes.task_activity` v1 immutable create/one-way tombstone |
-| Checklist text and projection cursor | `task_note_projections` plus note Markdown | Derived; rebuild/reconcile locally |
+| Checklist text and projection cursor | managed marker in note Markdown plus `task_note_projections` cache | Derived; rebuild/reconcile locally |
 | Reconciliation bookkeeping | `note_task_reconciliation_state` | Local only |
 | Activity read/dismiss state | `task_event_read_state` | Device/user UI state; never synchronized |
+| Projection drift review | `task_projection_drifts` | Local review state; never synchronized |
 
 Each task and activity uses a stable opaque UUID identity. The client may submit
 the resource ID but cannot select owner, authenticated actor, or trusted source
@@ -99,20 +101,59 @@ immutable.
 continue to expose and accept `text`; adapters translate at the boundary without
 changing stored meaning.
 
-The version-1 task payload contains:
+The version-1 task payload is exact; every field is required even when nullable:
 
-- `task_id` and `note_id`;
-- `title` and nullable `description`;
-- `status` and explicit completion state;
-- nullable `priority`, due date/time, recurrence rule/state, assignee, and estimate;
-- bounded normalized tags; and
-- bounded custom metadata.
+| Field | Canonical type and constraint |
+| --- | --- |
+| `task_id`, `note_id` | lowercase canonical UUIDv4 strings; immutable and equal to the envelope object/parent identity |
+| `title` | 1–2,000 Unicode code points, no CR/LF/control characters, already stripped; REST keeps its existing strip behavior before capture |
+| `description` | null or 0–16,000 Unicode code points with no disallowed controls; content is otherwise preserved |
+| `status` | exactly `open` or `done` |
+| `completed_at` | null RFC 3339 UTC timestamp for `open`; required RFC 3339 UTC timestamp for `done` |
+| `priority` | null or `low`, `medium`, `high` |
+| `due_date` | null or a real calendar date in canonical `YYYY-MM-DD` form |
+| `estimate` | null or `[0-9]{1,6}[mhd]`, preserving the existing accepted syntax |
+| `recurrence` | null or `{frequency, interval, by_weekday, until, state, occurrence_index}` using the bounded rules below |
+| `assignee_id` | null or the authenticated personal-dataset owner; shared assignment needs a later adapter version |
+| `tags` | at most 32 already-trimmed NFKC strings of 1–64 code points, no controls, unique under casefold, stored/hash-sorted by `(casefold, value)` |
+| `custom` | JSON object with at most 32 non-reserved keys, keys 1–64 safe characters, depth at most 4, and canonical UTF-8 JSON at most 16 KiB |
+
+Recurrence is data, not a scheduler. `frequency` is `daily`, `weekly`, `monthly`,
+or `yearly`; `interval` is 1–365; `by_weekday` is an ordered unique subset of
+`mo` through `su` and is allowed only for weekly recurrence; `until` is null or a
+canonical real date; `state` is `active`, `paused`, or `completed`; and
+`occurrence_index` is an integer from 0 through 2,147,483,647. Contradictory or
+unknown keys are rejected.
 
 Existing core fields stay in existing columns. Extended fields remain in
 `metadata_json`, but they are first-class validated wire fields rather than an
 untyped pass-through. Reserved wire keys cannot appear again in custom metadata.
 Unknown fields, noncanonical values, duplicate tags, invalid recurrence data, and
 out-of-bound strings/collections are rejected before hashing or persistence.
+
+The product mapping is fixed:
+
+| Wire state | Product state |
+| --- | --- |
+| `title` | `note_tasks.text` |
+| `status` | `note_tasks.status` |
+| `completed_at` | `note_tasks.completed_at` |
+| `description`, `priority`, `due_date`, `estimate`, `recurrence`, `assignee_id`, `tags`, `custom` | reserved canonical keys in `metadata_json` |
+| portable revision/hash | new `canonical_revision`, `canonical_hash` columns |
+| REST/projection optimistic row version | existing `version` column |
+
+Canonical task mutation increments both `version` and `canonical_revision` and
+recomputes `canonical_hash`. Projection-only locator/status changes may preserve
+their current REST `version` behavior but never change `canonical_revision` or
+`canonical_hash`. Bootstrap initializes `canonical_revision` to the existing
+positive `version` and hashes the current canonical row, so no REST version moves
+backward. Sync envelope `object_revision` always equals canonical revision, never
+the projection-influenced REST version.
+
+Legacy `due_date`, `priority`, and `estimate` keys map directly after exact
+validation. A legacy reserved key with the wrong type/value, an unknown top-level
+legacy key, or an oversized value blocks readiness and reports only row ID plus a
+reason code/hash; migration does not guess or silently relocate it into `custom`.
 
 The recurrence contract stores a validated rule and recurrence state only. It does
 not interpret wall-clock time to create another task. A future scheduler requires a
@@ -123,20 +164,54 @@ separate task and architecture decision.
 An activity payload contains:
 
 - stable `activity_id`;
-- `task_id` and `note_id` parent identities;
+- required `note_id` and nullable `task_id` parent identities;
 - actor identity and source device as server-bound provenance;
 - client event timestamp preserved as submitted metadata;
 - transition/event type, source, and bounded structured metadata; and
 - optional task revision/result references needed to verify the transition.
+
+The exact value contract is:
+
+| Field | Canonical type and constraint |
+| --- | --- |
+| `activity_id`, `note_id` | required lowercase UUIDv4 strings |
+| `task_id` | null or lowercase UUIDv4; when present it belongs to `note_id` |
+| `event_type` | one closed value listed below |
+| `actor_type` | server-bound `user`, `agent`, `tool`, `system`, or `legacy` |
+| `actor_id` | null or an authorized opaque ID of 1–128 safe characters; user actors equal the authenticated owner |
+| `source_device_id` | registered canonical device UUID for client origin; null only for trusted server/bootstrap sources |
+| `client_occurred_at` | canonical RFC 3339 UTC timestamp; preserved but not ordering authority |
+| `source_kind` | `client`, `rest`, `mcp`, `markdown_reconciliation`, `repair`, or `trusted_bootstrap_v1` |
+| `corrects_activity_id` | required same-scope UUID only for `corrected`; otherwise null |
+| `old_value`, `new_value` | null or event-schema-validated canonical JSON objects, each at most 16 KiB and depth 4 |
+| `metadata` | canonical JSON object at most 8 KiB, 16 keys, and depth 3; credentials and raw Markdown are forbidden |
 
 The stable ID is opaque, not a digest. A canonical fingerprint over the validated
 immutable content protects exact replay. Server cursor and activity ID define
 deterministic order. Client timestamps may be displayed but never resolve ordering
 or conflict.
 
-An activity must resolve to at least one authorized parent. If both task and note
-are present, the task must belong to that note. A task identity from another owner
-or dataset is indistinguishable from missing at public boundaries.
+The note is always present and authorized. If the task is present, it must belong
+to that note. A task identity from another owner or dataset is indistinguishable
+from missing at public boundaries.
+
+The product mapping adds owner/dataset, `sync_revision`, `sync_object_hash`,
+`sync_server_cursor`, `source_device_id`, `client_occurred_at`, `source_kind`,
+`corrects_activity_id`, and one-way deleted/deleted-at/delete-reason columns to
+`task_events`. Existing `created_at` remains the server-created time. Existing
+actor/tool/policy/approval and old/new JSON fields remain source data for the
+canonical event metadata. Activity pages keyset-order by
+`(sync_server_cursor, activity_id)`; `created_at` and `client_occurred_at` never
+order Sync history.
+
+Version 1 event types are the closed set `created`, `updated`, `completed`,
+`reopened`, `deleted`, `restored`, `projection_linked`, `projection_unlinked`,
+`projection_drift`, and `corrected`. A `corrected` event requires a
+`corrects_activity_id` in the same owner/dataset/note and, when present, task.
+Other event types require that field to be null. The fingerprint binds adapter
+version, lifecycle, activity ID, parent IDs, event type, correction target, actor,
+source device, client timestamp, source kind, transition values, and bounded
+metadata; it excludes server cursor, server-created time, and read state.
 
 ## Domain contracts
 
@@ -164,14 +239,21 @@ part of portable state. It excludes server cursor and local projection data.
 Activity creation uses an `upsert` envelope only as the common wire verb; product
 semantics are immutable create.
 
-- A missing stable ID creates one event.
+- A previously unseen envelope object/activity ID creates one event; the ID is
+  always required.
 - Exact stable ID plus canonical fingerprint replay is idempotent.
 - Reusing an ID with changed content is a stable idempotency conflict.
 - An existing event cannot be updated.
-- Tombstone requires exact identity/fingerprint lineage and is irreversible.
+- Tombstone requires the exact current cursor/revision/hash base, advances the
+  immutable activity lifecycle revision by one, and is irreversible.
 - Tombstoned activity cannot be restored or recreated under the same ID.
 - Corrections are represented as a new activity that references the earlier event
   where the event taxonomy permits it.
+
+Exact replay of the original accepted create or tombstone returns its existing
+result. A second create after tombstone, a distinct second tombstone, or any reuse
+with changed fingerprint conflicts. Tombstones retain the immutable event content
+for audit but exclude it from ordinary activity surfaces.
 
 Task transitions that require user-visible history create exactly one canonical
 activity. A retry or crash repair cannot duplicate it because the event ID and
@@ -180,9 +262,13 @@ mutation-group step are stable.
 ## Storage, migration, and RLS
 
 The first pull request extends the existing task schema rather than creating a
-parallel product authority. Migration changes are additive except where an
-explicit lifecycle field or constraint is required for immutable activity
-tombstones and exact Sync bootstrap.
+parallel product authority. Because client-chosen IDs are dataset-scoped, migration
+rebuilds the five existing task-side tables under the schema lock with composite
+`(owner_user_id, dataset_id, id)` authority and matching composite foreign keys;
+an internal surrogate may be used only if it preserves the same collision-safe
+contract. It also adds `task_projection_drifts` with the same scope. Legacy rows are
+mapped only after their owning note and dataset are proven. The swap is
+transactional, source-count/hash verified, and version-last.
 
 Both backends must enforce:
 
@@ -194,12 +280,20 @@ Both backends must enforce:
 - owner and parent-note authorization in every read/write predicate; and
 - exact current catalog verification before advertising readiness.
 
-PostgreSQL uses forced RLS. Task policies require authenticated owner/dataset and an
-owned parent note in `USING` and `WITH CHECK`. Activity policies additionally
-require the referenced task, when present, to belong to the same owner, dataset,
-and note. The current-version verifier enumerates every required column,
-constraint, index, policy, role, command, and canonical expression and rejects
-additional permissive policy drift.
+These rules apply to `note_tasks`, `task_events`, `task_note_projections`,
+`task_event_read_state`, `note_task_reconciliation_state`, and
+`task_projection_drifts`. Read-state requires the authenticated `user_id` to equal
+the owner and joins an authorized event before any insert/update. Projection and
+reconciliation rows may contain raw Markdown or state that reveals task existence,
+so they receive the same boundary despite not being Sync domains. Every public
+predicate begins with owner and dataset before resource identity or limit.
+
+PostgreSQL uses forced RLS on all six tables. Task policies require authenticated
+owner/dataset and an owned parent note in `USING` and `WITH CHECK`. Activity,
+projection, read-state, reconciliation, and drift policies join through the same
+owned note/task/event boundary. The current-version verifier enumerates every
+required column, constraint, composite key/FK, index, policy, role, command, and
+canonical expression and rejects additional permissive policy drift.
 
 Migration is transactional and authority-locked before inspection. It never
 guesses at malformed legacy rows, rewrites existing task meaning, or deletes
@@ -233,11 +327,15 @@ stable ID. Tags and metadata limits are enforced before allocation or hashing.
 1. Validate envelope version, domain, operation, payload, and size.
 2. Authorize device, dataset, parent note, task/activity identity, and enrollment.
 3. Compare the complete optimistic base with the durable current head.
-4. Append under dataset authority and project under the ADR-034 materialization
-   fence.
-5. Persist task/activity product state, object state, and apply result
+4. Deterministically expand any task mutation into its required activity and note
+   projection steps before append. The activity ID and group ID derive from the
+   authenticated input envelope ID plus transition kind, so retry produces the
+   identical plan. Clients do not separately invent the transition event.
+5. Validate and append the complete group under dataset authority, then project
+   under the ADR-034 materialization fence.
+6. Persist task/activity product state, object state, and apply result
    idempotently.
-6. Return success only for an applied or exact terminal replay.
+7. Return success only for an applied or exact terminal replay.
 
 ### Server origin
 
@@ -259,15 +357,46 @@ Client-origin compound groups use the same append authority and materialization
 ordering. A conflict in one step blocks later projection rather than publishing a
 partial accepted intent as success.
 
+All portable task mutations emit one canonical activity, including metadata-only
+updates. A task tombstone retains history and emits `deleted`; restore emits
+`restored`. A Markdown projection change adds a `notes.note` step only when the
+canonical note bytes change. Group synthesis, validation, append, repair, and
+postcondition verification are complete before either domain is advertised.
+
+Normal lifecycle activity is coordinator-derived, not separately submitted by the
+client: actor/device/timestamp come from the authenticated task envelope and
+`old_value`/`new_value` come from its exact base and accepted payload. A direct
+client activity create is permitted only for `corrected` and must reference an
+authorized existing event. Server-origin REST/MCP/reconciliation supplies the same
+fields through trusted bindings, never caller-selectable provenance.
+
 ## Bootstrap, capability advertisement, and rollout
 
 No global environment flag is added. Existing dataset enrollment and readiness are
-the rollout boundary.
+the rollout boundary. Public supported and writable capability maps omit both
+domains through PRs 1–3; dormant adapters are not a compatibility promise.
 
-Schema presence alone advertises neither domain as writable. Existing datasets are
-not silently enrolled.
+Each domain has an independent readiness row and the state machine
+`not_enrolled -> enrolling -> bootstrapping -> verifying -> ready`, with
+`blocked` retaining its last verified keyset cursor and reason code. Retry resumes
+`bootstrapping` or `verifying`; disabling enrollment returns to `not_enrolled` only
+before a domain has published canonical history. Existing ready Notes groups are
+not reopened.
 
-`notes.task` becomes dataset-writable only when:
+Existing datasets require an explicit owner/admin enrollment action. New datasets
+begin `not_enrolled`; a creation request may atomically request these domains only
+after PR 4 exposes them, but no profile silently opts in. Adding a domain to an
+already-ready default-personal dataset creates its independent readiness row in one
+Sync transaction without changing earlier domain readiness.
+
+Before the source scan, enrollment enables fail-closed canonical capture for the
+new domain while external device writes remain disabled. Each bootstrap page holds
+the dataset materialization fence, reads an owner/dataset keyset page, appends
+trusted source-verified envelopes, and records its cursor/count/fingerprint.
+Concurrent REST changes therefore append after or before that page under the same
+ordering authority rather than escaping capture.
+
+`notes.task` becomes dataset-writable in PR 4 only when:
 
 - `notes.note` and `notes.task` are enrolled at supported adapter versions;
 - source task bootstrap is complete, count/fingerprint verified, and resumable
@@ -276,9 +405,9 @@ not silently enrolled.
 - no reconciliation blocker or unresolved bootstrap drift exists.
 
 `notes.task_activity` additionally requires activity enrollment, complete immutable
-event bootstrap, and transition capture readiness. A server may list a completed
-adapter version in supported capabilities while omitting it from the selected
-dataset's writable map until these conditions hold.
+event bootstrap, and transition capture readiness. PR 4 may then list both adapter
+versions in server-supported capabilities. The selected dataset's writable map
+still omits either domain until that domain's exact predicate is true.
 
 Bootstrap is non-destructive and keyset-paged. Stable existing task/event IDs are
 preserved. Each page records its source count, cursor, and privacy-safe fingerprint.
@@ -287,21 +416,52 @@ last verified page. Source drift either captures a verified correction under the
 dataset fence or leaves the dataset not ready; it never marks stale source data
 ready.
 
+Legacy event provenance uses the explicit `trusted_bootstrap_v1` source kind,
+preserves the stored actor/tool/policy fields after validation, uses stored
+`created_at` as `client_occurred_at`, and records a null source device with a
+`legacy_source_verified` marker. Bootstrap never fabricates a client device or
+claims that a legacy timestamp ordered Sync history.
+
 Legacy devices receive only versions they negotiated. Per-domain adapter-version
 cursors and acknowledgments prevent a version change from skipping or
 acknowledging incompatible envelopes.
 
 ## Markdown projection convergence
 
-Markdown checklists are a deterministic view over explicit task authority, with a
-recorded last-common projection used for three-way reconciliation.
+Markdown checklists are a deterministic view over explicit task authority. A
+managed line ends with the protected marker
+`<!-- tldw-task:v1:<task-uuid>:<canonical-revision>:<canonical-hash> -->`.
+The marker is not user-visible when rendered, is included in the canonical note
+bytes, and is updated only by the projection coordinator. Duplicate or malformed
+markers are drift, never identity claims. Unmarked legacy checklist lines enter the
+bounded bootstrap matcher once; after an unambiguous source-verified match or new
+task creation, the coordinator rewrites the line with its marker.
+
+The marker is the durable association and exact last-common task base tuple. The
+named immutable `notes.task` envelope supplies the base snapshot after
+`task_note_projections` loss. Projection cache rebuild parses markers, authorizes
+their owner/dataset/note/task relation, verifies the referenced envelope
+revision/hash, and regenerates offsets and hashes. If the historical envelope is
+missing, superseded, unauthorized, or inconsistent, the line becomes drift and no
+task or note is overwritten.
+
+An applied task envelope referenced by a live marker is retention-protected until
+the marker advances or unlinks. Sync maintenance may compact unrelated history but
+must not remove the only last-common snapshot for a live projection.
+
+Only `title`, checkbox-derived `status`/`completed_at`, `due_date`, `priority`, and
+`estimate` are Markdown-projectable in version 1. Description, recurrence,
+assignee, tags, and custom metadata remain explicit-task-only fields and therefore
+cannot be erased by Markdown. The last-common envelope provides the projected
+field snapshot needed to distinguish task-only, Markdown-only, and compatible
+changes.
 
 For each bounded reconciliation unit:
 
 | Markdown since base | Task since base | Result |
 | --- | --- | --- |
 | unchanged | unchanged | no-op |
-| changed | unchanged | validate Markdown edit, create/update/tombstone task, emit activity, then record new projection |
+| changed | unchanged | validate Markdown edit, create/update or unlink task projection, emit activity, then record new marker/base |
 | unchanged | changed | rebuild Markdown from canonical task and record new projection |
 | changed compatibly | changed compatibly | converge to one canonical task/projection and record the complete durable group |
 | changed incompatibly | changed incompatibly | retain both authorities, create a privacy-safe review drift record, and do not overwrite |
@@ -311,10 +471,26 @@ claim an explicit task by text coincidence alone; it must carry or resolve the
 stable projection identity. Unsupported or ambiguous Markdown remains visible and
 creates reviewable drift rather than disappearing.
 
-Projection records and drift bookkeeping never become Sync domains. After restore,
-migration, parser change, or detected corruption, they can be rebuilt from canonical
-notes, tasks, and activity. Read endpoints do not perform unbounded maintenance
-writes.
+Removing a managed line unlinks its projection and emits `projection_unlinked`; it
+does not tombstone the explicit task. Task deletion is an explicit task operation,
+removes the managed line in the same durable group when linked, and leaves the
+activity history. Restore reprojects the line only when the stored linkage is live
+and the parent note is live; an unlinked task remains unlinked until explicit
+relink. Note trash hides projections without changing task lifecycle.
+
+`task_projection_drifts` stores only owner/dataset/note/task IDs, marker base tuple,
+bounded reason code, note/task head cursors and hashes, status
+`open|resolved|dismissed`, and timestamps. It stores no raw title, description, or
+Markdown. Resolution requires an exact opaque drift ID plus current note/task head
+claims and chooses `keep_task`, `accept_markdown`, or `unlink`; changed claims create
+a new review rather than applying stale intent. Resolved/dismissed rows remain
+bounded audit metadata and are excluded from Sync.
+
+Projection cache and drift bookkeeping never become Sync domains. After cache loss,
+restore, migration, parser change, or detected corruption, association and the
+last-common snapshot are reconstructed from the marker plus immutable Sync history.
+When that proof is unavailable, rebuild stops at review. Read endpoints do not
+perform maintenance writes.
 
 ## Conflict and failure semantics
 
@@ -348,18 +524,20 @@ note before a live task and the task before task-scoped activity visibility.
 
 - add ADR-039, canonical validators/hashes, lifecycle fields, migrations, RLS,
   exact catalog verification, and bounded indexes;
+- separate portable canonical revision/hash from the projection-influenced REST
+  row version and add marker/drift storage contracts;
 - preserve current REST/data behavior;
 - add fail-closed source-reconciliation and readiness state; and
-- advertise neither new domain writable.
+- advertise neither new domain as supported or writable.
 
 ### TASK-13006.2 — `notes.task`
 
 - implement strict upsert/tombstone adapter and idempotent materializer;
 - enforce dataset, note, identity, exact base, completion/reopen, restore, and
   recurrence-state rules;
-- capture REST/MCP server-origin task mutations and repair split commits;
+- implement dormant REST/MCP task capture primitives and split-commit repair;
 - bootstrap existing tasks and prove pull/ack behavior; and
-- advertise only `notes.task` when its full readiness predicate is true.
+- keep both domains absent from public supported/writable capabilities.
 
 ### TASK-13006.3 — `notes.task_activity`
 
@@ -367,19 +545,25 @@ note before a live task and the task before task-scoped activity visibility.
 - bind actor/device provenance and deterministic ordering;
 - capture canonical events for task transitions with exact replay deduplication;
 - bootstrap existing stable event IDs and exclude read state; and
-- advertise activity only when bootstrap, capture, pull, and materialization are
-  complete.
+- keep both domains absent from public supported/writable capabilities.
 
 ### TASK-13006.4 — Projection convergence
 
 - implement the three-way task/Markdown matrix and privacy-safe drift records;
-- use durable multi-object mutation groups across note, task, and activity;
+- implement deterministic task-to-activity expansion and durable multi-object
+  mutation groups across note, task, and activity before any product mutation;
+- activate public supported capabilities, explicit enrollment, bootstrap state
+  transitions, and per-dataset writable advertisement only after all predicates
+  pass;
 - prove concurrency, pagination, repair, and two-client end-to-end convergence on
   SQLite and PostgreSQL; and
 - publish final capability/API documentation and close TASK-13006.
 
-Each PR must be independently mergeable. Dormant schema or code may land before a
-domain, but capability advertisement cannot cross a later PR's boundary.
+Each PR must be independently mergeable. PRs 1–3 are compatibility-preserving
+dormant foundations: no public capability map or enrollment API exposes either
+domain. PR 4 is the first writable state and cannot merge until task/activity/note
+group append, projection, bootstrap, repair, and live-PostgreSQL evidence are all
+complete.
 
 ## Verification strategy
 
@@ -401,9 +585,11 @@ evidence afterward.
 - create/update/complete/reopen/delete/restore and stale-base matrices;
 - exact replay, changed replay, concurrent edit, recurrence-state, and parent-note
   authorization;
-- server-origin REST/MCP capture, product/Sync split repair, bootstrap, pull,
-  cursor, acknowledgment, and capability readiness; and
-- bounded query plans on both backends.
+- dormant server-origin REST/MCP capture, product/Sync split repair, bootstrap,
+  pull, cursor, and acknowledgment; proof that public capabilities still omit both
+  domains; and
+- bounded query plans plus lifecycle/RLS/cross-owner/repair tests on SQLite and
+  live PostgreSQL.
 
 ### PR 3
 
@@ -412,19 +598,31 @@ evidence afterward.
 - transition-to-single-event behavior under retry and crash repair;
 - task/note parent mismatch and cross-owner denial;
 - resumable existing-event bootstrap and exclusion of read state; and
-- batch ordering, pull/ack, restore visibility, and capability readiness.
+- batch ordering, pull/ack, restore visibility, and proof that public capabilities
+  still omit both domains; and
+- activity lifecycle/RLS/cross-owner/index/capture/repair tests on SQLite and live
+  PostgreSQL.
 
 ### PR 4
 
 - the complete three-way reconciliation matrix;
 - explicit-task protection, stable checklist identity, ambiguous parser input, and
-  privacy-safe drift;
+  privacy-safe drift lifecycle;
+- projection-cache loss/rebuild from markers plus immutable envelope bases,
+  retention protection, malformed/duplicate markers, line removal/unlink, task
+  delete, restore, and explicit relink;
 - note/task/activity mutation-group crash windows and repair;
 - multi-device concurrent completion, recurrence-state, deletion, restore, and
   checklist edits;
 - bounded pagination and plan assertions; and
 - end-to-end SQLite and live PostgreSQL capability, bootstrap, pull, apply, replay,
   and repair.
+
+Live PostgreSQL is a required gate in every PR: PR 1 proves migration/catalog/RLS;
+PR 2 proves dormant task lifecycle, authorization, pagination, capture, and repair;
+PR 3 proves dormant activity immutability, ordering, bootstrap, capture, and repair;
+and PR 4 proves activation and end-to-end convergence. An unavailable suitable
+server blocks the PR rather than converting the evidence to an accepted skip.
 
 Every PR runs affected Notes/Sync regression tests, Ruff, Bandit on changed
 production paths, `py_compile`, and `git diff --check`. The final PR runs the broad
