@@ -11157,6 +11157,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "CREATE INDEX idx_task_projections_scope_status ON task_note_projections(owner_user_id,dataset_id,projection_status,updated_at,task_id)",
             "CREATE INDEX idx_task_events_scope_task_page ON task_events(owner_user_id,dataset_id,task_id,sync_server_cursor,id)",
             "CREATE INDEX idx_task_events_scope_note_page ON task_events(owner_user_id,dataset_id,note_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_task_created ON task_events(owner_user_id,dataset_id,task_id,created_at)",
+            "CREATE INDEX idx_task_events_scope_note_created ON task_events(owner_user_id,dataset_id,note_id,created_at)",
             "CREATE INDEX idx_task_events_scope_created ON task_events(owner_user_id,dataset_id,created_at,id)",
             "CREATE INDEX idx_task_event_read_scope_user ON task_event_read_state(owner_user_id,dataset_id,user_id,read_at,dismissed_at,event_id)",
             "CREATE INDEX idx_task_reconciliation_scope_status ON note_task_reconciliation_state(owner_user_id,dataset_id,status,reconciled_at,note_id)",
@@ -11322,10 +11324,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         note_index = conn.execute(
             "SELECT tbl_name,sql FROM sqlite_master WHERE type='index' AND name='uq_notes_owner_id'"
         ).fetchone()
+        related_objects = {
+            str(row[1]): (
+                str(row[0]),
+                str(row[2]),
+                self._normalize_sqlite_catalog_sql(row[3]),
+            )
+            for row in conn.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                "WHERE type IN ('trigger','view') ORDER BY type,name"
+            )
+            if str(row[2]) in tables
+            or any(
+                re.search(rf"\b{re.escape(table)}\b", str(row[3]), re.IGNORECASE)
+                for table in tables
+            )
+        }
         return {
             "table_sql": table_sql,
             "explicit_index_sql": explicit_index_sql,
             "table_details": table_details,
+            "related_objects": related_objects,
             "note_index": None if note_index is None else (
                 str(note_index[0]),
                 self._normalize_sqlite_catalog_sql(note_index[1]),
@@ -11370,6 +11389,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         ):
             raise SchemaError("Notes task v60 SQLite index catalog drifted.")  # noqa: TRY003
+        if actual["related_objects"] != expected["related_objects"]:
+            raise SchemaError("Notes task v60 SQLite related catalog drifted.")  # noqa: TRY003
         if conn.execute("PRAGMA foreign_key_check").fetchall():
             raise SchemaError("Notes task v60 SQLite foreign-key catalog is invalid.")  # noqa: TRY003
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import inspect
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -305,6 +307,68 @@ def test_sqlite_v60_verifier_rejects_table_catalog_drift(
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
 
+@pytest.mark.parametrize(
+    "ddl",
+    [
+        (
+            "CREATE TRIGGER unexpected_task_delete AFTER INSERT ON note_tasks "
+            "BEGIN DELETE FROM note_tasks WHERE id = NEW.id; END"
+        ),
+        "CREATE VIEW unexpected_task_view AS SELECT id,note_id FROM note_tasks",
+    ],
+    ids=("trigger", "view"),
+)
+def test_sqlite_v60_verifier_rejects_related_trigger_or_view(
+    tmp_path: Path,
+    ddl: str,
+) -> None:
+    db_path = tmp_path / "related-catalog-drift.sqlite"
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    db.close_all_connections()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(ddl)
+
+    with pytest.raises(CharactersRAGDBError, match="related catalog drifted"):
+        CharactersRAGDB(str(db_path), client_id=OWNER)
+
+
+@pytest.mark.parametrize("migrated", [False, True], ids=("fresh", "migrated"))
+@pytest.mark.parametrize(
+    ("filter_column", "filter_value", "expected_index"),
+    [
+        ("task_id", TASK_ID, "idx_task_events_scope_task_created"),
+        ("note_id", NOTE_ID, "idx_task_events_scope_note_created"),
+    ],
+    ids=("task-page", "note-page"),
+)
+def test_sqlite_v60_activity_pages_use_scoped_created_indexes(
+    tmp_path: Path,
+    migrated: bool,
+    filter_column: str,
+    filter_value: str,
+    expected_index: str,
+) -> None:
+    db_path = tmp_path / f"activity-plan-{migrated}-{filter_column}.sqlite"
+    if migrated:
+        _prepare_v59_database(db_path)
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    try:
+        with db.transaction() as conn:
+            plan = [
+                str(row[3])
+                for row in conn.execute(
+                    "EXPLAIN QUERY PLAN SELECT * FROM task_events "
+                    f"WHERE owner_user_id=? AND dataset_id=? AND {filter_column}=? "  # nosec B608
+                    "ORDER BY created_at ASC,rowid ASC LIMIT ?",
+                    (OWNER, LOCAL_UNBOUND, filter_value, 100),
+                )
+            ]
+        assert any(expected_index in detail for detail in plan), plan  # nosec B101
+        assert not any("TEMP B-TREE" in detail.upper() for detail in plan), plan  # nosec B101
+    finally:
+        db.close_all_connections()
+
+
 @pytest.mark.parametrize("stage", ["create", "copy", "index", "verify"])
 def test_sqlite_v60_injected_failure_rolls_back_original_graph_and_version(
     tmp_path: Path,
@@ -335,6 +399,54 @@ def test_sqlite_v60_injected_failure_rolls_back_original_graph_and_version(
         assert "owner_user_id" not in _table_columns(conn, "note_tasks")  # nosec B101
         assert conn.execute("SELECT id FROM note_tasks").fetchone()[0] == TASK_ID  # nosec B101
         assert conn.execute("SELECT id FROM task_events").fetchone()[0] == EVENT_ID  # nosec B101
+
+
+def test_sqlite_v60_same_path_concurrent_openers_complete_one_migration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "concurrent-openers.sqlite"
+    _prepare_v59_database(db_path)
+    start = threading.Barrier(2)
+    checkpoint_lock = threading.Lock()
+    checkpoints: list[str] = []
+    original_checkpoint = CharactersRAGDB._note_task_v60_migration_checkpoint
+
+    def track_checkpoint(_db: CharactersRAGDB, stage: str) -> None:
+        with checkpoint_lock:
+            checkpoints.append(stage)
+        original_checkpoint(stage)
+
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_note_task_v60_migration_checkpoint",
+        track_checkpoint,
+    )
+
+    def open_same_path() -> int:
+        start.wait(timeout=10)
+        db = CharactersRAGDB(str(db_path), client_id=OWNER)
+        try:
+            with db.transaction() as conn:
+                return db._get_db_version(conn)
+        finally:
+            db.close_all_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        versions = list(executor.map(lambda _index: open_same_path(), range(2)))
+
+    assert versions == [60, 60]  # nosec B101
+    assert checkpoints == ["create", "copy", "index", "verify"]  # nosec B101
+    with sqlite3.connect(db_path) as conn:
+        tables = {str(row[0]) for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        assert conn.execute(  # nosec B101
+            "SELECT version FROM db_schema_version WHERE schema_name=?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0] == 60
+        assert not any(name.endswith("_v60") for name in tables)  # nosec B101
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []  # nosec B101
 
 
 def test_sqlite_v60_rejects_target_table_collision_without_version_change(tmp_path: Path) -> None:
