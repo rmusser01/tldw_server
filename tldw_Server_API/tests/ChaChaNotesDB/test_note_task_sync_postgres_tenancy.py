@@ -161,6 +161,27 @@ def _postgres_task_force_flags(conn: Any) -> dict[str, bool]:
     return {str(row["relname"]): bool(row["relforcerowsecurity"]) for row in rows}
 
 
+def _postgres_notes_authority_snapshot(backend: Any) -> tuple[tuple[object, ...], ...]:
+    with backend.transaction() as conn:
+        relation = backend.execute(
+            "SELECT relrowsecurity,relforcerowsecurity,relowner=current_user::regrole "
+            "AS is_table_owner,pg_has_role(current_user,n.nspowner,'USAGE') "
+            "AS is_schema_owner FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=current_schema() AND c.relname='notes'",
+            connection=conn,
+        ).rows
+        policies = backend.execute(
+            "SELECT policyname,permissive,roles::text AS roles,cmd,qual,with_check "
+            "FROM pg_policies WHERE schemaname=current_schema() AND tablename='notes' "
+            "ORDER BY policyname",
+            connection=conn,
+        ).rows
+    return (
+        tuple(relation[0].values()),
+        *(tuple(row.values()) for row in policies),
+    )
+
+
 def test_postgres_bind_local_task_graph_rekeys_complete_six_table_scope(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -358,6 +379,121 @@ def test_postgres_note_task_schema_v60_is_authoritative(
             (table, f"{table}_tenant_isolation")
             for table in sorted(CharactersRAGDB._NOTE_TASK_V60_TABLES)
         ]
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize(
+    "drift_statements",
+    (
+        ("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY",),
+        ("DROP POLICY notes_tenant_isolation ON notes",),
+        ("CREATE POLICY notes_open ON notes USING (true) WITH CHECK (true)",),
+        (
+            "DROP POLICY notes_tenant_isolation ON notes",
+            "CREATE POLICY notes_tenant_isolation ON notes USING (true) WITH CHECK (true)",
+        ),
+    ),
+    ids=("no-force", "missing-policy", "extra-policy", "weakened-policy"),
+)
+def test_postgres_current_v60_rejects_notes_authority_drift_without_repair(
+    pg_database_config: DatabaseConfig,
+    drift_statements: tuple[str, ...],
+) -> None:
+    owner = "950026"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=owner, backend=backend)
+    drift_backend = None
+    observer_backend = None
+    startup_db = None
+
+    try:
+        with db.transaction() as conn:
+            for statement in drift_statements:
+                conn.execute(statement)
+        drifted = _postgres_notes_authority_snapshot(backend)
+        db.close_all_connections()
+        drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        with pytest.raises(CharactersRAGDBError, match="ownership or RLS|policy catalog"):
+            startup_db = CharactersRAGDB(":memory:", client_id=owner, backend=drift_backend)
+        observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        assert _postgres_notes_authority_snapshot(observer_backend) == drifted
+    finally:
+        if startup_db is not None:
+            startup_db.close_all_connections()
+        db.close_all_connections()
+        backend.get_pool().close_all()
+        if drift_backend is not None:
+            drift_backend.get_pool().close_all()
+        if observer_backend is not None:
+            observer_backend.get_pool().close_all()
+
+
+def test_postgres_dataset_cursor_page_uses_exact_index(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner = "950027"
+    dataset_id = "cursor-dataset"
+    other_dataset_id = "cursor-other"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=owner, backend=backend)
+    note_id = db.add_note("Cursor parent", "Body")
+
+    try:
+        with db.transaction() as conn:
+            for cursor in range(1, 65):
+                target_event = db.record_task_event(
+                    owner_user_id=owner,
+                    dataset_id=dataset_id,
+                    note_id=note_id,
+                    event_type="updated",
+                    actor_type="user",
+                    conn=conn,
+                )
+                conn.execute(
+                    "UPDATE task_events SET sync_server_cursor=? "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                    (cursor, owner, dataset_id, target_event["id"]),
+                )
+                other_event = db.record_task_event(
+                    owner_user_id=owner,
+                    dataset_id=other_dataset_id,
+                    note_id=note_id,
+                    event_type="updated",
+                    actor_type="user",
+                    conn=conn,
+                )
+                conn.execute(
+                    "UPDATE task_events SET sync_server_cursor=? "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                    (cursor, owner, other_dataset_id, other_event["id"]),
+                )
+            conn.execute("ANALYZE task_events")
+            conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset_id,))
+            conn.execute("SET LOCAL enable_seqscan=off")
+            index_definition = conn.execute(
+                "SELECT pg_get_indexdef('idx_task_events_scope_cursor'::regclass,0,true)"
+            ).fetchone()["pg_get_indexdef"]
+            assert index_definition == (
+                "CREATE INDEX idx_task_events_scope_cursor ON task_events USING btree "
+                "(owner_user_id, dataset_id, sync_server_cursor, id)"
+            )
+            plan_rows = conn.execute(
+                "EXPLAIN SELECT id FROM task_events "
+                "WHERE owner_user_id=? AND dataset_id=? AND sync_server_cursor>? "
+                "ORDER BY sync_server_cursor,id LIMIT ?",
+                (owner, dataset_id, 0, 10),
+            ).fetchall()
+        plan = [str(next(iter(dict(row).values()))) for row in plan_rows]
+        relevant_plan = [
+            line.strip()
+            for line in plan
+            if "Sort" in line or "Index" in line or "Filter:" in line
+        ]
+        assert any("idx_task_events_scope_cursor" in line for line in plan), relevant_plan
+        assert not any("Sort" in line for line in plan), relevant_plan
+        assert not any("Filter: (sync_server_cursor" in line for line in plan), relevant_plan
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

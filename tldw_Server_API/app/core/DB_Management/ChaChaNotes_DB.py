@@ -11163,6 +11163,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "CREATE INDEX idx_task_projections_scope_status ON task_note_projections(owner_user_id,dataset_id,projection_status,updated_at,task_id)",
             "CREATE INDEX idx_task_events_scope_task_page ON task_events(owner_user_id,dataset_id,task_id,sync_server_cursor,id)",
             "CREATE INDEX idx_task_events_scope_note_page ON task_events(owner_user_id,dataset_id,note_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_cursor ON task_events(owner_user_id,dataset_id,sync_server_cursor,id)",
             "CREATE INDEX idx_task_events_scope_task_created ON task_events(owner_user_id,dataset_id,task_id,created_at,id)",
             "CREATE INDEX idx_task_events_scope_note_created ON task_events(owner_user_id,dataset_id,note_id,created_at,id)",
             "CREATE INDEX idx_task_events_scope_created ON task_events(owner_user_id,dataset_id,created_at,id)",
@@ -11502,6 +11503,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "CREATE INDEX idx_task_projections_scope_status ON task_note_projections(owner_user_id,dataset_id,projection_status,updated_at,task_id)",
             "CREATE INDEX idx_task_events_scope_task_page ON task_events(owner_user_id,dataset_id,task_id,sync_server_cursor,id)",
             "CREATE INDEX idx_task_events_scope_note_page ON task_events(owner_user_id,dataset_id,note_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_cursor ON task_events(owner_user_id,dataset_id,sync_server_cursor,id)",
             "CREATE INDEX idx_task_events_scope_task_created ON task_events(owner_user_id,dataset_id,task_id,created_at)",
             "CREATE INDEX idx_task_events_scope_note_created ON task_events(owner_user_id,dataset_id,note_id,created_at)",
             "CREATE INDEX idx_task_events_scope_created ON task_events(owner_user_id,dataset_id,created_at,id)",
@@ -12199,6 +12201,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _verify_note_task_schema_postgres(self, conn: Any) -> None:
         """Verify the complete PostgreSQL v60 task graph without repairing drift."""
         backend = self.backend
+        authority_relations = ("notes", *self._NOTE_TASK_V60_TABLES)
         backend.execute(
             "LOCK TABLE notes, note_tasks, task_note_projections, task_events, "
             "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
@@ -12220,10 +12223,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND table_row.relname = ANY(%s)
              ORDER BY table_row.relname
             """,
-            (list(self._NOTE_TASK_V60_TABLES),),
+            (list(authority_relations),),
             connection=conn,
         ).rows
-        if {str(row.get("table_name")) for row in table_rows} != set(self._NOTE_TASK_V60_TABLES):
+        if {str(row.get("table_name")) for row in table_rows} != set(authority_relations):
             raise SchemaError("Notes task v60 PostgreSQL relation catalog drifted.")  # noqa: TRY003
         if any(
             not bool(row.get("is_table_owner"))
@@ -12564,10 +12567,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE schemaname=current_schema() AND tablename = ANY(%s)
              ORDER BY tablename,policyname
             """,
-            (list(self._NOTE_TASK_V60_TABLES),),
+            (list(authority_relations),),
             connection=conn,
         ).rows
-        expected_policies = self._note_task_v60_policy_predicates()
+        expected_policies = {
+            "notes": "client_id = current_setting('app.current_user_id', true)",
+            **self._note_task_v60_policy_predicates(),
+        }
         if len(policy_rows) != len(expected_policies):
             raise SchemaError("Notes task v60 PostgreSQL RLS policy catalog drifted.")  # noqa: TRY003
         policies = {str(row.get("table_name")): row for row in policy_rows}

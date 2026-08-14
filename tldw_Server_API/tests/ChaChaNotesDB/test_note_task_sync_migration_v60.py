@@ -65,6 +65,10 @@ def test_postgres_v60_ddl_is_fixed_and_scopes_all_six_relations() -> None:
         "CREATE INDEX idx_task_events_scope_note_created ON "
         "task_events(owner_user_id,dataset_id,note_id,created_at,id)"
     ) in indexes
+    assert (
+        "CREATE INDEX idx_task_events_scope_cursor ON "
+        "task_events(owner_user_id,dataset_id,sync_server_cursor,id)"
+    ) in indexes
 
 
 def test_postgres_v60_migration_uses_fixed_lock_and_version_last_order() -> None:
@@ -593,6 +597,62 @@ def test_sqlite_v60_activity_pages_use_scoped_created_indexes(
                 )
             ]
         assert any(expected_index in detail for detail in plan), plan  # nosec B101
+        assert not any("TEMP B-TREE" in detail.upper() for detail in plan), plan  # nosec B101
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.parametrize("migrated", [False, True], ids=("fresh", "migrated"))
+def test_sqlite_v60_dataset_cursor_page_uses_exact_index(
+    tmp_path: Path,
+    migrated: bool,
+) -> None:
+    db_path = tmp_path / f"dataset-cursor-plan-{migrated}.sqlite"
+    if migrated:
+        _prepare_v59_database(db_path)
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    note_id = NOTE_ID if migrated else db.add_note("Cursor parent", "Body")
+
+    try:
+        with db.transaction() as conn:
+            for cursor in range(1, 65):
+                target_event = db.record_task_event(
+                    owner_user_id=OWNER,
+                    dataset_id=LOCAL_UNBOUND,
+                    note_id=note_id,
+                    event_type="updated",
+                    actor_type="user",
+                    conn=conn,
+                )
+                conn.execute(
+                    "UPDATE task_events SET sync_server_cursor=? "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                    (cursor, OWNER, LOCAL_UNBOUND, target_event["id"]),
+                )
+                other_event = db.record_task_event(
+                    owner_user_id=OWNER,
+                    dataset_id="other-dataset",
+                    note_id=note_id,
+                    event_type="updated",
+                    actor_type="user",
+                    conn=conn,
+                )
+                conn.execute(
+                    "UPDATE task_events SET sync_server_cursor=? "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                    (cursor, OWNER, "other-dataset", other_event["id"]),
+                )
+            conn.execute("ANALYZE task_events")
+            plan = [
+                str(row[3])
+                for row in conn.execute(
+                    "EXPLAIN QUERY PLAN SELECT id FROM task_events "
+                    "WHERE owner_user_id=? AND dataset_id=? AND sync_server_cursor>? "
+                    "ORDER BY sync_server_cursor,id LIMIT ?",
+                    (OWNER, LOCAL_UNBOUND, 0, 10),
+                )
+            ]
+        assert any("idx_task_events_scope_cursor" in detail for detail in plan), plan  # nosec B101
         assert not any("TEMP B-TREE" in detail.upper() for detail in plan), plan  # nosec B101
     finally:
         db.close_all_connections()
