@@ -665,6 +665,7 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 60  # Schema v60 scopes the Notes task graph by owner and dataset
+    _POSTGRES_SCHEMA_VERSION = 59  # PostgreSQL v60 lands atomically in plan Task 3.
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -11060,7 +11061,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """
             CREATE TABLE task_events_v60(
               owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, id TEXT NOT NULL,
-              task_id TEXT, note_id TEXT, event_type TEXT NOT NULL, actor_type TEXT NOT NULL,
+              task_id TEXT, note_id TEXT NOT NULL CHECK(length(trim(note_id)) > 0),
+              event_type TEXT NOT NULL, actor_type TEXT NOT NULL,
               actor_id TEXT, tool_name TEXT, policy_mode TEXT, approval_id TEXT,
               old_value_json TEXT, new_value_json TEXT, created_at TEXT NOT NULL, client_id TEXT NOT NULL,
               sync_revision INTEGER NOT NULL DEFAULT 1
@@ -11207,25 +11209,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
 
         event_rows = [dict(row) for row in conn.execute("SELECT * FROM task_events ORDER BY id")]
+        migrated_event_rows: list[dict[str, Any]] = []
         event_owners: dict[str, str] = {}
         for row in event_rows:
             task_scope = task_owners.get(str(row["task_id"])) if row["task_id"] is not None else None
+            derived_note_id = str(row["note_id"]) if row["note_id"] is not None else (
+                task_scope[1] if task_scope is not None else None
+            )
             note_row = (
-                conn.execute("SELECT client_id FROM notes WHERE id=?", (row["note_id"],)).fetchone()
-                if row["note_id"] is not None else None
+                conn.execute("SELECT client_id FROM notes WHERE id=?", (derived_note_id,)).fetchone()
+                if derived_note_id is not None else None
             )
             note_owner = str(note_row[0]).strip() if note_row is not None else None
             event_owner = task_scope[0] if task_scope is not None else note_owner
-            if not event_owner or (note_owner is not None and event_owner != note_owner):
+            if not event_owner or not derived_note_id or note_owner != event_owner:
                 raise SchemaError("Notes task v60 migration could not prove event parents.")  # noqa: TRY003
-            if task_scope is not None and row["note_id"] is not None and task_scope[1] != str(row["note_id"]):
+            if task_scope is not None and task_scope[1] != derived_note_id:
                 raise SchemaError("Notes task v60 migration found mismatched event parents.")  # noqa: TRY003
             source_hash = self._note_task_v60_hash({"source": row, "version": 1})
             event_owners[str(row["id"])] = event_owner
+            migrated_row = {**row, "note_id": derived_note_id}
+            migrated_event_rows.append(migrated_row)
             conn.execute(
                 "INSERT INTO task_events_v60 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    event_owner, dataset_id, *tuple(row.values()), 1, source_hash, None, None,
+                    event_owner, dataset_id, *tuple(migrated_row.values()), 1, source_hash, None, None,
                     row["created_at"], "trusted_bootstrap_v1", None, 0, None, None,
                     "legacy_task_activity_unverified", source_hash,
                 ),
@@ -11258,7 +11266,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         source_sets = {
             "note_tasks": task_rows, "task_note_projections": projection_rows,
-            "task_events": event_rows, "task_event_read_state": read_rows,
+            "task_events": migrated_event_rows, "task_event_read_state": read_rows,
             "note_task_reconciliation_state": reconciliation_rows,
         }
         ordering = {
@@ -11275,48 +11283,95 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if len(source_rows) != len(target_rows) or self._note_task_v60_hash(source_rows) != self._note_task_v60_hash(target_rows):
                 raise SchemaError(f"Notes task v60 source verification failed for {table}.")  # noqa: TRY003
 
-    def _verify_note_task_schema_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Reject current-v60 SQLite task catalog drift instead of repairing it."""
-        expected_columns = {
-            "note_tasks": {"owner_user_id","dataset_id","id","note_id","text","status","metadata_json",
-                "projection_status","deleted","created_at","updated_at","completed_at","client_id","version",
-                "canonical_revision","canonical_hash","source_diagnostic_code","source_diagnostic_hash"},
-            "task_note_projections": {"owner_user_id","dataset_id","task_id","note_id","note_version",
-                "line_number","start_offset","end_offset","normalized_text_hash","occurrence_index",
-                "block_fingerprint","raw_line","has_child_content","projection_status","updated_at"},
-            "task_events": {"owner_user_id","dataset_id","id","task_id","note_id","event_type","actor_type",
-                "actor_id","tool_name","policy_mode","approval_id","old_value_json","new_value_json","created_at",
-                "client_id","sync_revision","sync_object_hash","sync_server_cursor","source_device_id",
-                "client_occurred_at","source_kind","corrects_activity_id","deleted","deleted_at","delete_reason",
-                "source_diagnostic_code","source_diagnostic_hash"},
-            "task_event_read_state": {"owner_user_id","dataset_id","event_id","user_id","read_at","dismissed_at"},
-            "note_task_reconciliation_state": {"owner_user_id","dataset_id","note_id","note_version","status",
-                "reconciled_at","item_count","warning_count","cursor"},
-            "task_projection_drifts": {"owner_user_id","dataset_id","id","note_id","task_id",
-                "marker_base_revision","marker_base_hash","note_head_cursor","note_head_hash","task_head_cursor",
-                "task_head_hash","reason_code","status","created_at","updated_at","resolved_at"},
+    @staticmethod
+    def _normalize_sqlite_catalog_sql(sql: str | None) -> str | None:
+        return " ".join(sql.split()).lower() if sql is not None else None
+
+    def _note_task_catalog_snapshot_sqlite(self, conn: sqlite3.Connection) -> dict[str, Any]:
+        tables = self._NOTE_TASK_V60_TABLES
+        placeholders = ",".join("?" for _ in tables)
+        table_sql = {
+            str(row[0]): self._normalize_sqlite_catalog_sql(row[1])
+            for row in conn.execute(
+                f"SELECT name,sql FROM sqlite_master WHERE type='table' "  # nosec B608
+                f"AND name IN ({placeholders}) ORDER BY name",
+                tables,
+            )
         }
-        if not set(expected_columns).issubset(self._sqlite_table_names(conn)):
+        explicit_index_sql = {
+            str(row[0]): (str(row[1]), self._normalize_sqlite_catalog_sql(row[2]))
+            for row in conn.execute(
+                f"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='index' "  # nosec B608
+                f"AND tbl_name IN ({placeholders}) AND sql IS NOT NULL ORDER BY name",
+                tables,
+            )
+        }
+        table_details: dict[str, Any] = {}
+        for table in tables:
+            index_rows = [tuple(row) for row in conn.execute(f"PRAGMA index_list({table})")]  # nosec B608
+            table_details[table] = {
+                "xinfo": [tuple(row) for row in conn.execute(f"PRAGMA table_xinfo({table})")],  # nosec B608
+                "foreign_keys": [tuple(row) for row in conn.execute(f"PRAGMA foreign_key_list({table})")],  # nosec B608
+                "indexes": [
+                    (index_row, [tuple(row) for row in conn.execute(
+                        f"PRAGMA index_xinfo({index_row[1]})"  # nosec B608
+                    )])
+                    for index_row in index_rows
+                ],
+            }
+        note_index = conn.execute(
+            "SELECT tbl_name,sql FROM sqlite_master WHERE type='index' AND name='uq_notes_owner_id'"
+        ).fetchone()
+        return {
+            "table_sql": table_sql,
+            "explicit_index_sql": explicit_index_sql,
+            "table_details": table_details,
+            "note_index": None if note_index is None else (
+                str(note_index[0]),
+                self._normalize_sqlite_catalog_sql(note_index[1]),
+                [str(row[2]) for row in conn.execute("PRAGMA index_info(uq_notes_owner_id)")],
+            ),
+        }
+
+    def _expected_note_task_catalog_sqlite(self) -> dict[str, Any]:
+        expected = sqlite3.connect(":memory:")
+        try:
+            expected.execute("PRAGMA foreign_keys=ON")
+            expected.execute("CREATE TABLE notes(id TEXT PRIMARY KEY, client_id TEXT NOT NULL)")
+            self._create_note_task_schema_v60_sqlite(expected)
+            for table in self._NOTE_TASK_V60_TABLES:
+                expected.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}")  # nosec B608
+            self._create_note_task_indexes_v60_sqlite(expected)
+            return self._note_task_catalog_snapshot_sqlite(expected)
+        finally:
+            expected.close()
+
+    def _verify_note_task_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Reject any current-v60 SQLite task catalog drift instead of repairing it."""
+        expected = self._expected_note_task_catalog_sqlite()
+        actual = self._note_task_catalog_snapshot_sqlite(conn)
+        if (
+            actual["table_sql"] != expected["table_sql"]
+            or set(actual["table_details"]) != set(expected["table_details"])
+            or any(
+                actual["table_details"][table][key] != expected["table_details"][table][key]
+                for table in self._NOTE_TASK_V60_TABLES
+                for key in ("xinfo", "foreign_keys")
+            )
+        ):
             raise SchemaError("Notes task v60 SQLite table catalog drifted.")  # noqa: TRY003
-        for table, columns in expected_columns.items():
-            actual = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}  # nosec B608
-            if actual != columns:
-                raise SchemaError(f"Notes task v60 SQLite column catalog drifted for {table}.")  # noqa: TRY003
+        if (
+            actual["explicit_index_sql"] != expected["explicit_index_sql"]
+            or actual["note_index"] != expected["note_index"]
+            or any(
+                actual["table_details"][table]["indexes"]
+                != expected["table_details"][table]["indexes"]
+                for table in self._NOTE_TASK_V60_TABLES
+            )
+        ):
+            raise SchemaError("Notes task v60 SQLite index catalog drifted.")  # noqa: TRY003
         if conn.execute("PRAGMA foreign_key_check").fetchall():
             raise SchemaError("Notes task v60 SQLite foreign-key catalog is invalid.")  # noqa: TRY003
-        expected_indexes = {
-            "idx_note_tasks_scope_note_page","idx_note_tasks_scope_status_page","idx_note_tasks_scope_projection",
-            "idx_task_projections_scope_note","idx_task_projections_scope_status","idx_task_events_scope_task_page",
-            "idx_task_events_scope_note_page","idx_task_events_scope_created","idx_task_event_read_scope_user",
-            "idx_task_reconciliation_scope_status","idx_task_projection_drifts_scope_status",
-            "idx_task_projection_drifts_scope_task",
-        }
-        actual_indexes = {str(row[0]) for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL AND tbl_name IN (?,?,?,?,?,?)",
-            self._NOTE_TASK_V60_TABLES,
-        )}
-        if actual_indexes != expected_indexes:
-            raise SchemaError("Notes task v60 SQLite index catalog drifted.")  # noqa: TRY003
 
     def _migrate_from_v59_to_v60_sqlite(self, conn: sqlite3.Connection) -> None:
         """Transactionally replace the legacy task graph with scoped v60 tables."""
@@ -18867,7 +18922,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Bootstrap or migrate the ChaCha schema on PostgreSQL."""
 
         backend = self.backend
-        target_version = self._CURRENT_SCHEMA_VERSION
+        target_version = self._POSTGRES_SCHEMA_VERSION
 
         with backend.transaction() as conn:
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
@@ -35876,8 +35931,6 @@ for _note_store_method in (
 for _task_store_method in (
     "create_task",
     "get_task",
-    "get_task_scoped",
-    "resolve_task_compatibility_scope",
     "get_task_projection",
     "list_tasks",
     "update_unlinked_task_metadata_record_only",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import sqlite3
 from pathlib import Path
 
@@ -20,6 +21,12 @@ LOCAL_UNBOUND = "local-unbound"
 NOTE_ID = "11111111-1111-4111-8111-111111111111"
 TASK_ID = "22222222-2222-4222-8222-222222222222"
 EVENT_ID = "33333333-3333-4333-8333-333333333333"
+
+
+def test_postgres_initializer_authority_remains_v59_until_postgres_v60_lands() -> None:
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 59
+    source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
+    assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source
 
 
 def _prepare_v59_database(db_path: Path) -> None:
@@ -125,6 +132,22 @@ def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}  # nosec B608
 
 
+def _rewrite_sqlite_catalog(db_path: Path, *, object_name: str, old: str, new: str) -> None:
+    with sqlite3.connect(db_path) as conn:
+        current = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name=?", (object_name,)
+        ).fetchone()[0]
+        assert old in current  # nosec B101 - proves the adversarial mutation was applied.
+        conn.execute("PRAGMA writable_schema=ON")
+        conn.execute(
+            "UPDATE sqlite_master SET sql=? WHERE name=?",
+            (current.replace(old, new, 1), object_name),
+        )
+        schema_version = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+        conn.execute(f"PRAGMA schema_version={schema_version + 1}")  # nosec B608
+        conn.execute("PRAGMA writable_schema=OFF")
+
+
 def test_sqlite_v60_upgrade_preserves_graph_under_local_unbound_scope(tmp_path: Path) -> None:
     db_path = tmp_path / "task-v59.sqlite"
     _prepare_v59_database(db_path)
@@ -153,7 +176,7 @@ def test_sqlite_v60_upgrade_preserves_graph_under_local_unbound_scope(tmp_path: 
                 "note_task_reconciliation_state": 1,
                 "task_projection_drifts": 0,
             }
-        task = upgraded.get_task_scoped(
+        task = upgraded.get_task(
             owner_user_id=OWNER,
             dataset_id=LOCAL_UNBOUND,
             task_id=TASK_ID,
@@ -165,6 +188,50 @@ def test_sqlite_v60_upgrade_preserves_graph_under_local_unbound_scope(tmp_path: 
         assert task["canonical_hash"].startswith("sha256:")  # nosec B101
     finally:
         upgraded.close_all_connections()
+
+
+def test_sqlite_v60_upgrade_derives_missing_event_note_from_task(tmp_path: Path) -> None:
+    db_path = tmp_path / "task-v59-null-event-note.sqlite"
+    _prepare_v59_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE task_events SET note_id=NULL WHERE id=?", (EVENT_ID,))
+
+    upgraded = CharactersRAGDB(str(db_path), client_id=OWNER)
+    try:
+        with upgraded.transaction() as conn:
+            row = conn.execute("SELECT note_id FROM task_events WHERE id=?", (EVENT_ID,)).fetchone()
+            assert row[0] == NOTE_ID  # nosec B101
+            note_column = next(
+                column for column in conn.execute("PRAGMA table_xinfo(task_events)")
+                if column[1] == "note_id"
+            )
+            assert note_column[3] == 1  # nosec B101 - NOT NULL is catalog authority.
+    finally:
+        upgraded.close_all_connections()
+
+
+def test_sqlite_v60_upgrade_rejects_mismatched_event_task_and_note(tmp_path: Path) -> None:
+    db_path = tmp_path / "task-v59-mismatched-event-note.sqlite"
+    _prepare_v59_database(db_path)
+    other_note_id = "44444444-4444-4444-8444-444444444444"
+    original_version = CharactersRAGDB._CURRENT_SCHEMA_VERSION
+    CharactersRAGDB._CURRENT_SCHEMA_VERSION = 59
+    try:
+        legacy = CharactersRAGDB(str(db_path), client_id=OWNER)
+        assert legacy.add_note("Other", "Body", note_id=other_note_id) == other_note_id  # nosec B101
+        with legacy.transaction() as conn:
+            conn.execute("UPDATE task_events SET note_id=? WHERE id=?", (other_note_id, EVENT_ID))
+        legacy.close_all_connections()
+    finally:
+        CharactersRAGDB._CURRENT_SCHEMA_VERSION = original_version
+
+    with pytest.raises(CharactersRAGDBError, match="mismatched event parents"):
+        CharactersRAGDB(str(db_path), client_id=OWNER)
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(  # nosec B101
+            "SELECT version FROM db_schema_version WHERE schema_name=?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0] == 59
 
 
 def test_sqlite_v60_has_exact_scoped_task_graph_columns(tmp_path: Path) -> None:
@@ -199,6 +266,43 @@ def test_sqlite_v60_has_exact_scoped_task_graph_columns(tmp_path: Path) -> None:
             assert any(str(row[5]).upper() == "CASCADE" for row in foreign_keys)  # nosec B101
     finally:
         db.close_all_connections()
+
+
+def test_sqlite_v60_verifier_rejects_same_name_weak_index(tmp_path: Path) -> None:
+    db_path = tmp_path / "weak-index.sqlite"
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    db.close_all_connections()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX idx_task_events_scope_task_page")
+        conn.execute(
+            "CREATE INDEX idx_task_events_scope_task_page ON task_events(owner_user_id)"
+        )
+
+    with pytest.raises(CharactersRAGDBError, match="index catalog drifted"):
+        CharactersRAGDB(str(db_path), client_id=OWNER)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("note_id TEXT NOT NULL", "note_id BLOB NOT NULL"),
+        ("CHECK(length(trim(note_id)) > 0)", "CHECK(1)"),
+        ("ON UPDATE CASCADE ON DELETE RESTRICT", "ON UPDATE NO ACTION ON DELETE RESTRICT"),
+    ],
+    ids=("type", "check", "foreign-key-action"),
+)
+def test_sqlite_v60_verifier_rejects_table_catalog_drift(
+    tmp_path: Path,
+    old: str,
+    new: str,
+) -> None:
+    db_path = tmp_path / f"table-drift-{old[:4]}.sqlite"
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    db.close_all_connections()
+    _rewrite_sqlite_catalog(db_path, object_name="task_events", old=old, new=new)
+
+    with pytest.raises(CharactersRAGDBError, match="table catalog drifted"):
+        CharactersRAGDB(str(db_path), client_id=OWNER)
 
 
 @pytest.mark.parametrize("stage", ["create", "copy", "index", "verify"])

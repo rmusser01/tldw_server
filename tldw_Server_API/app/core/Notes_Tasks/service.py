@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, ConflictError, InputError
 from tldw_Server_API.app.core.Notes.organization_capture import (
     active_coordinator,
     capture_note_upsert,
@@ -179,10 +179,32 @@ def resolve_task_compatibility_scope(
     authenticated_owner_user_id: str,
 ) -> TaskStoreScope:
     """Resolve product-owned task scope without accepting a client dataset selector."""
-    owner, dataset = db.resolve_task_compatibility_scope(
-        owner_user_id=str(authenticated_owner_user_id)
-    )
-    return TaskStoreScope(owner_user_id=owner, dataset_id=dataset)
+    owner = str(authenticated_owner_user_id).strip()
+    if not owner:
+        raise InputError("Task owner cannot be empty.")  # noqa: TRY003
+    if owner != str(db.client_id):
+        raise ConflictError("Task scope is unavailable.", entity="tasks", entity_id=owner)  # noqa: TRY003
+    if db.backend_type == BackendType.POSTGRESQL:
+        return TaskStoreScope(owner_user_id=owner, dataset_id="local-unbound")
+    datasets: set[str] = set()
+    for table in (
+        "note_tasks",
+        "task_events",
+        "note_task_reconciliation_state",
+        "task_projection_drifts",
+    ):
+        cursor = db.execute_query(
+            f"SELECT DISTINCT dataset_id FROM {table} WHERE owner_user_id = ?",  # nosec B608
+            (owner,),
+        )
+        datasets.update(str(row["dataset_id"]) for row in cursor.fetchall())
+    if not datasets:
+        return TaskStoreScope(owner_user_id=owner, dataset_id="local-unbound")
+    if len(datasets) != 1:
+        raise ConflictError(
+            "Task compatibility scope is ambiguous.", entity="tasks", entity_id=owner
+        )  # noqa: TRY003
+    return TaskStoreScope(owner_user_id=owner, dataset_id=datasets.pop())
 
 
 class NotesTaskService:
@@ -297,9 +319,9 @@ class NotesTaskService:
         )
         note = self._require_note(db, note_id)
         state = db.get_reconciliation_state(
-            note_id,
             owner_user_id=scope.owner_user_id,
             dataset_id=scope.dataset_id,
+            note_id=note_id,
         )
         if state is not None and int(state["note_version"]) == int(note["version"]):
             if state["status"] == "clean":
@@ -371,7 +393,7 @@ class NotesTaskService:
             )
             if not result.created_task_ids:
                 raise ConflictError("Task creation did not create a task record.", entity="tasks", entity_id=note_id)
-            task = db.get_task_scoped(
+            task = db.get_task(
                 owner_user_id=scope.owner_user_id,
                 dataset_id=scope.dataset_id,
                 task_id=result.created_task_ids[-1],
@@ -720,9 +742,9 @@ class NotesTaskService:
         conn: TaskConnection,
     ) -> dict[str, Any]:
         projection = db.get_task_projection(
-            task_id,
             owner_user_id=scope.owner_user_id,
             dataset_id=scope.dataset_id,
+            task_id=task_id,
             conn=conn,
         )
         if projection is None:

@@ -92,9 +92,9 @@ def test_note_create_returns_saved_note_when_reconciliation_raises(
     assert saved_note is not None
     assert saved_note["content"] == "- [ ] Alpha\n"
     assert db.get_reconciliation_state(
-        created["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=created["id"],
     ) is None
     assert db.list_tasks(
         note_id=created["id"],
@@ -117,9 +117,9 @@ def test_note_patch_returns_saved_note_when_reconciliation_raises(
     assert create_response.status_code == 201, create_response.text
     created = create_response.json()
     original_state = db.get_reconciliation_state(
-        created["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=created["id"],
     )
     assert original_state is not None
     client.app.dependency_overrides[notes_endpoint.get_notes_task_service] = lambda: _FailingNotesTaskService()
@@ -137,9 +137,9 @@ def test_note_patch_returns_saved_note_when_reconciliation_raises(
     assert saved_note is not None
     assert saved_note["content"] == "- [x] Alpha\n"
     assert db.get_reconciliation_state(
-        created["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=created["id"],
     ) == original_state
 
 
@@ -156,9 +156,9 @@ def test_note_create_ignores_empty_checklist_placeholder_with_warning_state(
     assert create_response.status_code == 201, create_response.text
     created = create_response.json()
     state = db.get_reconciliation_state(
-        created["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=created["id"],
     )
     tasks = db.list_tasks(
         note_id=created["id"],
@@ -196,9 +196,9 @@ def test_title_only_put_advances_reconciliation_state_without_changing_tasks(
     assert update_response.status_code == 200, update_response.text
     updated = update_response.json()
     updated_state = db.get_reconciliation_state(
-        note_id,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note_id,
     )
     updated_tasks = _tasks_by_text(db, note_id)
     assert updated["version"] == created["version"] + 1
@@ -233,9 +233,9 @@ def test_title_only_patch_advances_reconciliation_state_without_changing_tasks(
     assert patch_response.status_code == 200, patch_response.text
     patched = patch_response.json()
     patched_state = db.get_reconciliation_state(
-        note_id,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note_id,
     )
     patched_tasks = _tasks_by_text(db, note_id)
     assert patched["version"] == created["version"] + 1
@@ -271,9 +271,9 @@ def test_bulk_create_reconciles_checklist_tasks_for_created_note(
     created_note = payload["results"][0]["note"]
     note_id = created_note["id"]
     state = db.get_reconciliation_state(
-        note_id,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note_id,
     )
     tasks = _tasks_by_text(db, note_id)
 
@@ -312,9 +312,9 @@ def test_markdown_import_reconciles_checklist_tasks_for_created_note(
     assert payload["failed_count"] == 0
     imported_note = _single_note_by_title(db, "Import Tasks")
     state = db.get_reconciliation_state(
-        imported_note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=imported_note["id"],
     )
     tasks = _tasks_by_text(db, imported_note["id"])
 
@@ -341,9 +341,9 @@ def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(
     note_id = created["id"]
 
     created_state = db.get_reconciliation_state(
-        note_id,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note_id,
     )
     created_tasks = _tasks_by_text(db, note_id)
     assert created_state is not None
@@ -363,9 +363,9 @@ def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(
     updated = update_response.json()
     updated_tasks = _tasks_by_text(db, note_id)
     updated_state = db.get_reconciliation_state(
-        note_id,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note_id,
     )
 
     assert updated["version"] == created["version"] + 1
@@ -383,9 +383,9 @@ def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(
     assert conflict_response.status_code == 409, conflict_response.text
 
     assert db.get_reconciliation_state(
-        note_id,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note_id,
     ) == updated_state
     tasks_after_conflict = _tasks_by_text(db, note_id)
     assert tasks_after_conflict["Alpha"]["status"] == "done"

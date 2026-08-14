@@ -1253,9 +1253,9 @@ class NotesModule(BaseModule):
         if task.get("projection_status") != "live":
             return
         projection = db.get_task_projection(
-            task_id,
             owner_user_id=scope.owner_user_id,
             dataset_id=scope.dataset_id,
+            task_id=task_id,
         )
         if projection is None:
             raise ConflictError(
@@ -1360,7 +1360,7 @@ class NotesModule(BaseModule):
 
     def _require_scoped_task(self, db: CharactersRAGDB, context: Any | None, task_id: str) -> dict[str, Any]:
         scope = self._task_scope(db, context)
-        task = db.get_task_scoped(
+        task = db.get_task(
             owner_user_id=scope.owner_user_id,
             dataset_id=scope.dataset_id,
             task_id=task_id,

@@ -142,9 +142,9 @@ def _task_response(
     include_projection: bool = True,
 ) -> TaskResponse:
     projection = db.get_task_projection(
-        str(task["id"]),
         owner_user_id=scope.owner_user_id,
         dataset_id=scope.dataset_id,
+        task_id=str(task["id"]),
     ) if include_projection else None
     return TaskResponse(
         id=str(task["id"]),
@@ -218,9 +218,9 @@ def _stale_reconciliation_response(
         )
     if note_id is not None:
         state_row = db.get_reconciliation_state(
-            note_id,
             owner_user_id=scope.owner_user_id,
             dataset_id=scope.dataset_id,
+            note_id=note_id,
         )
         return _reconciliation_response(None, fallback_state=state_row)
     return TaskReconciliationSummaryResponse(status="clean", processed_notes=0, remaining_stale_notes=0)
@@ -335,16 +335,16 @@ async def update_task_activity_state(
         scope = resolve_task_compatibility_scope(db, authenticated_owner_user_id=user_id)
         state_row = (
             db.mark_task_activity_dismissed(
-                event_id,
                 owner_user_id=scope.owner_user_id,
                 dataset_id=scope.dataset_id,
+                event_id=event_id,
                 user_id=user_id,
             )
             if request.dismissed
             else db.mark_task_activity_read(
-                event_id,
                 owner_user_id=scope.owner_user_id,
                 dataset_id=scope.dataset_id,
+                event_id=event_id,
                 user_id=user_id,
             )
         )
@@ -371,7 +371,7 @@ async def get_task(
     scope = resolve_task_compatibility_scope(
         db, authenticated_owner_user_id=str(current_user.id)
     )
-    task = db.get_task_scoped(
+    task = db.get_task(
         owner_user_id=scope.owner_user_id,
         dataset_id=scope.dataset_id,
         task_id=task_id,

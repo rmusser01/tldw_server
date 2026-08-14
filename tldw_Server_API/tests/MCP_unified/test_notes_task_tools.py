@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.notes_module import NotesModule
 
@@ -27,6 +27,8 @@ class _FakeTaskStore:
 
 
 class _FakeTaskDB:
+    backend_type = BackendType.SQLITE
+
     def __init__(self) -> None:
         self.client_id = "7"
         self.notes: dict[str, dict[str, Any]] = {
@@ -75,10 +77,11 @@ class _FakeTaskDB:
         self.task_store = _FakeTaskStore(self)
         self.closed = False
 
-    def resolve_task_compatibility_scope(self, *, owner_user_id: str) -> tuple[str, str]:
-        return owner_user_id, "local-unbound"
+    @staticmethod
+    def execute_query(_query: str, _params: Any = None) -> Any:
+        return SimpleNamespace(fetchall=lambda: [])
 
-    def get_task_projection(self, task_id: str, **scope: Any) -> dict[str, Any] | None:
+    def get_task_projection(self, *, task_id: str, **scope: Any) -> dict[str, Any] | None:
         return self.task_store.get_task_projection(task_id, **scope)
 
     def _task(
@@ -111,12 +114,17 @@ class _FakeTaskDB:
         note = self.notes.get(note_id)
         return dict(note) if note else None
 
-    def get_task(self, task_id: str, include_deleted: bool = False) -> dict[str, Any] | None:  # noqa: ARG002
+    def get_task(
+        self,
+        *,
+        task_id: str,
+        owner_user_id: str,  # noqa: ARG002
+        dataset_id: str,  # noqa: ARG002
+        include_deleted: bool = False,  # noqa: ARG002
+        conn: Any = None,  # noqa: ARG002
+    ) -> dict[str, Any] | None:
         task = self.tasks.get(task_id)
         return dict(task) if task else None
-
-    def get_task_scoped(self, *, task_id: str, **_scope: Any) -> dict[str, Any] | None:
-        return self.get_task(task_id)
 
     def list_tasks(
         self,

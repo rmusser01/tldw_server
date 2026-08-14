@@ -134,9 +134,9 @@ def test_unchanged_content_is_idempotent(
     assert [task["id"] for task in tasks_after_second] == [task["id"] for task in tasks_after_first]
     assert {task["id"]: task["version"] for task in tasks_after_second} == versions_after_first
     assert notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     )["note_version"] == note["version"]
 
 
@@ -169,9 +169,9 @@ def test_child_detail_only_edit_preserves_task_id(
     result = _reconcile(service, notes_db, updated_note)
     updated_task = _task_by_text(notes_db, note["id"])["Task"]
     state = notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     )
 
     assert result.created_count == 0
@@ -300,10 +300,10 @@ def test_unique_hash_fallback_requires_same_block_fingerprint(
     move_tasks = _tasks_for_text(notes_db, note["id"], "Move me")
     live_move_tasks = [task for task in move_tasks if task["projection_status"] == "live"]
     original_after = notes_db.get_task(
-        original_move_task["id"],
-        include_deleted=True,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        task_id=original_move_task["id"],
+        include_deleted=True,
     )
 
     assert len(live_move_tasks) == 1
@@ -320,9 +320,9 @@ def test_missing_live_projection_row_fails_closed_without_duplicate_task(
     _reconcile(service, notes_db, note)
     original_alpha = _task_by_text(notes_db, note["id"])["Alpha"]
     original_state = notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     )
     assert original_state is not None
     notes_db.execute_query(
@@ -343,9 +343,9 @@ def test_missing_live_projection_row_fails_closed_without_duplicate_task(
     )
     assert [task["text"] for task in tasks] == ["Alpha"]
     assert notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     ) == original_state
 
 
@@ -364,9 +364,9 @@ def test_empty_checklist_placeholder_is_warning_not_task(
         dataset_id=TASK_DATASET_ID,
     )
     state = notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     )
 
     assert result.created_count == 1
@@ -388,10 +388,10 @@ def test_missing_line_marks_previous_task_unlinked(
     updated_note = _update_note(notes_db, note["id"], int(note["version"]), "- [ ] Alpha\n")
     result = _reconcile(service, notes_db, updated_note)
     beta = notes_db.get_task(
-        beta_id,
-        include_deleted=True,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        task_id=beta_id,
+        include_deleted=True,
     )
 
     assert result.unlinked_count == 1
@@ -410,10 +410,10 @@ def test_manual_line_removal_does_not_hard_delete_task_history(
     updated_note = _update_note(notes_db, note["id"], int(note["version"]), "- [ ] Keep\n")
     _reconcile(service, notes_db, updated_note)
     removed_task = notes_db.get_task(
-        removed_id,
-        include_deleted=True,
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        task_id=removed_id,
+        include_deleted=True,
     )
     events = notes_db.list_task_activity(
         task_id=removed_id,
@@ -435,9 +435,9 @@ def test_stale_note_version_does_not_update_reconciliation_state(
     note = _create_note(notes_db, "- [ ] Alpha\n")
     _reconcile(service, notes_db, note)
     original_state = notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     )
     assert original_state is not None
 
@@ -454,9 +454,9 @@ def test_stale_note_version_does_not_update_reconciliation_state(
         )
 
     assert notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     ) == original_state
 
 
@@ -500,7 +500,7 @@ def test_current_note_validation_uses_public_task_store_snapshot(
         dataset_id=TASK_DATASET_ID,
     ) == []
     assert notes_db.get_reconciliation_state(
-        note["id"],
         owner_user_id=TASK_OWNER_USER_ID,
         dataset_id=TASK_DATASET_ID,
+        note_id=note["id"],
     ) is None
