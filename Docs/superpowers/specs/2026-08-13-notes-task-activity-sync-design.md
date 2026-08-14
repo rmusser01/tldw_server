@@ -255,6 +255,15 @@ result. A second create after tombstone, a distinct second tombstone, or any reu
 with changed fingerprint conflicts. Tombstones retain the immutable event content
 for audit but exclude it from ordinary activity surfaces.
 
+Create always has activity revision 1. Its payload is the complete immutable field
+set above and its object hash is the canonical fingerprint. Tombstone always has
+revision 2 and the exact payload `{note_id, task_id, deleted_at, delete_reason}`:
+parent IDs must equal the create, `deleted_at` is the canonical envelope timestamp,
+and `delete_reason` is `user_request`, `correction`, or `policy`. The tombstone hash
+binds adapter version, revision/lifecycle, original create fingerprint, parent IDs,
+deleted timestamp, and reason. The product row retains create fields and stores the
+same deleted-at/reason/hash/cursor. No revision greater than 2 is valid.
+
 Task transitions that require user-visible history create exactly one canonical
 activity. A retry or crash repair cannot duplicate it because the event ID and
 mutation-group step are stable.
@@ -370,6 +379,16 @@ client activity create is permitted only for `corrected` and must reference an
 authorized existing event. Server-origin REST/MCP/reconciliation supplies the same
 fields through trusted bindings, never caller-selectable provenance.
 
+ADR-034's 1,000-envelope mutation-group cap is authoritative. Reconciliation
+preflight parses and validates the complete note edit before appending any envelope
+or mutating product state. One changed task consumes a task step plus one activity
+step, and the note consumes at most one step, so a single request may change at
+most 499 managed tasks (`2 * 499 + 1 = 999`). Any computed plan above 1,000 steps,
+including future fixed coordinator steps, fails with the stable sanitized
+`sync_task_projection_group_too_large` error before the `notes.note` envelope is
+appended. The request is not split into sequential groups, because that would make
+an accepted prefix durable without the user's complete intent.
+
 ## Bootstrap, capability advertisement, and rollout
 
 No global environment flag is added. Existing dataset enrollment and readiness are
@@ -389,8 +408,9 @@ after PR 4 exposes them, but no profile silently opts in. Adding a domain to an
 already-ready default-personal dataset creates its independent readiness row in one
 Sync transaction without changing earlier domain readiness.
 
-Before the source scan, enrollment enables fail-closed canonical capture for the
-new domain while external device writes remain disabled. Each bootstrap page holds
+Before either source scan, enrollment atomically enables fail-closed canonical
+capture for both task and activity while external device writes remain disabled.
+It cannot enable task capture alone. Each bootstrap page holds
 the dataset materialization fence, reads an owner/dataset keyset page, appends
 trusted source-verified envelopes, and records its cursor/count/fingerprint.
 Concurrent REST changes therefore append after or before that page under the same
@@ -398,16 +418,20 @@ ordering authority rather than escaping capture.
 
 `notes.task` becomes dataset-writable in PR 4 only when:
 
-- `notes.note` and `notes.task` are enrolled at supported adapter versions;
+- `notes.note`, `notes.task`, and `notes.task_activity` are enrolled at supported
+  adapter versions;
 - source task bootstrap is complete, count/fingerprint verified, and resumable
   cursor state is `ready`;
-- server-origin task capture and repair are enabled; and
+- source activity bootstrap is complete and verified;
+- atomic task/activity capture, deterministic group expansion, and both repair
+  paths are enabled and healthy; and
 - no reconciliation blocker or unresolved bootstrap drift exists.
 
-`notes.task_activity` additionally requires activity enrollment, complete immutable
-event bootstrap, and transition capture readiness. PR 4 may then list both adapter
-versions in server-supported capabilities. The selected dataset's writable map
-still omits either domain until that domain's exact predicate is true.
+`notes.task_activity` has the same coupled readiness predicate because ordinary
+activity depends on an authorized task/note view and task mutations cannot succeed
+without activity. PR 4 may then list both adapter versions in server-supported
+capabilities. The selected dataset's writable map advertises both together or
+neither; a later adapter version may relax that coupling only through a new ADR.
 
 Bootstrap is non-destructive and keyset-paged. Stable existing task/event IDs are
 preserved. Each page records its source count, cursor, and privacy-safe fingerprint.
@@ -421,6 +445,35 @@ preserves the stored actor/tool/policy fields after validation, uses stored
 `created_at` as `client_occurred_at`, and records a null source device with a
 `legacy_source_verified` marker. Bootstrap never fabricates a client device or
 claims that a legacy timestamp ordered Sync history.
+
+Legacy event conversion is exact:
+
+| Existing `event_type` and values | Canonical event |
+| --- | --- |
+| `created` | `created`; old must be null and new must validate as the bounded task snapshot subset |
+| `updated` | `updated`; old/new must be bounded objects and differ in at least one canonical task field |
+| `status_changed`, `open -> done` | `completed` |
+| `status_changed`, `done -> open` | `reopened` |
+| `unlinked` | `projection_unlinked` |
+| `deleted` | `deleted` |
+| any other type, status transition, parent mismatch, malformed value, or invalid ID | block activity readiness; do not rewrite or drop the row |
+
+A nullable legacy `note_id` is derived only from its same-scope authorized task;
+both missing or inconsistent parents block readiness. `actor_type` must map to the
+closed actor enum and actor ID must meet its bound. `tool_name`, `policy_mode`, and
+`approval_id` become an optional `legacy_context` metadata object of separately
+bounded strings (128 code points each). Stored old/new JSON is canonicalized under
+the event-specific schema. A stored `idempotency_key` is not synchronized in raw
+form; after type/length validation it becomes a SHA-256 request fingerprint in
+metadata. Oversized, nested, or unknown values block readiness with a reason code
+and row hash.
+
+The source scan is keyset-ordered by `(created_at, id)` while holding the dataset
+fence. Trusted bootstrap envelopes receive monotonic server cursors in that order;
+after materialization all activity pages use `(sync_server_cursor, activity_id)`
+with a maximum page size of 1,000. A concurrent new event is captured normally
+under the same fence and therefore cannot be omitted between scan and final
+count/fingerprint verification.
 
 Legacy devices receive only versions they negotiated. Per-domain adapter-version
 cursors and acknowledgments prevent a version change from skipping or
@@ -448,6 +501,16 @@ task or note is overwritten.
 An applied task envelope referenced by a live marker is retention-protected until
 the marker advances or unlinks. Sync maintenance may compact unrelated history but
 must not remove the only last-common snapshot for a live projection.
+
+When a group advances or removes a marker, its privacy-safe group metadata records
+a projection anchor: task ID, linked/unlinked state, prior note envelope
+cursor/hash, prior task revision/hash, and marker hash. It contains no Markdown or
+task text. The anchor is durable Sync evidence, not the disposable locator cache,
+and lets repair reconstruct whether a task was linked before deletion. A linked
+task tombstone retains that anchor and both named envelopes until restore installs
+a new verified marker, an exact explicit unlink resolution commits, or an
+authorized hard-purge/restore-window workflow permanently releases the task. An
+unlinked task records that state and needs no former-marker retention.
 
 Only `title`, checkbox-derived `status`/`completed_at`, `due_date`, `priority`, and
 `estimate` are Markdown-projectable in version 1. Description, recurrence,
@@ -485,6 +548,12 @@ Markdown. Resolution requires an exact opaque drift ID plus current note/task he
 claims and chooses `keep_task`, `accept_markdown`, or `unlink`; changed claims create
 a new review rather than applying stale intent. Resolved/dismissed rows remain
 bounded audit metadata and are excluded from Sync.
+
+Every open drift installs retention blockers for its referenced current/prior note
+and task envelopes, including malformed or removed-marker cases that use the last
+durable projection anchor. The blockers release only when an exact drift resolution
+or dismissal commits and no live marker, linked tombstone, newer open drift, or
+pending repair still references the envelope. Cache deletion never releases them.
 
 Projection cache and drift bookkeeping never become Sync domains. After cache loss,
 restore, migration, parser change, or detected corruption, association and the
@@ -595,6 +664,8 @@ evidence afterward.
 
 - event immutability, ID/fingerprint replay, provenance, ordering, correction, and
   irreversible tombstone;
+- exact legacy event mapping/rejection, `(created_at, id)` bootstrap ordering,
+  deleted-at/reason hashes, revision-1/create and revision-2/tombstone pages;
 - transition-to-single-event behavior under retry and crash repair;
 - task/note parent mismatch and cross-owner denial;
 - resumable existing-event bootstrap and exclusion of read state; and
@@ -611,7 +682,10 @@ evidence afterward.
 - projection-cache loss/rebuild from markers plus immutable envelope bases,
   retention protection, malformed/duplicate markers, line removal/unlink, task
   delete, restore, and explicit relink;
+- linked-tombstone and open-drift compaction blockers/release, including cache loss;
 - note/task/activity mutation-group crash windows and repair;
+- 499-change boundary acceptance and pre-append rejection of 500 changes or any
+  computed plan over ADR-034's 1,000-step cap;
 - multi-device concurrent completion, recurrence-state, deletion, restore, and
   checklist edits;
 - bounded pagination and plan assertions; and

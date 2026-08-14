@@ -85,6 +85,11 @@ until the fourth PR supplies deterministic task/activity group expansion,
 projection convergence, bootstrap verification, and repair. Existing datasets are
 never silently enrolled.
 
+Because every portable task mutation emits immutable activity, task writability is
+coupled to both domains: task and activity capture are enabled atomically, both
+bootstraps and both repair paths must be ready, and neither domain is writable when
+that invariant is incomplete.
+
 TASK-13006 is delivered as four atomic pull requests:
 
 1. contract, storage, migration, RLS, catalog verification, and dormant readiness;
