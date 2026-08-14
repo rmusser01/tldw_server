@@ -241,6 +241,39 @@ def test_arbitrary_json_accepts_js_safe_integer_endpoints() -> None:
     ).metadata == {"minimum": minimum, "maximum": maximum}
 
 
+def test_canonical_json_rejects_bmp_and_non_bmp_object_keys() -> None:
+    with pytest.raises(NotesTaskContractError):
+        canonical_json_bytes({"\ue000": 1, "\U00010000": 2})
+
+
+def test_canonical_json_safe_ascii_key_order_is_stable() -> None:
+    assert canonical_json_bytes(
+        {"z": 3, "a.b": {"Z-9_": 2}, "A": 1}
+    ) == b'{"A":1,"a.b":{"Z-9_":2},"z":3}'
+
+
+def test_task_and_activity_reject_nested_non_safe_json_keys() -> None:
+    with pytest.raises(NotesTaskContractError, match="safe ASCII"):
+        parse_notes_task_v1(
+            valid_task_payload(custom={"nested": {"unsafe key": 1}}),
+            owner_user_id=OWNER_ID,
+        )
+    with pytest.raises(NotesTaskContractError, match="safe ASCII"):
+        parse_activity(
+            valid_activity_payload(metadata={"nested": {"\U00010000": 1}})
+        )
+
+
+def test_legacy_conversion_rejects_non_safe_json_keys_before_mapping() -> None:
+    with pytest.raises(NotesTaskContractError, match="safe ASCII"):
+        convert_legacy(
+            legacy_event(
+                old_value={"status": "open", "\ue000": 1},
+                new_value={"status": "done"},
+            )
+        )
+
+
 @pytest.mark.parametrize(
     "recurrence",
     [

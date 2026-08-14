@@ -910,8 +910,10 @@ def _validate_json_value(
         stack.append((current, parent_depth, True))
         if isinstance(current, dict):
             for key, item in current.items():
-                if not isinstance(key, str):
-                    raise ValueError(f"{label} JSON object keys must be strings")
+                if not isinstance(key, str) or _SAFE_KEY_RE.fullmatch(key) is None:
+                    raise ValueError(
+                        f"{label} JSON object keys must use 1 to 64 safe ASCII characters"
+                    )
                 stack.append((item, depth, False))
         else:
             stack.extend((item, depth, False) for item in current)
