@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     NotesTaskActivityTombstoneV1,
     NotesTaskContractError,
     NotesTaskV1Payload,
+    canonical_json_bytes,
     convert_legacy_task_event,
     notes_task_activity_object_hash,
     notes_task_object_hash,
@@ -209,6 +210,38 @@ def test_notes_task_v1_rejects_each_payload_boundary(
 
 
 @pytest.mark.parametrize(
+    "value",
+    [1.0, 1e-7, -0.0, 9_007_199_254_740_992, -9_007_199_254_740_992],
+)
+def test_arbitrary_json_rejects_cross_runtime_numeric_values(value: object) -> None:
+    with pytest.raises(NotesTaskContractError):
+        canonical_json_bytes({"value": value})
+    with pytest.raises(NotesTaskContractError):
+        parse_notes_task_v1(
+            valid_task_payload(custom={"value": value}),
+            owner_user_id=OWNER_ID,
+        )
+    with pytest.raises(NotesTaskContractError):
+        parse_activity(valid_activity_payload(metadata={"value": value}))
+
+
+def test_arbitrary_json_accepts_js_safe_integer_endpoints() -> None:
+    minimum = -9_007_199_254_740_991
+    maximum = 9_007_199_254_740_991
+
+    assert canonical_json_bytes({"minimum": minimum, "maximum": maximum}) == (
+        b'{"maximum":9007199254740991,"minimum":-9007199254740991}'
+    )
+    assert parse_notes_task_v1(
+        valid_task_payload(custom={"minimum": minimum, "maximum": maximum}),
+        owner_user_id=OWNER_ID,
+    ).custom == {"minimum": minimum, "maximum": maximum}
+    assert parse_activity(
+        valid_activity_payload(metadata={"minimum": minimum, "maximum": maximum})
+    ).metadata == {"minimum": minimum, "maximum": maximum}
+
+
+@pytest.mark.parametrize(
     "recurrence",
     [
         {
@@ -308,6 +341,23 @@ def test_notes_task_nested_custom_is_immutable_and_hash_stable() -> None:
     assert isinstance(raw_custom, dict)
     raw_custom["nested"]["items"].append({"value": 3})
     assert notes_task_object_hash(parsed, revision=1, deleted=False) == before
+
+
+def test_deepcopy_preserves_parsed_model_values_and_hashes() -> None:
+    task = parse_notes_task_v1(valid_task_payload(), owner_user_id=OWNER_ID)
+    activity = parse_activity(valid_activity_payload())
+
+    task_copy = deepcopy(task)
+    activity_copy = deepcopy(activity)
+
+    assert task_copy == task
+    assert activity_copy == activity
+    assert notes_task_object_hash(
+        task_copy, revision=1, deleted=False
+    ) == notes_task_object_hash(task, revision=1, deleted=False)
+    assert notes_task_activity_object_hash(
+        activity_copy, revision=1, deleted=False
+    ) == notes_task_activity_object_hash(activity, revision=1, deleted=False)
 
 
 @pytest.mark.parametrize(
@@ -414,6 +464,46 @@ def test_notes_task_activity_v1_rejects_noncanonical_event_shapes(
                 old_value=old_value,
                 new_value=new_value,
                 corrects_activity_id=corrects_activity_id,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "old_value", "new_value"),
+    [
+        (
+            "deleted",
+            {"deleted": 0, "projection_status": "live"},
+            {"deleted": True, "projection_status": "deleted"},
+        ),
+        (
+            "deleted",
+            {"deleted": False, "projection_status": "live"},
+            {"deleted": 1, "projection_status": "deleted"},
+        ),
+        (
+            "restored",
+            {"deleted": 1, "projection_status": "deleted"},
+            {"deleted": False, "projection_status": "live"},
+        ),
+        (
+            "restored",
+            {"deleted": True, "projection_status": "deleted"},
+            {"deleted": 0, "projection_status": "live"},
+        ),
+    ],
+)
+def test_lifecycle_activity_rejects_integer_deleted_flags(
+    event_type: str,
+    old_value: dict[str, object],
+    new_value: dict[str, object],
+) -> None:
+    with pytest.raises(NotesTaskContractError):
+        parse_activity(
+            valid_activity_payload(
+                event_type=event_type,
+                old_value=old_value,
+                new_value=new_value,
             )
         )
 
@@ -855,6 +945,21 @@ def test_convert_legacy_task_event_fails_closed_on_unknown_or_malformed_data(
 ) -> None:
     with pytest.raises(NotesTaskContractError):
         convert_legacy(event)
+
+
+def test_convert_legacy_task_event_bounds_deep_json_before_schema_matching() -> None:
+    deep: dict[str, object] = {}
+    for _ in range(1_500):
+        deep = {"nested": deep}
+
+    with pytest.raises(NotesTaskContractError, match="depth"):
+        convert_legacy(
+            legacy_event(
+                event_type="updated",
+                old_value=deep,
+                new_value=deep,
+            )
+        )
 
 
 def test_convert_legacy_task_event_wraps_invalid_ids_as_contract_errors() -> None:

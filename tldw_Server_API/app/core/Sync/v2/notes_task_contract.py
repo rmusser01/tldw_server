@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, NoReturn, TypeVar, cast
 from uuid import RFC_4122, UUID
 
 from pydantic import (
@@ -30,6 +29,7 @@ _SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _SAFE_ACTOR_ID_RE = re.compile(r"[A-Za-z0-9._:@/+-]{1,128}")
 _ESTIMATE_RE = re.compile(r"[0-9]{1,6}[mhd]")
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}")
+_JS_SAFE_INTEGER = 9_007_199_254_740_991
 _WEEKDAYS = ("mo", "tu", "we", "th", "fr", "sa", "su")
 _TASK_RESERVED_KEYS = frozenset(
     {
@@ -140,8 +140,14 @@ class NotesTaskContractError(ValueError):
 class _FrozenJsonDict(dict[str, Any]):
     """JSON object that retains normal dict serialization without mutation."""
 
-    def _reject_mutation(self, *_args: object, **_kwargs: object) -> None:
+    def _reject_mutation(self, *_args: object, **_kwargs: object) -> NoReturn:
         raise TypeError("canonical JSON values are immutable")
+
+    def __copy__(self) -> _FrozenJsonDict:
+        return self
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> _FrozenJsonDict:
+        return self
 
     __setitem__ = _reject_mutation
     __delitem__ = _reject_mutation
@@ -156,8 +162,14 @@ class _FrozenJsonDict(dict[str, Any]):
 class _FrozenJsonList(list[Any]):
     """JSON array that retains normal list serialization without mutation."""
 
-    def _reject_mutation(self, *_args: object, **_kwargs: object) -> None:
+    def _reject_mutation(self, *_args: object, **_kwargs: object) -> NoReturn:
         raise TypeError("canonical JSON values are immutable")
+
+    def __copy__(self) -> _FrozenJsonList:
+        return self
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> _FrozenJsonList:
+        return self
 
     __setitem__ = _reject_mutation
     __delitem__ = _reject_mutation
@@ -422,6 +434,7 @@ def canonical_json_bytes(value: object) -> bytes:
     """Serialize one validated value as canonical UTF-8 JSON."""
 
     try:
+        _validate_json_value(value, "value")
         return json.dumps(
             value,
             sort_keys=True,
@@ -429,7 +442,7 @@ def canonical_json_bytes(value: object) -> bytes:
             ensure_ascii=False,
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
         raise NotesTaskContractError("value is not canonical UTF-8 JSON") from exc
 
 
@@ -739,7 +752,7 @@ def convert_legacy_task_event(
     return parse_notes_task_activity_v1(
         {
             "activity_id": activity_id,
-            "note_id": cast(str, note_id),
+            "note_id": note_id,
             "task_id": task_id,
             "event_type": canonical_type,
             "actor_type": actor_type,
@@ -849,9 +862,7 @@ def _validate_json_object(
 ) -> None:
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object")
-    _validate_json_value(value, label)
-    if _json_depth(value) > max_depth:
-        raise ValueError(f"{label} exceeds maximum depth {max_depth}")
+    _validate_json_value(value, label, max_depth=max_depth)
     if len(canonical_json_bytes(value)) > max_bytes:
         raise ValueError(f"{label} exceeds {max_bytes // 1_024} KiB")
 
@@ -866,34 +877,44 @@ def _freeze_json(value: Any) -> Any:
     return value
 
 
-def _validate_json_value(value: object, label: str) -> None:
-    if value is None or isinstance(value, (str, bool)):
-        return
-    if isinstance(value, int) and not isinstance(value, bool):
-        return
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError(f"{label} must contain finite JSON numbers")
-        return
-    if isinstance(value, list):
-        for item in value:
-            _validate_json_value(item, label)
-        return
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ValueError(f"{label} JSON object keys must be strings")
-            _validate_json_value(item, label)
-        return
-    raise ValueError(f"{label} must contain only JSON values")
-
-
-def _json_depth(value: object) -> int:
-    if isinstance(value, dict):
-        return 1 + max((_json_depth(item) for item in value.values()), default=0)
-    if isinstance(value, list):
-        return 1 + max((_json_depth(item) for item in value), default=0)
-    return 0
+def _validate_json_value(
+    value: object,
+    label: str,
+    *,
+    max_depth: int | None = None,
+) -> None:
+    active_containers: set[int] = set()
+    stack: list[tuple[object, int, bool]] = [(value, 0, False)]
+    while stack:
+        current, parent_depth, leaving = stack.pop()
+        if leaving:
+            active_containers.remove(id(current))
+            continue
+        if current is None or isinstance(current, (str, bool)):
+            continue
+        if isinstance(current, int):
+            if not -_JS_SAFE_INTEGER <= current <= _JS_SAFE_INTEGER:
+                raise ValueError(f"{label} integers must be within the JS safe range")
+            continue
+        if isinstance(current, float):
+            raise ValueError(f"{label} cannot contain floating-point values")
+        if not isinstance(current, (dict, list)):
+            raise ValueError(f"{label} must contain only JSON values")
+        depth = parent_depth + 1
+        if max_depth is not None and depth > max_depth:
+            raise ValueError(f"{label} exceeds maximum depth {max_depth}")
+        container_id = id(current)
+        if container_id in active_containers:
+            raise ValueError(f"{label} cannot contain circular values")
+        active_containers.add(container_id)
+        stack.append((current, parent_depth, True))
+        if isinstance(current, dict):
+            for key, item in current.items():
+                if not isinstance(key, str):
+                    raise ValueError(f"{label} JSON object keys must be strings")
+                stack.append((item, depth, False))
+        else:
+            stack.extend((item, depth, False) for item in current)
 
 
 def _walk_keys(value: object):
@@ -1023,17 +1044,25 @@ def _validate_event_values(
         return
     if event_type == "deleted":
         if (
-            set(old_value or {}) != {"deleted", "projection_status"}
+            old_value is None
+            or new_value is None
+            or set(old_value) != {"deleted", "projection_status"}
             or old_value["deleted"] is not False
             or old_value["projection_status"] not in {"live", "unlinked", "ambiguous"}
-            or new_value != {"deleted": True, "projection_status": "deleted"}
+            or set(new_value) != {"deleted", "projection_status"}
+            or new_value["deleted"] is not True
+            or new_value["projection_status"] != "deleted"
         ):
             raise NotesTaskContractError("deleted activity has a noncanonical shape")
         return
     if event_type == "restored":
         if (
-            old_value != {"deleted": True, "projection_status": "deleted"}
-            or set(new_value or {}) != {"deleted", "projection_status"}
+            old_value is None
+            or new_value is None
+            or set(old_value) != {"deleted", "projection_status"}
+            or old_value["deleted"] is not True
+            or old_value["projection_status"] != "deleted"
+            or set(new_value) != {"deleted", "projection_status"}
             or new_value["deleted"] is not False
             or new_value["projection_status"] not in {"live", "unlinked"}
         ):
@@ -1041,7 +1070,9 @@ def _validate_event_values(
         return
     if event_type == "projection_linked":
         if (
-            set(old_value or {}) != {"projection_status"}
+            old_value is None
+            or new_value is None
+            or set(old_value) != {"projection_status"}
             or old_value["projection_status"] not in {"unlinked", "ambiguous"}
             or new_value != {"projection_status": "live"}
         ):
@@ -1050,7 +1081,8 @@ def _validate_event_values(
     if event_type == "projection_drift":
         if (
             old_value is not None
-            or set(new_value or {}) != {"reason_code"}
+            or new_value is None
+            or set(new_value) != {"reason_code"}
             or new_value["reason_code"] not in _DRIFT_REASONS
         ):
             raise NotesTaskContractError("projection_drift activity has a noncanonical shape")
@@ -1119,7 +1151,12 @@ def _copy_json_object(value: object, label: str) -> dict[str, Any] | None:
         raise NotesTaskContractError(f"{label} must be an object or null")
     copied = dict(value)
     try:
-        _validate_json_value(copied, label)
+        _validate_json_object(
+            copied,
+            label=label,
+            max_depth=4,
+            max_bytes=16 * 1_024,
+        )
     except ValueError as exc:
         raise NotesTaskContractError(str(exc)) from exc
     return copied

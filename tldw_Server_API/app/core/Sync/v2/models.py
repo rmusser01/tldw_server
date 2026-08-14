@@ -560,7 +560,7 @@ def normalize_supported_adapter_versions(
 
     requested = normalize_sync_v2_requested_domains(requested_domains)
     if value is None:
-        return {cast(SyncDomain, domain): [1] for domain in requested}
+        return {domain: [1] for domain in requested}
     if not isinstance(value, Mapping):
         raise ValueError("supported_adapter_versions must be an object")
     if len(value) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
@@ -572,7 +572,7 @@ def normalize_supported_adapter_versions(
     known = set(SYNC_V2_SUPPORTED_DOMAINS)
     requested_set = set(requested)
     normalized: dict[SyncDomain, list[int]] = {
-        cast(SyncDomain, domain): [1] for domain in requested
+        domain: [1] for domain in requested
     }
     for raw_domain, raw_versions in value.items():
         if not isinstance(raw_domain, str) or raw_domain not in known:
@@ -605,7 +605,7 @@ def normalize_supported_adapter_versions(
             )
         if len(set(versions)) != len(versions):
             raise ValueError("supported_adapter_versions contains duplicate adapter versions")
-        normalized[cast(SyncDomain, raw_domain)] = sorted(versions)
+        normalized[raw_domain] = sorted(versions)
     return normalized
 
 
