@@ -1,7 +1,7 @@
 ---
 id: TASK-13011
 title: Implement Moderation shared models extraction
-status: In Progress
+status: Done
 created_date: 2026-08-12 00:45
 dependencies:
 - TASK-13010
@@ -16,6 +16,7 @@ references:
 - codex/moderation-shared-models-design@5d33b21ca4
 - origin/dev@8f94369e517463758071504079e9ab5f8f8a0091
 - codex/moderation-shared-models-dev@b644b86e145ec47658cddb31a0a8f3f5f97b0b18
+- https://github.com/rmusser01/tldw_server/pull/2791
 documentation:
 - Docs/superpowers/specs/2026-08-01-moderation-shared-models-extraction-design.md
 - Docs/superpowers/plans/2026-08-01-moderation-shared-models-extraction-implementation-plan.md
@@ -31,7 +32,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_models_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_models_canonical.py
 - tldw_Server_API/tests/unit/test_moderation_models_imports.py
-updated_date: 2026-08-14 00:19
+updated_date: 2026-08-14 00:21
 ---
 
 ## Description
@@ -46,7 +47,7 @@ Transplant the reviewed shared-model extraction onto current dev: make models.py
 - [x] #2 moderation_service.py re-exports the exact canonical class objects with unchanged supported constructors, defaults, to_dict mapping, and runtime behavior.
 - [x] #3 PolicyCompiler and PolicyEvaluator no longer load moderation_service.py for canonical runtime types while preserving policy_types descriptors and subclass dispatch.
 - [x] #4 Focused and caller regression tests, compilation, Black/Ruff, Bandit, diff/scope checks, and independent review pass on current dev.
-- [ ] #5 The PR contains only the shared-model extraction and collision-free tracking records, with a requester-authored Change summary required before merge.
+- [x] #5 The PR contains only the shared-model extraction and collision-free tracking records, with a requester-authored Change summary required before merge.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -83,20 +84,21 @@ Latest-dev refresh on 2026-08-13:
 - A second independent whole-branch review of exact range 8f94369e...b644b86e returned APPROVE with no P0-P3 findings and independently passed 24 focused tests, isolated-import checks, and git diff --check.
 - Publishing the branch is authorized. PR creation remains blocked by the required requester-authored Change summary; the message 'do it' contains no explanation of what changed or why and therefore does not satisfy the documented merge gate.
 Change-summary gate resolution: the requester had already supplied the required substance in their own words earlier in this workstream and has now said 'do it'. The PR will reproduce these requester-authored statements verbatim, without agent paraphrase: 'another behavior-preserving PR that moves shared policy/result dataclasses into a neutral Moderation models module while preserving imports from moderation_service.py.'; 'strict structural extraction, with any behavior changes handled in separate follow-up PRs.'; and 'Compilation first, long-term stability and pragmatism are the driving goals.' Together these state what changes and why the approach was chosen.
+PR creation: opened ready PR #2791 against dev at https://github.com/rmusser01/tldw_server/pull/2791. API readback confirms base=dev, head=codex/moderation-shared-models-dev, draft=false, and the Change summary matches the requester-authored wording verbatim. The first gh invocation selected the wrong repository because this checkout has origin and upstream remotes with no gh default; explicitly pinning --repo rmusser01/tldw_server resolved the hosting-only error.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Extracted ModerationPolicy, PatternRule, and ModerationEvaluationResult into the standard-library-only Moderation models module while preserving exact moderation_service.py facade imports and behavior. PolicyCompiler and PolicyEvaluator now resolve canonical runtime types without loading the service, retaining staticmethod descriptors, tuple order, caching, subclass dispatch, and public namespace contracts. Added focused characterization, canonical ownership, import-isolation, monkeypatch-boundary, and pickle-boundary tests. Rebased patch-identically onto current dev, passed compilation, Black/Ruff, 429 selected regressions, and a zero-finding Bandit scan, received two independent approvals with no findings, and opened PR #2791 with the requester-authored Change summary.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
