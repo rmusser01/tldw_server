@@ -258,8 +258,9 @@ for audit but exclude it from ordinary activity surfaces.
 Create always has activity revision 1. Its payload is the complete immutable field
 set above and its object hash is the canonical fingerprint. Tombstone always has
 revision 2 and the exact payload `{note_id, task_id, deleted_at, delete_reason}`:
-parent IDs must equal the create, `deleted_at` is the canonical envelope timestamp,
-and `delete_reason` is `user_request`, `correction`, or `policy`. The tombstone hash
+parent IDs must equal the create, `deleted_at` must equal
+`SyncEnvelopeCreate.created_at_client` after `normalize_sync_timestamp()`, and
+`delete_reason` is `user_request`, `correction`, or `policy`. The tombstone hash
 binds adapter version, revision/lifecycle, original create fingerprint, parent IDs,
 deleted timestamp, and reason. The product row retains create fields and stores the
 same deleted-at/reason/hash/cursor. No revision greater than 2 is valid.
@@ -446,27 +447,71 @@ preserves the stored actor/tool/policy fields after validation, uses stored
 `legacy_source_verified` marker. Bootstrap never fabricates a client device or
 claims that a legacy timestamp ordered Sync history.
 
-Legacy event conversion is exact:
+Legacy event conversion is exact. First, an optional `idempotency_key` is removed
+from legacy `new_value` after validating it as a string of 1–256 characters; its
+lowercase SHA-256 becomes activity metadata `origin_request_fingerprint`. It never
+remains in old/new.
 
-| Existing `event_type` and values | Canonical event |
+A legacy metadata object must contain only `due_date`, `priority`, and `estimate`
+and expands to this complete canonical object:
+
+```json
+{
+  "description": null,
+  "priority": null,
+  "due_date": null,
+  "estimate": null,
+  "recurrence": null,
+  "assignee_id": null,
+  "tags": [],
+  "custom": {}
+}
+```
+
+The three legacy values replace their matching nulls after exact task-field
+validation. Missing legacy metadata means the object above; unknown keys block
+readiness.
+
+The canonical old/new schemas are fixed for every event:
+
+| Canonical event | Canonical `old_value` | Canonical `new_value` |
+| --- | --- | --- |
+| `created` | null | complete `{title, status, completed_at, metadata}` snapshot; a legacy done-at-create event uses normalized event `created_at` for `completed_at` |
+| `updated` | same non-empty key set as new, exactly `metadata` or `title` plus `metadata` | changed values for that exact key set; metadata is always the complete expanded object above |
+| `completed` | `{"status":"open"}` | `{"status":"done"}` |
+| `reopened` | `{"status":"done"}` | `{"status":"open"}` |
+| `deleted` | `{"deleted":false,"projection_status":<live|unlinked|ambiguous>}` | `{"deleted":true,"projection_status":"deleted"}` |
+| `restored` | `{"deleted":true,"projection_status":"deleted"}` | `{"deleted":false,"projection_status":<live|unlinked>}` |
+| `projection_linked` | `{"projection_status":<unlinked|ambiguous>}` | `{"projection_status":"live"}` |
+| `projection_unlinked` | `{"projection_status":"live"}` | `{"projection_status":"unlinked"}` |
+| `projection_drift` | null | `{"reason_code":<closed privacy-safe drift reason>}` |
+| `corrected` | same non-empty subset of one target event schema | changed values for that exact subset; `corrects_activity_id` identifies the target |
+
+No additional keys, implicit nulls, or numerically/string-coerced values are
+accepted. The closed drift reasons are `missing_marker_base`, `malformed_marker`,
+`duplicate_marker`, `marker_scope_mismatch`, `base_unavailable`, `both_changed`,
+`ambiguous_legacy_match`, and `unsupported_markdown`. A coordinator-generated
+version-1 event uses these same shapes.
+
+Legacy rows transform as follows:
+
+| Existing `event_type` and source values after idempotency removal | Canonical event and values |
 | --- | --- |
-| `created` | `created`; old must be null and new must validate as the bounded task snapshot subset |
-| `updated` | `updated`; old/new must be bounded objects and differ in at least one canonical task field |
-| `status_changed`, `open -> done` | `completed` |
-| `status_changed`, `done -> open` | `reopened` |
-| `unlinked` | `projection_unlinked` |
-| `deleted` | `deleted` |
+| `created`; old null; new exactly `{text,status,metadata}` | `created`; rename `text` to `title`, expand metadata, and derive `completed_at` as above |
+| `updated`; old/new both exactly `{metadata}` | `updated` with complete expanded metadata objects |
+| `updated`; old/new both exactly `{text,metadata}` | `updated`; rename `text` to `title` and expand metadata |
+| `status_changed`; old exactly `{"status":"open"}`, new exactly `{"status":"done"}` | `completed` with the canonical status objects above |
+| `status_changed`; old exactly `{"status":"done"}`, new exactly `{"status":"open"}` | `reopened` with the canonical status objects above |
+| `unlinked`; old exactly `{"projection_status":"live"}`, new exactly `{"projection_status":"unlinked"}` | `projection_unlinked` unchanged |
+| `deleted`; old/new exact canonical deleted shapes | `deleted` unchanged |
 | any other type, status transition, parent mismatch, malformed value, or invalid ID | block activity readiness; do not rewrite or drop the row |
 
 A nullable legacy `note_id` is derived only from its same-scope authorized task;
 both missing or inconsistent parents block readiness. `actor_type` must map to the
 closed actor enum and actor ID must meet its bound. `tool_name`, `policy_mode`, and
 `approval_id` become an optional `legacy_context` metadata object of separately
-bounded strings (128 code points each). Stored old/new JSON is canonicalized under
-the event-specific schema. A stored `idempotency_key` is not synchronized in raw
-form; after type/length validation it becomes a SHA-256 request fingerprint in
-metadata. Oversized, nested, or unknown values block readiness with a reason code
-and row hash.
+bounded strings (128 code points each). Oversized, nested, or unknown values block
+readiness with a reason code and row hash.
 
 The source scan is keyset-ordered by `(created_at, id)` while holding the dataset
 fence. Trusted bootstrap envelopes receive monotonic server cursors in that order;
