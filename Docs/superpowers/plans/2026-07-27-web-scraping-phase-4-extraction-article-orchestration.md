@@ -1529,10 +1529,10 @@ optional and in the standard flow; every browser destination is freshly guarded;
 both sync guards precede side effects; and no moved observability contains a
 full URL/raw error. Finalize and merge 4C before 4D.
 
-Implementation, final gates, independent reviews, and rebase onto
-`origin/dev` are complete at `1f9cb427c4`. Merge remains unchecked until the
-required human-written Change summary is supplied and the delivery-unit PR is
-created and merged.
+Implementation and independent reviews are complete. The content-equivalent
+rebased code candidate is `3a7cd35063` on `origin/dev` `8f94369e51`. Merge
+remains unchecked until the required human-written Change summary is supplied
+and the delivery-unit PR is marked ready and merged.
 
 ## Phase 4D: Final Integration And Gates
 
