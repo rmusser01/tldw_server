@@ -1516,6 +1516,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -1540,6 +1542,8 @@ jobs:
           - name: product-claims-service
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
               tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py

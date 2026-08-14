@@ -341,14 +341,13 @@ def _process_analytics_export(
             if retryable
             else "Claims analytics export failed."
         )
-        logger.warning(
-            "Claims analytics export worker failed: operation={} export_id={} job_id={} error_code={} error_type={}",
-            "process_analytics_export",
-            export_id,
-            job_id,
-            failure_code,
-            type(exc).__name__,
-        )
+        logger.bind(
+            operation="process_analytics_export",
+            export_id=export_id,
+            job_id=job_id,
+            error_code=failure_code,
+            error_type=type(exc).__name__,
+        ).warning("Claims analytics export worker failed")
         raise ClaimsJobError(
             public_message,
             retryable=retryable,

@@ -768,7 +768,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                         # Older PG versions or permission issues: non-fatal
                         pass
-        except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        except (
+            psycopg.Error,
+            *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
+        ) as exc:
             if not archive_batch_read_indexes_verified:
                 if isinstance(exc, RuntimeError):
                     raise

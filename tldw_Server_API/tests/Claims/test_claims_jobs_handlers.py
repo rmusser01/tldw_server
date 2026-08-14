@@ -759,7 +759,8 @@ async def test_analytics_export_handler_redacts_and_does_not_retry_nontransient_
 
 async def test_analytics_export_handler_logs_sanitized_unexpected_failure_context(monkeypatch) -> None:
     secret = "token=secret-value"
-    logged: list[tuple[str, tuple[object, ...]]] = []
+    bound: list[dict[str, object]] = []
+    logged: list[str] = []
 
     @contextmanager
     def _failing_database(**_kwargs):
@@ -767,8 +768,12 @@ async def test_analytics_export_handler_logs_sanitized_unexpected_failure_contex
         yield
 
     class _Logger:
-        def warning(self, message: str, *args: object) -> None:
-            logged.append((message, args))
+        def bind(self, **context: object) -> "_Logger":
+            bound.append(context)
+            return self
+
+        def warning(self, message: str) -> None:
+            logged.append(message)
 
     monkeypatch.setattr(claims_job_handlers, "managed_media_database", _failing_database)
     monkeypatch.setattr(claims_job_handlers, "logger", _Logger())
@@ -776,19 +781,17 @@ async def test_analytics_export_handler_logs_sanitized_unexpected_failure_contex
     with pytest.raises(ClaimsJobError):
         await claims_job_handlers.process_claims_job(_analytics_export_job())
 
-    assert logged == [
-        (
-            "Claims analytics export worker failed: operation={} export_id={} job_id={} error_code={} error_type={}",
-            (
-                "process_analytics_export",
-                "a" * 32,
-                81,
-                "claims_export_failed",
-                "RuntimeError",
-            ),
-        )
+    assert bound == [
+        {
+            "operation": "process_analytics_export",
+            "export_id": "a" * 32,
+            "job_id": 81,
+            "error_code": "claims_export_failed",
+            "error_type": "RuntimeError",
+        }
     ]
-    assert secret not in repr(logged)
+    assert logged == ["Claims analytics export worker failed"]
+    assert secret not in repr((bound, logged))
 
 
 async def test_unsupported_claims_job_type_remains_terminal() -> None:

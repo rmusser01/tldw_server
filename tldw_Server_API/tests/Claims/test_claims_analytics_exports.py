@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core import exceptions as core_exceptions
 from tldw_Server_API.app.core.Claims_Extraction import claims_analytics_exports as exports
 from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import (
     CSV_COLUMNS,
@@ -33,6 +34,10 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import 
 
 FIXED_NOW = datetime(2026, 8, 8, 12, 0, 0, 123456, tzinfo=timezone.utc)
 FIXED_SNAPSHOT = "2026-08-08T12:00:00.123Z"
+
+
+def test_claims_analytics_export_error_is_centralized() -> None:
+    assert ClaimsAnalyticsExportError is core_exceptions.ClaimsAnalyticsExportError
 
 
 @pytest.fixture(autouse=True)

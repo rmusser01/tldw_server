@@ -69,6 +69,85 @@ def test_jobs_models_owns_terminal_status_classification():
     assert models.is_terminal_job_status(None) is False
 
 
+def test_pg_ensure_ignores_optional_index_psycopg_error_after_required_indexes(
+    monkeypatch,
+):
+    import psycopg
+
+    from tldw_Server_API.app.core.Jobs import pg_migrations
+
+    connections = []
+    maintenance_calls = []
+
+    class _Cursor:
+        def __init__(self, phase):
+            self.phase = phase
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            del params
+            if self.phase == 3 and "idx_jobs_status_available_at" in str(query):
+                raise psycopg.OperationalError("optional index unavailable")
+
+    class _Connection:
+        def __init__(self, phase):
+            self.cursor_instance = _Cursor(phase)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            return None
+
+    def _connect(_dsn, *, autocommit=False):
+        del autocommit
+        connection = _Connection(len(connections) + 1)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(psycopg, "connect", _connect)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Jobs.pg_util.negotiate_pg_dsn",
+        lambda dsn: dsn,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_ensure_pg_archive_locators",
+        lambda _dsn: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_ensure_pg_archive_batch_read_indexes",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "ensure_job_events_pg",
+        lambda _dsn: maintenance_calls.append("events"),
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "ensure_job_counters_pg",
+        lambda _dsn: maintenance_calls.append("counters"),
+    )
+    monkeypatch.delenv("JOBS_PG_RLS_ENABLE", raising=False)
+
+    pg_migrations.ensure_jobs_tables_pg("postgresql://jobs.test/jobs")
+
+    assert maintenance_calls == ["events", "counters"]
+
+
 def test_create_and_acquire_and_complete(jobs_db):
 
 

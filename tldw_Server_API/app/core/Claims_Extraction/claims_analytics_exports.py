@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.claims_analytics_export_contract import (
     is_routable_claims_owner_id_text,
 )
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.exceptions import ClaimsAnalyticsExportError
 from tldw_Server_API.app.core.Jobs.models import is_terminal_job_status
 
 DEFAULT_EXPORT_MAX_BYTES = 10_485_760
@@ -64,24 +65,6 @@ _EXPORT_TRANSITIONS = {
 }
 _EXPORT_JOB_TYPE = "claims_generate_analytics_export"
 _EXPORT_BATCH_GROUP_PREFIX = "claims-analytics-export:"
-
-
-class ClaimsAnalyticsExportError(RuntimeError):
-    """Safe domain failure surfaced by Claims analytics export operations."""
-
-    def __init__(
-        self,
-        public_message: str,
-        *,
-        code: str,
-        retryable: bool = False,
-        http_status: int = 400,
-    ) -> None:
-        super().__init__(public_message)
-        self.public_message = public_message
-        self.code = code
-        self.retryable = retryable
-        self.http_status = http_status
 
 
 def _invalid_payload_error() -> ClaimsAnalyticsExportError:

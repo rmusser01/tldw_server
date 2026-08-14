@@ -56,6 +56,24 @@ class RecurringQuestionWorkerRetryableError(Exception):
     """Raised after durable run state is updated so WorkerSDK can retry the Jobs job."""
 
 
+class ClaimsAnalyticsExportError(RuntimeError):
+    """Safe domain failure surfaced by Claims analytics export operations."""
+
+    def __init__(
+        self,
+        public_message: str,
+        *,
+        code: str,
+        retryable: bool = False,
+        http_status: int = 400,
+    ) -> None:
+        super().__init__(public_message)
+        self.public_message = public_message
+        self.code = code
+        self.retryable = retryable
+        self.http_status = http_status
+
+
 class NotesOrganizationValidationError(ValueError):
     """Validation failure with a stable Notes organization Sync error code."""
 

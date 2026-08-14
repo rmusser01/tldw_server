@@ -7,6 +7,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     AdminPrincipal,
     RequirePermission,
     User,
+    check_rate_limit,
     get_auth_principal,
     get_request_user,
 )
@@ -46,6 +47,11 @@ from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 
 router = APIRouter(prefix="/claims", tags=["claims"])
+
+
+async def _enforce_claims_export_rate_limit(request: Request) -> None:
+    """Apply the shared ingress guard without exposing its legacy test hook."""
+    await check_rate_limit(request)
 
 
 @router.get("/status")
@@ -568,6 +574,7 @@ def claims_dashboard_analytics(
     "/analytics/export",
     response_model=ClaimsAnalyticsExportResponse,
     responses={202: {"model": ClaimsAnalyticsExportResponse}},
+    dependencies=[Depends(_enforce_claims_export_rate_limit)],
 )
 def export_claims_analytics(
     payload: ClaimsAnalyticsExportRequest,

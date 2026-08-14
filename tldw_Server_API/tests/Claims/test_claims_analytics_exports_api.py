@@ -7,7 +7,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import HTTPException, Request, Response
+from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.endpoints import claims as claims_endpoint
@@ -54,6 +55,47 @@ class _FakeDb:
     def transition_claims_analytics_export_status(self, **kwargs: Any) -> bool:
         self.transition_calls.append(kwargs)
         return True
+
+
+def test_export_create_route_enforces_ingress_rate_limit_without_query_parameter() -> None:
+    route = next(
+        route
+        for route in claims_endpoint.router.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/claims/analytics/export"
+        and "POST" in route.methods
+    )
+
+    dependency = next(
+        dependency
+        for dependency in route.dependant.dependencies
+        if dependency.call is claims_endpoint._enforce_claims_export_rate_limit
+    )
+    assert dependency.query_params == []
+
+
+@pytest.mark.asyncio
+async def test_claims_export_rate_limit_delegates_to_shared_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/claims/analytics/export",
+            "headers": [],
+        }
+    )
+    calls: list[Request] = []
+
+    async def _check_rate_limit(received: Request) -> None:
+        calls.append(received)
+
+    monkeypatch.setattr(claims_endpoint, "check_rate_limit", _check_rate_limit)
+
+    await claims_endpoint._enforce_claims_export_rate_limit(request)
+
+    assert calls == [request]
 
 
 def test_service_owner_validation_enforces_routable_integer_range() -> None:
