@@ -292,6 +292,24 @@ def test_notes_task_hash_has_exact_stable_vector_and_excludes_projection_version
     assert notes_task_object_hash(parsed, revision=7, deleted=True) != before
 
 
+def test_notes_task_nested_custom_is_immutable_and_hash_stable() -> None:
+    raw = valid_task_payload(
+        custom={"nested": {"items": [{"value": 1}]}},
+    )
+    parsed = parse_notes_task_v1(raw, owner_user_id=OWNER_ID)
+    before = notes_task_object_hash(parsed, revision=1, deleted=False)
+
+    with pytest.raises(TypeError):
+        parsed.custom["nested"]["items"][0]["value"] = 2
+    with pytest.raises(TypeError):
+        parsed.custom["nested"]["items"].append({"value": 2})
+
+    raw_custom = raw["custom"]
+    assert isinstance(raw_custom, dict)
+    raw_custom["nested"]["items"].append({"value": 3})
+    assert notes_task_object_hash(parsed, revision=1, deleted=False) == before
+
+
 @pytest.mark.parametrize(
     ("event_type", "old_value", "new_value", "corrects_activity_id"),
     [
@@ -400,6 +418,76 @@ def test_notes_task_activity_v1_rejects_noncanonical_event_shapes(
         )
 
 
+@pytest.mark.parametrize(
+    ("old_value", "new_value"),
+    [
+        (
+            {"status": "open", "completed_at": OCCURRED_AT},
+            {"status": "done", "completed_at": OCCURRED_AT},
+        ),
+        (
+            {"status": "open", "completed_at": None},
+            {"status": "done", "completed_at": None},
+        ),
+        (
+            {"deleted": False, "projection_status": "deleted"},
+            {"deleted": True, "projection_status": "deleted"},
+        ),
+        (
+            {"deleted": True, "projection_status": "deleted"},
+            {"deleted": False, "projection_status": "deleted"},
+        ),
+    ],
+)
+def test_corrected_activity_rejects_incompatible_coupled_states(
+    old_value: dict[str, object],
+    new_value: dict[str, object],
+) -> None:
+    with pytest.raises(NotesTaskContractError):
+        parse_activity(
+            valid_activity_payload(
+                event_type="corrected",
+                old_value=old_value,
+                new_value=new_value,
+                corrects_activity_id=CORRECTED_ID,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("old_value", "new_value"),
+    [
+        (
+            {"status": "open", "completed_at": None},
+            {"status": "done", "completed_at": OCCURRED_AT},
+        ),
+        (
+            {"deleted": True, "projection_status": "deleted"},
+            {"deleted": False, "projection_status": "live"},
+        ),
+        (
+            {"projection_status": "ambiguous"},
+            {"projection_status": "live"},
+        ),
+    ],
+)
+def test_corrected_activity_accepts_compatible_target_event_subsets(
+    old_value: dict[str, object],
+    new_value: dict[str, object],
+) -> None:
+    parsed = parse_activity(
+        valid_activity_payload(
+            event_type="corrected",
+            old_value=old_value,
+            new_value=new_value,
+            corrects_activity_id=CORRECTED_ID,
+        )
+    )
+
+    assert parsed.old_value == old_value
+    assert parsed.new_value == new_value
+
+
 def test_notes_task_activity_v1_binds_actor_and_device_provenance() -> None:
     payload = valid_activity_payload()
 
@@ -497,6 +585,40 @@ def test_notes_task_activity_create_hash_is_revision_one_and_stable_id_bound() -
     )
     with pytest.raises(NotesTaskContractError, match="revision 1"):
         notes_task_activity_object_hash(parsed, revision=2, deleted=False)
+
+
+def test_notes_task_activity_nested_json_is_immutable_and_hash_stable() -> None:
+    raw = valid_activity_payload(
+        old_value={
+            "metadata": canonical_task_metadata(
+                priority="low",
+                custom={"nested": {"value": 1}},
+            )
+        },
+        new_value={
+            "metadata": canonical_task_metadata(
+                priority="high",
+                custom={"nested": {"value": 2}},
+            )
+        },
+        metadata={"nested": {"items": [3]}},
+    )
+    parsed = parse_activity(raw)
+    before = notes_task_activity_object_hash(parsed, revision=1, deleted=False)
+    assert parsed.old_value is not None
+    assert parsed.new_value is not None
+
+    with pytest.raises(TypeError):
+        parsed.old_value["metadata"]["custom"]["nested"]["value"] = 4
+    with pytest.raises(TypeError):
+        parsed.new_value["metadata"]["custom"]["nested"]["value"] = 4
+    with pytest.raises(TypeError):
+        parsed.metadata["nested"]["items"].append(4)
+
+    raw_metadata = raw["metadata"]
+    assert isinstance(raw_metadata, dict)
+    raw_metadata["nested"]["items"].append(5)
+    assert notes_task_activity_object_hash(parsed, revision=1, deleted=False) == before
 
 
 def test_notes_task_activity_tombstone_binds_parents_timestamp_and_revision_two() -> None:

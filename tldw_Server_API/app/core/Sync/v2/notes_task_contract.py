@@ -137,6 +137,42 @@ class NotesTaskContractError(ValueError):
     """Stable fail-closed error for Notes task Sync contract violations."""
 
 
+class _FrozenJsonDict(dict[str, Any]):
+    """JSON object that retains normal dict serialization without mutation."""
+
+    def _reject_mutation(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("canonical JSON values are immutable")
+
+    __setitem__ = _reject_mutation
+    __delitem__ = _reject_mutation
+    __ior__ = _reject_mutation
+    clear = _reject_mutation
+    pop = _reject_mutation
+    popitem = _reject_mutation
+    setdefault = _reject_mutation
+    update = _reject_mutation
+
+
+class _FrozenJsonList(list[Any]):
+    """JSON array that retains normal list serialization without mutation."""
+
+    def _reject_mutation(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("canonical JSON values are immutable")
+
+    __setitem__ = _reject_mutation
+    __delitem__ = _reject_mutation
+    __iadd__ = _reject_mutation
+    __imul__ = _reject_mutation
+    append = _reject_mutation
+    clear = _reject_mutation
+    extend = _reject_mutation
+    insert = _reject_mutation
+    pop = _reject_mutation
+    remove = _reject_mutation
+    reverse = _reject_mutation
+    sort = _reject_mutation
+
+
 class NotesTaskRecurrenceV1(BaseModel):
     """Validated recurrence rule and state; this contract does not schedule work."""
 
@@ -271,7 +307,7 @@ class NotesTaskV1Payload(BaseModel):
             if key in _TASK_RESERVED_KEYS:
                 raise ValueError("task custom cannot contain reserved wire keys")
         _validate_json_object(value, label="task custom", max_depth=4, max_bytes=16 * 1_024)
-        return value
+        return cast(dict[str, Any], _freeze_json(value))
 
     @model_validator(mode="after")
     def _validate_completion(self) -> NotesTaskV1Payload:
@@ -332,7 +368,7 @@ class NotesTaskActivityV1(BaseModel):
             _validate_json_object(
                 value, label="activity transition value", max_depth=4, max_bytes=16 * 1_024
             )
-        return value
+        return cast(dict[str, Any], _freeze_json(value)) if value is not None else None
 
     @field_validator("metadata")
     @classmethod
@@ -344,7 +380,7 @@ class NotesTaskActivityV1(BaseModel):
         )
         if any(key.casefold() in _ACTIVITY_METADATA_FORBIDDEN_KEYS for key in _walk_keys(value)):
             raise ValueError("activity metadata cannot contain credentials or raw Markdown")
-        return value
+        return cast(dict[str, Any], _freeze_json(value))
 
     @model_validator(mode="after")
     def _validate_correction_target(self) -> NotesTaskActivityV1:
@@ -820,6 +856,16 @@ def _validate_json_object(
         raise ValueError(f"{label} exceeds {max_bytes // 1_024} KiB")
 
 
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _FrozenJsonDict(
+            {key: _freeze_json(item) for key, item in value.items()}
+        )
+    if isinstance(value, list):
+        return _FrozenJsonList(_freeze_json(item) for item in value)
+    return value
+
+
 def _validate_json_value(value: object, label: str) -> None:
     if value is None or isinstance(value, (str, bool)):
         return
@@ -880,6 +926,7 @@ def _validate_task_metadata(
 ) -> dict[str, object]:
     if not isinstance(value, dict) or set(value) != _TASK_METADATA_KEYS:
         raise NotesTaskContractError("activity task metadata must be the complete exact object")
+    wire_value = cast(dict[str, object], json.loads(canonical_json_bytes(value)))
     parsed = parse_notes_task_v1(
         {
             "task_id": "00000000-0000-4000-8000-000000000001",
@@ -887,12 +934,12 @@ def _validate_task_metadata(
             "title": "metadata validation",
             "status": "open",
             "completed_at": None,
-            **value,
+            **wire_value,
         },
         owner_user_id=owner_user_id,
     )
     canonical = _task_metadata_from_payload(parsed)
-    if canonical != value:
+    if canonical != wire_value:
         raise NotesTaskContractError("activity task metadata is not canonical")
     return canonical
 
@@ -1049,6 +1096,20 @@ def _validate_corrected_values(
             raise NotesTaskContractError("corrected activity projection status is invalid")
         if "reason_code" in value and value["reason_code"] not in _DRIFT_REASONS:
             raise NotesTaskContractError("corrected activity drift reason is invalid")
+        if {"status", "completed_at"}.issubset(value) and (
+            (value["status"] == "open" and value["completed_at"] is not None)
+            or (value["status"] == "done" and value["completed_at"] is None)
+        ):
+            raise NotesTaskContractError(
+                "corrected activity completion snapshot is invalid"
+            )
+        if {"deleted", "projection_status"}.issubset(value) and (
+            (value["deleted"] is True)
+            != (value["projection_status"] == "deleted")
+        ):
+            raise NotesTaskContractError(
+                "corrected activity lifecycle snapshot is invalid"
+            )
 
 
 def _copy_json_object(value: object, label: str) -> dict[str, Any] | None:
