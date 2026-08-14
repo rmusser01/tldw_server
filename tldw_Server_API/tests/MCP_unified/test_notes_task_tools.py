@@ -18,12 +18,16 @@ class _FakeTaskStore:
     def __init__(self, db: _FakeTaskDB) -> None:
         self._db = db
 
-    def _fetch_projection(self, task_id: str, **_scope: Any) -> dict[str, Any] | None:
+    def get_task_projection(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+    ) -> dict[str, Any] | None:
+        self._db.projection_requests.append((owner_user_id, dataset_id, task_id))
         projection = self._db.projections.get(task_id)
         return dict(projection) if projection else None
-
-    def get_task_projection(self, task_id: str, **_scope: Any) -> dict[str, Any] | None:
-        return self._fetch_projection(task_id)
 
 
 class _FakeTaskDB:
@@ -75,14 +79,28 @@ class _FakeTaskDB:
             for task_id, task in self.tasks.items()
         }
         self.task_store = _FakeTaskStore(self)
+        self.projection_requests: list[tuple[str, str, str]] = []
+        self.projection_error: Exception | None = None
         self.closed = False
 
     @staticmethod
     def execute_query(_query: str, _params: Any = None) -> Any:
         return SimpleNamespace(fetchall=lambda: [])
 
-    def get_task_projection(self, *, task_id: str, **scope: Any) -> dict[str, Any] | None:
-        return self.task_store.get_task_projection(task_id, **scope)
+    def get_task_projection(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+    ) -> dict[str, Any] | None:
+        if self.projection_error is not None:
+            raise self.projection_error
+        return self.task_store.get_task_projection(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            task_id=task_id,
+        )
 
     def _task(
         self,
@@ -519,6 +537,35 @@ async def test_notes_tasks_list_and_get_execute_read_only_with_reconciliation_su
         context=_ctx(),
     )
     assert [task["id"] for task in metadata_filtered["tasks"]] == ["task-filter"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_notes_tasks_get_preserves_pg_v59_projection_using_authenticated_scope() -> None:
+    module, db, _service = _module_with_fakes()
+    db.backend_type = BackendType.POSTGRESQL
+    db.tasks["task-1"].pop("owner_user_id")
+    db.tasks["task-1"].pop("dataset_id")
+
+    fetched = await module.execute_tool(
+        "notes.tasks.get",
+        {"task_id": "task-1"},
+        context=_ctx(),
+    )
+
+    assert fetched["projection"]["projection_status"] == "live"  # nosec B101
+    assert db.projection_requests == [("7", LOCAL_UNBOUND, "task-1")]  # nosec B101
+
+    db.projection_error = ConflictError(
+        "projection scope failure",
+        entity="tasks",
+        entity_id="task-1",
+    )
+    with pytest.raises(ConflictError, match="projection scope failure"):
+        await module.execute_tool(
+            "notes.tasks.get",
+            {"task_id": "task-1"},
+            context=_ctx(),
+        )
 
 
 @pytest.mark.asyncio

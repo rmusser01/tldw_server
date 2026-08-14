@@ -1078,7 +1078,7 @@ class NotesModule(BaseModule):
                     }
 
             return {
-                "tasks": [self._task_response(db, task) for task in tasks],
+                "tasks": [self._task_response(db, task, scope=scope) for task in tasks],
                 "reconciliation": self._task_reconciliation_response(reconciliation),
                 "pagination": {
                     "limit": limit,
@@ -1111,8 +1111,9 @@ class NotesModule(BaseModule):
         task_id = str(args.get("task_id"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             task = self._require_scoped_task(db, context, task_id)
-            return self._task_response(db, task)
+            return self._task_response(db, task, scope=scope)
         finally:
             self._close_task_db(db, "task fetch")
 
@@ -1125,6 +1126,7 @@ class NotesModule(BaseModule):
         expected_note_version = int(args.get("expected_note_version"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             self._require_scoped_note(db, context, note_id)
             task = self._task_service.create_task_for_note(
                 db=db,
@@ -1140,7 +1142,7 @@ class NotesModule(BaseModule):
                     idempotency_key=self._get_idempotency_key(args),
                 ),
             )
-            response = self._task_response(db, task)
+            response = self._task_response(db, task, scope=scope)
             response["insertion"] = {"mode": "append"}
             return response
         finally:
@@ -1151,6 +1153,7 @@ class NotesModule(BaseModule):
         task_id = str(args.get("task_id"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             self._require_scoped_task(db, context, task_id)
             task = self._task_service.update_task(
                 db=db,
@@ -1167,7 +1170,7 @@ class NotesModule(BaseModule):
                 ),
                 record_only=bool(args.get("record_only", False)),
             )
-            return self._task_response(db, task)
+            return self._task_response(db, task, scope=scope)
         finally:
             self._close_task_db(db, "task update")
 
@@ -1184,6 +1187,7 @@ class NotesModule(BaseModule):
             idempotency_key=self._get_idempotency_key(args),
         )
         try:
+            scope = self._task_scope(db, context)
             for item in self._task_status_updates(args) or []:
                 task_id = str(item.get("task_id") or "")
                 if task_id in seen_task_ids:
@@ -1196,7 +1200,7 @@ class NotesModule(BaseModule):
                     self._require_task_expected_versions(
                         db,
                         current,
-                        scope=self._task_scope(db, context),
+                        scope=scope,
                         expected_task_version=int(item.get("expected_task_version")),
                         expected_note_version=int(item["expected_note_version"]),
                     )
@@ -1204,7 +1208,7 @@ class NotesModule(BaseModule):
                         skipped.append({
                             "task_id": task_id,
                             "reason": f"already_{requested_status}",
-                            "task": self._task_response(db, current),
+                            "task": self._task_response(db, current, scope=scope),
                         })
                         continue
                     task = self._task_service.update_task(
@@ -1217,7 +1221,10 @@ class NotesModule(BaseModule):
                         actor=actor,
                         record_only=bool(item.get("record_only", False)),
                     )
-                    succeeded.append({"task_id": task_id, "task": self._task_response(db, task)})
+                    succeeded.append({
+                        "task_id": task_id,
+                        "task": self._task_response(db, task, scope=scope),
+                    })
                 except Exception as exc:
                     failed.append({
                         "task_id": task_id,
@@ -1292,6 +1299,7 @@ class NotesModule(BaseModule):
         task_id = str(args.get("task_id"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             self._require_scoped_task(db, context, task_id)
             task = self._task_service.delete_task(
                 db=db,
@@ -1306,7 +1314,7 @@ class NotesModule(BaseModule):
                     idempotency_key=self._get_idempotency_key(args),
                 ),
             )
-            return self._task_response(db, task)
+            return self._task_response(db, task, scope=scope)
         finally:
             self._close_task_db(db, "task delete")
 
@@ -1373,21 +1381,21 @@ class NotesModule(BaseModule):
             raise ValueError(f"Task note not found: {note_id}")
         return dict(task)
 
-    def _task_response(self, db: CharactersRAGDB, task: dict[str, Any]) -> dict[str, Any]:
+    def _task_response(
+        self,
+        db: CharactersRAGDB,
+        task: dict[str, Any],
+        *,
+        scope: TaskStoreScope,
+    ) -> dict[str, Any]:
         task_id = str(task.get("id"))
         note_id = str(task.get("note_id"))
         note = db.get_note_by_id(note_id)
-        projection = None
-        try:
-            task_store = getattr(db, "task_store", None)
-            if task_store is not None:
-                projection = task_store._fetch_projection(
-                    task_id,
-                    owner_user_id=str(task["owner_user_id"]),
-                    dataset_id=str(task["dataset_id"]),
-                )
-        except _NOTES_MODULE_NONCRITICAL_EXCEPTIONS:
-            projection = None
+        projection = db.get_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
 
         return {
             "id": task_id,
