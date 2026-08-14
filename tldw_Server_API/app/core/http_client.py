@@ -4877,9 +4877,7 @@ def fetch(*args, **kwargs):
 
                 request_stream = getattr(sc, "stream", None)
                 if not callable(request_stream):
-                    raise RuntimeError(
-                        "Selected backend does not support bounded response streaming"
-                    )
+                    raise RuntimeError("Selected backend does not support bounded response streaming")
                 with request_stream(
                     "GET",
                     cur_url,
@@ -4893,15 +4891,10 @@ def fetch(*args, **kwargs):
 
                     if not follow_redirects or status not in (301, 302, 303, 307, 308):
                         if _uses_compressed_content_encoding(response_headers):
-                            raise ValueError(
-                                "Compressed responses are not allowed with "
-                                "max_response_bytes"
-                            )
+                            raise ValueError("Compressed responses are not allowed with " "max_response_bytes")
                         iter_raw = getattr(streamed, "iter_raw", None)
                         if not callable(iter_raw):
-                            raise RuntimeError(
-                                "Selected backend does not support bounded response streaming"
-                            )
+                            raise RuntimeError("Selected backend does not support bounded response streaming")
                         body = _read_bounded_chunks(iter_raw(), max_response_bytes)
                         return HttpResponse(
                             status=status,
