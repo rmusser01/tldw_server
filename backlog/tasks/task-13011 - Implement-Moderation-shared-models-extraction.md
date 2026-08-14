@@ -1,7 +1,7 @@
 ---
 id: TASK-13011
 title: Implement Moderation shared models extraction
-status: In Progress
+status: Done
 created_date: 2026-08-12 00:45
 dependencies:
 - TASK-13010
@@ -32,7 +32,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_models_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_models_canonical.py
 - tldw_Server_API/tests/unit/test_moderation_models_imports.py
-updated_date: 2026-08-14 00:43
+updated_date: 2026-08-14 00:50
 ---
 
 ## Description
@@ -46,8 +46,8 @@ Transplant the reviewed shared-model extraction onto current dev: make models.py
 - [x] #1 models.py canonically owns exactly the three approved dataclasses and remains standard-library-only.
 - [x] #2 moderation_service.py re-exports the exact canonical class objects with unchanged supported constructors, defaults, to_dict mapping, and runtime behavior.
 - [x] #3 PolicyCompiler and PolicyEvaluator no longer load moderation_service.py for canonical runtime types while preserving policy_types descriptors and subclass dispatch.
-- [ ] #4 Focused and caller regression tests, compilation, Black/Ruff, Bandit, diff/scope checks, and independent review pass on current dev.
-- [ ] #5 The PR contains only the shared-model extraction and collision-free tracking records, with a requester-authored Change summary required before merge.
+- [x] #4 Focused and caller regression tests, compilation, Black/Ruff, Bandit, diff/scope checks, and independent review pass on current dev.
+- [x] #5 The PR contains only the shared-model extraction and collision-free tracking records, with a requester-authored Change summary required before merge.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -95,20 +95,27 @@ OpenAPI root-cause proof:
 - Generated complete canonical OpenAPI schemas from both this worktree and a detached origin/dev@8f94369e517463758071504079e9ab5f8f8a0091 worktree using the same interpreter/environment.
 - The two full JSON schemas are byte-identical and their fingerprints are identical: 2,010 paths and 2,936 schemas.
 - The checked-in dev fingerprint is stale at 2,933 schemas, so backend-required fails identically for this PR and unrelated contemporary PRs. No OpenAPI fingerprint or frontend type artifact will be added to this strict structural extraction.
+Final PR review remediation and merge-readiness verification on 2026-08-13:
+- Addressed Qodo's sole actionable comment in 0c550e2f15 by splitting aggregate assertions into independent parameterized/single-behavior tests. Replied with evidence; Qodo now reports the issue resolved, and the sole review thread is resolved/outdated. CodeRabbit's base-branch skip contains no actionable feedback.
+- Fresh exact-head gates passed: py_compile for all four production and three test files; Black check for the five approved clean files; Ruff for all seven touched Python files; 318 Moderation unit tests; 97 endpoint/Guardian tests; 16 chat moderation integration tests; 12 workflow moderation-adapter tests (45 deselected); and one audio redaction test. Total selected regressions: 444 passed.
+- Fresh Bandit scan of app/core/Moderation covered 3,335 LOC with zero findings, errors, skipped tests, or nosec suppressions.
+- Final independent whole-branch review at 0c550e2f15 against origin/dev@8f94369e returned APPROVE with no P0-P3 findings and confirmed the Qodo remediation, compatibility facade, canonical ownership, import isolation, behavior preservation, and approved scope.
+- Fetched origin/dev immediately before merge preparation; the branch remains six commits ahead and zero behind, with an exact merge-base at 8f94369e. The 11-file scope and git diff --check remain clean.
+- GitHub's backend-required OpenAPI failure is a verified stale dev fingerprint: complete schemas generated from this branch and origin/dev are byte-identical at 2,010 paths / 2,936 schemas, while the checked-in dev fingerprint says 2,933. No unrelated artifact was added to this strict structural PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Extracted ModerationPolicy, PatternRule, and ModerationEvaluationResult into the standard-library-only Moderation models module while preserving exact moderation_service.py facade imports and behavior. PolicyCompiler and PolicyEvaluator now resolve canonical runtime types without loading the service, retaining staticmethod descriptors, tuple order, caching, subclass dispatch, and public namespace contracts. Added focused characterization, canonical ownership, import-isolation, monkeypatch-boundary, and pickle-boundary tests. Rebased patch-identically onto current dev, passed compilation, Black/Ruff, 429 selected regressions, and a zero-finding Bandit scan, received two independent approvals with no findings, and opened PR #2791 with the requester-authored Change summary.
+Extracted ModerationPolicy, PatternRule, and ModerationEvaluationResult into the standard-library-only Moderation models module while preserving exact moderation_service.py facade imports and behavior. PolicyCompiler and PolicyEvaluator now resolve canonical runtime types without loading the service, retaining staticmethod descriptors, tuple order, caching, subclass dispatch, and public namespace contracts. Added focused characterization, ownership, import-isolation, monkeypatch-boundary, and pickle-boundary tests. Rebased patch-identically onto current dev; resolved the sole PR review comment with targeted test separation; passed compilation, Black/Ruff, 444 selected regressions, and a zero-finding Bandit scan; and received a final independent approval with no findings. PR #2791 contains the requester-authored Change summary and remains strict structural scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
