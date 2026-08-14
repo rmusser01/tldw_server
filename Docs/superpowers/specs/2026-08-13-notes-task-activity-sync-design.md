@@ -298,6 +298,16 @@ reconciliation rows may contain raw Markdown or state that reveals task existenc
 so they receive the same boundary despite not being Sync domains. Every public
 predicate begins with owner and dataset before resource identity or limit.
 
+ChaChaNotes schema migration cannot consult the separate Sync database to discover
+a dataset ID. It therefore assigns preserved inactive rows the server-only
+owner-scoped `local-unbound` dataset sentinel and uses composite foreign keys with
+`ON UPDATE CASCADE`. The sentinel is never accepted from a client, never appears in
+capabilities, and can never satisfy readiness. Explicit enrollment holds the
+dataset/product fence, proves the owner and parent-note source set, rejects any
+collision, and atomically rekeys the complete task-side graph from that sentinel to
+the selected dataset before bootstrap. New inactive legacy REST rows use the same
+sentinel until binding; once bound, all writes require the real dataset scope.
+
 PostgreSQL uses forced RLS on all six tables. Task policies require authenticated
 owner/dataset and an owned parent note in `USING` and `WITH CHECK`. Activity,
 projection, read-state, reconciliation, and drift policies join through the same

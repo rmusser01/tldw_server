@@ -59,6 +59,12 @@ and owner-scoped service predicates. Migrations are transactional and fail close
 on catalog drift. Existing data and REST behavior are preserved before a dataset
 explicitly enrolls in the new domains.
 
+Because the product migration cannot read the separate Sync database, preserved
+inactive rows use a private owner-scoped local-unbound dataset sentinel. Explicit
+enrollment source-verifies and atomically rekeys the complete task graph to the
+real dataset; the sentinel is never client-selectable, writable through Sync, or
+capability-ready.
+
 Markdown checklist text is a deterministic projection, not a competing authority.
 Each managed checklist line carries a hidden versioned marker containing its task
 ID and exact last-projected task revision/hash. The marker reconstructs identity
