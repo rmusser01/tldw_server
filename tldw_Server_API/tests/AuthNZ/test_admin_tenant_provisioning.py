@@ -199,15 +199,15 @@ class TestProvisionEndpointUnit:
         assert "INSERT INTO public.org_members" in conn.execute.await_args.args[0]
 
 
-def test_tenant_role_rejects_unknown_values() -> None:
-    with pytest.raises(ValidationError):
-        TenantProvisionRequest(
-            username="tenant_user",
-            email="tenant@example.com",
-            password="securepass123",
-            org_name="TenantOrg",
-            role="root",
-        )
+    def test_tenant_role_rejects_unknown_values(self) -> None:
+        with pytest.raises(ValidationError):
+            TenantProvisionRequest(
+                username="tenant_user",
+                email="tenant@example.com",
+                password="securepass123",
+                org_name="TenantOrg",
+                role="root",
+            )
 
     @pytest.mark.asyncio
     async def test_provisioning_failure_exits_the_single_transaction_with_error(self):
