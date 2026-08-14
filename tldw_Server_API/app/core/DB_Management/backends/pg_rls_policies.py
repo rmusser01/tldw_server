@@ -363,6 +363,103 @@ def build_chacha_rls_sql() -> list[str]:
     """.strip()
     add_tenant_policy("note_attachments", note_attachment_owner)
 
+    task_scope = """
+    note_tasks.owner_user_id = current_setting('app.current_user_id', true)
+    AND note_tasks.dataset_id = current_setting('app.current_dataset_id', true)
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = note_tasks.note_id
+        AND note.client_id = current_setting('app.current_user_id', true)
+        AND note.client_id = note_tasks.owner_user_id
+    )
+    """.strip()
+    add_tenant_policy("note_tasks", task_scope)
+
+    projection_scope = """
+    task_note_projections.owner_user_id = current_setting('app.current_user_id', true)
+    AND task_note_projections.dataset_id = current_setting('app.current_dataset_id', true)
+    AND EXISTS (
+      SELECT 1 FROM note_tasks AS task
+      WHERE task.owner_user_id = task_note_projections.owner_user_id
+        AND task.dataset_id = task_note_projections.dataset_id
+        AND task.id = task_note_projections.task_id
+        AND task.note_id = task_note_projections.note_id
+    )
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = task_note_projections.note_id
+        AND note.client_id = current_setting('app.current_user_id', true)
+        AND note.client_id = task_note_projections.owner_user_id
+    )
+    """.strip()
+    add_tenant_policy("task_note_projections", projection_scope)
+
+    event_scope = """
+    task_events.owner_user_id = current_setting('app.current_user_id', true)
+    AND task_events.dataset_id = current_setting('app.current_dataset_id', true)
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = task_events.note_id
+        AND note.client_id = current_setting('app.current_user_id', true)
+        AND note.client_id = task_events.owner_user_id
+    )
+    AND (
+      task_events.task_id IS NULL
+      OR EXISTS (
+        SELECT 1 FROM note_tasks AS task
+        WHERE task.owner_user_id = task_events.owner_user_id
+          AND task.dataset_id = task_events.dataset_id
+          AND task.id = task_events.task_id
+          AND task.note_id = task_events.note_id
+      )
+    )
+    """.strip()
+    add_tenant_policy("task_events", event_scope)
+
+    read_state_scope = """
+    task_event_read_state.owner_user_id = current_setting('app.current_user_id', true)
+    AND task_event_read_state.dataset_id = current_setting('app.current_dataset_id', true)
+    AND task_event_read_state.user_id = task_event_read_state.owner_user_id
+    AND EXISTS (
+      SELECT 1 FROM task_events AS event
+      WHERE event.owner_user_id = task_event_read_state.owner_user_id
+        AND event.dataset_id = task_event_read_state.dataset_id
+        AND event.id = task_event_read_state.event_id
+    )
+    """.strip()
+    add_tenant_policy("task_event_read_state", read_state_scope)
+
+    reconciliation_scope = """
+    note_task_reconciliation_state.owner_user_id = current_setting('app.current_user_id', true)
+    AND note_task_reconciliation_state.dataset_id = current_setting('app.current_dataset_id', true)
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = note_task_reconciliation_state.note_id
+        AND note.client_id = current_setting('app.current_user_id', true)
+        AND note.client_id = note_task_reconciliation_state.owner_user_id
+    )
+    """.strip()
+    add_tenant_policy("note_task_reconciliation_state", reconciliation_scope)
+
+    drift_scope = """
+    task_projection_drifts.owner_user_id = current_setting('app.current_user_id', true)
+    AND task_projection_drifts.dataset_id = current_setting('app.current_dataset_id', true)
+    AND EXISTS (
+      SELECT 1 FROM note_tasks AS task
+      WHERE task.owner_user_id = task_projection_drifts.owner_user_id
+        AND task.dataset_id = task_projection_drifts.dataset_id
+        AND task.id = task_projection_drifts.task_id
+        AND task.note_id = task_projection_drifts.note_id
+    )
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = task_projection_drifts.note_id
+        AND note.client_id = current_setting('app.current_user_id', true)
+        AND note.client_id = task_projection_drifts.owner_user_id
+    )
+    """.strip()
+    add_tenant_policy("task_projection_drifts", drift_scope)
+
     note_edge_owner = """
     note_edges.user_id = current_setting('app.current_user_id', true)
     AND EXISTS (

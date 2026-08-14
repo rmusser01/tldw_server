@@ -275,6 +275,51 @@ def test_chacha_note_attachment_rls_checks_registry_and_note_owner_for_reads_and
         assert policy.count(clause) == 2
 
 
+def test_chacha_note_task_graph_rls_checks_scope_and_owned_parents_for_reads_and_writes() -> None:
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    dataset = "current_setting('app.current_dataset_id', true)"
+
+    for table in (
+        "note_tasks",
+        "task_note_projections",
+        "task_events",
+        "task_event_read_state",
+        "note_task_reconciliation_state",
+        "task_projection_drifts",
+    ):
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        assert policy.count(f"{table}.owner_user_id = {owner}") == 2
+        assert policy.count(f"{table}.dataset_id = {dataset}") == 2
+
+    task_policy = sql.split(
+        "CREATE POLICY note_tasks_tenant_isolation ON note_tasks", 1
+    )[1].split(";", 1)[0]
+    for clause in (
+        "note.id = note_tasks.note_id",
+        "note.client_id = note_tasks.owner_user_id",
+        f"note.client_id = {owner}",
+    ):
+        assert task_policy.count(clause) == 2
+
+    read_state_policy = sql.split(
+        "CREATE POLICY task_event_read_state_tenant_isolation ON task_event_read_state", 1
+    )[1].split(";", 1)[0]
+    for clause in (
+        "task_event_read_state.user_id = task_event_read_state.owner_user_id",
+        "event.id = task_event_read_state.event_id",
+        "event.owner_user_id = task_event_read_state.owner_user_id",
+        "event.dataset_id = task_event_read_state.dataset_id",
+    ):
+        assert read_state_policy.count(clause) == 2
+
+
 def test_chacha_rls_includes_source_review_read_and_write_policies():
     sql = "\n".join(build_chacha_rls_sql())
 

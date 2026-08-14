@@ -50,19 +50,18 @@ class TaskStore:
         dataset = str(dataset_id).strip()
         if not owner or not dataset:
             raise InputError("Task owner and dataset scope cannot be empty.")  # noqa: TRY003
-        if self._db.backend_type == BackendType.POSTGRESQL and (
-            owner != str(self._db.client_id) or dataset != self._LOCAL_UNBOUND
-        ):
-            raise ConflictError(
-                "Task scope is unavailable on PostgreSQL schema v59.",
-                entity="tasks",
-                entity_id=owner,
-            )  # noqa: TRY003
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            if owner != str(self._db.client_id):
+                raise ConflictError(
+                    "Task owner does not match the authenticated PostgreSQL client.",
+                    entity="tasks",
+                    entity_id=owner,
+                )  # noqa: TRY003
+            self._db.execute_query(
+                "SELECT set_config('app.current_dataset_id', ?, false)",
+                (dataset,),
+            )
         return owner, dataset
-
-    @property
-    def _uses_postgres_v59_schema(self) -> bool:
-        return self._db.backend_type == BackendType.POSTGRESQL
 
     def _canonical_task_values(self, task: Mapping[str, Any]) -> tuple[int, str, str | None, str | None]:
         revision = int(task.get("canonical_revision") or task.get("version") or 1)
@@ -243,25 +242,6 @@ class TaskStore:
         include_deleted: bool,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
-        if self._uses_postgres_v59_schema:
-            if include_deleted:
-                cursor = self._read(
-                    "SELECT * FROM note_tasks WHERE client_id = ? AND id = ?",
-                    (owner_user_id, task_id),
-                    conn=conn,
-                )
-                return self._decode_task_row(cursor.fetchone())
-            cursor = self._read(
-                """
-                SELECT t.*
-                  FROM note_tasks t
-                  JOIN notes n ON n.id = t.note_id AND n.client_id = t.client_id
-                 WHERE t.client_id = ? AND t.id = ? AND t.deleted = ? AND n.deleted = ?
-                """,
-                (owner_user_id, task_id, self._deleted_value(False), self._deleted_value(False)),
-                conn=conn,
-            )
-            return self._decode_task_row(cursor.fetchone())
         if include_deleted:
             cursor = self._read(
                 "SELECT * FROM note_tasks WHERE owner_user_id = ? AND dataset_id = ? AND id = ?",
@@ -290,23 +270,11 @@ class TaskStore:
         dataset_id: str,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
-        if self._uses_postgres_v59_schema:
-            cursor = self._read(
-                """
-                SELECT p.*
-                  FROM task_note_projections p
-                  JOIN note_tasks t ON t.id = p.task_id
-                 WHERE t.client_id = ? AND p.task_id = ?
-                """,
-                (owner_user_id, task_id),
-                conn=conn,
-            )
-        else:
-            cursor = self._read(
-                "SELECT * FROM task_note_projections WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?",
-                (owner_user_id, dataset_id, task_id),
-                conn=conn,
-            )
+        cursor = self._read(
+            "SELECT * FROM task_note_projections WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?",
+            (owner_user_id, dataset_id, task_id),
+            conn=conn,
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -355,29 +323,17 @@ class TaskStore:
         case rather than creating a replacement task beside an orphaned live row.
         """
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        if self._uses_postgres_v59_schema:
-            cursor = self._read(
-                """
-                SELECT *
-                  FROM note_tasks
-                 WHERE client_id = ? AND note_id = ? AND deleted = ? AND projection_status = ?
-                 ORDER BY created_at ASC, id ASC
-                """,
-                (owner, note_id, self._deleted_value(False), "live"),
-                conn=conn,
-            )
-        else:
-            cursor = self._read(
-                """
-                SELECT *
-                  FROM note_tasks
-                 WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
-                   AND deleted = ? AND projection_status = ?
-                 ORDER BY created_at ASC, id ASC
-                """,
-                (owner, dataset, note_id, self._deleted_value(False), "live"),
-                conn=conn,
-            )
+        cursor = self._read(
+            """
+            SELECT *
+              FROM note_tasks
+             WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
+               AND deleted = ? AND projection_status = ?
+             ORDER BY created_at ASC, id ASC
+            """,
+            (owner, dataset, note_id, self._deleted_value(False), "live"),
+            conn=conn,
+        )
         projected_tasks: list[dict[str, dict[str, Any]]] = []
         for row in cursor.fetchall():
             task = self._decode_task_row(row)
@@ -534,73 +490,44 @@ class TaskStore:
         now = self._db._get_current_utc_timestamp_iso()
         completed_at = now if normalized_status == "done" else None
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        canonical_values = None
-        if not self._uses_postgres_v59_schema:
-            canonical_values = self._canonical_task_values(
-                {
-                    "owner_user_id": owner,
-                    "id": final_task_id,
-                    "note_id": note_id,
-                    "text": normalized_text,
-                    "status": normalized_status,
-                    "metadata_json": metadata_json,
-                    "projection_status": normalized_projection_status,
-                    "deleted": 0,
-                    "created_at": now,
-                    "updated_at": now,
-                    "completed_at": completed_at,
-                    "client_id": self._db.client_id,
-                    "version": 1,
-                    "canonical_revision": 1,
-                }
-            )
+        canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+            {
+                "owner_user_id": owner,
+                "id": final_task_id,
+                "note_id": note_id,
+                "text": normalized_text,
+                "status": normalized_status,
+                "metadata_json": metadata_json,
+                "projection_status": normalized_projection_status,
+                "deleted": 0,
+                "created_at": now,
+                "updated_at": now,
+                "completed_at": completed_at,
+                "client_id": self._db.client_id,
+                "version": 1,
+                "canonical_revision": 1,
+            }
+        )
 
         def _execute_create(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._require_active_note(note_id, final_task_id, owner_user_id=owner, conn=transaction_conn)
-            if self._uses_postgres_v59_schema:
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO note_tasks (
-                        id, note_id, text, status, metadata_json, projection_status,
-                        deleted, created_at, updated_at, completed_at, client_id, version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        final_task_id,
-                        note_id,
-                        normalized_text,
-                        normalized_status,
-                        metadata_json,
-                        normalized_projection_status,
-                        self._deleted_value(False),
-                        now,
-                        now,
-                        completed_at,
-                        owner,
-                        1,
-                    ),
-                )
-            else:
-                assert canonical_values is not None  # nosec B101
-                canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = canonical_values
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO note_tasks (
-                        owner_user_id, dataset_id, id, note_id, text, status, metadata_json,
-                        projection_status, deleted, created_at, updated_at, completed_at, client_id,
-                        version, canonical_revision, canonical_hash, source_diagnostic_code,
-                        source_diagnostic_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        owner, dataset, final_task_id, note_id, normalized_text, normalized_status,
-                        metadata_json, normalized_projection_status, self._deleted_value(False),
-                        now, now, completed_at, self._db.client_id, 1, canonical_revision,
-                        canonical_hash, diagnostic_code, diagnostic_hash,
-                    ),
-                )
+            self._execute(
+                transaction_conn,
+                """
+                INSERT INTO note_tasks (
+                    owner_user_id, dataset_id, id, note_id, text, status, metadata_json,
+                    projection_status, deleted, created_at, updated_at, completed_at, client_id,
+                    version, canonical_revision, canonical_hash, source_diagnostic_code,
+                    source_diagnostic_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner, dataset, final_task_id, note_id, normalized_text, normalized_status,
+                    metadata_json, normalized_projection_status, self._deleted_value(False),
+                    now, now, completed_at, self._db.client_id, 1, canonical_revision,
+                    canonical_hash, diagnostic_code, diagnostic_hash,
+                ),
+            )
             if actor_type:
                 self.record_task_event(
                     task_id=final_task_id,
@@ -677,12 +604,8 @@ class TaskStore:
     ) -> list[dict[str, Any]]:
         """List tasks with optional note/status filters."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        if self._uses_postgres_v59_schema:
-            clauses: list[str] = ["t.client_id = ?"]
-            params: list[Any] = [owner]
-        else:
-            clauses = ["t.owner_user_id = ?", "t.dataset_id = ?"]
-            params = [owner, dataset]
+        clauses: list[str] = ["t.owner_user_id = ?", "t.dataset_id = ?"]
+        params: list[Any] = [owner, dataset]
         if note_id is not None:
             clauses.append("t.note_id = ?")
             params.append(note_id)
@@ -718,10 +641,7 @@ class TaskStore:
             params.append(self._deleted_value(False))
         sql_query = "SELECT t.* FROM note_tasks t"
         if not include_deleted:
-            if self._uses_postgres_v59_schema:
-                sql_query += " JOIN notes n ON n.id = t.note_id AND n.client_id = t.client_id"
-            else:
-                sql_query += " JOIN notes n ON n.id = t.note_id AND n.client_id = t.owner_user_id"
+            sql_query += " JOIN notes n ON n.id = t.note_id AND n.client_id = t.owner_user_id"
         if clauses:
             sql_query += " WHERE " + " AND ".join(clauses)
         sql_query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ? OFFSET ?"
@@ -767,49 +687,34 @@ class TaskStore:
                     f"Task projection is {old['projection_status']} for task '{task_id}'.",
                     entity="tasks",
                     entity_id=task_id,
-                )  # noqa: TRY003
+            )  # noqa: TRY003
             self._require_active_note(old["note_id"], task_id, owner_user_id=owner, conn=transaction_conn)
             now = self._db._get_current_utc_timestamp_iso()
-            if self._uses_postgres_v59_schema:
-                cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET metadata_json = ?, updated_at = ?, version = version + 1
-                     WHERE client_id = ? AND id = ? AND version = ?
-                       AND deleted = ? AND projection_status = ?
-                    """,
-                    (
-                        metadata_json, now, owner, task_id, expected_version,
-                        self._deleted_value(False), "unlinked",
-                    ),
-                )
-            else:
-                canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
-                    {
-                        **old,
-                        "metadata_json": metadata_json,
-                        "updated_at": now,
-                        "version": int(old["version"]) + 1,
-                        "canonical_revision": int(old["canonical_revision"]) + 1,
-                    }
-                )
-                cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET metadata_json = ?, updated_at = ?, version = version + 1,
-                           canonical_revision = ?, canonical_hash = ?,
-                           source_diagnostic_code = ?, source_diagnostic_hash = ?
-                     WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
-                       AND version = ? AND deleted = ? AND projection_status = ?
-                    """,
-                    (
-                        metadata_json, now, canonical_revision, canonical_hash,
-                        diagnostic_code, diagnostic_hash, owner, dataset, task_id,
-                        expected_version, self._deleted_value(False), "unlinked",
-                    ),
-                )
+            canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+                {
+                    **old,
+                    "metadata_json": metadata_json,
+                    "updated_at": now,
+                    "version": int(old["version"]) + 1,
+                    "canonical_revision": int(old["canonical_revision"]) + 1,
+                }
+            )
+            cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE note_tasks
+                   SET metadata_json = ?, updated_at = ?, version = version + 1,
+                       canonical_revision = ?, canonical_hash = ?,
+                       source_diagnostic_code = ?, source_diagnostic_hash = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND version = ? AND deleted = ? AND projection_status = ?
+                """,
+                (
+                    metadata_json, now, canonical_revision, canonical_hash,
+                    diagnostic_code, diagnostic_hash, owner, dataset, task_id,
+                    expected_version, self._deleted_value(False), "unlinked",
+                ),
+            )
             if getattr(cursor, "rowcount", None) == 0:
                 raise ConflictError(
                     f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
@@ -903,55 +808,34 @@ class TaskStore:
                 completed_at = now
             elif new_status == "open":
                 completed_at = None
-            if self._uses_postgres_v59_schema:
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET text = ?, status = ?, metadata_json = ?, updated_at = ?,
-                           completed_at = ?, version = version + 1
-                     WHERE client_id = ? AND id = ? AND version = ?
-                    """,
-                    (
-                        new_text,
-                        new_status,
-                        new_metadata_json,
-                        now,
-                        completed_at,
-                        owner,
-                        task_id,
-                        expected_version,
-                    ),
-                )
-            else:
-                canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
-                    {
-                        **old,
-                        "text": new_text,
-                        "status": new_status,
-                        "metadata_json": new_metadata_json,
-                        "updated_at": now,
-                        "completed_at": completed_at,
-                        "version": int(old["version"]) + 1,
-                        "canonical_revision": int(old["canonical_revision"]) + 1,
-                    }
-                )
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET text = ?, status = ?, metadata_json = ?, updated_at = ?,
-                           completed_at = ?, version = version + 1,
-                           canonical_revision = ?, canonical_hash = ?,
-                           source_diagnostic_code = ?, source_diagnostic_hash = ?
-                     WHERE owner_user_id = ? AND dataset_id = ? AND id = ? AND version = ?
-                    """,
-                    (
-                        new_text, new_status, new_metadata_json, now, completed_at,
-                        canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash,
-                        owner, dataset, task_id, expected_version,
-                    ),
-                )
+            canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+                {
+                    **old,
+                    "text": new_text,
+                    "status": new_status,
+                    "metadata_json": new_metadata_json,
+                    "updated_at": now,
+                    "completed_at": completed_at,
+                    "version": int(old["version"]) + 1,
+                    "canonical_revision": int(old["canonical_revision"]) + 1,
+                }
+            )
+            update_cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE note_tasks
+                   SET text = ?, status = ?, metadata_json = ?, updated_at = ?,
+                       completed_at = ?, version = version + 1,
+                       canonical_revision = ?, canonical_hash = ?,
+                       source_diagnostic_code = ?, source_diagnostic_hash = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ? AND version = ?
+                """,
+                (
+                    new_text, new_status, new_metadata_json, now, completed_at,
+                    canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash,
+                    owner, dataset, task_id, expected_version,
+                ),
+            )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
                     f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
@@ -1049,36 +933,20 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            if self._uses_postgres_v59_schema:
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET projection_status = ?, updated_at = ?,
-                           version = CASE WHEN projection_status != ? THEN version + 1 ELSE version END
-                     WHERE client_id = ? AND id = ? AND note_id = ?
-                       AND deleted = ? AND projection_status = ?
-                    """,
-                    (
-                        normalized_projection_status, now, normalized_projection_status,
-                        owner, task_id, note_id, self._deleted_value(False), projection_state,
-                    ),
-                )
-            else:
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET projection_status = ?, updated_at = ?,
-                           version = CASE WHEN projection_status != ? THEN version + 1 ELSE version END
-                     WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
-                       AND note_id = ? AND deleted = ? AND projection_status = ?
-                    """,
-                    (
-                        normalized_projection_status, now, normalized_projection_status,
-                        owner, dataset, task_id, note_id, self._deleted_value(False), projection_state,
-                    ),
-                )
+            update_cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE note_tasks
+                   SET projection_status = ?, updated_at = ?,
+                       version = CASE WHEN projection_status != ? THEN version + 1 ELSE version END
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND note_id = ? AND deleted = ? AND projection_status = ?
+                """,
+                (
+                    normalized_projection_status, now, normalized_projection_status,
+                    owner, dataset, task_id, note_id, self._deleted_value(False), projection_state,
+                ),
+            )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
                     f"Task projection changed concurrently for task '{task_id}'.",
@@ -1090,46 +958,25 @@ class TaskStore:
                 normalized_text_hash, int(occurrence_index), block_fingerprint, raw_line,
                 self._deleted_value(bool(has_child_content)), normalized_projection_status, now,
             )
-            if self._uses_postgres_v59_schema:
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO task_note_projections (
-                        task_id, note_id, note_version, line_number, start_offset, end_offset,
-                        normalized_text_hash, occurrence_index, block_fingerprint, raw_line,
-                        has_child_content, projection_status, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(task_id) DO UPDATE SET
-                        note_id = excluded.note_id, note_version = excluded.note_version,
-                        line_number = excluded.line_number, start_offset = excluded.start_offset,
-                        end_offset = excluded.end_offset, normalized_text_hash = excluded.normalized_text_hash,
-                        occurrence_index = excluded.occurrence_index,
-                        block_fingerprint = excluded.block_fingerprint, raw_line = excluded.raw_line,
-                        has_child_content = excluded.has_child_content,
-                        projection_status = excluded.projection_status, updated_at = excluded.updated_at
-                    """,
-                    projection_values,
-                )
-            else:
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO task_note_projections (
-                        owner_user_id, dataset_id, task_id, note_id, note_version, line_number,
-                        start_offset, end_offset, normalized_text_hash, occurrence_index,
-                        block_fingerprint, raw_line, has_child_content, projection_status, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(owner_user_id, dataset_id, task_id) DO UPDATE SET
-                        note_id = excluded.note_id, note_version = excluded.note_version,
-                        line_number = excluded.line_number, start_offset = excluded.start_offset,
-                        end_offset = excluded.end_offset, normalized_text_hash = excluded.normalized_text_hash,
-                        occurrence_index = excluded.occurrence_index,
-                        block_fingerprint = excluded.block_fingerprint, raw_line = excluded.raw_line,
-                        has_child_content = excluded.has_child_content,
-                        projection_status = excluded.projection_status, updated_at = excluded.updated_at
-                    """,
-                    (owner, dataset, *projection_values),
-                )
+            self._execute(
+                transaction_conn,
+                """
+                INSERT INTO task_note_projections (
+                    owner_user_id, dataset_id, task_id, note_id, note_version, line_number,
+                    start_offset, end_offset, normalized_text_hash, occurrence_index,
+                    block_fingerprint, raw_line, has_child_content, projection_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, dataset_id, task_id) DO UPDATE SET
+                    note_id = excluded.note_id, note_version = excluded.note_version,
+                    line_number = excluded.line_number, start_offset = excluded.start_offset,
+                    end_offset = excluded.end_offset, normalized_text_hash = excluded.normalized_text_hash,
+                    occurrence_index = excluded.occurrence_index,
+                    block_fingerprint = excluded.block_fingerprint, raw_line = excluded.raw_line,
+                    has_child_content = excluded.has_child_content,
+                    projection_status = excluded.projection_status, updated_at = excluded.updated_at
+                """,
+                (owner, dataset, *projection_values),
+            )
             projection = self._fetch_projection(
                 task_id, owner_user_id=owner, dataset_id=dataset, conn=transaction_conn
             )
@@ -1182,27 +1029,16 @@ class TaskStore:
                 )  # noqa: TRY003
             self._require_live_projection_row(task_id, projection)
             now = self._db._get_current_utc_timestamp_iso()
-            if self._uses_postgres_v59_schema:
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET projection_status = ?, updated_at = ?, version = version + 1
-                     WHERE client_id = ? AND id = ? AND version = ? AND projection_status = ?
-                    """,
-                    ("unlinked", now, owner, task_id, expected_version, projection_state),
-                )
-            else:
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET projection_status = ?, updated_at = ?, version = version + 1
-                     WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
-                       AND version = ? AND projection_status = ?
-                    """,
-                    ("unlinked", now, owner, dataset, task_id, expected_version, projection_state),
-                )
+            update_cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE note_tasks
+                   SET projection_status = ?, updated_at = ?, version = version + 1
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND version = ? AND projection_status = ?
+                """,
+                ("unlinked", now, owner, dataset, task_id, expected_version, projection_state),
+            )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
                     f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
@@ -1214,35 +1050,18 @@ class TaskStore:
                 projection["line_number"], projection["normalized_text_hash"],
                 projection["occurrence_index"], projection["block_fingerprint"],
             )
-            if self._uses_postgres_v59_schema:
-                projection_update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE task_note_projections
-                       SET projection_status = ?, updated_at = ?
-                     WHERE task_id = ? AND projection_status = ? AND note_id = ?
-                       AND note_version = ? AND line_number = ? AND normalized_text_hash = ?
-                       AND occurrence_index = ? AND block_fingerprint = ?
-                       AND EXISTS (
-                           SELECT 1 FROM note_tasks task
-                            WHERE task.id = task_note_projections.task_id AND task.client_id = ?
-                       )
-                    """,
-                    ("unlinked", now, task_id, *projection_locator, owner),
-                )
-            else:
-                projection_update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE task_note_projections
-                       SET projection_status = ?, updated_at = ?
-                     WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?
-                       AND projection_status = ? AND note_id = ? AND note_version = ?
-                       AND line_number = ? AND normalized_text_hash = ?
-                       AND occurrence_index = ? AND block_fingerprint = ?
-                    """,
-                    ("unlinked", now, owner, dataset, task_id, *projection_locator),
-                )
+            projection_update_cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE task_note_projections
+                   SET projection_status = ?, updated_at = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?
+                   AND projection_status = ? AND note_id = ? AND note_version = ?
+                   AND line_number = ? AND normalized_text_hash = ?
+                   AND occurrence_index = ? AND block_fingerprint = ?
+                """,
+                ("unlinked", now, owner, dataset, task_id, *projection_locator),
+            )
             if getattr(projection_update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
                     f"Task projection changed concurrently for task '{task_id}'.",
@@ -1343,47 +1162,32 @@ class TaskStore:
                         "Task projection deletion is ambiguous without a matching projection locator."
                     )  # noqa: TRY003
             now = self._db._get_current_utc_timestamp_iso()
-            if self._uses_postgres_v59_schema:
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET deleted = ?, projection_status = ?, updated_at = ?, version = version + 1
-                     WHERE client_id = ? AND id = ? AND version = ?
-                       AND deleted = ? AND projection_status = ?
-                    """,
-                    (
-                        self._deleted_value(True), "deleted", now, owner, task_id,
-                        expected_version, self._deleted_value(False), projection_status,
-                    ),
-                )
-            else:
-                canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
-                    {
-                        **old,
-                        "deleted": 1,
-                        "projection_status": "deleted",
-                        "updated_at": now,
-                        "version": int(old["version"]) + 1,
-                        "canonical_revision": int(old["canonical_revision"]) + 1,
-                    }
-                )
-                update_cursor = self._execute(
-                    transaction_conn,
-                    """
-                    UPDATE note_tasks
-                       SET deleted = ?, projection_status = ?, updated_at = ?, version = version + 1,
-                           canonical_revision = ?, canonical_hash = ?,
-                           source_diagnostic_code = ?, source_diagnostic_hash = ?
-                     WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
-                       AND version = ? AND deleted = ? AND projection_status = ?
-                    """,
-                    (
-                        self._deleted_value(True), "deleted", now, canonical_revision,
-                        canonical_hash, diagnostic_code, diagnostic_hash, owner, dataset,
-                        task_id, expected_version, self._deleted_value(False), projection_status,
-                    ),
-                )
+            canonical_revision, canonical_hash, diagnostic_code, diagnostic_hash = self._canonical_task_values(
+                {
+                    **old,
+                    "deleted": 1,
+                    "projection_status": "deleted",
+                    "updated_at": now,
+                    "version": int(old["version"]) + 1,
+                    "canonical_revision": int(old["canonical_revision"]) + 1,
+                }
+            )
+            update_cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE note_tasks
+                   SET deleted = ?, projection_status = ?, updated_at = ?, version = version + 1,
+                       canonical_revision = ?, canonical_hash = ?,
+                       source_diagnostic_code = ?, source_diagnostic_hash = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND version = ? AND deleted = ? AND projection_status = ?
+                """,
+                (
+                    self._deleted_value(True), "deleted", now, canonical_revision,
+                    canonical_hash, diagnostic_code, diagnostic_hash, owner, dataset,
+                    task_id, expected_version, self._deleted_value(False), projection_status,
+                ),
+            )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
                     f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
@@ -1397,36 +1201,19 @@ class TaskStore:
                     projection["line_number"], projection["normalized_text_hash"],
                     projection["occurrence_index"], projection["block_fingerprint"],
                 )
-            if self._uses_postgres_v59_schema:
-                locator_sql = ""
-                if locator:
-                    locator_sql = (
-                        " AND projection_status = ? AND note_id = ? AND note_version = ?"
-                        " AND line_number = ? AND normalized_text_hash = ?"
-                        " AND occurrence_index = ? AND block_fingerprint = ?"
-                    )
-                projection_update_cursor = self._execute(
-                    transaction_conn,
-                    "UPDATE task_note_projections SET projection_status = ?, updated_at = ? "  # nosec B608
-                    "WHERE task_id = ?" + locator_sql +
-                    " AND EXISTS (SELECT 1 FROM note_tasks task "  # nosec B608
-                    "WHERE task.id = task_note_projections.task_id AND task.client_id = ?)",
-                    ("deleted", now, task_id, *locator, owner),
+            locator_sql = ""
+            if locator:
+                locator_sql = (
+                    " AND projection_status = ? AND note_id = ? AND note_version = ?"
+                    " AND line_number = ? AND normalized_text_hash = ?"
+                    " AND occurrence_index = ? AND block_fingerprint = ?"
                 )
-            else:
-                locator_sql = ""
-                if locator:
-                    locator_sql = (
-                        " AND projection_status = ? AND note_id = ? AND note_version = ?"
-                        " AND line_number = ? AND normalized_text_hash = ?"
-                        " AND occurrence_index = ? AND block_fingerprint = ?"
-                    )
-                projection_update_cursor = self._execute(
-                    transaction_conn,
-                    "UPDATE task_note_projections SET projection_status = ?, updated_at = ? "  # nosec B608
-                    "WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?" + locator_sql,
-                    ("deleted", now, owner, dataset, task_id, *locator),
-                )
+            projection_update_cursor = self._execute(
+                transaction_conn,
+                "UPDATE task_note_projections SET projection_status = ?, updated_at = ? "  # nosec B608
+                "WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?" + locator_sql,
+                ("deleted", now, owner, dataset, task_id, *locator),
+            )
             if projection_status == "live" and not allow_record_only:
                 if getattr(projection_update_cursor, "rowcount", None) == 0:
                     raise ConflictError(
@@ -1490,7 +1277,7 @@ class TaskStore:
         old_value_json = self._json_dumps(old_value, "old_value") if old_value is not None else None
         new_value_json = self._json_dumps(new_value, "new_value") if new_value is not None else None
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        event_hash = None if self._uses_postgres_v59_schema else self._db._note_task_v60_hash(
+        event_hash = self._db._note_task_v60_hash(
             {
                 "owner_user_id": owner,
                 "dataset_id": dataset,
@@ -1530,30 +1317,6 @@ class TaskStore:
                         entity="tasks",
                         entity_id=task_id,
                     )  # noqa: TRY003
-            if self._uses_postgres_v59_schema:
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO task_events (
-                        id, task_id, note_id, event_type, actor_type, actor_id, tool_name,
-                        policy_mode, approval_id, old_value_json, new_value_json, created_at, client_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        final_event_id, task_id, note_id, event_type, actor_type, actor_id,
-                        tool_name, policy_mode, approval_id, old_value_json, new_value_json,
-                        now, owner,
-                    ),
-                )
-                cursor = self._read(
-                    "SELECT * FROM task_events WHERE client_id = ? AND id = ?",
-                    (owner, final_event_id),
-                    conn=transaction_conn,
-                )
-                event = self._decode_event_row(cursor.fetchone())
-                if event is None:
-                    raise CharactersRAGDBError(f"Failed to read task event '{final_event_id}'.")  # noqa: TRY003
-                return event
             self._execute(
                 transaction_conn,
                 """
@@ -1635,12 +1398,8 @@ class TaskStore:
     ) -> list[dict[str, Any]]:
         """List task events by task or note scope."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        if self._uses_postgres_v59_schema:
-            clauses: list[str] = ["client_id = ?"]
-            params: list[Any] = [owner]
-        else:
-            clauses = ["owner_user_id = ?", "dataset_id = ?"]
-            params = [owner, dataset]
+        clauses: list[str] = ["owner_user_id = ?", "dataset_id = ?"]
+        params: list[Any] = [owner, dataset]
         if task_id is not None:
             clauses.append("task_id = ?")
             params.append(task_id)
@@ -1670,12 +1429,8 @@ class TaskStore:
     ) -> list[dict[str, Any]]:
         """List task events newest-first without changing the ascending default helper."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        if self._uses_postgres_v59_schema:
-            clauses: list[str] = ["client_id = ?"]
-            params: list[Any] = [owner]
-        else:
-            clauses = ["owner_user_id = ?", "dataset_id = ?"]
-            params = [owner, dataset]
+        clauses: list[str] = ["owner_user_id = ?", "dataset_id = ?"]
+        params: list[Any] = [owner, dataset]
         if task_id is not None:
             clauses.append("task_id = ?")
             params.append(task_id)
@@ -1711,40 +1466,26 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
         if user_id != owner:
             return []
-        if self._uses_postgres_v59_schema:
-            query = """
-                SELECT events.*
-                FROM task_events AS events
-                LEFT JOIN task_event_read_state AS state
-                  ON state.event_id = events.id AND state.user_id = ?
-                WHERE events.client_id = ?
-                  AND (state.event_id IS NULL OR (state.read_at IS NULL AND state.dismissed_at IS NULL))
-                  AND (? IS NULL OR events.task_id = ?)
-                  AND (? IS NULL OR events.note_id = ?)
-                  AND (? IS NULL OR events.actor_type = ?)
-            """
-        else:
-            query = """
-                SELECT events.*
-                FROM task_events AS events
-                LEFT JOIN task_event_read_state AS state
-                  ON state.owner_user_id = events.owner_user_id
-                 AND state.dataset_id = events.dataset_id
-                 AND state.event_id = events.id AND state.user_id = ?
-                WHERE events.owner_user_id = ? AND events.dataset_id = ?
-                  AND (state.event_id IS NULL OR (state.read_at IS NULL AND state.dismissed_at IS NULL))
-                  AND (? IS NULL OR events.task_id = ?)
-                  AND (? IS NULL OR events.note_id = ?)
-                  AND (? IS NULL OR events.actor_type = ?)
-            """
+        query = """
+            SELECT events.*
+            FROM task_events AS events
+            LEFT JOIN task_event_read_state AS state
+              ON state.owner_user_id = events.owner_user_id
+             AND state.dataset_id = events.dataset_id
+             AND state.event_id = events.id AND state.user_id = ?
+            WHERE events.owner_user_id = ? AND events.dataset_id = ?
+              AND (state.event_id IS NULL OR (state.read_at IS NULL AND state.dismissed_at IS NULL))
+              AND (? IS NULL OR events.task_id = ?)
+              AND (? IS NULL OR events.note_id = ?)
+              AND (? IS NULL OR events.actor_type = ?)
+        """
         if self._db.backend_type == BackendType.SQLITE:
             query += " ORDER BY events.created_at DESC, events.rowid DESC LIMIT ?"
         else:
             query += " ORDER BY events.created_at DESC, events.id DESC LIMIT ?"
-        if self._uses_postgres_v59_schema:
-            params: list[Any] = [user_id, owner, task_id, task_id, note_id, note_id, actor_type, actor_type]
-        else:
-            params = [user_id, owner, dataset, task_id, task_id, note_id, note_id, actor_type, actor_type]
+        params: list[Any] = [
+            user_id, owner, dataset, task_id, task_id, note_id, note_id, actor_type, actor_type
+        ]
         params.append(self._clamp_limit(limit))
         cursor = self._read(query, tuple(params))
         return [self._decode_event_row(row) for row in cursor.fetchall()]
@@ -1765,34 +1506,6 @@ class TaskStore:
             raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
 
         def _execute_read(transaction_conn: TaskConnection) -> dict[str, Any]:
-            if self._uses_postgres_v59_schema:
-                event = self._read(
-                    "SELECT id FROM task_events WHERE client_id = ? AND id = ?",
-                    (owner, event_id),
-                    conn=transaction_conn,
-                ).fetchone()
-                if event is None:
-                    raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO task_event_read_state (event_id, user_id, read_at, dismissed_at)
-                    VALUES (?, ?, ?, NULL)
-                    ON CONFLICT(event_id, user_id) DO UPDATE SET
-                        read_at = COALESCE(task_event_read_state.read_at, excluded.read_at)
-                    """,
-                    (event_id, user_id, now),
-                )
-                state = self.get_task_activity_read_state(
-                    owner_user_id=owner,
-                    dataset_id=dataset,
-                    event_id=event_id,
-                    user_id=user_id,
-                    conn=transaction_conn,
-                )
-                if state is None:
-                    raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
-                return state
             self._execute(
                 transaction_conn,
                 """
@@ -1845,35 +1558,6 @@ class TaskStore:
             raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
 
         def _execute_dismiss(transaction_conn: TaskConnection) -> dict[str, Any]:
-            if self._uses_postgres_v59_schema:
-                event = self._read(
-                    "SELECT id FROM task_events WHERE client_id = ? AND id = ?",
-                    (owner, event_id),
-                    conn=transaction_conn,
-                ).fetchone()
-                if event is None:
-                    raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO task_event_read_state (event_id, user_id, read_at, dismissed_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(event_id, user_id) DO UPDATE SET
-                        read_at = COALESCE(task_event_read_state.read_at, excluded.read_at),
-                        dismissed_at = excluded.dismissed_at
-                    """,
-                    (event_id, user_id, now, now),
-                )
-                state = self.get_task_activity_read_state(
-                    owner_user_id=owner,
-                    dataset_id=dataset,
-                    event_id=event_id,
-                    user_id=user_id,
-                    conn=transaction_conn,
-                )
-                if state is None:
-                    raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
-                return state
             self._execute(
                 transaction_conn,
                 """
@@ -1924,26 +1608,14 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
         if user_id != owner:
             return None
-        if self._uses_postgres_v59_schema:
-            cursor = self._read(
-                """
-                SELECT state.*
-                  FROM task_event_read_state state
-                  JOIN task_events event ON event.id = state.event_id
-                 WHERE event.client_id = ? AND state.event_id = ? AND state.user_id = ?
-                """,
-                (owner, event_id, user_id),
-                conn=conn,
-            )
-        else:
-            cursor = self._read(
-                """
-                SELECT * FROM task_event_read_state
-                 WHERE owner_user_id = ? AND dataset_id = ? AND event_id = ? AND user_id = ?
-                """,
-                (owner, dataset, event_id, user_id),
-                conn=conn,
-            )
+        cursor = self._read(
+            """
+            SELECT * FROM task_event_read_state
+             WHERE owner_user_id = ? AND dataset_id = ? AND event_id = ? AND user_id = ?
+            """,
+            (owner, dataset, event_id, user_id),
+            conn=conn,
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -1957,24 +1629,12 @@ class TaskStore:
     ) -> dict[str, Any] | None:
         """Return the last task reconciliation state for a note."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        if self._uses_postgres_v59_schema:
-            cursor = self._read(
-                """
-                SELECT state.*
-                  FROM note_task_reconciliation_state state
-                  JOIN notes note ON note.id = state.note_id
-                 WHERE note.client_id = ? AND state.note_id = ?
-                """,
-                (owner, note_id),
-                conn=conn,
-            )
-        else:
-            cursor = self._read(
-                "SELECT * FROM note_task_reconciliation_state "
-                "WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
-                (owner, dataset, note_id),
-                conn=conn,
-            )
+        cursor = self._read(
+            "SELECT * FROM note_task_reconciliation_state "
+            "WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
+            (owner, dataset, note_id),
+            conn=conn,
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -1996,68 +1656,34 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_state(transaction_conn: TaskConnection) -> dict[str, Any]:
-            if self._uses_postgres_v59_schema:
-                note = self._read(
-                    "SELECT id FROM notes WHERE client_id = ? AND id = ?",
-                    (owner, note_id),
-                    conn=transaction_conn,
-                ).fetchone()
-                if note is None:
-                    raise ConflictError("Task note not found.", entity="tasks", entity_id=note_id)  # noqa: TRY003
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO note_task_reconciliation_state (
-                        note_id, note_version, status, reconciled_at,
-                        item_count, warning_count, cursor
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(note_id) DO UPDATE SET
-                        note_version = excluded.note_version,
-                        status = excluded.status,
-                        reconciled_at = excluded.reconciled_at,
-                        item_count = excluded.item_count,
-                        warning_count = excluded.warning_count,
-                        cursor = excluded.cursor
-                    """,
-                    (
-                        note_id,
-                        int(note_version),
-                        status,
-                        now,
-                        int(item_count),
-                        int(warning_count),
-                        cursor,
-                    ),
+            self._execute(
+                transaction_conn,
+                """
+                INSERT INTO note_task_reconciliation_state (
+                    owner_user_id, dataset_id, note_id, note_version, status,
+                    reconciled_at, item_count, warning_count, cursor
                 )
-            else:
-                self._execute(
-                    transaction_conn,
-                    """
-                    INSERT INTO note_task_reconciliation_state (
-                        owner_user_id, dataset_id, note_id, note_version, status,
-                        reconciled_at, item_count, warning_count, cursor
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(owner_user_id, dataset_id, note_id) DO UPDATE SET
-                        note_version = excluded.note_version,
-                        status = excluded.status,
-                        reconciled_at = excluded.reconciled_at,
-                        item_count = excluded.item_count,
-                        warning_count = excluded.warning_count,
-                        cursor = excluded.cursor
-                    """,
-                    (
-                        owner,
-                        dataset,
-                        note_id,
-                        int(note_version),
-                        status,
-                        now,
-                        int(item_count),
-                        int(warning_count),
-                        cursor,
-                    ),
-                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, dataset_id, note_id) DO UPDATE SET
+                    note_version = excluded.note_version,
+                    status = excluded.status,
+                    reconciled_at = excluded.reconciled_at,
+                    item_count = excluded.item_count,
+                    warning_count = excluded.warning_count,
+                    cursor = excluded.cursor
+                """,
+                (
+                    owner,
+                    dataset,
+                    note_id,
+                    int(note_version),
+                    status,
+                    now,
+                    int(item_count),
+                    int(warning_count),
+                    cursor,
+                ),
+            )
             state = (
                 self.get_reconciliation_state(
                     owner_user_id=owner, dataset_id=dataset, note_id=note_id
@@ -2096,24 +1722,12 @@ class TaskStore:
         dataset_id: str,
         conn: TaskConnection,
     ) -> dict[str, Any] | None:
-        if self._uses_postgres_v59_schema:
-            cursor = self._read(
-                """
-                SELECT state.*
-                  FROM note_task_reconciliation_state state
-                  JOIN notes note ON note.id = state.note_id
-                 WHERE note.client_id = ? AND state.note_id = ?
-                """,
-                (owner_user_id, note_id),
-                conn=conn,
-            )
-        else:
-            cursor = self._read(
-                "SELECT * FROM note_task_reconciliation_state "
-                "WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
-                (owner_user_id, dataset_id, note_id),
-                conn=conn,
-            )
+        cursor = self._read(
+            "SELECT * FROM note_task_reconciliation_state "
+            "WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
+            (owner_user_id, dataset_id, note_id),
+            conn=conn,
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -2126,28 +1740,6 @@ class TaskStore:
     ) -> list[dict[str, Any]]:
         """Return checklist-bearing notes whose task reconciliation is stale or missing."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        if self._uses_postgres_v59_schema:
-            cursor = self._read(
-                """
-                SELECT n.id, n.title, n.version, n.last_modified
-                  FROM notes n
-                  LEFT JOIN note_task_reconciliation_state r ON r.note_id = n.id
-                 WHERE n.client_id = ? AND n.deleted = ?
-                   AND (n.content LIKE ? OR n.content LIKE ? OR n.content LIKE ?)
-                   AND (n.content LIKE ? OR n.content LIKE ? OR n.content LIKE ?)
-                   AND (r.note_id IS NULL OR r.note_version < n.version)
-                 ORDER BY n.last_modified DESC, n.id ASC
-                 LIMIT ?
-                """,
-                (
-                    owner,
-                    self._deleted_value(False),
-                    *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
-                    *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
-                    self._clamp_limit(limit),
-                ),
-            )
-            return [dict(row) for row in cursor.fetchall()]
         cursor = self._read(
             """
             SELECT n.id, n.title, n.version, n.last_modified
@@ -2192,28 +1784,6 @@ class TaskStore:
     ) -> int:
         """Count checklist-bearing notes whose task reconciliation is stale or missing."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        if self._uses_postgres_v59_schema:
-            params: list[Any] = [
-                owner,
-                self._deleted_value(False),
-                *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
-                *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
-            ]
-            sql_query = """
-                SELECT COUNT(*) AS stale_count
-                  FROM notes n
-                  LEFT JOIN note_task_reconciliation_state r ON r.note_id = n.id
-                 WHERE n.client_id = ? AND n.deleted = ?
-                   AND (n.content LIKE ? OR n.content LIKE ? OR n.content LIKE ?)
-                   AND (n.content LIKE ? OR n.content LIKE ? OR n.content LIKE ?)
-                   AND (r.note_id IS NULL OR r.note_version < n.version)
-            """
-            if note_id is not None:
-                sql_query += " AND n.id = ?"
-                params.append(note_id)
-            cursor = self._read(sql_query, tuple(params))
-            row = cursor.fetchone()
-            return int(row["stale_count"] if row else 0)
         params: list[Any] = [
             dataset,
             owner,

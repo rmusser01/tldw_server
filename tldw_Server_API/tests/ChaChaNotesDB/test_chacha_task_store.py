@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import inspect
-from contextlib import contextmanager
-from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    BackendType,
     CharactersRAGDB,
     ConflictError,
     InputError,
@@ -19,162 +16,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 pytestmark = pytest.mark.unit
 
 LOCAL_UNBOUND = "local-unbound"
-
-
-class _PostgresV59Cursor:
-    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
-        self.rows = rows or []
-        self.rowcount = 1
-
-    def fetchone(self):
-        return self.rows[0] if self.rows else None
-
-    def fetchall(self):
-        return self.rows
-
-
-class _PostgresV59Connection:
-    _FORBIDDEN = (
-        "owner_user_id",
-        "dataset_id",
-        "canonical_revision",
-        "canonical_hash",
-        "sync_revision",
-        "sync_object_hash",
-        "sync_server_cursor",
-        "source_device_id",
-        "client_occurred_at",
-        "source_kind",
-        "corrects_activity_id",
-        "source_diagnostic_code",
-        "source_diagnostic_hash",
-        "task_projection_drifts",
-    )
-
-    def __init__(self) -> None:
-        self.statements: list[str] = []
-        self.task = {
-            "id": "pg-task",
-            "note_id": "pg-note",
-            "text": "Review source",
-            "status": "open",
-            "metadata_json": "{}",
-            "projection_status": "live",
-            "deleted": False,
-            "created_at": "2026-08-13T00:00:00+00:00",
-            "updated_at": "2026-08-13T00:00:00+00:00",
-            "completed_at": None,
-            "client_id": "pg-owner",
-            "version": 1,
-        }
-        self.projection = {
-            "task_id": "pg-task",
-            "note_id": "pg-note",
-            "note_version": 1,
-            "line_number": 1,
-            "start_offset": 0,
-            "end_offset": 10,
-            "normalized_text_hash": "sha256:review",
-            "occurrence_index": 0,
-            "block_fingerprint": "block",
-            "raw_line": "- [ ] Review source",
-            "has_child_content": False,
-            "projection_status": "live",
-            "updated_at": "2026-08-13T00:00:00+00:00",
-        }
-        self.event = {
-            "id": "pg-event",
-            "task_id": "pg-task",
-            "note_id": "pg-note",
-            "event_type": "updated",
-            "actor_type": "user",
-            "actor_id": "pg-owner",
-            "tool_name": None,
-            "policy_mode": None,
-            "approval_id": None,
-            "old_value_json": None,
-            "new_value_json": None,
-            "created_at": "2026-08-13T00:00:00+00:00",
-            "client_id": "pg-owner",
-        }
-
-    def execute(self, query: str, _params=()) -> _PostgresV59Cursor:
-        normalized = " ".join(query.lower().split())
-        self.statements.append(normalized)
-        leaked = [token for token in self._FORBIDDEN if token in normalized]
-        assert leaked == [], f"PostgreSQL v59 received v60-only SQL: {leaked}: {normalized}"
-        if "select count(*) as stale_count" in normalized:
-            return _PostgresV59Cursor([{"stale_count": 1}])
-        if "select id from notes" in normalized:
-            return _PostgresV59Cursor([{"id": "pg-note"}])
-        if "select deleted from notes" in normalized:
-            return _PostgresV59Cursor([{"deleted": False}])
-        if "select id, version, content, deleted from notes" in normalized:
-            return _PostgresV59Cursor([
-                {"id": "pg-note", "version": 1, "content": "- [ ] Review source\n", "deleted": False}
-            ])
-        if "from task_note_projections" in normalized:
-            return _PostgresV59Cursor([self.projection])
-        if "from task_events" in normalized:
-            return _PostgresV59Cursor([self.event])
-        if "from task_event_read_state" in normalized:
-            return _PostgresV59Cursor([
-                {"event_id": "pg-event", "user_id": "pg-owner", "read_at": "now", "dismissed_at": None}
-            ])
-        if "from note_task_reconciliation_state" in normalized:
-            return _PostgresV59Cursor([
-                {
-                    "note_id": "pg-note",
-                    "note_version": 1,
-                    "status": "clean",
-                    "reconciled_at": "now",
-                    "item_count": 1,
-                    "warning_count": 0,
-                    "cursor": None,
-                }
-            ])
-        if "from note_tasks" in normalized:
-            return _PostgresV59Cursor([self.task])
-        if "from notes n" in normalized:
-            return _PostgresV59Cursor([
-                {"id": "pg-note", "version": 1, "content": "- [ ] Review source\n"}
-            ])
-        return _PostgresV59Cursor()
-
-
-class _PostgresV59DB:
-    backend_type = BackendType.POSTGRESQL
-    client_id = "pg-owner"
-
-    def __init__(self) -> None:
-        self.connection = _PostgresV59Connection()
-
-    def execute_query(self, query: str, params=None):
-        return self.connection.execute(query, params)
-
-    @contextmanager
-    def transaction(self):
-        yield self.connection
-
-    @staticmethod
-    def _prepare_backend_statement(query: str, params=None):
-        return query, params
-
-    @staticmethod
-    def _generate_uuid() -> str:
-        return "pg-event"
-
-    @staticmethod
-    def _get_current_utc_timestamp_iso() -> str:
-        return "2026-08-13T00:00:00+00:00"
-
-    @staticmethod
-    def _canonicalize_legacy_task_v60(*_args, **_kwargs):
-        raise AssertionError("PostgreSQL v59 task writes must not compute v60 canonical fields")
-
-    @staticmethod
-    def _note_task_v60_hash(*_args, **_kwargs):
-        raise AssertionError("PostgreSQL v59 events must not compute v60 sync fields")
 
 
 @pytest.fixture()
@@ -187,111 +28,19 @@ def db(tmp_path) -> CharactersRAGDB:
     database.close_connection()
 
 
-def test_postgres_v59_task_operations_never_issue_v60_sql() -> None:
-    legacy_db = _PostgresV59DB()
-    store = TaskStore(legacy_db)
-    scope = {"owner_user_id": legacy_db.client_id, "dataset_id": LOCAL_UNBOUND}
+def test_task_store_has_no_postgres_v59_sql_bridge() -> None:
+    source = inspect.getsource(TaskStore)
 
-    assert store.create_task(
-        **scope,
-        task_id="pg-task",
-        note_id="pg-note",
-        text="Review source",
-        actor_type=None,
-    ) is not None
-    assert store.get_task(**scope, task_id="pg-task") is not None
-    assert store.list_tasks(**scope, note_id="pg-note")
-    assert store.update_task_record(
-        **scope,
-        task_id="pg-task",
-        expected_version=1,
-        text="Review source",
-        actor_type=None,
-    ) is not None
-    assert store.set_task_projection(
-        **scope,
-        task_id="pg-task",
-        note_id="pg-note",
-        note_version=1,
-        line_number=1,
-        start_offset=0,
-        end_offset=10,
-        normalized_text_hash="sha256:review",
-        occurrence_index=0,
-        block_fingerprint="block",
-        raw_line="- [ ] Review source",
-        has_child_content=False,
-    ) is not None
-    legacy_db.connection.task["projection_status"] = "unlinked"
-    legacy_db.connection.projection["projection_status"] = "unlinked"
-    assert store.update_unlinked_task_metadata_record_only(
-        **scope,
-        task_id="pg-task",
-        expected_version=1,
-        metadata={"priority": "high"},
-        actor_type="user",
-    ) is not None
-    legacy_db.connection.task["projection_status"] = "live"
-    legacy_db.connection.projection["projection_status"] = "live"
-    assert store.mark_task_unlinked(
-        **scope,
-        task_id="pg-task",
-        expected_version=1,
-        actor_type=None,
-    ) is not None
-    assert store.soft_delete_task(
-        **scope,
-        task_id="pg-task",
-        expected_version=1,
-        allow_record_only=True,
-        actor_type=None,
-    ) is not None
-    assert store.get_task_projection(**scope, task_id="pg-task") is not None
-    assert store.get_note_reconciliation_snapshot(**scope, note_id="pg-note") is not None
-    assert store.list_live_projected_tasks(**scope, note_id="pg-note")
-    assert store.record_task_event(
-        **scope,
-        event_id="pg-event",
-        task_id="pg-task",
-        note_id="pg-note",
-        event_type="updated",
-        actor_type="user",
-    ) is not None
-    assert store.list_task_activity(**scope, task_id="pg-task")
-    assert store.list_recent_task_activity(**scope, task_id="pg-task")
-    assert store.list_recent_unread_task_activity(
-        **scope,
-        user_id=legacy_db.client_id,
-        task_id="pg-task",
-    )
-    assert store.mark_task_activity_read(
-        **scope,
-        event_id="pg-event",
-        user_id=legacy_db.client_id,
-    ) is not None
-    assert store.mark_task_activity_dismissed(
-        **scope,
-        event_id="pg-event",
-        user_id=legacy_db.client_id,
-    ) is not None
-    assert store.get_task_activity_read_state(
-        **scope,
-        event_id="pg-event",
-        user_id=legacy_db.client_id,
-    ) is not None
-    assert store.get_reconciliation_state(**scope, note_id="pg-note") is not None
-    assert store.set_reconciliation_state(
-        **scope,
-        note_id="pg-note",
-        note_version=1,
-        status="clean",
-        item_count=1,
-        warning_count=0,
-    ) is not None
-    assert store.candidate_notes_for_task_discovery(**scope)
-    assert store.count_candidate_notes_for_task_discovery(**scope) == 1
-
-    assert legacy_db.connection.statements
+    assert "_uses_postgres_v59_schema" not in source
+    assert "PostgreSQL schema v59" not in source
+    assert "FROM note_tasks WHERE client_id = ?" not in source
+    for legacy_sql in (
+        "t.client_id",
+        "events.client_id",
+        "task.client_id",
+        "WHERE client_id = ? AND id = ? AND version",
+    ):
+        assert legacy_sql not in source
 
 
 def test_canonical_task_store_methods_are_keyword_only_scope_first() -> None:

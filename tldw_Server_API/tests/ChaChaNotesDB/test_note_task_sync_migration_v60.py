@@ -25,10 +25,128 @@ TASK_ID = "22222222-2222-4222-8222-222222222222"
 EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 
-def test_postgres_initializer_authority_remains_v59_until_postgres_v60_lands() -> None:
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 59
+def test_postgres_initializer_authority_is_schema_v60() -> None:
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 60
     source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source
+    assert "_migrate_from_v59_to_v60_postgres" in source
+    assert "_verify_note_task_schema_postgres" in source
+
+
+def test_postgres_v60_ddl_is_fixed_and_scopes_all_six_relations() -> None:
+    statements = CharactersRAGDB._note_task_v60_postgres_ddl()
+    sql = " ".join("\n".join(statements).split()).lower()
+
+    assert len(statements) == 7
+    assert "create unique index uq_notes_owner_id on notes(client_id,id)" in sql
+    for table in CharactersRAGDB._NOTE_TASK_V60_TABLES:
+        assert f"create table {table}_v60" in sql
+        assert "owner_user_id text not null" in sql.split(
+            f"create table {table}_v60", 1
+        )[1].split("create table", 1)[0]
+        assert "dataset_id text not null" in sql.split(
+            f"create table {table}_v60", 1
+        )[1].split("create table", 1)[0]
+    assert "primary key(owner_user_id,dataset_id,id)" in sql
+    assert "references note_tasks_v60(owner_user_id,dataset_id,id)" in sql
+    assert "references task_events_v60(owner_user_id,dataset_id,id)" in sql
+    assert "on update cascade" in sql
+    assert "boolean not null default false" in sql
+    assert "bigint not null default 1" in sql
+    assert "timestamptz not null" in sql
+
+    indexes = CharactersRAGDB._note_task_v60_postgres_indexes()
+    assert (
+        "CREATE INDEX idx_task_events_scope_task_created ON "
+        "task_events(owner_user_id,dataset_id,task_id,created_at,id)"
+    ) in indexes
+    assert (
+        "CREATE INDEX idx_task_events_scope_note_created ON "
+        "task_events(owner_user_id,dataset_id,note_id,created_at,id)"
+    ) in indexes
+
+
+def test_postgres_v60_migration_uses_fixed_lock_and_version_last_order() -> None:
+    source = inspect.getsource(CharactersRAGDB._migrate_from_v59_to_v60_postgres)
+
+    assert "LOCK TABLE notes, note_tasks, task_note_projections, task_events" in source
+    assert "task_event_read_state, note_task_reconciliation_state IN ACCESS EXCLUSIVE MODE" in source
+    assert source.index("LOCK TABLE") < source.index("_validate_note_task_source_postgres")
+    assert source.index("_validate_note_task_source_postgres") < source.index(
+        "_create_note_task_schema_v60_postgres"
+    )
+    verify_pos = source.index("_verify_note_task_schema_postgres")
+    version_pos = source.index("UPDATE db_schema_version SET version=60")
+    assert verify_pos < version_pos
+    assert source.index("_validate_note_task_source_postgres") < source.index(
+        "_rename_note_task_v59_postgres_constraints"
+    ) < source.index("_create_note_task_schema_v60_postgres")
+    assert "WHERE schema_name=%s AND version=59" in source
+
+
+def test_postgres_v60_frees_only_fixed_v59_constraint_collisions() -> None:
+    assert CharactersRAGDB._note_task_v59_postgres_constraint_collisions() == (
+        ("note_tasks", "note_tasks_pkey"),
+        ("note_tasks", "note_tasks_projection_status_check"),
+        ("note_tasks", "note_tasks_status_check"),
+        ("task_note_projections", "task_note_projections_pkey"),
+        ("task_note_projections", "task_note_projections_projection_status_check"),
+        ("task_events", "task_events_pkey"),
+        ("task_event_read_state", "task_event_read_state_pkey"),
+        ("note_task_reconciliation_state", "note_task_reconciliation_state_pkey"),
+    )
+    source = inspect.getsource(CharactersRAGDB._rename_note_task_v59_postgres_constraints)
+    assert "ALTER TABLE {table_name} RENAME CONSTRAINT {constraint_name}" in source
+    assert "TO {constraint_name}_v59" in source
+
+
+def test_postgres_v60_uses_effective_schema_owner_and_exact_table_owner() -> None:
+    for method in (
+        CharactersRAGDB._migrate_from_v59_to_v60_postgres,
+        CharactersRAGDB._verify_note_task_schema_postgres,
+    ):
+        source = inspect.getsource(method).replace(" ", "")
+        assert (
+            "pg_has_role(current_user,namespace_row.nspowner,'USAGE')"
+            in source
+        )
+        assert "table_row.relowner=current_user::regroleASis_table_owner" in source
+
+
+def test_postgres_v60_verifier_enumerates_full_catalog_and_pg18_not_null_rows() -> None:
+    source = inspect.getsource(CharactersRAGDB._verify_note_task_schema_postgres)
+
+    for catalog in ("pg_class", "pg_attribute", "pg_constraint", "pg_index", "pg_policies"):
+        assert catalog in source
+    assert "constraint_row.contype <> 'n'" in source
+    assert "constraint_row.convalidated" in source
+    assert "referenced_namespace.nspname=current_schema()" in source.replace(" ", "")
+    assert "index_row.indisvalid" in source
+    assert "index_row.indisready" in source
+    assert "relrowsecurity" in source
+    assert "relforcerowsecurity" in source
+    assert "permissive" in source
+    assert "with_check" in source
+
+
+def test_postgres_v60_catalog_comparisons_fail_closed_on_security_drift() -> None:
+    source = inspect.getsource(CharactersRAGDB._verify_note_task_schema_postgres)
+
+    assert "set(constraints) != expected_constraint_names" in source
+    assert "not bool(row.get(\"constraint_validated\"))" in source
+    assert "_catalog_names(row.get(\"local_columns\")) != local_columns" in source
+    assert "_catalog_names(row.get(\"referenced_columns\")) != referenced_columns" in source
+    assert "str(row.get(\"delete_action\")) != delete_action" in source
+    assert "str(row.get(\"update_action\")) != update_action" in source
+    assert "set(indexes) != set(expected_indexes)" in source
+    assert "row.get(\"predicate\") is not None" in source
+    assert "len(policy_rows) != len(expected_policies)" in source
+    assert "normalized_using != normalized_expected" in source
+    assert "normalized_check != normalized_expected" in source
+
+    normalize = CharactersRAGDB._normalize_postgres_catalog_expression
+    canonical = "owner_user_id=current_setting('app.current_user_id',true)"
+    assert normalize(canonical) != normalize(f"({canonical}) OR TRUE")
 
 
 def _prepare_v59_database(db_path: Path) -> None:
